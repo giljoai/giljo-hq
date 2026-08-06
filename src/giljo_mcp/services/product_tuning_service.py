@@ -105,7 +105,14 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
     "target_platforms": {"type": "direct", "field": "target_platforms"},
 }
 
-TUNING_PROMPT_TEMPLATE = """You are reviewing a product's stored context for accuracy after recent development work.
+TUNING_PROMPT_TEMPLATE = """You are reviewing a product's stored context after recent development work.
+
+This context is STATE + INTENT: it records both what has already been BUILT and what
+the user still intends to build. Your review is ADDITIVE. The question is: since the
+last review, has anything been BUILT, ADDED, or CHANGED that this context has not
+absorbed yet? Hunt the git log, project memory, and dependencies for things to ADD or
+UPDATE. Do NOT hunt for context items that are "missing" from the code — an item with
+no code behind it yet is a plan, not an error.
 
 ## Product
 - Name: {product_name}
@@ -115,6 +122,19 @@ TUNING_PROMPT_TEMPLATE = """You are reviewing a product's stored context for acc
 - `get_context(categories, product_id)` — retrieve product context (tenant_key is auto-injected, do not pass it)
 - `apply_context_tuning(product_id, proposals, overall_summary)` — apply approved changes directly to product fields
 
+## Section authority — read this before judging anything
+Different sections answer to different sources of truth:
+- **Code-authoritative** (tech_stack, dev_tools, architecture-as-built): the code is the
+  source of truth. When the code has moved ahead of the stored value, propose the update freely.
+- **Intent-bearing** (description, core_features, quality_standards): these may legitimately
+  describe plans that are not built yet. Absence from the code is NOT drift.
+
+## The hard rule (do not break this)
+NEVER propose removing an item merely because it is not in the code yet. Context describes
+both what exists and what the user intends to build. If an item looks unbuilt, mark it
+"planned — not yet built" and ask whether it is still intended. Removal only happens when
+the user says the intent changed.
+
 ## Phase 1: RESEARCH (do this silently — no output to user yet)
 
 Ground yourself in the actual codebase before making any judgments.{project_path_instruction}
@@ -122,7 +142,9 @@ Ground yourself in the actual codebase before making any judgments.{project_path
 1. File structure:  Run `ls` in the project root, `ls static/` or equivalent
 2. Dependencies:   Read requirements.txt (or package.json, go.mod, etc.)
 3. Entry point:    Read the first 60 lines of the main backend file to see imports, config, and patterns
-4. Tests:          Run the test discovery command (e.g., `pytest --co -q`) to list tests without executing
+4. Tests:          Run this stack's test-discovery/listing command (e.g., a Python
+   runner's collect-only flag, `go test -list .` for Go, or your JS/TS runner's
+   list-tests flag) to list tests without executing them
 5. Git history:    Run `git log --oneline -15` to see recent changes
 6. Project memory: Call `get_context(categories=["memory_360"], product_id="{product_id}", depth_config={{"memory_360": {{"shape": "full"}}}})` to get recent project closeout bodies — these describe what was built, decisions made, and outcomes (full shape required since headlines-only would drop the very content this prompt needs)
 
@@ -137,7 +159,7 @@ Based on your research, give the user a short summary:
 ```
 Scanned the codebase and project history.
 
-Sections with likely drift:
+New or changed since the last review (candidates to ADD or UPDATE):
 - <section_name>: <one-line reason>
 - <section_name>: <one-line reason>
 
@@ -160,9 +182,12 @@ For each section the user wants to review, present this format:
 <the stored value as-is>
 
 **What I found:**
-<evidence from code, git log, or project memory that differs>
+<evidence from code, git log, or project memory>
 
-**Drift detected:** Yes / No
+**Verdict:** ADDED / CONTRADICTION / INTENT
+- ADDED — new in the code or history, not yet in this context → propose adding it
+- CONTRADICTION — the context claims something the code disproves → propose correcting it
+- INTENT — in the context but not in the code → keep it; optionally confirm it is still planned. Never propose removal here.
 
 **Proposed update:**
 <full replacement text — or "No change needed">
@@ -177,6 +202,7 @@ RULES:
 - If the user says "looks good" or similar, mark it as approved and move on
 - Keep proposed values factual and concise — avoid marketing language
 - Write the COMPLETE replacement value, not a diff or partial edit
+- An INTENT verdict is not drift: keep the item, never delete it, and at most ask whether it is still planned
 
 ## Phase 4: SUBMIT
 
@@ -197,6 +223,7 @@ apply_context_tuning(
   proposals=[
     {{
       "section": "<section_key>",
+      "verdict": "ADDED|CONTRADICTION|INTENT",
       "drift_detected": true|false,
       "current_summary": "<what it said before>",
       "evidence": "<what code/git/memory shows>",
@@ -208,6 +235,10 @@ apply_context_tuning(
   overall_summary="<one paragraph on context health>"
 )
 
+Set drift_detected from the verdict: ADDED and CONTRADICTION are changes to apply, so
+drift_detected: true. INTENT keeps the item unchanged, so drift_detected: false and
+proposed_value: null.
+
 Confidence levels:
 - "high" = verified by reading code or running commands
 - "medium" = inferred from project memory / git log only
@@ -215,7 +246,7 @@ Confidence levels:
 
 Only include sections the user explicitly approved. Do not include skipped sections.
 
-ALWAYS call apply_context_tuning at the end of the review. If no drift was found, submit a single proposal with the most relevant section (typically 'description'), `drift_detected: false`, `proposed_value: null`, `current_summary: '<unchanged value>'`, `evidence: 'Reviewed; current value still matches the codebase'`, `reasoning: 'No drift detected — submission records the review timestamp.'`, `confidence: 'high'`. This records the review even when nothing changed.
+ALWAYS call apply_context_tuning at the end of the review. If nothing needed adding or correcting, submit a single proposal with the most relevant section (typically 'description'), `verdict: 'INTENT'`, `drift_detected: false`, `proposed_value: null`, `current_summary: '<unchanged value>'`, `evidence: 'Reviewed; the context already reflects what has been built'`, `reasoning: 'Nothing new to absorb — submission records the review timestamp.'`, `confidence: 'high'`. This records the review even when nothing changed.
 {vision_note}
 ## Sections to Review
 

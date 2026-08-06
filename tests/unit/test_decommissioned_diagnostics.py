@@ -57,6 +57,7 @@ class TestDecommissionedDiagnostics:
         mock_tenant_manager.get_current_tenant.return_value = tenant_key
 
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
 
         decommissioned_exec = _make_mock_execution(status="decommissioned", job_id=job_id, tenant_key=tenant_key)
 
@@ -102,6 +103,7 @@ class TestDecommissionedDiagnostics:
         mock_tenant_manager.get_current_tenant.return_value = tenant_key
 
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
 
         decommissioned_exec = _make_mock_execution(status="decommissioned", job_id=job_id, tenant_key=tenant_key)
 

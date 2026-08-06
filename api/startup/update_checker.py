@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 _CHECK_INTERVAL_SECONDS = 21600  # 6 hours
 _SUBPROCESS_TIMEOUT_SECONDS = 10
-_GITHUB_RELEASES_URL = "https://api.github.com/repos/giljoai/GiljoAI_MCP/releases/latest"
+_GITHUB_RELEASES_URL = "https://api.github.com/repos/giljoai/giljo-hq/releases/latest"
 _HTTP_TIMEOUT_SECONDS = 10
 
 
@@ -91,7 +91,34 @@ async def _fetch_remote(remote: str = "origin") -> bool:
         return False
 
 
-async def _commits_behind(branch: str = "origin/master") -> int | None:
+async def _resolve_default_branch(remote: str = "origin") -> str:
+    """Resolve the remote's default branch ref (e.g. ``origin/main``).
+
+    TSK-9262: the branch was hardcoded to ``<remote>/master``, so a CE fork
+    whose default branch is ``main`` silently never saw update notices. Reads
+    the symbolic ref git records at clone time; if it is unset (older clones),
+    asks git to re-detect it via ``git remote set-head <remote> --auto`` and
+    retries. Falls back to ``<remote>/master`` on any failure so behavior for
+    stock clones is unchanged.
+    """
+    head_ref = f"refs/remotes/{remote}/HEAD"
+    try:
+        code, stdout, _ = await _run_git("symbolic-ref", "--short", head_ref)
+        if code == 0 and stdout:
+            return stdout
+        code, _, stderr = await _run_git("remote", "set-head", remote, "--auto")
+        if code == 0:
+            code, stdout, _ = await _run_git("symbolic-ref", "--short", head_ref)
+            if code == 0 and stdout:
+                return stdout
+        else:
+            logger.debug("git remote set-head %s --auto failed: %s", remote, stderr)
+    except (TimeoutError, FileNotFoundError, OSError) as exc:
+        logger.debug("Default-branch detection error for %s: %s", remote, exc)
+    return f"{remote}/master"
+
+
+async def _commits_behind(branch: str) -> int | None:
     """Return the number of commits HEAD is behind the remote branch.
 
     Returns None if the count cannot be determined (network error, branch
@@ -158,12 +185,13 @@ async def _update_check_loop(state) -> None:
     broadcasts.
     """
     remote = "origin"
-    branch = f"{remote}/master"
 
     # Initial fetch to populate FETCH_HEAD before the first check
     fetched = await _fetch_remote(remote)
     if not fetched:
         logger.debug("Initial fetch failed — update checks will rely on stale FETCH_HEAD if present")
+
+    branch = await _resolve_default_branch(remote)
 
     while True:
         try:
@@ -173,9 +201,11 @@ async def _update_check_loop(state) -> None:
                 # Network or branch error — leave current state unchanged
                 logger.debug("Could not determine commits behind %s — skipping this cycle", branch)
             elif count > 0:
+                from giljo_mcp import branding
+
                 new_info: dict | None = {
                     "commits_behind": count,
-                    "message": f"GiljoAI MCP: {count} update{'s' if count != 1 else ''} available. "
+                    "message": f"{branding.PRODUCT_NAME}: {count} update{'s' if count != 1 else ''} available. "
                     f"Run 'git pull', then restart your server to update.",
                 }
                 previous = state.update_available
@@ -254,12 +284,14 @@ async def _check_github_release() -> dict | None:
         return None
 
     if remote_version > local_version:
-        html_url = data.get("html_url", "https://github.com/giljoai/GiljoAI_MCP/releases")
+        from giljo_mcp import branding
+
+        html_url = data.get("html_url", "https://github.com/giljoai/giljo-hq/releases")
         return {
             "current_version": str(local_version),
             "latest_version": str(remote_version),
             "release_url": html_url,
-            "message": f"GiljoAI MCP v{remote_version} is available (you have v{local_version}). "
+            "message": f"{branding.PRODUCT_NAME} v{remote_version} is available (you have v{local_version}). "
             f"Re-run the installer to update.",
         }
 

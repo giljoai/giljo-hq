@@ -28,6 +28,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select, update
 
+from giljo_mcp.database import tenant_isolation_bypass
 from giljo_mcp.models.notifications import Notification
 from giljo_mcp.services.notification_service import NotificationService
 
@@ -62,18 +63,29 @@ async def _upsert_drift(service: NotificationService, tenant_key: str, dedupe_ke
 
 
 async def _set_dismissed_at(db_manager, notification_id: str, dismissed_at: datetime) -> None:
-    """Directly set dismissed_at on a notification row (bypasses service layer)."""
+    """Directly set dismissed_at on a notification row (bypasses service layer).
+
+    SEC-9276: Notification is now tenant-guard-registered. This helper looks up a
+    single row by its globally-unique id (no tenant predicate) purely to seed test
+    state for the resurface-after-hours behavior under test -- it is not exercising
+    or verifying cross-tenant isolation, so the guard bypass here is legitimate test
+    setup, not a mask over a real isolation gap.
+    """
     async with db_manager.get_session_async() as session:
-        await session.execute(
-            update(Notification).where(Notification.id == notification_id).values(dismissed_at=dismissed_at)
-        )
+        with tenant_isolation_bypass(session, reason="test setup: seed dismissed_at by id", models=(Notification,)):
+            await session.execute(
+                update(Notification).where(Notification.id == notification_id).values(dismissed_at=dismissed_at)
+            )
         await session.commit()
 
 
 async def _fetch_notification(db_manager, notification_id: str) -> Notification | None:
+    """Read a single notification row by its globally-unique id (see
+    _set_dismissed_at above for why the bypass is legitimate here)."""
     async with db_manager.get_session_async() as session:
-        result = await session.execute(select(Notification).where(Notification.id == notification_id))
-        return result.scalar_one_or_none()
+        with tenant_isolation_bypass(session, reason="test assert: read notification by id", models=(Notification,)):
+            result = await session.execute(select(Notification).where(Notification.id == notification_id))
+            return result.scalar_one_or_none()
 
 
 # ---------------------------------------------------------------------------

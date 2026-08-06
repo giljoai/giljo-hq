@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Middleware for GiljoAI MCP
+Middleware for Giljo HQ
 
 This module provides security middleware:
 

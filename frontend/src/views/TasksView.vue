@@ -81,22 +81,24 @@
         class="filter-cta-archive"
         @click="showHidden = !showHidden"
       />
+      <!-- FE-9365f: icon-only, mirroring the Projects action bar — the same action in
+           two rooms should wear the same clothes. Labels live in title/aria. -->
       <v-btn
         color="primary"
         variant="flat"
-        prepend-icon="mdi-plus"
+        icon="mdi-plus"
+        title="New task"
+        aria-label="Create new task"
         @click="handleNewTask"
-      >
-        New Task
-      </v-btn>
+      />
       <v-btn
-        variant="text"
-        prepend-icon="mdi-delete-restore"
+        variant="outlined"
+        icon="mdi-delete-restore"
+        title="Deleted tasks"
+        aria-label="Show deleted tasks"
         data-testid="deleted-tasks-btn"
         @click="openDeletedTasksDialog"
-      >
-        Deleted
-      </v-btn>
+      />
     </div>
 
     <!-- Tasks Table (extracted child component) -->

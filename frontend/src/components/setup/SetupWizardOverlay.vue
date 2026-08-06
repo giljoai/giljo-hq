@@ -7,7 +7,7 @@
         data-testid="setup-wizard-overlay"
         role="dialog"
         aria-modal="true"
-        aria-label="Setup GiljoAI MCP"
+        :aria-label="setupAriaLabel"
         @keydown.escape="handleDismiss"
       >
         <!-- Backdrop — click does NOT close -->
@@ -261,9 +261,12 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import configService from '@/services/configService'
 import { SETUP_TOOLS, methodTag, toolName } from '@/config/setupTools'
+import { PRODUCT_NAME } from '@/branding'
 import SetupStep2Connect from './SetupStep2Connect.vue'
 import SetupStep3Commands from './SetupStep3Commands.vue'
 import SetupStep4Complete from './SetupStep4Complete.vue'
+
+const setupAriaLabel = `Setup ${PRODUCT_NAME}`
 
 const STEPS = [
   { id: 'tools', label: 'Choose Tools' },

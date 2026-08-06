@@ -128,6 +128,10 @@ async def test_conductor_series_summary_todo_auto_acked(db_session, test_tenant_
         entry_type="project_completion",
         author_job_id=job_id,
         acknowledge_closeout_todo=True,
+        # user_id supplied so the staleness check (faked by _stub_staleness
+        # above) skips its db_manager-backed tenant-user lookup -- db_manager
+        # is otherwise unused by this test.
+        user_id=str(uuid4()),
         db_manager=MagicMock(),
         session=db_session,
     )
@@ -162,6 +166,10 @@ async def test_generic_remaining_work_todo_still_blocks(db_session, test_tenant_
         entry_type="project_completion",
         author_job_id=job_id,
         acknowledge_closeout_todo=True,
+        # user_id supplied so the staleness check (faked by _stub_staleness
+        # above) skips its db_manager-backed tenant-user lookup -- db_manager
+        # is otherwise unused by this test.
+        user_id=str(uuid4()),
         db_manager=MagicMock(),
         session=db_session,
     )
@@ -253,6 +261,10 @@ async def test_conductor_drive_todo_auto_acked_without_flag(db_session, test_ten
         entry_type="project_completion",
         author_job_id=job_id,
         acknowledge_closeout_todo=False,  # NOT passed -- the conductor auto-fires
+        # user_id supplied so the staleness check (faked by _stub_staleness
+        # above) skips its db_manager-backed tenant-user lookup -- db_manager
+        # is otherwise unused by this test.
+        user_id=str(uuid4()),
         db_manager=MagicMock(),
         session=db_session,
     )
@@ -279,6 +291,10 @@ async def test_solo_with_chain_drive_worded_todo_still_blocks(
         entry_type="project_completion",
         author_job_id=job_id,
         acknowledge_closeout_todo=True,
+        # user_id supplied so the staleness check (faked by _stub_staleness
+        # above) skips its db_manager-backed tenant-user lookup -- db_manager
+        # is otherwise unused by this test.
+        user_id=str(uuid4()),
         db_manager=MagicMock(),
         session=db_session,
     )
@@ -302,6 +318,10 @@ async def test_conductor_with_genuine_work_todo_still_blocks(db_session, test_te
         entry_type="project_completion",
         author_job_id=job_id,
         acknowledge_closeout_todo=False,
+        # user_id supplied so the staleness check (faked by _stub_staleness
+        # above) skips its db_manager-backed tenant-user lookup -- db_manager
+        # is otherwise unused by this test.
+        user_id=str(uuid4()),
         db_manager=MagicMock(),
         session=db_session,
     )
@@ -333,6 +353,7 @@ def _service_with_sequenced_executions(*scalar_results):
     mock_tenant_manager.get_current_tenant.return_value = tenant_key
 
     mock_session = AsyncMock()
+    mock_session.info = {}  # tenant_session_context save/restore target
     call_count = {"n": 0}
 
     async def mock_execute(*args, **kwargs):

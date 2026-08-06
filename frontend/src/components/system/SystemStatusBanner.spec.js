@@ -13,6 +13,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { ACTIVATE_BREADCRUMB_ARMED_EVENT } from '@/composables/useTutorialState'
 
 const h = vi.hoisted(() => ({
   push: vi.fn(),
@@ -38,7 +39,12 @@ vi.mock('@/services/configService', () => ({
   },
 }))
 
-vi.mock('@/composables/useTutorialState', () => ({
+// Spread the REAL module so ACTIVATE_BREADCRUMB_ARMED_EVENT is the genuine
+// constant, not a copy: renaming the event at the source must break this spec
+// rather than leave it passing against a stale literal. Only the two
+// storage-backed functions are stubbed.
+vi.mock('@/composables/useTutorialState', async (importOriginal) => ({
+  ...(await importOriginal()),
   isActivateBreadcrumbArmed: () => h.armed.value,
   clearActivateBreadcrumb: (...a) => h.clearBreadcrumb(...a),
 }))
@@ -58,6 +64,12 @@ vi.mock('@/composables/useIntegrationStatus', async () => {
     useIntegrationStatus: () => ({
       gitEnabled: ref(h.git.value),
       serenaEnabled: ref(h.serena.value),
+      // FE-9233: these tests all assert POST-resolution behaviour (mountBanner
+      // flushes promises before asserting), so the status is resolved. The
+      // pending/errored windows are covered in
+      // SystemStatusBanner.integ-flash.spec.js.
+      resolved: ref(true),
+      loading: ref(false),
       refresh: vi.fn().mockResolvedValue(),
     }),
   }
@@ -200,6 +212,27 @@ describe('SystemStatusBanner (FE-9202 unified Gil banner)', () => {
     expect(wrapper.find('[data-testid="tutorial-activate-banner"]').exists()).toBe(false)
   })
 
+  // FE-9320: the nudge is armed on the way OUT of the tutorial (door C), which
+  // happens long after this banner mounted. The banner lives in DefaultLayout,
+  // OUTSIDE <router-view> and with no :key, so it never remounts — it read the
+  // armed flag once at setup and nothing re-read it for the rest of the
+  // session, making the arming inert. The deleted TutorialActivateBreadcrumb
+  // only worked because it was mounted INSIDE the views, and router-view IS
+  // keyed by route path. Every test above arms BEFORE mounting, so they all
+  // miss this. This one arms AFTER.
+  it('shows the tutorial activate row when the breadcrumb is armed AFTER mount', async () => {
+    const wrapper = await mountBanner({ armed: false, activeProduct: null })
+    expect(wrapper.find('[data-testid="tutorial-activate-banner"]').exists()).toBe(false)
+
+    h.armed.value = true
+    // The real constant, not a literal: if the emit side renames the event this
+    // test must break with it rather than keep passing against a stale copy.
+    window.dispatchEvent(new Event(ACTIVATE_BREADCRUMB_ARMED_EVENT))
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="tutorial-activate-banner"]').exists()).toBe(true)
+  })
+
   it('retires the tutorial row on first product activation', async () => {
     const wrapper = await mountBanner({ armed: true, activeProduct: null })
     expect(wrapper.find('[data-testid="tutorial-activate-banner"]').exists()).toBe(true)
@@ -277,5 +310,31 @@ describe('SystemStatusBanner (FE-9202 unified Gil banner)', () => {
     expect(wrapper.find('[data-testid="onboarding-integration-banner"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="onboarding-agent-banner"]').exists()).toBe(false)
     expect(api.stats.getDashboard).not.toHaveBeenCalled()
+  })
+
+  // ── FE-9222: banner CTAs route through the shared notificationRouting map ────
+
+  it('context_tuning_due CTA deep-links to the Products tune dialog for its product', async () => {
+    const wrapper = await mountBanner({
+      rows: [
+        bannerRow({
+          id: 'ct1',
+          type: 'system.context_tuning_due',
+          cta_route: 'Tools', // server emits a bare Tools route; the map overrides it
+          cta_label: 'Review context',
+          payload: { product_id: 'prod-7', product_name: 'Acme' },
+        }),
+      ],
+    })
+    await wrapper.find('[data-testid="banner-cta-btn"]').trigger('click')
+    expect(h.push).toHaveBeenCalledWith({ name: 'Products', query: { tune: 'prod-7' } })
+  })
+
+  it('two-sided regression: a plain system banner still routes to its bare cta_route', async () => {
+    const wrapper = await mountBanner({
+      rows: [bannerRow({ id: 'sd1', type: 'system.skills_drift', cta_route: 'Tools', payload: null })],
+    })
+    await wrapper.find('[data-testid="banner-cta-btn"]').trigger('click')
+    expect(h.push).toHaveBeenCalledWith({ name: 'Tools' })
   })
 })

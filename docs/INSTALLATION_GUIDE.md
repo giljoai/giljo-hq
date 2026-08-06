@@ -1,8 +1,8 @@
-# GiljoAI MCP: Installation Guide
+# Giljo HQ: Installation Guide
 
 *Last updated: 2026-04-15*
 
-GiljoAI MCP is a self-hosted AI agent orchestration platform. This guide covers
+Giljo HQ, a GiljoAI product, is a self-hosted AI agent orchestration platform. This guide covers
 installing the server, completing the setup wizard, and connecting your AI coding tools.
 
 ---
@@ -51,8 +51,8 @@ Use this if you prefer to clone the repository and run the installer yourself.
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/giljoai/GiljoAI_MCP.git
-cd GiljoAI_MCP
+git clone https://github.com/giljoai/giljo-hq.git
+cd giljo-hq
 ```
 
 ### 2. Run the installer
@@ -200,7 +200,7 @@ For each selected tool, the wizard:
 
 **Claude Code:**
 ```bash
-claude mcp add --scope user --transport http giljo_mcp \
+claude mcp add --scope user --transport http giljo_hq \
   <server-url>/mcp --header "Authorization: Bearer <api-key>"
 ```
 
@@ -218,12 +218,12 @@ $env:GILJO_API_KEY="<api-key>"
 
 Then register the server:
 ```bash
-codex mcp add giljo_mcp --url <server-url>/mcp --bearer-token-env-var GILJO_API_KEY
+codex mcp add giljo_hq --url <server-url>/mcp --bearer-token-env-var GILJO_API_KEY
 ```
 
 **Gemini CLI:**
 ```bash
-gemini mcp add -t http -H "Authorization: Bearer <api-key>" giljo_mcp <server-url>/mcp
+gemini mcp add -t http -H "Authorization: Bearer <api-key>" giljo_hq <server-url>/mcp
 ```
 
 **If you enabled HTTPS: trust the certificate (one-time, Node.js tools only)**

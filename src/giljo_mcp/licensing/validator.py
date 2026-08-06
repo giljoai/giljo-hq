@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
 
+from giljo_mcp import branding
+
 
 class LicenseEdition(StrEnum):
     CE = "CE"
@@ -67,5 +69,5 @@ class LicenseValidator:
             valid=True,
             seat_limit=None,
             licensee=None,
-            message="GiljoAI MCP Community Edition — Elastic License 2.0.",
+            message=f"{branding.PRODUCT_NAME} Community Edition — Elastic License 2.0.",
         )

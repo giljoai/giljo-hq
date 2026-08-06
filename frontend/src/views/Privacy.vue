@@ -81,7 +81,7 @@
       <section class="mb-6">
         <h2 class="text-title-large mb-2">7. Self-hosted (CE) users</h2>
         <p class="legal-body">
-          If you run GiljoAI MCP on your own infrastructure under the
+          If you run {{ productName }} on your own infrastructure under the
           {{ licenseName }}, this Privacy Policy does not apply — your data
           stays on your hardware and we have no access to it. This document
           covers only the hosted demo and SaaS editions.
@@ -107,6 +107,9 @@
 
 <script setup>
 import { LICENSE_NAME_FULL } from '@/i18n/licenseCopy'
+import { PRODUCT_NAME } from '@/branding'
+
+const productName = PRODUCT_NAME
 
 const licenseName = LICENSE_NAME_FULL
 </script>

@@ -14,6 +14,7 @@ TSK-6154: dispatch on the PlatformRegistry export-platform constants (BE-6117)
 rather than bare string literals, so the export-vocabulary lives in one place.
 """
 
+from giljo_mcp import branding
 from giljo_mcp.platform_registry import (
     EXPORT_ANTIGRAVITY_CLI,
     EXPORT_CLAUDE_CODE,
@@ -22,15 +23,15 @@ from giljo_mcp.platform_registry import (
 )
 
 
-# BE-9067: the canonical "what GiljoAI MCP is" primer, persisted into the agent's
+# BE-9067: the canonical "what Giljo HQ is" primer, persisted into the agent's
 # durable startup context (CLAUDE.md/AGENTS.md/GEMINI.md or a code-memory system)
 # during first-time setup, so a fresh session already knows the platform mental
 # model instead of re-deriving it or calling get_giljo_guide from cold every time.
 # Defined ONCE here and referenced by every build_setup_instructions branch plus
 # the giljo_setup inline branch -- never copy-paste per platform, that drifts.
 # Kept well under 2KB on purpose: this is a persisted artifact, not the full guide.
-GILJOAI_MCP_PRIMER = """\
-## GiljoAI MCP -- what it is
+GILJOAI_MCP_PRIMER = f"""\
+## {branding.PRODUCT_NAME} -- what it is
 A project-management and agent-coordination platform driven over MCP.
 - Product -- top-level container holding baseline context (tech stack,
   architecture, conventions). Work happens under an active product.
@@ -74,7 +75,7 @@ def _primer_persist_step(home_dir: str, config_filename: str) -> str:
     """
     return (
         "Step P — Persist the GiljoAI primer into your durable startup context:\n"
-        f'Ask the user ONCE: "May I add a short GiljoAI MCP primer to your '
+        f'Ask the user ONCE: "May I add a short {branding.PRODUCT_NAME} primer to your '
         f"{home_dir}/{config_filename} so future sessions already understand the "
         'platform without re-fetching it?" If approved: back up an existing '
         f"{home_dir}/{config_filename} with a timestamped copy, then add or replace "
@@ -123,7 +124,7 @@ def build_inline_primer_note() -> str:
     else keep the primer in-context for the session. No OS-write instructions.
     """
     return (
-        "GiljoAI MCP primer for your own context (this session has no startup "
+        f"{branding.PRODUCT_NAME} primer for your own context (this session has no startup "
         "file to write):\n"
         f"{GILJOAI_MCP_PRIMER}"
         "If you have a code-memory system (e.g. Serena's write_memory, or a "
@@ -338,7 +339,7 @@ def build_setup_instructions(platform: str, download_url: str) -> str:
         "replace only this managed block using the markers below. Write UTF-8 without BOM.\n"
         "<!-- GILJOAI_CODEX_SUBAGENT_DISPLAY_START -->\n"
         "## GiljoAI Codex Subagent Display\n\n"
-        "When spawning, waiting on, messaging, or reporting Codex subagents for GiljoAI MCP work, "
+        f"When spawning, waiting on, messaging, or reporting Codex subagents for {branding.PRODUCT_NAME} work, "
         "always show the human-readable dashboard agent name and Codex template name alongside the "
         "Codex runtime id.\n\n"
         "Use:\n"

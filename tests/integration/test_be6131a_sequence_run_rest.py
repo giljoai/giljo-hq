@@ -35,6 +35,7 @@ from giljo_mcp.auth.jwt_manager import JWTManager
 from giljo_mcp.models import User
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.test_db_helper import purge_tenant_rows
 
 
 pytestmark = pytest.mark.asyncio
@@ -102,6 +103,33 @@ async def _seed_user(db_manager) -> dict:
             "X-CSRF-Token": _TEST_CSRF_TOKEN,
         },
     }
+
+
+@pytest_asyncio.fixture(scope="function")
+async def seed_user(db_manager):
+    """Factory: mint a fresh tenant (org + user), purged at teardown.
+
+    ``_seed_user`` COMMITS through a real ``db_manager`` session, so the
+    ``TransactionalTestContext`` this suite otherwise relies on cannot roll
+    those rows back — without an explicit purge the tenant's org+user rows
+    persist in the per-worker test DB across runs (TSK-9199; same leak class
+    as INF-9189, different tables). A test may mint several tenants, so the
+    factory records every key it mints and purges them all.
+
+    The minted-key list lives in the fixture (not at module scope), so the
+    suite stays parallel-safe under xdist.
+    """
+    minted: list[str] = []
+
+    async def _factory() -> dict:
+        seeded = await _seed_user(db_manager)
+        minted.append(seeded["tenant_key"])
+        return seeded
+
+    yield _factory
+
+    for tenant_key in minted:
+        await purge_tenant_rows(db_manager, tenant_key)
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -181,13 +209,13 @@ def _run_payload(project_ids=None, resolved_order=None, extra: dict | None = Non
 # ---------------------------------------------------------------------------
 
 
-async def test_tenant_a_run_invisible_to_tenant_b(api_client, db_manager):
+async def test_tenant_a_run_invisible_to_tenant_b(api_client, seed_user):
     """A run created under tenant A must not be readable by tenant B.
 
     Regression for the hard requirement: every DB query filters by tenant_key.
     """
-    tenant_a = await _seed_user(db_manager)
-    tenant_b = await _seed_user(db_manager)
+    tenant_a = await seed_user()
+    tenant_b = await seed_user()
 
     # Tenant A creates a run.
     create_resp = await api_client.post(
@@ -215,13 +243,13 @@ async def test_tenant_a_run_invisible_to_tenant_b(api_client, db_manager):
 # ---------------------------------------------------------------------------
 
 
-async def test_current_index_persists_and_resumes(api_client, db_manager):
+async def test_current_index_persists_and_resumes(api_client, seed_user):
     """current_index round-trips through create -> update -> GET.
 
     This proves the A-crash-resume invariant: after a crash the main orchestrator
     reads the persisted current_index and resumes from that project, not from 0.
     """
-    tenant = await _seed_user(db_manager)
+    tenant = await seed_user()
 
     # Create with initial index=0.
     create_resp = await api_client.post(
@@ -256,17 +284,17 @@ async def test_current_index_persists_and_resumes(api_client, db_manager):
 # ---------------------------------------------------------------------------
 
 
-async def test_create_rejects_invalid_execution_mode(api_client, db_manager):
+async def test_create_rejects_invalid_execution_mode(api_client, seed_user):
     """Invalid execution_mode must produce 422, not a DB-constraint 500."""
-    tenant = await _seed_user(db_manager)
+    tenant = await seed_user()
     bad_payload = _run_payload(extra={"execution_mode": "not_a_real_mode"})
     resp = await api_client.post("/api/v1/sequence-runs", json=bad_payload, headers=tenant["headers"])
     assert resp.status_code == 422, f"Expected 422, got {resp.status_code}: {resp.text}"
 
 
-async def test_create_rejects_too_many_projects(api_client, db_manager):
+async def test_create_rejects_too_many_projects(api_client, seed_user):
     """More than 5 project_ids must produce 422 (cap enforcement)."""
-    tenant = await _seed_user(db_manager)
+    tenant = await seed_user()
     too_many = [str(uuid.uuid4()) for _ in range(6)]
     resp = await api_client.post(
         "/api/v1/sequence-runs",

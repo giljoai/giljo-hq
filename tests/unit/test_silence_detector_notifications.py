@@ -210,6 +210,7 @@ class TestDetectSilentAgentsEmitsAgentSilent:
         # Mock the session and query result
         # scalars() returns a sync object with .all(), not an async one
         session = AsyncMock()
+        session.info = {}  # tenant_session_context save/restore target
         scalars_result = Mock()
         scalars_result.all.return_value = [mock_agent]
         mock_result = Mock()
@@ -263,6 +264,7 @@ class TestDetectSilentAgentsEmitsAgentSilent:
         mock_agent.duration_seconds = None  # BE-5107
 
         session = AsyncMock()
+        session.info = {}  # tenant_session_context save/restore target
         scalars_result = Mock()
         scalars_result.all.return_value = [mock_agent]
         mock_result = Mock()

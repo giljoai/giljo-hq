@@ -110,6 +110,7 @@ class _FakeSessionCtx:
 def _wire_session(service, monkeypatch, job):
     """Patch report_progress's session + fetch helpers to in-memory mocks."""
     session = AsyncMock()
+    session.info = {}  # tenant_session_context save/restore target
     execution = Mock()
     execution.status = "working"
     execution.progress = 0
@@ -149,6 +150,7 @@ async def test_process_todo_items_stores_valid_current_step(monkeypatch):
     service = _make_service()
     job = AgentJob(job_id=str(uuid.uuid4()), tenant_key="test-tenant", job_metadata={})
     session = AsyncMock()
+    session.info = {}  # tenant_session_context save/restore target
 
     await service._process_todo_items(
         session=session,

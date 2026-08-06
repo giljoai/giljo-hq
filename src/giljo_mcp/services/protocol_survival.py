@@ -332,7 +332,8 @@ def _chain_suborch_staging() -> list[str]:
         "YOUR project mission: update_project_mission(project_id, ...).",
         "2. spawn_job your agent team. Workers stay INERT until staging ends — do NOT launch them yet.",
         "3. End staging: complete_job(job_id, ...) (staging-end).",
-        "4. Post a 'staging-complete' note to the Hub thread (find it: search_threads on your run_id).",
+        "4. Post a 'staging-complete' note to the Hub thread (find it: get_context(categories=['chain']) "
+        "-> hub_thread_id).",
         "5. Call get_job_mission ONCE, passing the protocol_etag from this response — it returns your "
         "implementation protocol immediately (no gate, no human, no sleep-poll).",
     ]

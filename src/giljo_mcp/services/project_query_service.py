@@ -176,6 +176,11 @@ class ProjectQueryService:
                     agent_count=agent_count,
                     message_count=message_count,
                     project_type_id=project.project_type_id,
+                    # BE-9326: nested type info, same as the ProjectDetail builders.
+                    # Safe to read here: the row comes from
+                    # ProjectRepository.get_active_project, which selectinloads
+                    # project_type, and this construction happens inside the session.
+                    project_type=project.project_type,
                     series_number=project.series_number,
                     subseries=project.subseries,
                     taxonomy_alias=project.taxonomy_alias,

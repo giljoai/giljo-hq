@@ -103,6 +103,67 @@ _KNOWN_GENERIC_CLIENT_NAMES: frozenset[str] = frozenset(
 )
 
 
+# Harness PRESET tokens (INF-8003e). Repeated as literals rather than imported
+# because this module is the LEAF -- platform_registry imports it, never the
+# reverse. A drift guard (tests/unit/test_be9327_preset_targeting.py) asserts every
+# value below is a member of ``platform_registry.VALID_PRESETS``, so the duplication
+# cannot rot into a token that resolves to no preset row.
+_PRESET_WEB_SANDBOX = "web_sandbox"
+_PRESET_CHAT = "chat"
+
+
+# clientInfo.name (EXACT) -> harness PRESET token, for hosted surfaces whose name is
+# UNAMBIGUOUS about the environment behind it (BE-9327). This is the producer of the
+# ``capabilities["preset"]`` key ``select_effective_preset`` consumes; before it
+# existed nothing wrote that key, so the preset axis was reachable only by an explicit
+# declaration and a hosted chat client was handed filesystem install instructions for
+# directories it cannot write to.
+#
+# WHY ONLY THE openai-mcp FAMILY (the BE-9327 targeting decision):
+#   - ``openai-mcp`` / ``openai-mcp (ChatGPT)`` are chatgpt.com surfaces: no
+#     filesystem workspace at all -> ``chat``.
+#   - ``openai-mcp (Codex)`` is the HOSTED Codex connector (NOT the native
+#     ``codex-mcp-client`` CLI): a web coding agent with an isolated PR workspace and
+#     no OS terminals -> ``web_sandbox``, matching the PLATFORM_PRESETS row comment.
+#   - ``Anthropic/ClaudeAI`` is DELIBERATELY ABSENT. Claude Desktop and claude.ai web
+#     send the byte-identical string, and their environments differ in exactly the way
+#     this map decides: Desktop has a real home directory (``shared_working_tree``) and
+#     MUST keep its working file install; claude.ai web has none. Mapping the shared
+#     name to a chat preset would regress Desktop; mapping it to desktop_app would gain
+#     claude.ai nothing. It stays on the declared-only path until a signal that
+#     actually separates the two exists (the capability vector carries no ``roots``
+#     probe today). Those users still receive their agent identity through
+#     ``get_job_mission`` and templates through ``get_context``, so nothing is lost.
+#   - ``Anthropic/Toolbox`` and ``opencode-check`` are connection-test probes, not user
+#     sessions -- nothing to target.
+#
+# Detection remains a RENDERING hint and never a gate (see the module docstring): a
+# miss here costs the caller the declared-harness path, never access.
+_PRESET_BY_CLIENT_NAME: dict[str, str] = {
+    "openai-mcp": _PRESET_CHAT,
+    "openai-mcp (ChatGPT)": _PRESET_CHAT,
+    "openai-mcp (Codex)": _PRESET_WEB_SANDBOX,
+}
+
+
+def preset_from_client_info(name: str | None, version: str | None = None) -> str | None:
+    """Resolve the session harness PRESET token from the ``initialize`` clientInfo (BE-9327).
+
+    Returns ``web_sandbox`` / ``chat`` for a hosted client whose name unambiguously
+    identifies its environment, or ``None`` for everything else -- every terminal CLI,
+    every unrecognized name, an absent name, and the ambiguous ``Anthropic/ClaudeAI``
+    (see :data:`_PRESET_BY_CLIENT_NAME` for why). ``None`` means "no preset applies",
+    which leaves :func:`~giljo_mcp.platform_registry.select_effective_preset` on the
+    declared-only path -- byte-identical to the pre-BE-9327 behaviour.
+
+    Exact, case-sensitive matching and conservative by construction, mirroring
+    :func:`harness_from_client_info`: a lookalike name resolves to ``None`` rather than
+    guessing an environment. ``version`` is accepted for signature symmetry with the
+    harness resolver and for a future tie-break; it does not affect resolution today.
+    """
+    return _PRESET_BY_CLIENT_NAME.get((name or "").strip())
+
+
 def harness_from_client_info(name: str | None, version: str | None = None) -> str:
     """Resolve the session harness token from the MCP ``initialize`` clientInfo (BE-9035b).
 

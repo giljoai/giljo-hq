@@ -5,7 +5,7 @@
 
 """BE-6063c: tenant-guard AST-walk memoization regression suite.
 
-The spike (``internal/perf/BE6063C_SPIKE_RESULTS.md``, Q1 = GO) proved the
+The spike (BE6063C perf spike results, Q1 = GO) proved the
 ``do_orm_execute`` tenant guard runs a full ``visitors.iterate`` walk on EVERY
 execute (1.0/execute, not amortized by SQLAlchemy's compiled-statement cache):
 47-83us of pure-Python CPU per query on the single sync worker.

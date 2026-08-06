@@ -8,7 +8,7 @@
             <div class="d-flex flex-column align-center w-100">
               <v-img
                 src="/Giljo_YW.svg"
-                alt="GiljoAI MCP"
+                :alt="PRODUCT_NAME"
                 height="50"
                 width="auto"
                 max-width="200"
@@ -232,6 +232,7 @@ import AppAlert from '@/components/ui/AppAlert.vue'
 import { apiClient } from '@/services/api'
 import configService from '@/services/configService'
 import { useGiljoMode } from '@/composables/useGiljoMode'
+import { PRODUCT_NAME } from '@/branding'
 
 // API-0021c — Extension seam contract:
 //
@@ -310,7 +311,7 @@ const currentUser = computed(() => userStore.currentUser)
 const clientDisplayName = computed(() => {
   const clientId = oauthParams.value.client_id
   const knownClients = {
-    'giljo-mcp-default': 'GiljoAI MCP Client',
+    'giljo-mcp-default': `${PRODUCT_NAME} Client`,
     'claude-desktop': 'Claude Desktop',
   }
   return knownClients[clientId] || clientId

@@ -377,6 +377,95 @@ describe('ProjectsTable — Archived badge (BE-2002)', () => {
   })
 })
 
+// IMP-9258: "Park"/"Unpark" kebab actions — Park sets an inactive/active project
+// aside (non-destructive, full parity with Cancel/Cancelled's menu wiring but no
+// confirm dialog); Unpark is offered on already-parked rows.
+describe('ProjectsTable — Park/Unpark (IMP-9258)', () => {
+  const menuStubs = {
+    ...stubs,
+    'v-list-item': {
+      template: '<div class="v-list-item" v-bind="$attrs" @click="$emit(\'click\')">{{ title }}<slot /></div>',
+      props: ['prependIcon', 'title'],
+      inheritAttrs: false,
+    },
+    'v-data-table-server': {
+      template:
+        '<div class="v-data-table" data-table>' +
+        '<template v-for="item in items" :key="item.id">' +
+        '<slot name="item.menu" :item="item" /></template>' +
+        '<slot name="no-data" /></div>',
+      props: ['items', 'itemsLength', 'loading', 'headers', 'sortBy', 'page', 'itemsPerPage'],
+    },
+  }
+
+  function mountWithMenu(props = {}) {
+    return mount(ProjectsTable, {
+      props: { projects: sampleProjects, total: 1, loading: false, hasActiveProject: false, ...props },
+      global: { stubs: menuStubs },
+    })
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    smAndDownRef.value = false
+  })
+
+  it('offers "Park Project" for an inactive project', () => {
+    const wrapper = mountWithMenu({ inChainIds: [] })
+    const titles = wrapper.findAll('.v-list-item').map((i) => i.text())
+    expect(titles.some((t) => t.includes('Park Project'))).toBe(true)
+  })
+
+  it('offers "Park Project" for an active project', () => {
+    const active = [{ ...sampleProjects[0], status: 'active' }]
+    const wrapper = mountWithMenu({ projects: active, inChainIds: [] })
+    const titles = wrapper.findAll('.v-list-item').map((i) => i.text())
+    expect(titles.some((t) => t.includes('Park Project'))).toBe(true)
+  })
+
+  it('emits status-action with park when "Park Project" is clicked', async () => {
+    const wrapper = mountWithMenu({ inChainIds: [] })
+    const items = wrapper.findAll('.v-list-item')
+    const parkItem = items.find((i) => i.text().includes('Park Project'))
+    await parkItem.trigger('click')
+    expect(wrapper.emitted('status-action')).toBeTruthy()
+    expect(wrapper.emitted('status-action')[0][0]).toEqual({ action: 'park', projectId: 'proj-1' })
+  })
+
+  it('offers "Unpark" (not "Park Project") for an already-parked project', () => {
+    const parked = [{ ...sampleProjects[0], status: 'parked' }]
+    const wrapper = mountWithMenu({ projects: parked, inChainIds: [] })
+    const titles = wrapper.findAll('.v-list-item').map((i) => i.text())
+    expect(titles.some((t) => t.includes('Unpark'))).toBe(true)
+    expect(titles.some((t) => t.includes('Park Project'))).toBe(false)
+  })
+
+  it('emits status-action with unpark when "Unpark" is clicked on a parked row', async () => {
+    const parked = [{ ...sampleProjects[0], status: 'parked' }]
+    const wrapper = mountWithMenu({ projects: parked, inChainIds: [] })
+    const items = wrapper.findAll('.v-list-item')
+    const unparkItem = items.find((i) => i.text().includes('Unpark'))
+    await unparkItem.trigger('click')
+    expect(wrapper.emitted('status-action')).toBeTruthy()
+    expect(wrapper.emitted('status-action')[0][0]).toEqual({ action: 'unpark', projectId: 'proj-1' })
+  })
+
+  it('does NOT offer "Park Project" for a cancelled/completed/terminated project', () => {
+    for (const status of ['cancelled', 'completed', 'terminated']) {
+      const wrapper = mountWithMenu({ projects: [{ ...sampleProjects[0], status }], inChainIds: [] })
+      const titles = wrapper.findAll('.v-list-item').map((i) => i.text())
+      expect(titles.some((t) => t.includes('Park Project'))).toBe(false)
+    }
+  })
+
+  it('keeps Edit available for a parked project (resumable, not lifecycle-finished)', () => {
+    const parked = [{ ...sampleProjects[0], status: 'parked' }]
+    const wrapper = mountWithMenu({ projects: parked, inChainIds: [] })
+    const titles = wrapper.findAll('.v-list-item').map((i) => i.text())
+    expect(titles.some((t) => t.includes('Edit Project'))).toBe(true)
+  })
+})
+
 // FE-6050 / FE-6176: compact-headers spec.
 // FE-6176 split the header sets by link mode: NORMAL mode shows the play-button
 // `quick_action` column and NO `select` column; LINK mode swaps them — `select`

@@ -136,6 +136,80 @@ async def test_never_launched_closeout_with_commits_fires_notification(db_sessio
 
 
 @pytest.mark.asyncio
+async def test_notification_is_emitted_to_the_bell_surface(db_session, test_tenant_key, test_product):
+    """FE-9229: the row must be addressed to the surface that actually renders it.
+
+    Regression for the surface mismatch: this notification was emitted with
+    surface="banner", but SystemStatusBanner renders only its ALLOWED_TYPES
+    allowlist of singleton ``system.*`` state and silently discards any
+    ``project.*`` row -- so the notification rendered on no surface it was
+    addressed to, surviving only because the bell happens to ignore ``surface``.
+    Pinning "bell" here makes the bell's persistence a contract rather than an
+    accident. Do NOT "fix" this back to "banner"/"both" without also admitting
+    the type to SystemStatusBanner's allowlist -- and note that this fires once
+    per project, so a headless chain of N closeouts would stack N sticky banners.
+    """
+    project = await _make_project(db_session, test_tenant_key, test_product, implementation_launched=False)
+    db_manager = _mock_db_manager_over(db_session)
+
+    await write_360_memory(
+        project_id=str(project.id),
+        tenant_key=test_tenant_key,
+        summary="Closeout with commits, never launched",
+        key_outcomes=["shipped anyway"],
+        decisions_made=["decision"],
+        entry_type="project_completion",
+        git_commits=[{"sha": "b" * 40, "message": "fix", "author": "agent"}],
+        db_manager=db_manager,
+        session=db_session,
+    )
+
+    notification = await _open_notification(db_session, test_tenant_key, str(project.id))
+    assert notification is not None
+    assert notification.surface == "bell"
+
+
+@pytest.mark.asyncio
+async def test_enriched_notification_carries_taxonomy_alias_and_name(db_session, test_tenant_key, test_product):
+    """FE-9222: the pre-launch banner names the project by taxonomy_alias + name in
+    the title, body, and payload (enrichment; zero new queries), and the body reads
+    informationally rather than error-toned."""
+    project = await _make_project(db_session, test_tenant_key, test_product, implementation_launched=False)
+    db_manager = _mock_db_manager_over(db_session)
+
+    result = await write_360_memory(
+        project_id=str(project.id),
+        tenant_key=test_tenant_key,
+        summary="Closeout with commits, never launched",
+        key_outcomes=["shipped anyway"],
+        decisions_made=["decision"],
+        entry_type="project_completion",
+        git_commits=[{"sha": "e" * 40, "message": "fix", "author": "agent"}],
+        db_manager=db_manager,
+        session=db_session,
+    )
+    assert result.get("entry_id")
+
+    notification = await _open_notification(db_session, test_tenant_key, str(project.id))
+    assert notification is not None
+    # Payload carries the tag + name (+ the still-required commit_count/project_id).
+    # A non-empty taxonomy_alias proves the enricher read the SELECT-time
+    # column_property off the ORM instance (a missing/None value would fail here).
+    alias = notification.payload["taxonomy_alias"]
+    assert alias, "enriched notification should carry a non-empty taxonomy_alias"
+    assert notification.payload["project_name"] == "BE-9085 detector project"
+    assert notification.payload["commit_count"] == 1
+    # Tag + name lead the human-facing copy.
+    assert alias in notification.title
+    assert alias in notification.body
+    assert "BE-9085 detector project" in notification.body
+    # Informational, not error-toned: the headless/CLI framing is present and the
+    # old "ever_launched_at is unset" internals are gone.
+    assert "headless" in notification.body.lower()
+    assert "ever_launched_at" not in notification.body
+
+
+@pytest.mark.asyncio
 async def test_launched_project_with_commits_no_notification(db_session, test_tenant_key, test_product):
     project = await _make_project(db_session, test_tenant_key, test_product, implementation_launched=True)
     db_manager = _mock_db_manager_over(db_session)

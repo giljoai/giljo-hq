@@ -7,7 +7,7 @@
 
 The footers ride on the lifecycle ACTION tools (spawn_job, complete_job,
 update_project_mission). Each footer is a short (<= 10 line) plain-prose
-breadcrumb whose UI claims trace to ``handovers/Reference_docs/TOOL_UI_EVENT_MAP.md``.
+breadcrumb whose UI claims trace to the TOOL_UI_EVENT_MAP reference doc.
 
 These pure builders are exercised here for EVERY (tool x phase x role) cell —
 including the chain-conductor and chain sub-orch cells that are awkward to seed

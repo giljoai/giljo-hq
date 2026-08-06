@@ -80,7 +80,10 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         closeout_module,
         "_handle_force_close",
-        AsyncMock(return_value=None),
+        # BE-9246: _handle_force_close now returns list[AgentStatusChangeEvent]
+        # (empty when nothing was force-decommissioned) instead of None -- the
+        # caller iterates the return value to broadcast post-commit events.
+        AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
         closeout_module,
@@ -224,7 +227,13 @@ async def test_subprocess_filenotfound_simulated_via_empty_input(monkeypatch: py
         git_commits=None,
     )
 
-    assert response["message"].startswith("Project closed"), "closeout must succeed, not raise"
+    # This project is solo (no active chain run), so the truthful closeout message
+    # does not start with "Project closed" -- it never did for a solo project even
+    # before the wording fix; this assertion only checked for a fixed prefix as a
+    # stand-in for "the call succeeded". Assert that directly instead: a non-empty
+    # success message confirming the memory write, which genuinely happened.
+    assert response["message"], "closeout must succeed, not raise"
+    assert "memory" in response["message"].lower(), "the success message must confirm the memory write"
     assert response["git_commits_count"] == 0
     assert response["git_unavailable"] is True
     assert "git" in response["git_unavailable_reason"].lower()

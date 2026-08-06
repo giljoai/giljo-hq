@@ -383,7 +383,10 @@ class ProductMemoryRepository:
                 all_commits.extend(entry.git_commits)
 
         # Sort by date descending, limit
-        all_commits.sort(key=lambda c: c.get("date", ""), reverse=True)
+        # ``or ""`` and str(): a commit dict can carry date=None (the key exists,
+        # so a .get default never applies) or a non-string, and one such row
+        # breaks the whole sort (Sentry GILJOAI-BACKEND-N: None < None raised).
+        all_commits.sort(key=lambda c: str(c.get("date") or ""), reverse=True)
         return all_commits[:limit]
 
     # get_entries_by_tag_prefix and resolve_action_tags removed in INF-5025b

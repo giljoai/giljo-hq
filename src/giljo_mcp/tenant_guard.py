@@ -36,6 +36,8 @@ from .models import (
     AgentTodoItem,
     APIKey,
     ApiMetrics,
+    CommParticipant,
+    CommThread,
     DownloadToken,
     MCPContextIndex,
     MCPSession,
@@ -43,6 +45,7 @@ from .models import (
     MessageAcknowledgment,
     MessageCompletion,
     MessageRecipient,
+    Notification,
     Organization,
     OrgMembership,
     Product,
@@ -52,6 +55,9 @@ from .models import (
     ProductTechStack,
     ProductTestConfig,
     Project,
+    Roadmap,
+    RoadmapItem,
+    SequenceRun,
     Settings,
     SetupState,
     Task,
@@ -73,6 +79,40 @@ logger = logging.getLogger(__name__)
 # CE built-in tenant-scoped models -- the source of CE truth. Edition-pure: MUST
 # NOT contain any SaaS-only model (CE core may not import from saas/). SaaS widens
 # the allowed set at import time via register_tenant_scoped_models() (BE-6031a).
+#
+# SEC-9272 / SEC-9276 (registry coverage-gap sweep, see tests/security/
+# test_sec9272_ce_tenant_registry_completeness.py): six CE models were found to carry
+# a NOT NULL tenant_key with real, already caller-scoped bulk writes yet were
+# invisible to this guard entirely -- not even audit-logged, unlike a registered
+# model's benign Class-A no-match. All six are now registered.
+#
+# CommParticipant and CommThread were registered in SEC-9272: audited clean (all
+# real write paths -- comm_thread_service.py's tenant_session_context, and
+# comm_thread_repository.hard_delete's session.delete(), which fires a raw PK-only
+# DELETE with no tenant_key predicate at the SQL level and is now guard-injected)
+# and the full comm-thread test suite (82 tests) passes unchanged with them
+# registered.
+#
+# Notification, Roadmap, RoadmapItem, and SequenceRun were audited the same way and
+# registered in SEC-9276: their OWNING services (notification_service.py,
+# roadmap_service.py, sequence_run_service.py) already thread tenant_key correctly
+# on every write. Registering them surfaced a SEPARATE, pre-existing problem: ~20
+# test files shared a single db_session/db_manager session across MULTIPLE tenants,
+# or ran an autouse teardown that bulk-deleted the whole table with no tenant
+# predicate at all (`delete(SequenceRun)`, no WHERE) -- both patterns were silently
+# safe only because these models were guard-invisible. SEC-9276 fixed the affected
+# test files (wrapped cross-tenant test setup/teardown in tenant_isolation_bypass,
+# or moved cross-tenant seeding/verification into per-tenant
+# tenant_session_context blocks) so the guard's coverage now extends to these four
+# models with no loss of test signal.
+#
+# Configuration (models/config.py) was reviewed and deliberately EXCLUDED
+# permanently: its tenant_key is nullable BY DESIGN (NULL = a global/system-default
+# row that sits alongside per-tenant override rows in the same table -- see
+# ConfigurationRepository.get_all_values_for_key). Registering it would make the
+# guard inject `WHERE tenant_key = <this tenant>` on every SELECT touching the
+# table whenever a tenant context is active, which would silently hide the global
+# fallback row (`tenant_key IS NULL`) exactly when callers need the fallback most.
 _CE_TENANT_SCOPED_MODELS = frozenset(
     {
         APIKey,
@@ -81,6 +121,8 @@ _CE_TENANT_SCOPED_MODELS = frozenset(
         AgentTemplate,
         AgentTodoItem,
         ApiMetrics,
+        CommParticipant,
+        CommThread,
         DownloadToken,
         MCPSession,
         MCPContextIndex,
@@ -88,6 +130,7 @@ _CE_TENANT_SCOPED_MODELS = frozenset(
         MessageAcknowledgment,
         MessageCompletion,
         MessageRecipient,
+        Notification,
         OAuthAuthorizationCode,
         OAuthRevokedToken,
         OAuthRefreshToken,
@@ -100,6 +143,9 @@ _CE_TENANT_SCOPED_MODELS = frozenset(
         ProductTechStack,
         ProductTestConfig,
         Project,
+        Roadmap,
+        RoadmapItem,
+        SequenceRun,
         Settings,
         SetupState,
         Task,
@@ -398,17 +444,50 @@ def _models_with_tenant_predicate(statement: Any) -> frozenset[type[Any]]:
     return result
 
 
-def _tenant_predicate_values(statement: Any) -> frozenset[str]:
+def _bind_operand_values(element: Any, parameters: Any) -> frozenset[str]:
+    """Resolve a tenant_key-predicate operand's value(s) -- SEC-9272 FIX1.
+
+    ``BindParameter.value`` is populated at STATEMENT-BUILD time for the common
+    ``Model.tenant_key == "literal"`` shape (SQLAlchemy compiles the literal into
+    the bind immediately), but stays ``None`` for a deferred ``bindparam("name")``
+    bound later via ``session.execute(stmt, {"name": value})`` or an executemany
+    ``params=[{...}, ...]`` list -- SQLAlchemy's idiomatic bulk UPDATE/DELETE shape.
+    Reading ``.value`` alone (pre-FIX1 behavior) sees an empty value set for that
+    shape, which the no-match branch's discriminator would then treat as
+    not-scoped-to-this-tenant and falsely raise on an otherwise correctly-scoped
+    write. Fall back to resolving by ``.key`` against the execute-time parameters:
+    a single dict (``session.execute(stmt, {...})``) or an executemany list of
+    dicts (``session.execute(stmt, [{...}, {...}])``) -- the caller is scoped to a
+    value only if that value is present in EVERY row that carries the key, so a
+    mixed-tenant executemany surfaces every distinct value here and the caller
+    (``_tenant_predicate_values``) can still fail the ``== {tenant_key}`` check.
+    """
+    if not isinstance(element, BindParameter):
+        return frozenset()
+    if isinstance(element.value, str):
+        return frozenset({element.value})
+    rows = parameters if isinstance(parameters, (list, tuple)) else ([parameters] if parameters else [])
+    resolved: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        value = row.get(element.key)
+        if isinstance(value, str):
+            resolved.add(value)
+    return frozenset(resolved)
+
+
+def _tenant_predicate_values(statement: Any, parameters: Any = None) -> frozenset[str]:
     values: set[str] = set()
     for element in visitors.iterate(statement):
         if not isinstance(element, BinaryExpression) or element.operator is not operators.eq:
             continue
         left_model = _tenant_column_model(element.left)
         right_model = _tenant_column_model(element.right)
-        if left_model is not None and isinstance(element.right, BindParameter) and isinstance(element.right.value, str):
-            values.add(element.right.value)
-        if right_model is not None and isinstance(element.left, BindParameter) and isinstance(element.left.value, str):
-            values.add(element.left.value)
+        if left_model is not None:
+            values |= _bind_operand_values(element.right, parameters)
+        if right_model is not None:
+            values |= _bind_operand_values(element.left, parameters)
     return frozenset(values)
 
 
@@ -509,7 +588,7 @@ def _enforce_tenant_scope(execute_state: ORMExecuteState) -> None:
 
     explicit_tenant_models = _models_with_tenant_predicate(execute_state.statement)
     if session.info.get(TENANT_CONTEXT_SOURCE_KEY) == "flush" and explicit_tenant_models:
-        explicit_tenant_values = _tenant_predicate_values(execute_state.statement)
+        explicit_tenant_values = _tenant_predicate_values(execute_state.statement, execute_state.parameters)
         session_tenant_key = session.info.get("tenant_key")
         if not explicit_tenant_values or explicit_tenant_values != {session_tenant_key}:
             names = ", ".join(sorted(model.__name__ for model in models))
@@ -555,29 +634,63 @@ def _enforce_tenant_scope(execute_state: ORMExecuteState) -> None:
         execute_state.statement = execute_state.statement.where(target_model.tenant_key == tenant_key)
         return
 
-    # TSK-9008 Step 1 (log-only): the statement touches a tenant-scoped model but no model's
-    # table matched the UPDATE/DELETE target, so no tenant predicate could be injected -- the
-    # write proceeds exactly as before, we only record it. Step 2 (raising here) needs a fresh
-    # go from the owner after a clean observation window. The explicit-predicate detail
-    # separates "truly unscoped write" from "scoped by the caller but unmatched statement
-    # shape" -- after SEC-9094 the remaining no-match cases are statements whose UPDATE/DELETE
-    # target table is not itself a detected tenant model (e.g. a non-tenant target with a
-    # tenant-scoped model referenced only via a subquery/join), where nothing is injectable.
+    # TSK-9008 Step 2 (fail-closed, SEC-9156, shipped): the statement touches a tenant-scoped
+    # model but no model's table matched the UPDATE/DELETE target, so no tenant predicate could
+    # be injected. The explicit-predicate detail separates "truly unscoped write" (Class-B) from
+    # "scoped by the caller but unmatched statement shape" (Class-A) -- after SEC-9094 the
+    # remaining no-match cases are statements whose UPDATE/DELETE target table is not itself a
+    # detected tenant model (e.g. a non-tenant target with a tenant-scoped model referenced only
+    # via a subquery/join), where nothing is injectable. Class-B now RAISES (genuinely unscoped,
+    # unless observe-only audit mode is set); Class-A stays warn-and-continue (the 23 observed
+    # benign caller-scoped hits -- raising there would break legitimate writes).
+    #
+    # SEC-9272 (discriminator hardening, pre-existing weakness -- predates SEC-9156): this closes
+    # the VALUE dimension only -- an explicit tenant predicate being PRESENT never meant the
+    # predicate's VALUE was checked against THIS tenant. A caller bug (wrong variable threaded
+    # into the query) or a statement that references a real OTHER tenant's row could carry a
+    # syntactically-valid `tenant_key == <value>` predicate for a DIFFERENT tenant and still slip
+    # through as "benign" Class-A. Cross-check the predicate's VALUE against the resolved
+    # tenant_key for this execute (the same technique the flush-derived branch above already uses
+    # via _tenant_predicate_values) -- only an explicit predicate whose value set is EXACTLY
+    # {tenant_key} counts as caller-scoped-to-this-tenant; anything else (absent, or present-but-
+    # wrong-tenant) is treated as Class-B. This does NOT touch the separate COVERAGE dimension --
+    # whether EVERY touched model individually carries a matching predicate on its OWN tenant_key
+    # column -- which stays exactly as SEC-9156 left it (explicit_tenant_models is a set of ANY
+    # registered model with a matching predicate anywhere on the statement, not a per-model
+    # completeness check); that is a separate, pre-existing, out-of-scope question with no live
+    # caller shape that hits it.
+    explicit_tenant_values = (
+        _tenant_predicate_values(execute_state.statement, execute_state.parameters)
+        if explicit_tenant_models
+        else frozenset()
+    )
+    caller_scoped_to_this_tenant = bool(explicit_tenant_models) and explicit_tenant_values == {tenant_key}
+
     names = ", ".join(sorted(model.__name__ for model in models))
     message = f"would have blocked: no tenant predicate injectable for UPDATE/DELETE touching: {names}"
     if explicit_tenant_models:
         explicit_names = ", ".join(sorted(model.__name__ for model in explicit_tenant_models))
         message = f"{message}; statement carries an explicit tenant predicate on: {explicit_names}"
-    # SEC-9093 (D2): Class-B == no explicit tenant predicate on the statement. Only this
-    # (genuinely-unscoped) class feeds the Sentry tripwire; the explicit-predicate Class-A
-    # shape-mismatch case stays log-only. Behavior is otherwise unchanged (still warn-and-continue).
+        if not caller_scoped_to_this_tenant:
+            message = f"{message}; predicate value(s) {sorted(explicit_tenant_values)} do not match this tenant"
+    # SEC-9093 (D2), hardened by SEC-9272: Class-B == no explicit tenant predicate on the
+    # statement, OR an explicit predicate that does not resolve to THIS tenant. Only this
+    # (genuinely-not-scoped-to-this-tenant) class feeds the Sentry tripwire; the explicit-and-
+    # matching Class-A case stays log-only. _audit_warn (incl. the Sentry capture) fires BEFORE
+    # the raise below so a blocked Class-B write is never silent.
     _audit_warn(
         session,
         reason=message,
         models=models,
         execute_state=execute_state,
-        unscoped_write=not explicit_tenant_models,
+        unscoped_write=not caller_scoped_to_this_tenant,
     )
+    # Class-B fails closed -- but observe-only audit mode suppresses the raise (the _audit_warn +
+    # Sentry tripwire above still fire), exactly like the two sibling raises earlier in this
+    # function, so GILJO_TENANT_GUARD_MODE=audit stays a working kill switch to stop a bad flip
+    # without a redeploy.
+    if not caller_scoped_to_this_tenant and not audit_mode:
+        raise TenantIsolationError(message)
     return
 
 

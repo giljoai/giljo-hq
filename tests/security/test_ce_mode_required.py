@@ -6,14 +6,22 @@
 """
 SEC-0005c mode-gate regression suite -- "server-level endpoints are CE-only".
 
-Source of truth for the endpoint inventory: handovers/SEC-0005c_sweep_taxonomy.md
-(9 SERVER-LEVEL rows: 8 in api/endpoints/configuration.py, 1 in
-api/endpoints/settings.py -- BE-9000b removed 4 dead-route rows: PUT
-/key/{key_path}, PATCH /, POST /reload, POST /database/password). The bare
-``GET /`` system-config read was the one
+Source of truth for the endpoint inventory: the SEC-0005c sweep taxonomy
+(8 SERVER-LEVEL rows, all in api/endpoints/configuration.py -- BE-9000b removed
+4 dead-route rows: PUT /key/{key_path}, PATCH /, POST /reload, POST
+/database/password). The bare ``GET /`` system-config read was the one
 config route originally missing its ``require_ce_mode`` guard -- it 500'd on
 SaaS prod (config.yaml absent) instead of 404ing like its siblings; BE-6058
 added the guard and this row is its regression lock.
+
+FE-9241 (SaaS-configurable agent-silence timer) reclassified
+``PUT /api/v1/settings/system/agent-silence-threshold`` OUT of this CE-only
+inventory: it dropped ``require_ce_mode`` in favor of an internal edition
+branch (CE writes the deployment-wide system_settings default; SaaS writes a
+per-tenant override in ``configurations``) so the SAME route is now reachable
+-- with different backing storage -- in both editions. Its non-gating is
+locked by ``test_agent_silence_threshold_endpoint_is_not_ce_gated`` below,
+mirroring the lane-(a) negative-test pattern.
 
 For every row this suite asserts:
 
@@ -33,7 +41,7 @@ For every row this suite asserts:
       This is the behavioral assertion -- (2) only proves the dependency is
       wired; (3) proves the dependency does what the contract says.
 
-The taxonomy assigns these 9 endpoints to the SERVER-LEVEL lane because they
+The taxonomy assigns these 8 endpoints to the SERVER-LEVEL lane because they
 read or mutate server-global state -- config.yaml, .env, PostgreSQL ALTER
 USER, SSL certs on disk, the server-wide DB connection. They MUST NOT be
 exposed to admins of their own tenant in demo or SaaS deployments.
@@ -106,10 +114,9 @@ def _find_route(router, method: str, path_suffix: str):
 #
 # Each row: (mount_prefix, method, path_suffix, taxonomy_reason)
 #
-# 8 lane-(b) endpoints live in api/endpoints/configuration.py mounted under
-# /api/v1/config (api/app.py:489). 1 lane-(b) endpoint lives in
-# api/endpoints/settings.py mounted under /api/v1/settings (api/app.py:739).
-# Router resolution is by mount_prefix (see _router_for_prefix).
+# All 8 lane-(b) endpoints live in api/endpoints/configuration.py mounted
+# under /api/v1/config (api/app.py:489). Router resolution is by mount_prefix
+# (see _router_for_prefix).
 
 _CE_MODE_INVENTORY: list[tuple[str, str, str, str]] = [
     ("/api/v1/config", "GET", "/", "reads server-global config.yaml (full system-configuration dump)"),
@@ -120,12 +127,6 @@ _CE_MODE_INVENTORY: list[tuple[str, str, str, str]] = [
     ("/api/v1/config", "POST", "/ssl/cert/reference", "references cert+key by server path + writes config.yaml"),
     ("/api/v1/config", "GET", "/network-info", "reports the host IP(s) + port the server actually responds on"),
     ("/api/v1/config", "GET", "/health/database", "pings server-global DB connection"),
-    (
-        "/api/v1/settings",
-        "PUT",
-        "/system/agent-silence-threshold",
-        "writes server-global agent silence threshold to system_settings",
-    ),
 ]
 
 
@@ -251,4 +252,28 @@ def test_tenant_scoped_configuration_endpoint_is_not_ce_gated(method: str, path_
     assert not _route_has_dependency(route, require_ce_mode), (
         f"{method} /api/v1/config{path_suffix} is tenant-scoped (lane-(a)) and "
         "MUST NOT depend on require_ce_mode -- doing so breaks demo/SaaS admins."
+    )
+
+
+@pytest.mark.parametrize(
+    ("method", "path_suffix"),
+    [
+        ("GET", "/system/agent-silence-threshold"),
+        ("PUT", "/system/agent-silence-threshold"),
+    ],
+    ids=str,
+)
+def test_agent_silence_threshold_endpoint_is_not_ce_gated(method: str, path_suffix: str):
+    """FE-9241: the agent-silence-threshold endpoint is reachable in every edition
+    (CE reads/writes the deployment-wide default; SaaS reads/writes a per-tenant
+    override) via an internal edition branch, NOT require_ce_mode. Regression lock
+    for the SEC-0005c reclassification documented in this file's module docstring.
+    """
+    from api.endpoints import settings
+    from giljo_mcp.auth.dependencies import require_ce_mode
+
+    route = _find_route(settings.router, method, path_suffix)
+    assert not _route_has_dependency(route, require_ce_mode), (
+        f"{method} /api/v1/settings{path_suffix} must NOT depend on require_ce_mode -- "
+        "it is reachable in both CE and SaaS (FE-9241 edition branch inside the handler)."
     )

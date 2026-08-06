@@ -83,6 +83,7 @@
           <v-btn
             variant="text"
             :disabled="loading"
+            data-testid="dialog-cancel"
             @click="handleCancel"
           >
             {{ cancelText }}
@@ -92,6 +93,7 @@
             variant="flat"
             :loading="loading"
             :disabled="!canConfirm"
+            data-testid="dialog-confirm"
             @click="handleConfirm"
           >
             {{ confirmLabel }}

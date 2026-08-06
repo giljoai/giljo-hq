@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Authentication Middleware for GiljoAI MCP
+Authentication Middleware for Giljo HQ
 Supports auto-login for localhost and JWT/API key for network clients
 """
 

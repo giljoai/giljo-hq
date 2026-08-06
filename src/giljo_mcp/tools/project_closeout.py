@@ -10,7 +10,6 @@ Handles project completion and updates product memory with sequential history en
 """
 
 import logging
-import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -18,18 +17,19 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
-from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.exceptions import BaseGiljoError, ProjectStateError, ValidationError
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
-from giljo_mcp.schemas.jsonb_validators import validate_git_commits
+from giljo_mcp.schemas.jsonb_validators import GitCommitTitleRequiredError, validate_git_commits
+from giljo_mcp.schemas.service_responses import AgentStatusChangeEvent
+from giljo_mcp.services.closeout_ws_broadcast import broadcast_agent_status_events
 from giljo_mcp.services.dto import MemoryEntryCreateParams
 from giljo_mcp.services.product_memory_service import (
     ProductMemoryService,
     validate_memory_entry_write,
 )
 from giljo_mcp.services.project_closeout_service import ProjectCloseoutService
-from giljo_mcp.services.project_helpers import mark_chain_member_status
 from giljo_mcp.tenant import TenantManager
+from giljo_mcp.tools._closeout_finalize import _finalize_chain_member_closeout
 from giljo_mcp.tools._closeout_metrics import (
     build_metrics,
     calculate_significance,
@@ -37,9 +37,8 @@ from giljo_mcp.tools._closeout_metrics import (
     estimate_tokens,
 )
 from giljo_mcp.tools._memory_helpers import (
-    _fetch_github_commits,
     _fetch_project_and_product,
-    _get_git_config,
+    build_git_commit_title_required_rejection,
     emit_websocket_event,
     provided_session,
     refuse_if_superseded,
@@ -62,7 +61,7 @@ async def _handle_force_close(
     force: bool,
     blockers: list,
     closeout_service: ProjectCloseoutService,
-) -> None:
+) -> list[AgentStatusChangeEvent]:
     """
     Handle force-close path: guard against orchestrator self-decommission, then decommission agents.
 
@@ -79,9 +78,14 @@ async def _handle_force_close(
         force: Whether force-close was requested by the caller.
         blockers: List of blocker dicts from _check_agent_readiness; empty means no action needed.
         closeout_service: ProjectCloseoutService instance for agent status transitions.
+
+    Returns:
+        One AgentStatusChangeEvent per decommissioned agent (empty when force=False
+        or nothing needed decommissioning). BE-9246: the caller must broadcast these
+        POST-COMMIT -- this function only flushes, it never commits.
     """
     if not blockers or not force:
-        return
+        return []
 
     orch_stmt = (
         select(AgentExecution)
@@ -131,7 +135,7 @@ async def _handle_force_close(
             },
         )
 
-    decommissioned = await closeout_service.decommission_project_agents(
+    decommissioned, status_events = await closeout_service.decommission_project_agents(
         session=session, project_id=project_id, tenant_key=tenant_key
     )
     if decommissioned:
@@ -141,6 +145,7 @@ async def _handle_force_close(
             len(decommissioned),
             ", ".join(decommissioned),
         )
+    return status_events
 
 
 async def _resolve_git_commits(
@@ -148,14 +153,13 @@ async def _resolve_git_commits(
     session: AsyncSession,
     project_id: str,
     tenant_key: str,
-    product_memory: dict[str, Any],
     git_commits: list[dict[str, Any]] | None,
-    project: Any,
 ) -> tuple[list[dict[str, Any]], str | None, str | None]:
-    """Resolve git commits from agent input, GitHub API, or empty default.
+    """Resolve git commits from agent input, or an empty default.
 
-    Validates agent-supplied commits, falls back to GitHub API in SaaS mode,
-    or returns an empty list in CE mode.
+    Validates agent-supplied commits; the server itself is passive and never
+    fetches commits from a git host on the agent's behalf (host-agnostic —
+    the agent's local git remote may point anywhere).
 
     When git integration is enabled but the agent supplies no commits, the
     closeout still succeeds — a warning is logged and returned for surfacing
@@ -169,6 +173,11 @@ async def _resolve_git_commits(
     `git_unavailable_reason` so callers can distinguish "git was not available
     or not collected" from "git was available but produced no commits in
     range." The closeout itself must still succeed.
+
+    Raises:
+        GitCommitTitleRequiredError: BE-9256 — a supplied commit entry has no
+            title (SHA alone, or empty message/subject). The caller catches
+            this and returns the BE-6081 Tier-2 structured rejection.
 
     Returns:
         (commits, warning, git_unavailable_reason) — commits is always a
@@ -212,25 +221,12 @@ async def _resolve_git_commits(
             len(git_commits),
             sanitize(project_id),
         )
-    elif os.environ.get("GILJO_MODE") == "saas":
-        git_config = _get_git_config(product_memory)
-        if git_config.get("enabled") and git_config.get("repo_name") and git_config.get("repo_owner"):
-            git_commits = await _fetch_github_commits(
-                repo_name=git_config.get("repo_name"),
-                repo_owner=git_config.get("repo_owner"),
-                access_token=git_config.get("access_token"),
-                project_created_at=project.created_at,
-                project_completed_at=project.completed_at or datetime.now(UTC),
-            )
     else:
         git_commits = []
         logger.info(
-            "No agent-supplied git commits for project %s (CE server is passive)",
+            "No agent-supplied git commits for project %s (server is passive)",
             sanitize(project_id),
         )
-
-    if git_commits is None:
-        git_commits = []
 
     git_unavailable_reason: str | None = None
     if not git_commits and not agent_supplied_commits:
@@ -239,10 +235,7 @@ async def _resolve_git_commits(
         # project directory is not a git repo), so it sent git_commits=None.
         # The closeout succeeds; we just surface the signal so callers know
         # commit history was not collected.
-        git_unavailable_reason = (
-            "git not available — no agent-supplied commits and no GitHub API fallback. "
-            "Project closed without commit history."
-        )
+        git_unavailable_reason = "git not available — no agent-supplied commits. Project closed without commit history."
         logger.info(
             "git_unavailable_in_closeout project_id=%s tenant_key=%s",
             sanitize(project_id),
@@ -353,6 +346,31 @@ async def _build_and_persist_memory_entry(
     return entry, sequence_number
 
 
+def _build_closeout_message(*, project_id: str, is_chain_member: bool) -> str:
+    """Say what actually happened to the PROJECT ROW, not a fixed sentence.
+
+    A chain member's row genuinely IS flipped to a terminal status by
+    ``_finalize_chain_member_closeout`` (mirroring the solo archive path), so the
+    message may say "closed". A solo project's is deliberately left alone --
+    BUG #7 kept that behaviour so the user's Archive press stays meaningful -- so
+    claiming it "closed" is false, and it was the false claim that led a caller to
+    believe a solo project had been closed when it had not.
+
+    The remedy named is the endpoint the dashboard's Archive button actually calls
+    (``archive_project`` in ``api/endpoints/projects/lifecycle.py``), which flips the
+    row from any status -- never ``update_project(status=...)``, which is not the
+    supported completion path.
+    """
+    if is_chain_member:
+        return "Project closed: this chain member's status was updated and 360 Memory was updated successfully."
+    return (
+        "360 Memory updated successfully. This project's own status was NOT changed -- "
+        "closeout does not complete a solo project; that is left for the Archive action. "
+        f"To mark it completed, call POST /api/v1/projects/{project_id}/archive "
+        "(the same endpoint the dashboard's Archive button uses)."
+    )
+
+
 async def _finalize_closeout_response(
     entry: Any,
     sequence_number: int,
@@ -361,6 +379,8 @@ async def _finalize_closeout_response(
     git_unavailable_reason: str | None,
     tenant_key: str,
     product_id: Any,
+    project_id: str,
+    is_chain_member: bool,
 ) -> dict[str, Any]:
     """Log success, emit the WebSocket event, and build the response dict."""
     logger.info(
@@ -379,7 +399,7 @@ async def _finalize_closeout_response(
         "entry_id": str(entry.id),
         "sequence_number": sequence_number,
         "git_commits_count": len(git_commits),
-        "message": "Project closed and 360 Memory updated successfully",
+        "message": _build_closeout_message(project_id=project_id, is_chain_member=is_chain_member),
     }
     if git_warning:
         response["git_warning"] = git_warning
@@ -392,23 +412,21 @@ async def _finalize_closeout_response(
     return response
 
 
-def _resolve_closeout_websocket_manager(explicit: Any | None) -> Any | None:
-    """Resolve the WS manager for the MCP closeout broadcasts (BE-6198 live-update).
-
-    Prefers an explicitly-threaded manager (the @mcp.tool boundary passes the
-    accessor-held ``_websocket_manager``); otherwise falls back to the registered
-    global. Best-effort: a missing registry yields None so the closeout still
-    succeeds when WS is unavailable. Mirrors the pattern in
-    ``_memory_helpers.emit_websocket_event``.
+def _build_closeout_blocked_rejection(project_id: str, blockers: list[dict[str, Any]]) -> dict[str, Any]:
+    """BE-9016 (Sentry GILJOAI-BACKEND-5) / size-budget extraction: an EXPECTED,
+    agent-actionable domain rejection (the caller can resolve the blockers or
+    pass force=true), not an internal error -- the BE-6081 Tier-2 structured
+    shape, so it reaches the agent as normal content (not isError) and never
+    logs as a Sentry error event. Mirrors write_memory_entry's sibling
+    CLOSEOUT_BLOCKED gate, which already returns rather than raises.
     """
-    if explicit is not None:
-        return explicit
-    try:
-        from giljo_mcp.app_registry.service_registry import get_websocket_manager
-
-        return get_websocket_manager()
-    except Exception:  # Broad catch: WS resolution is best-effort; closeout must not depend on it
-        return None
+    return {
+        "success": False,
+        "error": "CLOSEOUT_BLOCKED",
+        "project_id": project_id,
+        "blockers": blockers,
+        "hint": "Resolve all blockers or pass force=true to auto-decommission remaining agents.",
+    }
 
 
 async def close_project_and_update_memory(
@@ -424,6 +442,7 @@ async def close_project_and_update_memory(
     force: bool = False,
     git_commits: list[dict[str, Any]] | None = None,
     websocket_manager: Any | None = None,
+    decommission_events_out: list[AgentStatusChangeEvent] | None = None,
 ) -> dict[str, Any]:
     """
     Close project and update product memory with history entry.
@@ -453,8 +472,11 @@ async def close_project_and_update_memory(
             infrastructure/ui-ux/integration). Use ``migration`` for schema
             changes. ``None`` or ``[]`` produce an entry with empty tags
             (no auto-extraction from prose).
-        git_commits: Agent-supplied commits from local git log. When provided,
-            skips the GitHub API fetch entirely (passive server model).
+        git_commits: Agent-supplied commits from local git log (the server is
+            passive -- it never fetches commits from a git host itself). Each
+            entry must carry a non-empty commit title; a titleless entry is
+            rejected with GIT_COMMIT_TITLE_REQUIRED.
+        decommission_events_out: BE-9273 out-param, see the assignment below.
 
     Raises:
         MemoryEntryWriteValidationError: structured rejection when caps are
@@ -493,21 +515,7 @@ async def close_project_and_update_memory(
             is_ready, blockers = await _check_agent_readiness(active_session, project_id, tenant_key)
 
             if not is_ready and not force:
-                # BE-9016 (Sentry GILJOAI-BACKEND-5): this is an EXPECTED,
-                # agent-actionable domain rejection (the caller can resolve the
-                # blockers or pass force=true), not an internal error -- return
-                # the BE-6081 Tier-2 structured rejection instead of raising, so
-                # it reaches the agent as normal content (not isError) and never
-                # logs as a Sentry error event. Mirrors write_memory_entry's
-                # sibling CLOSEOUT_BLOCKED gate (write_memory_entry.py), which
-                # already returns rather than raises for the same condition.
-                return {
-                    "success": False,
-                    "error": "CLOSEOUT_BLOCKED",
-                    "project_id": project_id,
-                    "blockers": blockers,
-                    "hint": "Resolve all blockers or pass force=true to auto-decommission remaining agents.",
-                }
+                return _build_closeout_blocked_rejection(project_id, blockers)
 
             # Build a lightweight service for agent status transitions
             # (session-in pattern: service methods accept the active session)
@@ -517,7 +525,7 @@ async def close_project_and_update_memory(
             )
 
             # Handover 0824: force-close guard + agent decommission
-            await _handle_force_close(
+            decommission_events = await _handle_force_close(
                 session=active_session,
                 project_id=project_id,
                 tenant_key=tenant_key,
@@ -526,21 +534,25 @@ async def close_project_and_update_memory(
                 closeout_service=closeout_service,
             )
 
+            # BE-9273: hand owns_session=False callers the raw events (no broadcast below for them).
+            if decommission_events_out is not None:
+                decommission_events_out.extend(decommission_events)
+
             # Handover 0435b: agent 'complete' → 'closed' moved to archive endpoint
             # (user action, not orchestrator MCP call). Agents stay 'complete' here.
 
-            product_memory: dict[str, Any] = product.product_memory or {}
-            if not isinstance(product_memory, dict):
-                product_memory = {}
-
-            git_commits, git_warning, git_unavailable_reason = await _resolve_git_commits(
-                session=active_session,
-                project_id=project_id,
-                tenant_key=tenant_key,
-                product_memory=product_memory,
-                git_commits=git_commits,
-                project=project,
-            )
+            try:
+                git_commits, git_warning, git_unavailable_reason = await _resolve_git_commits(
+                    session=active_session,
+                    project_id=project_id,
+                    tenant_key=tenant_key,
+                    git_commits=git_commits,
+                )
+            except GitCommitTitleRequiredError as exc:
+                # BE-9256 (Tier-2 domain rejection): a supplied commit has no title.
+                # Return the structured dict so it reaches the agent as normal tool
+                # content, not isError -- mirrors refuse_if_superseded above.
+                return build_git_commit_title_required_rejection(exc, project_id)
 
             entry, sequence_number = await _build_and_persist_memory_entry(
                 active_session,
@@ -555,70 +567,23 @@ async def close_project_and_update_memory(
                 db_manager=db_manager,
             )
 
-            # BE-6198: stamp the chain-advance signals the conductor's drive loop watches.
-            # This MCP closeout path (the one an orchestrator/sub-orch actually calls) wrote
-            # ONLY the 360 memory + decommissioned agents -- it never set closeout_executed_at
-            # or marked the chain member, so a chain sub-orch's write_project_closeout left
-            # project_closeout_at NULL (CH_CHAIN_DRIVE STEP D never advanced) and the run
-            # record untouched (C1 guard -> CONDUCTOR_CHAIN_INCOMPLETE). That stranded every
-            # chain at the finish line. closeout_executed_at is inert for solo (only chain
-            # machinery reads it); mark_chain_member_status is a no-op without an active run.
-            project.closeout_executed_at = datetime.now(UTC)
-            # BE-6198 live-update: resolve the WS manager ONCE and thread it through
-            # both broadcasts below. mark_chain_member_status uses it to emit
-            # `sequence:updated` (per-member chain badge); the is_chain_member block
-            # uses it to emit `project_update` (the "Project Completed and Closed"
-            # chip). Without it the chain-drive write path constructs a manager-less
-            # SequenceRunService that short-circuits its broadcast.
-            ws = _resolve_closeout_websocket_manager(websocket_manager)
-            is_chain_member = await mark_chain_member_status(
-                db_manager=db_manager,
-                tenant_manager=TenantManager(),
+            # BE-6198 / BUG #7: stamp chain-advance signals + finalize a chain-member
+            # project row (see helper docstring). Returns the WS manager threaded into
+            # the post-commit agent:status_changed emit below, plus whether this project
+            # is a chain member (the response message text depends on which case).
+            ws, is_chain_member = await _finalize_chain_member_closeout(
+                session=active_session,
+                project=project,
                 project_id=project_id,
                 tenant_key=tenant_key,
-                status="completed",
-                test_session=active_session,
-                websocket_manager=ws,
+                db_manager=db_manager,
+                websocket_manager=websocket_manager,
             )
-
-            # BUG #7: a chain member has no per-project user "archive" press (the chain
-            # flow closes each headlessly), so its /projects row would linger non-terminal
-            # while a solo project reaches "completed" via archive_project. Only for an
-            # active-run member, flip the project ROW here in the same transaction, mirroring
-            # solo archive (lifecycle.archive_project: COMPLETED, or TERMINATED on early
-            # termination). Solo stays byte-identical (is_chain_member False). The conductor
-            # drive keys on closeout_executed_at + run JSON, not project.status — flip is inert.
-            if is_chain_member:
-                project.status = ProjectStatus.TERMINATED if project.early_termination else ProjectStatus.COMPLETED
-                project.completed_at = datetime.now(UTC)
-                await active_session.flush()
-
-                # BE-6198 (Item B): the SOLO archive path broadcasts `project_update`
-                # (project_lifecycle_service) so the "Project Completed and Closed"
-                # chip (driven by projectStore status, NOT sequence:updated) lights
-                # up. The headless chain closeout never went through that path, so the
-                # chip stayed dark for chain members. Mirror the solo broadcast HERE,
-                # gated STRICTLY on is_chain_member so solo stays byte-identical (its
-                # archive path already emits) and there is no double-emit.
-                if ws is not None:
-                    try:
-                        await ws.broadcast_project_update(
-                            project_id=project_id,
-                            update_type="status_changed",
-                            project_data={
-                                "name": project.name,
-                                "status": project.status.value if hasattr(project.status, "value") else project.status,
-                                "mission": project.mission,
-                            },
-                            tenant_key=tenant_key,
-                        )
-                    except Exception as ws_error:  # Broad catch: WS resilience: never fail the closeout
-                        logger.warning("project_update broadcast failed during chain closeout: %s", ws_error)
 
             # Session commit handled by db_manager.get_session_async() context manager
             # when owns_session=True; flush already done by repo.create_entry()
 
-            return await _finalize_closeout_response(
+            response = await _finalize_closeout_response(
                 entry=entry,
                 sequence_number=sequence_number,
                 git_commits=git_commits,
@@ -626,7 +591,21 @@ async def close_project_and_update_memory(
                 git_unavailable_reason=git_unavailable_reason,
                 tenant_key=tenant_key,
                 product_id=product.id,
+                project_id=project_id,
+                is_chain_member=is_chain_member,
             )
+
+        # BE-9246 POST-COMMIT emit -- runs only AFTER `async with session_ctx`
+        # committed above. owns_session=False passes no events (see the
+        # broadcast_agent_status_events docstring for why that path stays silent).
+        await broadcast_agent_status_events(
+            ws,
+            tenant_key=tenant_key,
+            project_id=project_id,
+            events=decommission_events if owns_session else (),
+        )
+
+        return response
 
     except BaseGiljoError as exc:
         # A domain rejection (<500) is correct behaviour surfaced to the caller, not a
@@ -755,4 +734,7 @@ async def _force_decommission_agents(
         db_manager=None,  # type: ignore[arg-type]
         tenant_manager=TenantManager(),
     )
-    return await svc.decommission_project_agents(session=session, project_id=project_id, tenant_key=tenant_key)
+    decommissioned_names, _status_events = await svc.decommission_project_agents(
+        session=session, project_id=project_id, tenant_key=tenant_key
+    )
+    return decommissioned_names

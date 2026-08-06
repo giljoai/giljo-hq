@@ -32,6 +32,7 @@ from api.startup.metrics_flushers import (
 from api.startup.migration_check import get_pending_migration_info
 from api.startup.oauth_code_reaper import start_oauth_code_cleanup_task
 from api.startup.soft_delete_reaper import purge_expired_soft_deleted_entities
+from giljo_mcp import branding
 from giljo_mcp.database import DatabaseManager, tenant_isolation_bypass
 from giljo_mcp.models import APIKey, Product, Project
 from giljo_mcp.models.auth import User
@@ -51,7 +52,7 @@ _TOOLS_ROUTE = "Tools"
 # Public GitHub releases page the "update available" banner links out to.
 # Used as a fallback when the update checker did not capture a specific
 # release_url (git-mode installs report commit counts, not a release URL).
-_GITHUB_RELEASES_URL = "https://github.com/giljoai/GiljoAI_MCP/releases"
+_GITHUB_RELEASES_URL = "https://github.com/giljoai/giljo-hq/releases"
 
 
 async def _tenant_keys_with_admins(db_manager: DatabaseManager) -> set[str]:
@@ -186,7 +187,7 @@ async def _emit_update_available_banner(
     natural = tag or (str(commits_behind) if commits_behind is not None else "available")
     dedupe_key = f"system.update_available:{natural}"
 
-    title = update_info.get("message", "A GiljoAI MCP update is available")
+    title = update_info.get("message", f"A {branding.PRODUCT_NAME} update is available")
     await service.upsert_by_dedupe_key(
         tenant_key=tenant_key,
         user_id=None,
@@ -540,16 +541,18 @@ async def purge_old_notifications_task(state: APIState):
             continue
         try:
             async with state.db_manager.get_session_async() as session:
-                # Cross-tenant discovery of every tenant that owns a notification.
-                # NOTE: Notification is intentionally NOT in the tenant-isolation
-                # guard registry (its isolation is enforced by explicit
-                # tenant_key predicates in NotificationService, not the
-                # do_orm_execute guard), so this unscoped enumeration needs no
-                # bypass — and wrapping it in one would raise (the bypass rejects
-                # non-registered models). The per-tenant purge BELOW stays
-                # tenant-scoped via the owning service's explicit predicate.
-                result = await session.execute(select(Notification.tenant_key).distinct())
-                tenant_keys = {row[0] for row in result.fetchall()}
+                # Cross-tenant discovery: no single tenant is knowable before the
+                # query, so the audited model-scoped bypass is the correct
+                # mechanism (mirrors the APIKey scan above). The per-tenant purge
+                # BELOW stays tenant-scoped via the owning service's explicit
+                # predicate, so tenant A's sweep can never reach tenant B's rows.
+                with tenant_isolation_bypass(
+                    session,
+                    reason="cross-tenant maintenance scan: enumerate tenants with notifications",
+                    models=(Notification,),
+                ):
+                    result = await session.execute(select(Notification.tenant_key).distinct())
+                    tenant_keys = {row[0] for row in result.fetchall()}
 
             total_purged = 0
             for tenant_key in tenant_keys:

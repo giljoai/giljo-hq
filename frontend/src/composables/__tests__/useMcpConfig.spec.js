@@ -18,8 +18,8 @@ describe('generateClaudeDesktopConfig', () => {
     const raw = generateClaudeDesktopConfig(SERVER_HTTPS, API_KEY, { selfSigned: true })
     const cfg = JSON.parse(raw)
 
-    expect(cfg).toHaveProperty('mcpServers.giljo_mcp')
-    const entry = cfg.mcpServers.giljo_mcp
+    expect(cfg).toHaveProperty('mcpServers.giljo_hq')
+    const entry = cfg.mcpServers.giljo_hq
     expect(entry.command).toBe('npx')
     expect(entry.args).toEqual([
       'mcp-remote',
@@ -35,7 +35,7 @@ describe('generateClaudeDesktopConfig', () => {
     const raw = generateClaudeDesktopConfig(SERVER_PROXIED, API_KEY, { selfSigned: false })
     const cfg = JSON.parse(raw)
 
-    const entry = cfg.mcpServers.giljo_mcp
+    const entry = cfg.mcpServers.giljo_hq
     expect(entry.args[1]).toBe(`${SERVER_PROXIED}/mcp`)
     expect(entry.env.AUTH_HEADER).toBe(`Bearer ${API_KEY}`)
     expect(entry.env.NODE_TLS_REJECT_UNAUTHORIZED).toBeUndefined()
@@ -45,7 +45,7 @@ describe('generateClaudeDesktopConfig', () => {
     const raw = generateClaudeDesktopConfig(SERVER_HTTP, API_KEY, { selfSigned: false })
     const cfg = JSON.parse(raw)
 
-    const entry = cfg.mcpServers.giljo_mcp
+    const entry = cfg.mcpServers.giljo_hq
     expect(entry.args[1]).toBe(`${SERVER_HTTP}/mcp`)
     expect(entry.env.AUTH_HEADER).toBe(`Bearer ${API_KEY}`)
     expect(entry.env.NODE_TLS_REJECT_UNAUTHORIZED).toBeUndefined()
@@ -54,7 +54,7 @@ describe('generateClaudeDesktopConfig', () => {
   it('omits NODE_TLS_REJECT_UNAUTHORIZED when no options object is passed', () => {
     const raw = generateClaudeDesktopConfig(SERVER_HTTP, API_KEY)
     const cfg = JSON.parse(raw)
-    expect(cfg.mcpServers.giljo_mcp.env.NODE_TLS_REJECT_UNAUTHORIZED).toBeUndefined()
+    expect(cfg.mcpServers.giljo_hq.env.NODE_TLS_REJECT_UNAUTHORIZED).toBeUndefined()
   })
 
   it('output is pretty-printed JSON with 2-space indent (matches backend byte-for-byte)', () => {
@@ -63,7 +63,7 @@ describe('generateClaudeDesktopConfig', () => {
     const expected = JSON.stringify(
       {
         mcpServers: {
-          giljo_mcp: {
+          giljo_hq: {
             command: 'npx',
             args: [
               'mcp-remote',
@@ -89,14 +89,14 @@ describe('generateConfigForTool dispatch', () => {
   it('routes claude_desktop to JSON generator', () => {
     const out = generateConfigForTool('claude_desktop', SERVER_HTTPS, API_KEY, { selfSigned: true })
     const cfg = JSON.parse(out)
-    expect(cfg.mcpServers.giljo_mcp.command).toBe('npx')
-    expect(cfg.mcpServers.giljo_mcp.env.NODE_TLS_REJECT_UNAUTHORIZED).toBe('0')
+    expect(cfg.mcpServers.giljo_hq.command).toBe('npx')
+    expect(cfg.mcpServers.giljo_hq.env.NODE_TLS_REJECT_UNAUTHORIZED).toBe('0')
   })
 
   it('routes claude_desktop without options (no self-signed) correctly', () => {
     const out = generateConfigForTool('claude_desktop', SERVER_HTTP, API_KEY)
     const cfg = JSON.parse(out)
-    expect(cfg.mcpServers.giljo_mcp.env.NODE_TLS_REJECT_UNAUTHORIZED).toBeUndefined()
+    expect(cfg.mcpServers.giljo_hq.env.NODE_TLS_REJECT_UNAUTHORIZED).toBeUndefined()
   })
 })
 

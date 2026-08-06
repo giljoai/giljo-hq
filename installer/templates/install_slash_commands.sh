@@ -18,7 +18,7 @@ echo ""
 if [ -z "$GILJO_API_KEY" ]; then
   echo -e "${RED}Error: GILJO_API_KEY environment variable not set${NC}"
   echo ""
-  echo "Please configure GiljoAI MCP first:"
+  echo "Please configure Giljo HQ first:"
   echo "  Tools → Connect → MCP Configuration"
   echo ""
   echo "This will set up the required environment variable."

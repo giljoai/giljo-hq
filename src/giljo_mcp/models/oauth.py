@@ -106,6 +106,12 @@ class OAuthRefreshToken(Base):
     issued_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     revoked = Column(Boolean, nullable=False, default=False)
+    # SEC-9227b (M4): sha256 hex of the authorization code that minted this
+    # family. Set only at initial /token issuance; NULL for rotated rows (the
+    # family is revoked by family_id, not by this column) and for pre-migration
+    # grants. Enables code-reuse detection to revoke every family born of a
+    # replayed auth code (RFC 9700 §4.5.3). NEVER stores the raw code.
+    origin_code_hash = Column(String(64), nullable=True)
 
     # Explicit __table_args__ indices match the migration (ce_0020). We don't
     # use ``index=True`` on the columns because that would create a second

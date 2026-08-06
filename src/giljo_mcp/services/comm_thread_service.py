@@ -28,23 +28,31 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager, tenant_session_context
-from giljo_mcp.domain.soft_delete import RECOVER_WINDOW_DAYS, recover_window_expired
 from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
+from giljo_mcp.harness_resolver import GENERIC_HARNESS
 from giljo_mcp.models.comm import (
     BOUND_THREAD_MARKER_SUBJECT,
-    CHT_TAXONOMY_ABBR,
     LOOP_DIRECTIVE_MESSAGE_TYPE,
     TERMINAL_THREAD_STATUSES,
     VALID_PARTICIPANT_TYPES,
     CommThread,
 )
-from giljo_mcp.models.tasks import Message
 from giljo_mcp.repositories.agent_operations_repository import AgentOperationsRepository
 from giljo_mcp.repositories.comm_thread_repository import CommThreadRepository
 from giljo_mcp.repositories.user_repository import UserRepository
+from giljo_mcp.schemas.comm_serializers import message_dict, thread_dict
+from giljo_mcp.services._comm_thread_baton_mixin import CommThreadBatonMixin
+from giljo_mcp.services._comm_thread_chain_hub_mixin import CommThreadChainHubMixin
+from giljo_mcp.services._comm_thread_edit_mixin import CommThreadEditMixin
+from giljo_mcp.services._comm_thread_softdelete_mixin import CommThreadSoftDeleteMixin
+from giljo_mcp.services.comm_author_identity import resolve_and_register_author
+from giljo_mcp.services.comm_baton_targets import (
+    enrol_addressee,
+    post_target_rejection,
+    resolve_operator_alias,
+)
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.identity import validate_from_agent
-from giljo_mcp.utils.taxonomy_alias import format_taxonomy_alias
 
 
 logger = logging.getLogger(__name__)
@@ -73,7 +81,7 @@ _TAIL_MIN = 1
 _TAIL_MAX = 500
 
 
-class CommThreadService:
+class CommThreadService(CommThreadChainHubMixin, CommThreadSoftDeleteMixin, CommThreadEditMixin, CommThreadBatonMixin):
     """Service surface for comm_threads / comm_participants + thread messaging."""
 
     def __init__(
@@ -109,50 +117,6 @@ class CommThreadService:
                 with tenant_session_context(session, tenant_key):
                     yield session
 
-    # ------------------------------------------------------------------
-    # Serialization
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _thread_dict(thread: CommThread) -> dict[str, Any]:
-        return {
-            "thread_id": thread.id,
-            "chat_id": thread.taxonomy_alias,
-            "subject": thread.subject,
-            "status": thread.status,
-            "next_action_owner": thread.next_action_owner,
-            "severity": thread.severity,
-            "product_id": thread.product_id,
-            "project_id": thread.project_id,
-            "created_at": thread.created_at.isoformat() if thread.created_at else None,
-        }
-
-    @staticmethod
-    def _message_dict(msg: Message, recipient_state: dict[str, list[str]] | None = None) -> dict[str, Any]:
-        out = {
-            "message_id": msg.id,
-            "thread_id": msg.thread_id,
-            "from_agent_id": msg.from_agent_id,
-            "from_display_name": msg.from_display_name,
-            "content": msg.content,
-            "message_type": msg.message_type,
-            "priority": msg.priority,
-            "status": msg.status,
-            "requires_action": msg.requires_action,
-            "loop_interval_minutes": msg.loop_interval_minutes,
-            "created_at": msg.created_at.isoformat() if msg.created_at else None,
-        }
-        # FE-9012c (D3): additive MESSAGE-relative junction state, only when the caller
-        # (the Hub REST path) asks for it. Absent on the default read (byte-identical).
-        if recipient_state is not None:
-            recipients = recipient_state.get("recipients", [])
-            acted = set(recipient_state.get("acked_by", [])) | set(recipient_state.get("completed_by", []))
-            out["recipients"] = recipients
-            out["acked_by"] = recipient_state.get("acked_by", [])
-            out["completed_by"] = recipient_state.get("completed_by", [])
-            out["pending_for"] = [r for r in recipients if r not in acted]
-        return out
-
     async def _require_thread(self, session: AsyncSession, tenant_key: str, thread_id: str) -> CommThread:
         thread = await self._repo.get_by_id(session, tenant_key, thread_id)
         if thread is None:
@@ -176,10 +140,15 @@ class CommThreadService:
         creator_id: str | None = None,
         creator_type: str = "agent",
         creator_display_name: str | None = None,
+        sequence_run_id: str | None = None,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
         """Create a thread (mints the CHT-#### serial). Optionally registers the
-        creator as the first participant + hands them the baton."""
+        creator as the first participant + hands them the baton.
+
+        ``sequence_run_id`` (BE-9291) marks the thread as THE coordination hub of a
+        chain run, which is how ``resolve_chain_hub_thread`` finds it later. The repo
+        verifies the run belongs to this tenant before storing it."""
         tk = self._resolve_tenant(tenant_key)
         async with self._scoped_session(tk) as session:
             thread = await self._repo.create_thread(
@@ -190,6 +159,7 @@ class CommThreadService:
                 product_id=product_id,
                 project_id=project_id,
                 next_action_owner=creator_id,
+                sequence_run_id=sequence_run_id,
             )
             if creator_id:
                 ctype = creator_type if creator_type in VALID_PARTICIPANT_TYPES else "agent"
@@ -202,7 +172,7 @@ class CommThreadService:
                     display_name=creator_display_name,
                     role="creator",
                 )
-            return self._thread_dict(thread)
+            return thread_dict(thread)
 
     async def resolve_or_create_bound_thread(self, *, project_id: str, tenant_key: str | None = None) -> dict[str, Any]:
         """Resolve (or create) THE project's bound thread — the single source of
@@ -213,7 +183,7 @@ class CommThreadService:
             thread = await self._repo.resolve_or_create_bound_thread(
                 session, tk, project_id, marker=BOUND_THREAD_MARKER_SUBJECT
             )
-            return self._thread_dict(thread)
+            return thread_dict(thread)
 
     async def join_thread(
         self,
@@ -223,9 +193,16 @@ class CommThreadService:
         participant_type: str = "agent",
         display_name: str | None = None,
         role: str | None = None,
+        detected_harness: str | None = None,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
-        """Declare/claim an identity on a thread (collision-safe)."""
+        """Declare/claim an identity on a thread (collision-safe).
+
+        BE-9289a: ``detected_harness`` is resolved by the MCP boundary from the
+        ``initialize`` clientInfo and threaded down — it is NEVER a value the caller
+        declares about itself. A caller with no detection (the REST path, the in-memory
+        transport, an unknown client) resolves to ``generic``, the fail-safe floor.
+        """
         tk = self._resolve_tenant(tenant_key)
         if not participant_id:
             raise ValidationError("participant_id is required", context={"operation": "comm_thread.join"})
@@ -239,6 +216,9 @@ class CommThreadService:
                 participant_type=participant_type,
                 display_name=display_name,
                 role=role,
+                harness=detected_harness or GENERIC_HARNESS,
+                touch_last_seen=True,  # joining is activity
+                authoritative=True,  # join_thread is the participant DECLARING itself
             )
             return {
                 "participant_id": participant.participant_id,
@@ -261,6 +241,7 @@ class CommThreadService:
         loop_interval_minutes: int | None = None,
         pass_baton_to: str | None = None,
         user_id: str | None = None,
+        detected_harness: str | None = None,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
         """Post a message to a thread (broadcast to all participants, or direct to
@@ -326,6 +307,32 @@ class CommThreadService:
         async with self._scoped_session(tk) as session:
             thread = await self._require_thread(session, tk, thread_id)
 
+            # BE-9365b: expand "user" BEFORE the guard, so everything downstream sees an
+            # ordinary id; an unresolvable alias falls through and the guard refuses it
+            # rather than it being silently dropped. Full rationale on the resolver.
+            to_participant = (
+                await resolve_operator_alias(self._user_repo, session, tk, to_participant) or to_participant
+            )
+            pass_baton_to = await resolve_operator_alias(self._user_repo, session, tk, pass_baton_to) or pass_baton_to
+
+            # BE-9292a: refuse an addressee or a hand-off that could never be
+            # delivered, BEFORE any write, so a refused post persists neither message
+            # nor baton. BE-9292a-F1: the ADDRESSEE is screened too — the auto-pass
+            # makes it the baton target, and delivering to it enrols it.
+            rejection = await post_target_rejection(
+                self._repo,
+                self._user_repo,
+                session,
+                tk,
+                thread_id,
+                to_participant=to_participant,
+                pass_baton_to=pass_baton_to,
+                author_id=from_agent or user_id or "orchestrator",
+                current_owner=thread.next_action_owner,
+            )
+            if rejection is not None:
+                return rejection
+
             # BE-9197: atomic hand-off — written BEFORE the persist so a failed
             # post provably rolls the baton back (the atomicity test injects one).
             baton_passed = False
@@ -333,35 +340,29 @@ class CommThreadService:
                 await self._repo.set_next_action_owner(session, tk, thread_id, pass_baton_to)
                 baton_passed = True
 
-            # attribution_warning (TSK-0008): surface, never silently stamp. An
-            # omitted from_agent falls back to the principal; the backend cannot tell
-            # an agent that forgot it from a genuine user post, so it attributes AND
-            # advises. None on the agent path.
-            attribution_warning: str | None = None
-            if from_agent:
-                from_agent_id = from_agent
-                # Resolve the STORED display name from the poster's own participant
-                # row (set at join_thread) so every reader sees the friendly role; a
-                # poster with no row (or no display_name) falls back to the slug —
-                # never a crash, never worse than pre-fix.
-                participant = await self._repo.get_participant(session, tk, thread_id, from_agent)
-                from_display_name = (participant.display_name if participant else None) or from_agent
-            elif user_id:
-                user = await self._user_repo.get_user_by_id(session, user_id, tk)
-                from_agent_id = user_id
-                from_display_name = user.display_name if user else "user"
-                attribution_warning = (
-                    "from_agent omitted; attributed to the authenticated principal. An AGENT post "
-                    "must pass from_agent (its role/lane id) or it is mis-attributed (TSK-0008)."
-                )
-            else:
-                from_agent_id = "orchestrator"
-                from_display_name = "orchestrator"
-                attribution_warning = "from_agent omitted and no principal resolved; attributed to 'orchestrator'."
+            # BE-9289a: who wrote this, and register them — see comm_author_identity for
+            # why the KIND is recorded here rather than inferred by any later reader.
+            author = await resolve_and_register_author(
+                self._repo,
+                self._user_repo,
+                session,
+                tk,
+                thread_id,
+                from_agent=from_agent,
+                user_id=user_id,
+                detected_harness=detected_harness,
+            )
+            from_agent_id, from_kind = author.agent_id, author.kind
+            from_display_name, attribution_warning = author.display_name, author.warning
 
             # Recipients: a direct target, else broadcast to all OTHER participants.
             if to_participant:
                 recipient_ids = [to_participant]
+                # BE-9292a: delivering to someone enrols them. A broadcast cannot
+                # diverge (it fans out FROM the directory), but a directed post used to
+                # write a recipient row and no participant row — leaving its addressee
+                # obliged to reply and unable to acknowledge. See enrol_addressee.
+                await enrol_addressee(self._repo, self._user_repo, session, tk, thread_id, to_participant)
             else:
                 # BE-6141: a broadcast on a PROJECT-ANCHORED thread auto-enrolls the
                 # project's active agents as participants first, so the broadcast
@@ -390,6 +391,7 @@ class CommThreadService:
                 content=content,
                 from_agent_id=from_agent_id,
                 from_display_name=from_display_name,
+                from_kind=from_kind,
                 message_type=resolved_message_type,
                 priority=priority,
                 requires_action=requires_action,
@@ -404,6 +406,11 @@ class CommThreadService:
                 "recipients": recipient_ids,
                 "from_agent_id": from_agent_id,
                 "from_display_name": from_display_name,
+                # BE-9289a: returned so the WS broadcast can carry the SAME server-
+                # resolved kind the persisted row has. A live message that arrived
+                # without it would fall back to a default and could render the
+                # operator's own post as an agent.
+                "from_kind": from_kind,
                 "attribution_warning": attribution_warning,
                 "loop_directive_armed": loop_directive,
                 "loop_interval_minutes": interval_to_persist,
@@ -419,10 +426,14 @@ class CommThreadService:
 
         Reuses the AgentExecution roster (the owning AgentOperationsRepository)
         and the collision-safe ``add_participant`` join, so a broadcast reaches
-        agents that never manually joined. Idempotent: re-enrolling an existing
-        participant is a no-op (``ON CONFLICT DO NOTHING``), so no duplicate rows
-        accrue across repeated posts. Scoped to the project's active agents —
-        does not over-enroll terminal (complete/closed/decommissioned) agents.
+        agents that never manually joined. Re-enrolling an existing participant never
+        duplicates the row. Scoped to the project's active agents — does not
+        over-enroll terminal (complete/closed/decommissioned) agents.
+
+        BE-9289a: a PLACEHOLDER writer (``authoritative=False``) — it fills blanks but
+        never corrects. It re-runs on EVERY broadcast carrying a non-null roster name and
+        the literal role ``"auto-enrolled"``, so were it allowed to overwrite, an agent's
+        declared identity would flip back to the placeholder on every message.
         """
         roster = await self._agent_ops.get_active_agent_ids_for_project(session, tenant_key, project_id)
         for agent_id, display_name in roster:
@@ -436,146 +447,6 @@ class CommThreadService:
                 role="auto-enrolled",
             )
 
-    async def has_active_loop_directive(self, *, agent_id: str, tenant_key: str | None = None) -> bool:
-        """Whether an agent currently has a live loop directive (BE-6054c).
-
-        Used by the mission composer to decide whether to inject the loop/sleep
-        directive. True iff a loop_directive message targets this agent on a
-        non-terminal thread."""
-        tk = self._resolve_tenant(tenant_key)
-        async with self._scoped_session(tk) as session:
-            return await self._repo.has_active_loop_directive(session, tk, agent_id)
-
-    async def get_my_turn(self, *, agent_id: str, tenant_key: str | None = None) -> dict[str, Any]:
-        """The baton query: threads where next_action_owner == agent_id (or 'all').
-
-        FE-6140: also surfaces ``loop_directives`` — the active auto-check-in
-        requests for EVERY thread this agent participates in (not only the threads
-        where it holds the baton). This is the harness-neutral inject: a running
-        agent polling get_my_turn reads its cadence(s) and self-schedules a wake.
-        Each entry is ``{thread_id, chat_id, interval_minutes}`` (interval may be
-        None when a directive was armed without an explicit cadence)."""
-        tk = self._resolve_tenant(tenant_key)
-        if not agent_id:
-            raise ValidationError("agent_id is required", context={"operation": "comm_thread.get_my_turn"})
-        async with self._scoped_session(tk) as session:
-            mine = await self._repo.list_threads(session, tk, next_action_owner=agent_id)
-            broadcast = await self._repo.list_threads(session, tk, next_action_owner="all")
-            threads = {t.id: t for t in [*mine, *broadcast]}
-            directives = await self._repo.get_active_loop_directives_for_agent(session, tk, agent_id)
-            return {
-                "agent_id": agent_id,
-                "count": len(threads),
-                "threads": [self._thread_dict(t) for t in threads.values()],
-                "loop_directives": [
-                    {
-                        "thread_id": d["thread_id"],
-                        "chat_id": format_taxonomy_alias(CHT_TAXONOMY_ABBR, d["serial"]),
-                        "interval_minutes": d["interval_minutes"],
-                    }
-                    for d in directives
-                ],
-            }
-
-    async def pass_baton(self, *, thread_id: str, to: str, tenant_key: str | None = None) -> dict[str, Any]:
-        """Hand the baton: set next_action_owner to an agent_id / user_id / 'all' / 'none'."""
-        tk = self._resolve_tenant(tenant_key)
-        if not to:
-            raise ValidationError("to is required", context={"operation": "comm_thread.pass_baton"})
-        owner = None if to == "none" else to
-        async with self._scoped_session(tk) as session:
-            thread = await self._repo.set_next_action_owner(session, tk, thread_id, owner)
-            if thread is None:
-                raise ResourceNotFoundError(
-                    message="Thread not found or access denied",
-                    context={"operation": "comm_thread.pass_baton", "thread_id": thread_id},
-                )
-            return {"thread_id": thread_id, "next_action_owner": thread.next_action_owner}
-
-    async def delete_thread(self, *, thread_id: str, tenant_key: str | None = None) -> dict[str, Any]:
-        """Soft-delete a thread (Message Hub trash action).
-
-        Stamps ``deleted_at`` so the thread drops out of every read; message
-        history + participants stay intact. Raises ResourceNotFoundError when the
-        thread does not exist (or is already deleted) for the tenant."""
-        tk = self._resolve_tenant(tenant_key)
-        async with self._scoped_session(tk) as session:
-            thread = await self._require_thread(session, tk, thread_id)
-            chat_id = thread.taxonomy_alias
-            deleted = await self._repo.soft_delete(session, tk, thread_id)
-            if not deleted:  # pragma: no cover - _require_thread already guarantees presence
-                raise ResourceNotFoundError(
-                    message="Thread not found or access denied",
-                    context={"operation": "comm_thread.delete", "thread_id": thread_id},
-                )
-            return {"thread_id": thread_id, "chat_id": chat_id, "deleted": True}
-
-    async def restore_thread(self, *, thread_id: str, tenant_key: str | None = None) -> dict[str, Any]:
-        """Restore a soft-deleted thread (Message Hub recover action).
-
-        Clears ``deleted_at`` so the thread (and its intact message history +
-        participants) surfaces again in every read. Raises ResourceNotFoundError
-        when no soft-deleted thread matches the id for the tenant."""
-        tk = self._resolve_tenant(tenant_key)
-        async with self._scoped_session(tk) as session:
-            trashed = await self._repo.get_deleted_by_id(session, tk, thread_id)
-            if trashed is None:
-                raise ResourceNotFoundError(
-                    message="Deleted thread not found or access denied",
-                    context={"operation": "comm_thread.restore", "thread_id": thread_id},
-                )
-            if recover_window_expired(trashed.deleted_at):
-                raise ValidationError(
-                    f"This thread was deleted more than {RECOVER_WINDOW_DAYS} days ago and can no longer be recovered.",
-                    context={"operation": "comm_thread.restore", "thread_id": thread_id},
-                )
-            thread = await self._repo.restore(session, tk, thread_id)
-            return self._thread_dict(thread)
-
-    async def list_deleted_threads(
-        self,
-        *,
-        product_id: str | None = None,
-        project_id: str | None = None,
-        tenant_key: str | None = None,
-    ) -> dict[str, Any]:
-        """List soft-deleted threads (the recover dialog's source). Includes
-        ``deleted_at`` so the UI can show how long ago each was trashed."""
-        tk = self._resolve_tenant(tenant_key)
-        async with self._scoped_session(tk) as session:
-            threads = await self._repo.list_deleted(session, tk, product_id=product_id, project_id=project_id)
-            return {
-                "count": len(threads),
-                "threads": [
-                    {
-                        **self._thread_dict(t),
-                        "deleted_at": t.deleted_at.isoformat() if t.deleted_at else None,
-                    }
-                    for t in threads
-                ],
-            }
-
-    async def purge_expired_deleted_threads(self, *, tenant_key: str | None = None) -> int:
-        """Hard-delete trashed threads past the recovery window (TSK-6132 reaper).
-
-        Walks this tenant's soft-deleted threads and permanently removes those
-        whose ``deleted_at`` is past ``RECOVER_WINDOW_DAYS`` (the same boundary
-        ``restore_thread`` refuses to recover past). Cascade is DB-level. Returns
-        the count purged; tenant-isolated and idempotent (re-running finds none).
-        """
-        tk = self._resolve_tenant(tenant_key)
-        purged = 0
-        async with self._scoped_session(tk) as session:
-            for thread in await self._repo.list_deleted(session, tk):
-                if not recover_window_expired(thread.deleted_at):
-                    continue
-                try:
-                    if await self._repo.hard_delete(session, tk, thread.id):
-                        purged += 1
-                except Exception:
-                    logger.exception("Reaper failed to purge thread %s", thread.id)
-        return purged
-
     async def list_threads(
         self,
         *,
@@ -585,12 +456,20 @@ class CommThreadService:
         project_id: str | None = None,
         limit: int | None = None,
         before_id: str | None = None,
+        viewer_id: str | None = None,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
         """List threads with optional filters.
 
         BE-6131b: ``limit`` + ``before_id`` keyset pagination added to bound the
         Hub thread list (mirrors the BE-6071 bound on the ``/messages`` endpoint).
+
+        BE-9289b: ``viewer_id`` opts into the card facts the Quiet Cards list needs —
+        ``project_name``, ``participants``, ``last_message`` and ``unread`` — in ONE
+        extra round trip for the whole page, replacing the per-thread follow-up call the
+        UI used to make. It is OPT-IN because it is a presentation concern: the MCP
+        agent path passes no viewer and its payload stays byte-identical. ``unread`` is
+        per-viewer, so it cannot be computed without knowing who is asking.
         """
         tk = self._resolve_tenant(tenant_key)
         async with self._scoped_session(tk) as session:
@@ -604,7 +483,12 @@ class CommThreadService:
                 limit=limit,
                 before_id=before_id,
             )
-            return {"count": len(threads), "threads": [self._thread_dict(t) for t in threads]}
+            payload = [thread_dict(t) for t in threads]
+            if viewer_id:
+                facts = await self._repo.list_threads_enriched(session, tk, viewer_id=viewer_id, threads=threads)
+                for entry in payload:
+                    entry.update(facts.get(entry["thread_id"], {}))
+            return {"count": len(threads), "threads": payload}
 
     async def get_thread_history(
         self,
@@ -702,19 +586,42 @@ class CommThreadService:
 
             participant = None  # BE-9012a: the reader's per-(thread, participant) cursor row.
             if as_participant:
+                # BE-9289a: a read is activity — an agent that only listens is still
+                # alive. An UPDATE, so a non-participant reader enrolls nobody.
+                await self._repo.touch_participant_last_seen(session, tk, as_participant, thread_id=thread_id)
                 participant = await self._repo.get_participant(session, tk, thread_id, as_participant)
 
             if mark_read and participant is None:
-                # BE-6081 carve-out: a deliberate domain rejection (not an error). A
-                # silent no-op would let the caller believe it acked when it did not —
-                # the closeout-dance failure this chain exists to kill.
-                return {
-                    "success": False,
-                    "error": "NOT_A_PARTICIPANT",
-                    "thread_id": thread_id,
-                    "as_participant": as_participant,
-                    "hint": "join_thread this thread first (re-joining is a safe no-op), then retry mark_read.",
-                }
+                # BE-9292a: enrolment follows DELIVERY, so a reader holding a post
+                # addressed to it belongs here and the missing row is the defect, not
+                # the reader. Threads that diverged before the write boundary started
+                # registering addressees heal themselves on the next read — no
+                # migration, and no CE self-hoster left with a wedged thread.
+                delivered = await self._repo.get_thread_messages(
+                    session, tk, thread_id, directed_to=as_participant, tail=1
+                )
+                if delivered:
+                    participant = await enrol_addressee(
+                        self._repo,
+                        self._user_repo,
+                        session,
+                        tk,
+                        thread_id,
+                        as_participant,
+                        touch_last_seen=True,  # this read is the activity
+                    )
+                else:
+                    # BE-6081 carve-out: a deliberate domain rejection (not an error). A
+                    # silent no-op would let the caller believe it acked when it did not —
+                    # the closeout-dance failure this chain exists to kill. Still the right
+                    # answer for a reader with NOTHING delivered to it: nothing to ack.
+                    return {
+                        "success": False,
+                        "error": "NOT_A_PARTICIPANT",
+                        "thread_id": thread_id,
+                        "as_participant": as_participant,
+                        "hint": "join_thread this thread first (re-joining is a safe no-op), then retry mark_read.",
+                    }
 
             # unread keys on the stored timestamp (reaper-safe); no cursor => whole timeline.
             unread_after = participant.last_read_at if (unread_only and participant is not None) else None
@@ -765,11 +672,10 @@ class CommThreadService:
             directive = await self._repo.get_latest_loop_directive(session, tk, thread_id)
             active = directive is not None and not self.is_terminal_status(thread.status)
             response = {
-                "thread": self._thread_dict(thread),
+                "thread": thread_dict(thread),
                 "count": len(messages),
                 "messages": [
-                    self._message_dict(m, recipient_state.get(m.id) if include_recipient_state else None)
-                    for m in messages
+                    message_dict(m, recipient_state.get(m.id) if include_recipient_state else None) for m in messages
                 ],
                 "loop_directive": {
                     "active": active,
@@ -788,7 +694,7 @@ class CommThreadService:
             raise ValidationError("query is required", context={"operation": "comm_thread.search"})
         async with self._scoped_session(tk) as session:
             threads = await self._repo.search_threads(session, tk, query, limit=limit)
-            return {"query": query, "count": len(threads), "threads": [self._thread_dict(t) for t in threads]}
+            return {"query": query, "count": len(threads), "threads": [thread_dict(t) for t in threads]}
 
     async def list_participants(self, *, thread_id: str, tenant_key: str | None = None) -> dict[str, Any]:
         """Return the participant directory for a thread (BE-6054ef REST adapter)."""
@@ -805,6 +711,9 @@ class CommThreadService:
                         "participant_type": p.participant_type,
                         "display_name": p.display_name,
                         "role": p.role,
+                        # BE-9289a: server-stamped identity the Hub's agent pills render.
+                        "harness": p.harness,
+                        "last_seen_at": p.last_seen_at.isoformat() if p.last_seen_at else None,
                         "joined_at": p.joined_at.isoformat() if p.joined_at else None,
                     }
                     for p in parts

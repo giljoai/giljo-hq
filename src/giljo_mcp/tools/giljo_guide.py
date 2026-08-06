@@ -23,7 +23,7 @@ from typing import Any
 # Kept under ~1-2k tokens on purpose: a fresh agent (no CLAUDE.md, no skills)
 # reads this once to become competent at the project/task tool surface.
 _GUIDE = """\
-# GiljoAI MCP -- how to drive the project/task tools
+# Giljo HQ -- how to drive the project/task tools
 
 You are talking to the GiljoAI dashboard over MCP. This guide is the routing +
 judgment layer for the create/read/update tools. Call it once, then act.
@@ -32,10 +32,11 @@ judgment layer for the create/read/update tools. Call it once, then act.
 When a tool response hands you a ready-made artifact to write or run -- a launcher
 script, a command block, a file body marked "copy verbatim" -- write/run it
 BYTE-FOR-BYTE. Do NOT reformat, re-quote, "tidy", or convert it to an idiomatic form
-(e.g. turning a PowerShell `-ArgumentList '...'` string into array form): its quoting
-is load-bearing and self-contained, and the server already resolved everything it
-knows. There is nothing for you to fix -- changing it is the single most common way
-these flows break.
+(e.g. turning a shell command's quoted argument string into array form, or
+normalizing a launcher script's line endings): its quoting is load-bearing and
+self-contained, and the server already resolved everything it knows. There is
+nothing for you to fix -- changing it is the single most common way these flows
+break.
 
 ## 1. Project vs task -- pick the right create tool
 - **Task** (`create_task`): technical debt, a TODO, a bug, a small fix, a scope-creep
@@ -114,7 +115,7 @@ SaaS = hosted/billing/multi-org; Both = ships identically to each.
 - **Tasks** -> `list_tasks(mode="summary", filters={...})`; `mode="full"` for bodies.
   Every task is `TSK`, so a non-TSK `task_type` filter returns nothing -- normally
   omit it. `hidden` is UI declutter only; agents see hidden and visible alike.
-- **Serials -- the prefix tells task from project (IMP-6262):** **`TSK-nnnn` is ALWAYS
+- **Serials -- the prefix tells task from project:** **`TSK-nnnn` is ALWAYS
   a task** (`create_task` forces the reserved `TSK` tag; every task renders `TSK-nnnn`).
   **A typed non-TSK alias (`BE-`, `FE-`, `INF-`, ...) is ALWAYS a project.** Converting a
   task to a project **strips the type** -- the new project is UNTYPED and renders a bare

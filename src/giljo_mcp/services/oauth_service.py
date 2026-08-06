@@ -34,6 +34,7 @@ audience-binding transition window.
 import asyncio
 import base64
 import hashlib
+import hmac
 import inspect
 import logging
 import re
@@ -41,12 +42,14 @@ import secrets
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import bcrypt
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from giljo_mcp import branding
 from giljo_mcp.auth.jwt_manager import JWTManager
 from giljo_mcp.database import tenant_isolation_bypass, tenant_session_context
 from giljo_mcp.models.auth import User
@@ -135,16 +138,15 @@ def _builtin_single_client_resolver(client_id: str, tenant_key: str) -> Resolved
     The built-in client is global (CE has no multi-tenant DB lookup); the
     ``tenant_key`` argument is part of the ``ClientResolver`` contract but is
     ignored for lookup by BOTH CE and SaaS (OAUTH-MT: resolution is global by
-    client_id). Returns ``None`` for any other ``client_id``, producing
-    the same ``ValueError("Invalid client_id")`` that the previous hardcoded
-    constant comparison raised.
+    client_id). Returns ``None`` for any other ``client_id``, producing the
+    same ``ValueError("Invalid client_id")`` that the previous hardcoded constant comparison raised.
     """
     _ = tenant_key  # contract-required positional arg; CE built-in is global
     if client_id != BUILTIN_CLIENT_ID:
         return None
     return ResolvedClient(
         client_id=BUILTIN_CLIENT_ID,
-        client_name="GiljoAI MCP (built-in)",
+        client_name=f"{branding.PRODUCT_NAME} (built-in)",
         redirect_uris=None,
         client_secret_hash=None,
     )
@@ -258,18 +260,15 @@ class OAuthService:
 
     @staticmethod
     def _validate_resource_indicator(resource: str) -> None:
-        """Validate an RFC 8707 resource indicator URI.
+        """Validate an RFC 8707 §2 resource indicator URI.
 
-        Spec requirements (RFC 8707 §2):
-          - Absolute URI (must contain scheme + authority).
-          - https or http scheme; environment posture decides whether http
-            is real-world reachable, but we accept both at validation time
-            so localhost dev-mode flows keep working.
-          - No URI fragment.
-
-        We additionally cap length at :data:`MAX_RESOURCE_INDICATOR_LENGTH`
-        to bound DB storage and match the column width on
-        ``oauth_authorization_codes.resource``.
+        Requires an absolute http/https URI with a non-empty authority, no
+        userinfo (``user:pass@``), and no fragment. Parsed with ``urllib``
+        rather than a scheme prefix check so odd authorities cannot slip
+        through (SEC-9227i L3); the canonical MCP resource URI must keep
+        validating. http is accepted so localhost dev flows keep working;
+        length is capped at :data:`MAX_RESOURCE_INDICATOR_LENGTH` to match the
+        ``oauth_authorization_codes.resource`` column.
         """
         if not resource or not isinstance(resource, str):
             raise ValueError("resource must be a non-empty string")
@@ -277,8 +276,11 @@ class OAuthService:
             raise ValueError(f"resource exceeds {MAX_RESOURCE_INDICATOR_LENGTH} characters")
         if "#" in resource:
             raise ValueError("resource must not contain a URI fragment (RFC 8707 §2)")
-        if not resource.startswith(("https://", "http://")):
+        parsed = urlsplit(resource)
+        if parsed.scheme not in ("https", "http") or not parsed.netloc:
             raise ValueError("resource must be an absolute https:// or http:// URI")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("resource must not carry userinfo in the authority (RFC 8707 §2)")
 
     @staticmethod
     def _resolve_bound_resource(
@@ -490,53 +492,22 @@ class OAuthService:
         client_secret: str | None = None,
         tenant_key_hint: str | None = None,
     ) -> dict:
-        """Exchange an authorization code for a JWT access token.
+        """Exchange an authorization code for a JWT access+refresh token pair.
 
-        Validates the code, performs client authentication (PKCE for public
-        clients, ``client_secret`` for confidential clients per RFC 6749 §6),
-        marks the code as used, and issues a JWT via JWTManager.
+        Authenticates the client (bcrypt secret for confidential clients) and
+        REQUIRES + S256-verifies ``code_verifier`` for EVERY client type — a
+        client secret never substitutes for PKCE (SEC-9227 H2 / RFC 9700 §2.1.1).
+        Then atomically consumes the single-use code and issues the pair. Per-arg
+        contract (``resource``/``audience`` RFC 8707 binding, ``client_secret``
+        required-iff-hash, server-side ``tenant_key_hint``) is documented at each
+        use site below.
 
-        Args:
-            code: The authorization code to exchange.
-            client_id: Client ID (must match the code's client_id).
-            code_verifier: PKCE code verifier (RFC 7636). Required for public
-                clients (no ``client_secret_hash`` on the resolved record);
-                optional for confidential clients that authenticate via
-                ``client_secret``. When a confidential client DOES send a
-                verifier, it must match the stored challenge (defense-in-
-                depth). API-0021e Phase 1.1.
-            redirect_uri: Must match the URI used during authorization.
-            audience: Fallback ``aud`` value used only when neither the
-                client-asserted ``resource`` nor the auth-code record
-                carries one (pre-API-0021d transition window). New flows
-                MUST present ``resource``; this argument is preserved so
-                legacy callers keep working until the back-compat window
-                closes.
-            resource: RFC 8707 resource indicator asserted by the client at
-                the /token endpoint. When the auth-code record was bound to
-                a resource at /authorize, the value here MUST equal it.
-                The matched value becomes the JWT ``aud`` claim, replacing
-                anything passed via ``audience``.
-            client_secret: Plaintext secret for confidential clients (DCR
-                ``client_secret_post``). Required when the resolver returns a
-                ``ResolvedClient`` with a non-None ``client_secret_hash``;
-                must match (bcrypt verify). Public PKCE-only clients (no
-                hash on the resolved record) MUST NOT send a secret.
-                API-0021e Phase 1.
-            tenant_key_hint: Optional explicit tenant for the client lookup.
-                Defaults to the auth-code's ``tenant_key`` (the
-                trustworthy server-side value). The router never plumbs
-                client-supplied tenant — that would defeat tenant isolation.
-
-        Returns:
-            Dict with access_token, token_type, expires_in, refresh_token,
-            and refresh_expires_in.
-
-        Raises:
-            ValueError: If the code is invalid, expired, used, PKCE fails,
-                client authentication fails (``invalid_client``), or the
-                resource indicator does not match the bound value.
+        Raises ``ValueError`` on an invalid/expired/used code, PKCE failure,
+        ``invalid_client``, or a resource-binding mismatch. Returns a dict with
+        access_token, token_type, expires_in, refresh_token, refresh_expires_in.
         """
+        from giljo_mcp.services import oauth_refresh_service as _refresh
+
         # API-0022 (folds API-0024): defense-in-depth. Bind the auth-code
         # lookup itself to the body-supplied client_id so a stolen code
         # presented under a different client never even resolves a row.
@@ -578,7 +549,9 @@ class OAuthService:
         # 401 invalid_client (RFC 6749 §5.2 semantics) regardless of
         # whether the auth-code has already been consumed by a sibling
         # request inside the idempotency window.
-        resolved_client = await self._verify_client_authentication(
+        # Authenticates the client (raises invalid_client on a bad secret). Return
+        # value now unused: SEC-9227 made PKCE mandatory for every client type.
+        await self._verify_client_authentication(
             client_id=client_id,
             tenant_key=tenant_key_hint or auth_code.tenant_key,
             client_secret=client_secret,
@@ -590,14 +563,16 @@ class OAuthService:
         # so concurrent retries from the same client see a consistent 200
         # instead of one 200 + one 400. Mismatched signature falls through
         # to the existing fail-closed path.
-        idem_proof = client_secret if resolved_client.client_secret_hash is not None else (code_verifier or "")
+        # SEC-9227 (H2): the proof MUST key on the per-request PKCE verifier, not
+        # client_secret — this cache hit returns tokens BEFORE the mandatory PKCE check.
+        idem_proof = code_verifier or ""
         idem_signature = _idem.compute_body_signature(
             client_id=client_id,
             proof=idem_proof or "",
             redirect_uri=redirect_uri,
         )
         cached = await _idem.cache_get(auth_code.tenant_key, code)
-        if cached is not None and cached.body_signature == idem_signature:
+        if cached is not None and hmac.compare_digest(cached.body_signature, idem_signature):
             logger.info(
                 "oauth_token_idempotency_hit tenant=%s",
                 auth_code.tenant_key[:12] if auth_code.tenant_key else "",
@@ -605,6 +580,11 @@ class OAuthService:
             return dict(cached.response_body)
 
         if auth_code.used:
+            # SEC-9227 (M4): a code observed already-consumed at read time is a
+            # committed prior use = genuine reuse (RFC 9700 §4.5.3). Revoke every
+            # refresh family it minted (committed before we raise), then reject.
+            # This is the ONLY reuse-revoke site; the concurrent path never revokes.
+            await _refresh.revoke_families_for_code(self._db, code=code, tenant_key=auth_code.tenant_key)
             raise ValueError("Authorization code has already been used")
 
         if auth_code.expires_at < datetime.now(UTC):
@@ -613,19 +593,16 @@ class OAuthService:
         if auth_code.redirect_uri != redirect_uri:
             raise ValueError(f"redirect_uri mismatch: expected '{auth_code.redirect_uri}', got '{redirect_uri}'")
 
-        # API-0021e Phase 1.1: PKCE branching by client type.
-        # RFC 6749 §6 / RFC 7636: client_secret and PKCE are alternative
-        # proof-of-possession mechanisms. Public clients (no client_secret_hash)
-        # MUST present code_verifier — there is no other authentication.
-        # Confidential clients (client_secret_hash present + already verified
-        # above) MAY omit code_verifier; if they include it, it must verify
-        # against the stored challenge (defense-in-depth).
-        if resolved_client.client_secret_hash is None:
-            if code_verifier is None:
-                raise ValueError("code_verifier is required for public clients")
-            if not self.verify_pkce(code_verifier, auth_code.code_challenge):
-                raise ValueError("PKCE verification failed: code_verifier does not match challenge")
-        elif code_verifier is not None and not self.verify_pkce(code_verifier, auth_code.code_challenge):
+        # SEC-9227 (H2) / RFC 9700 §2.1.1: when a code_challenge was presented at
+        # authorization, the AS MUST verify the code_verifier at token exchange for
+        # EVERY client type. Codes minted here always carry an S256 challenge
+        # (``code_challenge`` is ``nullable=False``), so the verifier is required
+        # unconditionally. This replaced a branch that let a CONFIDENTIAL client
+        # omit it — a stolen code plus the client secret then redeemed a token with
+        # no proof-of-possession. (RFC 9700 supersedes the old RFC 6749 §6 "MAY omit".)
+        if code_verifier is None:
+            raise ValueError("code_verifier is required (PKCE challenge was presented at authorization)")
+        if not self.verify_pkce(code_verifier, auth_code.code_challenge):
             raise ValueError("PKCE verification failed: code_verifier does not match challenge")
 
         bound_resource = self._resolve_bound_resource(
@@ -635,8 +612,31 @@ class OAuthService:
 
         # BE6004C-5: post-resolution work runs tenant-scoped, not under the bypass.
         with tenant_session_context(self._db, auth_code.tenant_key):
-            auth_code.used = True
-            await self._db.flush()
+            # SEC-9227 (H1): atomic single-use consume. This one conditional
+            # UPDATE (used=false -> true) IS the check-and-set, replacing a
+            # non-atomic read-then-assign that let two concurrent exchanges both
+            # pass the used check and double-issue. rowcount!=1 => a sibling won.
+            consumed = await self._db.execute(
+                update(OAuthAuthorizationCode)
+                .where(
+                    OAuthAuthorizationCode.code == code,
+                    OAuthAuthorizationCode.tenant_key == auth_code.tenant_key,
+                    OAuthAuthorizationCode.used == False,  # noqa: E712 — SQLAlchemy needs ==
+                )
+                .values(used=True)
+            )
+            if consumed.rowcount != 1:
+                # Concurrent-loss path — DO NOT revoke here (SEC-9227 M4 / FLAG 1).
+                # Any request reaching this point already passed verify_pkce
+                # above, so it holds the code_verifier: it is the legitimate
+                # multi-egress twin (ChatGPT-class concurrent /token), not a
+                # reuse attacker (no verifier -> died at the PKCE check, never
+                # got here). The winner's just-issued family is legitimate, and
+                # the atomic UPDATE already blocked the double-issue — revoking
+                # here would self-DoS honest concurrent double-submits. Genuine
+                # reuse (a committed prior use) is caught + revoked at the
+                # used==true fast-path above; this loser just fails closed.
+                raise ValueError("Authorization code has already been used")
 
             user_result = await self._db.execute(
                 select(User).where(
@@ -683,8 +683,6 @@ class OAuthService:
             # token revokes the whole family — that, not withholding the token,
             # bounds the blast radius while letting CLI sessions outlive access
             # expiry. Aud is NOT NULL on the row; fall back to "" when no resource.
-            from giljo_mcp.services import oauth_refresh_service as _refresh
-
             persisted_aud = token_audience or ""
             refresh_token = await _refresh.issue_refresh_token(
                 self._db,
@@ -695,22 +693,24 @@ class OAuthService:
                 scope=auth_code.scope,
                 aud=persisted_aud,
                 lifetime_seconds=REFRESH_TOKEN_LIFETIME_SECONDS,
+                # SEC-9227b (M4): link this family to its originating code so a
+                # later reuse of that code can revoke it.
+                origin_code_hash=_refresh.hash_authorization_code(code),
             )
             response["refresh_token"] = refresh_token
             response["refresh_expires_in"] = REFRESH_TOKEN_LIFETIME_SECONDS
 
-        # API-0021l: write the response into the idempotency cache so a
-        # concurrent retry that arrives microseconds later sees the same
-        # token pair instead of a 400 from the spec-strict single-use
-        # auth-code enforcement.
-        await _idem.cache_put(
-            auth_code.tenant_key,
-            code,
-            _idem.IdempotencyEntry(
-                response_body=dict(response),
+            # API-0021l + SEC-9227e (M2b): durably commit the issuance, THEN
+            # cache the response so a concurrent in-window retry sees the same
+            # pair — and never a pair whose rows a rollback erased. The
+            # commit-before-cache ordering rationale lives on the helper.
+            await _idem.commit_then_cache_pair(
+                self._db,
+                tenant_key=auth_code.tenant_key,
+                code=code,
+                response_body=response,
                 body_signature=idem_signature,
-            ),
-        )
+            )
 
         return response
 

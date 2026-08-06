@@ -1,6 +1,6 @@
 // eslint-allow giljo-internal/no-manual-api-url-composition
 // (sanctioned: dev-mode fallback only — see resolver path in updateApiBaseURL below)
-// API Configuration for GiljoAI MCP Dashboard
+// API Configuration for Giljo HQ Dashboard
 //
 // URL composition is centralised in @/composables/useApiUrl. This module
 // derives its defaults from the resolver and keeps runtime-updatable config

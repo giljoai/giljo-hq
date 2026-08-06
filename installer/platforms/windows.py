@@ -172,7 +172,12 @@ class WindowsPlatformHandler(PlatformHandler):
         python_exe = str(venv_dir / "Scripts" / "python.exe")
         icons_dir = install_dir / "frontend" / "public"
 
-        # Start shortcut (launches backend + frontend + opens browser)
+        # Start shortcut (launches backend + frontend + opens browser).
+        # BE-9361: the .lnk FILENAME stays on the pre-rebrand name deliberately —
+        # it is an on-disk identifier already shipped to users (registry-frozen).
+        # Renaming it would leave existing desktops with two shortcuts and break
+        # the uninstall/reset cleanup lists that match on it. The user-visible
+        # Description below carries the current product name instead.
         start_path = desktop / "GiljoAI MCP.lnk"
         start_shortcut = shell.CreateShortcut(str(start_path))
         start_shortcut.TargetPath = python_exe
@@ -181,7 +186,7 @@ class WindowsPlatformHandler(PlatformHandler):
         start_ico = icons_dir / "Start.ico"
         if start_ico.exists():
             start_shortcut.IconLocation = str(start_ico)
-        start_shortcut.Description = "Start GiljoAI MCP (backend + frontend + browser)"
+        start_shortcut.Description = "Start Giljo HQ (backend + frontend + browser)"
         start_shortcut.save()
         shortcuts_created.append(str(start_path))
 
@@ -194,7 +199,7 @@ class WindowsPlatformHandler(PlatformHandler):
         stop_ico = icons_dir / "Stop.ico"
         if stop_ico.exists():
             stop_shortcut.IconLocation = str(stop_ico)
-        stop_shortcut.Description = "Stop GiljoAI MCP services"
+        stop_shortcut.Description = "Stop Giljo HQ services"
         stop_shortcut.save()
         shortcuts_created.append(str(stop_path))
 
@@ -226,16 +231,17 @@ class WindowsPlatformHandler(PlatformHandler):
 
         shortcuts = [
             {
+                # Frozen on-disk name — see the note on the win32com path above.
                 "name": "GiljoAI MCP.lnk",
                 "args": f'"{install_dir / "startup.py"}" --verbose',
                 "icon": icons_dir / "Start.ico",
-                "desc": "Start GiljoAI MCP (backend + frontend + browser)",
+                "desc": "Start Giljo HQ (backend + frontend + browser)",
             },
             {
                 "name": "Stop GiljoAI.lnk",
                 "args": f'"{install_dir / "startup.py"}" --stop',
                 "icon": icons_dir / "Stop.ico",
-                "desc": "Stop GiljoAI MCP services",
+                "desc": "Stop Giljo HQ services",
             },
         ]
 
@@ -348,10 +354,10 @@ class WindowsPlatformHandler(PlatformHandler):
         separator = "=" * 70
 
         print(f"\n{Fore.YELLOW}{Style.BRIGHT}{separator}{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}{Style.BRIGHT}  GiljoAI MCP - Windows Installer v3.0{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}{Style.BRIGHT}  Giljo HQ - Windows Installer v3.0{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}{Style.BRIGHT}{separator}{Style.RESET_ALL}\n")
 
-        print(f"{Fore.CYAN}Welcome to GiljoAI MCP!{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}Welcome to Giljo HQ!{Style.RESET_ALL}")
         print(f"{Fore.CYAN}This installer will set up your coding orchestrator.{Style.RESET_ALL}\n")
 
         print(f"{Fore.WHITE}What will be installed:{Style.RESET_ALL}")

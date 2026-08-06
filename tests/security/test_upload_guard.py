@@ -19,7 +19,7 @@ Covers the two pure helpers that back both upload endpoints:
   decode of the whole payload.
 
 These tests are the authoritative behavior spec in combination with the
-analyzer handover ``handovers/SEC-0001_upload_analysis.md`` sections 2 and 3.
+analyzer handover for SEC-0001 upload analysis, sections 2 and 3.
 Integration tests live in ``tests/api/test_sec_0001_upload_endpoints.py``.
 """
 

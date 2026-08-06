@@ -156,7 +156,7 @@
         @click="aboutDialog = false"
       />
       <v-card-text class="pa-5 text-body-medium">
-        <div class="font-weight-bold mb-3">GiljoAI MCP</div>
+        <div class="font-weight-bold mb-3">{{ productName }}</div>
         {{ versionLabel }}<br />
         {{ aboutEditionLabel }}<br />
         License: {{ aboutLicenseLabel }}<br /><br />
@@ -166,7 +166,7 @@
         <a href="https://www.giljo.ai" target="_blank" class="about-link">giljo.ai</a>
         &nbsp;&middot;&nbsp;
         <a
-          href="https://github.com/giljoai/GiljoAI_MCP/blob/master/LICENSE"
+          href="https://github.com/giljoai/giljo-hq/blob/master/LICENSE"
           target="_blank"
           class="about-link"
           >View License</a
@@ -209,6 +209,7 @@ import RoleBadge from '@/components/common/RoleBadge.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { getLicenseCopy } from '@/i18n/licenseCopy'
 import { isCeModeValue, isNonCeModeValue, isSaasModeValue } from '@/composables/useGiljoMode'
+import { PRODUCT_NAME } from '@/branding'
 
 const props = defineProps({
   currentUser: {
@@ -292,6 +293,7 @@ defineEmits([
 
 // Local dialog state
 const aboutDialog = ref(false)
+const productName = PRODUCT_NAME
 const showResetPasswordConfirm = ref(false)
 
 // Edition predicates (delegated to the centralized accessor — FE-9147)

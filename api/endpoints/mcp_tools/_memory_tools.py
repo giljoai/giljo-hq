@@ -21,6 +21,7 @@ from api.endpoints.mcp_tools._base import (
     _call_tool,
     mcp,
 )
+from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 from giljo_mcp.services.memory_entry_write_validator import (
     MEMORY_DECISION_MAX,
     MEMORY_DECISIONS_COUNT,
@@ -60,12 +61,15 @@ _EntryType = Literal[
 
 
 @mcp.tool(
+    title="Write Project Closeout",
     description=(
         "Close a project and write the 360 Memory closeout entry. Orchestrator-only, at project "
         "completion. All agents MUST be complete/closed/decommissioned first (resolve via "
         "report_progress + complete_job). git_commits is REQUIRED when git integration is "
         "enabled -- see that param for the accepted shape."
     ),
+    # BE-9251: closes the project (terminal) -- see _tool_hints docstring.
+    annotations=_tool_hints("write_project_closeout", destructive=True),
 )
 async def write_project_closeout(
     project_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
@@ -85,10 +89,13 @@ async def write_project_closeout(
         list[dict | str] | None,
         Field(
             description=(
-                "Git commits from the project branch. Pass a list of {sha, message, author} "
-                "dicts (preferred) OR bare SHA strings -- strings are auto-coerced into the dict "
-                "shape server-side. Run 'git log --oneline' first. Optional dict fields: date "
-                "(ISO 8601), files_changed (int), lines_added (int)."
+                "Git commits from the project branch. Every entry MUST carry a non-empty "
+                "commit title -- a titleless entry is rejected with GIT_COMMIT_TITLE_REQUIRED. "
+                "Pass a list of {sha, message, author?, pr_url?} dicts (preferred), OR "
+                "tab-delimited porcelain strings '<sha>\\t<subject>\\t<author>' (author "
+                "optional) -- run: git log --format='%H%x09%s%x09%an' <base>..HEAD. Optional "
+                "dict fields: date (ISO 8601), files_changed (int), lines_added (int), "
+                "pr_url (freeform, stored verbatim)."
             )
         ),
     ] = None,
@@ -114,8 +121,19 @@ async def write_project_closeout(
                 "Force-close: auto-decommission remaining agents before closing. "
                 "Use when the CLOSEOUT_BLOCKED hint says so — e.g. a leftover "
                 "'waiting' orchestrator after work was executed outside a staged "
-                "session. Refused while any specialist is still in flight or the "
-                "orchestrator is actively working (complete that work first)."
+                "session. Refused only while the CALLING orchestrator itself is "
+                "still active; it does NOT refuse on account of a specialist. "
+                "Any specialist still in flight — including one the health "
+                "monitor marked 'silent' — is DECOMMISSIONED, which records it "
+                "as failed/replaced/abandoned. So never reach for force to "
+                "retire an agent whose work you ACCEPTED: call "
+                "complete_job(job_id, result={...}) on it and then "
+                "close_job(job_id), which reaches 'closed' from any "
+                "non-terminal status, 'silent' included. If that complete_job "
+                "returns COMPLETION_BLOCKED, the stalled agent left TODOs or "
+                "unread messages behind: settle its ledger with "
+                "report_progress(job_id, todo_items=[...], replace=true) and "
+                "drain its action-required messages, then retry."
             )
         ),
     ] = False,
@@ -139,11 +157,13 @@ async def write_project_closeout(
 
 
 @mcp.tool(
+    title="Write Memory Entry",
     description=(
         "Write a 360 memory entry for project completion or handover (orchestrator on completion, "
         "or any agent on handover). git_commits is REQUIRED for project_completion when git "
         "integration is enabled -- see that param for the accepted shape."
     ),
+    annotations=_tool_hints("write_memory_entry"),
 )
 async def write_memory_entry(
     project_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
@@ -182,10 +202,13 @@ async def write_memory_entry(
         list[dict | str] | None,
         Field(
             description=(
-                "Git commits from the project branch. Pass a list of {sha, message, author} "
-                "dicts (preferred) OR bare SHA strings -- strings are auto-coerced into the dict "
-                "shape server-side. Optional dict fields: date (ISO 8601), files_changed (int), "
-                "lines_added (int)."
+                "Git commits from the project branch. Every entry MUST carry a non-empty "
+                "commit title -- a titleless entry is rejected with GIT_COMMIT_TITLE_REQUIRED. "
+                "Pass a list of {sha, message, author?, pr_url?} dicts (preferred), OR "
+                "tab-delimited porcelain strings '<sha>\\t<subject>\\t<author>' (author "
+                "optional) -- run: git log --format='%H%x09%s%x09%an' <base>..HEAD. Optional "
+                "dict fields: date (ISO 8601), files_changed (int), lines_added (int), "
+                "pr_url (freeform, stored verbatim)."
             )
         ),
     ] = None,

@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-FastAPI application for GiljoAI MCP
+FastAPI application for Giljo HQ
 Provides REST API and WebSocket endpoints for orchestration system
 
 This module is the application ASSEMBLER plus the startup/lifespan phase
@@ -211,7 +211,7 @@ async def lifespan(app: FastAPI):
     from api.startup.background_jobs_gate import should_run_background_jobs
 
     logger.info("=" * 70)
-    logger.info("Starting GiljoAI MCP API...")
+    logger.info("Starting Giljo HQ API...")
     logger.info("=" * 70)
     # v1.2.1: list_projects default behavior change.
     # MCP `list_projects` now excludes lifecycle-finished statuses
@@ -347,8 +347,14 @@ async def lifespan(app: FastAPI):
     from api.startup.saas_enforcement_gate import (
         register_mcp_subscription_gate,
         register_saas_tenant_scoped_models,
+        require_public_base_url,
     )
 
+    # Phase 8.58 (SEC-9227h / M7): SaaS must never boot without the origin pin —
+    # otherwise the OAuth issuer/audience and emailed lifecycle links silently
+    # derive from the attacker-influenceable Host header. Runs BEFORE 8.6/8.7 so
+    # a misconfigured deploy aborts as early as possible. No-op for CE.
+    require_public_base_url(giljo_mode=GILJO_MODE)
     register_saas_tenant_scoped_models(giljo_mode=GILJO_MODE)
     register_mcp_subscription_gate(giljo_mode=GILJO_MODE)
 
@@ -509,13 +515,14 @@ def create_app() -> FastAPI:
     """Create and configure FastAPI application"""
 
     from giljo_mcp import __version__ as giljo_version
+    from giljo_mcp import branding
 
     app = FastAPI(
-        title=f"GiljoAI MCP API v{giljo_version} - Community Edition",
-        description="""
+        title=f"{branding.PRODUCT_NAME} API v{giljo_version} - Community Edition",
+        description=f"""
         ## Multi-Agent Orchestration System REST API
 
-        GiljoAI MCP provides a comprehensive REST API for managing AI agent orchestration,
+        {branding.PRODUCT_NAME} provides a comprehensive REST API for managing AI agent orchestration,
         enabling coordinated development teams that can tackle projects of unlimited complexity.
 
         ### Key Features:
@@ -531,7 +538,7 @@ def create_app() -> FastAPI:
         API authentication can be enabled via configuration. Supports API key and OAuth methods.
 
         ### WebSocket:
-        Connect to `/ws/{client_id}` for real-time updates on projects, agents, and messages.
+        Connect to `/ws/{{client_id}}` for real-time updates on projects, agents, and messages.
 
         ### Rate Limiting:
         Rate limiting can be configured per tenant. Default: 60 requests/minute.
@@ -565,7 +572,7 @@ def create_app() -> FastAPI:
         },
         license_info={
             "name": "Elastic License 2.0",
-            "url": "https://github.com/giljoai/GiljoAI_MCP/blob/master/LICENSE",
+            "url": "https://github.com/giljoai/giljo-hq/blob/master/LICENSE",
         },
     )
 

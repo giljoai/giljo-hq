@@ -20,6 +20,7 @@ from giljo_mcp.schemas.jsonb_validators import (
     SETTINGS_CATEGORY_VALIDATORS,
     AgentExecutionResult,
     AgentJobMetadata,
+    GitCommitTitleRequiredError,
     GitIntegrationSettings,
     IntegrationsSettingsData,
     ProductMemoryConfig,
@@ -69,30 +70,33 @@ class TestAgentJobMetadata:
 
 
 # ---------------------------------------------------------------------------
-# ProductMemoryConfig — field names corrected to github / context
+# ProductMemoryConfig — seed key renamed github -> git_integration (BE-9261)
 # ---------------------------------------------------------------------------
 
 
 class TestProductMemoryConfig:
     def test_canonical_keys_accepted(self):
-        cfg = ProductMemoryConfig(github={"enabled": True}, context={"summary": "test"})
-        assert cfg.github == {"enabled": True}
+        cfg = ProductMemoryConfig(git_integration={"enabled": True}, context={"summary": "test"})
+        assert cfg.git_integration == {"enabled": True}
         assert cfg.context == {"summary": "test"}
 
     def test_empty_dict_accepted(self):
-        cfg = ProductMemoryConfig(github={}, context={})
-        assert cfg.github == {}
+        cfg = ProductMemoryConfig(git_integration={}, context={})
+        assert cfg.git_integration == {}
 
-    def test_old_keys_git_integration_via_extra(self):
-        cfg = ProductMemoryConfig(git_integration={"repo_url": "https://github.com/x/y"})
+    def test_legacy_github_key_still_accepted(self):
+        # BE-9261: "github" is the pre-rename seed key -- kept as a declared
+        # field (not folded into extra) purely for read tolerance so rows
+        # written before the rename keep loading.
+        cfg = ProductMemoryConfig(github={"repo_url": "https://github.com/x/y"})
         dumped = cfg.model_dump()
-        assert dumped.get("git_integration") == {"repo_url": "https://github.com/x/y"}
+        assert dumped.get("github") == {"repo_url": "https://github.com/x/y"}
 
-    def test_declared_fields_are_github_and_context(self):
+    def test_declared_fields_are_git_integration_github_and_context(self):
         fields = set(ProductMemoryConfig.model_fields.keys())
+        assert "git_integration" in fields
         assert "github" in fields
         assert "context" in fields
-        assert "git_integration" not in fields
         assert "context_metadata" not in fields
 
 
@@ -212,6 +216,15 @@ class TestValidateSuccessCriteria:
 
 
 class TestValidateGitCommits:
+    """BE-9256: fail-closed on a missing commit title.
+
+    BE-6208a's bare-SHA acceptance is FLIPPED here (contract change, not test
+    weakening): a bare SHA silently normalized to an empty-titled entry, and
+    every UI surface rendered that as a blank commit title. The validator now
+    rejects bare SHAs and requires either a titled dict or a tab-delimited
+    porcelain string.
+    """
+
     def test_none_returns_none(self):
         assert validate_git_commits(None) is None
 
@@ -225,45 +238,148 @@ class TestValidateGitCommits:
             validate_git_commits([{"message": "no sha"}])
 
     def test_rejects_missing_message(self):
-        with pytest.raises(ValidationError):
+        # Missing message key entirely is treated the same as an empty title.
+        with pytest.raises(GitCommitTitleRequiredError):
             validate_git_commits([{"sha": "abc123"}])
 
-    def test_accepts_bare_sha_strings_and_normalizes(self):
-        # BE-6208a: a list of bare SHA strings is normalized to dict shape.
-        out = validate_git_commits(["abc123", "def456"])
-        assert out == [
-            {
-                "sha": "abc123",
-                "message": "",
-                "author": None,
-                "date": None,
-                "files_changed": 0,
-                "lines_added": 0,
-            },
-            {
-                "sha": "def456",
-                "message": "",
-                "author": None,
-                "date": None,
-                "files_changed": 0,
-                "lines_added": 0,
-            },
-        ]
+    def test_rejects_bare_sha_strings(self):
+        # BE-9256 (flips BE-6208a): a bare SHA has no title and is rejected,
+        # not silently normalized to {"message": ""}.
+        with pytest.raises(GitCommitTitleRequiredError):
+            validate_git_commits(["abc123def456"])
 
-    def test_accepts_mixed_dicts_and_bare_shas(self):
-        out = validate_git_commits([{"sha": "a1", "message": "m"}, "b2"])
-        assert out[0]["sha"] == "a1"
-        assert out[0]["message"] == "m"
-        assert out[1]["sha"] == "b2"
-        assert out[1]["message"] == ""
+    def test_rejects_bare_sha_error_carries_git_command_hint(self):
+        with pytest.raises(GitCommitTitleRequiredError) as exc_info:
+            validate_git_commits(["abc123def456"])
+        assert "git log --format=" in exc_info.value.hint
+
+    def test_rejects_mixed_dicts_and_bare_shas(self):
+        # The one bad entry (bare SHA) fails the whole batch closed.
+        with pytest.raises(GitCommitTitleRequiredError):
+            validate_git_commits([{"sha": "a1", "message": "m"}, "b2"])
 
     def test_rejects_empty_bare_sha(self):
         with pytest.raises(ValueError):
             validate_git_commits(["   "])
 
+    def test_rejects_dict_with_empty_message(self):
+        with pytest.raises(GitCommitTitleRequiredError):
+            validate_git_commits([{"sha": "abc123", "message": "   "}])
+
     def test_rejects_non_str_non_dict_entry(self):
         with pytest.raises(TypeError):
             validate_git_commits([123])
+
+    def test_accepts_titled_porcelain_string(self):
+        # The output of: git log --format='%H%x09%s%x09%an' -1
+        out = validate_git_commits(["abc123\tFix the widget\tAlice"])
+        assert out == [
+            {
+                "sha": "abc123",
+                "message": "Fix the widget",
+                "author": "Alice",
+                "date": None,
+                "files_changed": 0,
+                "lines_added": 0,
+                "pr_url": None,
+            }
+        ]
+
+    def test_accepts_porcelain_string_without_author(self):
+        out = validate_git_commits(["abc123\tFix the widget"])
+        assert out[0]["sha"] == "abc123"
+        assert out[0]["message"] == "Fix the widget"
+        assert out[0]["author"] is None
+
+    def test_rejects_porcelain_string_with_empty_subject(self):
+        with pytest.raises(GitCommitTitleRequiredError):
+            validate_git_commits(["abc123\t\tAlice"])
+
+    def test_rejects_leading_tab_empty_sha_segment(self):
+        """BE-9256 audit Finding #2: a leading tab (empty sha segment) must be
+        REJECTED, not misparsed. Pre-fix, ``.strip()`` ran before the tab-split and
+        ate the leading tab, shifting every field left: 'Fix the widget' landed in
+        sha and 'Alice' landed in message -- accepted with swapped/wrong data."""
+        with pytest.raises(GitCommitTitleRequiredError):
+            validate_git_commits(["\tFix the widget\tAlice"])
+
+    def test_rejects_whitespace_only_sha_segment(self):
+        """A sha segment that is present but whitespace-only is still empty after
+        trim -- must reject, not treat the whitespace as a valid sha."""
+        with pytest.raises(GitCommitTitleRequiredError):
+            validate_git_commits(["   \tFix the widget\tAlice"])
+
+    def test_accepts_crlf_terminated_porcelain_line(self):
+        """A porcelain line terminated with \\r\\n (as raw git log output may be,
+        depending on platform/pipe) must still parse correctly -- only the
+        trailing newline/CR is stripped, not leading whitespace/tabs."""
+        out = validate_git_commits(["abc123\tFix the widget\tAlice\r\n"])
+        assert out[0]["sha"] == "abc123"
+        assert out[0]["message"] == "Fix the widget"
+        assert out[0]["author"] == "Alice"
+
+    def test_pr_url_stored_verbatim(self):
+        out = validate_git_commits(
+            [{"sha": "abc123", "message": "Fix the widget", "pr_url": "https://example.com/pr/1"}]
+        )
+        assert out[0]["pr_url"] == "https://example.com/pr/1"
+
+    def test_pr_url_defaults_to_none(self):
+        out = validate_git_commits([{"sha": "abc123", "message": "Fix the widget"}])
+        assert out[0]["pr_url"] is None
+
+    def test_empty_list_stays_valid(self):
+        # Non-git-repo escape hatch: empty list / omission is untouched by BE-9256.
+        assert validate_git_commits([]) == []
+
+
+class TestValidateGitCommitsLengthCaps:
+    """BE-9256 audit Finding #3 (advisory): the old bare-SHA path capped sha at
+    64 chars; the titled-dict/porcelain shapes introduced by BE-9256 accepted
+    unbounded sha/message/author/pr_url. Caps restored: sha<=64, message<=500,
+    author<=200, pr_url<=500. Applied once on ``GitCommitEntry`` so BOTH the
+    dict shape and the porcelain shape (which also constructs a
+    ``GitCommitEntry``) are covered by a single enforcement point."""
+
+    def test_accepts_sha_at_64_chars(self):
+        sha = "a" * 64
+        out = validate_git_commits([{"sha": sha, "message": "Fix the widget"}])
+        assert out[0]["sha"] == sha
+
+    def test_rejects_dict_sha_over_64_chars(self):
+        with pytest.raises(ValidationError):
+            validate_git_commits([{"sha": "a" * 65, "message": "Fix the widget"}])
+
+    def test_rejects_porcelain_sha_over_64_chars(self):
+        with pytest.raises(ValidationError):
+            validate_git_commits([f"{'a' * 65}\tFix the widget\tAlice"])
+
+    def test_accepts_message_at_500_chars(self):
+        message = "m" * 500
+        out = validate_git_commits([{"sha": "abc123", "message": message}])
+        assert out[0]["message"] == message
+
+    def test_rejects_dict_message_over_500_chars(self):
+        with pytest.raises(ValidationError):
+            validate_git_commits([{"sha": "abc123", "message": "m" * 501}])
+
+    def test_rejects_porcelain_message_over_500_chars(self):
+        with pytest.raises(ValidationError):
+            validate_git_commits([f"abc123\t{'m' * 501}\tAlice"])
+
+    def test_rejects_dict_author_over_200_chars(self):
+        with pytest.raises(ValidationError):
+            validate_git_commits([{"sha": "abc123", "message": "Fix the widget", "author": "a" * 201}])
+
+    def test_rejects_porcelain_author_over_200_chars(self):
+        with pytest.raises(ValidationError):
+            validate_git_commits([f"abc123\tFix the widget\t{'a' * 201}"])
+
+    def test_rejects_pr_url_over_500_chars(self):
+        with pytest.raises(ValidationError):
+            validate_git_commits(
+                [{"sha": "abc123", "message": "Fix the widget", "pr_url": "https://example.com/" + "p" * 500}]
+            )
 
 
 # ---------------------------------------------------------------------------

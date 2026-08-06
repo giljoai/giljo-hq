@@ -21,6 +21,8 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, Response
 
+from api.middleware.auth_rate_limiter import get_rate_limiter
+from api.middleware.auth_rate_limits import limit_for
 from giljo_mcp.auth.dependencies import get_db_session
 
 
@@ -111,6 +113,13 @@ async def revoke(
       - Refresh token: flips ``revoked=true`` on the entire token family
         (RFC 6749 §10.4 / OAuth 2.1 Security BCP).
     """
+    # SEC-9227d (M3): per-IP rate limit, FIRST — before any parsing (reject
+    # cheap, parse later). Deliberately OUTSIDE the try block below: the 429
+    # is NOT an OAuth protocol error and must propagate as-is, never rewritten
+    # into the RFC 6749 §5.2 envelope.
+    rate_limiter = get_rate_limiter()
+    await rate_limiter.check_rate_limit(request, limit=limit_for("oauth_revoke"), window=60, raise_on_limit=True)
+
     from giljo_mcp.services import oauth_revocation_service as _revoke
 
     # BE-6040: RFC 7009 §3 says revocation errors use the RFC 6749 §5.2

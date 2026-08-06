@@ -612,6 +612,11 @@ export const api = {
     delete: (keyId) => apiClient.delete(`/api/auth/api-keys/${keyId}`),
   },
 
+  // Connect surface — durable credential status (FE-9274)
+  connect: {
+    credentialStatus: () => apiClient.get('/api/connect/credential-status'),
+  },
+
   // Serena MCP Integration
   serena: {
     getStatus: () => apiClient.get('/api/serena/status'),
@@ -734,6 +739,8 @@ export const api = {
       }),
     participants: (id) => apiClient.get(`/api/v1/threads/${id}/participants`),
     create: (body) => apiClient.post('/api/v1/threads', body),
+    // FE-9289c: rename and/or set status (BE-9289b PATCH). Rejected on project threads.
+    update: (id, body) => apiClient.patch(`/api/v1/threads/${id}`, body),
     post: (id, body) => apiClient.post(`/api/v1/threads/${id}/post`, body),
     passBaton: (id, to) => apiClient.post(`/api/v1/threads/${id}/baton`, { to }),
     delete: (id) => apiClient.delete(`/api/v1/threads/${id}`),

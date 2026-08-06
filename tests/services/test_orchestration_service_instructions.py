@@ -167,7 +167,9 @@ class TestGetOrchestratorInstructions:
         assert "Serena MCP" in result["serena_guidance"]
         # Orchestrator-specific framing must be present (not the generic notice).
         assert "STAGING DISCOVERY" in result["serena_guidance"]
-        assert "Python-only" in result["serena_guidance"]
+        # BE-9260: the caveat is now workspace-conditional rather than asserting
+        # "Python-only" as a universal fact -- see serena_instructions.py.
+        assert "cover only the language(s) its LSP is configured for in this workspace" in result["serena_guidance"]
         # Serena tool names advertised in the tool list.
         for tool in ("find_symbol", "get_symbols_overview", "find_referencing_symbols", "search_for_pattern"):
             assert tool in result["mcp_tools_available"]
@@ -437,6 +439,7 @@ class TestUpdateAgentMission:
             db_manager=MagicMock(), tenant_manager=MagicMock(), websocket_manager=MagicMock()
         )
         service._test_session = db_session
+        service._mission._test_session = db_session
 
         # Handover 0730b: Exception-based error handling
         # update_agent_mission wraps ResourceNotFoundError in OrchestrationError
@@ -496,6 +499,7 @@ class TestUpdateAgentMission:
             db_manager=MagicMock(), tenant_manager=MagicMock(), websocket_manager=MagicMock()
         )
         service._test_session = db_session
+        service._mission._test_session = db_session
 
         # Handover 0730b: Exception-based error handling
         # Tenant B tries to update tenant A's job - should raise OrchestrationError

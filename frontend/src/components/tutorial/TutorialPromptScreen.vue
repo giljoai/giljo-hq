@@ -38,6 +38,27 @@
     </div>
 
     <p class="prompt-hint">{{ meta.hint }}</p>
+
+    <!-- FE-9320: door D waited on a connected agent forever with no hint at all,
+         and the wizard lets the Connect and Install steps be skipped — so after
+         a minute, say plainly what this step needs and offer a way out. Door B
+         needs no connection (any chat tool) and already has its own forward
+         control, so this is D-only. -->
+    <div v-if="path === 'D' && stalled && !agentDone" class="prompt-stalled" data-testid="tutorial-prompt-stalled">
+      <p class="prompt-hint">
+        Still nothing. This door only completes when an agent connected to {{ PRODUCT_NAME }}
+        runs the prompt — if you skipped the connect step, or pasted it into a chat tool with
+        no connection, it cannot report back. You can fill the product in yourself instead.
+      </p>
+      <v-btn
+        variant="text"
+        class="stalled-btn"
+        data-testid="tutorial-prompt-manual"
+        @click="$emit('manual')"
+      >
+        Fill it in myself instead
+      </v-btn>
+    </div>
   </div>
 </template>
 
@@ -47,6 +68,7 @@ import { useProductStore } from '@/stores/products'
 import { useClipboard } from '@/composables/useClipboard'
 import { useGiljoMode } from '@/composables/useGiljoMode'
 import { PROMPT_META, buildPromptB, buildPromptD } from '@/content/onboarding/prompts'
+import { PRODUCT_NAME } from '@/branding'
 
 const props = defineProps({
   /** Router door: 'D' (existing codebase) or 'B' (guided interview). */
@@ -62,7 +84,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['review', 'upload', 'product-created'])
+const emit = defineEmits(['review', 'upload', 'product-created', 'manual'])
 
 const productStore = useProductStore()
 const { copy } = useClipboard()
@@ -114,9 +136,16 @@ const POLL_INTERVAL_MS = 10_000
 let pollTimer = null
 let pollInFlight = false
 
+// FE-9320: mirrors the upload screen's 60s hint so both agent-driven doors are
+// honest about needing a connected agent, instead of only door A being so.
+const STALL_HINT_MS = 60_000
+const stalled = ref(false)
+let stallTimer = null
+
 function markAgentDone() {
   if (agentDone.value) return
   agentDone.value = true
+  clearTimeout(stallTimer)
   stopPolling()
   // Surface the "reports done" line, then advance to review.
   setTimeout(() => emit('review'), 1200)
@@ -210,12 +239,14 @@ onMounted(async () => {
   if (!agentDone.value) {
     window.addEventListener('vision-analysis-complete', onVisionComplete)
     startPolling()
+    stallTimer = setTimeout(() => { stalled.value = true }, STALL_HINT_MS)
   }
 })
 
 onBeforeUnmount(() => {
   stopPolling()
   clearTimeout(copiedTimer)
+  clearTimeout(stallTimer)
   window.removeEventListener('vision-analysis-complete', onVisionComplete)
 })
 </script>
@@ -327,5 +358,20 @@ onBeforeUnmount(() => {
   margin: 12px 0 0;
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.prompt-stalled {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.stalled-btn {
+  color: var(--text-secondary) !important;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  border-radius: $border-radius-default;
 }
 </style>

@@ -1,6 +1,6 @@
-# Contributing to GiljoAI MCP
+# Contributing to Giljo HQ
 
-Thank you for your interest in GiljoAI MCP.
+Thank you for your interest in Giljo HQ, a GiljoAI product.
 
 ## Before You Contribute
 
@@ -32,8 +32,8 @@ You are welcome to fork the repository and use it under the terms of the
 
 ```bash
 # Clone and install
-git clone https://github.com/giljoai/GiljoAI_MCP.git
-cd GiljoAI_MCP
+git clone https://github.com/giljoai/giljo-hq.git
+cd giljo-hq
 python install.py          # Interactive installer (sets up config.yaml, DB, etc.)
 
 # Install dependencies
@@ -76,7 +76,7 @@ To switch from production back to dev mode, simply re-run with `--dev`. No build
 - **Paths**: Always use `pathlib.Path()` — never hardcode OS-specific paths
 - **Logging**: Use `import logging; logger = logging.getLogger(__name__)` in most code. Use `structlog` only in auth, database, WebSocket, and MCP orchestration paths.
 
-For detailed code standards (database write discipline, service layer conventions, frontend patterns, security requirements), see **[docs/CODE_STANDARDS.md](docs/CODE_STANDARDS.md)**.
+For the conventions behind these rules — service and repository layering, database write discipline, tenant isolation, and frontend structure — see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**. For the security posture a change is expected to preserve, see **[docs/SECURITY_POSTURE.md](docs/SECURITY_POSTURE.md)**.
 
 Run before committing:
 ```bash
@@ -87,22 +87,18 @@ cd frontend && npx eslint src/ --fix
 
 ## Submitting a Pull Request
 
-1. Create a feature branch from `main`: `git checkout -b feature/short-description`
+1. Create a feature branch from `master`: `git checkout -b feature/short-description`
 2. Make your changes following the code style above
 3. Run tests: `pytest tests/ -x`
 4. Verify frontend builds: `cd frontend && npm run build`
 5. Commit using [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`
-6. Push and open a PR against `main`
+6. Push and open a PR against `master`
 
 ## Testing
 
 - Run full suite: `pytest tests/ --cov=src/giljo_mcp`
 - Coverage target: >80% for new code
 - Tests use PostgreSQL with transaction rollback for isolation
-
-### Manual testing for OAuth / MCP paths
-
-PRs that touch the Claude.ai → demo OAuth handshake (oauth endpoints, authGuard, OAuthAuthorize, DemoConsentScreen, oauth_service, saas/auth, demo seed data) require a manual end-to-end verification before merging. A sticky PR comment will appear automatically when the `manual-test:claude-ai-handshake` label is applied. Follow the runbook at [`scripts/conformance/claude_ai_handshake.md`](scripts/conformance/claude_ai_handshake.md), then add the `manual-test:verified` label once the handshake passes.
 
 ## Architecture
 
@@ -111,11 +107,11 @@ PRs that touch the Claude.ai → demo OAuth handshake (oauth endpoints, authGuar
 - **Frontend**: Vue 3 + Vuetify + Pinia stores in `frontend/src/`.
 - **Data isolation**: All database queries filter by `tenant_key`. Never bypass tenant isolation.
 
-See `docs/README_FIRST.md` for navigation and `docs/SERVER_ARCHITECTURE_TECH_STACK.md` for full architecture.
+See `docs/README_FIRST.md` for navigation and `docs/ARCHITECTURE.md` for full architecture.
 
 ## Reporting Issues
 
-Use [GitHub Issues](https://github.com/giljoai/GiljoAI_MCP/issues) with the provided templates. Include steps to reproduce for bugs.
+Use [GitHub Issues](https://github.com/giljoai/giljo-hq/issues) with the provided templates. Include steps to reproduce for bugs.
 
 ## Security Vulnerabilities
 

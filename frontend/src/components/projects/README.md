@@ -1,6 +1,6 @@
 # AgentCardEnhanced Component Suite
 
-Production-grade agent card components for GiljoAI MCP Handover 0077 dual-tab
+Production-grade agent card components for Giljo HQ Handover 0077 dual-tab
 interface.
 
 ## Components

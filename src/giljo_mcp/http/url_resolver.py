@@ -14,6 +14,7 @@ nginx, Demo Cloudflare Tunnel, SaaS production) without any mode
 branching.
 """
 
+import logging
 import os
 
 from fastapi import Request
@@ -21,7 +22,15 @@ from starlette.requests import Request as StarletteRequest
 from starlette.types import Scope
 
 
+logger = logging.getLogger(__name__)
+
 MCP_RESOURCE_PATH = "/mcp"
+
+# SEC-9227h belt-and-suspenders: log-once flag for the "saas mode but no pin"
+# request-time fallback. Should be unreachable in a real boot (the startup gate
+# in api/startup/saas_enforcement_gate.py aborts SaaS boot without the pin),
+# but an app constructed without the lifespan (unit tests) can still get here.
+_saas_pin_missing_warned = False
 
 
 def _saas_pinned_base_url() -> str | None:
@@ -39,7 +48,20 @@ def _saas_pinned_base_url() -> str | None:
     if os.environ.get("GILJO_MODE", "").strip().lower() != "saas":
         return None
     pinned = os.environ.get("GILJO_PUBLIC_BASE_URL", "").strip().rstrip("/")
-    return pinned or None
+    if not pinned:
+        # SEC-9227h: should be impossible post-boot (the startup gate aborts a
+        # SaaS boot without the pin), but warn — once — instead of silently
+        # falling back to the Host-header-derived URL.
+        global _saas_pin_missing_warned  # noqa: PLW0603 — process-wide log-once flag
+        if not _saas_pin_missing_warned:
+            _saas_pin_missing_warned = True
+            logger.warning(
+                "GILJO_MODE=saas but GILJO_PUBLIC_BASE_URL is empty at request time — "
+                "falling back to request-derived base URL (Host header). The startup "
+                "gate should have prevented this (SEC-9227h)."
+            )
+        return None
+    return pinned
 
 
 def get_public_base_url(request: Request) -> str:

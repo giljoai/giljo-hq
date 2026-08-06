@@ -158,7 +158,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNotificationStore } from '@/stores/notifications'
 import { useUserStore } from '@/stores/user'
@@ -166,9 +166,14 @@ import { useProductStore } from '@/stores/products'
 import configService from '@/services/configService'
 import api from '@/services/api'
 import { isSaasModeValue } from '@/composables/useGiljoMode'
-import { clearActivateBreadcrumb, isActivateBreadcrumbArmed } from '@/composables/useTutorialState'
+import {
+  ACTIVATE_BREADCRUMB_ARMED_EVENT,
+  clearActivateBreadcrumb,
+  isActivateBreadcrumbArmed,
+} from '@/composables/useTutorialState'
 import { useOnboardingReminders } from '@/composables/useOnboardingReminders'
 import { useIntegrationStatus } from '@/composables/useIntegrationStatus'
+import { resolveNotificationRoute } from '@/components/navigation/notificationRouting'
 
 const router = useRouter()
 const notifStore = useNotificationStore()
@@ -235,7 +240,7 @@ const visibleBanners = computed(() =>
 )
 
 /** GitHub releases landing page; fallback when a row carries no release_url. */
-const RELEASES_URL = 'https://github.com/giljoai/GiljoAI_MCP/releases'
+const RELEASES_URL = 'https://github.com/giljoai/giljo-hq/releases'
 
 /**
  * External CTA target for "update available" banners. Self-host upgrades happen
@@ -261,6 +266,16 @@ function goTo(n) {
     window.open(href, '_blank', 'noopener')
     return
   }
+  // FE-9222: resolve entity-aware destinations through the SAME shared map the
+  // notification bell uses (notificationRouting.js) — e.g. the context-tuning
+  // banner opens the Products tune dialog for its product. Plain system banners
+  // (pending_migrations / skills_drift) are not in the map, so they fall back to
+  // their bare cta_route named-route, unchanged.
+  const resolved = resolveNotificationRoute(n)
+  if (resolved) {
+    router.push(resolved)
+    return
+  }
   if (n.cta_route) {
     router.push({ name: n.cta_route })
   }
@@ -275,6 +290,18 @@ function dismiss(n) {
 // visible when the breadcrumb is armed AND no product is active; first activation
 // retires it for good.
 const showTutorialRow = ref(isActivateBreadcrumbArmed() && !productStore.activeProduct)
+
+// FE-9320: this banner is mounted in DefaultLayout OUTSIDE <router-view> and
+// carries no :key, so it never remounts — the ref above is read exactly once,
+// at app start. The breadcrumb is armed LATER (leaving the tutorial by the
+// manual-form door), so without this listener the nudge could never appear in
+// the session that armed it. armActivateBreadcrumb() dispatches this event.
+function syncTutorialRow() {
+  showTutorialRow.value = isActivateBreadcrumbArmed() && !productStore.activeProduct
+}
+
+onMounted(() => window.addEventListener(ACTIVATE_BREADCRUMB_ARMED_EVENT, syncTutorialRow))
+onBeforeUnmount(() => window.removeEventListener(ACTIVATE_BREADCRUMB_ARMED_EVENT, syncTutorialRow))
 
 function dismissTutorialRow() {
   clearActivateBreadcrumb()
@@ -303,7 +330,12 @@ const {
   dismissIntegrationReminder,
   dismissAgentReminder,
 } = useOnboardingReminders()
-const { gitEnabled, serenaEnabled, refresh: refreshIntegrationStatus } = useIntegrationStatus({
+const {
+  gitEnabled,
+  serenaEnabled,
+  resolved: integStatusResolved,
+  refresh: refreshIntegrationStatus,
+} = useIntegrationStatus({
   immediate: false,
 })
 
@@ -314,9 +346,18 @@ const agentHidden = ref(false)
 
 // Integration nudge: >=1 project AND NOT(git AND serena enabled), gated by the
 // composable's dismissal cadence (count<2 / 2-day resurface).
+//
+// FE-9233: integStatusResolved is load-bearing, do not drop it. hasProjects is
+// set by the dashboard read BEFORE refreshIntegrationStatus() is awaited, so
+// without this gate the row renders for one tick against the composable's
+// default-false git/serena and then vanishes -- the reported flash. `resolved`
+// is also false when the status fetch ERRORED, which keeps a fully-configured
+// box from being nagged during a transient outage. A nudge is optional UI:
+// when the status is unknown, show nothing.
 const showIntegRow = computed(
   () =>
     !integHidden.value &&
+    integStatusResolved.value &&
     integReminderCheck.value(hasProjects.value) &&
     !(gitEnabled.value && serenaEnabled.value),
 )

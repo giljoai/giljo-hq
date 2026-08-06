@@ -19,6 +19,7 @@ new test" guardrail.
 
 from __future__ import annotations
 
+import hashlib
 import re
 
 from giljo_mcp.services.oauth_refresh_service import hash_refresh_token, new_family_id
@@ -27,6 +28,26 @@ from giljo_mcp.services.oauth_refresh_service import hash_refresh_token, new_fam
 def test_hash_refresh_token_is_deterministic() -> None:
     raw = "raw-refresh-token-value"
     assert hash_refresh_token(raw) == hash_refresh_token(raw)
+
+
+def test_hash_refresh_token_ascii_digest_unchanged_by_utf8_encode() -> None:
+    """SEC-9227 (L1): switching ascii→utf-8 must not change any stored digest.
+
+    Real refresh tokens are ascii (url-safe base64); utf-8 is a superset of
+    ascii, so the digest is byte-identical — no migration, all existing stored
+    hashes stay valid. This pins that equivalence.
+    """
+    raw = "aGVsbG8td29ybGQtcmVmcmVzaC10b2tlbg"  # ascii, url-safe-base64 shape
+    assert hash_refresh_token(raw) == hashlib.sha256(raw.encode("ascii")).hexdigest()
+
+
+def test_hash_refresh_token_accepts_non_ascii_without_raising() -> None:
+    """SEC-9227 (L1): a non-ascii token now hashes cleanly instead of raising
+    UnicodeEncodeError (a 500). ascii.encode would have thrown on this input."""
+    raw = "réfresh-töken-ünïcode"
+    digest = hash_refresh_token(raw)
+    assert digest == hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    assert re.fullmatch(r"[0-9a-f]{64}", digest), digest
 
 
 def test_hash_refresh_token_returns_64_hex_chars() -> None:

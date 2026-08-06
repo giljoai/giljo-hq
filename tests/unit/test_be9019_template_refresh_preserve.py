@@ -149,6 +149,30 @@ async def test_force_overwrites_edited_row_and_archives_it(db_session: AsyncSess
     )
 
 
+@pytest.mark.parametrize("role_name", ["implementer", "tester", "documenter"])
+@pytest.mark.asyncio
+async def test_be9259_neutralized_persona_edits_do_not_clobber_saved_overrides(
+    db_session: AsyncSession, seeded_tenant, role_name: str
+):
+    """BE-9259 rewrote the implementer/tester/documenter seed prose to strip
+    dogfooding contamination (GiljoAI-as-target-product, our pytest/Vitest/
+    SaaS/tenant_key toolchain mandated to the customer). That rewrite changes
+    the shipped default text for these three roles — this proves the refresh
+    path still treats a tenant's saved override as sacrosanct rather than
+    silently reverting it to the new neutralized default (fail-first check
+    for the exact gap BE-9019 originally fixed, now re-verified against the
+    NEW content)."""
+    tenant_key = seeded_tenant
+    edited_prose = f"CUSTOM {role_name} prose the user wrote by hand. DO NOT REVERT THIS."
+    await _edit_prose(db_session, tenant_key, role_name, edited_prose)
+
+    report = await refresh_tenant_template_instructions(db_session, tenant_key)
+
+    row = await _get_by_name(db_session, tenant_key, role_name)
+    assert row.user_instructions == edited_prose, "saved override was clobbered by the persona-neutralization rewrite"
+    assert role_name in report.skipped_edited
+
+
 @pytest.mark.asyncio
 async def test_refresh_never_touches_custom_named_row(db_session: AsyncSession, seeded_tenant):
     """A custom-NAMED row is out of scope for refresh entirely (edited or not)."""

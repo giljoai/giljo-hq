@@ -1,5 +1,5 @@
 /**
- * Notifications store (IMP-5037a Phase 2 — DB-backed bell)
+ * Notifications store (IMP-5037a Phase 2 — DB-backed bell; FE-9241 persistence)
  *
  * Replaces the prior in-memory-only store with a REST-backed implementation.
  * Server is source of truth: fetch() → GET /api/notifications on mount.
@@ -17,10 +17,77 @@
  *    falling back to type-based heuristics for legacy in-memory notifications.
  *
  * New exports: fetch(), markRead(id), markDismissed(id), handleWsNewNotification(data)
+ *
+ * FE-9241 — client-side persistence for `_local` rows:
+ * Silent-agent / auto-failed notifications (agent:silent, agent:health_alert,
+ * agent:auto_failed — see stores/eventRoutes/agentEventRoutes.js) are emitted
+ * via addNotification() and never reach the server `notifications` table, so
+ * they need their own persistence + dismiss/read path. addNotification() now
+ * tags these rows `_local: true`. `_local` rows are mirrored to a per-user
+ * localStorage key (same direct-localStorage idiom as stores/settings.js — no
+ * new dependency) so they survive a page reload, and markRead/markDismissed
+ * branch on `_local` to mutate in memory + re-persist instead of issuing a
+ * REST call against a server row that doesn't exist. fetch() merges rehydrated
+ * `_local` rows into the server list instead of replacing it outright.
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api } from '@/services/api'
+import { useUserStore } from '@/stores/user'
+
+// FE-9241: cap the persisted `_local` row set so localStorage can't grow
+// unbounded from a chatty silence detector.
+const LOCAL_NOTIF_MAX_ROWS = 50
+const LOCAL_NOTIF_KEY_PREFIX = 'giljo_local_notifications'
+
+/** Current user id, or null when unauthenticated / pinia not yet active (defensive). */
+function currentUserId() {
+  try {
+    return useUserStore().currentUser?.id ?? null
+  } catch {
+    return null
+  }
+}
+
+function localNotifStorageKey(userId) {
+  return `${LOCAL_NOTIF_KEY_PREFIX}_${userId}`
+}
+
+/** Read this user's persisted `_local` rows from localStorage. Never throws. */
+function loadLocalRows(userId) {
+  if (!userId) return []
+  try {
+    const raw = localStorage.getItem(localNotifStorageKey(userId))
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+/** Write this user's `_local` rows to localStorage, capped. Never throws. */
+function saveLocalRows(rows, userId) {
+  if (!userId) return
+  try {
+    localStorage.setItem(
+      localNotifStorageKey(userId),
+      JSON.stringify(rows.slice(-LOCAL_NOTIF_MAX_ROWS)),
+    )
+  } catch {
+    // localStorage unavailable/full — non-fatal, in-memory state is still correct
+  }
+}
+
+/** Remove this user's persisted `_local` rows (logout / session clear). */
+function clearLocalRows(userId) {
+  if (!userId) return
+  try {
+    localStorage.removeItem(localNotifStorageKey(userId))
+  } catch {
+    // ignore
+  }
+}
 
 /** Normalize a raw notification from the server into local store shape. */
 function normalizeServerNotif(raw) {
@@ -170,14 +237,54 @@ export const useNotificationStore = defineStore('notifications', () => {
   // ---------------------------------------------------------------------------
 
   /**
+   * FE-9241: persist this store's `_local` rows (with their current read/
+   * dismissed state) to the current user's localStorage key. Called after
+   * every mutation that touches a `_local` row.
+   */
+  function persistLocalRows() {
+    const userId = currentUserId()
+    if (!userId) return
+    saveLocalRows(
+      notifications.value.filter((n) => n._local),
+      userId,
+    )
+  }
+
+  /**
+   * FE-9241: merge this user's persisted `_local` rows into notifications.value
+   * (dedup by id). Safe to call repeatedly — a no-op once a row is present.
+   */
+  function rehydrateLocalRows() {
+    const userId = currentUserId()
+    if (!userId) return
+    for (const row of loadLocalRows(userId)) {
+      if (!notifications.value.some((n) => n.id === row.id)) {
+        notifications.value.push(row)
+      }
+    }
+  }
+
+  /**
    * Fetch current user's notifications from the server.
-   * Replaces local list on each call (server is authoritative).
+   * MERGES server rows with rehydrated `_local` rows (dedup by id) — server
+   * rows are authoritative for anything DB-backed, but a full replace here
+   * used to flush silent-agent notifications on every reload (FE-9241).
    * Called on component mount and on explicit refresh.
    */
   async function fetch() {
     try {
       const response = await api.notifications.list()
-      notifications.value = (response.data ?? []).map(normalizeServerNotif)
+      const serverRows = (response.data ?? []).map(normalizeServerNotif)
+      const userId = currentUserId()
+      const localRows = [
+        ...notifications.value.filter((n) => n._local),
+        ...loadLocalRows(userId),
+      ]
+      const merged = [...serverRows]
+      for (const row of localRows) {
+        if (!merged.some((n) => n.id === row.id)) merged.push(row)
+      }
+      notifications.value = merged
     } catch (error) {
       // Fail silently — keep existing notifications to avoid blank bell on transient errors.
       console.error('[NotificationStore] Failed to fetch notifications:', error)
@@ -185,14 +292,26 @@ export const useNotificationStore = defineStore('notifications', () => {
   }
 
   /**
-   * Mark a notification as read via PATCH /api/notifications/{id}/read.
-   * Updates local state from server response.
+   * Mark a notification as read.
+   * FE-9241: `_local` rows (never persisted server-side) are mutated in
+   * memory + re-persisted to localStorage — no REST call, since a PATCH
+   * against a client-generated id 404s. Server rows keep the original
+   * PATCH /api/notifications/{id}/read round trip.
    */
   async function markRead(id) {
+    const idx = notifications.value.findIndex((n) => n.id === id)
+    const target = idx !== -1 ? notifications.value[idx] : null
+
+    if (target?._local) {
+      target.read = true
+      target.read_at = target.read_at ?? new Date().toISOString()
+      persistLocalRows()
+      return
+    }
+
     try {
       const response = await api.notifications.markRead(id)
       const updated = normalizeServerNotif(response.data)
-      const idx = notifications.value.findIndex((n) => n.id === id)
       if (idx !== -1) {
         notifications.value[idx] = updated
       }
@@ -202,10 +321,20 @@ export const useNotificationStore = defineStore('notifications', () => {
   }
 
   /**
-   * Mark a notification as dismissed via PATCH /api/notifications/{id}/dismiss.
-   * Removes from local list on success (dismissed items are excluded by default).
+   * Mark a notification as dismissed.
+   * FE-9241: `_local` rows are removed in memory + re-persisted to
+   * localStorage — no REST call (no server row exists to PATCH). Server
+   * rows keep the original PATCH /api/notifications/{id}/dismiss round trip.
    */
   async function markDismissed(id) {
+    const target = notifications.value.find((n) => n.id === id)
+
+    if (target?._local) {
+      notifications.value = notifications.value.filter((n) => n.id !== id)
+      persistLocalRows()
+      return
+    }
+
     try {
       await api.notifications.markDismissed(id)
       notifications.value = notifications.value.filter((n) => n.id !== id)
@@ -238,6 +367,8 @@ export const useNotificationStore = defineStore('notifications', () => {
    * Add a notification directly (in-memory, no REST call).
    * Retained for callers that emit local events (e.g. agent_health WS events
    * that are not yet persisted in the DB). Deduplicates by id.
+   * FE-9241: tagged `_local: true` and mirrored to localStorage so it
+   * survives a refresh and its dismiss/read state stays client-side.
    */
   function addNotification(notification) {
     const newNotification = {
@@ -247,6 +378,7 @@ export const useNotificationStore = defineStore('notifications', () => {
       message: notification.message ?? notification.body ?? null,
       timestamp: notification.timestamp || notification.created_at || new Date().toISOString(),
       read: notification.read !== undefined ? notification.read : false,
+      _local: true,
       // Spread optional fields only when present — preserves exact shape for legacy callers
       ...(notification.body !== undefined ? { body: notification.body } : {}),
       ...(notification.created_at !== undefined ? { created_at: notification.created_at } : {}),
@@ -261,6 +393,7 @@ export const useNotificationStore = defineStore('notifications', () => {
     const exists = notifications.value.some((n) => n.id === newNotification.id)
     if (!exists) {
       notifications.value.push(newNotification)
+      persistLocalRows()
     }
   }
 
@@ -273,16 +406,21 @@ export const useNotificationStore = defineStore('notifications', () => {
     }
   }
 
-  /** Mark all notifications as read locally (no REST call). */
+  /**
+   * Mark all notifications as read locally (no REST call).
+   * FE-9241: re-persists `_local` rows so their new read state survives a refresh.
+   */
   function markAllAsRead() {
     notifications.value.forEach((n) => {
       n.read = true
       n.read_at = n.read_at ?? new Date().toISOString()
     })
+    persistLocalRows()
   }
 
   function removeNotification(id) {
     notifications.value = notifications.value.filter((n) => n.id !== id)
+    persistLocalRows()
   }
 
   function clearForProject(projectId) {
@@ -290,11 +428,27 @@ export const useNotificationStore = defineStore('notifications', () => {
     notifications.value = notifications.value.filter(
       (n) => n.metadata?.project_id !== projectId,
     )
+    persistLocalRows()
   }
 
-  function clearAll() {
+  /**
+   * Clear all in-memory notifications and this user's persisted `_local` rows.
+   * FE-9241: called from the logout path (stores/user.js) so a different
+   * account on the same browser never rehydrates the previous user's
+   * client-only notifications. `userId` is accepted explicitly because the
+   * logout flow nulls `currentUser` before this runs — pass the outgoing
+   * user's id there; other callers (e.g. tests resetting store state) can
+   * omit it and fall back to the current user, if any.
+   */
+  function clearAll(userId) {
     notifications.value = []
+    clearLocalRows(userId ?? currentUserId())
   }
+
+  // FE-9241: rehydrate this user's persisted `_local` rows on store init —
+  // best-effort; if the user isn't authenticated yet at this point, fetch()
+  // rehydrates again on mount once the session is known.
+  rehydrateLocalRows()
 
   return {
     // State

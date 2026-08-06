@@ -134,6 +134,16 @@
     "ce_0078_projects_superseded_status_and_successor",
     "ce_0079_users_tutorial_reentry_state",
     "ce_0080_widen_comm_agent_id_columns",
+    "ce_0081_download_tokens_staged_at",
+    "ce_0082_oauth_refresh_origin_code_hash",
+    "ce_0083_projects_parked_status",
+    "ce_0084_heal_neutralized_seed_personas",
+    "ce_0085_heal_giljo_hq_bootstrap_rebrand",
+    "ce_0086_hub_identity_foundation",
+    "ce_0087_comm_threads_sequence_run_fk",
+    "ce_0088_backfill_project_completed_at",
+    "ce_0089_be9348_repair_absorbed_closeout_arguments",
+    "ce_0090_heal_giljo_hq_orchestrator_identity",
     "baseline_v38"
   ]
 }

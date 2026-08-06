@@ -46,8 +46,11 @@ _FROZEN_NOW = 1_000_000.0
 
 
 @pytest.fixture(autouse=True)
-def _reset_state(monkeypatch):
+def _reset_state(monkeypatch, real_auth_rate_limiter):
     """Clean registry + fresh singleton + no trusted proxies + frozen clock.
+
+    ``real_auth_rate_limiter`` (SEC-9227 H4) keeps the global test-bypass OFF —
+    this suite's whole purpose is to prove the real limiter fires.
 
     Freezing ``arl.time.time`` to a constant pins the fixed-window bucket
     inside a single test, eliminating the BE-1000a minute-boundary flake.

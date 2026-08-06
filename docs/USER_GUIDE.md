@@ -1,8 +1,8 @@
-# GiljoAI MCP: User Guide
+# Giljo HQ: User Guide
 
 *Last updated: 2026-07-17*
 
-This guide covers every page and UI element in GiljoAI MCP. Read from top to bottom on first use, or jump to the section you need.
+This guide covers every page and UI element in Giljo HQ, a GiljoAI product. Read from top to bottom on first use, or jump to the section you need.
 
 > **Self-hosting (Community Edition)?** The setup, optional HTTPS, and server-startup instructions are gathered at the end under **Self-Hosting & Network Setup**. Hosted (SaaS) users can skip that section entirely — your server and certificates are managed for you.
 
@@ -205,7 +205,7 @@ The workflow:
 3. Paste the prompt into your connected AI coding tool
 4. The agent scans the codebase, checks for drift between the stored context and the actual code, and presents findings section by section
 5. Approve or reject each section's proposed changes in the tool's conversation
-6. Approved changes are applied directly to the product fields in GiljoAI MCP. There is no separate review step in the dashboard
+6. Approved changes are applied directly to the product fields in Giljo HQ. There is no separate review step in the dashboard
 
 The `context_tuning` notification in the bell menu appears after a tuning pass applies changes to a product.
 
@@ -356,7 +356,7 @@ At the moment staging finishes but before you click Implement, the orchestrator 
 
 ### Agent Display Names
 
-When you spawn more than one agent of the same type in a project (for example, two implementer agents), GiljoAI MCP automatically assigns a numeric suffix to each one: the first is "implementer", the second is "implementer-2", the third is "implementer-3", and so on. You do not need to name them manually.
+When you spawn more than one agent of the same type in a project (for example, two implementer agents), Giljo HQ automatically assigns a numeric suffix to each one: the first is "implementer", the second is "implementer-2", the third is "implementer-3", and so on. You do not need to name them manually.
 
 ### Agent Approvals (Human-in-the-Loop)
 
@@ -584,12 +584,12 @@ If your session has a stale or missing organization record, the Identity tab sho
 
 ### User Management
 
-GiljoAI MCP is single-user, so the user list normally holds just your account. Attempting to add another user opens a **"Single-User License"** dialog explaining that Community Edition is licensed for single-user use and directing you to **sales@giljo.ai** for a commercial license.
+Giljo HQ is single-user, so the user list normally holds just your account. Attempting to add another user opens a **"Single-User License"** dialog explaining that Community Edition is licensed for single-user use and directing you to **sales@giljo.ai** for a commercial license.
 
 > [!CE]
 > A Community Edition admin can reset another local user's credentials from the user's row menu (**"Change Password & PIN"**).
 
-> GiljoAI MCP is permanently single-user per tenant in both Community Edition and hosted SaaS. The "Add User" button is intentionally unavailable; a future Team tier is not planned. First-install account creation is unaffected.
+> Giljo HQ is permanently single-user per tenant in both Community Edition and hosted SaaS. The "Add User" button is intentionally unavailable; a future Team tier is not planned. First-install account creation is unaffected.
 
 ---
 
@@ -659,7 +659,7 @@ The **Memory** page (in the left navigation) lets you search your product's accu
 
 ### Reporting Follow-up Work
 
-When an agent discovers a deferred item — technical debt, a known issue, or a decision that cannot be resolved in the current project — it creates an explicit follow-up using `mcp__giljo_mcp__create_task` (for single-step items) or `mcp__giljo_mcp__create_project` (for multi-step work). The returned ID is cited in `decisions_made` at closeout so the audit trail is intact.
+When an agent discovers a deferred item — technical debt, a known issue, or a decision that cannot be resolved in the current project — it creates an explicit follow-up using `mcp__giljo_hq__create_task` (for single-step items) or `mcp__giljo_hq__create_project` (for multi-step work). The returned ID is cited in `decisions_made` at closeout so the audit trail is intact.
 
 Follow-up tasks and projects appear on your Task Board immediately and carry forward as first-class work items.
 
@@ -766,7 +766,7 @@ Both `install.ps1` and `install.sh` also support a **`--repair`** mode, which sa
 
 ### HTTPS and Browser Configuration
 
-GiljoAI MCP runs over plain HTTP by default (localhost and LAN). HTTPS is an opt-in upgrade you enable in **Settings → Network**, where you provide your own certificate (a real CA, your organisation's internal CA, or a local CA such as mkcert). The steps below apply when your certificate comes from a **local CA** (e.g. mkcert): its root certificate must be trusted on each client. Your AI coding tools trust it after following the setup instructions on the connection page. Web browsers on Linux, however, maintain their own certificate stores and require an extra step.
+Giljo HQ runs over plain HTTP by default (localhost and LAN). HTTPS is an opt-in upgrade you enable in **Settings → Network**, where you provide your own certificate (a real CA, your organisation's internal CA, or a local CA such as mkcert). The steps below apply when your certificate comes from a **local CA** (e.g. mkcert): its root certificate must be trusted on each client. Your AI coding tools trust it after following the setup instructions on the connection page. Web browsers on Linux, however, maintain their own certificate stores and require an extra step.
 
 #### Obtaining a Certificate
 

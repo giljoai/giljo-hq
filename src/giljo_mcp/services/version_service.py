@@ -22,7 +22,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-GITHUB_RELEASES_URL = "https://api.github.com/repos/giljoai/GiljoAI_MCP/releases/latest"
+GITHUB_RELEASES_URL = "https://api.github.com/repos/giljoai/giljo-hq/releases/latest"
 CACHE_TTL_SECONDS = 3600  # 1 hour
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 

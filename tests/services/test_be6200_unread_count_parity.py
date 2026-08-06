@@ -41,6 +41,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models import AgentExecution, AgentJob, Message, Project
+from giljo_mcp.models.comm import CommThread
 from giljo_mcp.models.tasks import MessageAcknowledgment, MessageRecipient
 from giljo_mcp.services.workflow_status_service import WorkflowStatusService
 from giljo_mcp.tenant import TenantManager
@@ -183,3 +184,93 @@ async def test_unread_count_parity_drops_after_acknowledge(db_session: AsyncSess
     ws_after = await _workflow_svc(db_session).get_workflow_status(pid, tenant)
     remaining_ws = _unread_for(ws_after, analyzer.agent_id)
     assert remaining_ws == 2, f"get_workflow_status remaining should be 2, got {remaining_ws}"
+
+
+def _detail_for(workflow_status, agent_id: str):
+    for detail in workflow_status.agents:
+        if detail.agent_id == agent_id:
+            return detail
+    raise AssertionError(f"agent {agent_id} not present in workflow status")
+
+
+async def test_per_thread_unread_breakdown_sums_to_project_wide_total(db_session: AsyncSession) -> None:
+    """BE-9242 deliverable #2: sum(per-thread) == project-whole total.
+
+    Seeds messages on TWO distinct threads plus one legacy no-thread message
+    (thread_id=None, grouped under the "" key), all addressed to the same
+    agent, and asserts the per-thread breakdown sums exactly to the existing
+    project-wide unread_messages total -- proving the breakdown is a genuine
+    partition, not a second, possibly-disagreeing count.
+    """
+    tenant = TenantManager.generate_tenant_key()
+    pid, orchestrator, analyzer = await _seed_project_with_two_agents(db_session, tenant)
+
+    thread_a = str(uuid.uuid4())
+    thread_b = str(uuid.uuid4())
+    for serial, thread_id in enumerate((thread_a, thread_b), start=1):
+        db_session.add(CommThread(id=thread_id, tenant_key=tenant, serial=serial, project_id=pid))
+    await db_session.commit()
+    for thread_id, n in ((thread_a, 2), (thread_b, 3)):
+        for i in range(n):
+            msg = Message(
+                tenant_key=tenant,
+                project_id=pid,
+                thread_id=thread_id,
+                content=f"thread {thread_id} msg {i}",
+                message_type="direct",
+                status="pending",
+                from_agent_id=str(orchestrator.agent_id),
+            )
+            db_session.add(msg)
+            await db_session.flush()
+            db_session.add(MessageRecipient(message_id=msg.id, agent_id=analyzer.agent_id, tenant_key=tenant))
+    # One legacy no-thread message (thread_id left NULL).
+    await _send_pending(db_session, tenant, pid, from_agent=orchestrator, to_agent=analyzer, n=1)
+    await db_session.commit()
+
+    ws = await _workflow_svc(db_session).get_workflow_status(pid, tenant)
+    detail = _detail_for(ws, analyzer.agent_id)
+
+    total_from_breakdown = sum(t.unread_count for t in detail.unread_by_thread)
+    assert total_from_breakdown == detail.unread_messages, (
+        f"sum(per-thread)={total_from_breakdown} must equal the project-wide total={detail.unread_messages}"
+    )
+    assert detail.unread_messages == 2 + 3 + 1
+
+    by_thread = {t.thread_id: t.unread_count for t in detail.unread_by_thread}
+    assert by_thread[thread_a] == 2
+    assert by_thread[thread_b] == 3
+    assert by_thread[""] == 1, "the no-thread legacy message must be grouped under the '' key, not dropped"
+
+
+async def test_action_required_unread_is_distinct_subset_of_badge_total(db_session: AsyncSession) -> None:
+    """BE-9242 deliverable #3: action_required_unread is the gate-matching
+    subset of the broader badge total, not a re-derivation that can disagree.
+    """
+    tenant = TenantManager.generate_tenant_key()
+    pid, orchestrator, analyzer = await _seed_project_with_two_agents(db_session, tenant)
+
+    # 3 informational (requires_action=False) + 2 genuinely action-required.
+    await _send_pending(db_session, tenant, pid, from_agent=orchestrator, to_agent=analyzer, n=3)
+    for i in range(2):
+        msg = Message(
+            tenant_key=tenant,
+            project_id=pid,
+            content=f"action required {i}",
+            message_type="direct",
+            status="pending",
+            from_agent_id=str(orchestrator.agent_id),
+            requires_action=True,
+        )
+        db_session.add(msg)
+        await db_session.flush()
+        db_session.add(MessageRecipient(message_id=msg.id, agent_id=analyzer.agent_id, tenant_key=tenant))
+    await db_session.commit()
+
+    ws = await _workflow_svc(db_session).get_workflow_status(pid, tenant)
+    detail = _detail_for(ws, analyzer.agent_id)
+
+    assert detail.unread_messages == 5, "badge total must include both informational and action-required posts"
+    assert detail.action_required_unread == 2, (
+        "action_required_unread must count ONLY the requires_action, non-auto_generated subset"
+    )

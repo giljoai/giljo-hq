@@ -152,6 +152,7 @@
       :all-jobs-terminal="allJobsTerminal"
       :memory-poll-timed-out="memoryPollTimedOut"
       :memory-poll-error="memoryPollError"
+      :is-chain-member="Boolean(chainCtx)"
       @open-decision-modal="openDecisionModal"
       @dismiss-orch-unlocked="showOrchUnlockedBanner = false"
       @open-closeout-modal="onReviewProjectClick"
@@ -170,6 +171,7 @@
       :is-staging="loadingStageProject"
       :git-enabled="gitEnabled"
       :serena-enabled="serenaEnabled"
+      :integrations-resolved="integrationsResolved"
       :agentic-tool="agenticTool"
       @edit-description="emit('edit-description')"
     />
@@ -288,7 +290,17 @@ const projectStateStore = useProjectStateStore()
 const { sortedJobs } = useAgentJobs()
 
 // Integration status for LaunchTab (Handover 0427)
-const { gitEnabled, serenaEnabled } = useIntegrationStatus()
+// TSK-9234: `resolved` is load-bearing, do not drop it. gitEnabled/serenaEnabled
+// default to false, so without it LaunchTab renders both integration icons in
+// their disabled treatment -- tooltip "click to enable" -- before anything has
+// been read. `resolved` also stays false when the fetch ERRORED, which keeps a
+// fully-configured box from being told its integrations are off during a
+// transient outage. Same class as the FE-9233 nudge, milder surface.
+const {
+  gitEnabled,
+  serenaEnabled,
+  resolved: integrationsResolved,
+} = useIntegrationStatus()
 
 // FE-3007a: store-backed computed — single source of truth via projectStore, falls back to prop while first fetch is in-flight.
 const projectId = computed(() => props.project?.project_id || props.project?.id || null)

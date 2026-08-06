@@ -17,7 +17,7 @@ import logging
 from sqlalchemy import and_, select
 from sqlalchemy import delete as sql_delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import contains_eager
 
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.models.product_agent_assignment import ProductAgentAssignment
@@ -58,15 +58,30 @@ class ProductAgentAssignmentRepository:
             active_only: If True, only return active assignments
 
         Returns:
-            List of ProductAgentAssignment ORM instances with template relationship loaded
+            List of ProductAgentAssignment ORM instances with template relationship loaded.
+            Assignments whose template has been trashed are omitted.
         """
+        # BE-9334: INNER join filtered on ``deleted_at IS NULL``. The write-path
+        # predicates elsewhere in this class cannot cover the read, because a
+        # template trashed AFTER it was assigned leaves a junction row that was
+        # legitimate when it was written and is never revalidated. The old
+        # ``joinedload`` was a LEFT OUTER JOIN with no predicate, so those stale
+        # rows came back reported as ``template_is_active: True`` (soft-delete
+        # stamps ``deleted_at`` and deliberately leaves ``is_active`` alone).
+        #
+        # Narrowing to an INNER join cannot drop a legitimate assignment:
+        # ``template_id`` is ``nullable=False`` with an FK to ``agent_templates``,
+        # so every row has a matching template. ``contains_eager`` populates the
+        # relationship from this same join rather than adding a second one.
         stmt = (
             select(ProductAgentAssignment)
-            .options(joinedload(ProductAgentAssignment.template))
+            .join(ProductAgentAssignment.template)
+            .options(contains_eager(ProductAgentAssignment.template))
             .where(
                 and_(
                     ProductAgentAssignment.product_id == product_id,
                     ProductAgentAssignment.tenant_key == tenant_key,
+                    AgentTemplate.deleted_at.is_(None),
                 )
             )
         )
@@ -166,11 +181,17 @@ class ProductAgentAssignmentRepository:
         Returns:
             List of newly created ProductAgentAssignment instances
         """
-        # Get all active templates for this tenant
+        # Get all active templates for this tenant.
+        # BE-9334: ``deleted_at IS NULL`` is what makes "active" mean what this
+        # method's docstring says. Soft-delete stamps ``deleted_at`` and deliberately
+        # leaves ``is_active`` True (``template_service.py:720``), so filtering
+        # ``is_active`` alone auto-attached every TRASHED template to a product on
+        # activation (``product_lifecycle_service.py:192``).
         templates_stmt = select(AgentTemplate).where(
             and_(
                 AgentTemplate.tenant_key == tenant_key,
                 AgentTemplate.is_active.is_(True),
+                AgentTemplate.deleted_at.is_(None),
             )
         )
         with tenant_session_context(session, tenant_key):
@@ -247,19 +268,37 @@ class ProductAgentAssignmentRepository:
 
         Useful for filtering template lists by product context.
 
+        An ACTIVE ASSIGNMENT is not the same thing as an ACTIVE TEMPLATE. This
+        query previously checked only the assignment flag, so an assignment left
+        pointing at a soft-deleted or deactivated template still named that
+        template here. ``get_agent_templates`` narrows its live-template list to
+        this set only when the set is non-empty, so one dead assignee was enough
+        to engage the filter and remove every live-but-unassigned template --
+        an empty agent roster on a product that plainly had agents. The join
+        below makes the method honour its own name: a returned id always belongs
+        to a template that is itself live.
+
         Args:
             session: Active database session
             product_id: Product UUID
             tenant_key: Tenant key for isolation
 
         Returns:
-            Set of active template IDs
+            Set of template IDs that are actively assigned AND still live
+            (``is_active`` and not soft-deleted).
         """
-        stmt = select(ProductAgentAssignment.template_id).where(
-            and_(
-                ProductAgentAssignment.product_id == product_id,
-                ProductAgentAssignment.tenant_key == tenant_key,
-                ProductAgentAssignment.is_active.is_(True),
+        stmt = (
+            select(ProductAgentAssignment.template_id)
+            .join(AgentTemplate, AgentTemplate.id == ProductAgentAssignment.template_id)
+            .where(
+                and_(
+                    ProductAgentAssignment.product_id == product_id,
+                    ProductAgentAssignment.tenant_key == tenant_key,
+                    ProductAgentAssignment.is_active.is_(True),
+                    AgentTemplate.tenant_key == tenant_key,
+                    AgentTemplate.is_active.is_(True),
+                    AgentTemplate.deleted_at.is_(None),
+                )
             )
         )
         with tenant_session_context(session, tenant_key):

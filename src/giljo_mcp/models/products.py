@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Product-related models for GiljoAI MCP.
+Product-related models for Giljo HQ.
 
 This module contains models for products, vision documents, and vision chunks.
 Products are the top-level organizational unit in the system.

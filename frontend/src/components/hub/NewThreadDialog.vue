@@ -1,3 +1,13 @@
+<!--
+  NewThreadDialog.vue — FE-9289c
+
+  A name and one hint. The raw project_id / product_id fields are gone: a general
+  thread does not need them, and a project thread is created BY the project, never by
+  someone pasting a UUID into a text box here.
+
+  On create the thread id goes straight to the clipboard, because handing it to an
+  agent is the only reason the operator opened this dialog.
+-->
 <template>
   <BaseDialog
     v-model="isOpen"
@@ -10,33 +20,18 @@
   >
     <template #default>
       <v-text-field
-        v-model="form.subject"
-        label="Subject"
+        v-model="subject"
+        label="Name"
         variant="outlined"
         density="compact"
         hide-details="auto"
-        class="mb-4"
         data-testid="new-thread-subject"
+        @keydown.enter="onCreate"
       />
 
-      <v-text-field
-        v-model="form.project_id"
-        label="Project ID (optional)"
-        variant="outlined"
-        density="compact"
-        hide-details="auto"
-        class="mb-4"
-        data-testid="new-thread-project"
-      />
-
-      <v-text-field
-        v-model="form.product_id"
-        label="Product ID (optional)"
-        variant="outlined"
-        density="compact"
-        hide-details="auto"
-        data-testid="new-thread-product"
-      />
+      <p class="new-thread__hint" data-testid="new-thread-hint">
+        You'll get an id to paste into any harness so agents can join.
+      </p>
 
       <v-alert
         v-if="errorMsg"
@@ -61,7 +56,7 @@
         Cancel
       </v-btn>
       <v-btn
-        :disabled="!form.subject.trim()"
+        :disabled="!subject.trim()"
         :loading="creating"
         variant="flat"
         color="primary"
@@ -76,9 +71,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useCommHubStore } from '@/stores/commHubStore'
 import { useToast } from '@/composables/useToast'
+import { useClipboard } from '@/composables/useClipboard'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 
 const props = defineProps({
@@ -97,13 +93,9 @@ const isOpen = computed({
 
 const commHub = useCommHubStore()
 const { showToast } = useToast()
+const { copy } = useClipboard()
 
-const form = reactive({
-  subject: '',
-  project_id: '',
-  product_id: '',
-})
-
+const subject = ref('')
 const creating = ref(false)
 const errorMsg = ref(null)
 
@@ -113,23 +105,28 @@ function onCancel() {
 }
 
 function resetForm() {
-  form.subject = ''
-  form.project_id = ''
-  form.product_id = ''
+  subject.value = ''
   errorMsg.value = null
 }
 
 async function onCreate() {
-  if (!form.subject.trim()) return
+  if (!subject.value.trim()) return
   creating.value = true
   errorMsg.value = null
   try {
-    const body = { subject: form.subject.trim() }
-    if (form.project_id.trim()) body.project_id = form.project_id.trim()
-    if (form.product_id.trim()) body.product_id = form.product_id.trim()
+    const thread = await commHub.createThread({ subject: subject.value.trim() })
 
-    const thread = await commHub.createThread(body)
-    showToast({ type: 'success', message: 'Thread created.' })
+    // The id is the point of the dialog — put it on the clipboard rather than making
+    // the operator go and find it. A blocked clipboard is not a failed create, so it
+    // downgrades the message instead of erroring: the id is still shown afterwards.
+    const copied = thread?.thread_id ? await copy(thread.thread_id) : false
+    showToast({
+      type: 'success',
+      message: copied
+        ? 'Thread created — id copied, paste it into any harness.'
+        : 'Thread created.',
+    })
+
     emit('created', thread)
     emit('update:modelValue', false)
     resetForm()
@@ -142,3 +139,11 @@ async function onCreate() {
   }
 }
 </script>
+
+<style scoped lang="scss">
+.new-thread__hint {
+  margin: 10px 0 0;
+  font-size: 0.75rem; // 12
+  color: var(--text-muted);
+}
+</style>

@@ -192,6 +192,9 @@ async def test_get_my_turn_and_pass_baton(db_manager, db_session):
     svc = _service(db_manager, db_session)
     thread = await svc.create_thread(subject="t", creator_id="agent-alpha", tenant_key=tenant)
     tid = thread["thread_id"]
+    # BE-9292a: the baton target must be reachable, so beta joins before receiving it.
+    # What this test guards is unchanged — the baton moves and get_my_turn follows it.
+    await svc.join_thread(thread_id=tid, participant_id="agent-beta", tenant_key=tenant)
 
     mine = await svc.get_my_turn(agent_id="agent-alpha", tenant_key=tenant)
     assert tid in {t["thread_id"] for t in mine["threads"]}

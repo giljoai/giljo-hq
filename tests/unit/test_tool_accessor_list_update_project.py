@@ -33,6 +33,7 @@ def _make_accessor(tenant_key: str = "tenant-test") -> ToolAccessor:
     db_manager.get_session_async = Mock(return_value=mock_session)
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=False)
+    mock_session.info = {}  # tenant_session_context save/restore target
     # execute() returns a result with scalars().all() for project type queries
     mock_result = Mock()
     mock_result.scalars = Mock(return_value=Mock(all=Mock(return_value=[])))

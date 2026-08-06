@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Service-layer Pydantic response models for GiljoAI MCP.
+Service-layer Pydantic response models for Giljo HQ.
 
 Re-exports all domain-specific response models so that existing imports
 (``from giljo_mcp.schemas.service_responses import X``) continue to work
@@ -17,6 +17,7 @@ from giljo_mcp.schemas.responses.auth import (
     ApiKeyCreateResult,
     ApiKeyInfo,
     AuthResult,
+    CredentialStatusResult,
     SetupState,
     SetupStateInfo,
     UserInfo,
@@ -29,6 +30,7 @@ from giljo_mcp.schemas.responses.consolidation import (
     SummaryLevel,
 )
 from giljo_mcp.schemas.responses.orchestration import (
+    AgentStatusChangeEvent,
     AgentTodoCounts,
     AgentWorkflowDetail,
     CompleteJobResult,
@@ -46,6 +48,7 @@ from giljo_mcp.schemas.responses.orchestration import (
     SuccessionContextResult,
     SuccessionResult,
     SuccessionStatus,
+    ThreadUnreadDetail,
     WorkflowStatus,
     build_next_action,
 )
@@ -97,6 +100,7 @@ from giljo_mcp.schemas.responses.template import (
 __all__ = [
     "ActiveProjectDetail",
     # Orchestration
+    "AgentStatusChangeEvent",
     "AgentTodoCounts",
     "AgentWorkflowDetail",
     "ApiKeyCreateResult",
@@ -110,6 +114,7 @@ __all__ = [
     "CompleteJobResult",
     "ConsolidationResult",
     "ConversionResult",
+    "CredentialStatusResult",
     # Shared
     "DeleteResult",
     "DismissResult",
@@ -162,6 +167,7 @@ __all__ = [
     # Template
     "TemplateDetail",
     "TemplateGetResult",
+    "ThreadUnreadDetail",
     "UserInfo",
     "VisionUploadResult",
     "WorkflowStatus",

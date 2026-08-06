@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Services module for GiljoAI MCP.
+Services module for Giljo HQ.
 
 This module contains service classes for managing integrations and external tools.
 

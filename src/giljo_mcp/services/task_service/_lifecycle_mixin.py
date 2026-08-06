@@ -62,13 +62,40 @@ class _TaskLifecycleMixin:
         """
         try:
             async with self._get_session() as session:
-                return await self._change_status_impl(session, task_id, new_status)
+                task = await self._change_status_impl(session, task_id, new_status)
         except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
             # Re-raise our custom exceptions without wrapping
             raise
         except Exception as e:  # Broad catch: service boundary, wraps in BaseGiljoError
             self._logger.exception(f"Failed to change task {sanitize(task_id)} status")
             raise BaseGiljoError(message=str(e), context={"operation": "change_status", "task_id": task_id}) from e
+
+        # FE-9274: broadcast STRICTLY post-commit -- ``_get_session()`` (no
+        # injected test session) commits on the ``async with`` block's clean
+        # exit above, so the status change is durable by this point. This was
+        # the one task-mutation path with NO broadcast at all (unlike
+        # update_task's task:updated below it in _mutation_mixin) -- the FE
+        # dashboard's status-change dropdown calls exactly this method via
+        # PATCH /tasks/{id}/status/, so a stale task list never repainted.
+        # Reuses the SAME task:updated shape update_task emits so the FE event
+        # router needs only one handler for both mutation paths.
+        ws = self._websocket_manager
+        if ws:
+            try:
+                await ws.broadcast_to_tenant(
+                    tenant_key=self.tenant_manager.get_current_tenant(),
+                    event_type="task:updated",
+                    data={
+                        "task_id": task_id,
+                        "updated_fields": ["status"],
+                        "hidden": bool(getattr(task, "hidden", False)),
+                        "status": task.status,
+                    },
+                )
+            except (RuntimeError, ValueError, OSError) as ws_error:
+                self._logger.warning(f"Failed to broadcast task:updated event: {ws_error}")
+
+        return task
 
     async def _change_status_impl(self, session: AsyncSession, task_id: str, new_status: str) -> Task:
         """Implementation of change_status with explicit session parameter.

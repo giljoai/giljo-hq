@@ -37,7 +37,7 @@
       </template>
       <div class="mb-3">
         <p class="mb-2">
-          <strong>Congratulations!</strong> GiljoAI MCP is now accessible over your local network.
+          <strong>Congratulations!</strong> {{ PRODUCT_NAME }} is now accessible over your local network.
         </p>
         <p class="mb-2">
           <strong>Server URL:</strong> <code>{{ serverProtocol }}://{{ serverIp }}:{{ serverPort }}</code>
@@ -213,7 +213,7 @@
             <div v-for="(c, i) in recentCommits" :key="i" class="commit-row">
               <span class="commit-sha">{{ c.sha?.substring(0, 8) }}</span>
               <div class="commit-content">
-                <div class="commit-msg">{{ c.message }}</div>
+                <div class="commit-msg">{{ commitTitle(c) }}</div>
                 <div class="commit-meta">
                   <span v-if="c.author">{{ c.author }}</span>
                   <span v-if="c.product_name"> · {{ c.product_name }}</span>
@@ -238,18 +238,18 @@
 </template>
 
 <script setup>
-// eslint-allow giljo-internal/no-manual-api-url-composition
-// (sanctioned: server-URL string is rendered for the user in a setup guide / inline UI, not used as the frontend HTTP client base — see ADR-001)
+// eslint-allow giljo-internal/no-manual-api-url-composition (sanctioned: server-URL string is rendered for the user in a setup guide / inline UI, not used as the frontend HTTP client base — see ADR-001)
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { TEXT_MUTED_MATERIAL as COLOR_MUTED, COLOR_COMPLETE, COLOR_BRAND, COLOR_FAILED, COLOR_STAGED } from '@/config/colorTokens'
 import { getAgentColor } from '@/config/agentColors'
+import { commitTitle } from '@/utils/gitCommitDisplay'
+import { PRODUCT_NAME } from '@/branding'
 import AppAlert from '@/components/ui/AppAlert.vue'
 import RecentProjectsList from '@/components/dashboard/RecentProjectsList.vue'
 import RecentMemoriesList from '@/components/dashboard/RecentMemoriesList.vue'
 import ProjectReviewModal from '@/components/projects/ProjectReviewModal.vue'
 import { useRouter } from 'vue-router'
 import { useProductStore } from '@/stores/products'
-
 import api from '@/services/api'
 import setupService from '@/services/setupService'
 import { useToast } from '@/composables/useToast'
@@ -531,11 +531,11 @@ const downloadLanGuide = () => {
 }
 
 const generateLanGuide = () => {
-  return `# GiljoAI MCP - LAN/Server Mode Setup Guide
+  return `# ${PRODUCT_NAME} - LAN/Server Mode Setup Guide
 
 **Network Configuration Complete**
 
-This guide helps you verify and troubleshoot network connectivity for GiljoAI MCP in Server/LAN mode.
+This guide helps you verify and troubleshoot network connectivity for ${PRODUCT_NAME} in Server/LAN mode.
 
 ---
 
@@ -680,7 +680,8 @@ onUnmounted(() => {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 50%;
+  // FE-9365a: buttons are rounded squares — see main.scss Button Shape Standard.
+  border-radius: 8px;
   border: none;
   background: transparent;
   color: var(--text-muted);

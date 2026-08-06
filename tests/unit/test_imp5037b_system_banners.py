@@ -174,7 +174,7 @@ class TestUpdateAvailableBanner:
         # in-app route. It must carry no cta_route and a usable release_url in the
         # payload (git-mode installs supply no URL → fall back to the releases page).
         assert update_rows[0].cta_route is None
-        assert update_rows[0].payload["release_url"] == "https://github.com/giljoai/GiljoAI_MCP/releases"
+        assert update_rows[0].payload["release_url"] == "https://github.com/giljoai/giljo-hq/releases"
         # FE-6020: copy no longer tells users to run the (migration-only) update.py.
         assert "update.py" not in update_rows[0].title
 

@@ -16,7 +16,11 @@
         <v-icon size="23" class="door-icon">mdi-database-import-outline</v-icon>
         <span class="door-title">I have an existing codebase</span>
         <span class="door-desc">One prompt: your agent reads the repo, writes the vision doc, and fills the product card for you.</span>
-        <span class="door-tag door-tag--featured">FASTEST · NO TYPING</span>
+        <span class="door-expect" data-testid="door-expect-existing">
+          Needs an agent connected to {{ PRODUCT_NAME }}. It reads your whole repository, so
+          expect it to run for a while — minutes, not seconds — before it reports back.
+        </span>
+        <span class="door-tag door-tag--featured">NO TYPING · TAKES A WHILE</span>
       </div>
 
       <div
@@ -30,7 +34,12 @@
         <v-icon size="23" class="door-icon">mdi-chat-question-outline</v-icon>
         <span class="door-title">I have an idea — help me shape it</span>
         <span class="door-desc">A guided interview prompt for any chat tool. It asks the right questions and writes your vision document.</span>
-        <span class="door-tag">~10 MINUTES</span>
+        <span class="door-expect" data-testid="door-expect-idea">
+          This one is a conversation between you and your own agent. {{ PRODUCT_NAME }} only
+          hands you the opening prompt — it does not take part in the exchange or watch it.
+          You come back here with the document it writes.
+        </span>
+        <span class="door-tag">~10 MINUTES · ANY CHAT TOOL</span>
       </div>
 
       <div
@@ -44,7 +53,11 @@
         <v-icon size="23" class="door-icon">mdi-file-upload-outline</v-icon>
         <span class="door-title">I have a vision document</span>
         <span class="door-desc">Upload it. GiljoAI stages an analysis and your agent proposes the product setup.</span>
-        <span class="door-tag">UPLOAD &amp; GO</span>
+        <span class="door-expect" data-testid="door-expect-document">
+          Upload the document, then copy the discovery prompt yourself and paste it into an
+          agent connected to {{ PRODUCT_NAME }}. Nothing is copied for you.
+        </span>
+        <span class="door-tag">UPLOAD, THEN COPY THE PROMPT</span>
       </div>
 
       <div
@@ -58,13 +71,24 @@
         <v-icon size="23" class="door-icon">mdi-pencil-outline</v-icon>
         <span class="door-title">I'll fill it in myself</span>
         <span class="door-desc">The classic form: info, setup, tech, architecture, testing. Full control.</span>
-        <span class="door-tag">MANUAL</span>
+        <span class="door-expect" data-testid="door-expect-manual">
+          No agent involved. This leaves the tour and opens the product form, where you type
+          the details in yourself and activate when you are ready.
+        </span>
+        <span class="door-tag">MANUAL · LEAVES THE TOUR</span>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
+// FE-9320: each door states what it actually expects of the user BEFORE they
+// commit — whether it needs a connected agent, how long it runs, and who is
+// actually doing the talking. Doors are addressed by NAME everywhere; the
+// stored router_choice letters (D/B/A/C) do not match the displayed order and
+// renaming them would need a migration for no user-visible benefit.
+import { PRODUCT_NAME } from '@/branding'
+
 defineEmits(['pick'])
 </script>
 
@@ -153,6 +177,14 @@ defineEmits(['pick'])
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text-secondary);
+}
+
+/* What this door will ask of you — deliberately plainer and quieter than the
+   pitch above it, but present before the click, not after. */
+.door-expect {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 
 .door-tag {

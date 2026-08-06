@@ -23,6 +23,7 @@ class TestApiKeyIpLogging:
         from api.endpoints.mcp_session import MCPSessionManager
 
         mock_db = AsyncMock()
+        mock_db.info = {}  # tenant_session_context save/restore target
         mock_db.execute = AsyncMock()
         mock_db.commit = AsyncMock()
 
@@ -38,6 +39,7 @@ class TestApiKeyIpLogging:
         from api.endpoints.mcp_session import MCPSessionManager
 
         mock_db = AsyncMock()
+        mock_db.info = {}  # tenant_session_context save/restore target
         mock_db.execute = AsyncMock(side_effect=Exception("DB connection lost"))
 
         manager = MCPSessionManager(mock_db)
@@ -50,6 +52,7 @@ class TestApiKeyIpLogging:
         from api.endpoints.mcp_session import MCPSessionManager
 
         mock_db = AsyncMock()
+        mock_db.info = {}  # tenant_session_context save/restore target
         mock_db.execute = AsyncMock()
         mock_db.commit = AsyncMock()
 
@@ -65,6 +68,7 @@ class TestApiKeyIpLogging:
         from api.endpoints.mcp_session import MCPSessionManager
 
         mock_db = AsyncMock()
+        mock_db.info = {}  # tenant_session_context save/restore target
         mock_db.execute = AsyncMock()
         mock_db.commit = AsyncMock()
 
@@ -80,6 +84,7 @@ class TestApiKeyIpLogging:
         from api.endpoints.mcp_session import MCPSessionManager
 
         mock_db = AsyncMock()
+        mock_db.info = {}  # tenant_session_context save/restore target
         mock_db.execute = AsyncMock()
         mock_db.commit = AsyncMock()
 
@@ -95,6 +100,7 @@ class TestApiKeyIpLogging:
         from api.endpoints.mcp_session import MCPSessionManager
 
         mock_db = AsyncMock()
+        mock_db.info = {}  # tenant_session_context save/restore target
         mock_db.execute = AsyncMock()
         mock_db.commit = AsyncMock(side_effect=Exception("Commit failed"))
 
@@ -108,6 +114,7 @@ class TestApiKeyIpLogging:
         from api.endpoints.mcp_session import MCPSessionManager
 
         mock_db = AsyncMock()
+        mock_db.info = {}  # tenant_session_context save/restore target
         mock_db.execute = AsyncMock()
         mock_db.commit = AsyncMock()
 
@@ -141,6 +148,7 @@ class TestMcpEndpointIpLogging:
         from api.endpoints.mcp_session import MCPSessionManager
 
         mock_db = AsyncMock()
+        mock_db.info = {}  # tenant_session_context save/restore target
         manager = MCPSessionManager(mock_db)
         mock_db.execute = AsyncMock()
         mock_db.commit = AsyncMock()

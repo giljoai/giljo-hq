@@ -37,6 +37,21 @@ export const useMemoryStore = defineStore('memory', () => {
   // True while the loaded set is the result of a server-side ?search= query, so
   // filteredEntries skips the client-side substring match (BE-6082).
   const serverSearch = ref(false)
+  // FE-9338: the in-flight search promise. The view fires searchMemoryEntries()
+  // fire-and-forget from a 250ms debounce, so nothing outside the store can tell
+  // when the result has landed. Exposing the promise lets callers await THAT
+  // search settling instead of guessing at it. Reset to null when the search it
+  // points at settles.
+  const inFlightSearch = ref(null)
+
+  // IMP-9342: load sequencing token. fetchMemoryEntries and _runSearch both
+  // REPLACE the loaded set wholesale, so they race each other as well as
+  // themselves — without this the last response to arrive won, not the last one
+  // requested. Every load claims the next token before awaiting and applies its
+  // result only if it still holds it; a superseded response is dropped whole
+  // (entities, serverSearch, loadedProductId, error and loading alike).
+  // Store-instance scoped, not module scope, so it cannot leak between tests.
+  let loadSeq = 0
 
   // ── Getters ───────────────────────────────────────────────────────────────
   const entries = computed(() => Array.from(byId.value.values()))
@@ -152,10 +167,12 @@ export const useMemoryStore = defineStore('memory', () => {
    */
   async function fetchMemoryEntries(productId, { limit = 100 } = {}) {
     if (!productId) return
+    const seq = ++loadSeq
     loading.value = true
     error.value = null
     try {
       const response = await api.products.getMemoryEntries(productId, { limit })
+      if (seq !== loadSeq) return // superseded mid-flight — drop this response
       const list = response?.data?.entries || []
       // Replace the set for this product (fresh load), then upsert each entry
       // through the single write path so byId is the sole owner.
@@ -164,10 +181,13 @@ export const useMemoryStore = defineStore('memory', () => {
       loadedProductId.value = productId
       serverSearch.value = false
     } catch (err) {
+      if (seq !== loadSeq) return
       error.value = err.message
       console.error('Failed to fetch memory entries:', err)
     } finally {
-      loading.value = false
+      // Only the newest load owns the flag; a stale one must not report the
+      // still-running newer request as finished.
+      if (seq === loadSeq) loading.value = false
     }
   }
 
@@ -181,28 +201,49 @@ export const useMemoryStore = defineStore('memory', () => {
    * through the single write path, marking `serverSearch` so filteredEntries
    * trusts the server's text match.
    */
-  async function searchMemoryEntries(productId, term, { limit = 100 } = {}) {
+  function searchMemoryEntries(productId, term, { limit = 100 } = {}) {
+    const promise = _runSearch(productId, term, { limit })
+    inFlightSearch.value = promise
+    // Release the ref once this search settles, so a settled promise is never
+    // left parked in public store state. Identity-checked: a slow older search
+    // settling late must not clear a newer search that is still in flight.
+    // then(fn, fn) rather than finally() — finally() would derive a REJECTED
+    // promise nobody handles when the search rejects.
+    const settled = () => {
+      if (inFlightSearch.value === promise) inFlightSearch.value = null
+    }
+    promise.then(settled, settled)
+    return promise
+  }
+
+  async function _runSearch(productId, term, { limit = 100 } = {}) {
     if (!productId) return
     const trimmed = (term || '').trim()
     if (!trimmed) {
-      // Client-side fallback: reload the full set (clears serverSearch).
+      // Client-side fallback: reload the full set (clears serverSearch). It
+      // claims its own token inside fetchMemoryEntries, so it sequences against
+      // the server-search path below too — clearing the box then typing again
+      // must not let the full reload land on top of the newer search.
       await fetchMemoryEntries(productId, { limit })
       return
     }
+    const seq = ++loadSeq
     loading.value = true
     error.value = null
     try {
       const response = await api.products.getMemoryEntries(productId, { limit, search: trimmed })
+      if (seq !== loadSeq) return // superseded mid-flight — drop this response
       const list = response?.data?.entries || []
       byId.value = new Map()
       for (const entry of list) _upsertEntry(entry)
       loadedProductId.value = productId
       serverSearch.value = true
     } catch (err) {
+      if (seq !== loadSeq) return
       error.value = err.message
       console.error('Failed to search memory entries:', err)
     } finally {
-      loading.value = false
+      if (seq === loadSeq) loading.value = false
     }
   }
 
@@ -225,6 +266,7 @@ export const useMemoryStore = defineStore('memory', () => {
     sortMode,
     groupByProject,
     serverSearch,
+    inFlightSearch,
     // Getters
     entries,
     availableTags,

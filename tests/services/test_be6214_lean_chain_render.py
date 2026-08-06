@@ -228,7 +228,11 @@ def test_three_seams_relocated_into_conductor_chapters() -> None:
     assert "SCOPE IS HANDED" in render
     assert "scan for a project to continue" in render
     # Seam 2 — escalation sink + Hub-thread discovery.
-    assert "search_threads" in render
+    # BE-9291 DELIBERATELY CHANGED this from `search_threads` to the FK discovery path.
+    # In the CONDUCTOR render the bare name still appears 12 times — entirely inside the
+    # sub-orch SPAWN COMMAND (launch_command_synth) — so the old assertion passed on spawn
+    # boilerplate rather than on the escalation sink it claims to guard.
+    assert "hub_thread_id" in render
     assert "ESCALATION" in render
     # Seam 3 — advance, not complete_job (server refuses a premature finale).
     assert "CONDUCTOR_CHAIN_INCOMPLETE" in render
@@ -241,7 +245,9 @@ def test_three_seams_relocated_into_suborch_chapter() -> None:
     render = _suborch_render()
     assert "SCOPE IS HANDED" in render
     assert "scan for a project to continue" in render
-    assert "search_threads" in render
+    # BE-9291 DELIBERATELY CHANGED this from `search_threads` (now only the ToolSearch
+    # bootstrap hint in this render) to the FK discovery path the sub-orch actually uses.
+    assert "hub_thread_id" in render
     assert "write_project_closeout" in render
 
 

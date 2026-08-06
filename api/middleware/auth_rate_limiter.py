@@ -38,6 +38,14 @@ sub-limit count and all be admitted, so the effective ceiling drifted above
 `limit`. `incr` returns a distinct monotonic count per caller, so the limit
 holds exactly. Fixed-window carries the usual up-to-2x burst at a window
 boundary — the same trade-off the SaaS per-tenant RateLimitStore already makes.
+
+SEC-9227 (H4) — the test bypass is no longer request-derived. It used to read
+``request.base_url`` and exempt requests whose base URL carried a fixed test
+prefix, which made it forgeable: because ``base_url`` is built from the inbound
+``Host`` header, a client sending ``Host: testanything`` disabled every
+pre-auth limit for itself. The bypass is now an explicit process-local flag
+(``auth_rate_limits.set_test_bypass``) that defaults to OFF and takes no
+request input, so a test can bypass but an inbound request never can.
 """
 
 import logging
@@ -52,7 +60,7 @@ from giljo_mcp.services.cache_backends import (
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 from ._proxy_aware_ip import TRUSTED_PROXIES_ENV, ProxyAwareIpResolver
-from .auth_rate_limits import is_exempt_ip, limit_for
+from .auth_rate_limits import is_exempt_ip, is_test_bypass_enabled, limit_for
 
 
 logger = logging.getLogger(__name__)
@@ -139,9 +147,12 @@ class RateLimiter:
         Raises:
             HTTPException: 429 if limit exceeded and raise_on_limit=True
         """
-        # Test requests (base_url starts with http://test) bypass the limiter so
-        # the suite is not throttled. Preserved from the pre-SEC-6001 behavior.
-        if str(request.base_url).startswith("http://test"):
+        # SEC-9227 (H4): the ONLY bypass is an explicit, process-local test
+        # flag — never anything derived from the request. The check this
+        # replaced read ``request.base_url`` (the inbound Host header), so any
+        # client could exempt itself from every pre-auth limit by sending
+        # ``Host: testanything``. Defaults to OFF: production never bypasses.
+        if is_test_bypass_enabled():
             return True
 
         ip = self._get_client_ip(request)

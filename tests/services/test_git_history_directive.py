@@ -38,6 +38,7 @@ class TestGitHistoryDirective:
 
         # Mock session
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
 
         # First query returns product
         mock_result_product = MagicMock()
@@ -89,6 +90,7 @@ class TestGitHistoryDirective:
         mock_product.project_path = "/project"
 
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = mock_product
 
@@ -133,6 +135,7 @@ class TestGitHistoryDirective:
         mock_product.project_path = "/project"
 
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = mock_product
         mock_session.execute = AsyncMock(return_value=mock_result)
@@ -162,6 +165,7 @@ class TestGitHistoryDirective:
         mock_product.product_memory = {}
 
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = mock_product
 

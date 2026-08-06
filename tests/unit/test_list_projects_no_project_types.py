@@ -41,6 +41,7 @@ def _make_service(tenant_key: str) -> ProjectService:
     db_manager.get_session_async = Mock(return_value=mock_session)
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=False)
+    mock_session.info = {}  # tenant_session_context save/restore target
     mock_result = Mock()
     mock_result.scalars = Mock(return_value=Mock(all=Mock(return_value=[])))
     mock_session.execute = AsyncMock(return_value=mock_result)

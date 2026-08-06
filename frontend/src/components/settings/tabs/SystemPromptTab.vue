@@ -8,7 +8,7 @@
     <v-card-text>
       <v-alert type="info" variant="tonal" class="mb-6">
         <p class="mb-3">
-          GiljoAI MCP ships pre-packaged prompts so you don't have to write lengthy instructions for
+          {{ productName }} ships pre-packaged prompts so you don't have to write lengthy instructions for
           every request. They reduce errors, ensure consistency, and give your agents precise operating
           instructions out of the box.
         </p>
@@ -110,8 +110,10 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import api from '@/services/api'
+import { PRODUCT_NAME } from '@/branding'
 
 // State
+const productName = PRODUCT_NAME
 const prompt = ref('')
 const promptBaseline = ref('')
 const loading = ref(false)

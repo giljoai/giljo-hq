@@ -16,11 +16,12 @@
  */
 
 import { useUserStore } from '@/stores/user'
+import { PRODUCT_NAME } from '@/branding'
 
 export function createAuthGuard({ setupService, configService }) {
   return async function authGuard(to, from, next) {
     // Set page title
-    document.title = `${to.meta?.title || 'GiljoAI'} - GiljoAI MCP`
+    document.title = `${to.meta?.title || 'GiljoAI'} - ${PRODUCT_NAME}`
 
     // Fetch setupState ONCE at guard entry -- single source of truth for both
     // mode resolution and route_signal. setupService caches with a 2s TTL so

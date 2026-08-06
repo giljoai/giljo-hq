@@ -146,7 +146,7 @@
                         <v-icon icon="mdi-source-commit" color="info" size="small" class="mr-2" />
                       </template>
                       <v-list-item-title class="text-body-medium">
-                        {{ commit.message }}
+                        {{ commitTitle(commit) }}
                       </v-list-item-title>
                       <v-list-item-subtitle class="text-body-small">
                         {{ commit.author }} - {{ formatCommitDate(commit.timestamp) }}
@@ -250,6 +250,7 @@ import { useDisplay } from 'vuetify'
 import { useRouter } from 'vue-router'
 import { useFormatDate } from '@/composables/useFormatDate'
 import { useToast } from '@/composables/useToast'
+import { commitTitle } from '@/utils/gitCommitDisplay'
 import api from '@/services/api'
 
 const { formatDateTime } = useFormatDate()

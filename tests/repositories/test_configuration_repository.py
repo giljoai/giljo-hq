@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 
 from giljo_mcp.database import tenant_isolation_bypass
 from giljo_mcp.models import Configuration
@@ -176,3 +177,87 @@ class TestHealthCheckDomain:
         is_healthy = await config_repo.execute_health_check(FailingSession())
 
         assert is_healthy is False
+
+
+# ============================================================================
+# PER-TENANT VALUE DOMAIN TESTS (FE-9241 — SaaS-configurable silence timer)
+# ============================================================================
+
+
+class TestPerTenantValueDomain:
+    """Test get_value / upsert_value / get_all_values_for_key (per-tenant JSONB CRUD)."""
+
+    @pytest.mark.asyncio
+    async def test_get_value_returns_none_when_unset(self, config_repo, db_session, test_tenant_key):
+        """A tenant with no row for the key gets None (caller falls back to default)."""
+        result = await config_repo.get_value(db_session, test_tenant_key, "agent_silence_threshold_minutes")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_upsert_value_then_get_value_round_trips(self, config_repo, db_session, test_tenant_key):
+        """upsert_value writes a row that get_value reads back unchanged."""
+        await config_repo.upsert_value(
+            db_session, test_tenant_key, "agent_silence_threshold_minutes", 25, category="system"
+        )
+        await db_session.commit()
+
+        result = await config_repo.get_value(db_session, test_tenant_key, "agent_silence_threshold_minutes")
+
+        assert result == 25
+
+    @pytest.mark.asyncio
+    async def test_upsert_value_overwrites_existing_row_no_duplicate(self, config_repo, db_session, test_tenant_key):
+        """A second upsert for the same (tenant_key, key) updates in place (ON CONFLICT DO UPDATE),
+        never creates a duplicate row — proves the uq_config_tenant_key constraint is exercised."""
+        await config_repo.upsert_value(
+            db_session, test_tenant_key, "agent_silence_threshold_minutes", 25, category="system"
+        )
+        await db_session.commit()
+
+        await config_repo.upsert_value(
+            db_session, test_tenant_key, "agent_silence_threshold_minutes", 40, category="system"
+        )
+        await db_session.commit()
+
+        result = await db_session.execute(
+            select(Configuration).where(
+                Configuration.tenant_key == test_tenant_key,
+                Configuration.key == "agent_silence_threshold_minutes",
+            )
+        )
+        rows = result.scalars().all()
+
+        assert len(rows) == 1
+        assert rows[0].value == 40
+
+    @pytest.mark.asyncio
+    async def test_get_value_is_tenant_isolated(self, config_repo, db_session, test_tenant_key):
+        """Tenant A's value is invisible to tenant B (ADR-009)."""
+        other_tenant_key = "other_silence_tenant"
+        await config_repo.upsert_value(
+            db_session, test_tenant_key, "agent_silence_threshold_minutes", 25, category="system"
+        )
+        await db_session.commit()
+
+        result = await config_repo.get_value(db_session, other_tenant_key, "agent_silence_threshold_minutes")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_all_values_for_key_loads_every_tenant_in_one_query(self, config_repo, db_session):
+        """The cross-tenant batch loader used by the silence detector returns every
+        tenant's value for the key in a single query result (no N+1 per-tenant reads)."""
+        tenant_a = "silence_tenant_a"
+        tenant_b = "silence_tenant_b"
+        await config_repo.upsert_value(db_session, tenant_a, "agent_silence_threshold_minutes", 5, category="system")
+        await config_repo.upsert_value(db_session, tenant_b, "agent_silence_threshold_minutes", 90, category="system")
+        # A different key must NOT be picked up by the loader.
+        await config_repo.upsert_value(db_session, tenant_a, "unrelated_key", "ignored", category="general")
+        await db_session.commit()
+
+        overrides = await config_repo.get_all_values_for_key(db_session, "agent_silence_threshold_minutes")
+
+        assert overrides[tenant_a] == 5
+        assert overrides[tenant_b] == 90
+        assert "unrelated_key" not in overrides.values()

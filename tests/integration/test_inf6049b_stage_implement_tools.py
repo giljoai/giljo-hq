@@ -197,8 +197,39 @@ class _TenantSwitch:
         self.value = value
 
 
+class _CapturingWebSocketManager:
+    """Spy WS manager: records every broadcast_to_tenant call (BE-9332).
+
+    Mirrors the spy shape already used by tests/services/test_be6229_conductor_ws_flag.py
+    and tests/integration/test_tsk6219_event_origin_source.py — a real object with the
+    real method signature, so the emission boundary is exercised rather than mocked away.
+    Doubles as the REST ``ws_dep`` (it also answers ``is_available()``).
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def broadcast_to_tenant(self, tenant_key: str, event_type: str, data: dict) -> None:
+        self.calls.append({"tenant_key": tenant_key, "event_type": event_type, "data": data})
+
+    def is_available(self) -> bool:
+        return True
+
+    def events(self, event_type: str) -> list[dict]:
+        return [c for c in self.calls if c["event_type"] == event_type]
+
+    def event_types(self) -> list[str]:
+        return [c["event_type"] for c in self.calls]
+
+
 @pytest_asyncio.fixture
-async def lifecycle_mcp_client(db_manager, db_session, primary_tenant_key, monkeypatch):
+async def ws_spy() -> _CapturingWebSocketManager:
+    """The spy WS manager wired into the ToolAccessor by ``lifecycle_mcp_client``."""
+    return _CapturingWebSocketManager()
+
+
+@pytest_asyncio.fixture
+async def lifecycle_mcp_client(db_manager, db_session, primary_tenant_key, ws_spy, monkeypatch):
     """Yield ``(new_client, tenant_switch)`` for in-memory FastMCP transport tests.
 
     The ToolAccessor is built with ``test_session=db_session`` so the
@@ -207,6 +238,11 @@ async def lifecycle_mcp_client(db_manager, db_session, primary_tenant_key, monke
     transaction. ``_resolve_tenant`` / ``_resolve_user_id`` are monkeypatched on
     ``_base`` (the _call_tool + wrapper call site) since the in-memory transport
     has no auth middleware.
+
+    BE-9332: the accessor is given the ``ws_spy`` websocket_manager so the WS
+    emission boundary is real (production passes ``state.websocket_manager`` at
+    ``api/startup/core_services.py``). Request the ``ws_spy`` fixture alongside
+    this one to assert on emissions.
     """
     from api import app_state
     from api.endpoints import mcp_sdk_server
@@ -226,6 +262,7 @@ async def lifecycle_mcp_client(db_manager, db_session, primary_tenant_key, monke
         db_manager=db_manager,
         tenant_manager=state.tenant_manager,
         test_session=db_session,
+        websocket_manager=ws_spy,
     )
 
     tenant_switch = _TenantSwitch(primary_tenant_key)
@@ -316,6 +353,47 @@ async def test_stage_project_invalid_mode_rejected_at_boundary(lifecycle_mcp_cli
         result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "bogus"})
 
     assert result.isError is True, "invalid mode must be rejected (Literal boundary validation)"
+
+
+# ---------------------------------------------------------------------------
+# The mark_staged single-writer transaction fix: stage_project must route the
+# staged-state write through the OWNING service (ProjectStagingService.mark_staged),
+# not a raw inline write inside ThinClientLifecycleMixin.stage().
+# ---------------------------------------------------------------------------
+
+
+async def test_stage_project_calls_owning_service_not_a_raw_write(lifecycle_mcp_client, db_session, primary_tenant_key):
+    """stage_project's call chain must reach ProjectStagingService.mark_staged exactly
+    once, with the resolved project_id/execution_mode/tenant_key, on the SAME session
+    the tool already opened.
+
+    Fails against today's code because ``stage_project`` never reaches ``mark_staged``
+    at all -- ``ThinClientLifecycleMixin.stage()`` writes ``staging_status`` /
+    ``execution_mode`` inline instead (``thin_prompt_lifecycle.py``). This is the
+    MCP-boundary regression test for the CTO's literal requirement ("route it through
+    the owning service"), at the layer the bug lives in.
+    """
+    from unittest.mock import patch
+
+    from giljo_mcp.services.project_staging_service import ProjectStagingService
+
+    new_client, _switch = lifecycle_mcp_client
+    seeded = await _seed_product_project(db_session, primary_tenant_key, execution_mode=None)
+
+    with patch.object(
+        ProjectStagingService, "mark_staged", wraps=ProjectStagingService.mark_staged, autospec=True
+    ) as spy:
+        async with new_client() as session:
+            result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
+
+    assert result.isError is False, _error_text(result)
+    spy.assert_called_once()
+    _self, called_project_id, called_execution_mode = spy.call_args.args
+    called_kwargs = spy.call_args.kwargs
+    assert called_project_id == seeded["project"].id
+    assert called_execution_mode == "subagent"
+    assert called_kwargs["tenant_key"] == primary_tenant_key
+    assert called_kwargs["db_session"] is not None
 
 
 # ---------------------------------------------------------------------------
@@ -672,6 +750,296 @@ async def test_stage_project_equivalent_to_rest_staging(lifecycle_mcp_client, db
         "stage_project staging prompt must be content-equivalent to GET /api/prompts/staging"
     )
     assert tool_payload["orchestrator_id"] == rest_response.orchestrator_id
+
+
+# ---------------------------------------------------------------------------
+# BE-9332: the MCP staging path must emit orchestrator:prompt_generated
+# ---------------------------------------------------------------------------
+
+_PROMPT_EVENT = "orchestrator:prompt_generated"
+
+# The four identity fields the frontend route reads off the payload
+# (frontend/src/stores/eventRoutes/agentEventRoutes.js -> handleUpdated -> upsertJob).
+#
+# execution_id is NOT the store's Map key -- normalizeJob derives unique_key as
+# `agent_id || execution_id || job_id` (agent_id FIRST, and every emitter here sends
+# agent_id), and setJobs rebuilds the Map wholesale, so a refetch cannot strand a
+# duplicate row. It is required for the narrower, checkable reason: both REST prompt
+# endpoints already put it on the wire and the route reads it onto the job row, so
+# omitting it from the MCP payload would reintroduce exactly the cross-site drift this
+# change exists to end. Do not "harmonize" the frontend to key on execution_id -- that
+# would break reconciliation with the API refetch, which supplies agent_id.
+_IDENTITY_FIELDS = ("project_id", "orchestrator_id", "agent_id", "execution_id")
+
+
+def _rest_staging_call(db_session, tenant_key: str, ws_dep):
+    """Build the kwargs for a direct ``prompts.generate_staging_prompt`` call.
+
+    Mirrors ``test_stage_project_equivalent_to_rest_staging`` — the endpoint function is
+    invoked directly (not through FastAPI DI), so current_user / ws_dep / project_service
+    are supplied by hand and wired to the same test session.
+    """
+    from unittest.mock import MagicMock
+
+    from giljo_mcp.services.project_service import ProjectService
+
+    current_user = MagicMock()
+    current_user.id = uuid4()
+    current_user.tenant_key = tenant_key
+    current_user.username = "be9332-user"
+
+    tenant_manager = MagicMock()
+    tenant_manager.get_current_tenant.return_value = tenant_key
+
+    return {
+        "current_user": current_user,
+        "db": db_session,
+        "ws_dep": ws_dep,
+        "project_service": ProjectService(
+            db_manager=MagicMock(),
+            tenant_manager=tenant_manager,
+            test_session=db_session,
+        ),
+    }
+
+
+async def test_be9332_mcp_stage_project_emits_orchestrator_prompt_generated(
+    lifecycle_mcp_client, ws_spy, db_session, primary_tenant_key
+):
+    """BE-9332 (the bug): staging over MCP — the headless/CLI path — completes the whole
+    lifecycle but emits NO ``orchestrator:prompt_generated``, so the dashboard never
+    renders the orchestrator card. The REST path emits it; the MCP path did not.
+
+    Driven through the REAL FastMCP in-memory transport (regression at the failing layer:
+    the WS emission boundary of the MCP tool, not the service underneath it).
+
+    Pre-fix this fails as ``emitted == []``.
+    """
+    new_client, _switch = lifecycle_mcp_client
+    seeded = await _seed_product_project(db_session, primary_tenant_key)
+
+    async with new_client() as session:
+        result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
+
+    assert result.isError is False, _error_text(result)
+    assert _payload(result)["status"] == "staged"
+
+    emitted = ws_spy.events(_PROMPT_EVENT)
+    assert len(emitted) == 1, (
+        f"MCP stage_project must emit exactly one {_PROMPT_EVENT}; "
+        f"got {len(emitted)}. All events seen: {ws_spy.event_types()}"
+    )
+
+    call = emitted[0]
+    # Tenant-scoped: broadcast to the CALLING tenant, never a broader audience.
+    assert call["tenant_key"] == primary_tenant_key
+
+    data = call["data"]
+    for field in _IDENTITY_FIELDS:
+        assert data.get(field), f"{_PROMPT_EVENT} payload is missing a non-empty {field!r}: {data!r}"
+    assert data["project_id"] == seeded["project"].id
+    assert data["thin_client"] is True
+
+
+async def test_be9332_rest_and_mcp_prompt_payloads_agree(lifecycle_mcp_client, ws_spy, db_session, primary_tenant_key):
+    """BE-9332 anti-drift guard — the load-bearing half of DoD item 3.
+
+    BOTH paths must emit for the same project, and their payloads must AGREE on the four
+    identity fields. This is what catches an emission that was MOVED (REST silently
+    losing its event) rather than ADDED, and it pins the two call sites to one shape so
+    they cannot drift apart again the way the two pre-existing REST sites already had.
+    """
+    from api.endpoints import prompts
+
+    new_client, _switch = lifecycle_mcp_client
+    seeded = await _seed_product_project(db_session, primary_tenant_key, execution_mode=None)
+
+    rest_ws = _CapturingWebSocketManager()
+
+    # REST first — it creates the orchestrator and persists 'staged'; stage_project then
+    # re-stages and find-or-create returns the SAME orchestrator/agent/execution ids.
+    await prompts.generate_staging_prompt(
+        project_id=seeded["project"].id,
+        tool="claude-code",
+        execution_mode="claude_code_cli",
+        **_rest_staging_call(db_session, primary_tenant_key, rest_ws),
+    )
+
+    async with new_client() as session:
+        tool_result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
+    assert tool_result.isError is False, _error_text(tool_result)
+
+    rest_events = rest_ws.events(_PROMPT_EVENT)
+    mcp_events = ws_spy.events(_PROMPT_EVENT)
+
+    # REST is UNCHANGED — still exactly one emission (added, never moved).
+    assert len(rest_events) == 1, (
+        f"REST staging must still emit exactly one {_PROMPT_EVENT} (DoD item 3: REST unchanged); "
+        f"got {len(rest_events)}: {rest_ws.event_types()}"
+    )
+    assert len(mcp_events) == 1, f"MCP stage_project must emit exactly one {_PROMPT_EVENT}; got {len(mcp_events)}"
+
+    rest_data = rest_events[0]["data"]
+    mcp_data = mcp_events[0]["data"]
+
+    for field in _IDENTITY_FIELDS:
+        assert rest_data.get(field), f"REST payload lost {field!r} — regression: {rest_data!r}"
+        assert mcp_data.get(field) == rest_data.get(field), (
+            f"payload drift on {field!r}: MCP={mcp_data.get(field)!r} REST={rest_data.get(field)!r}"
+        )
+
+    # Both broadcast to the same (calling) tenant.
+    assert mcp_events[0]["tenant_key"] == rest_events[0]["tenant_key"] == primary_tenant_key
+
+
+async def test_be9332_rest_orchestrator_thin_still_emits(db_session, primary_tenant_key):
+    """Coverage for the OTHER REST emit site: POST /api/prompts/orchestrator-thin.
+
+    The anti-drift test above exercises /prompts/staging (site B). Nothing observed site A,
+    so its entire broadcast block could be deleted with a fully green suite — a pre-existing
+    gap, but this change repoints that block at the shared emitter, so pin it now.
+
+    Site A deliberately carries a DIFFERENT field set to site B: estimated_tokens +
+    timestamp, and NO agent_id or tool. That asymmetry is pre-existing and is left as-is
+    (changing a working REST payload is a behaviour change with no reproduced incident);
+    this test PINS it so it cannot drift further unnoticed.
+    """
+    from api.endpoints import prompts
+    from api.schemas.prompt import OrchestratorPromptRequest
+
+    seeded = await _seed_product_project(db_session, primary_tenant_key)
+    ws = _CapturingWebSocketManager()
+    call = _rest_staging_call(db_session, primary_tenant_key, ws)
+
+    await prompts.generate_orchestrator_prompt_thin(
+        request=OrchestratorPromptRequest(project_id=seeded["project"].id, tool="claude-code"),
+        current_user=call["current_user"],
+        db=db_session,
+        ws_dep=ws,
+    )
+
+    emitted = ws.events(_PROMPT_EVENT)
+    assert len(emitted) == 1, (
+        f"/prompts/orchestrator-thin must still emit exactly one {_PROMPT_EVENT}; "
+        f"got {len(emitted)}: {ws.event_types()}"
+    )
+    data = emitted[0]["data"]
+    assert emitted[0]["tenant_key"] == primary_tenant_key
+    assert data["project_id"] == seeded["project"].id
+    assert data["orchestrator_id"]
+    assert data["execution_id"], "site A relies on execution_id as the store's unique_key"
+    assert data["thin_client"] is True
+    # Site A's own fields...
+    assert data["estimated_tokens"] >= 0
+    assert data["timestamp"]
+    # ...and NOT site B's (pinning the deliberate asymmetry, and the omit-None contract).
+    assert "agent_id" not in data
+    assert "tool" not in data
+
+
+async def test_be9332_stage_project_without_websocket_manager_still_stages(
+    db_manager, db_session, primary_tenant_key, monkeypatch
+):
+    """BE-9332: the emit is best-effort. With NO websocket_manager wired (CE boot before
+    the WS manager exists, or any accessor built without one) staging must still complete
+    normally — the broadcast simply no-ops. Guards against the fix turning an optional
+    notification into a hard dependency."""
+    from api import app_state
+    from api.endpoints import mcp_sdk_server
+    from api.endpoints.mcp_tools import _base
+    from giljo_mcp.tools.tool_accessor import ToolAccessor
+
+    state = app_state.state
+    prior_tool_accessor = state.tool_accessor
+    prior_tenant_manager = state.tenant_manager
+    prior_db_manager = state.db_manager
+
+    if state.tenant_manager is None:
+        state.tenant_manager = TenantManager()
+    state.db_manager = db_manager
+    state.tool_accessor = ToolAccessor(
+        db_manager=db_manager,
+        tenant_manager=state.tenant_manager,
+        test_session=db_session,
+        websocket_manager=None,
+    )
+    monkeypatch.setattr(_base, "_resolve_tenant", lambda ctx: primary_tenant_key)
+    monkeypatch.setattr(_base, "_resolve_user_id", lambda ctx: None)
+
+    try:
+        seeded = await _seed_product_project(db_session, primary_tenant_key)
+        async with create_connected_server_and_client_session(mcp_sdk_server.mcp) as session:
+            result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
+
+        assert result.isError is False, _error_text(result)
+        payload = _payload(result)
+        assert payload["status"] == "staged"
+        assert payload["prompt"]
+    finally:
+        state.tool_accessor = prior_tool_accessor
+        state.tenant_manager = prior_tenant_manager
+        state.db_manager = prior_db_manager
+
+
+async def test_be9332_broadcast_failure_does_not_fail_staging(
+    lifecycle_mcp_client, ws_spy, db_session, primary_tenant_key, monkeypatch
+):
+    """BE-9332: the emitter documents itself as best-effort ("never raises"). Pin it.
+
+    A notification is not worth failing the staging it reports on — if the WS layer is
+    unhealthy the agent must still get its staging prompt and the project must still be
+    persisted as staged. Without this the new call site would be a NEW way for
+    stage_project to fail, which is a worse bug than the one being fixed.
+    """
+
+    async def _boom(**_kwargs):
+        raise RuntimeError("simulated WebSocket failure")
+
+    monkeypatch.setattr(ws_spy, "broadcast_to_tenant", _boom)
+
+    new_client, _switch = lifecycle_mcp_client
+    seeded = await _seed_product_project(db_session, primary_tenant_key)
+
+    async with new_client() as session:
+        result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
+
+    assert result.isError is False, _error_text(result)
+    payload = _payload(result)
+    assert payload["status"] == "staged"
+    assert payload["prompt"]
+
+    # And the staged state really landed despite the broadcast blowing up.
+    row = (await db_session.execute(select(Project).where(Project.id == seeded["project"].id))).scalar_one()
+    assert row.staging_status == "staged"
+
+
+async def test_be9332_stage_returns_execution_id_for_frontend_map_key(
+    lifecycle_mcp_client, db_session, primary_tenant_key
+):
+    """BE-9332 companion fix: ``ThinClientLifecycleMixin.stage()`` dropped ``execution_id``
+    from its return dict, so the MCP tool had nothing to emit it from.
+
+    Both REST prompt endpoints already put ``execution_id`` on the wire, and the frontend
+    event route reads it onto the job row (it is also ``upsertJob``'s first existing-row
+    lookup). Omitting it from the MCP payload would reintroduce exactly the cross-site
+    payload drift this change exists to end — the anti-drift test above would fail.
+    """
+    new_client, _switch = lifecycle_mcp_client
+    seeded = await _seed_product_project(db_session, primary_tenant_key)
+
+    async with new_client() as session:
+        result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
+
+    assert result.isError is False, _error_text(result)
+    payload = _payload(result)
+    assert payload.get("execution_id"), f"stage_project payload must carry execution_id: {payload.keys()}"
+    # It is the AgentExecution row id, distinct from the orchestrator JOB id.
+    assert payload["execution_id"] != payload["orchestrator_id"]
+
+    row = (
+        await db_session.execute(select(AgentExecution).where(AgentExecution.id == payload["execution_id"]))
+    ).scalar_one()
+    assert row.tenant_key == primary_tenant_key
 
 
 # ---------------------------------------------------------------------------

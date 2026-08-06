@@ -429,6 +429,23 @@ class _TaskMutationMixin:
                 message="Task not found after creation",
                 context={"task_id": task_id, "tenant_key": effective_tenant_key},
             )
+
+        # FE-9274: the REST create path had NO broadcast at all (unlike its MCP
+        # twin create_task_for_mcp, which emits task:created) -- a task created
+        # from the dashboard never appeared for other connected tabs without a
+        # manual refresh. log_task above already committed durably, so this is
+        # post-commit.
+        ws = self._websocket_manager
+        if ws:
+            try:
+                await ws.broadcast_to_tenant(
+                    tenant_key=effective_tenant_key,
+                    event_type="task:created",
+                    data={"task_id": task_id, "title": title, "product_id": product_id},
+                )
+            except (RuntimeError, ValueError, OSError) as ws_error:
+                self._logger.warning(f"Failed to broadcast task:created event: {ws_error}")
+
         return task
 
     # ============================================================================

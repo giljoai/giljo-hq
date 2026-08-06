@@ -329,3 +329,116 @@ def find_postgresql() -> Dict[str, Any]:
     """
     discovery = PostgreSQLDiscovery()
     return discovery.discover()
+
+
+def _parse_lsclusters(output: str) -> List[tuple]:
+    """Parse `pg_lsclusters --no-header` into [(major_version, port), ...] for ONLINE clusters.
+
+    Columns are: Ver Cluster Port Status Owner Data-directory Log-file. Only
+    online clusters are returned -- a cluster that is `down` is not somewhere a
+    database can be created.
+    """
+    clusters: List[tuple] = []
+
+    for line in output.splitlines():
+        fields = line.split()
+        if len(fields) < 4:
+            continue
+        version_field, _cluster, port_field, status = fields[0], fields[1], fields[2], fields[3]
+        if status.lower() != "online":
+            continue
+        try:
+            # "18" or, on ancient installs, "9.6" -- the leading component is the major.
+            major = int(version_field.split(".")[0])
+            port = int(port_field)
+        except ValueError:
+            continue
+        clusters.append((major, port))
+
+    return clusters
+
+
+def detect_cluster_port(current_port: int = 5432, timeout: int = 10) -> Optional[int]:
+    """Return the port the local PostgreSQL cluster actually listens on, or None.
+
+    The installer used to assume 5432 everywhere. When something else already
+    holds that port -- a host Postgres, a second WSL distro sharing the network
+    namespace, a published Docker port -- ``pg_createcluster`` puts the new
+    cluster on 5433 and every later step (database creation, .env, config.yaml)
+    aims at a server that is not ours. Worse, the foreign server answers a bare
+    TCP probe, so the mistake looks healthy until authentication fails. (INF-9321)
+
+    Strategy, cheapest discriminating probe first:
+      1. ``pg_lsclusters`` -- authoritative on Debian/Ubuntu/PGDG, which is the
+         path install.sh drives.
+      2. ``psql -tAc "SHOW port"`` -- covers non-Debian Linux, and macOS/Homebrew
+         comes free from the same probe (there the postgres server runs as the
+         current user, so no sudo is needed).
+
+    Windows is deliberately not probed: there is no ``pg_lsclusters``, and the
+    EDB build authenticates with scram, so ``psql`` would need a password the
+    installer does not yet hold. install.ps1 pre-checks the port instead.
+
+    Args:
+        current_port: The port already configured. If a live cluster is on it,
+            it is returned unchanged so a healthy machine sees no change at all.
+        timeout: Per-probe subprocess timeout in seconds.
+
+    Returns:
+        The detected port, or None when nothing could be determined (the caller
+        keeps whatever it had).
+    """
+    logger = logging.getLogger(__name__)
+    system = platform.system()
+
+    if system == "Windows":
+        return None
+
+    # Probe 1: pg_lsclusters (Debian/Ubuntu/PGDG).
+    if shutil.which("pg_lsclusters"):
+        try:
+            proc = subprocess.run(
+                ["pg_lsclusters", "--no-header"],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+            clusters = _parse_lsclusters(proc.stdout or "")
+            if clusters:
+                # Take the newest online cluster: that is the one install.sh just
+                # asked the package manager to create, and the one that meets the
+                # recommended-version bar. On the ordinary single-cluster machine
+                # this is the cluster on 5432, so nothing changes. Ties (two
+                # clusters of the same major) prefer the configured port, then the
+                # lowest, so the answer is deterministic.
+                newest_major = max(major for major, _port in clusters)
+                candidates = sorted(port for major, port in clusters if major == newest_major)
+                port = current_port if current_port in candidates else candidates[0]
+                logger.info("pg_lsclusters reports cluster %s on port %s", newest_major, port)
+                return port
+        except (subprocess.SubprocessError, OSError) as exc:
+            logger.warning("pg_lsclusters probe failed: %s", exc)
+
+    # Probe 2: ask a running server directly.
+    if shutil.which("psql"):
+        # Linux packages run the server as the `postgres` system account (peer
+        # auth over the unix socket). -n so a machine without passwordless sudo
+        # errors out instead of blocking an unattended install on a prompt.
+        cmd = ["psql", "-tAc", "SHOW port"]
+        if system != "Darwin":
+            cmd = ["sudo", "-n", "-u", "postgres", *cmd]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+            if proc.returncode == 0:
+                try:
+                    port = int((proc.stdout or "").strip())
+                except ValueError:
+                    logger.warning("Could not parse 'SHOW port' output")
+                else:
+                    logger.info("psql reports the server is listening on port %s", port)
+                    return port
+        except (subprocess.SubprocessError, OSError) as exc:
+            logger.warning("psql port probe failed: %s", exc)
+
+    return None

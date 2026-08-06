@@ -105,11 +105,16 @@ class TaxonomyRepository:
         Returns:
             List of (TaxonomyType, project_count) tuples.
         """
+        # BE-9355: the liveness predicate belongs INSIDE the correlated subquery.
+        # In the outer WHERE it would filter the taxonomy rows themselves, and a
+        # type with no live projects would vanish from the picker instead of
+        # showing zero.
         project_count_subq = (
             select(func.count(Project.id))
             .where(
                 Project.project_type_id == TaxonomyType.id,
                 Project.tenant_key == tenant_key,
+                Project.deleted_at.is_(None),
             )
             .correlate(TaxonomyType)
             .scalar_subquery()
@@ -131,11 +136,21 @@ class TaxonomyRepository:
         tenant_key: str,
         type_id: str,
     ) -> int:
-        """Count projects assigned to a taxonomy type."""
+        """Count LIVE projects assigned to a taxonomy type.
+
+        BE-9355: soft-deleted projects are excluded because this count is the
+        delete guard in ``taxonomy_ops.delete_taxonomy_type``. Counting a trashed
+        project told the user to "reassign or remove" a project that was already
+        removed and no longer reachable in the UI -- an instruction that could not
+        be followed, leaving the type undeletable until the retention window
+        expired. ``projects.project_type_id`` is ``ondelete="SET NULL"``, so the
+        delete now detaches any trashed project rather than destroying it.
+        """
         result = await session.execute(
             select(func.count(Project.id)).where(
                 Project.project_type_id == type_id,
                 Project.tenant_key == tenant_key,
+                Project.deleted_at.is_(None),
             )
         )
         return result.scalar() or 0

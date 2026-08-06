@@ -39,7 +39,7 @@ from sqlalchemy.orm import joinedload
 from sqlalchemy.sql import func
 
 from giljo_mcp.database import DatabaseManager
-from giljo_mcp.domain.project_status import LIFECYCLE_FINISHED_STATUSES
+from giljo_mcp.domain.project_status import LIFECYCLE_FINISHED_STATUSES, ProjectStatus
 from giljo_mcp.domain.task_status import TASK_LIFECYCLE_FINISHED_STATUSES
 from giljo_mcp.exceptions import (
     AuthorizationError,
@@ -715,6 +715,13 @@ class RoadmapService:
                 # active roadmap (reverses FE-6022c surfacing). `active` is NOT
                 # terminal — an activated project stays (reversible).
                 if status in LIFECYCLE_FINISHED_STATUSES:
+                    continue
+                # IMP-9258: `parked` is its OWN hidden-but-not-finished
+                # exclusion -- deliberately NOT folded into
+                # LIFECYCLE_FINISHED_STATUSES (it is resumable and stays
+                # visible in normal project lists), but a parked project
+                # should not pin the active roadmap plan either.
+                if status == ProjectStatus.PARKED:
                     continue
                 title = proj.name
                 taxonomy_alias = proj.taxonomy_alias or ""

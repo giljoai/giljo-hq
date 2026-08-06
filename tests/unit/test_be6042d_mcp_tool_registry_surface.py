@@ -57,7 +57,17 @@ from api.endpoints.mcp_sdk_server import TOOL_SCOPES, mcp
 # BE-9197 added the pass_baton_to param to post_to_thread (atomic post-with-baton;
 # param addition only, tool set + count unchanged). BE-9201 added create_product +
 # create_vision_document (agent-side product bootstrap for the onboarding tutorial's
-# prompt paths B/D) -> 46.
+# prompt paths B/D) -> 46. BE-9291 added the sequence_run_id param to create_thread —
+# the chain conductor stamps the hub thread's run link structurally instead of
+# encoding it in the subject string, so discovery resolves on a real FK. DELIBERATELY
+# ADMITTED: param addition only, tool set + count unchanged (count stays 46). This
+# lock caught the change, which is exactly its job — a tool signature must not move
+# silently. FE-9320 added the emit_completion param to update_product_context: the
+# vision ingest became a STAGED write (the old one-call-covers-everything mandate
+# failed a real run at 62,420 bytes), and the agent marks its final call instead of
+# a new tool being introduced for the purpose. DELIBERATELY ADMITTED: param addition
+# only, count stays 46 — that is the load-bearing half, since a new tool here would
+# grow the surface of a product about to be submitted to a connector directory.
 EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
     "create_project": {
         "fn": "create_project",
@@ -165,9 +175,19 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
         "scope": "mcp:read",
     },
     # BE-6054b: Agent Message Hub (BBS) thread tools (8 new -> 48 total).
+    # BE-9291: sequence_run_id is the chain conductor's structural hub link (see the
+    # ledger above). Admitted deliberately; fn name and scope are unchanged.
     "create_thread": {
         "fn": "create_thread",
-        "params": ["creator_display_name", "creator_id", "product_id", "project_id", "severity", "subject"],
+        "params": [
+            "creator_display_name",
+            "creator_id",
+            "product_id",
+            "project_id",
+            "sequence_run_id",
+            "severity",
+            "subject",
+        ],
         "scope": "mcp:agent",
     },
     "join_thread": {
@@ -373,6 +393,7 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
             "architecture",
             "consolidated_vision",
             "core_features",
+            "emit_completion",
             "force",
             "product_description",
             "product_id",

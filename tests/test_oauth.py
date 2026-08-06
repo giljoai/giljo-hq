@@ -428,6 +428,189 @@ class TestExchangeCodeForToken:
             )
 
 
+_SEC9227_CONF_CLIENT_ID = "sec9227-confidential-client"
+_SEC9227_CONF_SECRET = "sec9227-confidential-secret-value"
+_SEC9227_CONF_REDIRECT = "http://localhost:3000/callback"
+
+
+@pytest.fixture
+def confidential_client():
+    """Install a process-wide resolver recognizing ONE confidential client.
+
+    A confidential client is one with a ``client_secret_hash`` set (DCR
+    ``client_secret_post``). The built-in resolver only knows the public
+    PKCE-only client, so SEC-9227 (H2) needs a confidential one to prove the
+    verifier is enforced even when a valid secret is presented. The prior
+    resolver is restored on teardown so the seam does not leak across tests.
+    """
+    import bcrypt
+
+    from giljo_mcp.services import oauth_service as _svc
+
+    secret_hash = bcrypt.hashpw(_SEC9227_CONF_SECRET.encode("utf-8"), bcrypt.gensalt()).decode("ascii")
+    resolved = _svc.ResolvedClient(
+        client_id=_SEC9227_CONF_CLIENT_ID,
+        client_name="SEC-9227 confidential test client",
+        redirect_uris=[_SEC9227_CONF_REDIRECT],
+        client_secret_hash=secret_hash,
+    )
+    prev = _svc.get_client_resolver()
+    _svc.set_client_resolver(lambda cid, tk: resolved if cid == _SEC9227_CONF_CLIENT_ID else prev(cid, tk))
+    try:
+        yield
+    finally:
+        _svc.set_client_resolver(prev)
+
+
+@pytest.mark.asyncio
+class TestConfidentialClientPkceEnforced:
+    """SEC-9227 (H2) / RFC 9700 §2.1.1: a confidential client MUST present and
+    pass PKCE at token exchange, exactly like a public client — a stored
+    ``code_challenge`` obliges verification for EVERY client type.
+
+    Before this fix, the confidential branch made ``code_verifier`` optional, so
+    a stolen authorization code plus the client secret redeemed a token with no
+    verifier at all. These tests exercise the service method the bug lives in.
+    """
+
+    async def _make_conf_code(self, oauth_service, test_user, test_tenant_key, challenge):
+        return await oauth_service.generate_authorization_code(
+            user_id=test_user.id,
+            tenant_key=test_tenant_key,
+            client_id=_SEC9227_CONF_CLIENT_ID,
+            redirect_uri=_SEC9227_CONF_REDIRECT,
+            code_challenge=challenge,
+        )
+
+    async def test_confidential_secret_without_verifier_rejected(
+        self, oauth_service, test_user, test_tenant_key, confidential_client
+    ):
+        """THE EXPLOIT SHAPE: valid secret, NO code_verifier → rejected.
+
+        This is the case that returned a token before the fix.
+        """
+        _verifier, challenge = _generate_pkce_pair()
+        code = await self._make_conf_code(oauth_service, test_user, test_tenant_key, challenge)
+
+        with pytest.raises(ValueError, match="code_verifier is required"):
+            await oauth_service.exchange_code_for_token(
+                code=code,
+                client_id=_SEC9227_CONF_CLIENT_ID,
+                code_verifier=None,
+                redirect_uri=_SEC9227_CONF_REDIRECT,
+                client_secret=_SEC9227_CONF_SECRET,
+            )
+
+    async def test_confidential_secret_with_wrong_verifier_rejected(
+        self, oauth_service, test_user, test_tenant_key, confidential_client
+    ):
+        """Valid secret + a code_verifier that does not match the challenge → rejected."""
+        _verifier, challenge = _generate_pkce_pair()
+        code = await self._make_conf_code(oauth_service, test_user, test_tenant_key, challenge)
+
+        with pytest.raises(ValueError, match="PKCE"):
+            await oauth_service.exchange_code_for_token(
+                code=code,
+                client_id=_SEC9227_CONF_CLIENT_ID,
+                code_verifier=secrets.token_urlsafe(64),  # wrong verifier
+                redirect_uri=_SEC9227_CONF_REDIRECT,
+                client_secret=_SEC9227_CONF_SECRET,
+            )
+
+    async def test_confidential_secret_with_correct_verifier_succeeds(
+        self, oauth_service, test_user, test_tenant_key, confidential_client
+    ):
+        """LOAD-BEARING happy path: valid secret + CORRECT verifier → token issued.
+
+        The fix must not break a well-behaved confidential client that does send
+        the verifier (every RFC 9700-compliant client does).
+        """
+        verifier, challenge = _generate_pkce_pair()
+        code = await self._make_conf_code(oauth_service, test_user, test_tenant_key, challenge)
+
+        token_response = await oauth_service.exchange_code_for_token(
+            code=code,
+            client_id=_SEC9227_CONF_CLIENT_ID,
+            code_verifier=verifier,
+            redirect_uri=_SEC9227_CONF_REDIRECT,
+            client_secret=_SEC9227_CONF_SECRET,
+        )
+
+        assert token_response["token_type"] == "bearer"
+        assert token_response["access_token"].count(".") == 2  # JWT
+        # Confidential clients receive a rotating refresh token (API-0021e Phase 2).
+        assert token_response.get("refresh_token")
+
+    async def test_public_client_without_verifier_still_rejected(self, oauth_service, test_user, test_tenant_key):
+        """Two-sided: the public-client path is unchanged — no verifier → rejected."""
+        _verifier, challenge = _generate_pkce_pair()
+        code = await oauth_service.generate_authorization_code(
+            user_id=test_user.id,
+            tenant_key=test_tenant_key,
+            client_id="giljo-mcp-default",
+            redirect_uri="http://localhost:3000/callback",
+            code_challenge=challenge,
+        )
+
+        with pytest.raises(ValueError, match="code_verifier is required"):
+            await oauth_service.exchange_code_for_token(
+                code=code,
+                client_id="giljo-mcp-default",
+                code_verifier=None,
+                redirect_uri="http://localhost:3000/callback",
+            )
+
+    async def test_confidential_replay_without_verifier_does_not_hit_idempotency_cache(
+        self, oauth_service, test_user, test_tenant_key, confidential_client
+    ):
+        """SEC-9227 (H2), idempotency-cache path — the residual bypass.
+
+        The idempotency cache short-circuits and returns a cached token pair
+        BEFORE the mandatory-PKCE check. The cache signature must key on the
+        per-request PKCE verifier, NOT the client_secret — otherwise a
+        confidential client, after one correct-verifier exchange populates the
+        cache, could replay the SAME code with NO verifier inside the window and
+        get the cached tokens with PKCE never checked.
+
+        Fail-first: on the pre-fix code (idem_proof keyed on client_secret) the
+        no-verifier replay returned the cached pair (no raise). After the fix it
+        misses the cache and fails closed.
+        """
+        verifier, challenge = _generate_pkce_pair()
+        code = await self._make_conf_code(oauth_service, test_user, test_tenant_key, challenge)
+
+        # 1. Legit exchange with the correct verifier + secret POPULATES the cache.
+        ok = await oauth_service.exchange_code_for_token(
+            code=code,
+            client_id=_SEC9227_CONF_CLIENT_ID,
+            code_verifier=verifier,
+            redirect_uri=_SEC9227_CONF_REDIRECT,
+            client_secret=_SEC9227_CONF_SECRET,
+        )
+        assert "access_token" in ok
+
+        # 2. Replay the SAME code with NO verifier, same secret, INSIDE the window
+        #    (window not collapsed) — must NOT return the cached tokens.
+        with pytest.raises(ValueError):
+            await oauth_service.exchange_code_for_token(
+                code=code,
+                client_id=_SEC9227_CONF_CLIENT_ID,
+                code_verifier=None,
+                redirect_uri=_SEC9227_CONF_REDIRECT,
+                client_secret=_SEC9227_CONF_SECRET,
+            )
+
+        # 3. Replay with a WRONG verifier — also must fail closed (no cached pair).
+        with pytest.raises(ValueError):
+            await oauth_service.exchange_code_for_token(
+                code=code,
+                client_id=_SEC9227_CONF_CLIENT_ID,
+                code_verifier=secrets.token_urlsafe(64),
+                redirect_uri=_SEC9227_CONF_REDIRECT,
+                client_secret=_SEC9227_CONF_SECRET,
+            )
+
+
 @pytest.mark.asyncio
 class TestCleanupExpiredCodes:
     """Tests for cleanup_expired_codes."""

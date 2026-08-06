@@ -152,6 +152,37 @@ class AgentJob(Base):
         return f"<AgentJob(job_id={self.job_id}, job_type={self.job_type}, status={self.status})>"
 
 
+# BE-9292b: the execution statuses that mean "this run is over" — the exact set
+# every "find the ACTIVE (non-terminal) execution" lookup excludes. Every other
+# status, INCLUDING 'silent', is still completable: a stalled agent the health
+# monitor marked silent can be driven to 'complete' (and then 'closed') by the
+# orchestrator that verified its deliverable.
+#
+# Named once because close_job's wrong-state error now ADVERTISES that recovery.
+# The advertisement is only true while it agrees with the query it describes, and
+# the two used to be independent literals — the class of defect this project
+# exists to fix is a contract that describes a behavior the code does not have.
+#
+# BE-9304 made this the ONLY definition. It absorbed two near-identical rivals:
+# monitoring/agent_health_monitor's private ``_TERMINAL_EXECUTION_STATUSES``
+# (identical value, name differing by one underscore, in the very module that
+# SETS 'silent' — so a maintainer editing this line could not see it) and
+# repositories/mission_repository's ``TERMINAL_AGENT_STATUSES``, which carried a
+# fourth element, "failed". That fourth element was inert: "failed" is not an
+# admissible agent_executions.status (see the ck_agent_execution_status CHECK
+# constraint below — it was legal under the v3.2 baseline and dropped by v3.3),
+# and op.create_check_constraint validates existing rows, so a database at head
+# provably holds no 'failed' row. Dropping it therefore changed no result set.
+# tests/scripts/test_be9304_terminal_status_single_source.py pins both facts and
+# fails if a new literal predicate appears or the schema re-admits 'failed'.
+#
+# BE-9165: anything NOT listed here — 'waiting', 'working', 'blocked', 'silent',
+# 'awaiting_user', 'staged', ... — counts as IN FLIGHT. Unknown statuses land on
+# the in-flight side deliberately, so the closeout gates stay conservative.
+# Order carries no meaning — membership is the whole semantics.
+TERMINAL_EXECUTION_STATUSES: tuple[str, ...] = ("complete", "closed", "decommissioned")
+
+
 class AgentExecution(Base):
     """
     Executor instance - represents an active agent.

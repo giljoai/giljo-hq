@@ -131,12 +131,17 @@ class ProjectPrelaunchWorkproductPayload(BaseModel):
     approved this cycle. Alarm-only -- carries enough for the bell/banner
     to render and link back to the project; the closeout itself is never
     blocked or altered by this detector (fail-open).
+
+    FE-9222: ``taxonomy_alias`` (the project's human tag, e.g. "PRJ-0042")
+    enriches the row so the notification names the project unambiguously.
+    Optional -- a project without a resolvable alias still emits.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     project_id: str = Field(..., min_length=1, max_length=36)
     project_name: str = Field(..., min_length=1, max_length=255)
+    taxonomy_alias: str | None = Field(default=None, max_length=64)
     commit_count: int = Field(..., ge=0)
 
 

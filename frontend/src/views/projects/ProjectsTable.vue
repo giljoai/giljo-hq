@@ -124,12 +124,22 @@
           <span class="date-compact date-cell">{{ formatDateCompactWithTime(item.created_at) }}</span>
         </template>
 
-        <!-- Completed Date Column -->
+        <!-- Completed Date Column.
+             BE-9343: no `|| item.updated_at` fallback. This column is headed COMPLETED
+             but rendered last-modified, so ANY later write — including the archive/hide
+             toggle, which is usually the last thing to touch a finished project —
+             silently moved the date on screen, and it disagreed with the sort (which
+             reads the real column). The backend now stamps completed_at on every
+             terminal transition and ce_0088 backfilled the historical rows, so the real
+             column is the one to show. A terminal row still lacking one gets the same
+             em-dash as a running project rather than a borrowed date. -->
         <template v-slot:item.completed_at="{ item }">
           <div class="text-center">
-            <template v-if="item.status === 'completed' || item.status === 'cancelled' || item.status === 'terminated'">
-              <span class="date-full date-cell">{{ formatDateWithTime(item.completed_at || item.updated_at) }}</span>
-              <span class="date-compact date-cell">{{ formatDateCompactWithTime(item.completed_at || item.updated_at) }}</span>
+            <template
+              v-if="(item.status === 'completed' || item.status === 'cancelled' || item.status === 'terminated') && item.completed_at"
+            >
+              <span class="date-full date-cell">{{ formatDateWithTime(item.completed_at) }}</span>
+              <span class="date-compact date-cell">{{ formatDateCompactWithTime(item.completed_at) }}</span>
             </template>
             <template v-else><span class="date-cell date-cell--empty">—</span></template>
           </div>
@@ -490,6 +500,11 @@ function getRowProps({ item }) {
 // the active dot white in the ≤1280px collapsed view.
 const DOT_ACTIVE = getAgentColor('implementer').hex
 
+// IMP-9258: the collapsed "parked" dot mirrors the full-size StatusBadge pill,
+// which resolves the `color-agent-reviewer` (Lavender) token — same technique
+// as DOT_ACTIVE above, so the dot and pill never drift onto separate palettes.
+const DOT_PARKED = getAgentColor('reviewer').hex
+
 function statusDotColor(status) {
   const colors = {
     active: DOT_ACTIVE,
@@ -498,6 +513,7 @@ function statusDotColor(status) {
     cancelled: DOT_WARNING,
     terminated: DOT_ERROR,
     deleted: DOT_ERROR,
+    parked: DOT_PARKED,
   }
   return colors[status] || DOT_MUTED
 }
@@ -514,17 +530,24 @@ const statusActionDefs = {
   deactivate: { label: 'Deactivate', icon: 'mdi-pause-circle', color: null, confirm: true },
   complete: { label: 'Complete', icon: 'mdi-check-circle', color: null, confirm: true },
   cancel: { label: 'Cancel Project', icon: 'mdi-cancel', color: 'warning', confirm: true },
+  // IMP-9258: Park sets a project aside without cancelling it — non-destructive
+  // and fully resumable (unlike Cancel), so no confirm dialog.
+  park: { label: 'Park Project', icon: 'mdi-parking', color: null, confirm: false },
+  unpark: { label: 'Unpark', icon: 'mdi-play-circle-outline', color: 'success', confirm: false },
   reopen: { label: 'Reopen', icon: 'mdi-refresh', color: 'success', confirm: false },
   review: { label: 'Review', icon: 'mdi-eye', color: null, confirm: false },
   superseded: { label: 'Mark Superseded', icon: 'mdi-file-replace-outline', color: null, confirm: false },
 }
 
 const actionsByStatus = {
-  inactive: ['activate', 'complete', 'cancel', 'superseded'],
-  active: ['deactivate', 'complete', 'cancel', 'superseded'],
+  inactive: ['activate', 'complete', 'cancel', 'park', 'superseded'],
+  active: ['deactivate', 'complete', 'cancel', 'park', 'superseded'],
   completed: ['review', 'superseded'],
   cancelled: ['review'],
   terminated: ['review'],
+  // IMP-9258: parked is a two-way door (not lifecycle-finished, not immutable)
+  // — its only status-aware action is Unpark, straight back to inactive.
+  parked: ['unpark'],
 }
 
 function getStatusActions(item) {

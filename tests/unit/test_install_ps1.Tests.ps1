@@ -278,6 +278,6 @@ Describe "Script Structure" {
     }
 
     It "references the correct GitHub repository" {
-        $script:content | Should -Match 'giljoai/GiljoAI_MCP'
+        $script:content | Should -Match 'giljoai/giljo-hq'
     }
 }

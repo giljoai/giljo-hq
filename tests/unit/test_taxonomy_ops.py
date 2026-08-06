@@ -81,6 +81,7 @@ class TestEnsureDefaultTypesSeeded:
     async def test_seeds_when_no_types(self):
         """If tenant has zero types, all defaults should be added."""
         session = AsyncMock()
+        session.add = MagicMock()  # Session.add is sync in real SQLAlchemy
         mock_result = MagicMock()
         mock_result.scalar.return_value = 0
         session.execute.return_value = mock_result

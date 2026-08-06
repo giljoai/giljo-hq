@@ -40,6 +40,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from api.middleware.auth_rate_limiter import get_rate_limiter
 from api.middleware.auth_rate_limits import limit_for
+from giljo_mcp import branding
 from giljo_mcp.services.oauth_service import (
     ALLOWED_REDIRECT_URI_PATTERNS,
     BUILTIN_CLIENT_ID,
@@ -81,7 +82,7 @@ class CeRegistrationRequest(BaseModel):
     sanity.
     """
 
-    client_name: str = Field(default="GiljoAI MCP client", min_length=1, max_length=MAX_CLIENT_NAME_LENGTH)
+    client_name: str = Field(default=f"{branding.PRODUCT_NAME} client", min_length=1, max_length=MAX_CLIENT_NAME_LENGTH)
     redirect_uris: list[str] = Field(..., min_length=1, max_length=MAX_REDIRECT_URIS)
     grant_types: list[str] | None = Field(default=None, max_length=8)
     response_types: list[str] | None = Field(default=None, max_length=8)

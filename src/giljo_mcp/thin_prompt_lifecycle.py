@@ -11,7 +11,7 @@ Mechanical mixin split (mirrors the BE-6042 / tool_accessor mixin pattern) to ke
 AND the ``stage_project`` / ``implement_project`` MCP tools — zero duplicated
 prompt-building. They run on the composed ``ThinClientPromptGenerator`` and use its
 ``db`` / ``tenant_key`` / ``generate`` / ``generate_staging_prompt`` /
-``generate_implementation_prompt`` / ``_fetch_project`` members.
+``generate_implementation_prompt`` members.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from giljo_mcp.models import Project
-from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES, AgentExecution, AgentJob
 from giljo_mcp.models.templates import AgentTemplate
 from giljo_mcp.platform_registry import (
     ACCEPTED_EXECUTION_MODES,
@@ -32,6 +32,8 @@ from giljo_mcp.platform_registry import (
     MODE_MULTI_TERMINAL,
     effective_harness,
 )
+from giljo_mcp.services.execution_mode_gate import effective_execution_mode
+from giljo_mcp.services.sequence_chain_context import chain_execution_mode_for_project
 
 
 # The harness-neutral subagent implementation prompt type (BE-9099) — served by
@@ -248,8 +250,8 @@ class ThinClientLifecycleMixin:
     _IMPLEMENTATION_PROMPT_TYPE_MAP: ClassVar[dict[str, str]] = _IMPLEMENTATION_PROMPT_TYPE_MAP
 
     async def stage(self, project_id: str, user_id: str | None, tool: str, execution_mode: str) -> dict[str, Any]:
-        """Shared staging core (INF-6049b) — create the orchestrator job, build the
-        mode-specific staging prompt, and persist the staged state.
+        """Shared staging core (INF-6049b) — create the orchestrator job and build the
+        mode-specific staging prompt. Pure generation; does NOT persist staged state.
 
         This is the generation path the ``stage_project`` MCP tool drives; it reuses
         the EXISTING engine (``generate`` + ``generate_staging_prompt`` ->
@@ -258,17 +260,29 @@ class ThinClientLifecycleMixin:
         caller. Content is therefore equivalent to ``GET /api/prompts/staging`` for
         the same project + resolved tool.
 
+        The mark_staged single-writer transaction fix: this method used to also
+        raw-write ``project.staging_status='staged'`` + ``execution_mode`` and
+        ``self.db.commit()`` inline here, on a re-fetched project row -- a SECOND
+        write path for the identical transition ``ProjectStagingService.mark_staged``
+        already owns, and on a session the caller had no way to control. That write
+        (and the redundant re-fetch it required) is gone; EVERY caller of ``stage()``
+        MUST now call ``ProjectStagingService.mark_staged`` (via the
+        ``ProjectLifecycleService`` facade) itself, on its own session, right after
+        this returns -- see ``ToolAccessor.stage_project``
+        (``tools/tool_accessor/_project_tools.py``) for the reference caller.
+
         Args:
             project_id: Project UUID.
             user_id: Authenticated user id (optional; drives field-priority toggles).
             tool: Harness tool (claude-code / codex / gemini / antigravity).
-            execution_mode: Resolved execution_mode persisted onto the project
-                pre-launch (claude_code_cli / codex_cli / gemini_cli / multi_terminal /
-                antigravity_cli).
+            execution_mode: Resolved execution_mode the CALLER must persist onto the
+                project pre-launch via ``mark_staged`` (claude_code_cli / codex_cli /
+                gemini_cli / multi_terminal / antigravity_cli) -- this method itself no
+                longer writes it.
 
         Returns:
-            dict with ``orchestrator_id``, ``agent_id``, ``prompt``,
-            ``estimated_prompt_tokens``.
+            dict with ``orchestrator_id``, ``agent_id``, ``execution_id``,
+            ``prompt``, ``estimated_prompt_tokens``, ``launch_commands``.
 
         Raises:
             ValueError: If the project or its product is not found.
@@ -283,17 +297,6 @@ class ThinClientLifecycleMixin:
         )
         staging_tokens = len(staging_prompt) // 4
 
-        # Persist staged state so it survives navigation away. Mirror of the REST
-        # staging endpoint: write the RESOLVED mode only while still pre-launch
-        # (once implementation_launched_at is stamped the mode is locked; re-stage
-        # to change it). The human gate is untouched here.
-        project = await self._fetch_project(project_id)
-        if project:
-            project.staging_status = "staged"
-            if project.implementation_launched_at is None:
-                project.execution_mode = execution_mode
-            await self.db.commit()
-
         # INF-6049c: multi_terminal staging carries the per-agent launch_commands for
         # any agents the orchestrator has already spawned (empty at first staging,
         # before a team exists). Other modes run one terminal -> no array.
@@ -306,6 +309,12 @@ class ThinClientLifecycleMixin:
         return {
             "orchestrator_id": result["orchestrator_id"],
             "agent_id": result.get("agent_id"),
+            # BE-9332: the AgentExecution row id. Both REST prompt endpoints already put
+            # it on the orchestrator:prompt_generated wire payload, and the frontend
+            # route reads it onto the job row (it is also upsertJob's first
+            # existing-row lookup). The MCP caller could not emit it because stage()
+            # dropped it here — generate() has always returned it.
+            "execution_id": result.get("execution_id"),
             "prompt": staging_prompt,
             "estimated_prompt_tokens": staging_tokens,
             "launch_commands": launch_commands,
@@ -357,13 +366,25 @@ class ThinClientLifecycleMixin:
         if not project:
             raise ResourceNotFoundError(f"Project {project_id} not found or not accessible")
 
+        # BE-9335: a chain member IMPLEMENTS in the chain's mode. This path is the solo
+        # Play button, which stays live on a chain member's Jobs tab, so it is reachable
+        # by clicking alone — and it read the project column at every site below, which
+        # rendered a member in whatever mode it was staged with individually. Resolved
+        # ONCE here so the gate, the per-agent tool assignment, the prompt-builder
+        # election and the launch-command branch cannot disagree with each other.
+        # None (solo path) -> the project column, so solo rendering is unchanged.
+        execution_mode = effective_execution_mode(
+            project.execution_mode,
+            await chain_execution_mode_for_project(self.db, project_id=project_id, tenant_key=self.tenant_key),
+        )
+
         # 2. Validate execution mode. BE-9035a derived this gate from the registry (was
         # a hand-copied tuple that omitted generic_mcp, 400ing every solo generic_mcp
         # project at implement). BE-9035c: use the registry's BOUNDARY set (2 canonical
         # modes + 5 legacy aliases) so the collapsed ``subagent`` mode is supported and a
         # stored legacy row (incl. ``generic_mcp``) never hard-fails at implement.
-        if project.execution_mode not in ACCEPTED_EXECUTION_MODES:
-            raise ValidationError(f"Unsupported execution mode: {project.execution_mode}")
+        if execution_mode not in ACCEPTED_EXECUTION_MODES:
+            raise ValidationError(f"Unsupported execution mode: {execution_mode}")
 
         # 3. SACRED human gate — shared with the REST endpoint, never bypassed.
         ProjectStagingService.check_implementation_allowed(project)
@@ -376,7 +397,7 @@ class ThinClientLifecycleMixin:
             .where(
                 AgentExecution.tenant_key == self.tenant_key,
                 AgentExecution.agent_display_name == "orchestrator",
-                AgentExecution.status.not_in(["complete", "closed", "decommissioned", "failed"]),
+                AgentExecution.status.not_in(TERMINAL_EXECUTION_STATUSES),
             )
             .join(
                 AgentJob,
@@ -427,8 +448,6 @@ class ThinClientLifecycleMixin:
             # stays) from "all specialists terminal" — the latter is a valid
             # lifecycle state (work executed outside a staged session) and gets
             # a ready-to-close response instead of the misleading dead end.
-            from giljo_mcp.repositories.mission_repository import TERMINAL_AGENT_STATUSES
-
             any_status_stmt = (
                 select(AgentExecution)
                 .where(
@@ -442,7 +461,7 @@ class ThinClientLifecycleMixin:
                 .where(AgentJob.project_id == project_id)
             )
             all_specialists = (await self.db.execute(any_status_stmt)).scalars().all()
-            if all_specialists and all(e.status in TERMINAL_AGENT_STATUSES for e in all_specialists):
+            if all_specialists and all(e.status in TERMINAL_EXECUTION_STATUSES for e in all_specialists):
                 return {
                     "ready_to_close": True,
                     "prompt": _READY_TO_CLOSE_PROMPT,
@@ -461,7 +480,7 @@ class ThinClientLifecycleMixin:
         # 7. INF-6049c: resolve each spawned agent's assigned coding tool BEFORE prompt
         # generation so the per-terminal seed block routes each agent to its tool's
         # variant (Claude -> ToolSearch bootstrap; codex/gemini/antigravity -> plain).
-        await self._resolve_agent_cli_tools(agent_executions, execution_mode=project.execution_mode)
+        await self._resolve_agent_cli_tools(agent_executions, execution_mode=execution_mode)
 
         # 8. Select the implementation prompt builder (BE-9099). The pure resolver applies
         # the DETECTED-beats-declared harness upgrade for subagent-family modes and keeps
@@ -469,7 +488,7 @@ class ThinClientLifecycleMixin:
         # UNREACHABLE from a subagent election. Step 2 already validated execution_mode
         # against ACCEPTED_EXECUTION_MODES. resolved_harness seeds the neutral builder's
         # registry-sourced spawn prose (None for multi_terminal).
-        prompt_type, resolved_harness = select_implementation_prompt_type(project.execution_mode, detected_harness)
+        prompt_type, resolved_harness = select_implementation_prompt_type(execution_mode, detected_harness)
         prompt = self.generate_implementation_prompt(
             prompt_type=prompt_type,
             resolved_harness=resolved_harness,
@@ -483,7 +502,7 @@ class ThinClientLifecycleMixin:
         # (advisory; the driving agent / user runs them locally). Other modes run a
         # single terminal, so the array is empty.
         launch_commands: list[dict] = []
-        if project.execution_mode == "multi_terminal":
+        if execution_mode == "multi_terminal":
             launch_commands = self._launch_commands_for(agent_executions)
 
         return {

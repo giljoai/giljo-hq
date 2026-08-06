@@ -131,10 +131,12 @@ class _FakeWebSocket:
     ``client``/``base_url`` are needed since BE-8000h: a failed API-key
     validation now runs the shared per-IP auth-failure throttle
     (``enforce_api_key_auth_failure``), which reads both off the request-like
-    object. ``base_url`` deliberately starts with ``http://test`` so the
-    limiter's existing test-bypass exempts this transport-parity suite from
-    throttling -- BE-6060b/BE-8000h's own throttle behavior is covered in
-    their dedicated regression tests, not here.
+    object. The WS parity tests here authenticate valid/one-shot credentials
+    and are not meant to be throttled — the global ``_auth_rate_limit_test_bypass``
+    fixture (SEC-9227 H4) keeps the limiter's explicit test bypass ON for them.
+    (``base_url`` is now inert for that decision — it used to carry the
+    ``http://test`` sentinel; the throttle behavior itself is covered in
+    BE-6060b/BE-8000h's dedicated regression tests, not here.)
     """
 
     def __init__(self, *, token: str | None = None, api_key: str | None = None) -> None:
@@ -297,9 +299,10 @@ class _FakeRestRequest:
     TSK-9021 (REST parity with BE-8000h/BE-6060b): a failed X-API-Key auth now
     runs the shared per-IP auth-failure throttle (``enforce_api_key_auth_failure``),
     which reads ``client``/``headers``/``base_url`` off the request-like object,
-    same as the WS handshake stand-in above. ``base_url`` deliberately does NOT
-    start with ``http://test`` -- that prefix is the limiter's test-bypass -- so
-    this suite drives the REAL throttle path.
+    same as the WS handshake stand-in above. This class drives the REAL throttle,
+    so it opts out of the global test bypass via ``real_auth_rate_limiter``
+    (SEC-9227 H4). (``base_url`` is now inert for that decision — it used to
+    carry the ``http://test`` sentinel.)
     """
 
     def __init__(self, *, ip: str) -> None:
@@ -315,6 +318,12 @@ class _FakeRestRequest:
 
 
 class TestRestParity:
+    @pytest.fixture(autouse=True)
+    def _real_limiter(self, real_auth_rate_limiter):
+        """SEC-9227 (H4): this class asserts the REST failed-auth throttle fires,
+        so keep the global test-bypass OFF for its tests."""
+        return
+
     @pytest.mark.asyncio
     async def test_repeated_bad_api_key_over_rest_trips_lockout(self, db_session, monkeypatch):
         """``limit`` bad X-API-Keys over REST are plain 401 rejections; the

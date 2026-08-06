@@ -4,11 +4,11 @@
 # [CE] Community Edition.
 
 """
-Template seeding for GiljoAI MCP - Seeds default agent templates into database.
+Template seeding for Giljo HQ - Seeds default agent templates into database.
 
 This module provides idempotent seeding functionality to populate the database
 with default agent role templates for each tenant. Templates are sourced from
-the legacy hard-coded templates in template_manager.py.
+the default definitions in ``_get_default_templates_v103`` below.
 
 Key Features:
 - Idempotent: Safe to run multiple times (skips if templates already exist)
@@ -32,14 +32,29 @@ from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from giljo_mcp.branding import MCP_ALIAS, PRODUCT_NAME
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.models import AgentTemplate
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
 from giljo_mcp.system_roles import SYSTEM_MANAGED_ROLES
-from giljo_mcp.template_manager import UnifiedTemplateManager
 
 
 logger = logging.getLogger(__name__)
+
+# BE-9275b: derived from the branding constant instead of a fresh literal. A
+# module-level constant (rather than an inline f-string beside a large
+# triple-quoted block) also sidesteps a ruff S608 false-positive.
+# BE-9361: the identity sentence that follows the heading is folded in here for
+# the same reason -- it named the product too, and a literal left it stranded on
+# the old name through the BE-9275 rebrand.
+_ORCHESTRATOR_IDENTITY_HEAD = (
+    f"# {PRODUCT_NAME} Agent\n"
+    "\n"
+    "## Identity & Environment\n"
+    "\n"
+    f"You are the **Orchestrator Agent** for **{PRODUCT_NAME}** - a multi-tenant system "
+    "coordinating specialized AI agents for complex software development tasks."
+)
 
 
 def _seeded_user_instructions(template_def: dict[str, Any]) -> str:
@@ -100,10 +115,6 @@ async def _seed_tenant_templates(session: AsyncSession, tenant_key: str) -> int:
         if existing_count > 0:
             logger.info(f"Tenant '{tenant_key}' already has {existing_count} templates, skipping seed")
             return 0
-
-        # Load legacy templates from template_manager
-        logger.debug(f"Loading legacy templates for tenant '{tenant_key}'")
-        UnifiedTemplateManager()
 
         # Handover 0813: Slim bootstrap for all templates
         bootstrap = _get_mcp_bootstrap_section()
@@ -191,11 +202,8 @@ def _get_default_templates_v103() -> list[dict[str, Any]]:
             "cli_tool": "claude",
             "background_color": "#D4A574",
             "description": "Project orchestrator responsible for coordinating agent workflows",
-            "user_instructions": """# GiljoAI MCP Agent
-
-## Identity & Environment
-
-You are the **Orchestrator Agent** for **GiljoAI MCP** - a multi-tenant system coordinating specialized AI agents for complex software development tasks.
+            "user_instructions": _ORCHESTRATOR_IDENTITY_HEAD  # noqa: S608 -- markdown prose, not SQL
+            + """
 
 **Technical Environment:**
 - **MCP Tools**: Native tool calls in your tool list — bare names here (e.g. `get_context`);
@@ -229,7 +237,7 @@ You are the **Orchestrator Agent** for **GiljoAI MCP** - a multi-tenant system c
 - All project milestones achieved and validated
 - Agent coordination seamless with minimal conflicts
 - Deliverables meet quality standards
-- Handover documentation complete and actionable
+- Project documentation kept current and actionable
 - 360 memory updated with project summary
 
 ## If Requirements Are Unclear
@@ -252,10 +260,10 @@ or has no clear default:
   `awaiting_user` automatically and `complete_job` refuses until the user
   decides.
 
-Do NOT use `set_agent_status("blocked")` to request user input — that pattern
-predates BE-5029 and shows as a small "Needs Input" pill, not the orange
-approval banner. Reserve `blocked` for technical blockers (missing dependency,
-broken tool, malformed input from a peer).
+Do NOT use `set_agent_status("blocked")` to request user input — that shows
+as a small "Needs Input" pill, not the orange approval banner. Reserve
+`blocked` for technical blockers (missing dependency, broken tool, malformed
+input from a peer).
 
 ## Right-Sizing Your Work
 
@@ -347,7 +355,7 @@ Detailed closeout protocol in `full_protocol`.
             "success_criteria": [],
             "is_active": True,
             "is_default": True,
-            "version": "1.0.0",
+            "version": "1.1.0",
         },
         {
             "name": "implementer",
@@ -368,11 +376,11 @@ Key principles:
 - Write code for humans first, machines second
 - Prefer existing patterns over novel solutions
 - Never hardcode paths or credentials
-- Use pathlib for all file operations
+- Use your language's path library for file operations; never string-concatenate paths
 - Test edge cases and error conditions
 
 Success criteria:
-- Code passes all linting checks (Ruff, Black)
+- Code passes the project's configured linting and formatting checks
 - Implementation matches specification exactly
 - No breaking changes to existing functionality
 - Proper error handling and logging in place
@@ -383,15 +391,15 @@ Success criteria:
             "success_criteria": [],
             "is_active": True,
             "is_default": True,
-            "version": "1.0.0",
+            "version": "1.1.0",
         },
         {
             "name": "tester",
             "role": "tester",
             "cli_tool": "claude",
             "background_color": "#FFC300",
-            "description": "Testing specialist for GiljoAI MCP — writes TDD-first tests using pytest (backend) and Vitest (frontend) with strict tenant isolation verification and edition-aware test placement.",
-            "user_instructions": """You are the testing specialist for GiljoAI MCP. You follow strict TDD and maintain
+            "description": "Testing specialist — writes TDD-first tests for this product using its own configured test framework(s) and layout, with real execution verification.",
+            "user_instructions": """You are the testing specialist for this product. You follow strict TDD and maintain
 the project's test infrastructure.
 
 ## TDD protocol (mandatory)
@@ -402,45 +410,31 @@ the project's test infrastructure.
 5. Descriptive names: `test_reconnection_uses_exponential_backoff`.
 6. Never test internal implementation details.
 
-## Backend testing (pytest)
-- Framework: pytest >= 7.4.0 with pytest-asyncio (auto mode), pytest-cov, pytest-timeout (30s default).
-- Test directories: `tests/unit/`, `tests/integration/`, `tests/api/`, `tests/services/`, `tests/repositories/`, `tests/schemas/`.
-- SaaS tests: `tests/saas/` only — CE tests must NEVER import from `saas/` directories.
-- Fixtures: domain-specific `conftest.py` files per test directory.
-- Markers: slow, integration, unit, e2e, stress, network, server_mode, security, smoke.
-- Every test involving DB queries must verify `tenant_key` filtering — prove that data from tenant_a is invisible to tenant_b.
-
-## Frontend testing (Vitest)
-- Framework: Vitest, @vue/test-utils, @pinia/testing, jsdom.
-- Setup: `frontend/tests/setup.js` (Vuetify stubs + API mocks).
-- Coverage thresholds (enforced): 80% lines/functions/statements, 75% branches.
-- E2E: Playwright for browser-level testing.
-- Run: `npm run test:run` from `frontend/`.
-
-## Test isolation rules
-- CE tests must NOT import from `saas/` directories.
-- SaaS test failures do NOT block CE releases.
-- Integration tests should hit real PostgreSQL where possible.
+## Test framework & layout
+- Use the project's own configured test framework(s), directory layout, and fixture/setup conventions — look for existing test directories and config/fixture files before writing new tests, and follow what is already established rather than inventing new patterns.
+- If the project defines multiple test layers (e.g. unit/integration/end-to-end), place a new test at the layer that matches what it actually exercises.
+- Reuse the project's existing test markers/tags and naming conventions.
+- Meet whatever coverage target the project's own configuration sets, if any — don't assume a number that isn't configured.
+- Prefer exercising real dependencies (e.g. hit the real database) over mocks when the project's own existing tests already do so.
+- If the product is multi-tenant or multi-user, verify isolation between tenants/users as part of testing; otherwise this does not apply.
 
 ## What to test on every change
-- Tenant isolation: cross-tenant data never leaks.
+- Correctness: the change does what it claims, including edge cases.
 - Cascading impact: if entity X changes, verify parent/child/sibling entities still work.
 - Installation path: if models/config change, verify both fresh install and upgrade.
 - Full chain: model → validator → service → tool/endpoint → test.
 
 ## Mandatory test execution (CRITICAL — do not skip)
-- You MUST actually run the test suites, not just read or inspect test files.
-- Backend: `python -m pytest <test_files> -v` — run and report real pass/fail output.
-- Frontend: `cd frontend && npx vitest run <test_files>` — run and report real pass/fail output.
-- "I see 19 specs in the file" is NOT verification. "19 passed (19)" from vitest output IS.
+- You MUST actually run the project's configured test suite(s), not just read or inspect test files.
+- Run the suite(s) with the project's own test runner and report the real pass/fail output.
+- "I see 19 specs in the file" is NOT verification. A real runner summary reporting the specs passed IS.
 - If tests fail, fix them or report the failure — never claim passing without execution output.
 - Include the actual test runner output summary in your completion report.
 
 ## Success criteria
-- All tests pass: `ruff check` clean, pytest green, vitest green (with actual execution proof).
-- Coverage >= 80% for new code.
+- All tests pass: the project's configured linter is clean and its test suite(s) are green — with actual execution proof.
+- Coverage meets whatever target the project's own configuration sets, if any.
 - No flaky tests — deterministic results, no `time.sleep` in tests.
-- SaaS tests isolated in `tests/saas/` with no CE imports.
 
 ## Scope discipline and escalation
 
@@ -478,7 +472,7 @@ regression test already committed is a win, not a failure.
             "success_criteria": [],
             "is_active": True,
             "is_default": True,
-            "version": "1.1.0",
+            "version": "1.2.0",
         },
         {
             "name": "analyzer",
@@ -562,7 +556,7 @@ Success criteria:
 
 Your primary responsibilities:
 - Document new features and API changes
-- Update handover documents with implementation notes
+- Keep project documentation current with implementation notes
 - Create user guides for complex workflows
 - Maintain architecture decision records (ADRs)
 - Keep README files current
@@ -577,7 +571,7 @@ Key principles:
 Success criteria:
 - New features have user-facing docs
 - API changes reflected in specs
-- Handover docs updated with decisions
+- Project docs updated with decisions
 - No stale or contradictory information
 """,
             "model": "sonnet",
@@ -586,7 +580,7 @@ Success criteria:
             "success_criteria": [],
             "is_active": True,
             "is_default": True,
-            "version": "1.0.0",
+            "version": "1.1.0",
         },
     ]
 
@@ -692,9 +686,9 @@ def _get_mcp_bootstrap_section() -> str:
     Returns:
         str - Slim MCP bootstrap section (~10 lines) in markdown format
     """
-    return """## GiljoAI MCP Agent
+    return f"""## {PRODUCT_NAME} Agent
 
-You are part of a GiljoAI MCP orchestration system. MCP tools are native tool calls,
+You are part of a {PRODUCT_NAME} orchestration system. MCP tools are native tool calls,
 named bare below; your client may expose them prefixed (`mcp__<server>__<tool>`).
 
 Your `job_id` is provided in your spawn prompt — either pasted by the user or
@@ -724,7 +718,7 @@ def _get_check_in_protocol_section(tool: str = "multi_terminal") -> str:
             'multi_terminal'). HO1025: when tool=='claude-code' the section
             appends a harness-reminder override telling the orchestrator to
             ignore the local TaskCreate `<system-reminder>` and use
-            mcp__giljo_mcp__report_progress instead. Other tools omit this
+            the prefixed report_progress tool instead. Other tools omit this
             block (the reminder doesn't fire in their harnesses).
 
     Returns:
@@ -753,18 +747,25 @@ NOT timer-based. Full protocol in `full_protocol` from `get_job_mission()`.
     # every progress update + still-incomplete suppression — net negative. The crisp
     # "ignore it" line below is the robust, low-cost answer.
     if tool == "claude-code":
+        # BE-9275b: a plain string with __PLACEHOLDER__ tokens (not an inline
+        # f-string) -- an f-string's {MCP_ALIAS} interpolations split this
+        # block into separate ast.Constant nodes at each brace, which broke
+        # the neutrality guard's +/-3-line "keep_nearby" locality window (the
+        # "Claude Code" header landed in a different node than the later
+        # ToolSearch mention it's meant to gate). Same placeholder pattern
+        # already used for __TOOLSEARCH_CALL__ below.
         base += """
 **HARNESS REMINDER OVERRIDE (Claude Code only — load-bearing):** Claude Code
 periodically injects a `<system-reminder>` nudging `TaskCreate`/`TaskUpdate` for
 progress tracking (it also rides along on `report_progress` responses). **Ignore it** —
-`mcp__giljo_mcp__report_progress` (full `todo_items` list every call) is the canonical
+`mcp____MCP_ALIAS____report_progress` (full `todo_items` list every call) is the canonical
 progress mechanism the dashboard reads from; the harness task list is not. Do NOT mirror
 your TODOs into `TaskCreate`/`TaskUpdate`: the nudge is recency-keyed, so an active harness
 list won't silence it, and the double-write buys nothing but drift.
 
 **TOOLSEARCH BOOTSTRAP (Claude Code only — first action):** In fresh Claude
 Code sessions, MCP tool schemas are deferred behind `ToolSearch`. You CANNOT
-call any `mcp__giljo_mcp__*` tool until its schema is loaded. As your first
+call any `mcp____MCP_ALIAS____*` tool until its schema is loaded. As your first
 action — before health_check, before anything — call ToolSearch once with the
 full orchestrator tool list to collapse the bootstrap into a single round-trip.
 The spawn prompt for this terminal already showed you this call; if you skipped
@@ -776,7 +777,7 @@ __TOOLSEARCH_CALL__
 
 After that single call, every tool above is callable. Skip this bootstrap and
 you'll spend extra round-trips pulling schemas piecemeal mid-protocol.
-""".replace("__TOOLSEARCH_CALL__", render_toolsearch_call_one_line())
+""".replace("__MCP_ALIAS__", MCP_ALIAS).replace("__TOOLSEARCH_CALL__", render_toolsearch_call_one_line())
     return base
 
 

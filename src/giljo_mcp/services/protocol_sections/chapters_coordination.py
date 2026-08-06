@@ -120,6 +120,18 @@ When in doubt about whether a message is INFO or WORK: if acting on it would
 change what another agent is supposed to build, it is WORK — route it through the
 orchestrator.
 
+- THE HUMAN OPERATOR IS ADDRESSABLE. Everything above routes agent-to-agent, but
+  some calls are not the orchestrator's to make — a product judgement, a spend, a
+  public-facing decision. For those, address the operator DIRECTLY:
+      post_to_thread(..., to_participant="user", requires_action=true)
+  "user" is a reserved alias the server resolves to the operator; you are not
+  expected to know their id. pass_baton(thread_id, to="user") works the same way.
+  Do NOT write "waiting for you" into a broadcast and hope. A broadcast moves no
+  baton, so the request is invisible on the operator's board no matter how the
+  prose is worded — the Hub deliberately shows "your turn" only from the baton and
+  never from the words in a post. Directed and baton-passed is the only form of
+  that request the operator can actually see.
+
 MESSAGE BOARD (threads) — when you are on a comm thread (a CHT-#### chat):
 - Posts are APPEND-ONLY. post_to_thread adds to the timeline; never rewrite history.
 - IDENTIFY YOURSELF: pass from_agent = your role from your activated agent template

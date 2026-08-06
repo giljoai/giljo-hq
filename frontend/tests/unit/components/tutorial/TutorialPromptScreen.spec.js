@@ -127,13 +127,13 @@ describe('TutorialPromptScreen', () => {
     it('renders the CE wording by default and the SaaS variant in SaaS mode', async () => {
       let wrapper = mountScreen({ path: 'D' })
       await flushPromises()
-      expect(wrapper.text()).toContain('self-hosted GiljoAI MCP server')
+      expect(wrapper.text()).toContain('self-hosted Giljo HQ server')
 
       mockIsSaas = true
       wrapper = mountScreen({ path: 'D' })
       await flushPromises()
       expect(wrapper.text()).toContain('browser sign-in')
-      expect(wrapper.text()).not.toContain('self-hosted GiljoAI MCP server')
+      expect(wrapper.text()).not.toContain('self-hosted Giljo HQ server')
     })
 
     it('poll ignores intermediate section writes and advances ONLY on the final consolidated-vision write', async () => {

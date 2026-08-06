@@ -33,9 +33,39 @@ from giljo_mcp.platform_registry import VALID_EXECUTION_MODES, mode_label_list
 __all__ = [
     "EXECUTION_MODE_NOT_SELECTED_MESSAGE",
     "VALID_EXECUTION_MODES",
+    "effective_execution_mode",
+    "execution_mode_not_selected_message",
     "execution_mode_selected",
     "require_execution_mode",
 ]
+
+
+def effective_execution_mode(project_execution_mode: Any, chain_execution_mode: Any = None) -> Any:
+    """Return the mode a project actually RUNS in — the CHAIN's when it is a member.
+
+    BE-9335: a chain's execution mode is chosen once, for the whole chain, and is
+    stored on the RUN (``sequence_runs.execution_mode``). ``projects.execution_mode``
+    is the SOLO authority and the fallback. Every chain-member reader must resolve
+    through here, because the failure this fixes was not a stale value but a
+    DISAGREEMENT: the mission protocol header already resolved the run (BE-6177)
+    while ``get_staging_instructions`` and the ``spawn_job`` bootstrap resolved the
+    project column, so one member was told two different harnesses at once.
+
+    Deliberately NOT gated on ``implementation_launched_at``. The per-project
+    post-launch lock exists so a LIVE agent's harness cannot change under it; for a
+    chain member that guarantee comes from the RUN's mode being frozen as soon as
+    any member crosses that same launch gate (``refuse_mode_change_if_live``).
+    Gating the RESOLVER on it instead would defeat the fix outright, because driving
+    a chain LAUNCHES each member — the head is launched by the dashboard before the
+    drive prompt is even copied — so every member would fall straight back to the
+    divergent project column exactly when it matters. The lock therefore lives on
+    the write, not the read.
+
+    ``chain_execution_mode`` is None on the solo path (no active run), so the
+    project column is returned unchanged and the solo render stays byte-identical.
+    """
+    chain_mode = str(chain_execution_mode).strip() if chain_execution_mode else ""
+    return chain_mode or project_execution_mode
 
 
 # Single user-facing instruction reused across the service-layer gates so the
@@ -47,6 +77,18 @@ EXECUTION_MODE_NOT_SELECTED_MESSAGE = (
     f"GiljoAI dashboard, pick an execution mode ({mode_label_list()}), and stage "
     "it before continuing."
 )
+
+
+def execution_mode_not_selected_message(project_name: str | None = None) -> str:
+    """The mode-not-selected guidance, naming the project when it is known (BE-9335).
+
+    A chain has several members, so a refusal that says only "this project" leaves
+    the user to work out which one stalled the chain. Falls back to the unnamed
+    constant so callers without a loaded project are unchanged.
+    """
+    if not project_name:
+        return EXECUTION_MODE_NOT_SELECTED_MESSAGE
+    return EXECUTION_MODE_NOT_SELECTED_MESSAGE.replace("for this project.", f"for project '{project_name}'.", 1)
 
 
 def execution_mode_selected(project: Any) -> bool:
@@ -81,7 +123,7 @@ def require_execution_mode(project: Any, project_id: str, tenant_key: str) -> No
     """
     if not execution_mode_selected(project):
         raise ValidationError(
-            message=EXECUTION_MODE_NOT_SELECTED_MESSAGE,
+            message=execution_mode_not_selected_message(getattr(project, "name", None)),
             error_code="EXECUTION_MODE_NOT_SELECTED",
             context={"project_id": project_id, "tenant_key": tenant_key},
         )

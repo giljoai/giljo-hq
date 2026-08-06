@@ -124,6 +124,7 @@ async def test_get_user_repository_query_uses_service_tenant_key():
     service._logger = logging.getLogger("test")
 
     fake_session = AsyncMock()
+    fake_session.info = {}  # tenant_session_context save/restore target
     with pytest.raises(ResourceNotFoundError):
         await service._get_user_impl(fake_session, "foreign-user-uuid")
 

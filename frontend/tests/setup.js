@@ -127,6 +127,15 @@ vi.mock('vuetify', () => ({
 }))
 
 // Globally stub Vuetify components (kebab-case for template resolution)
+//
+// FE-9366: this stub renders ONLY the default slot. A component's named/scoped
+// slots (VSelect's #item / #selection, VList's #prepend / #append, ...) never
+// execute against this stub, so a bug living in one of those slots can ship
+// behind a fully green suite (FE-9365d — the `??` dropdown defect). Before you
+// add a test that reads a value out of a scoped slot on any component stubbed
+// below, use `withRealVuetify()` from tests/helpers/realVuetify.js instead of
+// asserting through this flat stub — see that file's header comment for why
+// `stubs: { VSelect: false }` alone does not work as an escape hatch.
 config.global.stubs = {
   'v-app': { template: '<div class="v-app"><slot /></div>' },
   'v-main': { template: '<div class="v-main"><slot /></div>' },
@@ -233,6 +242,35 @@ window.matchMedia = vi.fn().mockImplementation(query => ({
 
 // Mock document.execCommand for clipboard operations
 document.execCommand = vi.fn(() => true)
+
+// FE-9366: jsdom implements neither of these, and Vuetify's real VOverlay
+// (location strategies) and VVirtualScroll (used inside a real VList) reach
+// for them unconditionally on mount. They are otherwise silent under the
+// flat component stubs (this file's `config.global.stubs`, above) because a
+// stub never mounts Vuetify's real overlay/virtual-scroll internals to begin
+// with -- but `withRealVuetify()` (tests/helpers/realVuetify.js) opts a mount
+// into the real components, and without these two the menu-open path throws
+// "ResizeObserver is not defined" / "visualViewport is not defined" instead
+// of rendering. Defined globally (not scoped to the helper) because any
+// future real-Vuetify mount needs them, not just this one.
+if (typeof window.ResizeObserver === 'undefined') {
+  window.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+}
+if (typeof window.visualViewport === 'undefined') {
+  window.visualViewport = {
+    width: window.innerWidth,
+    height: window.innerHeight,
+    offsetLeft: 0,
+    offsetTop: 0,
+    scale: 1,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }
+}
 
 // Mock API service with comprehensive namespace coverage
 // NOTE: The full API object must be inside the vi.mock factory because vi.mock is hoisted.

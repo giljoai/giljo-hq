@@ -55,6 +55,7 @@ def _make_service(tenant_key: str) -> ProjectService:
     db_manager.get_tenant_session_async = Mock(return_value=mock_session)
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=False)
+    mock_session.info = {}  # tenant_session_context save/restore target
     mock_result = Mock()
     mock_result.scalars = Mock(return_value=Mock(all=Mock(return_value=[])))
     mock_session.execute = AsyncMock(return_value=mock_result)
@@ -700,6 +701,7 @@ class TestListProjectsAndFetchContextAgree:
         fake_session = AsyncMock()
         fake_session.__aenter__ = AsyncMock(return_value=fake_session)
         fake_session.__aexit__ = AsyncMock(return_value=False)
+        fake_session.info = {}  # tenant_session_context save/restore target
         fake_result = Mock()
         fake_result.scalar_one_or_none = Mock(return_value=fake_project)
         fake_session.execute = AsyncMock(return_value=fake_result)
@@ -1201,6 +1203,7 @@ class TestQueryServiceHeadlines:
                 session = AsyncMock()
                 session.__aenter__ = AsyncMock(return_value=session)
                 session.__aexit__ = AsyncMock(return_value=False)
+                session.info = {}  # tenant_session_context save/restore target
                 gs.return_value = session
                 rows = await svc.get_project_memory_entries("p-1", _TENANT_A)
         assert rows[0]["entry_type"] == "decision"
@@ -1233,6 +1236,7 @@ class TestQueryServiceHeadlines:
                 session = AsyncMock()
                 session.__aenter__ = AsyncMock(return_value=session)
                 session.__aexit__ = AsyncMock(return_value=False)
+                session.info = {}  # tenant_session_context save/restore target
                 gs.return_value = session
                 rows = await svc.get_project_memory_entries("p-1", _TENANT_A, headlines=True)
         row = rows[0]
@@ -1251,6 +1255,7 @@ class TestQueryServiceHeadlines:
                 session = AsyncMock()
                 session.__aenter__ = AsyncMock(return_value=session)
                 session.__aexit__ = AsyncMock(return_value=False)
+                session.info = {}  # tenant_session_context save/restore target
                 gs.return_value = session
                 await svc.get_project_memory_entries("p-1", _TENANT_A, headlines=True, limit=5)
         assert repo_mock.call_args.kwargs.get("limit") == 5 or 5 in repo_mock.call_args.args
@@ -1282,6 +1287,7 @@ class TestQueryServiceHeadlines:
                 session = AsyncMock()
                 session.__aenter__ = AsyncMock(return_value=session)
                 session.__aexit__ = AsyncMock(return_value=False)
+                session.info = {}  # tenant_session_context save/restore target
                 gs.return_value = session
                 rows = await svc.get_project_agent_details("p-1", _TENANT_A, headlines=True)
         row = rows[0]

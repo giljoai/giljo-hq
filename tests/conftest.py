@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import event as _sa_event
 
 
 # Add src to path
@@ -153,6 +154,157 @@ async def setup_context_module(db_manager):
     yield
 
 
+# ---------------------------------------------------------------------------
+# Committed-test-org leak teardown (BE-9238)
+# ---------------------------------------------------------------------------
+# Several API/security suites create Organization(...) + User(...) then COMMIT
+# via a real ``db_manager.get_session_async()`` session (NOT the rollback-isolated
+# ``db_session``) — deliberately, because the endpoint under test uses its own DB
+# session, so a rolled-back org would be invisible to the request handler. With no
+# teardown those rows persisted forever, leaking ~1,100 ``tk_`` org/user pairs into
+# the shared test DB. The correct fix is TEARDOWN, not rollback: capture exactly
+# the ``tk_`` tenant_keys this test's ORM inserts minted, then delete only those.
+#
+# xdist-safety (load-bearing — this fixture runs under ``-n auto``): each worker is
+# a separate PROCESS with (a) its OWN per-worker database ``giljo_mcp_test_gwN``
+# (see ``PostgreSQLTestHelper.resolve_test_db_name``) and (b) its own copy of the
+# module-level set below. Captured tenant_keys are freshly-generated, globally
+# unique random values (``tk_`` + 32 hex); the set is cleared at the start of every
+# test; and cleanup runs against THIS test's own ``db_manager`` (its own DB). So a
+# worker can only ever delete rows IT minted, in ITS OWN database — it is physically
+# impossible to touch a sibling worker's in-flight rows. This is deliberately NOT a
+# "delete every tk_ row created since a snapshot" — that could race a sibling.
+_leaked_tenant_keys: set[str] = set()
+
+
+def _capture_committed_tenant_key(_mapper, _connection, target) -> None:
+    """``after_insert`` hook: record ``tk_`` tenant_keys of Organization/User inserts."""
+    tenant_key = getattr(target, "tenant_key", None)
+    if isinstance(tenant_key, str) and tenant_key.startswith("tk_"):
+        _leaked_tenant_keys.add(tenant_key)
+
+
+def _register_tenant_key_capture() -> None:
+    """Attach the capture hook once per worker process (idempotent)."""
+    from giljo_mcp.models import User
+    from giljo_mcp.models.organizations import Organization
+
+    for model in (Organization, User):
+        if not _sa_event.contains(model, "after_insert", _capture_committed_tenant_key):
+            _sa_event.listen(model, "after_insert", _capture_committed_tenant_key)
+
+
+_register_tenant_key_capture()
+
+
+async def _purge_tenant_key(db_manager, tenant_key: str) -> None:
+    """Delete every row for a single ``tk_`` tenant across all tenant-scoped tables.
+
+    Runs FK-safe and list-free: it walks ``Base.metadata.sorted_tables`` in reverse
+    (dependency order is parents-before-children, so reversed is children-before-
+    parents — the correct order to delete without tripping a foreign key) and issues
+    a ``DELETE ... WHERE tenant_key = :tk`` against every table that carries a
+    ``tenant_key`` column. Because the order comes from the schema itself, this stays
+    correct no matter which tables a test committed into (project + task, comm thread,
+    product memory, roadmap, ...), with no hand-maintained model list to fall stale.
+
+    SCHEMA-AWARE: the ORM metadata also carries SaaS-only tables (e.g. ``restore_requests``,
+    created only by ``migrations/saas_versions/``) that are ABSENT from a CE-schema test
+    DB — CI's CE pytest job builds its DB from ``migrations/versions/`` alone. A blind
+    ``DELETE FROM`` on such a table raises ``UndefinedTableError`` there, so we first
+    intersect the metadata tables with the tables that PHYSICALLY EXIST in the connected
+    database (``pg_tables``). This keeps the purge correct on every schema — CE, SaaS, and
+    the local create_all test DBs alike — instead of only the schema the author's DB
+    happens to carry.
+
+    Uses a raw superuser connection from the test engine, which deliberately bypasses
+    the ORM tenant-isolation guard — this is a test-only cleanup of ONE known,
+    globally-unique test tenant, not app code. ``table.name`` comes from our own
+    metadata (never user input), so the interpolated identifier is safe.
+    """
+    from sqlalchemy import text
+
+    from giljo_mcp.models.base import Base
+
+    async with db_manager.async_engine.begin() as conn:
+        result = await conn.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'"))
+        existing_tables = {row[0] for row in result}
+        for table in reversed(Base.metadata.sorted_tables):
+            if table.name in existing_tables and "tenant_key" in table.c:
+                await conn.execute(
+                    text(f'DELETE FROM "{table.name}" WHERE tenant_key = :tk'),
+                    {"tk": tenant_key},
+                )
+
+
+@pytest_asyncio.fixture(scope="function", autouse=True)
+async def _purge_committed_test_orgs(db_manager):
+    """Delete the ``tk_`` rows this test COMMITTED (BE-9238 leak fix).
+
+    Parallel-safe by construction (see the module note above): only this test's own
+    freshly-minted ``tk_`` tenant_keys are deleted, and only in this worker's own
+    per-worker DB. Inserts that were rolled back (the ``db_session`` isolation
+    fixture) never persist, so their delete is a harmless 0-row no-op. The whole
+    tenant is purged FK-safely (see ``_purge_tenant_key``), so a test that commits a
+    project/task/etc. under its tk_ tenant is cleaned completely, not just its org.
+    """
+    _leaked_tenant_keys.clear()
+    try:
+        yield
+    finally:
+        keys = list(_leaked_tenant_keys)
+        _leaked_tenant_keys.clear()
+        for tenant_key in keys:
+            await _purge_tenant_key(db_manager, tenant_key)
+
+
+@pytest.fixture
+def real_auth_rate_limiter():
+    """Opt OUT of the global pre-auth rate-limit test bypass for this test.
+
+    SEC-9227 (H4): the pre-auth limiter's test bypass is an explicit
+    process-local flag (``auth_rate_limits.set_test_bypass``), not the old
+    forgeable ``Host: http://test`` sentinel. The autouse
+    ``_auth_rate_limit_test_bypass`` fixture below turns that bypass ON for the
+    whole suite so tests are not throttled — but a suite that exercises the
+    limiter ITSELF must run against the real limiter. Requesting this fixture
+    (directly or via a class/module autouse) keeps the bypass OFF for that test;
+    the autouse fixture detects the request and stands down.
+    """
+    from api.middleware.auth_rate_limits import set_test_bypass
+
+    set_test_bypass(False)
+    try:
+        yield
+    finally:
+        set_test_bypass(False)
+
+
+@pytest.fixture(autouse=True)
+def _auth_rate_limit_test_bypass(request):
+    """Bypass the pre-auth IP rate limiter for the suite (SEC-9227 H4).
+
+    The limiter's bypass is now an explicit process-local flag rather than a
+    ``Host``-header sentinel, so the suite must set it itself — the TestClient
+    default ``http://testserver`` no longer short-circuits the limiter. Enabled
+    for every test EXCEPT those that request ``real_auth_rate_limiter`` (the
+    rate-limit suites), which own the flag and keep it off. The opt-out is read
+    from ``request.fixturenames`` (resolved at setup), so this never fights the
+    opt-out fixture on ordering — when the opt-out is present this fixture does
+    not touch the flag at all.
+    """
+    from api.middleware.auth_rate_limits import set_test_bypass
+
+    if "real_auth_rate_limiter" in request.fixturenames:
+        yield
+        return
+    set_test_bypass(True)
+    try:
+        yield
+    finally:
+        set_test_bypass(False)
+
+
 # Note: db_session fixture is imported from base_fixtures.py
 # and provides transaction-based test isolation
 
@@ -270,6 +422,31 @@ def pytest_configure(config):
     )
     config.addinivalue_line(
         "markers", "production_safe: marks tests that have been verified safe from production DB access"
+    )
+
+    # BE-9288: an un-awaited AsyncMock coroutine is a real test-double bug (a
+    # mock session/manager left under-specified lets a sync-in-real-SQLAlchemy
+    # call -- e.g. Result.scalar_one_or_none(), Session.info.get() -- come back
+    # async and silently go unawaited). Narrow on purpose: only THIS exact
+    # message becomes an error, so it fails the offending test loudly instead
+    # of relying on someone noticing the warning.
+    #
+    # TWO filters, not one: the coroutine's own finalizer (coro_dealloc) raises
+    # the "never awaited" RuntimeWarning from INSIDE a destructor, so CPython
+    # cannot let it propagate as a normal exception -- it reports it via
+    # sys.unraisablehook instead (verified empirically: filtering only
+    # RuntimeWarning leaves the test passing, just with different warning
+    # text). Pytest's builtin unraisableexception plugin re-wraps whatever
+    # sys.unraisablehook receives as PytestUnraisableExceptionWarning; THAT is
+    # the one that must become the error for the test to actually fail.
+    config.addinivalue_line("filterwarnings", "error:coroutine .* was never awaited:RuntimeWarning")
+    # No literal ':' in the message half -- pytest's filterwarnings parser
+    # splits the whole "action:message:category:..." spec on ':' with no
+    # escaping, so a literal colon there breaks parsing. '.' (any char)
+    # stands in for the "ignored in:" colon instead.
+    config.addinivalue_line(
+        "filterwarnings",
+        "error:.*coroutine object AsyncMockMixin._execute_mock_call:pytest.PytestUnraisableExceptionWarning",
     )
 
     # Check if we're only running smoke tests

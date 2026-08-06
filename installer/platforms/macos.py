@@ -210,6 +210,8 @@ class MacOSPlatformHandler(PlatformHandler):
             startup_script = str(install_dir / "startup.py")
 
             # Start script
+            # BE-9361: frozen on-disk name (already shipped to users' desktops);
+            # renaming it strands the existing launcher. Display text is rebranded.
             start_sh = desktop / "GiljoAI MCP.command"
             start_sh.write_text(f'#!/bin/bash\ncd "{install_dir}"\n"{python_bin}" "{startup_script}" --verbose\n')
             start_sh.chmod(0o755)
@@ -299,10 +301,10 @@ class MacOSPlatformHandler(PlatformHandler):
         separator = "=" * 70
 
         print(f"\n{Fore.YELLOW}{Style.BRIGHT}{separator}{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}{Style.BRIGHT}  GiljoAI MCP - macOS Installer v3.0{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}{Style.BRIGHT}  Giljo HQ - macOS Installer v3.0{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}{Style.BRIGHT}{separator}{Style.RESET_ALL}\n")
 
-        print(f"{Fore.CYAN}Welcome to GiljoAI MCP!{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}Welcome to Giljo HQ!{Style.RESET_ALL}")
         print(f"{Fore.CYAN}This installer will set up your coding orchestrator.{Style.RESET_ALL}\n")
 
         print(f"{Fore.WHITE}What will be installed:{Style.RESET_ALL}")

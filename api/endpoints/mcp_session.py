@@ -34,6 +34,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import tenant_isolation_bypass
+from giljo_mcp.harness_resolver import preset_from_client_info
 from giljo_mcp.models import MCPSession
 from giljo_mcp.platform_registry import harness_from_client_info
 from giljo_mcp.services.debounce import should_run
@@ -50,11 +51,19 @@ def _client_info_patch(client_info: dict[str, Any] | None) -> dict[str, Any]:
     later tool render can read the DETECTED harness off the session record without
     re-resolving. Absent/empty/unknown clientInfo → ``"generic"`` (the fail-safe
     floor); the resolver drives RENDERING only, never auth.
+
+    BE-9327 adds ``resolved_preset`` on the same vehicle and for the same reason: the
+    harness PRESET (web_sandbox / chat) is derivable only from the initialize
+    clientInfo, which ``stateless_http`` drops on every later tools/call. ``None`` for
+    every client that is not an unambiguously-hosted surface. Rows written before
+    BE-9327 simply lack the key; every reader uses ``.get``, so a legacy session
+    resolves to no preset — exactly its behaviour today.
     """
     info = client_info or {}
     return {
         "client_info": info,
         "resolved_harness": harness_from_client_info(info.get("name"), info.get("version")),
+        "resolved_preset": preset_from_client_info(info.get("name"), info.get("version")),
     }
 
 

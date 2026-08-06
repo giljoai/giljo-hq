@@ -43,8 +43,12 @@ from giljo_mcp.services.cache_backends import (
 
 
 @pytest.fixture(autouse=True)
-def _reset_state(monkeypatch):
-    """Each test starts with a clean registry, fresh singleton, no trusted proxies."""
+def _reset_state(monkeypatch, real_auth_rate_limiter):
+    """Each test starts with a clean registry, fresh singleton, no trusted proxies.
+
+    ``real_auth_rate_limiter`` (SEC-9227 H4) opts this whole suite out of the
+    global test-bypass — it exercises the limiter itself, so the bypass stays OFF.
+    """
     monkeypatch.delenv(arl._TRUSTED_PROXIES_ENV, raising=False)
     monkeypatch.delenv("FORWARDED_ALLOW_IPS", raising=False)
     reset_registry_for_tests()
@@ -346,12 +350,34 @@ class TestSharedLimiterStore:
         assert headers["X-RateLimit-Remaining"] == "0"
 
     @pytest.mark.asyncio
-    async def test_test_base_url_short_circuit_preserved(self):
-        """``http://test`` base_url bypasses the limiter (suite must not throttle)."""
+    async def test_explicit_flag_bypasses_but_host_header_never_does(self, monkeypatch):
+        """SEC-9227 (H4): the bypass is the explicit process flag, NOT the Host.
+
+        Two-sided: (1) a request whose base_url/Host starts with ``http://test``
+        — the old sentinel, still fully attacker-controllable — is now RATE
+        LIMITED with the flag off; (2) flipping the explicit flag on bypasses.
+        The exploit-shaped case is (1): a forged ``Host`` can no longer disable
+        the limiter.
+        """
+        import api.middleware.auth_rate_limits as arlimits
+
         limiter = arl.RateLimiter()
-        req = _make_request(client_host="198.51.100.9", base_url="http://test/")
-        for _ in range(50):
-            assert await limiter.check_rate_limit(req, limit=1, window=60, raise_on_limit=True) is True
+
+        # (1) Exploit shape: forged Host ``http://testanything`` no longer bypasses.
+        assert arlimits.is_test_bypass_enabled() is False, "flag must default OFF"
+        req = _make_request(client_host="198.51.100.9", base_url="http://testanything.example/")
+        assert await limiter.check_rate_limit(req, limit=1, window=60) is True
+        # Second request over the limit: the forged Host does NOT save it.
+        assert await limiter.check_rate_limit(req, limit=1, window=60) is False
+
+        # (2) The explicit flag is the only bypass; with it on, nothing throttles.
+        arlimits.set_test_bypass(True)
+        try:
+            req2 = _make_request(client_host="198.51.100.10", base_url="http://app.example.local/")
+            for _ in range(50):
+                assert await limiter.check_rate_limit(req2, limit=1, window=60, raise_on_limit=True) is True
+        finally:
+            arlimits.set_test_bypass(False)
 
 
 class _YieldingAtomicBackend:

@@ -58,10 +58,12 @@ class _StateCapturingApp:
     def __init__(self) -> None:
         self.called = False
         self.resolved_harness_seen: object = "SENTINEL_UNSET"
+        self.resolved_preset_seen: object = "SENTINEL_UNSET"
 
     async def __call__(self, scope, receive, send) -> None:
         self.called = True
         self.resolved_harness_seen = scope.get("state", {}).get("resolved_harness", "SENTINEL_UNSET")
+        self.resolved_preset_seen = scope.get("state", {}).get("resolved_preset", "SENTINEL_UNSET")
         await receive()
         await send({"type": "http.response.start", "status": 200, "headers": []})
         await send({"type": "http.response.body", "body": b'{"jsonrpc":"2.0","id":1,"result":{}}'})
@@ -193,5 +195,69 @@ async def test_tools_call_does_not_stamp_generic(db_manager, jwt_env):
         inner = await _tools_call(db_manager, raw_key, session_id)
         assert inner.called is True
         assert inner.resolved_harness_seen == "SENTINEL_UNSET", "a generic harness must not be stamped"
+    finally:
+        state.db_manager = prior_db
+
+
+# ---------------------------------------------------------------------------
+# BE-9327 — the PRESET axis rides the same two halves, and must be proven on the
+# same real-transport seam. The unit tests cover the capture function and the
+# stamp function in isolation; only this proves the middleware actually CALLS the
+# stamp, which is precisely the "green units, dead seam" gap that left the preset
+# key unproduced for the whole of BE-8003g's life.
+# ---------------------------------------------------------------------------
+
+
+async def test_initialize_persists_resolved_preset_for_hosted_chat_client(db_manager, jwt_env):
+    """A real openai-mcp initialize persists session_data['resolved_preset']='chat'."""
+    from api.app_state import state
+
+    raw_key, tenant_key = await _seed_api_key(db_manager)
+    prior_db = state.db_manager
+    state.db_manager = db_manager
+    try:
+        session_id = await _initialize(db_manager, raw_key, "openai-mcp")
+        session_data = await _read_session_data(db_manager, tenant_key, session_id)
+        assert session_data.get("resolved_preset") == "chat"
+        assert session_data.get("resolved_harness") == "generic", "the harness axis is unchanged"
+    finally:
+        state.db_manager = prior_db
+
+
+async def test_tools_call_stamps_resolved_preset_onto_scope_state(db_manager, jwt_env):
+    """THE SEAM: a non-initialize tools/call surfaces the persisted preset onto scope state.
+
+    ``giljo_setup`` is always a tools/call, and ``stateless_http`` has dropped the
+    live clientInfo by then, so this stamp is the ONLY way the inline branch can see
+    that the session has no filesystem.
+    """
+    from api.app_state import state
+
+    raw_key, _tenant_key = await _seed_api_key(db_manager)
+    prior_db = state.db_manager
+    state.db_manager = db_manager
+    try:
+        session_id = await _initialize(db_manager, raw_key, "openai-mcp")
+        inner = await _tools_call(db_manager, raw_key, session_id)
+        assert inner.called is True
+        assert inner.resolved_preset_seen == "chat", (
+            "the persisted preset must be stamped onto scope state on the tools/call"
+        )
+    finally:
+        state.db_manager = prior_db
+
+
+async def test_tools_call_does_not_stamp_a_preset_for_a_terminal_cli(db_manager, jwt_env):
+    """A claude-code session has a real home directory — nothing to stamp, nothing changes."""
+    from api.app_state import state
+
+    raw_key, _tenant_key = await _seed_api_key(db_manager)
+    prior_db = state.db_manager
+    state.db_manager = db_manager
+    try:
+        session_id = await _initialize(db_manager, raw_key, "claude-code")
+        inner = await _tools_call(db_manager, raw_key, session_id)
+        assert inner.called is True
+        assert inner.resolved_preset_seen == "SENTINEL_UNSET", "a terminal CLI must not be given a preset"
     finally:
         state.db_manager = prior_db

@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Configuration and system-related models for GiljoAI MCP.
+Configuration and system-related models for Giljo HQ.
 
 This module contains models for system configuration, setup state,
 download tokens, and API metrics.
@@ -304,6 +304,16 @@ class DownloadToken(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at = Column(
         DateTime(timezone=True), nullable=False, comment="Token expiry timestamp (15 minutes after creation)"
+    )
+    # TSK-9210: stamped in TokenManager.mark_ready(), i.e. AFTER staging commits
+    # last_exported_at. Anchoring staleness on THIS token's staging time (rather than
+    # the tenant-global export watermark) is what stops a newer token's staging from
+    # masking an older link's staleness. NULL for tokens minted before the migration —
+    # those fall back to the BE-9208 export-watermark comparison.
+    staged_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="TSK-9210: when this token's ZIP was staged; anchors per-token staleness",
     )
 
     __table_args__ = (

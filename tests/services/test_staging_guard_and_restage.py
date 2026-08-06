@@ -42,6 +42,7 @@ def mock_db_manager():
     session.refresh = AsyncMock()
     session.add = MagicMock()
     session.get = AsyncMock()
+    session.info = {}  # tenant_session_context save/restore target
     db_manager.get_session_async = MagicMock(return_value=session)
     return db_manager, session
 

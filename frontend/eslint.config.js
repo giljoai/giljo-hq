@@ -143,6 +143,7 @@ export default [
     // v-html site requires a separate reviewed entry.
     files: [
       'src/components/DatabaseConnection.vue',
+      'src/components/hub/ThreadTimeline.vue',
       'src/components/memory/MemoryEntryRow.vue',
       'src/components/messages/BroadcastPanel.vue',
       'src/components/messages/MessageItem.vue',

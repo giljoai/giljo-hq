@@ -1,10 +1,10 @@
-# GiljoAI MCP - Install Script Templates
+# Giljo HQ - Install Script Templates
 
 Cross-platform installation scripts for token-efficient MCP downloads (Handover 0094).
 
 ## Overview
 
-This directory contains 4 production-ready installation scripts that users can download and execute to install GiljoAI MCP components:
+This directory contains 4 production-ready installation scripts that users can download and execute to install Giljo HQ components:
 
 1. **Slash Commands Installers** - Install Claude Code slash commands to `~/.claude/commands/`
 2. **Agent Templates Installers** - Install AI agent templates to product or personal directories

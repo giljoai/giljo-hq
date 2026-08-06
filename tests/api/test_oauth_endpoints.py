@@ -1196,16 +1196,17 @@ class TestTokenClientSecretVerification:
     # {"loc":["body","code_verifier"],"msg":"Field required","type":"missing"}.
 
     @pytest.mark.asyncio
-    async def test_token_exchange_confidential_client_no_pkce_succeeds(self, api_client, db_manager):
-        """A confidential DCR client that authenticates with client_secret MUST
-        be able to exchange a code WITHOUT presenting code_verifier. RFC 6749
-        §6 treats client authentication and PKCE as alternative proof-of-
-        possession mechanisms; OAuth 2.1 §7.4 prefers both, but the spec text
-        in API-0021e called for client_secret as an "alternative to PKCE".
+    async def test_token_exchange_confidential_client_no_pkce_rejected(self, api_client, db_manager):
+        """SEC-9227 (H2) / RFC 9700 §2.1.1, at the /token boundary: a confidential
+        client authenticating with client_secret MUST STILL present a matching
+        code_verifier — the auth-code carries an S256 challenge, so the verifier
+        is required for every client type.
 
-        The auth-code record still carries a code_challenge (set at
-        /authorize), but the /token side does not require the verifier when
-        the client has authenticated via secret.
+        This previously SUCCEEDED (the confidential branch made the verifier
+        optional), which meant a stolen authorization code plus the client secret
+        redeemed a token with no proof-of-possession. It must now be rejected as
+        invalid_request (400). The earlier "client_secret as an alternative to
+        PKCE" reading (RFC 6749 §6) is superseded by RFC 9700.
         """
         verifier, challenge = _generate_pkce_pair()
         del verifier  # We deliberately do NOT send a verifier; challenge stays on the auth-code row.
@@ -1224,17 +1225,15 @@ class TestTokenClientSecretVerification:
                     "client_id": client_id,
                     "redirect_uri": "http://localhost:3000/callback",
                     "client_secret": plaintext_secret,
-                    # no code_verifier — confidential client uses secret as auth
+                    # no code_verifier — a valid secret must NOT substitute for PKCE
                 },
             )
         finally:
             restore()
 
-        assert response.status_code == 200, response.text
-        data = response.json()
-        assert "access_token" in data
-        assert data["token_type"] == "bearer"
-        assert data["access_token"].count(".") == 2
+        assert response.status_code == 400, response.text
+        detail_text = _oauth_err_text(response.json())
+        assert "invalid_request" in detail_text.lower(), response.text
 
     @pytest.mark.asyncio
     async def test_token_exchange_confidential_client_with_wrong_pkce_rejected(self, api_client, db_manager):

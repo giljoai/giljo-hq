@@ -1,10 +1,10 @@
 <template>
   <div class="beat gj-anim">
     <div class="beat-eyebrow">01 · How it works</div>
-    <h2 class="beat-title">Your tools do the thinking. GiljoAI keeps the thread.</h2>
+    <h2 class="beat-title">Your tools do the thinking. Giljo HQ keeps the thread.</h2>
     <p class="beat-sub">
-      GiljoAI never runs AI. Your own coding tools ask it for context, and every answer starts them fully briefed.
-      <router-link class="beat-readmore" :to="{ path: '/guide', hash: '#what-is-giljoai-mcp' }" target="_blank" rel="noopener">Read more →</router-link>
+      Giljo HQ never runs AI. Your own coding tools ask it for context, and every answer starts them fully briefed.
+      <router-link class="beat-readmore" :to="{ path: '/guide', hash: '#what-is-giljo-hq' }" target="_blank" rel="noopener">Read more →</router-link>
     </p>
 
     <div class="beat-stage">
@@ -27,7 +27,7 @@
 
       <div class="mcp-node">
         <img src="/icons/Giljo_YW_Face.svg" alt="" class="mcp-face" />
-        <span class="mcp-name">GILJOAI MCP</span>
+        <span class="mcp-name">{{ productName }}</span>
         <span class="mcp-tag">passive · always briefed</span>
       </div>
     </div>
@@ -44,6 +44,9 @@
 <script setup>
 import { computed } from 'vue'
 import { useUserStore } from '@/stores/user'
+import { PRODUCT_NAME } from '@/branding'
+
+const productName = PRODUCT_NAME.toUpperCase()
 
 // Live-state enhancement (approved): personalize from setup_selected_tools
 // when available — appended under the interface cards, never replacing them.

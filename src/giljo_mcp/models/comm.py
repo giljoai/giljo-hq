@@ -40,7 +40,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text
 
 from giljo_mcp.utils.taxonomy_alias import format_taxonomy_alias
 
@@ -115,6 +115,22 @@ class CommThread(Base):
     # counter (mint_serial) deliberately keeps counting deleted rows so a freed
     # serial is never reused. All reads filter deleted_at IS NULL.
     deleted_at = Column(DateTime(timezone=True), nullable=True)
+    # BE-9291: THE chain run this thread is the coordination hub for. NULL on every
+    # thread that is not a chain hub, which is nearly all of them — hence nullable.
+    #
+    # This replaces a free-text convention with a structural link. The run_id used to
+    # be substring-searched out of ``subject`` (the conductor's seed instruction put it
+    # there and told sub-orchestrators to find their hub with search_threads(run_id)),
+    # which made a display field load-bearing lookup machinery whose failure mode was
+    # SILENT: nothing raised, the sub-orchestrator just never found its hub.
+    #
+    # ``ondelete=SET NULL`` is load-bearing, not a default. A finished run is PURGED
+    # (SequenceRunService.purge_run, BE-6189) — the chain grouping is ephemeral while
+    # the conversation is durable, so the hub must OUTLIVE its run. CASCADE would
+    # delete the thread and its whole message history when the chain completed
+    # normally, and RESTRICT would make purge_run raise. Discovery tolerates the
+    # resulting NULL: post-purge there is no run left to discover a hub for.
+    sequence_run_id = Column(String(36), ForeignKey("sequence_runs.id", ondelete="SET NULL"), nullable=True)
 
     participants = relationship("CommParticipant", back_populates="thread", cascade="all, delete-orphan")
 
@@ -130,6 +146,15 @@ class CommThread(Base):
         Index("idx_comm_threads_tenant_updated", "tenant_key", "updated_at"),
         Index("idx_comm_thread_product", "product_id"),
         Index("idx_comm_thread_project", "project_id"),
+        # BE-9291: the chain-hub discovery lookup. PARTIAL — hub threads are a tiny
+        # minority, so indexing only the non-NULL rows keeps this a few pages instead
+        # of one entry per thread on the board.
+        Index(
+            "idx_comm_thread_sequence_run",
+            "tenant_key",
+            "sequence_run_id",
+            postgresql_where=text("sequence_run_id IS NOT NULL"),
+        ),
     )
 
     @property
@@ -158,7 +183,20 @@ class CommParticipant(Base):
     participant_type = Column(String(20), nullable=False)  # 'agent' | 'user'
     display_name = Column(String(255), nullable=True)
     role = Column(String(50), nullable=True)
+    # BE-9289a: the harness driving this participant's session (claude-code / codex /
+    # gemini / antigravity / opencode / generic). Stamped SERVER-SIDE from the MCP
+    # ``initialize`` handshake via harness_resolver.harness_from_client_info — NEVER
+    # self-declared, so no local instruction file can change what the Hub renders.
+    # ``generic`` is the fail-safe floor (REST posts, in-memory transport, unknown
+    # clientInfo). Deliberately NOT accompanied by a host/machine-name column: the
+    # server cannot know a client's hostname, so it would have to be volunteered by
+    # the agent — the exact self-declaration this step removes.
+    harness = Column(String(32), nullable=True)
     joined_at = Column(DateTime(timezone=True), server_default=func.now())
+    # BE-9289a: last activity of ANY kind on this thread (post, read, or baton poll),
+    # so a live/idle dot is derivable without a second presence mechanism. NULL = the
+    # participant was enrolled but has never acted.
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)
     # BE-9012a (D6): server-persistent per-(thread, participant) read cursor.
     # ``last_read_at`` is the load-bearing filter — the unread read keys on
     # ``Message.created_at > last_read_at``, which is reaper-safe (a reaped message

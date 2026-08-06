@@ -228,7 +228,7 @@ async def test_thin_prompt_generator_creates_orchestrator_with_staging_phase(
 #     exec across phases (waiting at staging-end, working at impl start). The
 #     spawn-time tests below were deleted in CE-0032 along with the helper.
 #     CE-0027 billing-unstick + idempotency-for-active tests also deleted
-#     (msg-006 in handovers/agentcomms.json) because the bug class no longer
+#     (msg-006 in the private agentcomms log) because the bug class no longer
 #     exists once the multi-exec model is gone.
 # ============================================================================
 

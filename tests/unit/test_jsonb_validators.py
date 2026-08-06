@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from giljo_mcp.schemas.jsonb_validators import (
     AgentJobMetadata,
     GitCommitEntry,
+    GitCommitTitleRequiredError,
     OrganizationSettings,
     ProductMemoryConfig,
     ProductTuningState,
@@ -137,7 +138,9 @@ class TestOrganizationSettings:
 class TestProductMemoryConfig:
     """Tests for ProductMemoryConfig model."""
 
-    def test_valid_data(self):
+    def test_legacy_github_key_still_loads(self):
+        # BE-9261: "github" is the pre-rename seed key. Rows written before the
+        # rename must still validate and load their data.
         data = {
             "github": {"enabled": True, "commit_limit": 25},
             "context": {"last_updated": "2026-03-25"},
@@ -145,13 +148,25 @@ class TestProductMemoryConfig:
         model = ProductMemoryConfig(**data)
         assert model.github["enabled"] is True
 
+    def test_git_integration_key_accepted(self):
+        # BE-9261: "git_integration" is the current seed key.
+        data = {
+            "git_integration": {"enabled": True, "commit_limit": 25},
+            "context": {"last_updated": "2026-03-25"},
+        }
+        model = ProductMemoryConfig(**data)
+        assert model.git_integration["enabled"] is True
+        assert model.github is None
+
     def test_empty_data(self):
         model = ProductMemoryConfig()
+        assert model.git_integration is None
         assert model.github is None
         assert model.context is None
 
-    def test_extra_keys_allowed(self):
-        model = ProductMemoryConfig(github={}, context={})
+    def test_empty_dicts_allowed(self):
+        model = ProductMemoryConfig(git_integration={}, github={}, context={})
+        assert model.git_integration == {}
         assert model.github == {}
 
 
@@ -203,8 +218,15 @@ class TestValidateGitCommits:
         assert result[1]["author"] == "dev"
 
     def test_missing_required_field_raises(self):
-        with pytest.raises(ValidationError):
+        # BE-9256: a missing message (no commit title) raises the dedicated
+        # fail-closed error, not a generic pydantic ValidationError.
+        with pytest.raises(GitCommitTitleRequiredError):
             validate_git_commits([{"sha": "abc123"}])
+
+    def test_bare_sha_string_rejected(self):
+        # BE-9256 (flips BE-6208a): a bare SHA has no title and is rejected.
+        with pytest.raises(GitCommitTitleRequiredError):
+            validate_git_commits(["abc123"])
 
     def test_empty_list(self):
         result = validate_git_commits([])
@@ -221,9 +243,12 @@ class TestValidateProductMemory:
         result = validate_product_memory({"git_integration": {"enabled": True}})
         assert result["git_integration"]["enabled"] is True
 
-    def test_extra_keys_preserved(self):
-        result = validate_product_memory({"github": {}, "context": {}})
-        assert "github" in result
+    def test_legacy_github_key_tolerated(self):
+        # BE-9261: "github" is a declared field kept for read-tolerance, not
+        # folded into extra="allow" -- a legacy-shaped row must still validate
+        # and round-trip its data.
+        result = validate_product_memory({"github": {"enabled": True}, "context": {}})
+        assert result["github"] == {"enabled": True}
 
 
 class TestValidateTuningState:

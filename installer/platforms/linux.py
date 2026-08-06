@@ -243,10 +243,10 @@ class LinuxPlatformHandler(PlatformHandler):
             main_desktop = desktop_dir / "giljoai-mcp.desktop"
             self._create_desktop_file(
                 main_desktop,
-                name="GiljoAI MCP",
+                name="Giljo HQ",
                 exec_path=f'"{python_bin}" "{startup_script}" --verbose',
                 working_dir=install_dir,
-                description="Start GiljoAI MCP (backend + frontend + browser)",
+                description="Start Giljo HQ (backend + frontend + browser)",
                 terminal=True,
             )
             shortcuts_created.append(str(main_desktop))
@@ -258,7 +258,7 @@ class LinuxPlatformHandler(PlatformHandler):
                 name="Stop GiljoAI",
                 exec_path=f'"{python_bin}" "{startup_script}" --stop',
                 working_dir=install_dir,
-                description="Stop GiljoAI MCP services",
+                description="Stop Giljo HQ services",
                 terminal=True,
             )
             shortcuts_created.append(str(stop_desktop))
@@ -378,10 +378,10 @@ Categories=Development;
         separator = "=" * 70
 
         print(f"\n{Fore.YELLOW}{Style.BRIGHT}{separator}{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}{Style.BRIGHT}  GiljoAI MCP - Linux Installer v3.0{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}{Style.BRIGHT}  Giljo HQ - Linux Installer v3.0{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}{Style.BRIGHT}{separator}{Style.RESET_ALL}\n")
 
-        print(f"{Fore.CYAN}Welcome to GiljoAI MCP!{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}Welcome to Giljo HQ!{Style.RESET_ALL}")
         print(f"{Fore.CYAN}This installer will set up your coding orchestrator.{Style.RESET_ALL}\n")
 
         print(f"{Fore.WHITE}What will be installed:{Style.RESET_ALL}")

@@ -28,15 +28,18 @@ from api.endpoints.mcp_tools._base import (
     _parse_iso_datetime_param,
     mcp,
 )
+from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 
 
 @mcp.tool(
+    title="Diagnose Project State",
     description=(
         "Diagnose a project's lifecycle state for orchestrator self-healing. READ-ONLY: reports "
         "status, gates, agent/job counts, closeout readiness, and stuck_conditions with "
         "suggested_actions. Call when a project looks wedged, instead of guessing. Tenant-scoped. "
         "See get_giljo_guide for the full stuck_conditions list and recovery routing."
     ),
+    annotations=_tool_hints("diagnose_project_state"),
 )
 async def diagnose_project_state(
     project_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Project UUID to diagnose.")],
@@ -46,6 +49,7 @@ async def diagnose_project_state(
 
 
 @mcp.tool(
+    title="Create Project",
     description=(
         "Create a new project bound to the active product. project_type is a taxonomy abbreviation "
         "(e.g. FE, BE, INF); the reserved 'TSK' type is task-only and is never valid here. "
@@ -53,6 +57,7 @@ async def diagnose_project_state(
         "created inactive; the user activates/launches from the dashboard. See get_giljo_guide for "
         "chain creation (shared series_number + a/b/c suffix), taxonomy errors, and Edition Scope."
     ),
+    annotations=_tool_hints("create_project"),
 )
 async def create_project(
     name: Annotated[str, Field(max_length=MCP_NAME_MAX)],
@@ -101,6 +106,7 @@ async def create_project(
 
 
 @mcp.tool(
+    title="List Projects",
     description=(
         "List projects for the active product with server-side filtering. Default returns only "
         "active-lifecycle projects (excludes completed/cancelled/terminated/deleted); pass "
@@ -110,6 +116,7 @@ async def create_project(
         "Requires an active product. See get_giljo_guide for read-vs-write routing."
     ),
     meta=MCP_HEAVY_TOOL_META,  # BE-9083c: raise Claude Code's inline-truncation ceiling
+    annotations=_tool_hints("list_projects"),
 )
 async def list_projects(
     status: str = "",
@@ -232,12 +239,16 @@ async def list_projects(
 
 
 @mcp.tool(
+    title="Update Project",
     description=(
         "Update project metadata (name, description, status, project_type, series_number, suffix). "
         "Only provided fields are updated. The reserved 'TSK' tag is not a selectable project_type. "
         "To find a project to update, call list_projects first. See get_giljo_guide for chain "
         "repositioning routing."
     ),
+    # BE-9251: status accepts terminal values (completed/cancelled) -- a general
+    # editor tool that CAN produce a terminal transition, not just rename/redescribe.
+    annotations=_tool_hints("update_project", destructive=True),
 )
 async def update_project(
     project_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
@@ -255,7 +266,9 @@ async def update_project(
         project_id: Project UUID (required).
         name: New project name (max 200 chars). Leave empty to keep current.
         description: New description (max 20000 chars). Leave empty to keep current.
-        status: New status — "inactive", "active", "completed", or "cancelled". Leave empty to keep current.
+        status: New status — "inactive", "active", "completed", "cancelled", or "parked". Leave
+            empty to keep current. "parked" sets a project aside without cancelling it -- hidden
+            from the roadmap but resumable; unpark by setting status back to "inactive" or "active".
         project_type: Taxonomy type abbreviation (e.g. FE, BE). Leave empty to keep current.
             The reserved 'TSK' tag is not a selectable project type (tasks only).
         series_number: Sequential number within the type series (1-9999). Use 0 to keep current.
@@ -278,11 +291,13 @@ async def update_project(
 
 
 @mcp.tool(
+    title="Update Project Mission",
     description=(
         "Save the orchestrator's mission plan (the execution OUTPUT), distinct from "
         "Project.description (the user's INPUT requirements). Orchestrator-only, called after "
         "creating the execution strategy during staging. Triggers a WebSocket UI update."
     ),
+    annotations=_tool_hints("update_project_mission"),
 )
 async def update_project_mission(
     project_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
@@ -300,6 +315,7 @@ async def update_project_mission(
 
 
 @mcp.tool(
+    title="Stage Project",
     description=(
         "Stage a project: drive the staging endpoint and return the orchestrator staging prompt for "
         "the chosen mode (execution harness: multi_terminal|subagent|claude|codex|gemini|antigravity). MCP "
@@ -307,6 +323,7 @@ async def update_project_mission(
         "-- the user must press Implement in the dashboard before implement_project can run. See "
         "get_giljo_guide for the staging -> human-gate -> implement lifecycle."
     ),
+    annotations=_tool_hints("stage_project"),
 )
 async def stage_project(
     project_id: str,
@@ -321,12 +338,14 @@ async def stage_project(
 
 
 @mcp.tool(
+    title="Implement Project",
     description=(
         "Return the implementation prompt for an already-staged project. Preconditions: "
         "staging_status='staging_complete' AND the user has pressed Implement in the dashboard. If "
         "the gate hasn't cleared, returns a structured error (status='gate_not_passed') with a "
         "next_action naming the exact next step. No bypass -- the human gate is intentional."
     ),
+    annotations=_tool_hints("implement_project"),
 )
 async def implement_project(
     project_id: str,
@@ -347,6 +366,7 @@ async def implement_project(
 
 
 @mcp.tool(
+    title="Launch Implementation",
     description=(
         "Release the implementation phase gate for a STAGED project from the CLI -- the second of the "
         "two human-authorized doors that flip implementation_launched_at (the first is the dashboard "
@@ -355,6 +375,11 @@ async def implement_project(
         "permission prompt IS the human authorization. Use for headless/CLI operation with no "
         "dashboard user to press Implement."
     ),
+    # BE-9251 audit F3: stamps project.implementation_launched_at -- a
+    # one-way phase gate set once and never reset, the same terminal-transition
+    # class as update_project/update_task/complete_job/close_job/
+    # write_project_closeout.
+    annotations=_tool_hints("launch_implementation", destructive=True),
 )
 async def launch_implementation(
     project_id: str,

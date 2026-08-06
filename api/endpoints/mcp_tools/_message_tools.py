@@ -28,21 +28,23 @@ from api.endpoints.mcp_tools._base import (
     mcp,
 )
 from api.endpoints.mcp_tools._inline_approval import maybe_elicit_approval_inline
+from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 
 
 @mcp.tool(
+    title="Request Approval",
     description=(
         "Request a user approval before continuing (HITL gate: closeout with deferred findings, "
-        "an ambiguous decision). ORCHESTRATOR JOBS ONLY — the dashboard approval card binds to "
-        "the orchestrator's job; a worker call returns a structured rejection "
-        "(ORCHESTRATOR_ONLY_APPROVAL) and should escalate via post_to_thread instead. Creates a "
-        "user_approvals row and flips the calling agent to status='awaiting_user'. options: list "
-        "of {id, label} dicts. Returns {approval_id, status}. Tenant-scoped. See get_giljo_guide "
-        "for how the dashboard surfaces and clears this gate."
+        "an ambiguous decision). Orchestrator jobs only -- a worker call is rejected with "
+        "ORCHESTRATOR_ONLY_APPROVAL; escalate via post_to_thread instead. See get_giljo_guide for "
+        "how the dashboard surfaces and clears this gate."
     ),
+    annotations=_tool_hints("request_approval"),
 )
 async def request_approval(
-    job_id: Annotated[str, Field(description="Calling agent's job_id (UUID).")],
+    job_id: Annotated[
+        str, Field(description="Calling agent's job_id (UUID). Flips to status='awaiting_user' until decided.")
+    ],
     project_id: Annotated[str, Field(description="Project UUID the approval belongs to.")],
     reason: Annotated[
         str,

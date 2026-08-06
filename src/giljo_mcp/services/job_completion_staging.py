@@ -327,7 +327,7 @@ async def _finale_deliverables_recorded(
     """True iff this project's staging finale has nothing left to implement (BE-9165).
 
     Requires at least one spawned specialist AND none in flight (statuses all in
-    :data:`~giljo_mcp.repositories.mission_repository.TERMINAL_AGENT_STATUSES`).
+    :data:`~giljo_mcp.models.agent_identity.TERMINAL_EXECUTION_STATUSES`).
     Chain members are EXCLUDED: their implementation gate opens in software (§14),
     so they never hit the retroactive-staging deadlock, and rerouting them would
     skip the §14 chain-advance bookkeeping — a chain lookup failure therefore

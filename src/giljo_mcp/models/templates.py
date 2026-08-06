@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Agent template-related models for GiljoAI MCP.
+Agent template-related models for Giljo HQ.
 
 This module contains models for agent templates, template archives,
 augmentations, and usage statistics. These models support template management

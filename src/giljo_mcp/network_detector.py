@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Dynamic Network Adapter IP Detection for GiljoAI MCP.
+Dynamic Network Adapter IP Detection for Giljo HQ.
 
 This module provides runtime IP detection for network adapters to support
 CORS configuration updates when adapter IPs change.

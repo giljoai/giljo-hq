@@ -1,6 +1,6 @@
 # Getting Started
 
-*For users already signed in to the GiljoAI MCP dashboard. Last updated: 2026-07-17.*
+*For users already signed in to the Giljo HQ (a GiljoAI product) dashboard. Last updated: 2026-07-17.*
 
 This guide walks through five steps to run your first project: set up your tools, create your first product, create and stage a project, run it in your AI coding tool, and monitor it to completion.
 
@@ -17,7 +17,7 @@ The **Setup Wizard** opens automatically the first time you sign in (rerun it an
 | **Install** | Ask your tool to run `giljo_setup`. This installs the `/giljo` skill and your agent templates. |
 | **Launch** | You're all set. Three cards let you create your first product, open the dashboard, or read this guide. |
 
-Each tool's status turns green on its own once it connects. If you'd rather check by hand, run `/mcp` in your CLI tool and confirm `giljo_mcp` is listed as Connected.
+Each tool's status turns green on its own once it connects. If you'd rather check by hand, run `/mcp` in your CLI tool and confirm `giljo_hq` is listed as Connected.
 
 To add or reconnect tools later, open **Tools → Connect** — it is a single directory of your connected tools with live status, and **+ Add a tool** starts the same one-at-a-time flow.
 
@@ -137,7 +137,7 @@ Your next project starts with this accumulated 360 Memory automatically.
 > The remaining items apply to self-hosted Community Edition. On hosted GiljoAI, your server, database, and updates are managed for you.
 
 **"Connection refused" when your AI tool tries to reach MCP:**
-- Confirm GiljoAI MCP is running (`python startup.py`).
+- Confirm Giljo HQ is running (`python startup.py`).
 - Check the API key in your tool's MCP configuration.
 - Confirm port 7272 is not blocked by your firewall.
 

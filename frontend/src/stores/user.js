@@ -94,6 +94,12 @@ export const useUserStore = defineStore('user', () => {
   }
 
   async function logout() {
+    // FE-9241: capture the outgoing user's id before it's nulled below —
+    // notificationStore.clearAll() needs it to clear that user's localStorage-
+    // persisted `_local` notification rows (silent-agent bell notifications
+    // that never reach the DB), so a different account on the same browser
+    // can't rehydrate the previous user's notifications.
+    const outgoingUserId = currentUser.value?.id ?? null
     try {
       await api.auth.logout()
     } catch (error) {
@@ -138,7 +144,7 @@ export const useUserStore = defineStore('user', () => {
       }
       try {
         const { useNotificationStore } = await import('@/stores/notifications')
-        useNotificationStore().clearAll()
+        useNotificationStore().clearAll(outgoingUserId)
       } catch (e) {
         console.warn('[UserStore] Notification store cleanup skipped:', e)
       }
@@ -201,6 +207,23 @@ export const useUserStore = defineStore('user', () => {
       _checkAuthAt = Date.now()
       return true
     } catch (error) {
+      // FE-9233: a 429 (rate limited) or 5xx is the server saying "not now",
+      // NOT "you are logged out". Clearing the session on those threw a
+      // throttled user out to /login mid-session. Keep the last-known auth
+      // state and let the next navigation re-verify -- _checkAuthAt is left
+      // at 0 so nothing is served stale from the TTL.
+      //
+      // Not an auth relaxation: we only preserve an already-successful
+      // check, never fabricate one, and the backend still enforces auth on
+      // every API call (see the CHECK_AUTH_TTL_MS note above) -- this client
+      // gate has never been the security boundary.
+      const status = error?.response?.status
+      if (status === 429 || status >= 500) {
+        console.warn('[UserStore] Auth check transient failure:', status)
+        _checkAuthAt = 0
+        return !!currentUser.value
+      }
+
       console.error('[UserStore] Auth check failed:', error)
       currentUser.value = null
       clearOrgFields()

@@ -17,7 +17,7 @@ Goals
 -----
 * One declaration site for the canonical project statuses
   (``inactive``, ``active``, ``completed``, ``cancelled``, ``terminated``,
-  ``deleted``, ``superseded``).
+  ``deleted``, ``superseded``, ``parked``).
 * Class-level metadata (label, color token, lifecycle flags) so the
   frontend can pull the same metadata via API and gate writes against
   the same flags the backend uses.
@@ -105,6 +105,16 @@ class ProjectStatus(enum.StrEnum):
     # Postgres ENUM order — ce_0078 appends it via ``ALTER TYPE ... ADD VALUE``,
     # which always adds to the end. Do not reorder without a migration.
     SUPERSEDED = "superseded"
+    # IMP-9258: a project set aside without cancelling it -- hidden from the
+    # canned roadmap plan (own exclusion, NOT lumped into
+    # LIFECYCLE_FINISHED_STATUSES) but fully resumable: NOT immutable, so the
+    # generic update_project() write path can unpark it straight back to
+    # inactive/active with no dedicated restore endpoint needed (unlike
+    # cancelled, which IS immutable and requires the separate restore flow).
+    # Declared LAST to match the Postgres ENUM order -- ce_0083 appends it via
+    # ``ALTER TYPE ... ADD VALUE``, which always adds to the end. Do not
+    # reorder without a migration.
+    PARKED = "parked"
 
     @property
     def meta(self) -> ProjectStatusMeta:
@@ -204,6 +214,23 @@ PROJECT_STATUS_META: dict[ProjectStatus, ProjectStatusMeta] = {
         is_lifecycle_finished=True,
         is_immutable=True,
         is_user_mutable_via_mcp=False,
+    ),
+    # IMP-9258: parked is a deliberate two-way door -- NOT lifecycle-finished
+    # (stays visible in default project lists / list_projects, unlike
+    # completed/cancelled/terminated/deleted/superseded) and NOT immutable (so
+    # a plain update_project(status='active'|'inactive') un-parks it through
+    # the same generic write path -- no dedicated restore endpoint required,
+    # unlike cancelled). is_user_mutable_via_mcp=True: an agent can park/unpark
+    # via update_project(status='parked') directly. color-agent-reviewer
+    # (Lavender) is not used by any other project status, keeping the badge
+    # visually distinct; the frontend may re-map this token when it wires the
+    # UI (IMP-9258 P2).
+    ProjectStatus.PARKED: ProjectStatusMeta(
+        label="Parked",
+        color_token="color-agent-reviewer",
+        is_lifecycle_finished=False,
+        is_immutable=False,
+        is_user_mutable_via_mcp=True,
     ),
 }
 

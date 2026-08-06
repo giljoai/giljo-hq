@@ -81,8 +81,11 @@ class TestMissionSerenaGuidance:
         assert "Implementation Guidance" in mission
         assert "replace_symbol_body" in mission
         assert "SYMBOLIC EDITING" in mission
-        # Python-only caveat must travel with every role block.
-        assert "Python-only" in mission
+        # BE-9260: the caveat no longer asserts "Python-only" as a universal fact
+        # (that was THIS repo's own LSP config leaking into every customer's
+        # guidance) -- it now derives the claim from the workspace's configured
+        # language(s). The reworded caveat must still travel with every role block.
+        assert "cover only the language(s) its LSP is configured for in this workspace" in mission
 
     def test_tester_gets_tester_block_when_toggle_on(self):
         service = _make_service()

@@ -24,6 +24,7 @@ from api.endpoints.mcp_tools._base import (
     _call_tool,
     mcp,
 )
+from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 from giljo_mcp.services.product_memory_service import (
     SEARCH_MEMORY_LIMIT_DEFAULT,
     SEARCH_MEMORY_LIMIT_MAX,
@@ -58,6 +59,11 @@ class _TechStackContext(BaseModel):
     backend_frameworks: str = Field("", max_length=MCP_DESCRIPTION_MAX)
     databases: str = Field("", max_length=MCP_DESCRIPTION_MAX)
     infrastructure: str = Field("", max_length=MCP_DESCRIPTION_MAX)
+    dev_tools: str = Field(
+        "",
+        max_length=MCP_DESCRIPTION_MAX,
+        description="Developer tooling: editors, linters, formatters, build/test runners, local services.",
+    )
     target_platforms: list[str] | None = Field(
         None, description="Subset of: windows, linux, macos, android, ios, web, all."
     )
@@ -117,6 +123,7 @@ def _merge_group(kwargs: dict[str, Any], group: BaseModel | None) -> None:
 
 
 @mcp.tool(
+    title="Get Context",
     description=(
         "Unified context fetcher: retrieves product/project context by category, with depth "
         "control. Pass one or more categories in a single call. For one project's "
@@ -124,6 +131,7 @@ def _merge_group(kwargs: dict[str, Any], group: BaseModel | None) -> None:
         "categories param for the full category list + token costs, and get_giljo_guide for "
         "read-vs-write routing."
     ),
+    annotations=_tool_hints("get_context"),
 )
 async def get_context(
     product_id: Annotated[
@@ -150,19 +158,27 @@ async def get_context(
                 "'architecture']): product_core (~100 tokens), vision_documents (0-24K), "
                 "tech_stack (200-400), architecture (300-1.5K), testing (0-400), memory_360 "
                 "(500-5K, most recent N closeouts by sequence DESC, default N=3; tune via "
-                "depth_config={'memory_360': <int>} or {'last_n_projects': N, 'shape': "
-                "'full'|'headlines'}), git_history (500-5K), agent_templates (400-2.4K), "
+                "depth_config={'memory_360': <int>} or {'memory_360': {'last_n_projects': N, "
+                "'shape': 'full'|'headlines'}}), git_history (500-5K), agent_templates (400-2.4K), "
                 "project (~300), self_identity (agent template content), tasks (open task list), "
                 "todos (TODO content for a job — pass job_id, used for force-recovery), "
                 "chain (the caller's active chain run: run_id, chain_mission, resolved_order — "
-                "requires project_id; empty + error='no_active_chain_run' outside a chain)."
+                "requires project_id; empty + error='no_active_chain_run' outside a chain), "
+                "threads (the tenant's Hub threads, read-only, up to 25 most recent; not "
+                "depth-tunable)."
             )
         ),
     ] = None,
     depth_config: Annotated[
         dict | None,
         Field(
-            description="Optional depth overrides per category, e.g. {'vision_documents': 'full', 'git_history': 'summary'}."
+            description=(
+                "Optional depth overrides, keyed by CATEGORY name, e.g. {'vision_documents': 'full', "
+                "'git_history': 'summary'}. Keys must be category names (as in `categories`), NOT user "
+                "depth-setting names -- 'memory_360' not 'memory_last_n_projects', 'tech_stack' not "
+                "'tech_stack_sections'. An unrecognized key is rejected with the accepted list; it is "
+                "never silently ignored. Omit entirely to use the user's saved depth settings."
+            )
         ),
     ] = None,
     output_format: Annotated[str, Field(description="Output format: 'structured' (default) or 'flat'.")] = "structured",
@@ -185,6 +201,7 @@ async def get_context(
 
 
 @mcp.tool(
+    title="Search Memory",
     description=(
         "Search the 360 memory (closeouts/handovers) by keyword to answer 'have we solved X "
         "before?'. Matches summary, key_outcomes, decisions_made, project_name, and tags; "
@@ -193,6 +210,7 @@ async def get_context(
         "from get_context(memory_360) (recency, not search) and search_threads (Hub chat, not "
         "memory)."
     ),
+    annotations=_tool_hints("search_memory"),
 )
 async def search_memory(
     query: Annotated[
@@ -227,22 +245,34 @@ async def search_memory(
 
 @mcp.tool(
     name="create_product",
+    title="Create Product",
     description=(
-        "Create a new product for the user (BE-9201 agent-side bootstrap — the MCP twin "
-        "of the dashboard's product-create form). Establishes the product row only, "
-        "INACTIVE; populate tech/architecture/testing afterwards via "
-        "update_product_context, and write a vision document via create_vision_document. "
-        "The user activates the product from the dashboard. Fails if a product with the "
-        "same name already exists. target_platforms must be from: windows, linux, macos, "
-        "android, ios, web, all. project_path is the absolute path of the user's local "
-        "codebase folder you are operating from; OMIT it if you have no filesystem access "
-        "inside the user's repository — never guess."
+        "Create a new product for the user (agent-side bootstrap — the MCP twin of the "
+        "dashboard's product-create form). Establishes the product row only, INACTIVE; "
+        "populate details afterwards via update_product_context and create_vision_document."
     ),
+    annotations=_tool_hints("create_product"),
 )
 async def create_product(
-    name: Annotated[str, Field(min_length=1, max_length=MCP_NAME_MAX, description="Product name (required).")],
+    name: Annotated[
+        str,
+        Field(
+            min_length=1,
+            max_length=MCP_NAME_MAX,
+            description="Product name (required). Create fails if a product with this name already exists.",
+        ),
+    ],
     description: Annotated[str, _PRODUCT_PROSE] = "",
-    project_path: Annotated[str, _PRODUCT_PROSE] = "",
+    project_path: Annotated[
+        str,
+        Field(
+            max_length=MCP_DESCRIPTION_MAX,
+            description=(
+                "Absolute path of the user's local codebase folder you are operating from; OMIT "
+                "if you have no filesystem access inside the user's repository — never guess."
+            ),
+        ),
+    ] = "",
     core_features: Annotated[str, _PRODUCT_PROSE] = "",
     brand_guidelines: Annotated[str, _PRODUCT_PROSE] = "",
     target_platforms: Annotated[
@@ -273,22 +303,26 @@ async def create_product(
 
 @mcp.tool(
     name="create_vision_document",
+    title="Create Vision Document",
     description=(
-        "Write an agent-authored markdown vision document onto an EXISTING product "
-        "(BE-9201 — the MCP twin of the dashboard's vision-document upload; the document "
-        "appears in the UI exactly like an uploaded file and feeds the same ingest and "
-        "staleness machinery). Use after create_product, or against a product the user "
-        "already created. Content must be markdown text within the same size cap as the "
-        "UI upload. After creating the document, call get_vision_doc then "
-        "update_product_context (including vision_summaries + consolidated_vision) to "
-        "populate the product card."
+        "Write an agent-authored markdown vision document onto an EXISTING product — the MCP "
+        "twin of the dashboard's vision-document upload; it appears in the UI exactly like an "
+        "uploaded file and feeds the same ingest and staleness machinery."
     ),
+    annotations=_tool_hints("create_vision_document"),
 )
 async def create_vision_document(
     product_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
     content: Annotated[
         str,
-        Field(min_length=1, description="Full markdown vision document text."),
+        Field(
+            min_length=1,
+            description=(
+                "Full markdown vision document text (same size cap as the UI upload). After "
+                "creating, call get_vision_doc then update_product_context (vision_summaries + "
+                "consolidated_vision) to populate the product card."
+            ),
+        ),
     ],
     document_name: Annotated[
         str,
@@ -307,12 +341,15 @@ async def create_vision_document(
 
 @mcp.tool(
     name="get_vision_doc",
+    title="Get Vision Document",
     description=(
         "Retrieve a product's vision document with extraction instructions. "
         "Call WITHOUT chunk to get metadata (total_chunks, extraction_instructions). "
-        "Then call WITH chunk=1, chunk=2, etc. to retrieve each chunk's content "
-        "one at a time. Read ALL chunks before calling update_product_context."
+        "Then fetch chunk=1 through chunk=total_chunks -- these reads are independent "
+        "and side-effect free, so request them in PARALLEL, in any order. Read ALL "
+        "chunks before calling update_product_context."
     ),
+    annotations=_tool_hints("get_vision_doc"),
 )
 async def get_vision_doc(
     product_id: str,
@@ -327,31 +364,34 @@ async def get_vision_doc(
 
 @mcp.tool(
     name="update_product_context",
+    title="Update Product Context",
     description=(
-        "Write structured product fields extracted from vision document analysis. "
-        "Performs merge-write: only updates fields that are provided. Creates child "
-        "table rows on first write. The tech/architecture/quality/testing prose is "
-        "grouped into four dicts: tech_stack (programming_languages, frontend_frameworks, "
-        "backend_frameworks, databases, infrastructure, target_platforms), architecture "
-        "(architecture_pattern, design_patterns, api_style, architecture_notes, "
-        "coding_conventions, brand_guidelines), quality (quality_standards), testing "
-        "(testing_strategy, testing_frameworks, test_coverage_target). "
-        "Pass vision_summaries=[{doc_id, light, medium}] for per-document summaries and "
-        "consolidated_vision={light, medium} for the product-level aggregate. "
-        "project_path is the absolute path of the user's local codebase folder you are "
-        "operating from (your working directory); OMIT it if you have no filesystem access "
-        "inside the user's repository — never guess. Like product_name it is user-owned and "
-        "skipped when already set. "
-        "target_platforms (inside tech_stack) must be from: windows, linux, macos, "
-        "android, ios, web, all."
+        "Write structured product fields extracted from vision document analysis. Merge-write: "
+        "only provided fields are updated, and it is SAFE TO CALL IN STAGES -- split a large "
+        "analysis across several calls and set emit_completion=true on the last one. Every "
+        "response reports vision_analysis_complete, missing_for_completion, and fields_skipped, "
+        "so you never have to infer what landed. See the tech_stack/architecture/quality/testing "
+        "param groups, project_path, and vision_summaries/consolidated_vision for field detail."
     ),
+    annotations=_tool_hints("update_product_context"),
 )
 async def update_product_context(
     product_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
     product_name: Annotated[str, _PRODUCT_LABEL] = "",
     product_description: Annotated[str, _PRODUCT_PROSE] = "",
     core_features: Annotated[str, _PRODUCT_PROSE] = "",
-    project_path: Annotated[str, _PRODUCT_PROSE] = "",
+    project_path: Annotated[
+        str,
+        Field(
+            max_length=MCP_DESCRIPTION_MAX,
+            description=(
+                "Absolute path of the user's local codebase folder you are operating from (your "
+                "working directory); OMIT if you have no filesystem access inside the user's "
+                "repository — never guess. Like product_name, it is user-owned and skipped when "
+                "already set."
+            ),
+        ),
+    ] = "",
     tech_stack: Annotated[
         _TechStackContext | None,
         Field(
@@ -379,8 +419,23 @@ async def update_product_context(
         Field(description="Testing group: testing_strategy, testing_frameworks, test_coverage_target."),
     ] = None,
     force: bool = False,
-    vision_summaries: list[dict] | None = None,
-    consolidated_vision: dict | None = None,
+    emit_completion: Annotated[
+        bool,
+        Field(
+            description=(
+                "Set true on your FINAL staged call. Re-checks the completion state and signals "
+                "the dashboard even when this call writes no new fields."
+            )
+        ),
+    ] = False,
+    vision_summaries: Annotated[
+        list[dict] | None,
+        Field(description="Per-document summaries: [{doc_id, light, medium}, ...]."),
+    ] = None,
+    consolidated_vision: Annotated[
+        dict | None,
+        Field(description="Product-level aggregate summary: {light, medium}."),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     # Merge-write: forward only provided, non-empty values. The grouped dicts unpack
@@ -408,4 +463,6 @@ async def update_product_context(
         kwargs["consolidated_vision"] = consolidated_vision
     if force:
         kwargs["force"] = True
+    if emit_completion:
+        kwargs["emit_completion"] = True
     return await _call_tool(ctx, "update_product_context", kwargs)

@@ -75,7 +75,7 @@
         <template #activator="{ props }">
           <v-icon v-bind="props" size="16" class="hitl-toggle-info">mdi-information-outline</v-icon>
         </template>
-        Off (the default) keeps a human in the loop — the server will not authorize implementation until you press Implement. On lets a trusted CLI/OAuth agent start building without a click; only enable it for autonomous workflows you trust. Note: HITL guarantees the server will not authorize implementation early, but it cannot stop a non-compliant local orchestrator from inlining its own mission into an in-process subagent and working off the books (an accepted residual of local execution).
+        This governs in-application, server-mediated launches only — the MCP launch_implementation tool that OAuth agent sessions use to advance a project from staging to building. Off (the default) keeps a human in the loop: the server will not authorize that launch until you press Implement. On lets a trusted CLI/OAuth agent self-advance without a click; only enable it for autonomous workflows you trust. It does not gate direct CLI interaction — an agent that reads a project and simply runs it locally never asks the server, so this toggle cannot reach it. Note: HITL guarantees the server will not authorize implementation early, but it cannot stop a non-compliant local orchestrator from inlining its own mission into an in-process subagent and working off the books (an accepted residual of local execution).
       </v-tooltip>
     </div>
 

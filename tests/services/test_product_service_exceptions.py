@@ -50,6 +50,7 @@ def mock_db_manager():
     """Create mock database manager with async session."""
     db_manager = Mock()
     session = AsyncMock()
+    session.info = {}  # tenant_session_context save/restore target
 
     # Setup async context manager
     async_cm = AsyncMock()

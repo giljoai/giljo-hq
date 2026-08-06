@@ -1,5 +1,5 @@
 <template>
-  <v-container fluid>
+  <v-container fluid data-testid="product-detail-view">
     <v-row>
       <v-col cols="12">
         <v-btn icon variant="text" class="mb-4" @click="$router.back()">

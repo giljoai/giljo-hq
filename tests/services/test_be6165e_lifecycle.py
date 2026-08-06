@@ -29,6 +29,7 @@ import pytest_asyncio
 from sqlalchemy import delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from giljo_mcp.database import tenant_isolation_bypass
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import SequenceRun
@@ -46,7 +47,10 @@ _MODE = "claude_code_cli"
 async def _wipe_sequence_runs(db_manager):
     yield
     async with db_manager.get_session_async() as session:
-        await session.execute(delete(SequenceRun))
+        with tenant_isolation_bypass(
+            session, reason="test teardown: wipe sequence_runs (per-worker DB)", models=(SequenceRun,)
+        ):
+            await session.execute(delete(SequenceRun))
         # Raw SQL scoped to THIS test's seeded rows: they are committed (escape
         # rollback), a cross-tenant ORM delete trips the tenant guard, and a
         # blanket wipe would hit other tests' projects (shared per-worker DB).

@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-GiljoAI MCP - Multi-Agent Coding Orchestrator
+Giljo HQ - Multi-Agent Coding Orchestrator
 """
 
 try:
@@ -13,4 +13,4 @@ try:
 
     __version__ = _get_version("giljo-mcp")
 except (PackageNotFoundError, ImportError):
-    __version__ = "2.0.1.1"
+    __version__ = "2.0.2"

@@ -42,6 +42,7 @@
                 :disabled="purgingProductId === product.id || purgingAll"
                 title="Restore product"
                 aria-label="Restore deleted product"
+                data-testid="product-recover-restore"
                 @click="handleRestore(product.id)"
               ></v-btn>
               <v-btn
@@ -53,6 +54,7 @@
                 :disabled="restoringProductId === product.id || purgingAll"
                 title="Permanently delete product"
                 aria-label="Permanently delete product"
+                data-testid="product-recover-purge"
                 @click="handlePurge(product.id)"
               ></v-btn>
             </div>
@@ -70,13 +72,14 @@
 
     <template #actions>
       <v-spacer />
-      <v-btn variant="text" @click="closeDialog">Close</v-btn>
+      <v-btn variant="text" data-testid="product-recover-close" @click="closeDialog">Close</v-btn>
       <v-btn
         color="error"
         variant="flat"
         prepend-icon="mdi-delete-forever"
         :disabled="deletedProducts.length === 0 || purgingAll"
         :loading="purgingAll"
+        data-testid="product-recover-purge-all"
         @click="handlePurgeAll"
       >
         Delete All

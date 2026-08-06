@@ -3,13 +3,28 @@ import { useProductStore } from '@/stores/products'
 import { useClipboard } from '@/composables/useClipboard'
 import { useToast } from '@/composables/useToast'
 
-export function useVisionAnalysis(patchProductForm) {
+/**
+ * @param {Function} patchProductForm - completion hook; receives the mapped form data.
+ * @param {object}   [options]
+ * @param {boolean}  [options.copyPromptOnStage=true] - whether staging an analysis also
+ *   writes the prompt to the clipboard. TRUE (the default, and what ProductForm relies
+ *   on) keeps the historical behaviour: there, staging is itself an explicit button
+ *   press, so the copy is the user's own action. The tutorial's upload screen stages as
+ *   a side effect of dropping a file, where a silent clipboard write is exactly what the
+ *   operator ruled out — it opts OUT here and owns a visible copy control instead.
+ *   Deliberately a per-CONSUMER option, not a per-CALL argument: stageAnalysis's arity is
+ *   asserted by TSK-9206's specs, and the policy belongs to the screen, not the call site.
+ */
+export function useVisionAnalysis(patchProductForm, { copyPromptOnStage = true } = {}) {
   const productStore = useProductStore()
   const { copy: copyToClipboard } = useClipboard()
   const { showToast } = useToast()
 
   const analysisPromptCopied = ref(false)
   const promptFallbackText = ref(null)
+  // The staged prompt, always published so a consumer that opted out of the
+  // automatic copy can display it and offer its own copy control.
+  const analysisPromptText = ref('')
   const analysisInProgress = ref(false)
   const analysisAgentConnected = ref(false)
   const analysisHintVisible = ref(false)
@@ -125,22 +140,26 @@ export function useVisionAnalysis(patchProductForm) {
     let prompt =
       `Analyze the vision documents for product "${productName}".\n` +
       `1. Call get_vision_doc(product_id="${productId}") and FOLLOW the extraction_instructions embedded in the response.\n` +
-      `2. Make ONE single update_product_context call with product_id="${productId}" covering all per-document and consolidated summaries plus the product card fields. A single call lets the backend flip vision_analysis_complete atomically and emit the WebSocket event that unlocks the rest of the setup wizard.`
+      `2. Write the results with update_product_context(product_id="${productId}") — the per-document and consolidated summaries plus the product card fields. It is a merge-write and is SAFE TO CALL IN STAGES: split the work across several calls rather than sending one large one, and set emit_completion=true on your final call to unlock the rest of the setup wizard. Every response reports vision_analysis_complete and missing_for_completion, so you never have to guess whether you are done.`
 
     if (customInstructions) {
       prompt += `\n\nAdditional extraction guidance from the product owner:\n${customInstructions}`
     }
 
     promptFallbackText.value = null
-    const didCopy = await copyToClipboard(prompt)
+    analysisPromptText.value = prompt
 
-    if (didCopy) {
-      analysisPromptCopied.value = true
-      showToast({ message: 'Discovery prompt copied. Paste into your AI agent to analyze your vision doc.', type: 'success', timeout: 4000 })
-      setTimeout(() => { analysisPromptCopied.value = false }, 3000)
-    } else {
-      promptFallbackText.value = prompt
-      showToast({ message: 'Clipboard blocked. Select the prompt below and press Ctrl+C.', type: 'warning', timeout: 5000 })
+    if (copyPromptOnStage) {
+      const didCopy = await copyToClipboard(prompt)
+
+      if (didCopy) {
+        analysisPromptCopied.value = true
+        showToast({ message: 'Discovery prompt copied. Paste into your AI agent to analyze your vision doc.', type: 'success', timeout: 4000 })
+        setTimeout(() => { analysisPromptCopied.value = false }, 3000)
+      } else {
+        promptFallbackText.value = prompt
+        showToast({ message: 'Clipboard blocked. Select the prompt below and press Ctrl+C.', type: 'warning', timeout: 5000 })
+      }
     }
 
     analysisInProgress.value = true
@@ -192,19 +211,29 @@ export function useVisionAnalysis(patchProductForm) {
     // arrives even if fetchProductById rejects — otherwise the wizard stays
     // stuck on "Analyzing". completeAnalysis handles the happy path (patch +
     // teardown); the finally is the safety net for a failed fetch.
+    //
+    // FE-9320: the finally used to stopPolling() as well. completeAnalysis is
+    // the ONLY thing that advances the wizard (it is what calls patchProductForm),
+    // and it can only run with a product in hand — so when the fetch threw or
+    // returned null, the advance was skipped AND the poll that would have
+    // retried it was torn down in the same breath. That left the upload screen
+    // on "Waiting for your agent's analysis…" permanently, with no way forward.
+    // The poll now survives a failed fetch and retries every tick; the event
+    // already told us the analysis is done, so there IS something to find.
+    let updated = null
     try {
-      const updated = await productStore.fetchProductById(productId)
-      completeAnalysis(updated)
+      updated = await productStore.fetchProductById(productId)
     } finally {
       clearHintTimer()
-      stopPolling()
       analysisInProgress.value = false
       analysisAgentConnected.value = false
     }
+    if (updated) completeAnalysis(updated)
   }
 
   return {
     analysisPromptCopied,
+    analysisPromptText,
     promptFallbackText,
     analysisInProgress,
     analysisAgentConnected,

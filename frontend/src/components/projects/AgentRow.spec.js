@@ -256,6 +256,92 @@ describe('AgentRow — message badge', () => {
 })
 
 // ---------------------------------------------------------------------------
+// action_required_unread badge (BE-9273): the subset of messages_waiting_count
+// that is genuinely blocking (requires_action + non-auto_generated) must read
+// as a DISTINCT, stronger signal than plain unread -- "this agent is waiting
+// on YOU" vs "this agent has unread mail."
+// ---------------------------------------------------------------------------
+
+describe('AgentRow — action_required_unread badge (BE-9273)', () => {
+  it('renders needs-action class when action_required_unread > 0', async () => {
+    const wrapper = await mountRow({
+      agent: makeAgent({ messages_waiting_count: 2, action_required_unread: 1 }),
+      now: NOW_MS,
+    })
+    const badge = wrapper.find('[data-testid="messages-badge"]')
+    expect(badge.exists()).toBe(true)
+    expect(badge.classes()).toContain('needs-action')
+    expect(badge.classes()).not.toContain('has-msgs')
+    expect(badge.classes()).not.toContain('zero')
+    // The badge count itself stays the BROADER messages_waiting_count total —
+    // only the tint escalates for the action-required subset.
+    expect(badge.text()).toBe('2')
+  })
+
+  it('needs-action takes priority even when it equals the full waiting count', async () => {
+    const wrapper = await mountRow({
+      agent: makeAgent({ messages_waiting_count: 1, action_required_unread: 1 }),
+      now: NOW_MS,
+    })
+    const badge = wrapper.find('[data-testid="messages-badge"]')
+    expect(badge.classes()).toContain('needs-action')
+  })
+
+  it('falls back to has-msgs when unread exists but none is action_required', async () => {
+    const wrapper = await mountRow({
+      agent: makeAgent({ messages_waiting_count: 3, action_required_unread: 0 }),
+      now: NOW_MS,
+    })
+    const badge = wrapper.find('[data-testid="messages-badge"]')
+    expect(badge.classes()).toContain('has-msgs')
+    expect(badge.classes()).not.toContain('needs-action')
+  })
+
+  it('falls back to zero when both counts are zero', async () => {
+    const wrapper = await mountRow({
+      agent: makeAgent({ messages_waiting_count: 0, action_required_unread: 0 }),
+      now: NOW_MS,
+    })
+    const badge = wrapper.find('[data-testid="messages-badge"]')
+    expect(badge.classes()).toContain('zero')
+    expect(badge.classes()).not.toContain('needs-action')
+    expect(badge.classes()).not.toContain('has-msgs')
+  })
+
+  it('treats a missing action_required_unread field as 0 (backwards-compatible default)', async () => {
+    // No action_required_unread key at all on the agent object -- must not
+    // throw and must not spuriously mark the badge as needs-action.
+    const wrapper = await mountRow({
+      agent: makeAgent({ messages_waiting_count: 2 }),
+      now: NOW_MS,
+    })
+    const badge = wrapper.find('[data-testid="messages-badge"]')
+    expect(badge.classes()).toContain('has-msgs')
+    expect(badge.classes()).not.toContain('needs-action')
+  })
+
+  it('sets an actionable aria-label and title when action_required_unread > 0', async () => {
+    const wrapper = await mountRow({
+      agent: makeAgent({ messages_waiting_count: 1, action_required_unread: 1 }),
+      now: NOW_MS,
+    })
+    const btn = wrapper.find('.message-count-button')
+    expect(btn.attributes('aria-label')).toBe('View messages — action required')
+    const badge = wrapper.find('[data-testid="messages-badge"]')
+    expect(badge.attributes('title')).toBe('1 message(s) need your action')
+  })
+
+  it('keeps the plain aria-label when action_required_unread is 0', async () => {
+    const wrapper = await mountRow({
+      agent: makeAgent({ messages_waiting_count: 3, action_required_unread: 0 }),
+      now: NOW_MS,
+    })
+    const btn = wrapper.find('.message-count-button')
+    expect(btn.attributes('aria-label')).toBe('View messages')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Duration formatting via now prop (pure, no timer in AgentRow)
 // ---------------------------------------------------------------------------
 

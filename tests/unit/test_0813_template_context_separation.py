@@ -199,7 +199,9 @@ class TestSeederProducesSlimBootstrap:
         bootstrap = _get_mcp_bootstrap_section()
         lines = [line for line in bootstrap.strip().split("\n") if line.strip()]
         assert len(lines) <= 15, f"Bootstrap should be slim (~10 lines), got {len(lines)}"
-        assert "GiljoAI MCP Agent" in bootstrap or "GiljoAI" in bootstrap
+        from giljo_mcp.branding import PRODUCT_NAME
+
+        assert f"{PRODUCT_NAME} Agent" in bootstrap or PRODUCT_NAME in bootstrap
         assert "get_job_mission" in bootstrap
         assert "health_check" in bootstrap
         assert "full_protocol" in bootstrap
@@ -300,6 +302,7 @@ class TestGetAgentTemplatesIncludesUserInstructions:
 
         mock_session = AsyncMock()
         mock_session.execute.return_value = mock_result
+        mock_session.info = {}  # tenant_session_context save/restore target
 
         mock_db_manager = MagicMock()
         mock_db_manager.get_session_async.return_value.__aenter__ = AsyncMock(return_value=mock_session)

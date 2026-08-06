@@ -18,7 +18,6 @@ Handover 0431: Added pre-closeout verification protocol.
 """
 
 import logging
-import os
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -31,7 +30,7 @@ from giljo_mcp.database import DatabaseManager
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.models.agent_identity import AgentExecution
 from giljo_mcp.repositories.agent_completion_repository import AgentCompletionRepository
-from giljo_mcp.schemas.jsonb_validators import validate_git_commits
+from giljo_mcp.schemas.jsonb_validators import GitCommitTitleRequiredError, validate_git_commits
 from giljo_mcp.services.dto import MemoryEntryCreateParams
 from giljo_mcp.services.product_memory_service import (
     ProductMemoryService,
@@ -40,14 +39,13 @@ from giljo_mcp.services.product_memory_service import (
 from giljo_mcp.services.project_closeout_service import ProjectCloseoutService
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools._memory_helpers import (
-    _fetch_github_commits,
-    _get_git_config,
+    _fetch_project_and_product as _resolve_project_and_product,
+)
+from giljo_mcp.tools._memory_helpers import (
+    build_git_commit_title_required_rejection,
     emit_websocket_event,
     provided_session,
     refuse_if_superseded,
-)
-from giljo_mcp.tools._memory_helpers import (
-    _fetch_project_and_product as _resolve_project_and_product,
 )
 from giljo_mcp.tools._prelaunch_workproduct_detector import check_and_emit_prelaunch_workproduct
 
@@ -165,31 +163,6 @@ async def _resolve_author_info(
     }
 
 
-async def _fetch_git_commits_for_project(
-    product_memory: dict[str, Any],
-    project: Any,
-) -> list[dict[str, Any]]:
-    """
-    Fetch GitHub commits for the project if git integration is configured.
-
-    Reads git config from product_memory and calls _fetch_github_commits when
-    both ``repo_name`` and ``repo_owner`` are present. Returns an empty list
-    when git integration is disabled or not configured.
-    """
-    git_config = _get_git_config(product_memory)
-    if not (git_config.get("enabled") and git_config.get("repo_name") and git_config.get("repo_owner")):
-        return []
-
-    commits = await _fetch_github_commits(
-        repo_name=git_config.get("repo_name"),
-        repo_owner=git_config.get("repo_owner"),
-        access_token=git_config.get("access_token"),
-        project_created_at=project.created_at,
-        project_completed_at=project.completed_at or datetime.now(UTC),
-    )
-    return commits or []
-
-
 async def _resolve_tenant_user_id(
     session: AsyncSession,
     tenant_key: str,
@@ -277,7 +250,9 @@ async def _check_closeout_readiness(
 
     Checks:
     1. All agents have status == 'complete' (excluding orchestrator, decommissioned, cancelled)
-    2. All agents have messages_waiting_count == 0
+    2. All agents have zero unread action-required messages (TSK-9268: the live
+       ack-based count the mark_read drain writes, not the denormalized
+       messages_waiting_count column)
     3. All agents have all AgentTodoItem.status == 'completed'
     4. Orchestrator's own todos are completed (if orchestrator_job_id provided)
 
@@ -313,6 +288,14 @@ async def _check_closeout_readiness(
     }
 
     for finding in report.findings:
+        # TSK-9268: unread is tallied for EVERY finding so the summary (and the
+        # post-write "verified.all_messages_read" derived from it) tells the
+        # truth even while agents are still working. Blocker EMISSION below is
+        # unchanged: a non-complete agent still surfaces as one still_working
+        # blocker (whose suggested_action already includes draining).
+        if finding.messages_waiting > 0:
+            summary["agents_with_unread"] += 1
+
         # Check 1: Agent status must be 'complete'
         if finding.status != "complete":
             summary["still_working"] += 1
@@ -332,9 +315,8 @@ async def _check_closeout_readiness(
             )
             continue  # Don't check further issues for this agent
 
-        # Check 2: No unread messages
+        # Check 2: No unread messages (tallied above; blocker emitted here)
         if finding.messages_waiting > 0:
-            summary["agents_with_unread"] += 1
             blockers.append(
                 {
                     "job_id": finding.job_id,
@@ -411,6 +393,30 @@ async def _check_closeout_readiness(
     }
 
 
+def _derive_verified(verification_result: dict[str, Any]) -> dict[str, Any]:
+    """Truthful post-write "verified" block (TSK-9268).
+
+    When blockers exist (ungated entry types like ``session_handover`` still
+    write), the readiness envelope carries no ``verified`` key. The former
+    hardcoded all-True fallback made this verifier contradict the
+    project_completion gate on the identical state (the live 2026-07-22
+    "all_messages_read=true while CLOSEOUT_BLOCKED said 3 unread" wedge).
+    Derive the truth from the readiness summary instead.
+    """
+    if "verified" in verification_result:
+        return verification_result["verified"]
+    check_summary = verification_result.get("summary", {})
+    return {
+        "all_complete": check_summary.get("still_working", 0) == 0,
+        "all_messages_read": check_summary.get("agents_with_unread", 0) == 0,
+        "all_todos_done": (
+            check_summary.get("agents_with_incomplete_todos", 0) == 0
+            and check_summary.get("orchestrator_incomplete_todos", 0) == 0
+        ),
+        "agents_checked": check_summary.get("agents_checked", 0),
+    }
+
+
 async def write_360_memory(
     project_id: str,
     tenant_key: str,
@@ -444,8 +450,10 @@ async def write_360_memory(
             with ``ORCHESTRATOR_ONLY_ENTRY_TYPE`` for workers): ``project_completion``,
             ``session_handover``. ``handover_closeout`` is preserved for back-compat.
         author_job_id: Job ID of agent writing entry (optional)
-        git_commits: Agent-supplied commits from local git log. When provided,
-            skips the GitHub API fetch entirely (passive server model).
+        git_commits: Agent-supplied commits from local git log (the server is
+            passive -- it never fetches commits from a git host itself). Each
+            entry must carry a non-empty commit title; a titleless entry is
+            rejected with GIT_COMMIT_TITLE_REQUIRED.
         tags: <= 8 tags, each <= 30 chars matching ``^[a-z0-9-]+$``.
         acknowledge_closeout_todo: When True, auto-complete the author's own
             self-referential closeout TODOs (matching CLOSEOUT_TODO_PATTERN)
@@ -612,10 +620,6 @@ async def write_360_memory(
                         **verification_result,
                     }
 
-            product_memory: dict[str, Any] = product.product_memory or {}
-            if not isinstance(product_memory, dict):
-                product_memory = {}
-
             # Hard gate: if git integration is enabled, require commits
             git_integration_enabled = False
             try:
@@ -638,23 +642,25 @@ async def write_360_memory(
                     "project_id": project_id,
                 }
 
-            # Use agent-supplied commits; SaaS can fall back to GitHub API
+            # Use agent-supplied commits. The server is passive -- it never
+            # fetches commits from a git host itself (host-agnostic).
             if git_commits is not None:
-                git_commits = validate_git_commits(git_commits)
+                try:
+                    git_commits = validate_git_commits(git_commits)
+                except GitCommitTitleRequiredError as exc:
+                    # BE-9256 (Tier-2 domain rejection): a supplied commit has no
+                    # title. Return the structured dict so it reaches the agent as
+                    # normal tool content, not isError.
+                    return build_git_commit_title_required_rejection(exc, project_id)
                 logger.info(
                     "Using %d agent-supplied git commits for project %s",
                     len(git_commits),
                     project_id,
                 )
-            elif os.environ.get("GILJO_MODE") == "saas":
-                git_commits = await _fetch_git_commits_for_project(
-                    product_memory=product_memory,
-                    project=project,
-                )
             else:
                 git_commits = []
                 logger.info(
-                    "No agent-supplied git commits for project %s (CE server is passive)",
+                    "No agent-supplied git commits for project %s (server is passive)",
                     project_id,
                 )
 
@@ -747,14 +753,7 @@ async def write_360_memory(
                     tenant_key=tenant_key,
                     orchestrator_job_id=author_job_id,
                 )
-                result["verified"] = verification_result.get(
-                    "verified",
-                    {
-                        "all_complete": True,
-                        "all_messages_read": True,
-                        "all_todos_done": True,
-                    },
-                )
+                result["verified"] = _derive_verified(verification_result)
 
             return result
 

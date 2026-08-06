@@ -6,9 +6,7 @@
 """Shared helpers for project_closeout and write_memory_entry tools."""
 
 import logging
-import re
 from contextlib import asynccontextmanager
-from datetime import datetime
 from inspect import iscoroutine
 from typing import Any
 
@@ -19,6 +17,7 @@ from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
+from giljo_mcp.schemas.jsonb_validators import GitCommitTitleRequiredError
 
 
 logger = logging.getLogger(__name__)
@@ -73,32 +72,26 @@ MAX_SUMMARY_LENGTH = 10000  # ~2,500 tokens
 MAX_KEY_OUTCOMES = 100
 MAX_DECISIONS_MADE = 100
 
-# GitHub owner/repo path-segment validation. GitHub's own allowed character set
-# for owner/repo names is alphanumerics plus '.', '_' and '-'. We validate at the
-# function boundary BEFORE interpolating the value into the GitHub API URL so a
-# malformed/injection-ish config value (path traversal, query/host injection)
-# can never reach the request.
-_GITHUB_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
-_GITHUB_SEGMENT_MAX_LEN = 100
 
+def build_git_commit_title_required_rejection(
+    exc: GitCommitTitleRequiredError,
+    project_id: str,
+) -> dict[str, Any]:
+    """Build the BE-6081 Tier-2 structured rejection for a titleless git_commits entry.
 
-def _validate_github_segment(value: str, field_name: str) -> None:
-    """Reject a repo_owner / repo_name that is not a safe URL path segment.
-
-    Raises ``ValueError`` (a 422-style validation error at the tool boundary)
-    rather than letting an injection-ish value reach the GitHub API URL. MUST be
-    called BEFORE the request is built AND outside the broad ``try/except`` in
-    ``_fetch_github_commits`` (which would otherwise swallow the rejection into a
-    silent ``None``).
+    Shared by ``write_project_closeout`` and ``write_memory_entry`` -- both call sites
+    catch ``GitCommitTitleRequiredError`` (raised by ``validate_git_commits``, BE-9256)
+    around the same JSONB validator call and return this dict instead of letting the
+    exception propagate, so the rejection reaches the agent as normal tool content
+    (not isError) with the exact git command it needs to self-correct.
     """
-    if len(value) > _GITHUB_SEGMENT_MAX_LEN:
-        raise ValueError(f"Invalid {field_name}: exceeds {_GITHUB_SEGMENT_MAX_LEN}-character limit")
-    if not _GITHUB_SEGMENT_RE.match(value):
-        raise ValueError(f"Invalid {field_name}: only letters, digits, '.', '_' and '-' are allowed")
-    # Block path-traversal tokens that still pass the charset ('..' or all-dots)
-    # so the value cannot collapse the URL path (e.g. '/repos/../x/commits').
-    if ".." in value or value.strip(".") == "":
-        raise ValueError(f"Invalid {field_name}: must not contain path-traversal sequences")
+    return {
+        "success": False,
+        "error": "GIT_COMMIT_TITLE_REQUIRED",
+        "project_id": project_id,
+        "message": str(exc),
+        "hint": exc.hint,
+    }
 
 
 async def _fetch_project_and_product(
@@ -147,14 +140,6 @@ async def _fetch_project_and_product(
     return project, product
 
 
-def _get_git_config(product_memory: dict[str, Any]) -> dict[str, Any]:
-    """Normalize git integration configuration."""
-    if not isinstance(product_memory, dict):
-        return {}
-    git_cfg = product_memory.get("git_integration") or product_memory.get("github") or {}
-    return git_cfg if isinstance(git_cfg, dict) else {}
-
-
 async def emit_websocket_event(
     event_type: str,
     tenant_key: str,
@@ -187,79 +172,3 @@ async def emit_websocket_event(
             )
     except (RuntimeError, ValueError, KeyError, TypeError) as exc:  # pragma: no cover - best-effort emit
         logger.warning("WebSocket emit failed", extra={"error": str(exc), "event_type": event_type})
-
-
-async def _fetch_github_commits(
-    repo_name: str | None,
-    repo_owner: str | None,
-    access_token: str | None,
-    project_created_at: datetime,
-    project_completed_at: datetime | None,
-) -> list[dict[str, Any | None]]:
-    """
-    Fetch GitHub commits between project creation and completion.
-
-    Returns simplified commit dictionaries or None on failure/disabled config.
-    """
-    if not repo_name or not repo_owner:
-        logger.info("GitHub integration not configured (missing repo details)")
-        return None
-
-    # Validate charset/length BEFORE the URL is built and BEFORE the broad
-    # try/except below (which returns None on error) — a malformed value is a
-    # caller-config bug to surface loudly, not a transient fetch failure to skip.
-    _validate_github_segment(repo_owner, "repo_owner")
-    _validate_github_segment(repo_name, "repo_name")
-
-    try:
-        import httpx
-
-        api_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/commits"
-        params = {}
-        if project_created_at:
-            params["since"] = project_created_at.isoformat()
-        if project_completed_at:
-            params["until"] = project_completed_at.isoformat()
-
-        headers = {
-            "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "GiljoAI-MCP",
-        }
-        if access_token:
-            headers["Authorization"] = f"token {access_token}"
-
-        async with httpx.AsyncClient() as client:
-            response = await client.get(api_url, params=params, headers=headers, timeout=10.0)
-            if response.status_code != 200:
-                logger.warning(
-                    f"GitHub API returned {response.status_code}: {response.text[:200]}",
-                    extra={"repo": f"{repo_owner}/{repo_name}"},
-                )
-                return None
-
-            commits_data = response.json()
-            commits: list[dict[str, Any]] = [
-                {
-                    "sha": commit.get("sha"),
-                    "message": commit.get("commit", {}).get("message"),
-                    "author": commit.get("commit", {}).get("author", {}).get("name")
-                    if isinstance(commit.get("commit", {}).get("author"), dict)
-                    else commit.get("commit", {}).get("author"),
-                    "date": commit.get("commit", {}).get("author", {}).get("date")
-                    if isinstance(commit.get("commit", {}).get("author"), dict)
-                    else None,
-                    "url": commit.get("html_url"),
-                    "files_changed": commit.get("files_changed"),
-                    "lines_added": commit.get("lines_added") or commit.get("stats", {}).get("additions")
-                    if isinstance(commit.get("stats"), dict)
-                    else None,
-                }
-                for commit in commits_data[:100]
-            ]
-
-            logger.info(f"Fetched {len(commits)} GitHub commits for {repo_owner}/{repo_name}")
-            return commits
-
-    except Exception as exc:  # Broad catch: tool boundary, logs and re-raises
-        logger.exception("Failed to fetch GitHub commits", extra={"error": str(exc)})
-        return None

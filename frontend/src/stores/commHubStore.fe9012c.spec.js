@@ -76,8 +76,97 @@ describe('commHubStore — two-tab split + unread badges (FE-9012c)', () => {
 
     expect(withState.recipients).toEqual(['beta'])
     expect(withState.pending_for).toEqual(['beta'])
-    // Absent junction state is null (not []), so the filter can tell "not loaded".
+    // Absent junction state is null (not []), so a reader can tell "not loaded".
     expect(noState.recipients).toBeNull()
     expect(noState.pending_for).toBeNull()
+  })
+
+  // FE-9289c: the waiting/read/sent filter row was the ONLY thing that rendered the
+  // junction state, and DoD 7 deletes it — so the Hub stops asking for it. The service
+  // parameter and REST query param survive (a clean opt-in read a future caller may
+  // want); this pins that the HUB does not opt in, because re-adding the flag would
+  // silently reintroduce a per-thread-open payload that nothing displays.
+  it('loadThread does NOT request recipient state — nothing renders it any more', async () => {
+    const api = (await import('@/services/api')).default
+    api.threads.history.mockClear()
+
+    await commHub.loadThread('p1')
+
+    expect(api.threads.history).toHaveBeenCalledTimes(1)
+    expect(api.threads.history).toHaveBeenCalledWith('p1')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// TSK-9300 / TSK-9297 — a 200 does not mean it worked.
+//
+// BE-9292a gave the post and baton routes a structured DECLINE returned at HTTP 200
+// (`{success: false, error, hint, ...}`), so axios does not throw. These calls were
+// written when a 200 on these routes always DID mean success, and they trusted it —
+// which turned a declined post into "Message sent." with the operator's text wiped.
+// ---------------------------------------------------------------------------
+
+const POST_REFUSAL = {
+  success: false,
+  error: 'TARGET_IS_A_DISPLAY_NAME',
+  thread_id: 'p1',
+  field: 'to_participant',
+  requested: 'implementer',
+  registered_id: 'agent-7',
+  next_action_owner: 'orchestrator',
+  valid_participants: ['agent-7', 'orchestrator'],
+  hint: 'implementer is a display name held by agent-7 — address agent-7 instead.',
+}
+
+describe('commHubStore refuses to treat a 200 refusal as success (TSK-9300 / TSK-9297)', () => {
+  let commHub
+  let api
+
+  beforeEach(async () => {
+    setActivePinia(createPinia())
+    commHub = useCommHubStore()
+    api = (await import('@/services/api')).default
+  })
+
+  it('postMessage REJECTS on a declined post instead of returning it as sent', async () => {
+    api.threads.post = vi.fn().mockResolvedValue({ data: POST_REFUSAL })
+    await expect(commHub.postMessage('p1', { content: 'hi' })).rejects.toThrow(
+      /display name held by agent-7/,
+    )
+  })
+
+  it('the thrown error carries the server refusal so a caller can explain it', async () => {
+    api.threads.post = vi.fn().mockResolvedValue({ data: POST_REFUSAL })
+    const err = await commHub.postMessage('p1', { content: 'hi' }).catch((e) => e)
+    expect(err.refusal.error).toBe('TARGET_IS_A_DISPLAY_NAME')
+    expect(err.refusal.valid_participants).toContain('agent-7')
+  })
+
+  it('postMessage still resolves normally on a real send', async () => {
+    api.threads.post = vi.fn().mockResolvedValue({ data: { message_id: 'm-1', thread_id: 'p1' } })
+    await expect(commHub.postMessage('p1', { content: 'hi' })).resolves.toMatchObject({
+      message_id: 'm-1',
+    })
+  })
+
+  it('passBaton does NOT move the local baton on a refusal, though it carries a thread_id', async () => {
+    commHub._testSeedThread({ thread_id: 'b1', project_id: null, next_action_owner: 'orchestrator' })
+    // The refusal reports the UNCHANGED owner, so a naive patch happens to land on the
+    // truth — the server being careful, not this store being correct. Assert the store
+    // does not patch AT ALL, so the guarantee stops depending on the payload.
+    api.threads.passBaton = vi.fn().mockResolvedValue({
+      data: { ...POST_REFUSAL, thread_id: 'b1', field: 'pass_baton_to' },
+    })
+    await expect(commHub.passBaton('b1', 'implementer')).rejects.toThrow()
+    expect(commHub.threadsById.get('b1').next_action_owner).toBe('orchestrator')
+  })
+
+  it('passBaton still patches the baton on a real hand-off', async () => {
+    commHub._testSeedThread({ thread_id: 'b2', project_id: null, next_action_owner: 'orchestrator' })
+    api.threads.passBaton = vi.fn().mockResolvedValue({
+      data: { thread_id: 'b2', next_action_owner: 'agent-7' },
+    })
+    await commHub.passBaton('b2', 'agent-7')
+    expect(commHub.threadsById.get('b2').next_action_owner).toBe('agent-7')
   })
 })

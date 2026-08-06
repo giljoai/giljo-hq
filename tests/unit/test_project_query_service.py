@@ -21,6 +21,7 @@ import pytest
 
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.models import AgentExecution, AgentJob, Message, Product, ProductMemoryEntry, Project
+from giljo_mcp.models.projects import TaxonomyType
 from giljo_mcp.services.project_query_service import ProjectQueryService
 
 
@@ -124,6 +125,57 @@ async def test_get_active_project_returns_seeded_project(query_service, db_sessi
     assert result.mission == "seeded mission"
     assert result.agent_count == 2
     assert result.message_count == 1
+
+
+@pytest.mark.asyncio
+async def test_get_active_project_populates_nested_project_type(query_service, db_session, test_tenant_key):
+    """BE-9326: the ActiveProjectDetail builder must carry the nested project_type.
+
+    The builder listed project_type_id but not project_type, and the field defaults
+    to None on the schema — so nothing raised and GET /api/v1/projects/active
+    reported ``project_type: null`` for every project, including typed ones
+    (api/endpoints/projects/crud.py::_to_project_response reads proj.project_type).
+    """
+    with tenant_session_context(db_session, test_tenant_key):
+        taxonomy_type = TaxonomyType(
+            id=str(uuid4()),
+            tenant_key=test_tenant_key,
+            abbreviation="BE",
+            label="Backend",
+            color="#1976D2",
+        )
+        db_session.add(taxonomy_type)
+        await db_session.flush()
+        project = await _seed_project(db_session, test_tenant_key, status="active", project_type_id=taxonomy_type.id)
+        await db_session.flush()
+
+    result = await query_service.get_active_project()
+
+    assert result is not None
+    assert result.project_type_id == taxonomy_type.id
+    assert result.project_type is not None, (
+        "get_active_project dropped the nested project_type — GET /api/v1/projects/active "
+        "reports null for a typed project. See project_query_service.py "
+        "ActiveProjectDetail construction."
+    )
+    assert result.project_type.abbreviation == "BE"
+    assert result.project_type.label == "Backend"
+    assert result.project_type.color == "#1976D2"
+    assert str(project.id) == result.id
+
+
+@pytest.mark.asyncio
+async def test_get_active_project_keeps_project_type_null_when_untyped(query_service, db_session, test_tenant_key):
+    """A project with no taxonomy type still returns project_type=None, not an error."""
+    with tenant_session_context(db_session, test_tenant_key):
+        await _seed_project(db_session, test_tenant_key, status="active")
+        await db_session.flush()
+
+    result = await query_service.get_active_project()
+
+    assert result is not None
+    assert result.project_type_id is None
+    assert result.project_type is None
 
 
 @pytest.mark.asyncio

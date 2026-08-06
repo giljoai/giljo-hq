@@ -27,6 +27,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
+from api.middleware.auth_rate_limiter import get_rate_limiter
+from api.middleware.auth_rate_limits import limit_for
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.http.url_resolver import (
     get_canonical_mcp_resource_uri,
@@ -109,8 +111,26 @@ def _detail_description(exc: HTTPException) -> str:
 # the advertised list, and the documented set fails CI immediately.
 # Conformance verdicts and evidence are tracked in CONFORMANCE.md (see the
 # project's drift-tracking process). 2025-11-25 is declared even though CIMD
-# is unimplemented — the gap is documented explicitly rather than hidden.
+# (OAuth Client ID Metadata Documents) is unimplemented. This is NOT an
+# over-claim: CIMD is a SHOULD, and the spec signals support for it with a
+# separate AS-metadata flag, `client_id_metadata_document_supported`, which we
+# deliberately do NOT emit — so a spec-aware client falls back to the
+# `registration_endpoint` (RFC 7591 DCR) we DO advertise and which is live,
+# exactly as the spec prescribes.
 MCP_SPEC_VERSIONS_SUPPORTED: list[str] = ["2025-03-26", "2025-06-18", "2025-11-25"]
+
+
+def _has_forbidden_log_chars(value: str) -> bool:
+    """True if ``value`` holds a char that could inject into a log line (CWE-117).
+
+    Rejects C0 controls + DEL (``< 0x20``, ``0x7F``), C1 controls
+    (``0x80-0x9F``), and the Unicode line/paragraph separators
+    (``U+2028``/``U+2029``) — all can smuggle a line break or terminal escape
+    into a log line. Shared by the two OAuth field guards
+    (``AuthorizeRequest._no_control_chars`` and ``_enforce_oauth_field_caps``)
+    so they cannot drift apart again (SEC-9227i L2).
+    """
+    return any(ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F or ord(c) in (0x2028, 0x2029) for c in value)
 
 
 class AuthorizeRequest(BaseModel):
@@ -159,7 +179,7 @@ class AuthorizeRequest(BaseModel):
     )
     @classmethod
     def _no_control_chars(cls, v: str) -> str:
-        if v and any(ord(c) < 32 or ord(c) == 0x7F for c in v):
+        if v and _has_forbidden_log_chars(v):
             raise ValueError("control characters are not permitted")
         return v
 
@@ -257,7 +277,7 @@ async def authorize(
             resource=body.resource,
         )
     except ValueError as exc:
-        logger.warning("OAuth authorize validation failed: %s", exc)
+        logger.warning("OAuth authorize validation failed: %s", sanitize(str(exc)))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid authorization request parameters.",
@@ -369,7 +389,7 @@ def _enforce_oauth_field_caps(**fields: str | None) -> None:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"invalid_request: {name} exceeds maximum length {cap}",
             )
-        if value and any(ord(c) < 32 or ord(c) == 0x7F for c in value):
+        if value and _has_forbidden_log_chars(value):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"invalid_request: {name} contains invalid characters",
@@ -405,13 +425,11 @@ async def token(
         client_id: OAuth client identifier (optional if Basic Auth header
             supplies it).
         redirect_uri: Must match the URI used during authorization.
-        code_verifier: PKCE code verifier (RFC 7636). Required for public
-            clients (no ``client_secret_hash`` on the resolved record),
-            optional for confidential clients that authenticate via
-            ``client_secret`` (RFC 6749 §6 treats client authentication and
-            PKCE as alternative proof-of-possession mechanisms). When a
-            confidential client DOES include a verifier, it must match the
-            stored challenge (defense-in-depth). API-0021e Phase 1.1.
+        code_verifier: PKCE code verifier (RFC 7636). REQUIRED for every client
+            type — public and confidential alike — and verified against the
+            stored S256 challenge (SEC-9227 H2 / RFC 9700 §2.1.1). A
+            confidential client's ``client_secret`` authenticates the client but
+            does NOT substitute for the verifier.
         resource: RFC 8707 resource indicator. Optional at /token: when
             the auth-code record carries a bound resource, the bound value
             is authoritative — if the client asserts ``resource`` here it
@@ -434,7 +452,15 @@ async def token(
             required field, wrong grant_type, PKCE/expiry/code-reuse).
         HTTPException 401: ``invalid_grant`` (resource mismatch) or
             ``invalid_client`` (confidential auth failed).
+        HTTPException 429: per-IP rate limit exceeded (SEC-9227d).
     """
+    # SEC-9227d (M3): per-IP rate limit, FIRST — before any parsing (reject
+    # cheap, parse later). Deliberately OUTSIDE the try blocks below: the 429
+    # is NOT an OAuth protocol error and must propagate as-is, never rewritten
+    # into the RFC 6749 §5.2 envelope.
+    rate_limiter = get_rate_limiter()
+    await rate_limiter.check_rate_limit(request, limit=limit_for("oauth_token"), window=60, raise_on_limit=True)
+
     # BE-6040: parse + field-cap failures must also use the RFC 6749 §5.2
     # envelope (they raise HTTPException with a string detail otherwise).
     try:
@@ -505,7 +531,7 @@ async def token(
         # All other validation failures (PKCE, code reuse, expired, missing
         # resource when required) stay invalid_request (400).
         if "invalid_client" in message:
-            logger.warning("OAuth token client authentication failed: %s", exc)
+            logger.warning("OAuth token client authentication failed: %s", sanitize(str(exc)))
             # RFC 6749 §5.2: a 401 invalid_client SHOULD carry WWW-Authenticate
             # naming the auth schemes /token accepts (Basic + form/JSON post).
             return _oauth_error(
@@ -514,12 +540,12 @@ async def token(
                 www_authenticate='Basic realm="oauth"',
             )
         if "resource does not match" in message:
-            logger.warning("OAuth token resource mismatch: %s", exc)
+            logger.warning("OAuth token resource mismatch: %s", sanitize(str(exc)))
             return _oauth_error(
                 "invalid_grant",
                 status_code=status.HTTP_401_UNAUTHORIZED,
             )
-        logger.warning("OAuth token exchange failed: %s", exc)
+        logger.warning("OAuth token exchange failed: %s", sanitize(str(exc)))
         return _oauth_error(
             "invalid_request",
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -570,7 +596,15 @@ async def refresh(
         HTTPException 400: ``invalid_request`` (grant_type wrong, missing field).
         HTTPException 401: ``invalid_client`` (auth failed) or
             ``invalid_grant`` (token unknown / revoked / expired).
+        HTTPException 429: per-IP rate limit exceeded (SEC-9227d).
     """
+    # SEC-9227d (M3): per-IP rate limit, FIRST — before any parsing (reject
+    # cheap, parse later). Deliberately OUTSIDE the try blocks below: the 429
+    # is NOT an OAuth protocol error and must propagate as-is, never rewritten
+    # into the RFC 6749 §5.2 envelope.
+    rate_limiter = get_rate_limiter()
+    await rate_limiter.check_rate_limit(request, limit=limit_for("oauth_refresh"), window=60, raise_on_limit=True)
+
     # BE-6040: parse + field-cap failures must also use the RFC 6749 §5.2
     # envelope (they raise HTTPException with a string detail otherwise).
     try:
@@ -626,19 +660,19 @@ async def refresh(
     except ValueError as exc:
         message = str(exc)
         if message.startswith("invalid_client"):
-            logger.warning("OAuth refresh client authentication failed: %s", exc)
+            logger.warning("OAuth refresh client authentication failed: %s", sanitize(str(exc)))
             return _oauth_error(
                 "invalid_client",
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 www_authenticate='Basic realm="oauth"',
             )
         if message.startswith("invalid_grant"):
-            logger.warning("OAuth refresh invalid_grant: %s", exc)
+            logger.warning("OAuth refresh invalid_grant: %s", sanitize(str(exc)))
             return _oauth_error(
                 "invalid_grant",
                 status_code=status.HTTP_401_UNAUTHORIZED,
             )
-        logger.warning("OAuth refresh request invalid: %s", exc)
+        logger.warning("OAuth refresh request invalid: %s", sanitize(str(exc)))
         return _oauth_error(
             "invalid_request",
             status_code=status.HTTP_400_BAD_REQUEST,

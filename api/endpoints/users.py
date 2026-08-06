@@ -232,7 +232,7 @@ class DepthConfig(BaseModel):
     - git_commits: 10, 25, 50, 100
     - agent_templates: basic, full (0347d)
     - tech_stack_sections: required, all
-    - architecture_depth: overview, detailed
+    - architecture_depth: overview, detailed (stored, NOT applied -- see field description)
     """
 
     vision_documents: Literal["none", "optional", "light", "medium", "full"] = Field(
@@ -244,11 +244,12 @@ class DepthConfig(BaseModel):
     git_commits: Literal[5, 10, 25, 50, 100] = Field(default=25, description="Number of recent git commits to include")
     agent_templates: Literal["basic", "full"] = Field(
         default="basic",
-        description="Detail level for agent templates: basic (team roster) / full (complete definitions)",
+        description="get_context roster detail: basic (name/role/desc) / full (+instructions). Not agent identity.",
     )
     tech_stack_sections: Literal["required", "all"] = Field(default="all", description="Tech stack sections to include")
     architecture_depth: Literal["overview", "detailed"] = Field(
-        default="overview", description="Architecture documentation depth"
+        default="overview",
+        description="Architecture depth. STORED BUT NOT APPLIED - get_architecture takes no depth param.",
     )
 
     model_config = ConfigDict(
@@ -971,7 +972,12 @@ async def update_depth_config(
         extra={"user_id": str(current_user.id), "tenant_key": current_user.tenant_key},
     )
 
-    await user_service.update_depth_config(str(current_user.id), depth_request.depth_config.model_dump())
+    # BE-9322: every DepthConfig field has a default, so a plain model_dump()
+    # turned a partial body into a six-key overwrite. The service already
+    # merges per key; exclude_unset is what makes the merge reach it.
+    await user_service.update_depth_config(
+        str(current_user.id), depth_request.depth_config.model_dump(exclude_unset=True)
+    )
 
     logger.info(
         f"Updated depth config for user: {current_user.username}",

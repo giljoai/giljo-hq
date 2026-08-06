@@ -1,6 +1,6 @@
 # Migrations
 
-This directory holds the Alembic migration chains for the GiljoAI MCP database.
+This directory holds the Alembic migration chains for the Giljo HQ database.
 
 ## Layout
 

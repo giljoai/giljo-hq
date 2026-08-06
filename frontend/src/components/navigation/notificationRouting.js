@@ -15,6 +15,17 @@
 export const TYPE_ROUTE_MAP = {
   // api_key.expiring_soon → Tools connect tab (ApiKeyManager lives there)
   'api_key.expiring_soon': () => ({ name: 'Tools', query: { tab: 'connect' } }),
+  // FE-9222: the context-tuning-due system banner deep-links to the Products
+  // view, which opens the ProductTuningDialog for ?tune=<product_id>. Routing
+  // it through this shared map (rather than the bare cta_route named-route the
+  // banner emits) is what lets it carry the product context the tune dialog
+  // needs — and keeps the banner and the bell on one routing source of truth.
+  'system.context_tuning_due': (n) => ({ name: 'Products', query: { tune: productIdOf(n) } }),
+  // FE-9289c: a Message Hub handover ("It's your call") lands on its thread. The
+  // client-local _local row carries the thread id in metadata; Answer routes here, the
+  // same ?thread= deep link the browser notification uses, so both open the thread and
+  // HubView selects it on arrival (works from a cold page).
+  handover: (n) => ({ path: '/hub', query: { thread: threadIdOf(n) } }),
 }
 
 /**
@@ -41,6 +52,21 @@ export const CLOSEOUT_NOTIFICATION_TYPES = new Set([
  * in payload.project_id. Read either so both deep-link to the project.
  */
 export const projectIdOf = (n) => n?.metadata?.project_id ?? n?.payload?.project_id
+
+/**
+ * FE-9222: the product id a context-tuning banner points at. Structured-payload
+ * rows carry it in payload.product_id; metadata-style rows in
+ * metadata.product_id. Read either, mirroring projectIdOf. Module-local — only
+ * the context-tuning route factory below consumes it.
+ */
+const productIdOf = (n) => n?.payload?.product_id ?? n?.metadata?.product_id
+
+/**
+ * FE-9289c: the thread id a Message Hub handover points at. Carried in metadata (the
+ * client-local row) or payload, mirroring projectIdOf. Module-local — only the handover
+ * route factory consumes it.
+ */
+const threadIdOf = (n) => n?.metadata?.thread_id ?? n?.payload?.thread_id
 
 /**
  * Project deep-link for a notification, closeout-family-aware.

@@ -2,7 +2,7 @@
 
 ## What We Believe
 
-GiljoAI MCP is built with full source code included because we believe the best developer tools are transparent. We want individual developers and teams to have full access to a powerful agent orchestration system, run it on their own infrastructure, modify it, and build with it.
+Giljo HQ is built with full source code included because we believe the best developer tools are transparent. We want individual developers and teams to have full access to a powerful agent orchestration system, run it on their own infrastructure, modify it, and build with it.
 
 At the same time, we need the right to build a sustainable business. When someone repackages this software as a hosted or managed service that competes with our own offering, that is a commercial use case, and we want the option to monetize it.
 
@@ -56,7 +56,7 @@ If that does not work for you, no hard feelings. You are welcome to fork the rep
 
 ## The "Community Edition" Brand
 
-The downloadable version of GiljoAI MCP is branded as the **Community Edition**. This is the full product. It is not limited, locked down, or missing features compared to what we run ourselves on the SaaS side — except that the SaaS-only code (billing, multi-org provisioning, trial lifecycle, deletion lifecycle, OAuth onboarding flows) is not part of the CE distribution.
+The downloadable version of Giljo HQ is branded as the **Community Edition**. This is the full product. It is not limited, locked down, or missing features compared to what we run ourselves on the SaaS side — except that the SaaS-only code (billing, multi-org provisioning, trial lifecycle, deletion lifecycle, OAuth onboarding flows) is not part of the CE distribution.
 
 The branding exists so users know which edition they are running and so we can maintain a clear distinction between the Community Edition and any commercial or hosted offering.
 

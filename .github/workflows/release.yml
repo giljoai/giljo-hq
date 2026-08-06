@@ -154,7 +154,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          name: "GiljoAI MCP v${{ steps.version.outputs.VERSION }}"
+          name: "Giljo HQ v${{ steps.version.outputs.VERSION }}"
           generate_release_notes: true
           draft: false
           prerelease: ${{ steps.version.outputs.PRERELEASE == 'true' }}

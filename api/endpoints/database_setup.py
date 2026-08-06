@@ -171,7 +171,7 @@ async def test_database_connection(request: DatabaseSetupRequest) -> dict:
 @router.post("/setup", dependencies=[Depends(require_setup_incomplete)])
 async def setup_database(request: DatabaseSetupRequest) -> dict:
     """
-    Set up PostgreSQL database for GiljoAI MCP.
+    Set up PostgreSQL database for Giljo HQ.
 
     This endpoint:
     1. Tests connection to PostgreSQL with admin credentials

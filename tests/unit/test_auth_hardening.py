@@ -174,6 +174,7 @@ class TestAuthenticateWebsocketApiKeyTenantKey:
         mock_websocket.headers = {}
 
         mock_db = AsyncMock()
+        mock_db.info = {}  # tenant_session_context save/restore target
 
         validated_key = {
             "name": "test-key",

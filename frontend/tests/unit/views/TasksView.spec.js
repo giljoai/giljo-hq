@@ -130,7 +130,9 @@ describe('TasksView - Task Statistics', () => {
 
     await flushPromises()
     expect(wrapper.text()).toContain('Tasks')
-    expect(wrapper.text()).toContain('New Task')
+    // FE-9365f: the toolbar went icon-only (Projects parity) — the label lives in the
+    // title/aria attributes now, not the text.
+    expect(wrapper.find('[title="New task"]').exists()).toBe(true)
   })
 })
 
@@ -355,7 +357,10 @@ describe('TasksView - Filter Controls', () => {
     })
 
     await flushPromises()
-    expect(wrapper.text()).toContain('New Task')
+    // FE-9365f: icon-only button; the accessible name is what a user (and a screen
+    // reader) actually gets, so that is what the test pins.
+    const btn = wrapper.find('[aria-label="Create new task"]')
+    expect(btn.exists()).toBe(true)
   })
 })
 

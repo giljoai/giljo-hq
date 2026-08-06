@@ -1,5 +1,5 @@
 /**
- * Design Tokens for GiljoAI MCP Dashboard
+ * Design Tokens for Giljo HQ Dashboard
  *
  * Extracted from Nicepage design reference for consistent styling across UI components.
  * Handover 0243a: Design Token Extraction & LaunchTab Container
@@ -235,6 +235,13 @@ $shadow-default: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 $shadow-strong: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
 $shadow-dramatic: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
 
+// FE-9289c: the Quiet Cards hover lift. Named for its ROLE (card-hover elevation),
+// not its value, so the next shadow tweak edits one place. The house $shadow-* scale
+// above tops out at 0.1 alpha and is tuned for light-on-light panels; a card lifting
+// off the dark Hub surface needs the deeper 0.30 the spec's --shadow-lg calls for.
+// This is the one place that value lives — never inline it in a component.
+$shadow-card-hover: 0 8px 32px rgba(0, 0, 0, 0.3);
+
 // =========================================================================
 // 12. MIXINS — shared patterns for component @include usage
 // =========================================================================
@@ -267,4 +274,3 @@ $transition-slow:   0.4s;
 $transition-hover:     background $transition-fast, color $transition-fast;
 $transition-transform: transform $transition-normal ease;
 $transition-all-fast:  all $transition-fast ease;
-

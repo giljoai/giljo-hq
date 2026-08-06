@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-DatabaseManager for GiljoAI MCP with PostgreSQL support.
+DatabaseManager for Giljo HQ with PostgreSQL support.
 
 Provides connection pooling, tenant isolation, and production-ready database management.
 """

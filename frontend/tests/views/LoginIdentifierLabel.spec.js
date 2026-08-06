@@ -1,7 +1,7 @@
 /**
  * AUTH-EMAIL frontend contract: the login identifier field must indicate that
- * either a username OR an email can be entered. See
- * handovers/completed/AUTH_EMAIL_USERNAME_DECISION.md (Option A, decision commit
+ * either a username OR an email can be entered. See the
+ * AUTH_EMAIL_USERNAME_DECISION record (Option A, decision commit
  * af53e62b). The backend performs dual-lookup; the frontend only updates copy.
  *
  * Guard-rails:

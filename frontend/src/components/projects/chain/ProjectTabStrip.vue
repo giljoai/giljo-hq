@@ -3,7 +3,9 @@
        The Review badge is a display-only status indicator; the "Review project"
        button lives in ProjectStatusBanner and routes through onReviewProjectClick
        in ProjectTabs.vue. Active tab highlighted; completed tabs show "COMPLETED";
-       not-started tabs faded. Conditional layer only. -->
+       not-started tabs faded. Conditional layer only.
+       Badge state machine (FE-9239 addendum) — read-only reference for P2/FE-9244:
+       REVIEW > COMPLETED > WORKING > PLANNING > WAITING, see badgeState() below. -->
   <div class="project-tab-strip" role="tablist" data-testid="project-tab-strip">
     <button
       v-for="tab in tabs"
@@ -85,16 +87,26 @@ function truncName(tab) {
 
 /**
  * Returns the modifier key for the badge class.
- * Precedence: needsReview > isCompleted > isWorking (implementing) > waiting.
+ * Precedence: needsReview > isCompleted > isWorking (implementing) > isPlanning > waiting.
  * isWorking derives from the project's status field, NOT from chain position (isCurrent).
- * A staging/pending member that IS the chain head correctly shows WAITING until its
+ * A staging/pending member that IS the chain head correctly shows PLANNING (while its
+ * staging_status is 'staging'/'staged') or WAITING (not yet staged) until its
  * sub-orchestrator sets status to 'implementing'.
+ * isPlanning (FE-9239) derives from Project.staging_status via useChainContext — true
+ * while a chain member is actively being staged, so it reads distinctly from a
+ * genuinely-queued member instead of both showing WAITING. staging_complete (mission
+ * written, Implement lit, no workers yet) is DELIBERATELY excluded from isPlanning by
+ * useChainContext today (falls through to WAITING here) — that is Patrik's
+ * design-review call; to switch it to PLANNING, flip the fallback check in
+ * useChainContext.js's `tabs` computed (the `stagingActive` derivation) to also
+ * include 'staging_complete', no change needed in this file.
  * Always returns a non-null string so every pill renders a two-row layout.
  */
 function badgeState(tab) {
   if (tab.needsReview) return 'review'
   if (tab.isCompleted) return 'completed'
   if (tab.isWorking) return 'working'
+  if (tab.isPlanning) return 'planning'
   return 'waiting'
 }
 
@@ -103,6 +115,7 @@ function badgeLabel(tab) {
   if (state === 'review') return 'REVIEW'
   if (state === 'completed') return 'COMPLETED'
   if (state === 'working') return 'WORKING'
+  if (state === 'planning') return 'PLANNING'
   if (state === 'waiting') return 'WAITING'
   return ''
 }
@@ -218,6 +231,13 @@ function badgeIsPulsing(tab) {
     &--working {
       color: $color-status-working;
       background: rgba($color-status-working, 0.15);
+    }
+
+    &--planning {
+      // FE-9239: distinct from WAITING (amber) and WORKING (white) — a chain
+      // member actively being staged, not yet a genuinely-queued/working one.
+      color: $color-status-sleeping;
+      background: rgba($color-status-sleeping, 0.15);
     }
 
     &--waiting {

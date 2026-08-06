@@ -176,11 +176,14 @@ async def test_audit_dedupes_repeated_contextless_warnings(db_manager, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_update_no_match_branch_logs_and_does_not_raise(db_manager, monkeypatch, caplog):
-    """TSK-9008 Step 1 (log-only): an UPDATE/DELETE that touches a tenant-scoped model set but
-    whose target table cannot be matched to any of those models (no predicate injectable) LOGS
-    via _audit_warn and does NOT raise -- even under enforce (the default mode). Step 2
-    (flipping this branch to raise) is a separate, not-yet-authorized change.
+async def test_update_no_match_branch_logs_and_raises(db_manager, monkeypatch, caplog):
+    """TSK-9008 Step 2 (fail-closed, SEC-9156, shipped): a Class-B UPDATE/DELETE -- touches a
+    tenant-scoped model set, no model's table matches the target (no predicate injectable), AND
+    carries no explicit tenant predicate -- LOGS via _audit_warn (still, unchanged) and now
+    RAISES TenantIsolationError under enforce (the default mode). Superseded assertion: this
+    branch used to warn-and-continue (Step 1, log-only); Step 2 makes it fail-closed for the
+    genuinely-unscoped case. The Class-A (explicit-predicate) sibling stays warn-and-continue --
+    see test_sec9156_guard_failclosed.py::test_classa_explicitly_scoped_delete_does_not_raise.
 
     This variant forces the branch deterministically (independent of statement shape) by
     making the walk report an unrelated tenant-scoped model as "touched" -- the DELETE's own
@@ -198,17 +201,17 @@ async def test_update_no_match_branch_logs_and_does_not_raise(db_manager, monkey
         monkeypatch.setattr(guard_module, "_tenant_models_for_statement", lambda statement: frozenset({Task}))
 
         with caplog.at_level(logging.WARNING, logger="giljo_mcp.database"):
-            await session.execute(delete(Product).where(Product.id == product.id))
+            with pytest.raises(TenantIsolationError):
+                await session.execute(delete(Product).where(Product.id == product.id))
 
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "tenant guard audit" in r.getMessage()]
-    assert warnings, "expected an audit WARNING for the no-match UPDATE/DELETE branch"
+    assert warnings, "expected an audit WARNING for the no-match UPDATE/DELETE branch (still logged before raising)"
     message = warnings[0].getMessage()
     assert "would have blocked" in message
     assert "Task" in message
     assert "statement_type=delete" in message
     # No explicit tenant predicate in this statement, so no explicit-predicate suffix.
     assert "explicit tenant predicate" not in message
-    # No raise: session.execute() above completing without an exception IS the assertion.
 
 
 @pytest.mark.asyncio
@@ -218,7 +221,7 @@ async def test_mapped_class_bulk_update_now_injects(db_manager, caplog):
     TSK-9008 log-only (warn) branch. The SEC-9094 matcher routes injection through the same
     ``_table_model`` unwrap the detection walk uses, so this shape now INJECTS the tenant
     predicate: the write applies AND the guard is quiet (no "would have blocked" warn). The
-    genuinely-unmatchable case still warns -- see test_update_no_match_branch_logs_and_does_not_raise."""
+    genuinely-unmatchable case still warns AND now raises -- see test_update_no_match_branch_logs_and_raises."""
     tenant_key = _tenant_key()
 
     async with TransactionalTestContext(db_manager) as session:

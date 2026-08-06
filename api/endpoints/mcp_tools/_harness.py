@@ -17,6 +17,7 @@ Edition Scope: Both.
 from mcp.server.fastmcp import Context
 from starlette.requests import Request as StarletteRequest
 
+from giljo_mcp.harness_resolver import preset_from_client_info
 from giljo_mcp.platform_registry import GENERIC_HARNESS, harness_from_client_info, select_effective_preset
 
 
@@ -55,7 +56,40 @@ def _detected_harness(ctx: Context) -> str:
     return _persisted_harness(ctx) or GENERIC_HARNESS
 
 
-def get_session_capabilities(ctx: Context) -> dict[str, bool | str]:
+def _persisted_preset(ctx: Context) -> str | None:
+    """Read the DETECTED harness preset the middleware stamped onto scope state (BE-9327).
+
+    The preset-axis twin of :func:`_persisted_harness`; see
+    ``_stamp_resolved_preset`` (transport) for why the persisted copy is the only one
+    a tools/call can see. ``None`` when there is no HTTP request (in-memory transport)
+    or nothing stamped. Never raises — a render hint, not a gate.
+    """
+    try:
+        request: StarletteRequest = ctx.request_context.request
+        value = request.scope.get("state", {}).get("resolved_preset")
+        return value if isinstance(value, str) and value else None
+    except Exception:  # noqa: BLE001 - detection is a render hint, never raise into the tool
+        return None
+
+
+def _detected_preset(ctx: Context) -> str | None:
+    """Resolve the DETECTED harness PRESET, live clientInfo first with a persisted fallback.
+
+    Mirrors :func:`_detected_harness` exactly, and for the same reason: the live
+    ``ctx.session.client_params.clientInfo`` is authoritative when present (the
+    ``initialize`` request and the in-memory transport), but ``stateless_http`` drops
+    it on every tools/call — the render path — so fall back to the preset persisted at
+    initialize. Degrades to ``None`` (no preset applies); never raises.
+    """
+    try:
+        client_info = ctx.session.client_params.clientInfo
+        live = preset_from_client_info(getattr(client_info, "name", None), getattr(client_info, "version", None))
+    except Exception:  # noqa: BLE001 - detection is a render hint, never raise into the tool
+        live = None
+    return live or _persisted_preset(ctx)
+
+
+def get_session_capabilities(ctx: Context) -> dict[str, bool | str | None]:
     """Generalized per-session capability read (INF-8003d; BE-9035b harness axis).
 
     Wraps the ``ClientCapabilities`` probes already used ad hoc by the two
@@ -70,6 +104,13 @@ def get_session_capabilities(ctx: Context) -> dict[str, bool | str]:
     codex / ... / generic) resolved from the session clientInfo. It is the capability
     vector ``effective_harness`` consumes to apply the DETECTED-beats-declared render
     precedence. Absent/unknown clientInfo → ``"generic"`` (the fail-safe floor).
+
+    BE-9327 adds the ``"preset"`` key: the DETECTED harness PRESET (web_sandbox / chat)
+    for a hosted surface, else ``None``. ``select_effective_preset`` has always read
+    this key, but nothing produced it, so the whole preset axis was reachable only by
+    an explicit declaration — which no hosted client sends. The key is ALWAYS present
+    (``None`` when no preset applies) so the vector stays one fixed shape rather than
+    two its readers would have to tell apart.
     """
     from mcp.types import ClientCapabilities, ElicitationCapability
 
@@ -83,6 +124,7 @@ def get_session_capabilities(ctx: Context) -> dict[str, bool | str]:
         "elicitation": _probe(ClientCapabilities(elicitation=ElicitationCapability())),
         "tasks": _probe(ClientCapabilities(experimental={"io.modelcontextprotocol/tasks": {}})),
         "harness": _detected_harness(ctx),
+        "preset": _detected_preset(ctx),
     }
 
 

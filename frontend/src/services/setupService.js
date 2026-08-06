@@ -93,8 +93,13 @@ class SetupService {
         this._statusCacheTime = Date.now()
         return result
       } else {
-        console.warn('[SETUP_SERVICE] Setup status endpoint failed:', response.status)
-        return this._fallbackStatus()
+        // FE-9233: an HTTP response means the server is ALIVE, so a 429 (rate
+        // limited) or 5xx is TRANSIENT -- not "this box is unconfigured".
+        // Falling through to _fallbackStatus() here returned is_fresh_install:
+        // true in CE, which authGuard.js PRIORITY 1 turned into a reroute to
+        // the /welcome CreateAdminAccount wizard on a fully set-up install.
+        console.warn('[SETUP_SERVICE] Setup status transient failure:', response.status)
+        return this._transientStatus()
       }
     } catch (error) {
       console.warn('[SETUP_SERVICE] Status check failed:', error)
@@ -103,7 +108,38 @@ class SetupService {
   }
 
   /**
+   * FE-9233: result for a TRANSIENT failure -- the server answered (429/5xx),
+   * so it exists and is configured-or-not in a way we simply could not read
+   * this time. Never asserts a fresh install.
+   *
+   * Prefers the last-known good status even if its TTL has expired: a stale
+   * true answer beats a fresh guess. Deliberately NOT written to _statusCache,
+   * so the next call retries the network instead of serving this shape for the
+   * full TTL.
+   *
+   * Derived from _fallbackStatus() so mode-specific semantics (saas/demo
+   * public-landing) stay identical; the ONLY thing stripped is the CE
+   * fresh-install assertion that caused the misroute.
+   */
+  _transientStatus() {
+    if (this._statusCache) return this._statusCache
+    return {
+      ...this._fallbackStatus(),
+      is_fresh_install: false,
+      requires_admin_creation: false,
+      transient_failure: true,
+    }
+  }
+
+  /**
    * Mode-aware fallback when /api/setup/status is unreachable.
+   *
+   * FE-9233 -- LOAD-BEARING, do not repurpose: this is reached only from the
+   * catch branch of _fetchStatus(), i.e. a genuine connection failure with
+   * nothing listening. That is the CE installer first-boot path (the frontend
+   * comes up before the backend finishes booting) and the CE fresh-install
+   * default here is what carries a real first-boot user into the
+   * admin-creation wizard. Transient HTTP failures go to _transientStatus().
    *
    * In demo/saas mode we must NEVER default to is_fresh_install: true --
    * that would race an anonymous visitor into the CE CreateAdminAccount

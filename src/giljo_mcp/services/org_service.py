@@ -27,7 +27,7 @@ import secrets
 import string
 from typing import Any
 
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.exceptions import (
@@ -340,12 +340,33 @@ class OrgService:
             merged_settings = dict(current_settings)
 
             # --- Field-allowlist write (mirrors post-0962 discipline) ---
-            org.name = clean_name
-            org.slug = candidate_slug
-            org.settings = merged_settings
-            org.org_setup_complete = True
-
-            await self.session.commit()
+            # Two attempts: the slug check above cannot be atomic with the
+            # write, so anything it cannot see (a racing setup) can still trip
+            # the global idx_org_slug unique index. On that one violation,
+            # roll back, re-read the row and retry once with a random suffix
+            # rather than surfacing a 500 to a first-login user. Nothing else
+            # is pending in this transaction — the wizard write is
+            # self-contained — so a plain rollback discards only this attempt.
+            for attempt in (1, 2):
+                org.name = clean_name
+                org.slug = candidate_slug
+                org.settings = merged_settings
+                org.org_setup_complete = True
+                try:
+                    await self.session.commit()
+                    break
+                except IntegrityError as integrity_exc:
+                    if attempt == 2 or "idx_org_slug" not in str(integrity_exc.orig):
+                        raise
+                    await self._repo.rollback(self.session)
+                    suffix = "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(6))
+                    candidate_slug = f"{self._generate_slug(clean_name)}-{suffix}"
+                    org = await self._repo.get_organization_by_id(self.session, org_id, tenant_key=tenant_key)
+                    if org is None:
+                        raise ResourceNotFoundError(
+                            message="Organization not found",
+                            context={"org_id": org_id, "tenant_key": tenant_key},
+                        ) from integrity_exc
 
             logger.info(
                 "Org first-login setup complete",

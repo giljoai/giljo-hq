@@ -1,5 +1,5 @@
 [run]
-# Coverage configuration for GiljoAI MCP project
+# Coverage configuration for Giljo HQ project
 source = src
 branch = True
 parallel = True
@@ -72,7 +72,7 @@ fail_under = 80
 [html]
 # HTML report options
 directory = htmlcov
-title = GiljoAI MCP Coverage Report
+title = Giljo HQ Coverage Report
 
 [xml]
 # XML report for CI/CD integration
@@ -85,7 +85,7 @@ pretty_print = true
 
 [paths]
 # Path mapping for consistent reporting across environments
-source = 
+source =
     src/
     /app/src/
     C:\*\src\

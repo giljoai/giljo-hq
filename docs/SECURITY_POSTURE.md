@@ -1,8 +1,8 @@
-# GiljoAI MCP — Security Posture
+# Giljo HQ — Security Posture
 
 *Last updated: 2026-07-01*
 
-This document is a plain-English summary of GiljoAI MCP's security posture,
+This document is a plain-English summary of Giljo HQ's (a GiljoAI product) security posture,
 written for non-engineers — product, sales, customer security reviewers, and
 anyone who needs to understand what the server does and does not do with your
 content. Engineering detail — including the grep-evidence audit (SEC-0002)
@@ -11,7 +11,7 @@ backing every claim below — lives in
 
 ## The claim
 
-GiljoAI MCP is a **passive coordination server**. AI reasoning happens on the
+Giljo HQ is a **passive coordination server**. AI reasoning happens on the
 user's own machine with the user's own API keys; the GiljoAI server never runs
 LLM inference, never executes user content as code, and never initiates
 outbound calls carrying user content. A prompt-injection attack embedded in

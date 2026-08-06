@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-GiljoAI MCP Tools Package
+Giljo HQ Tools Package
 
 All MCP tools are registered in api/endpoints/mcp_sdk_server.py via FastMCP SDK
 and delegate to ToolAccessor methods which use the service layer.

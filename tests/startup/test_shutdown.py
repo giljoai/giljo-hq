@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from api.app_state import APIState
+from giljo_mcp.branding import PRODUCT_NAME
 
 
 def _quiet_state() -> APIState:
@@ -231,11 +232,15 @@ async def test_shutdown_logs_progress():
         await shutdown(state)
 
         # Verify shutdown messages were logged (step detail is at DEBUG, TSK-9194)
-        info_calls = [call.args[0] for call in mock_logger.info.call_args_list]
+        info_call_args = [call.args for call in mock_logger.info.call_args_list]
 
-        # Check for the actual logger.info messages from shutdown.py
-        assert any("Shutting down GiljoAI MCP API" in msg for msg in info_calls)
-        assert any("Shutdown: %d/%d steps OK" in msg for msg in info_calls)
+        # The opening line is logged as logger.info("Shutting down %s API...", PRODUCT_NAME, ...)
+        # -- assert the template AND that the interpolated product name is the
+        # branding constant (not a hardcoded pre-rebrand product name).
+        assert any(
+            "Shutting down %s API" in args[0] and args[1] == PRODUCT_NAME for args in info_call_args if len(args) > 1
+        )
+        assert any("Shutdown: %d/%d steps OK" in args[0] for args in info_call_args)
 
 
 @pytest.mark.asyncio

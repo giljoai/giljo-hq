@@ -127,5 +127,5 @@ jobs:
           # Now run startup.py --help with the no-deps system Python.
           # The guard must re-exec into ./venv/bin/python and succeed.
           python startup.py --help > /tmp/help.out 2>&1 || (echo '--- startup.py --help output ---'; cat /tmp/help.out; exit 1)
-          grep -q "GiljoAI MCP" /tmp/help.out || (echo "Expected 'GiljoAI MCP' in --help output:"; cat /tmp/help.out; exit 1)
+          grep -q "Giljo HQ" /tmp/help.out || (echo "Expected 'Giljo HQ' in --help output:"; cat /tmp/help.out; exit 1)
           echo "[OK] Venv-guard re-exec succeeded -- startup.py --help reachable from no-deps Python."

@@ -235,7 +235,7 @@ class ConfigManager:
             frontend_mode = str(self.settings.get("frontend_mode", "development")).lower()
             environment = "production" if frontend_mode == "production" else "development"
 
-            env_content = f"""# GiljoAI MCP Environment Configuration v3.0
+            env_content = f"""# Giljo HQ Environment Configuration v3.0
 # Generated: {datetime.now().isoformat()}
 # Deployment Context: {network_mode} (informational only - not a mode)
 
@@ -716,101 +716,4 @@ ACTIVE_PRODUCT=GiljoAI-MCP Coding Orchestrator
             result["valid"] = False
             result["issues"].append("config.yaml file not found")
 
-        return result
-
-
-def seed_default_orchestrator_template(db_manager, tenant_key: str) -> Dict[str, Any]:
-    """
-    Seed the default orchestrator template for a tenant.
-
-    Args:
-        db_manager: Database manager instance
-        tenant_key: Tenant key for multi-tenant isolation
-
-    Returns:
-        Result dictionary with success status
-    """
-    from datetime import datetime, timezone
-
-    from giljo_mcp.models import AgentTemplate
-    from giljo_mcp.template_manager import UnifiedTemplateManager
-
-    logger = logging.getLogger(__name__)
-    result = {"success": False, "errors": []}
-
-    try:
-        logger.info("Seeding default orchestrator template...")
-
-        # Get orchestrator template from UnifiedTemplateManager
-        template_mgr = UnifiedTemplateManager()
-        orchestrator_content = template_mgr._legacy_templates["orchestrator"]
-
-        # Use synchronous session (installer context)
-        with db_manager.get_session() as session:
-            # Check if orchestrator template already exists
-            existing = (
-                session.query(AgentTemplate)
-                .filter(
-                    AgentTemplate.tenant_key == tenant_key,
-                    AgentTemplate.role == "orchestrator",
-                    AgentTemplate.is_default == True,  # noqa: E712 - SQLAlchemy filter expression
-                )
-                .first()
-            )
-
-            if existing:
-                logger.info("Default orchestrator template already exists")
-                result["success"] = True
-                result["message"] = "Template already exists"
-                return result
-
-            # Create template
-            template = AgentTemplate(
-                tenant_key=tenant_key,
-                product_id=None,  # Global template (all products)
-                name="orchestrator",
-                category="role",
-                role="orchestrator",
-                template_content=orchestrator_content,
-                variables=["project_name", "project_mission", "product_name"],
-                behavioral_rules=[
-                    "Coordinate all agents effectively",
-                    "Ensure project goals are met through delegation",
-                    "Handle conflicts and blockers",
-                    "Maintain project momentum",
-                    "Read vision document completely (all parts)",
-                    "Challenge scope drift",
-                    "Enforce 3-tool rule (delegate if using >3 tools)",
-                    "Create specific missions based on discoveries",
-                    "Create 3 documentation artifacts at project close",
-                ],
-                success_criteria=[
-                    "Vision document fully read (all parts if chunked)",
-                    "All product config_data reviewed",
-                    "Serena MCP discoveries documented",
-                    "All agents spawned with SPECIFIC missions",
-                    "Project goals achieved and validated",
-                    "Handoffs completed successfully",
-                    "Three documentation artifacts created",
-                ],
-                is_default=True,  # Default orchestrator template
-                is_active=True,
-                description="Enhanced orchestrator template with discovery-first workflow, 30-80-10 principle, and 3-tool delegation rule",
-                version="2.0.0",
-                tags=["orchestrator", "discovery", "delegation", "default"],
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
-            )
-
-            session.add(template)
-            session.commit()
-
-            logger.info("Default orchestrator template seeded successfully")
-            result["success"] = True
-            result["message"] = "Template seeded successfully"
-            return result
-
-    except Exception as e:
-        logger.error(f"Failed to seed orchestrator template: {e}")
-        result["errors"].append(str(e))
         return result

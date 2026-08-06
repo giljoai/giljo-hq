@@ -27,7 +27,9 @@ Security contract (RFC 6749 §6 + §10.4 + OAuth 2.1 Security BCP):
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -37,12 +39,13 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, case, func, select, update
 
 from giljo_mcp.auth.jwt_manager import JWTManager
 from giljo_mcp.database import tenant_isolation_bypass, tenant_session_context
 from giljo_mcp.models.auth import User
 from giljo_mcp.models.oauth import OAuthRefreshToken
+from giljo_mcp.services._idem_crypto import decrypt_payload, encrypt_payload
 from giljo_mcp.services.cache_backends import OAUTH_REFRESH_BACKEND_NAME, get_cache_backend
 
 
@@ -64,6 +67,13 @@ logger = logging.getLogger(__name__)
 OAUTH_REFRESH_IDEMPOTENCY_WINDOW_SECONDS = int(os.environ.get("OAUTH_REFRESH_IDEMPOTENCY_WINDOW_SECONDS", "5"))
 _REFRESH_IDEMPOTENCY_FIELD_SEP = b"\x1f"
 
+# SEC-9227e (M5): bounded under-lock re-check of the idempotency cache before
+# reuse detection revokes a family. Covers the winner's commit->cache-put gap
+# (see _converged_pair_under_lock). 5 x 50ms = ~250ms worst case, and ONLY on
+# the losing side of a truly concurrent same-token refresh.
+_CONVERGE_RECHECK_ATTEMPTS = 5
+_CONVERGE_RECHECK_SLEEP_SECONDS = 0.05
+
 
 @dataclass(frozen=True)
 class _RefreshIdempotencyEntry:
@@ -72,16 +82,26 @@ class _RefreshIdempotencyEntry:
 
 
 def _serialize_refresh_entry(entry: _RefreshIdempotencyEntry) -> str:
-    return json.dumps(
-        {
-            "response_body": entry.response_body,
-            "body_signature": entry.body_signature,
-        }
+    # SEC-9227f (M2a): the JSON contains the raw access+refresh token pair —
+    # encrypt it so no readable token material reaches any cache backend
+    # (SaaS Redis persistence/MONITOR would otherwise expose live pairs).
+    return encrypt_payload(
+        json.dumps(
+            {
+                "response_body": entry.response_body,
+                "body_signature": entry.body_signature,
+            }
+        )
     )
 
 
-def _deserialize_refresh_entry(raw: str) -> _RefreshIdempotencyEntry:
-    payload = json.loads(raw)
+def _deserialize_refresh_entry(raw: str) -> _RefreshIdempotencyEntry | None:
+    # SEC-9227f: an undecryptable entry (tampered, rotated key, stale format)
+    # is a cache MISS, never an exception — see _idem_crypto.decrypt_payload.
+    plaintext = decrypt_payload(raw)
+    if plaintext is None:
+        return None
+    payload = json.loads(plaintext)
     return _RefreshIdempotencyEntry(
         response_body=dict(payload["response_body"]),
         body_signature=str(payload["body_signature"]),
@@ -134,6 +154,53 @@ def _compute_refresh_body_signature(
     return h.hexdigest()
 
 
+async def _converged_pair_under_lock(
+    *,
+    tenant_key: str,
+    token_hash: str,
+    body_signature: str,
+) -> _RefreshIdempotencyEntry | None:
+    """SEC-9227e (M5): under-lock cache re-check that lets truly concurrent
+    refreshes CONVERGE instead of self-revoking the family.
+
+    The incident shape (the reason the idempotency window exists at all — see
+    the live-evidence note in ``oauth_token_idempotency.py``): two simultaneous
+    /refresh calls with the SAME token from the same honest client (multi-egress
+    connector retry). Both miss the pre-lock cache read (neither has written
+    yet), then serialize on the user FOR UPDATE lock. The winner rotates,
+    commits, and cache-puts; the loser then sees ``row.revoked=True`` under the
+    lock and — without this re-check — would trip reuse detection and revoke the
+    ENTIRE family, killing the pair the winner just returned. That is the
+    protection mechanism destroying the session it protects.
+
+    WHY THE RETRY LOOP EXISTS (do not "simplify" it away): M2b deliberately
+    moved the winner's cache-put to AFTER its commit (a cache entry must never
+    outlive a rolled-back transaction). The winner's FOR UPDATE lock releases AT
+    commit, so the loser can proceed inside the winner's commit->cache-put gap
+    and miss a cache entry that is microseconds from existing. The bounded wait
+    (up to ~250ms, losing request only) rides out exactly that gap. Removing it
+    silently reopens the family self-revocation under true concurrency.
+
+    A HIT is convergence, not an attack: producing the matching
+    ``body_signature`` requires the client's own credentials/token — the same
+    proof the winner presented. A replay outside the window, or from a different
+    identity, has no matching entry (MISS / signature mismatch) and returns
+    None, letting the caller's reuse detection fire unchanged.
+    """
+    for attempt in range(_CONVERGE_RECHECK_ATTEMPTS):
+        cached = await _refresh_idempotency_cache_get(tenant_key, token_hash)
+        if cached is not None:
+            if hmac.compare_digest(cached.body_signature, body_signature):
+                return cached
+            # An entry exists but was written by a DIFFERENT identity: that can
+            # never become a matching entry by waiting — fail to reuse detection
+            # immediately (museum rule: mismatch is attack telemetry).
+            return None
+        if attempt < _CONVERGE_RECHECK_ATTEMPTS - 1:
+            await asyncio.sleep(_CONVERGE_RECHECK_SLEEP_SECONDS)
+    return None
+
+
 def hash_refresh_token(raw_token: str) -> str:
     """Return the sha256 hex digest of ``raw_token`` for DB lookup.
 
@@ -144,7 +211,21 @@ def hash_refresh_token(raw_token: str) -> str:
     bcrypt would add no real-world security and a lot of latency on every
     refresh call.
     """
-    return hashlib.sha256(raw_token.encode("ascii")).hexdigest()
+    # SEC-9227 (L1): utf-8 is a superset of ascii, so the digest is byte-identical
+    # for every existing (ascii) token — no migration — while a future non-ascii
+    # token hashes cleanly instead of raising UnicodeEncodeError (a 500).
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def hash_authorization_code(code: str) -> str:
+    """Return the sha256 hex digest of an authorization ``code`` (SEC-9227b, M4).
+
+    Stored as ``oauth_refresh_tokens.origin_code_hash`` at /token issuance and
+    recomputed on the code-reuse path to find every family born of a replayed
+    code. The raw code is NEVER persisted — only this digest. utf-8 (not ascii)
+    for the same reason as :func:`hash_refresh_token`.
+    """
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 
 def new_family_id() -> str:
@@ -162,6 +243,7 @@ async def issue_refresh_token(
     scope: str | None,
     aud: str,
     lifetime_seconds: int,
+    origin_code_hash: str | None = None,
 ) -> str:
     """Mint + persist a refresh-token row, return the raw token string.
 
@@ -169,6 +251,11 @@ async def issue_refresh_token(
     its sha256 hex hash. ``family_id`` groups every token derived from the
     same initial authorization-code grant; reusing a revoked token revokes
     the entire family (RFC 6749 §10.4 + OAuth 2.1 Security BCP).
+
+    ``origin_code_hash`` (SEC-9227b, M4): the sha256 hex of the authorization
+    code that minted this family. Passed only at initial /token issuance;
+    rotation and other callers leave it None (the family is revoked by
+    family_id, so rotated rows need no linkage of their own).
     """
     raw_token = secrets.token_urlsafe(64)
     token_hash = hash_refresh_token(raw_token)
@@ -184,6 +271,7 @@ async def issue_refresh_token(
         aud=aud,
         expires_at=expires_at,
         revoked=False,
+        origin_code_hash=origin_code_hash,
     )
     session.add(row)
     await session.flush()
@@ -240,6 +328,121 @@ async def revoke_all_for_user(
     )
     await session.flush()
     return int(result.rowcount or 0)
+
+
+async def get_oauth_credential_status(session: AsyncSession, tenant_key: str) -> tuple[bool, bool]:
+    """Return ``(has_valid_oauth, has_expired_oauth)`` for tenant_key (FE-9274 connect-status).
+
+    ``has_valid_oauth``: >=1 non-revoked, non-expired row.
+    ``has_expired_oauth``: >=1 row exists at all, but none are currently
+    valid (all revoked and/or past ``expires_at``) -- distinct from "never
+    connected" (no rows), which reports both False.
+
+    One COUNT query, read-only, no locking.
+    """
+    now = datetime.now(UTC)
+    is_valid = and_(OAuthRefreshToken.revoked.is_(False), OAuthRefreshToken.expires_at > now)
+    stmt = select(
+        func.count(OAuthRefreshToken.id),
+        func.count(case((is_valid, 1))),
+    ).where(OAuthRefreshToken.tenant_key == tenant_key)
+    result = await session.execute(stmt)
+    total, valid = result.one()
+    has_valid_oauth = valid > 0
+    has_expired_oauth = total > 0 and not has_valid_oauth
+    return has_valid_oauth, has_expired_oauth
+
+
+async def lock_user_for_update(session: AsyncSession, *, user_id: str, tenant_key: str) -> User | None:
+    """SEC-9227c (H3): take the user-first ``SELECT ... FOR UPDATE`` on the owning User.
+
+    Every family-revocation site locks the User BEFORE revoking the refresh
+    family so it serializes against a concurrent /refresh grant in the SAME order
+    (SEC-9217b lock-order contract, same as ``session_eviction`` and
+    ``_refresh_grant_after_lookup``). The caller then passes the returned row to
+    :func:`bump_epoch_if_revoked`. Returns the locked User, or None if absent.
+    """
+    return (
+        await session.execute(select(User).where(User.id == user_id, User.tenant_key == tenant_key).with_for_update())
+    ).scalar_one_or_none()
+
+
+def bump_epoch_if_revoked(user: User | None, revoked_rows: int) -> bool:
+    """SEC-9227c (H3): increment ``token_revocation_epoch`` iff a revoke revoked LIVE rows.
+
+    Bumping the epoch makes ``principal.py`` reject every access JWT already
+    derived from the just-revoked family (its ``rev`` claim is now below the
+    user's epoch) — the enforcement half of RFC 7009 revocation that flipping
+    ``revoked`` alone does NOT provide. ONE shared, GATED bump so every
+    revocation path (RFC 7009 /revoke, /refresh reuse, /token code-reuse) invokes
+    it identically (avoiding the "fix in only N of the copies" drift
+    ``principal.py`` warns about).
+
+    GATE (``revoked_rows > 0``): re-revoking an ALREADY-dead family (e.g. a client
+    presenting its old token after a password-reset eviction already revoked the
+    family + bumped the epoch) must NOT keep bumping — that would spuriously
+    invalidate the user's fresh re-login tokens (regression pinned by
+    tests/saas/test_sec9047_reset_eviction). The epoch is bumped exactly once,
+    when live tokens actually transition to revoked. Requires the User already
+    locked FOR UPDATE (see :func:`lock_user_for_update`); the caller commits.
+    """
+    if revoked_rows > 0 and user is not None:
+        user.token_revocation_epoch = (user.token_revocation_epoch or 0) + 1
+        return True
+    return False
+
+
+async def revoke_families_for_code(
+    session: AsyncSession,
+    *,
+    code: str,
+    tenant_key: str,
+) -> int:
+    """SEC-9227b (M4): on authorization-code REUSE, revoke every refresh family
+    minted from that code (RFC 9700 §4.5.3 / RFC 6749 §4.1.2).
+
+    Finds the distinct families whose ``origin_code_hash`` matches this code
+    within ``tenant_key`` and revokes each. Runs the lookup tenant-SCOPED and
+    COMMITS before returning so the caller can raise immediately afterward: the
+    router maps the raised ValueError to an HTTPException, whose GeneratorExit
+    would otherwise roll the session back and lose the revocation (the same
+    durability contract the /refresh reuse path relies on). Logs a security
+    warning for attack telemetry. Returns the number of families revoked.
+    """
+    code_hash = hash_authorization_code(code)
+    with tenant_session_context(session, tenant_key):
+        rows = (
+            await session.execute(
+                select(OAuthRefreshToken.family_id, OAuthRefreshToken.user_id)
+                .where(
+                    OAuthRefreshToken.origin_code_hash == code_hash,
+                    OAuthRefreshToken.tenant_key == tenant_key,
+                )
+                .distinct()
+            )
+        ).all()
+        family_ids = [r.family_id for r in rows]
+        # SEC-9227c (H3): lock the owning user(s) user-first (a code is issued to
+        # ONE user, so normally one), revoke the families, then bump the epoch iff
+        # a family actually had live rows — so their already-derived access JWTs
+        # die too, without re-bumping on a repeat reuse of an already-dead code.
+        locked_users = [
+            await lock_user_for_update(session, user_id=uid, tenant_key=tenant_key)
+            for uid in {r.user_id for r in rows if r.user_id}
+        ]
+        total_revoked = 0
+        for family_id in family_ids:
+            total_revoked += await revoke_family(session, family_id=family_id, tenant_key=tenant_key)
+        for user in locked_users:
+            bump_epoch_if_revoked(user, total_revoked)
+        await session.commit()
+
+    logger.warning(
+        "oauth_auth_code_reuse_detected tenant=%s families_revoked=%d",
+        tenant_key[:12] if tenant_key else "",
+        len(family_ids),
+    )
+    return len(family_ids)
 
 
 async def refresh_token_grant(
@@ -392,7 +595,7 @@ async def _refresh_grant_after_lookup(
         refresh_token_hash=token_hash,
     )
     cached = await _refresh_idempotency_cache_get(row.tenant_key, token_hash)
-    if cached is not None and cached.body_signature == refresh_idem_signature:
+    if cached is not None and hmac.compare_digest(cached.body_signature, refresh_idem_signature):
         logger.info(
             "oauth_refresh_idempotency_hit family_id=%s tenant=%s",
             row.family_id,
@@ -417,13 +620,43 @@ async def _refresh_grant_after_lookup(
     await db.refresh(row, attribute_names=["revoked"])
 
     if row.revoked:
+        # SEC-9227e (M5): before treating this as reuse, re-check the idempotency
+        # cache UNDER the lock (bounded retry). A truly concurrent honest retry
+        # loses the lock race to its twin and only now sees revoked=True; if the
+        # winner's response is cached under OUR signature, this is convergence —
+        # return the winner's pair instead of revoking the family the winner
+        # just extended. See _converged_pair_under_lock for why the wait exists
+        # (the winner's commit->cache-put gap) and why a signature-matched HIT
+        # is provably the same client, not an attacker.
+        converged = await _converged_pair_under_lock(
+            tenant_key=row.tenant_key,
+            token_hash=token_hash,
+            body_signature=refresh_idem_signature,
+        )
+        if converged is not None:
+            logger.info(
+                "oauth_refresh_concurrent_converged family_id=%s tenant=%s",
+                row.family_id,
+                row.tenant_key[:12] if row.tenant_key else "",
+            )
+            return dict(converged.response_body)
+        # MISS after the bounded retry (or signature mismatch): genuine replay.
+        # Everything below is the unchanged museum-rule path — family revocation,
+        # epoch bump, durable commit, attack telemetry.
         revoked_count = await revoke_family(db, family_id=row.family_id, tenant_key=row.tenant_key)
+        # SEC-9227c (H3): bump the epoch so access JWTs already derived from this
+        # reused family are rejected at principal.py — but ONLY if this reuse
+        # revoked LIVE rows (a live sibling of the replayed token). The User is
+        # already locked FOR UPDATE above (user-first order). Gating avoids
+        # re-bumping when the family was already fully revoked (e.g. a
+        # password-reset eviction), which would kill the user's fresh tokens.
+        bump_epoch_if_revoked(user, revoked_count)
         # Commit BEFORE raising. The router maps ValueError to an
         # HTTPException, which FastAPI surfaces as GeneratorExit through
         # the session context manager — that path rolls back. Without
-        # this explicit commit the family revocation would be lost and a
-        # sibling token in the family could keep refreshing. RFC 6749
-        # §10.4 reuse detection MUST be durable.
+        # this explicit commit the family revocation (and the epoch bump)
+        # would be lost and a sibling token in the family could keep
+        # refreshing. RFC 6749 §10.4 reuse detection MUST be durable.
         await db.commit()
         logger.warning(
             "oauth_refresh_token_reuse_detected family_id=%s tenant=%s revoked_rows=%d",
@@ -483,6 +716,19 @@ async def _refresh_grant_after_lookup(
         "refresh_token": new_refresh,
         "refresh_expires_in": refresh_token_lifetime_seconds,
     }
+
+    # SEC-9227e (M2b): commit BEFORE the cache-put so the cache can never serve
+    # a pair whose refresh row did not persist. Pre-fix, the put ran inside the
+    # still-open transaction (the router's get_db_session dependency commits
+    # only after the endpoint returns); a rollback after this point — a later
+    # pipeline exception, a dropped connection — left the cache holding a
+    # phantom pair, and an in-window retry receiving it was hard-logged-out at
+    # its next refresh (row unknown to the DB). Mirrors the reuse-detection
+    # branch above, which already explicitly commits for exactly this
+    # durability reason; the dependency's own later commit becomes a no-op.
+    # This also releases the user FOR UPDATE lock, which is what opens the
+    # commit->cache-put gap the M5 under-lock retry waits out.
+    await db.commit()
 
     # API-0021l: cache the rotated pair so a concurrent retry inside the
     # window receives the SAME pair instead of triggering a second rotation

@@ -1,8 +1,8 @@
-# GiljoAI MCP: Architecture
+# Giljo HQ: Architecture
 
 *Last updated: 2026-04-24*
 
-This document describes the technical architecture of GiljoAI MCP for developers
+This document describes the technical architecture of Giljo HQ, a GiljoAI product, for developers
 working on or integrating with the platform.
 
 ---
@@ -291,7 +291,7 @@ property-A/property-B regression discipline), see
 
 <a id="trust-model-pitch"></a>
 
-GiljoAI MCP is a **passive coordination server**. AI reasoning happens on the
+Giljo HQ is a **passive coordination server**. AI reasoning happens on the
 user's own machine with the user's own API keys; the GiljoAI server never runs
 LLM inference, never executes user content as code, and never initiates
 outbound calls carrying user content. A prompt-injection attack embedded in

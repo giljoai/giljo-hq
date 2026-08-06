@@ -196,6 +196,7 @@ describe('SetupWizardOverlay — learning mode removed (FE-9200)', () => {
     // the wizard now owns setup mode only.
     const wrapper = await mountOverlay({ mode: 'learning', currentStep: 0 })
     expect(wrapper.text()).not.toContain('How to Use GiljoAI MCP')
+    expect(wrapper.find('[aria-label="Setup Giljo HQ"]').exists()).toBe(true)
     expect(wrapper.find('.setup-wizard-panel').exists()).toBe(false)
     expect(wrapper.find('.wizard-rail').exists()).toBe(true)
   })

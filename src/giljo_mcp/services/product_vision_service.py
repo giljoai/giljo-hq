@@ -267,6 +267,22 @@ class ProductVisionService:
         Returns:
             The computed flag value (also persisted on the product row).
         """
+        complete, _missing = await self.evaluate_vision_completion(session, product_id)
+        return complete
+
+    async def evaluate_vision_completion(
+        self,
+        session: AsyncSession,
+        product_id: str,
+    ) -> tuple[bool, list[str]]:
+        """Recompute the completion flag AND report what is still outstanding.
+
+        FE-9320: staged writes need the caller to be TOLD the completion state
+        rather than infer it. Same computation as
+        :meth:`evaluate_vision_analysis_complete` (which delegates here), plus a
+        list of agent-readable reasons the analysis is not complete yet. The list
+        is empty exactly when the flag is True.
+        """
         # BE-6210: force-refresh the product AND its vision_documents collection.
         # The per-doc summaries and the aggregate consolidated_vision are written
         # through *separate* sessions (VisionDocumentRepository / ProductService on
@@ -298,7 +314,18 @@ class ProductVisionService:
         new_value = all_docs_summarized and aggregate_populated
         product.vision_analysis_complete = new_value
         await session.flush()
-        return new_value
+
+        missing: list[str] = []
+        if not active_docs:
+            missing.append("at least one active vision document (upload one, or call create_vision_document)")
+        missing.extend(
+            f"vision_summaries entry with both light and medium for doc_id {doc.id} ({doc.document_name})"
+            for doc in active_docs
+            if not (doc.summary_light and doc.summary_medium)
+        )
+        if not aggregate_populated:
+            missing.append("consolidated_vision with both light and medium")
+        return new_value, missing
 
     async def _consolidate_vision(self, session, product_id: str) -> None:
         """Auto-consolidate vision documents after upload.

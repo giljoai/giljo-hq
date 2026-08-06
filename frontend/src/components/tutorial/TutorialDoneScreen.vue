@@ -13,6 +13,20 @@
         <span class="spotlight-desc">Creates a staged project · you paste one prompt · agents do the rest</span>
       </div>
     </div>
+
+    <!-- FE-9320: the finish state needs its own way out. Until now the only exit
+         from a COMPLETED tutorial was the footer's "Skip - I'll explore on my
+         own", which reads as abandoning the tour you just finished. -->
+    <v-btn
+      color="primary"
+      variant="flat"
+      class="done-btn"
+      data-testid="tutorial-done-close"
+      append-icon="mdi-arrow-right"
+      @click="$emit('close')"
+    >
+      Go to my dashboard
+    </v-btn>
   </div>
 </template>
 
@@ -27,6 +41,8 @@ const props = defineProps({
     default: null,
   },
 })
+
+defineEmits(['close'])
 
 // D → import an existing product; A/B/C → bootstrap a new one. Labels and
 // icons come from projectTemplates.js, the single source of truth.
@@ -109,5 +125,18 @@ const cardSub = computed(() =>
 .spotlight-desc {
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.done-btn {
+  margin-top: 4px;
+  font-family: 'Outfit', $typography-font-primary;
+  font-weight: 600;
+  border-radius: $border-radius-default;
+  background: $color-brand-yellow !important;
+  color: $color-on-yellow-ink !important;
+
+  &:hover {
+    background: $color-brand-yellow-hover !important;
+  }
 }
 </style>

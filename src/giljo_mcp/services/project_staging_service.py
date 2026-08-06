@@ -18,7 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.domain.project_status import ProjectStatus
-from giljo_mcp.exceptions import ImplementationNotReadyError, ProjectStateError, ResourceNotFoundError
+from giljo_mcp.exceptions import (
+    ImplementationNotReadyError,
+    ProjectStateError,
+    ResourceNotFoundError,
+    ValidationError,
+)
 from giljo_mcp.models.projects import Project
 from giljo_mcp.repositories.project_lifecycle_repository import ProjectLifecycleRepository
 from giljo_mcp.repositories.project_repository import ProjectRepository
@@ -345,7 +350,13 @@ class ProjectStagingService:
                 "project_id": project.id,
             }
 
-    async def mark_staged(self, project_id: str, execution_mode: str) -> None:
+    async def mark_staged(
+        self,
+        project_id: str,
+        execution_mode: str,
+        tenant_key: str | None = None,
+        db_session: AsyncSession | None = None,
+    ) -> None:
         """Persist the 'staged' state after a staging prompt has been generated.
 
         BE-3006a single-writer rule: the REST staging endpoint
@@ -354,14 +365,28 @@ class ProjectStagingService:
         generating the prompt. That write now lives here — the owning service —
         as a twin of ``restage``/``unstage`` (same session + commit pattern).
 
-        Transaction note: the prompt generator commits its own orchestrator work
-        in a separate transaction (``thin_prompt_generator`` sets
-        ``staging_status='staging'`` independently), so this flip to 'staged' is
-        already a standalone write; running it on its own session preserves the
-        prior behaviour. The pre-generation re-stage guard stays at the endpoint
-        (it is a read, runs BEFORE generation, and must reject 'staged' as well
-        as 'staging' — semantics distinct from ``check_staging_allowed``). This
-        method therefore does NOT re-call that guard, because the generator has
+        Single-writer transaction fix: both callers that generate a
+        staging prompt on their OWN session (the ``stage_project`` MCP tool, the
+        REST staging endpoint) can now pass that same ``db_session`` + an
+        explicit ``tenant_key`` so this write lands on ONE session instead of
+        opening a second, independent one. Omitting both preserves the prior
+        behaviour exactly (own session, contextvar-resolved tenant) — this is an
+        additive-only signature change.
+
+        Transaction note: when this call owns its session, the prompt generator
+        commits its own orchestrator work in a separate transaction
+        (``thin_prompt_generator`` sets ``staging_status='staging'``
+        independently), so this flip to 'staged' is already a standalone write.
+        When a caller-supplied session is used instead, this method STILL commits
+        internally (does not defer to the caller's own commit) — see the design
+        note in the mark_staged single-writer fix: neither of today's two
+        callers does anything after this write that could plausibly roll it
+        back, and deferring the commit would risk a project stuck at
+        ``staging_status='staging'`` if something later in the request throws.
+        The pre-generation re-stage guard stays at the endpoint (it is a read,
+        runs BEFORE generation, and must reject 'staged' as well as 'staging' —
+        semantics distinct from ``check_staging_allowed``). This method
+        therefore does NOT re-call that guard, because the generator has
         legitimately set 'staging' by the time we get here.
 
         Args:
@@ -369,29 +394,59 @@ class ProjectStagingService:
             execution_mode: The resolved, user-chosen execution mode. Written only
                 while implementation has not launched (mirrors the PATCH-path
                 lock in ``ProjectService._apply_project_updates``).
+            tenant_key: Tenant for isolation. Defaults to the current tenant
+                context when omitted (the MCP dispatch sets it via the
+                contextvar; a caller with its own resolved tenant should pass
+                it explicitly).
+            db_session: Optional caller-owned session to write on instead of
+                opening a new one. When provided, the write still commits (see
+                the transaction note above) but never opens a second connection.
 
         Raises:
+            ValidationError: No tenant could be resolved (neither the explicit
+                argument nor the ambient contextvar).
             ResourceNotFoundError: Project not found.
         """
-        tenant_key = self.tenant_manager.get_current_tenant()
+        resolved_tenant = tenant_key or self.tenant_manager.get_current_tenant()
+        if not resolved_tenant:
+            raise ValidationError(
+                message="Tenant not set", context={"operation": "mark_staged", "project_id": project_id}
+            )
 
-        async with self._get_session() as session:
-            project = await self._project_repo.get_by_id(session, tenant_key, project_id)
+        owns_session = db_session is None
+        if owns_session:
+            async with self._get_session(resolved_tenant) as session:
+                await self._mark_staged_transaction(session, resolved_tenant, project_id, execution_mode)
+        else:
+            await self._mark_staged_transaction(db_session, resolved_tenant, project_id, execution_mode)
 
-            if not project:
-                raise ResourceNotFoundError(
-                    message="Project not found",
-                    context={"project_id": project_id},
-                )
+    async def _mark_staged_transaction(
+        self, session: AsyncSession, tenant_key: str, project_id: str, execution_mode: str
+    ) -> None:
+        """The actual staged-state write, shared by both the owned- and caller-session paths.
 
-            project.staging_status = "staged"
-            if project.implementation_launched_at is None:
-                project.execution_mode = execution_mode
-            project.updated_at = datetime.now(UTC)
+        Takes the ALREADY-RESOLVED tenant explicitly (never re-derives via the
+        ambient contextvar) so a caller that resolved its own tenant_key (as
+        opposed to relying on the contextvar the MCP dispatch sets) gets a DB
+        lookup scoped to the tenant it actually asked for -- not whatever the
+        contextvar happens to hold at call time.
+        """
+        project = await self._project_repo.get_by_id(session, tenant_key, project_id)
 
-            await session.commit()
+        if not project:
+            raise ResourceNotFoundError(
+                message="Project not found",
+                context={"project_id": project_id},
+            )
 
-            self._logger.info("[MARK_STAGED] Project %s marked staged", project_id)
+        project.staging_status = "staged"
+        if project.implementation_launched_at is None:
+            project.execution_mode = execution_mode
+        project.updated_at = datetime.now(UTC)
+
+        await session.commit()
+
+        self._logger.info("[MARK_STAGED] Project %s marked staged", project_id)
 
     async def launch_implementation(
         self,

@@ -35,6 +35,7 @@ def mock_db_manager():
     session.commit = AsyncMock()
     session.refresh = AsyncMock()
     session.add = MagicMock()
+    session.info = {}  # tenant_session_context save/restore target
     db_manager.get_session_async = MagicMock(return_value=session)
     return db_manager, session
 
@@ -224,27 +225,28 @@ async def test_complete_job_emits_status_changed_with_duration_seconds(
         job_type="orchestrator",
     )
 
-    # complete_job makes 8 execute calls for orchestrator jobs:
+    # complete_job's execute calls for orchestrator jobs:
     # 1. execution lookup (scalar_one_or_none)
     # 2. job lookup (scalar_one_or_none)
     # 3. unread messages (scalars().all())
     # 4. todo items (scalars().all())
     # 5. other active executions (scalar_one_or_none)
     # 6. find orchestrator execution for auto-completion message (scalar_one_or_none)
-    # 7. _check_360_memory_written: project lookup (scalar_one_or_none)
-    # 8. _check_360_memory_written: product memory entry lookup (scalar_one_or_none)
+    #
+    # Of the two trailing entries this list used to carry, only the LAST was spare.
+    # Both were labelled as 360-memory lookups, and the 360-memory query really is
+    # gone (BE-5028 "Fix A" removed the warning that called it; IMP-9342 deleted the
+    # orphaned _check_360_memory_written and its repository query). But the
+    # second-to-last entry was feeding a live call it was never named for: the
+    # conductor-purge (complete_chain_run_if_finished -> find_active_run_for_conductor),
+    # which now takes the StopIteration from this shortened list and swallows it in the
+    # broad except at project_helpers.py:650. The call_count assert after the call under
+    # test pins the real total so a future 10th execute cannot hide in that same swallow.
     unread_result = MagicMock()
     unread_result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
 
     todo_result = MagicMock()
     todo_result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
-
-    # Project mock for 360 memory check (has product_id so memory query runs)
-    project_for_memory = SimpleNamespace(
-        id=job.project_id,
-        tenant_key=tenant_key,
-        product_id=str(uuid4()),
-    )
 
     session.execute.side_effect = [
         _scalar_result(execution),
@@ -258,11 +260,13 @@ async def test_complete_job_emits_status_changed_with_duration_seconds(
         _scalar_result(None),  # BE-9153: closeout_mode settings read (no row -> default hitl; clean result -> no gate)
         _scalar_result(None),  # other active executions (none)
         _scalar_result(None),  # find_orchestrator_execution (none — skip auto-message)
-        _scalar_result(project_for_memory),  # 360 memory: project lookup
-        _scalar_result(None),  # 360 memory: no entry found (triggers warning)
     ]
 
     result = await orchestration_service.complete_job(job_id=job_id, result={"ok": True}, tenant_key=tenant_key)
+
+    # Pinned: 9 execute calls, one more than this 8-entry list feeds. Call 9 is the
+    # conductor-purge, whose broad except swallows the resulting StopIteration.
+    assert session.execute.call_count == 9
 
     # Handover 0731c: Returns CompleteJobResult typed model.
     # BE-9153: a CLEAN orchestrator closeout completes under the default (hitl) mode —

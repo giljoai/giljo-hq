@@ -135,13 +135,17 @@ describe('useVisionAnalysis', () => {
       // BE-9164: the expanded two-role prompt template (BE-5118) now lives
       // server-side in VISION_EXTRACTION_PROMPT (get_vision_doc's
       // extraction_instructions) as the single source of truth. This wizard
-      // prompt only needs to point the agent at that flow and require a
-      // single atomic update_product_context call.
+      // prompt only needs to point the agent at that flow.
+      // FE-9320: it used to also require a single atomic update_product_context
+      // call. That mandate WAS the defect — a real run died at 62,420 bytes
+      // obeying it — so the prompt now teaches STAGED writes finished with
+      // emit_completion=true.
       expect(prompt).toContain('Analyze the vision documents for product "My Product"')
       expect(prompt).toContain(`get_vision_doc(product_id="${PRODUCT_ID}")`)
       expect(prompt).toMatch(/extraction_instructions/)
       expect(prompt).toMatch(/update_product_context/)
-      expect(prompt).toMatch(/ONE single|single call/i)
+      expect(prompt).toMatch(/stages|staged/i)
+      expect(prompt).toMatch(/emit_completion/)
       expect(prompt).toMatch(/vision_analysis_complete/)
     }
 

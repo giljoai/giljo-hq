@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Enhanced chunking utilities for GiljoAI MCP.
+Enhanced chunking utilities for Giljo HQ.
 Supports documents up to 100K+ tokens with natural boundary preservation.
 Based on proven chunking implementation with enhancements.
 """

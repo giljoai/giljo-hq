@@ -37,6 +37,7 @@ from sqlalchemy import select
 
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.models.user_approval import UserApproval
+from giljo_mcp.schemas.service_responses import build_next_action
 
 
 if TYPE_CHECKING:
@@ -286,6 +287,81 @@ def _block_error(job_id: str, approval_id: Any, reasons: list[str]) -> Validatio
             "approval_id": approval_id,
             "agent_status": "awaiting_user",
             "reasons": reasons,
+        },
+    )
+
+
+def build_completion_blocked_error(
+    *,
+    job_id: str,
+    unread_messages: list,
+    incomplete_todos: list,
+) -> ValidationError:
+    """Build complete_job's COMPLETION_BLOCKED rejection (BE-9292b).
+
+    Lives beside :func:`_block_error` -- the other complete_job gate rejection --
+    and out of ``job_completion_service``, which sits at its shrink-only size budget.
+
+    This gate is reached by TWO callers: the agent completing its own job, and an
+    ORCHESTRATOR completing a stalled agent's job on its behalf (the accepting exit
+    for a 'silent' worker). So it addresses the JOB, never "your" ledger -- an
+    orchestrator acting for a dead agent has to drain that agent's thread under that
+    agent's id, not its own -- and every reason names the tool that clears it instead
+    of only listing what is stuck. AUDIT_9292B F2: this wall is the one an orchestrator
+    hits while running the documented stalled-agent recovery, and it previously named
+    no tool at all.
+    """
+    reasons: list[str] = []
+    if unread_messages:
+        unread_ids = [str(msg.id) for msg in unread_messages[:5]]
+        reasons.append(
+            f"Acknowledge {len(unread_messages)} action-required message(s) before completing. "
+            f"Call get_thread_history(as_participant=<the agent id of job {job_id}>, mark_read=true) "
+            f"on that job's coordination thread (join_thread first if that id is not a participant) "
+            f"to read and acknowledge them — that ack is what clears this gate. Pending: {unread_ids}"
+        )
+    if incomplete_todos:
+        todo_names = [todo.content for todo in incomplete_todos[:5]]
+        reasons.append(
+            f"{len(incomplete_todos)} TODO item(s) not completed: {todo_names}. Settle the ledger "
+            f'with report_progress(job_id="{job_id}", todo_items=[...], replace=true) — replace=true '
+            f"overwrites the whole list, so an orchestrator accepting a stalled agent's work records "
+            f"what it ACTUALLY finished rather than marking abandoned items done."
+        )
+
+    # The stranded-TODO half is the one the recovery walks into, so it points at the
+    # settling call; a messages-only block points at the drain, which clears THAT half.
+    if incomplete_todos:
+        next_action = build_next_action(
+            tool="report_progress",
+            args_hint={"job_id": job_id, "todo_items": ["<honest final state>"], "replace": True},
+            why=(
+                "Completion is blocked by TODO items still open on this job. Rewrite the "
+                "ledger to its honest final state with replace=true, then retry complete_job. "
+                "If you are an orchestrator accepting a stalled agent's verified work, this "
+                "is the prerequisite step — record what it actually delivered."
+            ),
+        )
+    else:
+        next_action = build_next_action(
+            tool="get_thread_history",
+            args_hint={"as_participant": "<the agent id of this job>", "mark_read": True},
+            why=(
+                "Completion is blocked by unacknowledged action-required messages on this "
+                "job's coordination thread. Reading them with mark_read=true is what clears "
+                "the gate."
+            ),
+        )
+
+    return ValidationError(
+        message="COMPLETION_BLOCKED: Complete all TODO items and read all messages before calling complete_job()",
+        error_code="COMPLETION_BLOCKED",
+        context={
+            "job_id": job_id,
+            "reasons": reasons,
+            "unread_messages": len(unread_messages),
+            "incomplete_todos": len(incomplete_todos),
+            "next_action": next_action,
         },
     )
 

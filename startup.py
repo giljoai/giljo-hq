@@ -6,9 +6,9 @@
 # [CE] Community Edition.
 
 """
-GiljoAI MCP - Unified Startup Script
+Giljo HQ - Unified Startup Script
 
-This is the primary entry point for running GiljoAI MCP.
+This is the primary entry point for running Giljo HQ.
 It handles:
 - PostgreSQL detection and validation
 - Python version checking
@@ -99,7 +99,7 @@ def ensure_project_virtualenv() -> None:
         if not venv_python.exists():
             return
 
-        print("Re-launching GiljoAI MCP startup inside project virtual environment...")
+        print("Re-launching Giljo HQ startup inside project virtual environment...")
 
         # Cross-platform process replacement:
         # subprocess.run() waits for child and captures exit code
@@ -951,7 +951,7 @@ def run_startup(
     Returns:
         Exit code (0 for success, non-zero for failure)
     """
-    print_header("GiljoAI MCP - Unified Startup v3.0")
+    print_header("Giljo HQ - Unified Startup v3.0")
 
     # Step 1: Check dependencies (Python, PostgreSQL, pip)
     if not check_dependencies():
@@ -1161,7 +1161,7 @@ def run_startup(
         enforce_frontend=frontend_built,
     )
     if consistency_problems:
-        print_error("Your GiljoAI MCP install looks incomplete or out of date:")
+        print_error("Your Giljo HQ install looks incomplete or out of date:")
         for problem in consistency_problems:
             print_error(f"    - {problem}")
         print_error("")
@@ -1216,7 +1216,7 @@ def run_startup(
             print_info("Login to your server to begin setup!")
             print_success(f"Setup URL: {http_proto}://{server_host}:{browser_port}/setup")
 
-        print_header("Welcome to GiljoAI MCP! -Gil")
+        print_header("Welcome to Giljo HQ, a GiljoAI product! -Gil")
     else:
         # Branch order (saas-production → CE first-run → dashboard) lives in the
         # pure helper above so tests and production share one source of truth.
@@ -1265,8 +1265,8 @@ def run_startup(
 
 
 def stop_services() -> int:
-    """Stop all running GiljoAI MCP services by finding and terminating their processes."""
-    print_info("Stopping GiljoAI MCP services...")
+    """Stop all running Giljo HQ services by finding and terminating their processes."""
+    print_info("Stopping Giljo HQ services...")
 
     stopped = 0
 
@@ -1361,9 +1361,9 @@ def main(
     check_only: bool, verbose: bool, no_browser: bool, no_migrations: bool, no_ssl: bool, stop: bool, dev: bool
 ) -> None:
     """
-    GiljoAI MCP - Unified Startup Script
+    Giljo HQ - Unified Startup Script
 
-    This script handles the complete startup process for GiljoAI MCP,
+    This script handles the complete startup process for Giljo HQ,
     including dependency checking, database verification, and service launching.
 
     Production mode is automatic when frontend/dist/ exists.

@@ -65,7 +65,7 @@
         <ConnectToolCard
           :key="selectedId"
           :tool-id="selectedId"
-          :connected="connStatus[selectedId] === 'connected'"
+          :connected="isConfigured"
           :key-mode="!!keyMode[selectedId]"
           connected-next="This tool is live. Manage or remove it here anytime."
           :advance-label="''"
@@ -94,6 +94,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { useWebSocketStore } from '@/stores/websocket'
+import api from '@/services/api'
 import { SETUP_TOOLS, TOOL_META, toolName } from '@/config/setupTools'
 import ConnectToolCard from '@/components/setup/ConnectToolCard.vue'
 
@@ -101,27 +102,85 @@ const userStore = useUserStore()
 const wsStore = useWebSocketStore()
 
 // Fleet = the user's chosen tools (persisted via setup_selected_tools). "+ Add a tool"
-// appends here. Per-tool connection status is SESSION-live (D3: persisted per-tool
-// state is parked — the connect event is generic, so there is nothing to attribute).
+// appends here. Connection status is WORKSPACE-LEVEL, backed by the durable
+// GET /api/connect/credential-status endpoint (FE-9274) — the server emits a
+// GENERIC connect event (it cannot tell which CLI connected, proposal §6: no
+// per-tool attribution), so every row reflects the same tenant-wide credential
+// truth. This also fixes the core bug where an in-memory-only status reverted to
+// "Waiting" on every remount: the durable fetch survives navigation.
 const fleetIds = ref([...(userStore.currentUser?.setup_selected_tools ?? [])])
 const fleet = computed(() =>
   fleetIds.value.filter((id) => TOOL_META[id]).map((id) => ({ id, name: toolName(id) })),
 )
 
-const connStatus = reactive({})
+const credStatus = reactive({ has_valid_api_key: false, has_valid_oauth: false, has_expired_oauth: false })
+// "I already configured this" optimistic flip — bridges the gap until the NEXT
+// completed fetchCredentialStatus() call, which is always authoritative and always
+// clears this flag (whatever it finds). It must never persist past that fetch: an
+// un-reset optimistic flag would let a stale "Configured" survive an authoritative
+// fetch that found no valid credential (e.g. after a revoke) — a false-positive
+// worse than the stale-red bug this component was built to fix.
+const optimisticConfigured = ref(false)
+// In-session-only message after a revoke drops the workspace to no valid credential
+// (no persistence flag, honors the no-tracking-per-tool rule: a fresh reload settles
+// back to the plain "Not set up" idle state).
+const justDeleted = ref(false)
+
 const keyMode = reactive({})
 const selectedId = ref(fleetIds.value[0] || null)
 const mode = ref(selectedId.value ? 'card' : 'picker')
 
 const selectedName = computed(() => toolName(selectedId.value))
 
+const isConfigured = computed(
+  () => credStatus.has_valid_api_key || credStatus.has_valid_oauth || optimisticConfigured.value,
+)
+const isReauth = computed(
+  () => !isConfigured.value && credStatus.has_expired_oauth && !credStatus.has_valid_api_key,
+)
+
+async function fetchCredentialStatus() {
+  try {
+    const { data } = await api.connect.credentialStatus()
+    credStatus.has_valid_api_key = !!data?.has_valid_api_key
+    credStatus.has_valid_oauth = !!data?.has_valid_oauth
+    credStatus.has_expired_oauth = !!data?.has_expired_oauth
+    // The completed fetch is authoritative — clear the optimistic flag atomically
+    // with the new credStatus so a stale "already configured" click can never
+    // outlive a real fetch that found nothing valid.
+    optimisticConfigured.value = false
+  } catch (e) {
+    console.warn('[ToolsConnectDirectory] Failed to fetch credential status:', e)
+  }
+}
+
+async function handleKeyRevoked() {
+  await fetchCredentialStatus()
+  if (!isConfigured.value) {
+    justDeleted.value = true
+  }
+}
+
 function statusFor(id) {
-  if (connStatus[id] === 'connected') return 'connected'
+  if (isConfigured.value) return 'configured'
+  if (isReauth.value) return 'reauth'
+  if (justDeleted.value) return 'deleted'
   if (mode.value === 'card' && selectedId.value === id) return 'waiting'
   return 'idle'
 }
 function statusLabel(state) {
-  return state === 'connected' ? 'Connected' : state === 'waiting' ? 'Waiting' : 'Not set up'
+  switch (state) {
+    case 'configured':
+      return 'Configured'
+    case 'reauth':
+      return 'Requires re-authentication'
+    case 'deleted':
+      return 'API key deleted'
+    case 'waiting':
+      return 'Waiting'
+    default:
+      return 'Not set up'
+  }
 }
 
 function selectTool(id) {
@@ -147,7 +206,6 @@ async function addTool(id) {
 
 async function removeTool(id) {
   fleetIds.value = fleetIds.value.filter((t) => t !== id)
-  delete connStatus[id]
   try {
     await userStore.updateSetupState({ setup_selected_tools: [...fleetIds.value] })
   } catch (e) {
@@ -163,27 +221,32 @@ function toggleKeyMode() {
   keyMode[selectedId.value] = !keyMode[selectedId.value]
 }
 
-// "I already configured this" — marks the SELECTED tool only (same active-only
-// contract as the wizard walk).
+// "I already configured this" — optimistic workspace-level flip; the next durable
+// fetch (mount, WS event, or key-created/-revoked) reconciles it against the truth.
 function markConfigured() {
-  if (selectedId.value) connStatus[selectedId.value] = 'connected'
+  optimisticConfigured.value = true
 }
 
 // The server emits a GENERIC event (tool_name='mcp_connected') — it cannot tell
-// which CLI connected (proposal §6: do not attempt per-tool attribution). Flip the
-// SELECTED tool only.
+// which CLI connected (proposal §6: do not attempt per-tool attribution). Re-fetch
+// the durable, workspace-level credential status instead of guessing locally.
 let wsUnsub = null
-function handleToolConnected(payload) {
-  if (payload?.tool_name === 'mcp_connected' && selectedId.value) {
-    connStatus[selectedId.value] = 'connected'
+async function handleToolConnected(payload) {
+  if (payload?.tool_name === 'mcp_connected') {
+    await fetchCredentialStatus()
   }
 }
 
 onMounted(() => {
   wsUnsub = wsStore.on('setup:tool_connected', handleToolConnected)
+  window.addEventListener('api-key-created', fetchCredentialStatus)
+  window.addEventListener('api-key-revoked', handleKeyRevoked)
+  fetchCredentialStatus()
 })
 onUnmounted(() => {
   if (wsUnsub) wsUnsub()
+  window.removeEventListener('api-key-created', fetchCredentialStatus)
+  window.removeEventListener('api-key-revoked', handleKeyRevoked)
 })
 </script>
 
@@ -198,7 +261,10 @@ onUnmounted(() => {
   background: $elevation-raised;
   border-radius: $border-radius-rounded;
   overflow: hidden;
-  max-width: 1000px;
+  /* Must match .connect-grid's max-width in ToolsView.vue — the directory and the
+     stacked integration cards below it are siblings on the Connect tab and have to
+     align on the same right edge. */
+  max-width: 1100px;
 }
 
 /* Fleet rail */
@@ -263,8 +329,16 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.15);
 }
 
-.dir-rail-dot--connected {
+.dir-rail-dot--configured {
   background: $color-status-success;
+}
+
+.dir-rail-dot--reauth {
+  background: $color-status-warning;
+}
+
+.dir-rail-dot--deleted {
+  background: $color-indicator-disconnected;
 }
 
 .dir-rail-dot--waiting {

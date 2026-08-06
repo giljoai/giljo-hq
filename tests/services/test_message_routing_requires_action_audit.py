@@ -119,6 +119,7 @@ class TestAutoBlockBehavior:
     async def test_informational_message_short_circuits_auto_block(self, routing_service):
         """requires_action=False -> auto-block returns [] without DB calls."""
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
         mock_project = MagicMock()
         mock_project.status = "active"
 
@@ -137,6 +138,7 @@ class TestAutoBlockBehavior:
     async def test_broadcast_fanout_short_circuits_auto_block(self, routing_service):
         """Broadcasts skip auto-block regardless of requires_action."""
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
         mock_project = MagicMock()
         mock_project.status = "active"
 

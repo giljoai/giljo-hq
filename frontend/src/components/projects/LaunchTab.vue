@@ -57,7 +57,10 @@
               <template #activator="{ props: tooltipProps }">
                 <v-icon
                   v-bind="tooltipProps"
-                  :class="{ 'icon-disabled': !gitEnabled }"
+                  :class="{
+                    'icon-disabled': integrationsResolved && !gitEnabled,
+                    'icon-pending': !integrationsResolved,
+                  }"
                   size="28"
                   color="white"
                   data-testid="git-status-icon"
@@ -66,7 +69,8 @@
                   @click="goToIntegrations"
                 >mdi-git</v-icon>
               </template>
-              <span v-if="gitEnabled">Git integration enabled.</span>
+              <span v-if="!integrationsResolved">Checking Git integration status.</span>
+              <span v-else-if="gitEnabled">Git integration enabled.</span>
               <span v-else>Git disabled. Click to enable.</span>
             </v-tooltip>
             <v-tooltip location="bottom" max-width="300">
@@ -76,14 +80,18 @@
                   src="/Serena.png"
                   width="28"
                   height="28"
-                  :class="{ 'icon-disabled': !serenaEnabled }"
+                  :class="{
+                    'icon-disabled': integrationsResolved && !serenaEnabled,
+                    'icon-pending': !integrationsResolved,
+                  }"
                   data-testid="serena-status-icon"
                   class="cursor-pointer integration-icon"
                   alt="Serena MCP"
                   @click="goToIntegrations"
                 />
               </template>
-              <span v-if="serenaEnabled">Serena MCP enabled.</span>
+              <span v-if="!integrationsResolved">Checking Serena MCP status.</span>
+              <span v-else-if="serenaEnabled">Serena MCP enabled.</span>
               <span v-else>Serena disabled. Click to enable.</span>
             </v-tooltip>
             <v-tooltip v-if="agenticTool" location="bottom" max-width="300">
@@ -241,6 +249,15 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  // TSK-9234: gitEnabled/serenaEnabled default to false, which means BOTH
+  // "known to be off" and "not read yet". Without this flag the icons assert
+  // "disabled -- click to enable" against a status nobody has read. Defaults to
+  // false so a caller that omits it renders the honest unknown state rather
+  // than a false negative.
+  integrationsResolved: {
+    type: Boolean,
+    default: false,
+  },
   agenticTool: {
     type: Object,
     default: null,
@@ -385,6 +402,13 @@ watch(missionText, (next, previous) => {
       &:hover {
         opacity: 0.5;
       }
+    }
+
+    // TSK-9234: status not read yet. Deliberately BETWEEN enabled (1) and
+    // disabled (0.3) so the icon claims neither -- rendering it at either
+    // extreme would state a status nobody has read.
+    &.icon-pending {
+      opacity: 0.65;
     }
   }
 }

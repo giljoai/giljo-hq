@@ -28,11 +28,13 @@ from giljo_mcp.exceptions import (
 from giljo_mcp.models.projects import Project
 from giljo_mcp.repositories.project_lifecycle_repository import ProjectLifecycleRepository
 from giljo_mcp.schemas.service_responses import (
+    AgentStatusChangeEvent,
     ProjectCompleteResult,
     ProjectData,
     ProjectResumeResult,
 )
 from giljo_mcp.services._session_helpers import optional_tenant_session
+from giljo_mcp.services.closeout_ws_broadcast import broadcast_agent_status_events
 from giljo_mcp.services.project_helpers import _build_ws_project_data, mark_chain_member_status
 from giljo_mcp.services.project_lifecycle_service._orchestrator_fixture_mixin import OrchestratorFixtureMixin
 from giljo_mcp.tenant import TenantManager
@@ -288,9 +290,11 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
         """Facade: delegates to ProjectStagingService."""
         return await self._staging.unstage(project_id)
 
-    async def mark_staged(self, project_id: str, execution_mode: str) -> None:
+    async def mark_staged(
+        self, project_id: str, execution_mode: str, tenant_key: str | None = None, db_session: Any | None = None
+    ) -> None:
         """Facade: delegates to ProjectStagingService."""
-        await self._staging.mark_staged(project_id, execution_mode)
+        await self._staging.mark_staged(project_id, execution_mode, tenant_key=tenant_key, db_session=db_session)
 
     async def cancel_staging(self, project_id: str, websocket_manager: Any | None = None) -> ProjectData:
         """Facade: delegates to ProjectStagingService."""
@@ -305,6 +309,7 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
         tenant_key: str | None = None,
         db_session: Any | None = None,
         git_commits: list[dict] | None = None,
+        decommission_events_out: list[AgentStatusChangeEvent] | None = None,
     ) -> ProjectCompleteResult:
         """
         Mark a project as completed and trigger 360 memory update.
@@ -319,6 +324,11 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
                 closeout. Threaded into write_project_closeout, which
                 validates and persists them as structured rows. Omission/None
                 yields an empty list (no commits).
+            decommission_events_out: BE-9273 out-param for an externally-supplied
+                ``db_session`` (this call does not own the commit): if a list is
+                passed, the force-decommission events land here instead of being
+                silently dropped, so the true commit-owner can broadcast them.
+                Unused (no-op) when this call owns its own session.
 
         Returns:
             ProjectCompleteResult: Completion result with memory update metadata
@@ -361,6 +371,7 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
                 decisions_made=decisions_made,
                 git_commits=git_commits,
                 commit=False,
+                decommission_events_out=decommission_events_out,
             )
 
         except ValidationError:
@@ -383,6 +394,7 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
         decisions_made: list[str],
         commit: bool,
         git_commits: list[dict] | None = None,
+        decommission_events_out: list[AgentStatusChangeEvent] | None = None,
     ) -> ProjectCompleteResult:
         """
         Complete project within provided session context.
@@ -426,6 +438,13 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
         # Invoke MCP tool to write 360 Memory entry
         from giljo_mcp.tools.project_closeout import close_project_and_update_memory
 
+        # BE-9273: close_project_and_update_memory runs with session=session
+        # (owns_session=False from ITS perspective), so it cannot safely
+        # broadcast the force-decommission events itself -- commit timing
+        # belongs to THIS caller. Collect the raw events here and broadcast
+        # them ourselves, below, only after our own commit actually lands.
+        decommission_events: list[AgentStatusChangeEvent] = []
+
         try:
             mcp_result = await close_project_and_update_memory(
                 project_id=project_id,
@@ -437,18 +456,58 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
                 session=session,
                 force=True,
                 git_commits=git_commits or None,
+                decommission_events_out=decommission_events,
             )
-            memory_updated = True
-            sequence_number = mcp_result.get("sequence_number", 0)
-            git_commits_count = mcp_result.get("git_commits_count", 0)
         except (ResourceNotFoundError, ValidationError, ProjectStateError, OSError):
             self._logger.exception("MCP tool call failed")
             memory_updated = False
             sequence_number = 0
             git_commits_count = 0
+        else:
+            if mcp_result.get("success") is False:
+                # BE-9256 fix (adversarial-audit Finding #1): close_project_and_update_memory
+                # uses the BE-6081 Tier-2 dict-return carve-out for a deliberate domain
+                # rejection (e.g. GIT_COMMIT_TITLE_REQUIRED) instead of raising -- that
+                # carve-out is scoped to the @mcp.tool boundary. This is a service-layer
+                # caller (the REST /complete endpoint), where post-0480 requires raising on
+                # error. Without this check the rejection dict was silently treated as
+                # success: project.status committed to COMPLETED with memory_updated=True
+                # reported, but zero memory entries were actually written. Raise BEFORE the
+                # commit below so the whole transaction (including the status/timestamp
+                # mutations above) rolls back -- no partial state persists.
+                raise ValidationError(
+                    message=mcp_result.get("message") or "Project closeout was rejected",
+                    error_code=mcp_result.get("error", "PROJECT_CLOSEOUT_REJECTED"),
+                    context={"project_id": project_id, "hint": mcp_result.get("hint")},
+                )
+            memory_updated = True
+            sequence_number = mcp_result.get("sequence_number", 0)
+            git_commits_count = mcp_result.get("git_commits_count", 0)
 
         if commit:
             await session.commit()
+
+            # BE-9273 POST-COMMIT: mirrors the BE-9246 owns_session=True MCP-tool
+            # path -- only emit once OUR OWN commit above has actually landed
+            # (never mid-flush, so a broadcast can't announce a status a rollback
+            # here could still undo).
+            if decommission_events:
+                await broadcast_agent_status_events(
+                    self._websocket_manager,
+                    tenant_key=tenant_key,
+                    project_id=project_id,
+                    events=decommission_events,
+                )
+        elif decommission_events and decommission_events_out is not None:
+            # commit=False: an externally-supplied db_session, so this call does
+            # NOT own the commit and must never broadcast (same reasoning as
+            # close_project_and_update_memory's own owns_session gate). Hand the
+            # events to the caller-supplied out-param instead of silently
+            # dropping them, so the true commit-owner can broadcast POST its own
+            # commit. Currently unreachable (no production caller passes
+            # db_session into complete_project), so this only activates for a
+            # future external-session caller.
+            decommission_events_out.extend(decommission_events)
 
         # Broadcast project status change to all browsers
         ws_mgr = self._websocket_manager

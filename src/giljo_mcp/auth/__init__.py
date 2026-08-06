@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Authentication module for GiljoAI MCP.
+Authentication module for Giljo HQ.
 
 This module provides unified authentication for all deployment contexts:
 - JWT token management for web dashboard sessions

@@ -37,6 +37,7 @@ from giljo_mcp.schemas.service_responses import (
 )
 from giljo_mcp.services._error_helpers import not_found_or_wrong_state_error
 from giljo_mcp.services._session_helpers import optional_tenant_session
+from giljo_mcp.services.agent_terminal_cursor_service import resolve_terminal_agent_cursors
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -514,6 +515,15 @@ class OrchestrationAgentStateService:
         Closed jobs are terminal — they will not be auto-blocked on incoming messages
         and are not expected to receive further work.
 
+        BE-9292b: 'complete' is normally self-reported by the agent, but an agent
+        that stalled never reports. The orchestrator is NOT stuck with
+        force-decommission in that case: ``complete_job`` accepts any non-terminal
+        execution (``TERMINAL_EXECUTION_STATUSES``), so a 'silent' agent whose
+        deliverable has been verified can be completed by the orchestrator and then
+        closed here — reaching an ACCEPTING terminal state rather than the
+        failed/replaced/abandoned label. The wrong-state error raised below names
+        that path (see ``_error_helpers._wrong_state_next_action``).
+
         Args:
             job_id: Job UUID
             tenant_key: Optional tenant key (uses current if not provided)
@@ -546,6 +556,23 @@ class OrchestrationAgentStateService:
 
                 job = await self._job_repo.get_agent_job_by_job_id(session, tenant_key, job_id)
                 project_id = str(job.project_id) if job and job.project_id else None
+
+                # BE-9242: a closed job is terminal -- "not expected to receive
+                # further work" per this method's own contract above. Any live
+                # (unacked) message cursor it still holds would otherwise linger
+                # forever (nobody can reactivate a closed agent to drain it).
+                # Genuinely action-required posts are forwarded to the live
+                # orchestrator, never silently dropped; see
+                # agent_terminal_cursor_service for the two-sided contract.
+                if project_id:
+                    await resolve_terminal_agent_cursors(
+                        session,
+                        tenant_key=tenant_key,
+                        project_id=project_id,
+                        agent_id=execution.agent_id,
+                        agent_label=execution.agent_display_name or execution.agent_name or execution.agent_id,
+                        terminal_status="closed",
+                    )
 
                 await self._job_repo.flush(session)
                 self._logger.info("Job %s closed (final acceptance)", job_id)

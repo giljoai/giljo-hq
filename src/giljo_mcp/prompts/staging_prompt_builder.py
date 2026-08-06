@@ -13,10 +13,14 @@ import logging
 import os
 from typing import Any
 
+from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.config_manager import get_config
 from giljo_mcp.models import Product, Project
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
 
+
+# BE-9275b: derived from the branding constant instead of a fresh literal.
+_PREFIX = f"mcp__{MCP_ALIAS}__"
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +77,7 @@ class StagingPromptBuilder:
 
         # CE-0034 Task 2: Claude Code defers MCP tool schemas behind ToolSearch.
         # Without this single up-front call, health_check() and every other
-        # mcp__giljo_mcp__* call below raises InputValidationError. The hint
+        # mcp__<alias>__* call below raises InputValidationError. The hint
         # must live in THIS spawn prompt (not get_staging_instructions —
         # that's unreachable until ToolSearch loads its schema).
         # Mirrors ClaudePromptBuilder._build_context_recap (CE-0033 Task 5).
@@ -82,12 +86,21 @@ class StagingPromptBuilder:
             toolsearch_bootstrap = (
                 "STEP 0 — TOOLSEARCH BOOTSTRAP (Claude Code only — do this FIRST):\n"
                 "Claude Code defers MCP tool schemas. You CANNOT call any\n"
-                "mcp__giljo_mcp__* tool (including health_check) until its schema\n"
+                f"{_PREFIX}* tool (including health_check) until its schema\n"
                 "is loaded. Fire this single call before the WORKFLOW below:\n"
                 f"  {render_toolsearch_call_one_line()}\n"
                 "After that, every tool in the canonical orchestrator set is callable.\n"
                 "\n"
             )
+
+        # BE-9260: TodoWrite is a Claude-Code-only tool -- this line used to render
+        # unconditionally for every harness. Gate it the same way as the ToolSearch
+        # bootstrap above; every other tool gets harness-neutral phrasing.
+        todo_tracking_line = (
+            "Claude Code: Use TodoWrite tool to track workflow progress."
+            if tool == "claude-code"
+            else "Use your task list to track workflow progress."
+        )
 
         return f"""I am Orchestrator for GiljoAI Project "{_project_title(project)}".
 
@@ -127,7 +140,7 @@ PROJECT CONTEXT (Inline - ~200 tokens):
    → Server flips project.staging_status to 'staging_complete' (enables the Implement button in UI)
    → Response includes staging_directive.action='STOP' — your session ends NOW
 
-Claude Code: Use TodoWrite tool to track workflow progress.
+{todo_tracking_line}
 
 MESSAGING RULE: Always use agent_id UUIDs when addressing agents via post_to_thread(to_participant=...).
 Each spawn_job() returns an agent_id UUID. Never use display names in to_participant.
@@ -192,7 +205,7 @@ Begin by verifying MCP connection, then fetch complete context, and CREATE the m
             toolsearch_bootstrap = (
                 "STEP 0 — TOOLSEARCH BOOTSTRAP (Claude Code only — do this FIRST):\n"
                 "Claude Code defers MCP tool schemas. You CANNOT call any\n"
-                "mcp__giljo_mcp__* tool (including health_check) until its schema\n"
+                f"{_PREFIX}* tool (including health_check) until its schema\n"
                 "is loaded. Fire this single call before the START NOW workflow below:\n"
                 f"  {render_toolsearch_call_one_line()}\n"
                 "After that, every tool in the canonical orchestrator set is callable.\n"

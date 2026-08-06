@@ -59,12 +59,34 @@ _TOOLS = ("multi_terminal", "claude-code", "codex", "gemini", "antigravity")
 # acknowledge flags (BE-9012b retired them server-side; the old bullet was no-op
 # advice). git-verified that this seed bullet is the ONLY change to the composed
 # identity (the sweep's other edits live in the protocol chapters, not the seed).
+#
+# BE-9259: re-frozen after the persona-neutralization sweep — two internal-process
+# phrases in the orchestrator seed were customer-neutralized: the "## Success
+# Criteria" bullet ("Handover documentation complete and actionable" -> "Project
+# documentation kept current and actionable") and the "## If Requirements Are
+# Unclear" section dropped its internal ticket citation ("that pattern predates
+# BE-5029 and shows as..." -> "that shows as..."). git-verified (diff of
+# src/giljo_mcp/template_seeder.py) that these two lines are the ONLY change to
+# the composed identity — the tester/implementer/documenter persona rewrites in
+# the same change live in separate, non-orchestrator template defs.
+# BE-9275b: re-frozen after the HQ rebrand heading edit — the seed's opening
+# heading ("# GiljoAI MCP Agent" -> "# Giljo HQ Agent") is the ONLY change to
+# the composed identity (git-verified: `f"# {PRODUCT_NAME} Agent"` derives from
+# branding.py; the "for **GiljoAI MCP**" body sentence is untouched, out of
+# this chain step's scope).
+# BE-9361: re-frozen after the rename-residuals sweep finished what BE-9275b
+# left — the body sentence above ("for **GiljoAI MCP**" -> "for **Giljo HQ**",
+# now derived from branding.PRODUCT_NAME via _ORCHESTRATOR_IDENTITY_HEAD) is the
+# ONLY change to the composed identity. Verified by reverse substitution, not by
+# reading the diff: replacing just that one name substring back in the newly
+# composed text reproduces the previous golden EXACTLY for all five tools, which
+# is only possible if nothing else moved.
 _SOLO_IDENTITY_SHA256 = {
-    "multi_terminal": "b7e65867b07518a603bc1cdce234ff0bd16da5c14dfea3c1ce224650042c9078",
-    "claude-code": "89fbc871c7f427bf4d426dc26475fff62ad14312f95c17f0bc3819c284afd8ef",
-    "codex": "b7e65867b07518a603bc1cdce234ff0bd16da5c14dfea3c1ce224650042c9078",
-    "gemini": "b7e65867b07518a603bc1cdce234ff0bd16da5c14dfea3c1ce224650042c9078",
-    "antigravity": "b7e65867b07518a603bc1cdce234ff0bd16da5c14dfea3c1ce224650042c9078",
+    "multi_terminal": "3b17f3ff087b11d7a6481695342770f289bb3d9d5b4ae7d4aa3c1255b31eb8e1",
+    "claude-code": "bbfc8c66cd180fdc57ddc2592376b8dc04b0e58b9b36235b02fc4ed4eb966f96",
+    "codex": "3b17f3ff087b11d7a6481695342770f289bb3d9d5b4ae7d4aa3c1255b31eb8e1",
+    "gemini": "3b17f3ff087b11d7a6481695342770f289bb3d9d5b4ae7d4aa3c1255b31eb8e1",
+    "antigravity": "3b17f3ff087b11d7a6481695342770f289bb3d9d5b4ae7d4aa3c1255b31eb8e1",
 }
 
 # Verbatim seed anchors the conductor trim removes / retains.

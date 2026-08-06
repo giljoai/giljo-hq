@@ -360,6 +360,11 @@ class TokenManager:
             # Update staging status
             token_record.staging_status = "ready"
             token_record.staging_error = None  # Clear any previous errors
+            # TSK-9210: stamp the per-token staleness anchor HERE, not at token creation.
+            # Every caller reaches mark_ready() only AFTER staging has committed
+            # last_exported_at, so staged_at lands past that write — which is precisely
+            # why anchoring on created_at would false-positive on every fresh download.
+            token_record.staged_at = datetime.now(UTC)
 
             await self.db_session.commit()
 

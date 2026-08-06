@@ -4,7 +4,7 @@
       <div class="dlg-header">
         <v-icon class="dlg-icon">{{ isEdit ? 'mdi-pencil' : 'mdi-plus' }}</v-icon>
         <span class="dlg-title">{{ isEdit ? 'Edit Product' : 'Create New Product' }}</span>
-        <v-btn icon variant="text" class="dlg-close" aria-label="Close" @click="closeDialog">
+        <v-btn icon variant="text" class="dlg-close" aria-label="Close" data-testid="product-form-close" @click="closeDialog">
           <v-icon>mdi-close</v-icon>
         </v-btn>
       </div>
@@ -21,32 +21,32 @@
           color="primary"
           class="mb-0"
         >
-          <v-btn value="setup">
+          <v-btn value="setup" data-testid="product-form-tab-setup">
             <v-icon start size="small">mdi-cog</v-icon>
             Product Setup
           </v-btn>
-          <v-btn value="info" :disabled="analysisInProgress || isTabLocked('info')">
+          <v-btn value="info" data-testid="product-form-tab-info" :disabled="analysisInProgress || isTabLocked('info')">
             <v-icon start size="small">mdi-information-outline</v-icon>
             Product Info
             <v-tooltip v-if="isTabLocked('info')" activator="parent" location="bottom">
               Run analysis to unlock
             </v-tooltip>
           </v-btn>
-          <v-btn value="tech" :disabled="analysisInProgress || isTabLocked('tech')">
+          <v-btn value="tech" data-testid="product-form-tab-tech" :disabled="analysisInProgress || isTabLocked('tech')">
             <v-icon start size="small">mdi-code-braces</v-icon>
             Tech Stack
             <v-tooltip v-if="isTabLocked('tech')" activator="parent" location="bottom">
               Run analysis to unlock
             </v-tooltip>
           </v-btn>
-          <v-btn value="arch" :disabled="analysisInProgress || isTabLocked('arch')">
+          <v-btn value="arch" data-testid="product-form-tab-arch" :disabled="analysisInProgress || isTabLocked('arch')">
             <v-icon start size="small">mdi-sitemap</v-icon>
             Architecture
             <v-tooltip v-if="isTabLocked('arch')" activator="parent" location="bottom">
               Run analysis to unlock
             </v-tooltip>
           </v-btn>
-          <v-btn value="features" :disabled="analysisInProgress || isTabLocked('features')">
+          <v-btn value="features" data-testid="product-form-tab-features" :disabled="analysisInProgress || isTabLocked('features')">
             <v-icon start size="small">mdi-test-tube</v-icon>
             Testing
             <v-tooltip v-if="isTabLocked('features')" activator="parent" location="bottom">
@@ -120,12 +120,13 @@
 
       <div class="dlg-footer">
         <v-spacer></v-spacer>
-        <v-btn variant="text" :disabled="isFirstTab" @click="goPrevTab">Back</v-btn>
+        <v-btn variant="text" :disabled="isFirstTab" data-testid="product-form-back" @click="goPrevTab">Back</v-btn>
         <v-btn
           color="primary"
           variant="flat"
           :disabled="nextOrSaveDisabled"
           :loading="isEdit ? saving : isLastTab ? saving : false"
+          data-testid="product-form-primary"
           @click="onPrimaryClick"
         >
           <template v-if="primaryButtonState === 'analyzing'">

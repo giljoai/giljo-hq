@@ -32,6 +32,7 @@ import yaml
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+from .branding import PRODUCT_NAME
 from .models import AgentTemplate
 
 
@@ -43,10 +44,21 @@ logger = logging.getLogger(__name__)
 MAX_PACKAGED_TEMPLATES = 16
 
 
-_MCP_BOOTSTRAP_MARKER = "You are part of a GiljoAI MCP orchestration system"
+# BE-9275b: existing DB rows carry the OLD "GiljoAI MCP" bootstrap text until the
+# ce_0085 heal migration runs (and a CE self-hoster may never run it before a
+# render). Both markers/headings are recognized so old-shape and new-shape rows
+# behave identically here -- only the seeded literal moved, not this tolerance.
+_MCP_BOOTSTRAP_MARKER_OLD = "You are part of a GiljoAI MCP orchestration system"
+_MCP_BOOTSTRAP_MARKER_NEW = f"You are part of a {PRODUCT_NAME} orchestration system"
+_MCP_BOOTSTRAP_MARKERS = (_MCP_BOOTSTRAP_MARKER_OLD, _MCP_BOOTSTRAP_MARKER_NEW)
 _MCP_BOOTSTRAP_END = "Do not begin work until you have received and read your mission and protocols"
 _MCP_STARTUP_MARKER = "STARTUP (MANDATORY)"
-_ROLE_BOUNDARY_HEADING_RE = re.compile(r"(?m)^\s{0,3}#{1,3}\s+(?!GiljoAI MCP Agent\b|STARTUP \(MANDATORY\)\b).+")
+_ROLE_BOUNDARY_HEADINGS_OLD_NEW = ("GiljoAI MCP Agent", f"{PRODUCT_NAME} Agent")
+_ROLE_BOUNDARY_HEADING_RE = re.compile(
+    r"(?m)^\s{0,3}#{1,3}\s+(?!"
+    + "\\b|".join(re.escape(h) for h in _ROLE_BOUNDARY_HEADINGS_OLD_NEW)
+    + r"\b|STARTUP \(MANDATORY\)\b).+"
+)
 
 
 def _normalize_instruction_text(text: str) -> str:
@@ -69,12 +81,18 @@ def _serve_bootstrap(stored_system_text: str | None) -> str:
     verbatim — only the system-owned bootstrap section is regenerated.
     """
     normalized = _normalize_instruction_text(stored_system_text or "")
-    if _MCP_BOOTSTRAP_MARKER in normalized:
+    if any(marker in normalized for marker in _MCP_BOOTSTRAP_MARKERS):
         # Lazy import avoids a module-load cycle (template_seeder imports models).
         from .template_seeder import _get_mcp_bootstrap_section
 
         return _normalize_instruction_text(_get_mcp_bootstrap_section())
     return normalized
+
+
+def _find_bootstrap_marker_index(text: str) -> int:
+    """Return the index of whichever bootstrap marker (old or new shape) appears first, or -1."""
+    indices = [idx for marker in _MCP_BOOTSTRAP_MARKERS if (idx := text.find(marker)) != -1]
+    return min(indices) if indices else -1
 
 
 def _remove_duplicate_mcp_bootstrap(system_text: str, user_text: str) -> str:
@@ -84,15 +102,18 @@ def _remove_duplicate_mcp_bootstrap(system_text: str, user_text: str) -> str:
     existing template rows still carry an older copy at the start of
     user_instructions, which produces malformed Codex agent TOML exports.
     """
-    if _MCP_BOOTSTRAP_MARKER not in system_text:
+    if not any(marker in system_text for marker in _MCP_BOOTSTRAP_MARKERS):
         return user_text
 
-    marker_index = user_text.find(_MCP_BOOTSTRAP_MARKER)
+    marker_index = _find_bootstrap_marker_index(user_text)
     if marker_index == -1:
         return user_text
 
     prefix = user_text[:marker_index].strip()
-    if prefix and prefix not in {"# GiljoAI MCP Agent", "## GiljoAI MCP Agent"}:
+    allowed_prefixes = {f"# {h}" for h in _ROLE_BOUNDARY_HEADINGS_OLD_NEW} | {
+        f"## {h}" for h in _ROLE_BOUNDARY_HEADINGS_OLD_NEW
+    }
+    if prefix and prefix not in allowed_prefixes:
         return user_text
 
     if _MCP_STARTUP_MARKER not in user_text[marker_index:]:

@@ -179,7 +179,7 @@ async def test_chain_member_closeout_stamps_signals(db_session: AsyncSession) ->
     run = await _seed_two_project_run(db_session, tenant)
     p1, _p2 = run["_project_ids"]
 
-    await close_project_and_update_memory(
+    result = await close_project_and_update_memory(
         project_id=p1,
         summary="done",
         key_outcomes=["x"],
@@ -188,6 +188,16 @@ async def test_chain_member_closeout_stamps_signals(db_session: AsyncSession) ->
         db_manager=_DB_MANAGER_SENTINEL,
         session=db_session,
         force=True,
+    )
+
+    # Closeout-message companion: unlike solo, a chain member's row genuinely IS flipped
+    # below (status + completed_at), so its message may say so -- and it must NOT
+    # carry the solo-only Archive remedy, which would be actively misleading here
+    # (the row is already terminal; there's nothing left to archive).
+    message = result["message"]
+    assert "archive" not in message.lower(), (
+        f"a chain member's closeout already flipped its status -- the solo-only Archive "
+        f"remedy must not appear here: {message!r}"
     )
 
     # (a) closeout_executed_at is now stamped on the project (was NULL before the fix).
@@ -309,10 +319,16 @@ async def test_solo_closeout_unchanged(db_session: AsyncSession) -> None:
     reloaded = await _reload_project(db_session, p_solo, tenant)
     assert reloaded.closeout_executed_at is not None, "closeout_executed_at is stamped even for solo (inert)"
 
-    # BUG #7 byte-identical guard: a SOLO closeout must NOT flip the project row status
+    # BUG #7 guard: a SOLO closeout must NOT flip the project row status
     # (solo relies on the user's archive press, unchanged). The seed leaves it "active".
     assert reloaded.status == "active", "solo closeout must NOT flip status (stays whatever it was)"
-    assert reloaded.completed_at is None, "solo closeout must NOT stamp completed_at"
+
+    # BE-9343 supersedes the former "must NOT stamp completed_at" assertion here.
+    # That gap is exactly the defect: a solo project closed by an agent kept
+    # completed_at NULL, so the dashboard showed updated_at under a "Completed"
+    # heading and completed_after/completed_before matched nothing. The status
+    # half of BUG #7's guard is untouched and asserted above.
+    assert reloaded.completed_at is not None, "BE-9343: a solo closeout stamps completed_at"
 
     # No run exists for a solo project -> mark_chain_member_status was a clean no-op.
     run = await _run_svc(db_session).find_active_run_for_project(project_id=p_solo, tenant_key=tenant)

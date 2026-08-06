@@ -46,6 +46,7 @@ def _build_session_mocks(tenant_key: str):
     mock_product.product_memory = {}
 
     mock_session = AsyncMock()
+    mock_session.info = {}  # tenant_session_context save/restore target
     mock_db_manager = MagicMock()
     mock_db_manager.get_session_async.return_value.__aenter__ = AsyncMock(return_value=mock_session)
     mock_db_manager.get_session_async.return_value.__aexit__ = AsyncMock(return_value=False)

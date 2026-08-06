@@ -441,3 +441,24 @@ async def test_template_reaper_is_tenant_isolated(db_manager, db_session, test_t
         await db_session.execute(select(AgentTemplate.id).where(AgentTemplate.id == expired))
     ).scalar_one_or_none()
     assert still_there == expired
+
+
+# ---------------------------------------------------------------------------
+# BE-9289b: the soft-delete lifecycle moved to CommThreadSoftDeleteMixin. The move was
+# a pure relocation, so the behavioural coverage above is unchanged — this pins the
+# COMPOSITION, which is the one thing a relocation can silently break: if the mixin is
+# ever dropped from the service's bases, every test above would fail with an obscure
+# AttributeError instead of naming the cause.
+# ---------------------------------------------------------------------------
+
+
+def test_soft_delete_lifecycle_is_served_by_the_mixin():
+    from giljo_mcp.services._comm_thread_softdelete_mixin import CommThreadSoftDeleteMixin
+    from giljo_mcp.services.comm_thread_service import CommThreadService
+
+    assert issubclass(CommThreadService, CommThreadSoftDeleteMixin)
+    for name in ("delete_thread", "restore_thread", "list_deleted_threads", "purge_expired_deleted_threads"):
+        assert hasattr(CommThreadService, name), f"{name} vanished from the service API"
+        # Served BY the mixin, not redefined on the service — that is what makes the
+        # extraction a single source of truth rather than a copy.
+        assert getattr(CommThreadService, name) is getattr(CommThreadSoftDeleteMixin, name)

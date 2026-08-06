@@ -146,8 +146,8 @@ async def test_stall_current_member_run(db_session: AsyncSession) -> None:
         current_index=0,
     )
 
-    silenced = [(tenant, p0, datetime.now(UTC) - timedelta(minutes=60))]
-    await _detector(db_session)._stall_runs_for_silenced_projects(db_session, silenced, threshold_minutes=10)
+    silenced = [(tenant, p0, datetime.now(UTC) - timedelta(minutes=60), 10)]
+    await _detector(db_session)._stall_runs_for_silenced_projects(db_session, silenced)
 
     refreshed = await _run_svc(db_session).find_active_run_for_project(project_id=p0, tenant_key=tenant)
     assert refreshed["status"] == "stalled"
@@ -173,8 +173,8 @@ async def test_no_stall_for_noncurrent_member(db_session: AsyncSession) -> None:
     )
 
     # p1 is index 1 — NOT the current in-flight member.
-    silenced = [(tenant, p1, datetime.now(UTC) - timedelta(minutes=60))]
-    await _detector(db_session)._stall_runs_for_silenced_projects(db_session, silenced, threshold_minutes=10)
+    silenced = [(tenant, p1, datetime.now(UTC) - timedelta(minutes=60), 10)]
+    await _detector(db_session)._stall_runs_for_silenced_projects(db_session, silenced)
 
     refreshed = await _run_svc(db_session).find_active_run_for_project(project_id=p1, tenant_key=tenant)
     assert refreshed["status"] != "stalled"
@@ -190,6 +190,6 @@ async def test_no_stall_solo_no_run(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
     pid = await _seed_project(db_session, tenant)
 
-    silenced = [(tenant, pid, datetime.now(UTC) - timedelta(minutes=60))]
+    silenced = [(tenant, pid, datetime.now(UTC) - timedelta(minutes=60), 10)]
     # No active run contains pid => the loop finds nothing and never raises.
-    await _detector(db_session)._stall_runs_for_silenced_projects(db_session, silenced, threshold_minutes=10)
+    await _detector(db_session)._stall_runs_for_silenced_projects(db_session, silenced)

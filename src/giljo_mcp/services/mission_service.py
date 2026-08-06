@@ -31,6 +31,10 @@ from giljo_mcp.models import (
 )
 from giljo_mcp.platform_registry import EXECUTION_MODE_TO_TOOL, MULTI_TERMINAL, Platform, get_preset
 from giljo_mcp.repositories.mission_repository import MissionRepository
+from giljo_mcp.schemas.responses.orchestration import (
+    IDENTITY_ORCHESTRATOR_DEFAULT,
+    IDENTITY_RESOLVED,
+)
 from giljo_mcp.schemas.service_responses import (
     MissionResponse,
     MissionUpdateResult,
@@ -39,9 +43,12 @@ from giljo_mcp.services._error_helpers import not_found_or_wrong_state_error
 from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.services.conductor_chain_injector import inject_conductor_chain_drive
 from giljo_mcp.services.conductor_mission_mirror import mirror_chain_mission_for_conductor
+from giljo_mcp.services.execution_mode_gate import effective_execution_mode
 from giljo_mcp.services.loop_directive_composer import compose_loop_directive
 from giljo_mcp.services.mission_assembly import (
     assemble_mission_context,
+    compose_template_identity,
+    compose_unresolved_identity,
     compute_is_chain_conductor,
     compute_protocol_etag,
 )
@@ -146,6 +153,7 @@ class MissionService:
             all_project_executions: list[AgentExecution] = []
             mission_lookup: dict[str, str] = {}
             agent_identity: str | None = None
+            identity_status: str = IDENTITY_RESOLVED
             current_team_state: list[dict] | None = None
             project = None
 
@@ -198,12 +206,13 @@ class MissionService:
                 is_chain_conductor = compute_is_chain_conductor(chain_execution_mode, job.project_id)
 
                 # Resolve agent identity from template (Handover 0825)
-                agent_identity = await self._resolve_mission_template(
+                agent_identity, identity_status = await self._resolve_mission_template(
                     session,
                     job,
                     execution,
                     tenant_key,
                     is_chain_conductor=is_chain_conductor,
+                    chain_execution_mode=chain_execution_mode,
                 )
 
                 # Atomic start semantics on FIRST mission fetch
@@ -296,6 +305,7 @@ class MissionService:
                 comm_thread_id=comm_thread_id,
                 detected_harness=detected_harness,
             )
+            mission_response.identity_status = identity_status  # BE-9333
             # BE-6177 Bug 4 (chain-blind runtime); BE-9092: proto alias keeps the inject arg-line <=120.
             proto = mission_response.full_protocol
             mission_response.full_protocol = await inject_conductor_chain_drive(
@@ -519,7 +529,8 @@ class MissionService:
         execution: AgentExecution,
         tenant_key: str,
         is_chain_conductor: bool = False,
-    ) -> str | None:
+        chain_execution_mode: str | None = None,
+    ) -> tuple[str | None, str]:
         """Resolve agent identity from template or orchestrator defaults.
 
         Handover 0825: Identity is resolved at read-time, not baked at spawn.
@@ -529,7 +540,10 @@ class MissionService:
         chain conductor's composed orchestrator identity.
 
         Returns:
-            Agent identity string, or None if no template and not an orchestrator.
+            ``(agent_identity, identity_status)``. BE-9333: identity is never None
+            any more -- a job whose template does not resolve gets an explicit block
+            saying so plus a ``template_unresolved`` / ``template_unbound`` status,
+            because a bare None was indistinguishable from a healthy response.
         """
         agent_identity: str | None = None
         job_id = job.job_id
@@ -538,37 +552,7 @@ class MissionService:
             identity_template = await self._repo.get_template_by_id(session, tenant_key, job.template_id)
 
             if identity_template:
-                identity_parts = []
-
-                # Framing directive -- tells the LLM how to process this field
-                role_label = (identity_template.role or execution.agent_name or "agent").upper()
-                identity_parts.append(
-                    f"You are {role_label}. The following defines your expertise, "
-                    f"behavioral constraints, and success criteria. "
-                    f"Internalize these as your operating identity.\n"
-                )
-
-                # Role prose (user_instructions only -- system_instructions excluded
-                # because the thin prompt already handles MCP bootstrap)
-                if identity_template.user_instructions:
-                    identity_parts.append(identity_template.user_instructions)
-
-                # Behavioral rules (structured list from template)
-                if identity_template.behavioral_rules:
-                    rules = identity_template.behavioral_rules
-                    if isinstance(rules, list) and len(rules) > 0:
-                        rules_text = "\n".join(f"- {r}" for r in rules)
-                        identity_parts.append(f"\n## Behavioral Rules\n{rules_text}")
-
-                # Success criteria (structured list from template)
-                if identity_template.success_criteria:
-                    criteria = identity_template.success_criteria
-                    if isinstance(criteria, list) and len(criteria) > 0:
-                        criteria_text = "\n".join(f"- {c}" for c in criteria)
-                        identity_parts.append(f"\n## Success Criteria\n{criteria_text}")
-
-                agent_identity = "\n\n".join(identity_parts)
-
+                agent_identity = compose_template_identity(identity_template, execution)
                 self._logger.info(
                     "[AGENT_IDENTITY] Resolved identity from template at read time",
                     extra={"job_id": job_id, "template_id": job.template_id},
@@ -580,7 +564,14 @@ class MissionService:
         # HO1025: pass the project's execution-mode-derived tool so the
         # Claude-Code-specific TaskCreate harness override only renders for
         # Claude Code orchestrators (codex/gemini/multi_terminal omit it).
-        if job.job_type == "orchestrator" and not agent_identity:
+        # BE-9333 (audit F1): this fallback is for an orchestrator that was NEVER BOUND (no
+        # `orchestrator` row is seeded, so that is the normal case). Keyed on job_type alone it
+        # also caught a job that WAS bound and whose template has since been DELETED, silently
+        # substituting the seeded default and reporting it healthy -- the very substitution this
+        # project removes, surviving because job_type is the display name verbatim. A set
+        # `template_id` here means the lookup above ran and failed (a resolved one would have
+        # filled agent_identity), so fall through to the degraded branch instead.
+        if job.job_type == "orchestrator" and not agent_identity and not getattr(job, "template_id", None):
             # HO1027: Use the canonical composer so the system harness (MCP
             # Tool Usage, CHECK-IN PROTOCOL, HARNESS REMINDER OVERRIDE) is
             # always appended — even when the tenant admin has saved a
@@ -590,7 +581,9 @@ class MissionService:
 
             project = await self._repo.get_project_by_id(session, tenant_key, job.project_id)
             project_exec_mode = getattr(project, "execution_mode", "multi_terminal") if project else "multi_terminal"
-            tool = _EXECUTION_MODE_TO_TOOL.get(project_exec_mode, "multi_terminal")
+            # BE-9335: same resolver as the protocol body (identity must not contradict it).
+            mode = effective_execution_mode(project_exec_mode, chain_execution_mode)
+            tool = _EXECUTION_MODE_TO_TOOL.get(mode, "multi_terminal")
 
             override_content: str | None = None
             try:
@@ -614,8 +607,21 @@ class MissionService:
                 "[AGENT_IDENTITY] Composed orchestrator identity (override+harness or seed+harness)",
                 extra={"job_id": job_id, "tool": tool, "is_override": override_content is not None},
             )
+            return agent_identity, IDENTITY_ORCHESTRATOR_DEFAULT
 
-        return agent_identity
+        # BE-9333: nothing loaded. Say so in the field the agent actually reads, and log it --
+        # the read path was previously silent at BOTH levels (no flag, no line). `not` rather
+        # than `is None` so an empty composition can never slip through as a healthy identity;
+        # compose_template_identity always emits its framing line, so this changes nothing today.
+        if not agent_identity:
+            agent_identity, status = compose_unresolved_identity(job, execution)
+            self._logger.warning(
+                "[AGENT_IDENTITY] No template resolved -- agent runs with no role framing",
+                extra={"job_id": job_id, "template_id": job.template_id, "identity_status": status},
+            )
+            return agent_identity, status
+
+        return agent_identity, IDENTITY_RESOLVED
 
     @staticmethod
     def _compute_protocol_etag(agent_identity: str | None, full_protocol: str | None) -> str:

@@ -1,5 +1,5 @@
 # =============================================================================
-# GiljoAI MCP Release Filter Configuration
+# Giljo HQ Release Filter Configuration
 # =============================================================================
 # This file defines what gets excluded from release archives/branches
 # When creating releases, GitHub will automatically exclude these files

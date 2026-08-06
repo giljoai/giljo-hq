@@ -27,6 +27,7 @@ import { useProjectStateStore } from '@/stores/projectStateStore'
 import { useProjectTabsStore } from '@/stores/projectTabs'
 import { useAgentJobs } from '@/composables/useAgentJobs'
 import { registerReconnectResync } from '@/stores/websocketEventRouter'
+import { PRODUCT_NAME } from '@/branding'
 
 export function useProjectTabsLifecycle({
   projectId,
@@ -221,7 +222,7 @@ export function useProjectTabsLifecycle({
     unsubscribeStagingComplete?.()
     unsubscribeImplLaunched?.()
     cleanupCloseout()
-    document.title = 'GiljoAI MCP'
+    document.title = PRODUCT_NAME
   })
 
   return {

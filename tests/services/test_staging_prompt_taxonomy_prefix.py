@@ -118,7 +118,9 @@ def test_ce_0035_staging_prompt_includes_toolsearch_bootstrap_for_claude_code():
     rendered = _render_staging_prompt(tool="claude-code")
     assert "STEP 0 — TOOLSEARCH BOOTSTRAP" in rendered
     assert "select:" in rendered  # render_toolsearch_call_one_line() output
-    assert "mcp__giljo_mcp__" in rendered  # the ToolSearch select: line, still fully prefixed
+    from giljo_mcp.branding import MCP_ALIAS
+
+    assert f"mcp__{MCP_ALIAS}__" in rendered  # the ToolSearch select: line, still fully prefixed
 
 
 def test_ce_0035_staging_prompt_toolsearch_precedes_start_now_workflow():

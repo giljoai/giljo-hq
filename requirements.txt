@@ -1,4 +1,4 @@
-# GiljoAI MCP - Core Dependencies
+# Giljo HQ - Core Dependencies
 # Python 3.12+ required (see pyproject.toml for canonical version spec)
 #
 # THIS FILE is the single source of truth for runtime deps (INF-8000f); it is
@@ -7,7 +7,7 @@
 # exactly (same names/extras/specifiers). The CI drift check
 # (tests/unit/test_dependency_manifest_sync.py) REDs the build on any mismatch.
 #
-# This file contains ONLY the essential packages needed to run GiljoAI MCP.
+# This file contains ONLY the essential packages needed to run Giljo HQ.
 # (Development/test tooling is not listed here; see the project docs for the dev setup.)
 
 # Core Framework
@@ -17,7 +17,7 @@
 # completes it: route-introspection tests now flatten _IncludedRouter via tests/helpers/route_surface
 # and the frozen surface baselines are reproduced byte-for-byte. starlette 1.3.1 clears 4 CVEs
 # (CVE-2026-48818/48817/54283/54282) that 1.0.1 carried. Keep these two pinned in lockstep.
-fastapi==0.139.0           # REST API and WebSockets
+fastapi==0.139.2           # REST API and WebSockets
 starlette==1.3.1           # Pinned with fastapi (clears CVE-2026-48818/48817/54283/54282; needs >=1.3.1)
 uvicorn[standard]>=0.23.0   # ASGI server with production extras (includes websockets, httptools, watchfiles)
 pydantic>=2.0.0             # Data validation and serialization
@@ -31,7 +31,7 @@ greenlet>=3.5.1             # Required by SQLAlchemy async on macOS arm64 (trans
 
 # Authentication & Security
 bcrypt>=4.0.0                      # Password hashing (direct bcrypt, no passlib wrapper)
-cryptography>=48.0.0              # Fernet encryption for auth tokens (auth_manager.py)
+cryptography>=50.0.0              # Fernet encryption for auth tokens (auth_manager.py)
 python-multipart>=0.0.6           # Form data and file upload support
 PyJWT>=2.8.0                      # JWT token handling (using PyJWT instead of python-jose)
 email-validator>=2.1.0            # Required by Pydantic EmailStr (auth.py, users.py)

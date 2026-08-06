@@ -70,7 +70,13 @@ async def sync_api_metrics_to_db(state: APIState):
         state.mcp_call_count.clear()
         try:
             async with state.db_manager.get_session_async() as session:
-                for tenant_key, api_count in api_counts.items():
+                # Union of both maps' keys, not just api_counts': a tenant can
+                # make MCP calls with no API calls in the same window (/mcp is
+                # a public path, so auth never sets tenant_key there) and its
+                # mcp_call_count must still reach the DB even though it was
+                # already cleared unconditionally above.
+                for tenant_key in api_counts.keys() | mcp_counts.keys():
+                    api_count = api_counts.get(tenant_key, 0)
                     mcp_count = mcp_counts.get(tenant_key, 0)
 
                     stmt = (
@@ -92,7 +98,17 @@ async def sync_api_metrics_to_db(state: APIState):
                     )
                     await session.execute(stmt)
                 await session.commit()
-            logger.info(f"Synced API metrics for {len(api_counts)} tenants.")
+            # House rule: a periodic loop logs at INFO only when it did something;
+            # an idle tick logs at DEBUG. This predicate IS the edition difference
+            # (CE idles at 0 tenants, SaaS does not) — do not make it a mode check.
+            if api_counts:
+                logger.info("Synced API metrics for %d tenants.", len(api_counts))
+            else:
+                # Scoped to the API counts on purpose: /mcp is a public path, so
+                # auth never sets tenant_key and api_call_count stays empty while
+                # mcp_call_count fills. A blanket "nothing to flush" would be a
+                # false statement on an MCP-only server.
+                logger.debug("API metrics sync: no API call counts to flush")
         except asyncio.CancelledError:
             raise
         except Exception as e:

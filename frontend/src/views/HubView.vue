@@ -1,57 +1,38 @@
 <template>
   <v-container fluid class="hub-view pa-0" data-testid="hub-view">
-    <!-- Header bar -->
-    <div class="hub-view__header">
-      <div class="hub-view__title">
-        <v-icon size="22" class="mr-2">mdi-forum</v-icon>
-        <h1 class="text-headline-small font-weight-bold">Message Hub</h1>
-      </div>
-      <div class="d-flex align-center ga-2">
-        <v-btn
-          variant="text"
-          size="small"
-          prepend-icon="mdi-delete-restore"
-          data-testid="deleted-threads-btn"
-          @click="openDeletedThreads"
-        >
-          Deleted
-        </v-btn>
-        <v-btn
-          variant="tonal"
-          size="small"
-          prepend-icon="mdi-plus"
-          class="hub-view__new-btn"
-          data-testid="new-thread-btn"
-          @click="showNewThread = true"
-        >
-          New Thread
-        </v-btn>
-      </div>
-    </div>
+    <!-- LIST VIEW. FE-9365c: the list and the thread are two views of the same region,
+         not two panes side by side. Opening a card REPLACES the list. -->
+    <template v-if="!commHub.selectedThreadId">
+      <v-row class="align-center mb-4 main-window-reveal main-window-reveal--hero main-window-delay-1">
+        <v-col>
+          <h1 class="text-headline-large">Message Hub</h1>
+          <p class="text-body-medium text-muted-a11y mt-1">
+            See how agents from different harnesses and machines coordinate. Nothing here is
+            fetched back into their context — it's yours to read.
+            <v-tooltip location="bottom start" max-width="480">
+              <template #activator="{ props }">
+                <v-icon v-bind="props" size="16" class="help-icon" data-testid="hub-help-icon">
+                  mdi-help-circle-outline
+                </v-icon>
+              </template>
+              <span>
+                A thread is a room agents can join from any machine. Share its
+                <strong>join_thread</strong> command and an agent registers itself, then sees every
+                post on its next poll. Threads bound to a project are audit logs — they are named
+                after their project and kept with its 360 memory, so they cannot be renamed or
+                deleted here.
+              </span>
+            </v-tooltip>
+          </p>
+        </v-col>
+      </v-row>
 
-    <!-- Main layout: thread list | timeline + composer -->
-    <div class="hub-view__body">
-      <!-- Left: two-tab thread list — "Project threads" (project-bound threads) +
-           "General threads" (standalone), replacing the old top/bottom split (FE-9012c D2). -->
-      <div class="hub-view__sidebar">
-        <div class="tab-pills hub-view__tabs" role="tablist">
-          <button
-            type="button"
-            class="pill-btn"
-            :class="{ active: activeTab === 'project' }"
-            role="tab"
-            :aria-selected="activeTab === 'project' ? 'true' : 'false'"
-            data-testid="hub-tab-project"
-            @click="activeTab = 'project'"
-          >
-            Project threads
-            <span
-              v-if="commHub.projectUnreadTotal > 0"
-              class="hub-view__tab-badge smooth-border"
-              :style="tabBadgeStyle"
-              data-testid="hub-tab-project-unread"
-            >{{ commHub.projectUnreadTotal }}</span>
-          </button>
+      <!-- Tabs get their OWN row: putting them inside the filter bar would break the
+           canonical search | select | primary | outlined shape the other lists use. -->
+      <div class="tab-pills hub-view__tabs main-window-reveal main-window-delay-2" role="tablist">
+          <!-- FE-9289c: relabelled General / Projects; the scope prop + store getters
+               are unchanged. The per-tab unread COUNT badges are dropped — the design
+               bar is no numbers on the screen except relative times. -->
           <button
             type="button"
             class="pill-btn"
@@ -61,33 +42,203 @@
             data-testid="hub-tab-town"
             @click="activeTab = 'town'"
           >
-            General threads
-            <span
-              v-if="commHub.townSquareUnreadTotal > 0"
-              class="hub-view__tab-badge smooth-border"
-              :style="tabBadgeStyle"
-              data-testid="hub-tab-town-unread"
-            >{{ commHub.townSquareUnreadTotal }}</span>
+            General
+          </button>
+          <button
+            type="button"
+            class="pill-btn"
+            :class="{ active: activeTab === 'project' }"
+            role="tab"
+            :aria-selected="activeTab === 'project' ? 'true' : 'false'"
+            data-testid="hub-tab-project"
+            @click="activeTab = 'project'"
+          >
+            Projects
           </button>
         </div>
-        <ThreadList class="hub-view__thread-list" :scope="activeTab" @select="onThreadSelect" />
-      </div>
 
-      <!-- Right: timeline + composer -->
-      <div class="hub-view__main">
-        <div v-if="!commHub.selectedThreadId" class="hub-view__no-thread">
-          <v-icon size="48" class="mb-3" color="grey-darken-1">mdi-forum-outline</v-icon>
-          <p class="text-body-medium" style="color: var(--text-muted)">
-            Select a thread from the list to view messages and reply.
-          </p>
+        <!-- The shared list-filter-bar shape, ordered exactly as Products/Projects:
+             search -> sort -> filled primary -> outlined. The Deleted / New Thread
+             buttons moved here from the page's top-right corner. -->
+        <div class="filter-bar main-window-reveal main-window-delay-2">
+          <v-text-field
+            v-model="search"
+            class="filter-search"
+            prepend-inner-icon="mdi-magnify"
+            placeholder="Search threads..."
+            variant="solo"
+            density="compact"
+            flat
+            hide-details
+            clearable
+            data-testid="hub-search"
+          />
+          <v-select
+            v-model="sort"
+            class="filter-select"
+            :items="sortOptions"
+            prepend-inner-icon="mdi-sort"
+            variant="solo"
+            density="compact"
+            flat
+            hide-details
+            data-testid="hub-sort"
+          />
+          <v-btn color="primary" prepend-icon="mdi-plus" data-testid="new-thread-btn" @click="showNewThread = true">
+            New Thread
+          </v-btn>
+          <v-btn
+            variant="outlined"
+            :color="deletedThreads.length > 0 ? 'warning' : 'grey'"
+            prepend-icon="mdi-delete-restore"
+            :disabled="deletedThreads.length === 0"
+            data-testid="deleted-threads-btn"
+            @click="openDeletedThreads"
+          >
+            Deleted ({{ deletedThreads.length }})
+          </v-btn>
+          <v-btn
+            variant="outlined"
+            icon="mdi-help-circle-outline"
+            title="What the indicators mean"
+            :color="legendOpen ? 'warning' : undefined"
+            data-testid="hub-legend-btn"
+            @click="legendOpen = !legendOpen"
+          />
         </div>
 
-        <template v-else>
-          <ThreadTimeline class="hub-view__timeline" />
-          <HubComposer class="hub-view__composer" />
-        </template>
+        <!-- At most ONE attention strip (handoff §7), General tab only. Derived from
+             next_action_owner === you and nothing else — the same honesty rule as the
+             yellow card. Prose in a post can never light this up. -->
+        <button
+          v-if="activeTab === 'town' && attentionThread"
+          type="button"
+          class="hub-view__attention smooth-border"
+          data-testid="hub-attention-strip"
+          @click="onThreadSelect(attentionThread.thread_id)"
+        >
+          <v-icon size="16" class="hub-view__attention-icon">mdi-hand-back-right-outline</v-icon>
+          <span class="hub-view__attention-text">
+            <strong v-if="attentionThread.last_message?.author">{{ attentionThread.last_message.author }}</strong>
+            {{ attentionThread.last_message?.author ? 'is waiting on you' : 'Waiting on you' }}
+            in "{{ attentionThread.subject || attentionThread.title }}"
+          </span>
+          <span class="hub-view__attention-open">Open</span>
+        </button>
+
+        <ThreadList
+          class="hub-view__thread-list"
+          :scope="activeTab"
+          :search="search"
+          :sort="sort"
+          @select="onThreadSelect"
+        />
+    </template>
+
+    <!-- THREAD VIEW — replaces the list in the same region. -->
+    <template v-else>
+      <div class="hub-view__back-row">
+        <button type="button" class="hub-view__back" data-testid="hub-back" @click="backToList">
+          <v-icon size="16">mdi-arrow-left</v-icon> All threads
+        </button>
+        <v-btn
+          variant="outlined"
+          size="small"
+          icon="mdi-help-circle-outline"
+          title="What the indicators mean"
+          :color="legendOpen ? 'warning' : undefined"
+          data-testid="hub-legend-btn-thread"
+          @click="legendOpen = !legendOpen"
+        />
       </div>
-    </div>
+      <div class="hub-view__main">
+          <!-- Thread header: the sharing moment. Rename lives here as well as on the
+               card (DoD 3), and the id sits in a terminal block with the join_thread
+               hint because this is where the operator actually hands it to an agent. -->
+          <div class="hub-view__thread-head" data-testid="thread-header">
+            <div class="hub-view__thread-title-row">
+              <template v-if="renamingHeader">
+                <input
+                  ref="headerRenameInput"
+                  v-model="headerDraft"
+                  class="hub-view__thread-rename smooth-border"
+                  data-testid="thread-header-rename-input"
+                  @keydown.enter="saveHeaderRename"
+                  @keydown.esc="renamingHeader = false"
+                  @blur="renamingHeader = false"
+                />
+                <span class="hub-view__thread-rename-hint">↵ save · esc cancel</span>
+              </template>
+
+              <template v-else>
+                <!-- FE-9365e acceptance fix: §8 puts the serial BEFORE the title, 19px
+                     yellow — it is the handle the operator quotes to an agent, and the
+                     header is where they read it mid-conversation. -->
+                <span class="hub-view__thread-serial" data-testid="thread-header-serial">
+                  {{ commHub.selectedThread?.chat_id }}
+                </span>
+                <h2 class="hub-view__thread-title" data-testid="thread-header-title">
+                  {{ headerTitle }}
+                </h2>
+                <button
+                  type="button"
+                  class="hub-view__thread-action"
+                  :title="headerLocked ? 'Project logs are named after their project' : 'Rename'"
+                  :aria-label="headerLocked ? 'Locked — named after its project' : 'Rename thread'"
+                  data-testid="thread-header-rename"
+                  @click="startHeaderRename"
+                >
+                  <v-icon size="16">{{ headerLocked ? 'mdi-lock-outline' : 'mdi-pencil-outline' }}</v-icon>
+                </button>
+                <button
+                  type="button"
+                  class="hub-view__thread-action"
+                  title="Copy thread id"
+                  aria-label="Copy thread id"
+                  data-testid="thread-header-copy"
+                  @click="copyThreadId"
+                >
+                  <v-icon size="16">mdi-content-copy</v-icon>
+                </button>
+              </template>
+            </div>
+
+            <!-- §8: pills identical to the card's (same component), scope note
+                 right-aligned on the SAME row — the prototype's layout. -->
+            <div class="hub-view__thread-meta">
+              <div v-if="headerAgents.length" class="hub-view__thread-pills" data-testid="thread-header-pills">
+                <AgentPill v-for="a in headerAgents" :key="a.participant_id" :participant="a" />
+              </div>
+              <div class="hub-view__thread-scope" data-testid="thread-header-scope">
+                <v-icon v-if="headerLocked" size="13" class="mr-1">mdi-eye-off-outline</v-icon>
+                {{ headerScopeNote }}
+              </div>
+            </div>
+
+            <!-- The same copyable terminal block the card carries. Display-only here was
+                 an acceptance miss: this is the exact place the operator hands the id to
+                 an agent mid-conversation. -->
+            <button
+              type="button"
+              class="hub-view__thread-id"
+              title="Copy thread id"
+              data-testid="thread-header-id"
+              @click="copyThreadId"
+            >
+              <span class="hub-view__thread-id-cmd">join_thread</span>
+              <span class="hub-view__thread-id-val">{{ commHub.selectedThreadId }}</span>
+              <v-icon size="13">mdi-content-copy</v-icon>
+            </button>
+          </div>
+
+        <ThreadTimeline class="hub-view__timeline" />
+        <HubComposer class="hub-view__composer" />
+      </div>
+    </template>
+
+    <!-- The legend floats beside the content (prototype placement), available from BOTH
+         the list and an open thread. Default CLOSED. -->
+    <IndicatorLegend v-if="legendOpen" @close="legendOpen = false" />
 
     <!-- New thread dialog -->
     <NewThreadDialog
@@ -112,16 +263,17 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute } from 'vue-router'
 import { useCommHubStore } from '@/stores/commHubStore'
+import { useUserStore } from '@/stores/user'
 import { registerReconnectResync } from '@/stores/websocketEventRouter'
-import { useHubNotifications } from '@/composables/useHubNotifications'
 import { useToast } from '@/composables/useToast'
-import { getAgentColor } from '@/config/agentColors'
-import { hexToRgba } from '@/utils/colorUtils'
+import { useClipboard } from '@/composables/useClipboard'
 import api from '@/services/api'
 import ThreadList from '@/components/hub/ThreadList.vue'
+import IndicatorLegend from '@/components/hub/IndicatorLegend.vue'
+import AgentPill from '@/components/hub/AgentPill.vue'
 import ThreadTimeline from '@/components/hub/ThreadTimeline.vue'
 import HubComposer from '@/components/hub/HubComposer.vue'
 import NewThreadDialog from '@/components/hub/NewThreadDialog.vue'
@@ -129,8 +281,10 @@ import ThreadCreatedDialog, { isThreadCreatedHintHidden } from '@/components/hub
 import ThreadDeletedDialog from '@/components/hub/ThreadDeletedDialog.vue'
 
 const commHub = useCommHubStore()
+const userStore = useUserStore()
 const route = useRoute()
 const { showToast } = useToast()
+const { copy } = useClipboard()
 const showNewThread = ref(false)
 const showThreadCreated = ref(false)
 const createdThread = ref(null)
@@ -142,20 +296,111 @@ const restoringId = ref(null)
 // /jobs message icon deep-links here to a project's bound thread (D3).
 const activeTab = ref('project')
 
-// Per-tab unread badge: tinted implementer sky-blue (matches ThreadList's per-row badge).
-const tabBadgeStyle = (() => {
-  const hex = getAgentColor('implementer')?.hex
-  return { backgroundColor: hexToRgba(hex, 0.2), color: hex, borderRadius: '8px' }
-})()
+// FE-9365c: filter-bar state, matching the Products/Projects shape.
+const search = ref('')
+const sort = ref('activity')
+const sortOptions = [
+  { title: 'Last activity', value: 'activity' },
+  { title: 'Newest first', value: 'created' },
+  { title: 'Serial', value: 'serial' },
+]
 
-// Wire hub notifications (away alerts, browser push, baton signalling)
-useHubNotifications()
+// The indicator legend (FE-9365e fills the panel in). Default CLOSED — it must not
+// cover the cards on load.
+const legendOpen = ref(false)
+
+// The header's pill row: agent participants of the open thread, same filter as the
+// card. The user is not a "registered agent" here either.
+const headerAgents = computed(() =>
+  commHub.participantsFor(commHub.selectedThreadId || '').filter((p) => p.participant_type !== 'user'),
+)
+
+// The one thread allowed to claim the operator's attention: the newest open General
+// thread whose baton points at THEM. next_action_owner only — never the words in a post.
+const TERMINAL = new Set(['resolved', 'closed'])
+const attentionThread = computed(() => {
+  const me = userStore.currentUser?.id
+  if (!me) return null
+  return (
+    commHub.townSquareThreadList.find(
+      (t) => t.next_action_owner === me && !TERMINAL.has(String(t.status || '').toLowerCase()),
+    ) || null
+  )
+})
+
+/** Leave the thread view and return to the list. Clearing the selection is what
+ *  swaps the region back, since the two are v-if branches over one selection. */
+function backToList() {
+  commHub.selectThread(null)
+}
+
+// FE-9289c: useHubNotifications() is NOT mounted here anymore — it moved to
+// DefaultLayout so the handover bell reaches the operator on ANY page, not only while
+// they are already looking at the Hub. Do NOT re-add it here: it de-dupes per instance,
+// so a second mount would double-fire every toast and browser notification.
+
+// ---- thread header (DoD 3 rename + DoD 5 the join_thread hint) ----
+// A project thread is named after its project and kept with its 360 memory, so the
+// pencil becomes a lock that says why — never a missing button.
+const headerLocked = computed(() => commHub.selectedThread?.project_id != null)
+const headerTitle = computed(() => {
+  const t = commHub.selectedThread?.title || commHub.selectedThread?.subject
+  return t || 'Untitled thread'
+})
+const headerScopeNote = computed(() =>
+  headerLocked.value
+    ? 'Audit record — never sent back to agents during context fetch'
+    : 'Visible to the agents registered here, on their next poll',
+)
+
+const renamingHeader = ref(false)
+const headerDraft = ref('')
+const headerRenameInput = ref(null)
+
+async function startHeaderRename() {
+  if (headerLocked.value) {
+    showToast({ type: 'info', message: 'Project logs are named after their project.' })
+    return
+  }
+  headerDraft.value = commHub.selectedThread?.subject || ''
+  renamingHeader.value = true
+  await nextTick()
+  headerRenameInput.value?.focus()
+  headerRenameInput.value?.select()
+}
+
+async function saveHeaderRename() {
+  const next = headerDraft.value.trim()
+  const current = commHub.selectedThread?.subject
+  renamingHeader.value = false
+  if (!next || next === current) return
+  try {
+    await commHub.renameThread(commHub.selectedThreadId, next)
+    showToast({ type: 'success', message: 'Thread renamed.' })
+  } catch (err) {
+    const msg = err?.response?.data?.detail || err?.message || 'Could not rename this thread.'
+    showToast({ type: 'error', message: msg })
+  }
+}
+
+// The UUID, not the CHT alias — the UUID is what an agent needs to join.
+async function copyThreadId() {
+  const ok = await copy(commHub.selectedThreadId)
+  showToast(
+    ok
+      ? { type: 'success', message: 'Thread id copied — paste it into any harness.' }
+      : { type: 'error', message: 'Browser blocked the copy — select and copy manually.' },
+  )
+}
 
 let unregisterResync = null
 
 onMounted(async () => {
   // Initial load
   await commHub.loadThreads()
+  // FE-9365c: the Deleted button now carries a COUNT and disables itself at zero, so
+  // the list has to be known before the operator clicks rather than fetched on click.
+  await loadDeletedThreads()
 
   // FE-9012c (D3): the /jobs message icon deep-links via ?thread=<id>&tab=project.
   // Honor an explicit tab, then pre-select the thread and align the tab to its
@@ -201,15 +446,23 @@ function onThreadCreated(thread) {
   }
 }
 
-async function openDeletedThreads() {
-  showDeletedThreads.value = true
+/** Fetch the recoverable threads. Silent on failure when called from mount — the
+ *  count is decoration there, and a toast on page load for a surface the operator has
+ *  not asked for would be noise. Opening the dialog reports properly. */
+async function loadDeletedThreads({ notify = false } = {}) {
   try {
     const res = await api.threads.getDeleted()
     deletedThreads.value = res.data.threads ?? []
   } catch (err) {
+    if (!notify) return
     const msg = err?.response?.data?.detail ?? 'Failed to load deleted threads.'
     showToast({ type: 'error', message: msg })
   }
+}
+
+async function openDeletedThreads() {
+  showDeletedThreads.value = true
+  await loadDeletedThreads({ notify: true })
 }
 
 async function onRestoreThread(thread) {
@@ -229,77 +482,222 @@ async function onRestoreThread(thread) {
 </script>
 
 <style scoped lang="scss">
+@use '../styles/design-tokens' as *;
 @use '../styles/variables' as v;
 
-.hub-view {
-  display: flex;
-  flex-direction: column;
-  height: calc(100vh - 64px); // subtract top nav
-  overflow: hidden;
+@use '../styles/list-filter-bar' as filterBar;
 
-  &__header {
+.hub-view {
+  // FE-9365c: a normal scrolling page, matching Products/Projects. The old
+  // `height: calc(100vh - 64px); overflow: hidden` existed to make a two-pane split
+  // work; with one column and the thread as its own view there is nothing to trap.
+  padding: 30px 40px 40px;
+
+  @include filterBar.list-filter-bar;
+
+  // General / Projects on their OWN row between the subtitle and the filter bar.
+  &__tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+
+  &__back-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: v.$spacing-md v.$spacing-lg;
-    flex-shrink: 0;
   }
 
-  &__title {
+  // The one accent strip. Yellow because it is the handover colour — and it exists
+  // only when the baton points at the operator, so it is rare by construction.
+  &__attention {
     display: flex;
     align-items: center;
+    gap: v.$spacing-sm;
+    width: 100%;
+    max-width: 1120px;
+    text-align: left;
+    background: rgba(255, 195, 0, 0.07);
+    --smooth-border-color: #{rgba($color-brand-yellow, 0.35)};
+    border: none;
+    border-radius: $border-radius-md; // 12
+    padding: 10px 14px;
+    margin-bottom: v.$spacing-md;
+    cursor: pointer;
+    font-size: 0.8125rem; // 13
+    color: var(--text-secondary);
+
+    strong { color: $color-text-primary; }
   }
 
-  &__body {
-    display: flex;
-    flex: 1;
-    gap: v.$spacing-md;
-    padding: 0 v.$spacing-md v.$spacing-md;
+  &__attention-icon { color: $color-brand-yellow; flex: none; }
+
+  &__attention-text {
+    min-width: 0;
     overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  &__sidebar {
-    width: 300px;
-    flex-shrink: 0;
+  &__attention-open {
+    margin-left: auto;
+    flex: none;
+    font-weight: 600;
+    color: $color-brand-yellow;
+  }
+
+  &__thread-meta {
     display: flex;
-    flex-direction: column;
-    overflow: hidden;
+    align-items: center;
+    gap: v.$spacing-sm;
+    min-width: 0;
   }
 
-  // FE-9012c (D2): the two-tab toggle sits above the thread list.
-  &__tabs {
-    flex-shrink: 0;
-    padding: v.$spacing-xs 0 v.$spacing-sm;
-  }
+  &__back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: none;
+    padding: 0;
+    margin-bottom: v.$spacing-md;
+    cursor: pointer;
+    font-size: 0.8125rem; // 13
+    color: var(--text-muted);
+    transition: color $transition-fast;
 
-  &__tab-badge {
-    font-size: 0.62rem;
-    font-weight: 700;
-    line-height: 1;
-    padding: 2px 6px;
-    margin-left: 2px;
-  }
-
-  &__thread-list {
-    flex: 1;
-    min-height: 0;
+    &:hover { color: $color-brand-yellow; }
   }
 
   &__main {
-    flex: 1;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    min-height: 0;
   }
 
-  &__no-thread {
-    flex: 1;
+  &__thread-serial {
+    flex: none;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 1.1875rem; // 19 — the header's louder cousin of the card's 15
+    font-weight: 700;
+    color: $color-brand-yellow;
+    letter-spacing: 0.01em;
+    margin-right: v.$spacing-sm;
+  }
+
+  &__thread-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: v.$spacing-xs;
+    margin: v.$spacing-xs 0;
+  }
+
+  &__thread-head {
+    flex-shrink: 0;
     display: flex;
     flex-direction: column;
+    gap: 6px;
+    padding: v.$spacing-sm v.$spacing-md v.$spacing-md;
+  }
+
+  &__thread-title-row {
+    display: flex;
+    align-items: center;
+    gap: v.$spacing-sm;
+    min-height: 28px;
+  }
+
+  &__thread-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.0625rem; // 17
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__thread-action {
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    text-align: center;
-    padding: v.$spacing-xl;
+    width: 26px;
+    height: 26px;
+    flex-shrink: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: $border-radius-default; // 8
+    cursor: pointer;
+    transition: color $transition-fast, background $transition-fast;
+
+    &:hover {
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.08);
+    }
+  }
+
+  &__thread-rename {
+    flex: 1;
+    min-width: 0;
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.0625rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+    border: none;
+    border-radius: $border-radius-md; // 12 — inputs
+    padding: 4px 10px;
+
+    &:focus { outline: none; }
+  }
+
+  &__thread-rename-hint,
+  &__thread-id-cmd { color: var(--text-muted); }
+  &__thread-id-val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  &__thread-id {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: none;
+    cursor: pointer;
+    min-width: 0;
+    .v-icon { color: $color-brand-yellow; flex: none; }
+
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.6875rem; // 11 — the floor
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  &__thread-scope {
+    display: flex;
+    align-items: center;
+    margin-left: auto; // right-aligned on the pill row, per the prototype
+    flex: none;
+    font-size: 0.71875rem; // 11.5
+    color: var(--text-muted);
+  }
+
+  &__thread-id-cmd { color: var(--text-muted); }
+  &__thread-id-val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  &__thread-id {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: none;
+    cursor: pointer;
+    min-width: 0;
+    .v-icon { color: $color-brand-yellow; flex: none; }
+
+    align-self: flex-start;
+    padding: 3px 8px;
+    border-radius: $border-radius-default; // 8
+    background: rgba(0, 0, 0, 0.28);
+    overflow-x: auto;
+    max-width: 100%;
   }
 
   &__timeline {

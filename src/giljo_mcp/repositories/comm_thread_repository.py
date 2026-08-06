@@ -13,8 +13,8 @@ reads/writes on. It owns:
 - ``create_thread`` — verify the tenant has the reserved CHT taxonomy type
   (else a clear 422, never a confusing serial), mint the serial, validate the
   ``resolution`` JSONB, and persist the thread.
-- ``add_participant`` — collision-safe join (``ON CONFLICT DO NOTHING`` on the
-  ``(thread_id, participant_id)`` unique).
+- ``add_participant`` — collision-safe join (upsert on the
+  ``(thread_id, participant_id)`` unique; see the per-column conflict rules there).
 - tenant-filtered reads (``get_by_id``, ``list_threads``).
 
 CRITICAL: every query filters ``tenant_key`` — no exceptions.
@@ -36,7 +36,6 @@ from giljo_mcp.models.comm import (
     CHT_TAXONOMY_ABBR,
     LOOP_DIRECTIVE_MESSAGE_TYPE,
     TERMINAL_THREAD_STATUSES,
-    VALID_PARTICIPANT_TYPES,
     CommParticipant,
     CommThread,
 )
@@ -47,6 +46,10 @@ from giljo_mcp.models.tasks import (
     MessageCompletion,
     MessageRecipient,
 )
+from giljo_mcp.repositories._comm_thread_chain_hub_mixin import CommThreadChainHubMixin
+from giljo_mcp.repositories._comm_thread_directed_actions_mixin import CommThreadDirectedActionsMixin
+from giljo_mcp.repositories._comm_thread_list_enrichment_mixin import CommThreadListEnrichmentMixin
+from giljo_mcp.repositories._comm_thread_participants_mixin import CommThreadParticipantsMixin
 from giljo_mcp.repositories.taxonomy_repository import TaxonomyRepository
 from giljo_mcp.schemas.comm_jsonb_validators import validate_comm_thread_resolution
 from giljo_mcp.utils.log_sanitizer import sanitize
@@ -55,7 +58,12 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 logger = logging.getLogger(__name__)
 
 
-class CommThreadRepository:
+class CommThreadRepository(
+    CommThreadChainHubMixin,
+    CommThreadDirectedActionsMixin,
+    CommThreadListEnrichmentMixin,
+    CommThreadParticipantsMixin,
+):
     """Data access for comm_threads / comm_participants."""
 
     def __init__(self) -> None:
@@ -108,12 +116,25 @@ class CommThreadRepository:
         product_id: str | None = None,
         project_id: str | None = None,
         resolution: dict | None = None,
+        sequence_run_id: str | None = None,
     ) -> CommThread:
-        """Create a comm thread, minting its CHT serial. Tenant-isolated."""
+        """Create a comm thread, minting its CHT serial. Tenant-isolated.
+
+        ``sequence_run_id`` (BE-9291) marks this thread as THE coordination hub of a
+        chain run, and is checked twice before it is written. It must name a real run
+        IN THIS TENANT -- the FK alone would turn a bad id into a 500, and a run id
+        from another tenant would otherwise be accepted by the constraint while
+        silently creating a cross-tenant link. And that run must not already have a
+        live hub: a second link makes resolution ambiguous rather than wrong-and-loud,
+        so the refusal names the hub that exists.
+        """
         if not tenant_key:
             raise ValidationError("tenant_key is required", context={"operation": "comm_thread.create"})
 
         await self._ensure_cht_type(session, tenant_key)
+        if sequence_run_id:
+            await self._require_sequence_run(session, tenant_key, sequence_run_id)
+            await self._require_run_is_unhubbed(session, tenant_key, sequence_run_id)
         validated_resolution = validate_comm_thread_resolution(resolution)
         serial = await self.mint_serial(session, tenant_key)
 
@@ -127,6 +148,7 @@ class CommThreadRepository:
             product_id=product_id,
             project_id=project_id,
             resolution=validated_resolution,
+            sequence_run_id=sequence_run_id,
         )
         session.add(thread)
         await session.flush()
@@ -367,83 +389,9 @@ class CommThreadRepository:
 
         return out
 
-    async def add_participant(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-        thread_id: str,
-        *,
-        participant_id: str,
-        participant_type: str,
-        display_name: str | None = None,
-        role: str | None = None,
-    ) -> CommParticipant:
-        """Register a participant on a thread, collision-safe (idempotent join).
-
-        Re-joining the same ``(thread_id, participant_id)`` is a no-op
-        (``ON CONFLICT DO NOTHING``); the existing row is returned.
-        """
-        if participant_type not in VALID_PARTICIPANT_TYPES:
-            raise ValidationError(
-                f"participant_type must be one of {VALID_PARTICIPANT_TYPES}, got '{participant_type}'.",
-                context={"operation": "comm_thread.add_participant", "participant_type": participant_type},
-            )
-
-        stmt = (
-            pg_insert(CommParticipant.__table__)
-            .values(
-                id=generate_uuid(),
-                tenant_key=tenant_key,
-                thread_id=thread_id,
-                participant_id=participant_id,
-                participant_type=participant_type,
-                display_name=display_name,
-                role=role,
-            )
-            .on_conflict_do_nothing(constraint="uq_comm_participant")
-        )
-        await session.execute(stmt)
-        await session.flush()
-
-        result = await session.execute(
-            select(CommParticipant).where(
-                CommParticipant.tenant_key == tenant_key,
-                CommParticipant.thread_id == thread_id,
-                CommParticipant.participant_id == participant_id,
-            )
-        )
-        row = result.scalar_one_or_none()
-        if row is None:  # pragma: no cover - insert+select within one tx always resolves
-            raise RuntimeError(f"Failed to register participant {sanitize(participant_id)} on thread {thread_id}")
-        return row
-
     # ------------------------------------------------------------------
     # BE-6054b reads/writes the MCP tool surface builds on.
     # ------------------------------------------------------------------
-
-    async def get_participants(self, session: AsyncSession, tenant_key: str, thread_id: str) -> list[CommParticipant]:
-        """All participants registered on a thread (tenant-scoped)."""
-        result = await session.execute(
-            select(CommParticipant).where(
-                CommParticipant.tenant_key == tenant_key,
-                CommParticipant.thread_id == thread_id,
-            )
-        )
-        return list(result.scalars().all())
-
-    async def get_participant(
-        self, session: AsyncSession, tenant_key: str, thread_id: str, participant_id: str
-    ) -> CommParticipant | None:
-        """One participant row (the D6 read-cursor anchor) or None; None = never joined
-        => "nothing read yet" / mark_read refused (BE-9012a). Tenant-scoped."""
-        result = await session.execute(
-            select(CommParticipant).where(
-                CommParticipant.tenant_key == tenant_key,
-                CommParticipant.thread_id == thread_id,
-                CommParticipant.participant_id == participant_id,
-            )
-        )
-        return result.scalar_one_or_none()
 
     async def set_next_action_owner(
         self, session: AsyncSession, tenant_key: str, thread_id: str, owner: str | None
@@ -657,6 +605,7 @@ class CommThreadRepository:
         requires_action: bool,
         recipient_ids: list[str],
         loop_interval_minutes: int | None = None,
+        from_kind: str = "agent",
     ) -> Message:
         """SIDE-EFFECT-FREE thread message persist (BE-6054b carve-out).
 
@@ -668,6 +617,11 @@ class CommThreadRepository:
         FE-6140: ``loop_interval_minutes`` is the operator-chosen auto-check-in
         cadence carried on a ``loop_directive`` message (NULL on every other
         message); surfaced on the poll responses so a running agent reads it.
+
+        BE-9289a: ``from_kind`` ('agent'|'user') is the SERVER's answer to what the
+        author is, decided by the caller's attribution branch. It is stored alongside
+        ``from_agent_id``, never derived from it — the slug is self-declared and its
+        shape says nothing about the author's kind.
         """
         message = Message(
             tenant_key=tenant_key,
@@ -679,6 +633,7 @@ class CommThreadRepository:
             status="pending",
             from_agent_id=from_agent_id,
             from_display_name=from_display_name,
+            from_kind=from_kind,
             requires_action=requires_action,
             loop_interval_minutes=loop_interval_minutes,
         )

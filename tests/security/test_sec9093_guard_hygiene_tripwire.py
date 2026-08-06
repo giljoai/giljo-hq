@@ -299,9 +299,9 @@ async def test_classb_triggers_sentry_capture_classa_does_not(db_session, monkey
     class. The remaining warn/tripwire class is a genuinely-uninjectable UPDATE/DELETE whose target
     table is NOT itself a detected tenant model. We force that shape deterministically (walk reports
     an unrelated tenant model while the DELETE targets a different table -- the same technique as
-    test_update_no_match_branch_logs_and_does_not_raise) and re-assert the D2 classification: the
-    predicate-ABSENT (Class-B) case feeds the Sentry tripwire; the explicit-predicate (Class-A) case
-    does not."""
+    test_sec9156_guard_failclosed.py) and re-assert the D2 classification: the predicate-ABSENT
+    (Class-B) case feeds the Sentry tripwire (and, since SEC-9156 shipped Step 2, now also raises);
+    the explicit-predicate (Class-A) case does neither."""
     calls = []
     monkeypatch.setattr(
         tenant_guard,
@@ -315,9 +315,10 @@ async def test_classb_triggers_sentry_capture_classa_does_not(db_session, monkey
     tenant_a = _tk()
     db_session.info["tenant_key"] = tenant_a
 
-    # Class-B: no explicit tenant predicate -> capture fires once.
+    # Class-B: no explicit tenant predicate -> capture fires once, then the guard raises (SEC-9156).
     tenant_guard._AUDIT_WARN_SEEN.clear()
-    await db_session.execute(sql_delete(TemplateArchive).where(TemplateArchive.id == "no-such-id"))
+    with pytest.raises(tenant_guard.TenantIsolationError):
+        await db_session.execute(sql_delete(TemplateArchive).where(TemplateArchive.id == "no-such-id"))
     assert calls == [(("APIKey",), "delete")], "Class-B (predicate-absent, uninjectable) must feed the tripwire once"
 
     # Class-A: an explicit tenant predicate is present -> capture must NOT fire.

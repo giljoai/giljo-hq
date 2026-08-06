@@ -29,8 +29,14 @@ import json
 import logging
 import os
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
+from giljo_mcp.services._idem_crypto import decrypt_payload, encrypt_payload
 from giljo_mcp.services.cache_backends import OAUTH_IDEMPOTENCY_BACKEND_NAME, get_cache_backend
+
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 logger = logging.getLogger(__name__)
@@ -48,16 +54,26 @@ class IdempotencyEntry:
 
 
 def _serialize(entry: IdempotencyEntry) -> str:
-    return json.dumps(
-        {
-            "response_body": entry.response_body,
-            "body_signature": entry.body_signature,
-        }
+    # SEC-9227f (M2a): the JSON contains the raw access+refresh token pair —
+    # encrypt it so no readable token material reaches any cache backend
+    # (SaaS Redis persistence/MONITOR would otherwise expose live pairs).
+    return encrypt_payload(
+        json.dumps(
+            {
+                "response_body": entry.response_body,
+                "body_signature": entry.body_signature,
+            }
+        )
     )
 
 
-def _deserialize(raw: str) -> dict[str, object]:
-    return json.loads(raw)
+def _deserialize(raw: str) -> dict[str, object] | None:
+    # SEC-9227f: an undecryptable entry (tampered, rotated key, stale format)
+    # is a cache MISS, never an exception — see _idem_crypto.decrypt_payload.
+    plaintext = decrypt_payload(raw)
+    if plaintext is None:
+        return None
+    return json.loads(plaintext)
 
 
 async def cache_get(tenant_key: str, code: str) -> IdempotencyEntry | None:
@@ -71,6 +87,8 @@ async def cache_get(tenant_key: str, code: str) -> IdempotencyEntry | None:
     if raw is None:
         return None
     payload = _deserialize(raw)
+    if payload is None:
+        return None
     return IdempotencyEntry(
         response_body=dict(payload["response_body"]),  # type: ignore[arg-type]
         body_signature=str(payload["body_signature"]),
@@ -85,6 +103,42 @@ async def cache_put(tenant_key: str, code: str, entry: IdempotencyEntry) -> None
         code,
         _serialize(entry),
         ttl_seconds=OAUTH_TOKEN_IDEMPOTENCY_WINDOW_SECONDS,
+    )
+
+
+async def commit_then_cache_pair(
+    session: AsyncSession,
+    *,
+    tenant_key: str,
+    code: str,
+    response_body: dict,
+    body_signature: str,
+) -> None:
+    """SEC-9227e (M2b): durably COMMIT the token issuance, THEN cache it.
+
+    The order is load-bearing — do not swap or split it. Pre-fix, the /token
+    cache-put ran inside the still-open request transaction (the endpoint's
+    ``get_db_session`` dependency commits only after the handler returns); a
+    rollback after that point left the cache holding a phantom pair — an
+    in-window retry received tokens the DB does not know, a hard logout at its
+    next refresh. Committing first means a cache entry can never outlive a
+    rolled-back transaction. Mirrors the /refresh reuse-detection branch's
+    explicit commit-before-raise durability precedent (oauth_refresh_service);
+    the dependency's own later commit becomes a no-op.
+
+    Called as the LAST statement inside ``tenant_session_context`` so every
+    write commits under the scoped ``session.info``/ContextVar; the context
+    manager only mutates those markers (no transaction interaction), so
+    committing here is safe.
+    """
+    await session.commit()
+    await cache_put(
+        tenant_key,
+        code,
+        IdempotencyEntry(
+            response_body=dict(response_body),
+            body_signature=body_signature,
+        ),
     )
 
 

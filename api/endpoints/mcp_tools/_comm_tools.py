@@ -32,8 +32,11 @@ from api.endpoints.mcp_tools._base import (
     MCP_NAME_MAX,
     MCP_SHORT_TEXT_MAX,
     _call_tool,
+    _detected_harness,
     mcp,
 )
+from api.endpoints.mcp_tools._tool_annotations import _tool_hints
+from giljo_mcp import branding
 
 
 logger = logging.getLogger(__name__)
@@ -68,12 +71,15 @@ def _resolve_pass_baton_to(pass_baton_to: str, requires_action: bool, to_partici
 
 
 @mcp.tool(
+    title="Create Thread",
     description=(
         "Create a persistent message-board thread (chat) and get back its CHT-#### "
         "chat id to share so other agents can join_thread. Threads are standalone by "
         "default; pass project_id to anchor one to a project. The creator is registered "
-        "as the first participant and holds the baton (next_action_owner)."
+        "as the first participant and holds the baton (next_action_owner). "
+        f"{branding.TWO_HUB_DISAMBIGUATION}"
     ),
+    annotations=_tool_hints("create_thread"),
 )
 async def create_thread(
     subject: Annotated[str, Field(max_length=MCP_NAME_MAX, description="Short thread subject / topic.")] = "",
@@ -91,6 +97,17 @@ async def create_thread(
     creator_display_name: Annotated[
         str, Field(max_length=MCP_NAME_MAX, description="Your display name (optional).")
     ] = "",
+    sequence_run_id: Annotated[
+        str,
+        Field(
+            max_length=MCP_ID_MAX,
+            description=(
+                "Chain conductors only: the run UUID this thread is the coordination hub for. "
+                "Stamping it is what lets every sub-orchestrator find this hub via "
+                "get_context(categories=['chain']) — no subject convention required."
+            ),
+        ),
+    ] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
@@ -106,6 +123,8 @@ async def create_thread(
         kwargs["creator_id"] = creator_id
     if creator_display_name:
         kwargs["creator_display_name"] = creator_display_name
+    if sequence_run_id:
+        kwargs["sequence_run_id"] = sequence_run_id
     result = await _call_tool(ctx, "create_thread", kwargs)
     # NOTE: best-effort WS broadcast so an agent-created thread auto-appears on the
     # dashboard, exactly like the user/REST create path (comm_threads.py). Without
@@ -130,11 +149,14 @@ async def create_thread(
 
 
 @mcp.tool(
+    title="Join Thread",
     description=(
         "Join a message-board thread by its thread_id, declaring/claiming your agent_id. "
         "Collision-safe (re-joining is a no-op). Registers you in the participant directory "
-        "so broadcast posts reach you."
+        "so broadcast posts reach you. "
+        f"{branding.TWO_HUB_DISAMBIGUATION}"
     ),
+    annotations=_tool_hints("join_thread"),
 )
 async def join_thread(
     thread_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="The thread UUID to join.")],
@@ -143,7 +165,15 @@ async def join_thread(
     role: Annotated[str, Field(max_length=MCP_ID_MAX, description="Optional role label.")] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {"thread_id": thread_id, "agent_id": agent_id}
+    kwargs: dict[str, Any] = {
+        "thread_id": thread_id,
+        "agent_id": agent_id,
+        # BE-9289a: the harness is DETECTED from the MCP handshake, never declared. This
+        # is the same resolver the render path uses (_detected_harness -> BE-9035b
+        # harness_from_client_info), so no local instruction file can change what the
+        # Hub shows. Absent/unknown clientInfo degrades to 'generic'.
+        "detected_harness": _detected_harness(ctx),
+    }
     if display_name:
         kwargs["display_name"] = display_name
     if role:
@@ -152,19 +182,14 @@ async def join_thread(
 
 
 @mcp.tool(
+    title="Post to Thread",
     description=(
-        "Post a message to a thread (append-only). Broadcasts by default; set to_participant to "
-        "DM one. set_status to open|active|resolved|closed (resolved/closed end a looped "
-        "conversation). Does NOT trigger agent reactivation or job side-effects. Set from_agent to "
-        "your role/agent_id (drives the Hub author badge) -- omit ONLY when posting as the human "
-        "user. This is the canonical agent-to-agent messaging tool -- role-attributed and "
-        "thread-scoped. ATOMIC BATON HAND-OFF: pass_baton_to (agent_id | user_id | 'all' | 'none') "
-        "moves next_action_owner in the same transaction as the post -- no separate pass_baton "
-        "call needed. DEFAULT when pass_baton_to is omitted: a directed action-request "
-        "(requires_action=true + to_participant) auto-passes the baton to that participant; "
-        "pass_baton_to='none' posts without moving it; every other post (broadcasts included) "
-        "leaves the baton untouched."
+        "Post a message to a thread (append-only) -- the canonical agent-to-agent messaging "
+        "tool. Broadcasts by default; see to_participant, set_status, from_agent, and "
+        "pass_baton_to for DM, status, attribution, and atomic baton hand-off. "
+        f"{branding.TWO_HUB_DISAMBIGUATION}"
     ),
+    annotations=_tool_hints("post_to_thread"),
 )
 async def post_to_thread(
     thread_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="The thread UUID.")],
@@ -223,6 +248,8 @@ async def post_to_thread(
         "requires_action": requires_action,
         "loop_directive": loop_directive,
         "user_id": _base._resolve_user_id(ctx),
+        # BE-9289a: server-detected harness, stamped onto the poster's participant row.
+        "detected_harness": _detected_harness(ctx),
     }
     if from_agent:
         kwargs["from_agent"] = from_agent
@@ -237,6 +264,12 @@ async def post_to_thread(
     if effective_baton_to:
         kwargs["pass_baton_to"] = effective_baton_to
     result = await _call_tool(ctx, "post_to_thread", kwargs)
+    # BE-9292a: a refused hand-off is not a post. Nothing was persisted, so the
+    # follow-on side effects below must not run — reactivation would block a recipient
+    # over a message that does not exist, and the WS fan-out would announce it to the
+    # Hub. Return the domain rejection untouched.
+    if result.get("success") is False:
+        return result
     # BE-9012b (D5): relocate the bus auto-block/reactivation onto project-bound Hub
     # posts. A directed (to_participant), action-required post on a project-bound
     # thread flips a completed recipient -> blocked (reactivation), exactly as the bus
@@ -247,13 +280,18 @@ async def post_to_thread(
     if requires_action and to_participant:
         try:
             accessor = _base._get_tool_accessor()
-            await accessor._message_routing_service.auto_block_for_thread_post(
+            outcome = await accessor._message_routing_service.auto_block_for_thread_post(
                 message_id=result.get("message_id", ""),
                 to_participant=to_participant,
                 sender_display_name=result.get("from_display_name", from_agent or "orchestrator"),
                 requires_action=requires_action,
                 tenant_key=_base._resolve_tenant(ctx),
             )
+            # BE-9247: surface the forward-on-send outcome in the SAME response so the
+            # sender learns immediately (e.g. "Tester was closed -- your message was
+            # forwarded to the orchestrator"), rather than discarding it silently.
+            if outcome.notice:
+                result["forward_notice"] = outcome.notice
         except Exception:  # noqa: BLE001 - reactivation is a follow-on side-effect; never unwind a durable post
             logger.warning(
                 "MCP post_to_thread reactivation auto-block (D5) failed for message %s -> %s (non-fatal)",
@@ -274,6 +312,7 @@ async def post_to_thread(
                 message_id=result.get("message_id", ""),
                 from_agent_id=result.get("from_agent_id", from_agent or ""),
                 from_display_name=result.get("from_display_name", from_agent or "agent"),
+                from_kind=result.get("from_kind", "agent"),  # BE-9289a
                 content=content,
                 message_type="direct" if to_participant else "broadcast",
                 priority="normal",
@@ -313,10 +352,13 @@ async def post_to_thread(
 
 
 @mcp.tool(
+    title="Get My Turn",
     description=(
         "The baton query: list threads where it is YOUR turn (next_action_owner == your "
-        "agent_id, plus threads addressed to 'all'). Poll this to find conversations awaiting you."
+        "agent_id, plus threads addressed to 'all'). Poll this to find conversations awaiting you. "
+        f"{branding.TWO_HUB_DISAMBIGUATION}"
     ),
+    annotations=_tool_hints("get_my_turn"),
 )
 async def get_my_turn(
     agent_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Your agent_id.")],
@@ -326,10 +368,13 @@ async def get_my_turn(
 
 
 @mcp.tool(
+    title="Pass Baton",
     description=(
         "Pass the baton: set who acts next on a thread. 'to' is an agent_id, a user_id, "
-        "'all' (anyone), or 'none' (no one waiting). The recipient finds it via get_my_turn."
+        "'all' (anyone), or 'none' (no one waiting). The recipient finds it via get_my_turn. "
+        f"{branding.TWO_HUB_DISAMBIGUATION}"
     ),
+    annotations=_tool_hints("pass_baton"),
 )
 async def pass_baton(
     thread_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="The thread UUID.")],
@@ -337,6 +382,10 @@ async def pass_baton(
     ctx: Context = None,
 ) -> dict[str, Any]:
     result = await _call_tool(ctx, "pass_baton", {"thread_id": thread_id, "to": to})
+    # BE-9292a: a refused hand-off moved no baton — broadcasting would tell the Hub the
+    # owner had been cleared when it is unchanged.
+    if result.get("success") is False:
+        return result
     # NOTE: best-effort WS broadcast so MCP baton-passes also push live to the dashboard.
     try:
         from api.app_state import state as _state
@@ -366,10 +415,13 @@ async def pass_baton(
 
 
 @mcp.tool(
+    title="List Threads",
     description=(
         "List message-board threads with optional filters: status, owner (next_action_owner), "
-        "product_id, project_id. Newest first."
+        "product_id, project_id. Newest first. "
+        f"{branding.TWO_HUB_DISAMBIGUATION}"
     ),
+    annotations=_tool_hints("list_threads"),
 )
 async def list_threads(
     status: Annotated[str, Field(max_length=MCP_ID_MAX, description="Filter by status. Optional.")] = "",
@@ -391,27 +443,19 @@ async def list_threads(
 
 
 @mcp.tool(
+    title="Get Thread History",
     description=(
-        "Read a thread's message timeline. READ-ONLY by default (does NOT acknowledge). "
-        "Returns the thread messages oldest-first. Use to catch up before replying. "
-        "By DEFAULT a plain read returns only the most recent messages (a bounded tail) so "
-        "polling a long thread stays cheap; pass tail=0 for the ENTIRE timeline. "
-        "INCREMENTAL FETCH (optional, for a chain conductor polling a long Hub thread): pass "
-        "after_message_id (the last message id you saw) to get ONLY newer messages, or since "
-        "(an ISO-8601 timestamp) for messages after that time, or tail=N for just the last N. "
-        "The incremental (after_message_id/since) and unread_only cursor reads return their "
-        "full delta and are never truncated by the default tail. "
-        "PERSISTENT CURSOR (server-remembered per participant — survives context loss): pass "
-        "as_participant=<your participant_id> to use it. unread_only=true returns only posts "
-        "since your last mark_read on this thread; mark_read=true records that you have read the "
-        "returned posts and (on a clean unread drain) advances your cursor so the next unread_only "
-        "read returns nothing new; directed_only=true returns only posts delivered to you "
-        "(DM or broadcast, excludes a DM aimed at someone else); "
-        "action_required_only=true returns only posts flagged requires_action. The four cursor "
-        "params REQUIRE as_participant. mark_read on a thread you never join_thread'd is refused "
-        "(NOT_A_PARTICIPANT — join first)."
+        "Read a thread's message timeline, oldest-first. READ-ONLY by default (does NOT "
+        "acknowledge; pass mark_read=true to do so). See tail/after_message_id/since for "
+        "polling and as_participant for the persistent per-participant read cursor. "
+        f"{branding.TWO_HUB_DISAMBIGUATION}"
     ),
     meta=MCP_HEAVY_TOOL_META,  # BE-9083c: raise Claude Code's inline-truncation ceiling
+    # BE-9251 audit F2: read-scoped for auth (TOOL_SCOPES=mcp:read) but
+    # mark_read=true is a real write -- _READ_SCOPED_BUT_MUTATING flips
+    # readOnlyHint=False; destructive=False because that write is additive/
+    # idempotent (draining an unread cursor), never deletes data.
+    annotations=_tool_hints("get_thread_history", destructive=False),
 )
 async def get_thread_history(
     thread_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="The thread UUID.")],
@@ -545,10 +589,13 @@ async def get_thread_history(
 
 
 @mcp.tool(
+    title="Search Threads",
     description=(
         "Search threads by CHT serial, subject keyword, participant, or message content. "
-        "Tenant-scoped, newest first. Used by /giljo to find a chat."
+        "Tenant-scoped, newest first. Used by /giljo to find a chat. "
+        f"{branding.TWO_HUB_DISAMBIGUATION}"
     ),
+    annotations=_tool_hints("search_threads"),
 )
 async def search_threads(
     query: Annotated[

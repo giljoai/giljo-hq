@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Enhanced Configuration Manager for GiljoAI MCP.
+Enhanced Configuration Manager for Giljo HQ.
 
 This module provides a robust configuration system that:
 - Loads configuration from YAML files
@@ -27,6 +27,7 @@ from watchdog.events import FileModifiedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 # Import from centralized exceptions
+from .branding import PRODUCT_NAME
 from .exceptions import ConfigValidationError
 
 
@@ -235,7 +236,7 @@ class ConfigFileWatcher(FileSystemEventHandler):
 
 class ConfigManager:
     """
-    Central configuration management for GiljoAI MCP.
+    Central configuration management for Giljo HQ.
 
     Features:
     - Hierarchical configuration (defaults -> file -> env vars)
@@ -269,7 +270,7 @@ class ConfigManager:
         self.tenant = TenantConfig()
 
         # Application metadata (restored from cleanup)
-        self.app_name = "GiljoAI MCP"
+        self.app_name = PRODUCT_NAME
         self.app_version = "1.0.0"
 
         # Raw config dict cache (populated by _load_from_file, used by get_nested)

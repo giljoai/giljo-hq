@@ -397,7 +397,7 @@ GOOD (passes validator):
                    fields. Pydantic GitCommitEntry validator now coerces
                    None to 0 at the schema boundary."
   key_outcomes:   ["Validator coerces None->0", "3 regression tests added",
-                   "BE-5025 closed clean"]
+                   "Verified end-to-end via the MCP boundary test"]
   decisions_made: ["Used schema-boundary coercion vs runtime guards",
                    "Kept legacy entries unchanged"]
   deliverables:   []   <- empty is fine; field is deprecated
@@ -462,7 +462,7 @@ Tell user: "Project complete. Use `/giljo` to create follow-ups or look up exist
 
 ────────────────────────────────────────────────────────────────────────────
 
-AGENT REACTIVATION PROTOCOL (Handover 0435c):
+AGENT REACTIVATION PROTOCOL:
 
 When a downstream agent reports an issue requiring rework from an already-completed
 upstream agent, follow this sequence:
@@ -470,7 +470,7 @@ upstream agent, follow this sequence:
 ── STEP 1: Post a direct message to the completed agent's coordination thread ──
 Call: post_to_thread(thread_id=<your coordination thread>, to_participant="<completed-agent-id>",
       content="REWORK_REQUIRED: <specific issue>", from_agent="OID-golden", requires_action=true)
-This auto-blocks the completed agent (server-side, Handover 0827b).
+This auto-blocks the completed agent (server-side).
 
 ── STEP 2: Reactivate the job ─────────────────────────────────────────────
 Call: resolve_reactivation(job_id="<completed-agent-job-id>", action="resume")
@@ -514,6 +514,31 @@ After verifying all deliverables from a completed agent:
 - Agents marked 'closed' will not be auto-reactivated on new messages
 - Use 'decommissioned' only for failed/replaced/abandoned agents
 - Lifecycle: working → complete (agent self-reports) → closed (orchestrator accepts)
+
+ACCEPTING A STALLED AGENT (it never called complete_job):
+
+An agent can stall mid-run and go 'silent' (the health monitor's inactivity
+timeout) with its work already DONE — committed, verified, even audited. You
+must not label that agent 'decommissioned'; it did not fail.
+
+close_job refuses a 'silent' job, because 'closed' is only reachable from
+'complete'. Complete it YOURSELF — complete_job accepts any non-terminal
+execution, and 'silent' is not terminal:
+
+1. Verify the deliverable independently (commits, artifacts, tests). You are
+   vouching for work you did not watch happen — this step is the whole basis
+   for accepting it.
+2. If the agent left TODOs mid-flight, settle its ledger honestly:
+   report_progress(job_id=<stalled job>, todo_items=[...], replace=true).
+   Skipping this returns COMPLETION_BLOCKED naming the stranded items.
+3. complete_job(job_id=<stalled job>, result={"summary": ..., "commits": [...]})
+   — record what it actually delivered, not what it claimed.
+4. close_job(job_id=<stalled job>) → 'closed'. Accepted, not failed.
+
+Do NOT use write_project_closeout(force=true) to get past a stalled agent. It
+does not refuse on a specialist's account — it DECOMMISSIONS it, permanently
+recording accepted work under the failed/replaced/abandoned label. force is for
+agents you are genuinely abandoning.
 
 ────────────────────────────────────────────────────────────────────────────
 
@@ -663,10 +688,10 @@ completing, an unblock event, or any other trigger — execute this loop:
   mission ("the implementer probably added X") — if the result is absent, note it as unknown and scope
   verification to what is confirmed.
 - **HOW to handle non-blocking findings (triage by RISK, not file count):**
-  - *Mechanical AND caused by this project* — drop a stranded field, delete vestigial code orphaned by this commit, rename a symbol this project introduced, fix a regex/constant that drifted as a side effect. → Fix inline regardless of file count, re-run the same verification (relevant `pytest` scope + `ruff` + the CI you push to), ship the fix in THIS project. Do NOT defer your own mess.
-  - *Out-of-scope finding* — pre-existing master bug not introduced by this project, unrelated cleanup the reviewer noticed in passing. → `create_task` and cite the ID in `decisions_made`. Audit purity matters.
-  - *Needs user approval* — protected zones (`pyproject.toml`, root `CLAUDE.md`, `docs/`, `alembic.ini`, `LICENSE`, `install.py`/`install.sh`/`install.ps1`, `startup.py`); irreversible actions; license/security/billing changes. → `create_task` with the approval gate stated in the description.
-  - *Architectural, multi-file logic, or risky* — anything that re-shapes a contract, crosses an edition boundary, touches concurrency/auth/migrations, or that the reviewer flagged as needing design discussion. → Re-spawn the deliverable agent with a scoped fix mission citing the exact finding. Do NOT fix inline.
+  - *Mechanical AND caused by this project* — drop a stranded field, delete vestigial code orphaned by this commit, rename a symbol this project introduced, fix a regex/constant that drifted as a side effect. → Fix inline regardless of file count, re-run the same verification (the project's test runner + linter + the CI you push to), ship the fix in THIS project. Do NOT defer your own mess.
+  - *Out-of-scope finding* — pre-existing default-branch bug not introduced by this project, unrelated cleanup the reviewer noticed in passing. → `create_task` and cite the ID in `decisions_made`. Audit purity matters.
+  - *Needs user approval* — the product's declared protected paths (repo-root config files, license/docs directories, install/startup scripts, or similar); irreversible actions; license/security/billing changes. → `create_task` with the approval gate stated in the description.
+  - *Architectural, multi-file logic, or risky* — anything that re-shapes a contract, spans a major structural boundary, touches concurrency/auth/migrations, or that the reviewer flagged as needing design discussion. → Re-spawn the deliverable agent with a scoped fix mission citing the exact finding. Do NOT fix inline.
 
 **PROGRESS REPORTING (MANDATORY after every coordination action):**
   → To update statuses: `report_progress(job_id="JID-golden", todo_items=[...FULL list with updated statuses...])`
@@ -1202,10 +1227,10 @@ completing, an unblock event, or any other trigger — execute this loop:
   mission ("the implementer probably added X") — if the result is absent, note it as unknown and scope
   verification to what is confirmed.
 - **HOW to handle non-blocking findings (triage by RISK, not file count):**
-  - *Mechanical AND caused by this project* — drop a stranded field, delete vestigial code orphaned by this commit, rename a symbol this project introduced, fix a regex/constant that drifted as a side effect. → Fix inline regardless of file count, re-run the same verification (relevant `pytest` scope + `ruff` + the CI you push to), ship the fix in THIS project. Do NOT defer your own mess.
-  - *Out-of-scope finding* — pre-existing master bug not introduced by this project, unrelated cleanup the reviewer noticed in passing. → `create_task` and cite the ID in `decisions_made`. Audit purity matters.
-  - *Needs user approval* — protected zones (`pyproject.toml`, root `CLAUDE.md`, `docs/`, `alembic.ini`, `LICENSE`, `install.py`/`install.sh`/`install.ps1`, `startup.py`); irreversible actions; license/security/billing changes. → `create_task` with the approval gate stated in the description.
-  - *Architectural, multi-file logic, or risky* — anything that re-shapes a contract, crosses an edition boundary, touches concurrency/auth/migrations, or that the reviewer flagged as needing design discussion. → Re-spawn the deliverable agent with a scoped fix mission citing the exact finding. Do NOT fix inline.
+  - *Mechanical AND caused by this project* — drop a stranded field, delete vestigial code orphaned by this commit, rename a symbol this project introduced, fix a regex/constant that drifted as a side effect. → Fix inline regardless of file count, re-run the same verification (the project's test runner + linter + the CI you push to), ship the fix in THIS project. Do NOT defer your own mess.
+  - *Out-of-scope finding* — pre-existing default-branch bug not introduced by this project, unrelated cleanup the reviewer noticed in passing. → `create_task` and cite the ID in `decisions_made`. Audit purity matters.
+  - *Needs user approval* — the product's declared protected paths (repo-root config files, license/docs directories, install/startup scripts, or similar); irreversible actions; license/security/billing changes. → `create_task` with the approval gate stated in the description.
+  - *Architectural, multi-file logic, or risky* — anything that re-shapes a contract, spans a major structural boundary, touches concurrency/auth/migrations, or that the reviewer flagged as needing design discussion. → Re-spawn the deliverable agent with a scoped fix mission citing the exact finding. Do NOT fix inline.
 
 **PROGRESS REPORTING (MANDATORY after every coordination action):**
   → To update statuses: `report_progress(job_id="JID-golden", todo_items=[...FULL list with updated statuses...])`

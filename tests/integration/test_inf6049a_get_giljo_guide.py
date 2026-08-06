@@ -116,6 +116,31 @@ async def test_guide_closeout_sequence_has_no_redundant_memory_write():
     assert "series-summary" in low or "series summary" in low
 
 
+async def test_guide_opens_with_the_current_product_name():
+    """BE-9361: the guide greets every connected agent, and it opened with the
+    dead pre-rebrand name ("GiljoAI MCP") for months after BE-9275 renamed the
+    product to Giljo HQ -- the residual that started this project.
+
+    Pinned to ``branding.PRODUCT_NAME`` rather than to the literal on purpose:
+    a future rebrand that flips branding.py but forgets this agent-facing header
+    goes RED here, which is the exact regression class BE-9361 exists to close.
+    A literal would happily pass while the guide went stale again.
+    """
+    from giljo_mcp.branding import PRODUCT_NAME
+
+    async with create_connected_server_and_client_session(mcp) as session:
+        result = await session.call_tool("get_giljo_guide", {})
+
+    guide = _payload(result)["guide"]
+    first_line = guide.lstrip().splitlines()[0]
+    assert PRODUCT_NAME in first_line, (
+        f"guide header must name the current product ({PRODUCT_NAME!r}), got {first_line!r}"
+    )
+    # The dead name must not survive anywhere in the agent-facing body. The
+    # house brand on its own ("the GiljoAI dashboard") is correct and stays.
+    assert "GiljoAI MCP" not in guide, "guide still carries the pre-rebrand product name"
+
+
 async def test_guide_carries_verbatim_artifact_principle():
     """BE-6207: the guide states the server-authored-artifact = verbatim discipline
     (the durable principle that reinforces the inline chain STEP A spawn directive)."""

@@ -21,6 +21,7 @@ from sqlalchemy import text
 
 from api.app_state import GILJO_MODE, state
 from api.exception_handlers import register_exception_handlers
+from giljo_mcp import branding
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 from .websocket import authenticate_ws_connection, handle_ws_subscribe
@@ -50,7 +51,7 @@ def register_event_handlers(app: FastAPI) -> None:
             if hasattr(app.state, "config") and app.state.config:
                 edition = getattr(app.state.config, "edition", None) or "community"
             return {
-                "name": "GiljoAI MCP",
+                "name": branding.PRODUCT_NAME,
                 "version": giljo_version,
                 "edition": edition,
                 "status": "operational",

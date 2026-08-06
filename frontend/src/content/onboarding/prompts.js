@@ -1,10 +1,7 @@
-// DRAFT — final wording pending PM review (FE-9200).
-// The mock's prompt texts were skeletons; these are rewritten against the REAL
-// update_product_context tool signature (api/endpoints/mcp_tools/_context_tools.py)
-// and the product model / ProductForm tabs (Info / Setup / Tech / Arch / Testing).
-// Both prompts must be exercised against a live agent session (Claude Code at
-// minimum) at the integration stage and iterated until the resulting product
-// card needs no manual repair.
+// Wording APPROVED as-is by the PM (2026-07-18, FE-9200 review closed).
+// Written against the REAL update_product_context tool signature
+// (api/endpoints/mcp_tools/_context_tools.py) and the product model /
+// ProductForm tabs (Info / Setup / Tech / Arch / Testing).
 //
 // Prompt-B and Prompt-D share their back half (vision document → populated
 // product card) — one library, two openings. Edition variants keyed by
@@ -15,6 +12,8 @@
 // section-by-section update_product_context calls in the card's own order,
 // consolidated_vision STRICTLY LAST — that final write is the tutorial's
 // done-signal (agentReportsDone seam in TutorialPromptScreen.vue).
+
+import { PRODUCT_NAME } from '@/branding'
 
 /**
  * Screen chrome for the prompt screen — copy VERBATIM from the approved mock.
@@ -49,7 +48,7 @@ export const PROMPT_META = Object.freeze({
 export function buildPromptD({ productId = '', saas = false } = {}) {
   const connection = saas
     ? 'You are connected to my GiljoAI workspace (browser sign-in) as an MCP server.'
-    : 'You are connected to my self-hosted GiljoAI MCP server (the API-key connection you were configured with).'
+    : `You are connected to my self-hosted ${PRODUCT_NAME} server (the API-key connection you were configured with).`
   return `${connection}
 My product card is empty. Its product_id is "${productId}".
 

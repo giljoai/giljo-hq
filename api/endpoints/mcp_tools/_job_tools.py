@@ -30,10 +30,12 @@ from api.endpoints.mcp_tools._base import (
     mcp,
 )
 from api.endpoints.mcp_tools._tasks_prototype import maybe_attach_task_view
+from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 from giljo_mcp.exceptions import ValidationError
 
 
 @mcp.tool(
+    title="Get Staging Instructions",
     description=(
         "Fetch context for the orchestrator to CREATE a mission plan (near the start of staging, "
         "or during implementation to refresh context). Returns project description (user "
@@ -41,6 +43,9 @@ from giljo_mcp.exceptions import ValidationError
         "specialists. Orchestrator-only; analyzes this INPUT, does NOT execute work."
     ),
     meta=MCP_HEAVY_TOOL_META,  # BE-9083c: raise Claude Code's inline-truncation ceiling
+    # BE-9251: the BE-5122 CTX self-close path writes project.status=COMPLETED
+    # (terminal) -- see TOOL_SCOPES's get_staging_instructions comment + _tool_hints docstring.
+    annotations=_tool_hints("get_staging_instructions", destructive=True),
 )
 async def get_staging_instructions(
     job_id: str,
@@ -61,10 +66,12 @@ async def get_staging_instructions(
 
 
 @mcp.tool(
+    title="Update Job Mission",
     description=(
         "Persist an agent's mission/execution plan. Orchestrator-only, called during staging so a "
         "fresh-session orchestrator can retrieve it later via get_job_mission() during implementation."
     ),
+    annotations=_tool_hints("update_job_mission"),
 )
 async def update_job_mission(
     job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
@@ -82,11 +89,13 @@ async def update_job_mission(
 
 
 @mcp.tool(
+    title="Report Progress",
     description=(
         "Report incremental progress with TODO items. Backend auto-calculates "
         "percent and step counts. Also auto-wakes idle/sleeping/blocked agents "
         "back to 'working' status."
     ),
+    annotations=_tool_hints("report_progress"),
 )
 async def report_progress(
     job_id: str,
@@ -126,15 +135,15 @@ async def report_progress(
 
 
 @mcp.tool(
+    title="Complete Job",
     description=(
         "Mark a job as completed with results. Any agent, when all assigned work is done. "
-        "REJECTED if genuine action-required messages remain or TODOs are incomplete -- drain "
-        "your coordination thread with get_thread_history() (unread_only=true, mark_read=true), "
-        "act on the posts, and finish your TODOs first; there is no bypass flag. Overloaded "
-        "three ways by hidden server-side phase (staging_end / closeout / deliverable) -- the "
-        "response's phase/message/next_action self-explain. See get_giljo_guide for the "
-        "three-phase detail."
+        "Rejected if action-required Hub messages or incomplete TODOs remain -- there is no "
+        "bypass. See get_giljo_guide for the three-phase completion contract "
+        "(staging_end / closeout / deliverable)."
     ),
+    # BE-9251: terminal job-lifecycle transition -- see _tool_hints docstring.
+    annotations=_tool_hints("complete_job", destructive=True),
 )
 async def complete_job(
     job_id: str,
@@ -147,17 +156,23 @@ async def complete_job(
     acknowledge_closeout_todo: Annotated[
         bool,
         Field(
-            description="RETIRED (BE-9012b): accepted-and-ignored. The self-referential closeout TODO auto-completes structurally on your closeout call whether or not this is passed; non-closeout TODOs still block either way. Kept on the signature only so in-flight callers do not 422. Do not pass it. Default False."
+            description="RETIRED: accepted-and-ignored. The self-referential closeout TODO auto-completes structurally on your closeout call whether or not this is passed; non-closeout TODOs still block either way. Kept on the signature only so in-flight callers do not 422. Do not pass it. Default False."
         ),
     ] = False,
     acknowledge_messages_on_complete: Annotated[
         bool,
         Field(
-            description="RETIRED (BE-9012b): accepted-and-ignored. The messages gate blocks only on genuine action-required posts; drain them with get_thread_history() (unread_only=true, mark_read=true), act, and retry — there is no drain-bypass. Kept on the signature only so in-flight callers do not 422. Do not pass it. Default False."
+            description="RETIRED: accepted-and-ignored. The messages gate blocks only on genuine action-required posts; drain them with get_thread_history() (unread_only=true, mark_read=true), act, and retry — there is no drain-bypass. Kept on the signature only so in-flight callers do not 422. Do not pass it. Default False."
         ),
     ] = False,
     ctx: Context = None,
 ) -> dict[str, Any]:
+    """Mark a job as completed with results.
+
+    Overloaded three ways by hidden server-side phase (staging_end / closeout /
+    deliverable) -- the response's phase/message/next_action fields self-explain
+    which one applied. See get_giljo_guide for the full three-phase detail.
+    """
     return await _call_tool(
         ctx,
         "complete_job",
@@ -171,13 +186,23 @@ async def complete_job(
 
 
 @mcp.tool(
+    title="Close Job",
     description=(
         "Mark a completed agent job as closed (final acceptance). "
         "Called by: ORCHESTRATOR ONLY after verifying deliverables. "
         "Transition: complete → closed. Closed jobs will not be "
         "auto-reactivated on new messages. Use 'decommissioned' only "
-        "for failed/replaced/abandoned agents."
+        "for failed/replaced/abandoned agents. If the agent stalled and never "
+        "reported (e.g. 'silent'), do not force-decommission it: call "
+        "complete_job(job_id, result=<the deliverable you verified>) yourself "
+        "first — it accepts any non-terminal execution — then close_job again. "
+        "If that complete_job returns COMPLETION_BLOCKED, the stalled agent left "
+        "TODOs or unread messages behind: settle its ledger with "
+        "report_progress(job_id, todo_items=[...], replace=true) and drain its "
+        "action-required messages, then retry."
     ),
+    # BE-9251: terminal job-lifecycle transition -- see _tool_hints docstring.
+    annotations=_tool_hints("close_job", destructive=True),
 )
 async def close_job(
     job_id: str,
@@ -187,6 +212,7 @@ async def close_job(
 
 
 @mcp.tool(
+    title="Resolve Reactivation",
     description=(
         "Resolve a post-completion reactivation. A completed agent auto-blocks when a "
         "directed, action-required message/post arrives for it. Pick ONE action: "
@@ -195,6 +221,7 @@ async def close_job(
         "acknowledges the message without resuming (blocked -> complete) when it is "
         "informational and no action is needed. Only works while status is 'blocked'."
     ),
+    annotations=_tool_hints("resolve_reactivation"),
 )
 async def resolve_reactivation(
     job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
@@ -216,12 +243,14 @@ async def resolve_reactivation(
 
 
 @mcp.tool(
+    title="Set Agent Status",
     description=(
         "Set agent resting/blocked status: 'blocked' (needs human help), 'idle' (monitoring), or "
         "'sleeping' (periodic check-in). All three auto-wake to 'working' on report_progress(). "
         "Server-locked for the orchestrator during staging (403 STAGING_LOCK) -- use "
         "report_progress instead. Spawned non-orchestrator agents bypass the lock."
     ),
+    annotations=_tool_hints("set_agent_status"),
 )
 async def set_agent_status(
     job_id: str,
@@ -260,6 +289,7 @@ _PLACEHOLDER_JOB_IDS = {"unknown", "none", "null", "", "undefined", "placeholder
 
 
 @mcp.tool(
+    title="Get Job Mission",
     description=(
         "Fetch agent-specific mission and context. Call immediately after receiving the thin "
         "prompt from spawn_job -- your first action. Idempotent. Pass protocol_etag from a prior "
@@ -268,6 +298,7 @@ _PLACEHOLDER_JOB_IDS = {"unknown", "none", "null", "", "undefined", "placeholder
         "of full_protocol."
     ),
     meta=MCP_HEAVY_TOOL_META,  # BE-9083c: raise Claude Code's inline-truncation ceiling
+    annotations=_tool_hints("get_job_mission"),
 )
 async def get_job_mission(
     job_id: str,
@@ -287,7 +318,7 @@ async def get_job_mission(
         Field(
             max_length=128,
             description=(
-                "Optional truncation recovery (BE-9083d). A section name from a prior response's "
+                "Optional truncation recovery. A section name from a prior response's "
                 "protocol_toc; the response then carries ONLY that slice of full_protocol "
                 "(byte-identical to the full render, small enough to survive any harness limit). "
                 "Default '' returns the full mission response."
@@ -328,6 +359,7 @@ async def get_job_mission(
 
 
 @mcp.tool(
+    title="Spawn Job",
     description=(
         "Create specialist agent job for execution. Called by: ORCHESTRATOR ONLY during "
         "staging to delegate work (Step 4 of workflow). Orchestrator breaks down mission "
@@ -335,6 +367,7 @@ async def get_job_mission(
         "and thin prompt (~10 lines). Agent later calls get_job_mission() to fetch full "
         "mission. Creates database record linking agent to project."
     ),
+    annotations=_tool_hints("spawn_job"),
 )
 async def spawn_job(
     agent_display_name: Annotated[
@@ -406,11 +439,13 @@ async def spawn_job(
 
 
 @mcp.tool(
+    title="Get Agent Result",
     description=(
         "Fetch the completion result of a finished agent job. Returns the structured "
         "result dict (summary, artifacts, commits) stored when the agent called "
         "complete_job. Use this to read what a predecessor agent accomplished."
     ),
+    annotations=_tool_hints("get_agent_result"),
 )
 async def get_agent_result(
     job_id: str,
@@ -420,6 +455,7 @@ async def get_agent_result(
 
 
 @mcp.tool(
+    title="Get Workflow Status",
     description=(
         "Monitor workflow progress across all project agents. Returns active/completed/"
         "blocked/closed/silent/decommissioned/pending agent counts and progress_percent (0-100). "
@@ -427,6 +463,7 @@ async def get_agent_result(
         "measure of work done. "
         "Use exclude_job_id to omit the calling orchestrator's own job from counts."
     ),
+    annotations=_tool_hints("get_workflow_status"),
 )
 async def get_workflow_status(
     project_id: str,

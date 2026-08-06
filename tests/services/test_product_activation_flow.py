@@ -31,6 +31,7 @@ def mock_db_manager():
     session.execute = AsyncMock()
     session.commit = AsyncMock()
     session.flush = AsyncMock()
+    session.info = {}  # tenant_session_context save/restore target
 
     # Create proper async context manager
     @asynccontextmanager

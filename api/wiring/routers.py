@@ -38,6 +38,7 @@ from api.endpoints import (
     auth_pin_recovery,
     comm_threads,
     configuration,
+    connect,
     database_setup,
     downloads,
     git,
@@ -128,6 +129,8 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(templates.router)
     app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
     app.include_router(auth_pin_recovery.router, prefix="/api/auth", tags=["auth"])
+    # FE-9274: Connect surface durable credential-status (read-only, tenant-scoped)
+    app.include_router(connect.router, prefix="/api/connect", tags=["connect"])
     app.include_router(oauth.router, prefix="/api/oauth", tags=["oauth"])
     # API-0022: RFC 7009 /revoke split out to stay under the 800-line guardrail.
     app.include_router(oauth_revoke.router, prefix="/api/oauth", tags=["oauth"])

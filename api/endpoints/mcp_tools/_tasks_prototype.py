@@ -168,7 +168,7 @@ def build_task_view(
         "create_task_result": CreateTaskResult(task=task).model_dump(mode="json"),
         "prototype": True,
         "spec_note": (
-            "BE-6039 prototype (NO-SHIP-UNTIL-GA): demonstrates the our-lifecycle -> MCP Tasks "
+            "Prototype (NO-SHIP-UNTIL-GA): demonstrates the our-lifecycle -> MCP Tasks "
             "mapping. Production tasks/get|update + persistent TaskStore land with the GA SDK."
         ),
     }
@@ -203,6 +203,6 @@ def maybe_attach_task_view(
             last_updated_at=last_updated_at,
         )
     except Exception:  # noqa: BLE001 - prototype overlay must never break the live tool
-        logger.warning("[BE-6039] task-view build failed; returning result unchanged", exc_info=True)
+        logger.warning("task-view build failed; returning result unchanged", exc_info=True)
         return result
     return {**result, "task_view": view}

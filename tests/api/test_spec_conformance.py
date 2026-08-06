@@ -138,13 +138,15 @@ class TestMcpServerInfoEndpoint:
         )
 
     @pytest.mark.asyncio
-    async def test_server_name_is_giljo_mcp(self, api_client):
+    async def test_server_name_is_giljo_hq(self, api_client):
+        from giljo_mcp import branding
+
         response = await api_client.get("/.well-known/mcp-server-info")
         body = response.json()
-        # The MCP server is registered as `name="giljo_mcp"` in FastMCP
-        # (see api/endpoints/mcp_sdk_server.py:39-49). The server_name field
-        # must match that identity exactly.
-        assert body["server_name"] == "giljo_mcp", (
+        # The MCP server is registered as `name=branding.MCP_ALIAS` in FastMCP
+        # (see api/endpoints/mcp_tools/_base.py). The server_name field must
+        # match that identity exactly (BE-9275a: alias flipped to giljo_hq).
+        assert body["server_name"] == branding.MCP_ALIAS, (
             f"server_name must match the FastMCP registered name, got {body['server_name']!r}"
         )
 

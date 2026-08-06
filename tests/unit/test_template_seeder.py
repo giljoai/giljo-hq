@@ -187,13 +187,15 @@ class TestTemplateSeederDualField:
         for template in templates:
             system_inst = template.system_instructions
 
-            # Handover 0813: Bootstrap should reference GiljoAI MCP Agent
-            assert "GiljoAI MCP Agent" in system_inst, f"{template.role} missing GiljoAI MCP Agent header"
+            # BE-9275b: Bootstrap should reference the current product name's Agent header.
+            from giljo_mcp.branding import MCP_ALIAS, PRODUCT_NAME
+
+            assert f"{PRODUCT_NAME} Agent" in system_inst, f"{template.role} missing {PRODUCT_NAME} Agent header"
             # BE-9012d (F1): tool names are bare now (this shared bootstrap renders to
             # Codex/Gemini/Desktop too, where the Claude Code prefix is wrong) -- it
             # instead teaches that a client MAY expose tools prefixed.
             assert "mcp__<server>__<tool>" in system_inst, f"{template.role} should teach the client-prefix note"
-            assert "mcp__giljo_mcp__get_job_mission" not in system_inst, (
+            assert f"mcp__{MCP_ALIAS}__get_job_mission" not in system_inst, (
                 f"{template.role} tool call must be bare, not prefixed"
             )
             # Should reference get_job_mission for full protocol delivery
@@ -215,9 +217,15 @@ class TestTemplateSeederDualField:
         for template in templates:
             user_inst = template.user_instructions.upper()
 
-            assert "YOU ARE PART OF A GILJOAI MCP ORCHESTRATION SYSTEM" not in user_inst, (
-                f"{template.role} user_instructions contains MCP bootstrap prose (should be in system only)"
-            )
+            # BE-9361: both brand generations -- the bootstrap says "Giljo HQ"
+            # now, so pinning only the pre-rename wording made this vacuous.
+            for bootstrap_phrase in (
+                "YOU ARE PART OF A GILJOAI MCP ORCHESTRATION SYSTEM",
+                "YOU ARE PART OF A GILJO HQ ORCHESTRATION SYSTEM",
+            ):
+                assert bootstrap_phrase not in user_inst, (
+                    f"{template.role} user_instructions contains MCP bootstrap prose (should be in system only)"
+                )
             assert "STARTUP (MANDATORY)" not in user_inst, (
                 f"{template.role} user_instructions contains MCP startup prose (should be in system only)"
             )
@@ -423,3 +431,88 @@ class TestDefaultTemplatesV103:
         for template in templates:
             assert isinstance(template["success_criteria"], list), f"{template['role']} success_criteria not a list"
             assert template["success_criteria"] == [], f"{template['role']} should have empty success_criteria"
+
+
+class TestBE9259PersonaNeutrality:
+    """BE-9259: the tester/implementer/documenter seed personas must not teach a
+    customer's agents that the software under test IS Giljo HQ, nor hand them
+    THIS repo's own toolchain/edition/tenancy rules as if they were the customer's.
+
+    A customer product with a non-Python stack and no CE/SaaS editions must
+    receive a tester persona that names their own product (or no product at
+    all) and carries none of our stack/edition/tenant mandates. Role-1 system
+    branding (Giljo HQ as the orchestration platform) is untouched and
+    deliberately not asserted against here.
+    """
+
+    # Terms that would re-introduce dogfooding contamination if they appeared
+    # in the customer-facing tester/implementer/documenter prose. Checked
+    # case-insensitively as substrings of the rendered text.
+    _FORBIDDEN_ROLE2_ROLE3_TERMS = (
+        # BE-9361: both brand generations -- the product renamed to "Giljo HQ",
+        # which does not contain the legacy literal, so keeping only the old one
+        # would let post-rename Role-2 contamination through.
+        "giljoai mcp",  # the platform asserted as the software UNDER TEST (Role 2)
+        "giljo hq",  # same, under the current brand
+        "pytest",
+        "vitest",
+        "playwright",
+        "@vue/test-utils",
+        "@pinia/testing",
+        "jsdom",
+        "tenant_key",
+        "tenant isolation",
+        "saas test",
+        "ce test",
+        "tests/saas",
+        "real postgresql",
+        "ruff",
+        "black",
+        "use pathlib",
+        "handover doc",
+    )
+
+    def _render(self, role: str) -> str:
+        template = next(t for t in _get_default_templates_v103() if t["role"] == role)
+        return f"{template['description']}\n{template['user_instructions']}"
+
+    def test_tester_persona_is_customer_neutral(self):
+        """The tester seed must name no toolchain/edition/tenancy specifics of
+        THIS repo — a Go/Rust/whatever customer product gets clean guidance."""
+        text = self._render("tester").lower()
+        hits = [term for term in self._FORBIDDEN_ROLE2_ROLE3_TERMS if term in text]
+        assert not hits, f"Tester persona still contains dogfooding contamination: {hits}"
+        # The generic verification discipline must survive the rewrite.
+        assert "is not verification" in text
+        assert "scope discipline and escalation" in text
+
+    def test_implementer_persona_is_language_neutral(self):
+        """The implementer seed must not mandate our Python-specific tooling."""
+        text = self._render("implementer").lower()
+        hits = [term for term in self._FORBIDDEN_ROLE2_ROLE3_TERMS if term in text]
+        assert not hits, f"Implementer persona still contains dogfooding contamination: {hits}"
+
+    def test_documenter_persona_drops_handover_doc_phrasing(self):
+        """'Handover documents' is our internal process artifact, not a customer
+        deliverable — the documenter seed must speak of plain project docs."""
+        text = self._render("documenter").lower()
+        assert "handover doc" not in text
+
+    def test_orchestrator_persona_drops_ticket_ref_and_handover_doc_phrasing(self):
+        """The orchestrator seed must not cite our internal ticket refs or call
+        its own success criterion a 'handover document'."""
+        orchestrator_def = next(t for t in _get_default_templates_v103() if t["role"] == "orchestrator")
+        text = orchestrator_def["user_instructions"].lower()
+        assert "be-5029" not in text
+        assert "handover doc" not in text
+
+    def test_touched_persona_versions_bumped_past_shipped_baseline(self):
+        """BE-9259 rewrote prose for orchestrator/implementer/tester/documenter —
+        per the seeder's own per-role version convention (see tester's prior
+        1.0.0 -> 1.1.0 bump), a content rewrite bumps that def's version string
+        so the change is visible on the template row / its archive history."""
+        by_role = {t["role"]: t for t in _get_default_templates_v103()}
+        assert by_role["orchestrator"]["version"] == "1.1.0"
+        assert by_role["implementer"]["version"] == "1.1.0"
+        assert by_role["tester"]["version"] == "1.2.0"
+        assert by_role["documenter"]["version"] == "1.1.0"

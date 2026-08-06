@@ -19,8 +19,8 @@ from typing import Any
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from giljo_mcp.models import AgentTodoItem, Message, ProductMemoryEntry, Project
-from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models import AgentTodoItem, Message
+from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES, AgentExecution, AgentJob
 from giljo_mcp.models.tasks import MessageAcknowledgment, MessageRecipient
 from giljo_mcp.models.templates import AgentTemplate
 
@@ -68,6 +68,13 @@ class AgentCompletionRepository:
     ) -> AgentExecution | None:
         """Find the latest active execution for job completion.
 
+        BE-9292b: "active" here means NOT terminal — so a 'silent' execution
+        (health-monitor timeout) IS completable, which is what lets an
+        orchestrator accept a stalled-but-successful agent instead of
+        force-decommissioning it. Bound to the shared
+        ``TERMINAL_EXECUTION_STATUSES`` because ``close_job``'s wrong-state error
+        now advertises that recovery and must not drift from this predicate.
+
         Args:
             session: Async database session
             tenant_key: Tenant key for isolation
@@ -81,7 +88,7 @@ class AgentCompletionRepository:
             .where(
                 AgentExecution.job_id == job_id,
                 AgentExecution.tenant_key == tenant_key,
-                AgentExecution.status.not_in(["complete", "closed", "decommissioned"]),
+                AgentExecution.status.not_in(TERMINAL_EXECUTION_STATUSES),
             )
             .order_by(AgentExecution.started_at.desc())
             .limit(1)
@@ -160,6 +167,55 @@ class AgentCompletionRepository:
         result = await session.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_undrained_messages_for_agent(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        project_id: str,
+        agent_id: str,
+    ) -> list[Message]:
+        """Get EVERY not-yet-acked message addressed to agent_id (any intent).
+
+        BE-9242: broader than ``get_unread_messages_for_agent`` (the closeout GATE,
+        narrowed to ``requires_action=True`` + ``auto_generated=False``). This
+        enumerates every live cursor a now-TERMINAL agent still holds — including
+        informational and auto-generated posts — so a lifecycle hook can partition
+        them into "safe to auto-ack" vs. "must forward, never silently drop"
+        (``agent_terminal_cursor_service.resolve_terminal_agent_cursors``).
+
+        Args:
+            session: Async database session
+            tenant_key: Tenant key for isolation
+            project_id: Project UUID
+            agent_id: Recipient agent ID
+
+        Returns:
+            List of not-yet-acknowledged Message instances addressed to agent_id.
+        """
+        already_acked = (
+            select(MessageAcknowledgment.id)
+            .where(
+                MessageAcknowledgment.message_id == Message.id,
+                MessageAcknowledgment.agent_id == agent_id,
+                MessageAcknowledgment.tenant_key == tenant_key,
+            )
+            .exists()
+        )
+        stmt = (
+            select(Message)
+            .join(MessageRecipient)
+            .where(
+                and_(
+                    Message.tenant_key == tenant_key,
+                    Message.project_id == project_id,
+                    MessageRecipient.agent_id == agent_id,
+                    ~already_acked,
+                )
+            )
+        )
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_incomplete_todos(
         self,
         session: AsyncSession,
@@ -186,46 +242,6 @@ class AgentCompletionRepository:
         result = await session.execute(stmt)
         return list(result.scalars().all())
 
-    async def check_360_memory_for_project(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-        project_id: str,
-    ) -> bool:
-        """Check if 360 memory exists for a project's product.
-
-        Fetches the project, then checks for project_completion memory entries.
-
-        Args:
-            session: Async database session
-            tenant_key: Tenant key for isolation
-            project_id: Project UUID
-
-        Returns:
-            True if memory entry exists or project/product not found
-        """
-        project_res = await session.execute(
-            select(Project).where(
-                Project.id == project_id,
-                Project.tenant_key == tenant_key,
-            )
-        )
-        project = project_res.scalar_one_or_none()
-        if not project or not project.product_id:
-            return True
-
-        stmt = (
-            select(ProductMemoryEntry)
-            .where(
-                ProductMemoryEntry.product_id == project.product_id,
-                ProductMemoryEntry.tenant_key == tenant_key,
-                ProductMemoryEntry.entry_type == "project_completion",
-            )
-            .limit(1)
-        )
-        result = await session.execute(stmt)
-        return result.scalar_one_or_none() is not None
-
     async def find_other_active_executions_by_agent_id(
         self,
         session: AsyncSession,
@@ -248,7 +264,7 @@ class AgentCompletionRepository:
             AgentExecution.job_id == job_id,
             AgentExecution.tenant_key == tenant_key,
             AgentExecution.agent_id != exclude_agent_id,
-            AgentExecution.status.not_in(["complete", "closed", "decommissioned"]),
+            AgentExecution.status.not_in(TERMINAL_EXECUTION_STATUSES),
         )
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
@@ -419,12 +435,30 @@ class AgentCompletionRepository:
 
         Returns:
             List of active template name strings
+
+        BE-9337: this list IS the spawn allowlist -- ``job_lifecycle_service``
+        accepts an ``agent_name`` only if it appears here, and renders the list
+        verbatim into the rejection ("Must be one of: ..."). Soft-delete stamps
+        ``deleted_at`` and deliberately leaves ``is_active`` alone
+        (``template_service.py:720``), so filtering on ``is_active`` alone kept
+        every TRASHED template on it. The templates API already hides those
+        rows, so the two surfaces disagreed about which agents exist and the
+        disagreeing one was the one gating spawning: a user was offered a
+        deleted agent as a valid choice, and a spawn against it resolved no
+        template (``get_template_by_name`` excludes trashed rows since BE-9325)
+        and bound no identity.
+
+        Same omission, same one-line remedy, as the six sites BE-9325 fixed --
+        this is the seventh, and it sits in this file between two queries that
+        were already hardened against it (``get_template_by_name`` below,
+        ``find_active_orchestrator_in_project`` by BE-9242).
         """
         result = await session.execute(
             select(AgentTemplate.name).where(
                 and_(
                     AgentTemplate.tenant_key == tenant_key,
                     AgentTemplate.is_active,
+                    AgentTemplate.deleted_at.is_(None),
                 )
             )
         )
@@ -445,6 +479,18 @@ class AgentCompletionRepository:
 
         Returns:
             Active orchestrator AgentExecution or None
+
+        BE-9242 fix: during a legitimate orchestrator handover/succession
+        (job_lifecycle_service allows a successor to spawn while the
+        predecessor is still active — parent_job_id == predecessor.agent_id),
+        TWO orchestrator executions match this query at once. A bare
+        ``scalar_one_or_none()`` would raise ``MultipleResultsFound`` and crash
+        every caller on the close/forward path. Order by ``started_at`` DESC +
+        ``limit(1)`` and take ``.first()`` so the query is multiplicity-tolerant
+        and deterministic: the most-recently-STARTED active orchestrator is the
+        successor, i.e. the correct live forward target. Mirrors the sibling
+        pattern already used by ``find_active_execution_for_completion`` /
+        ``find_decommissioned_execution``.
         """
         result = await session.execute(
             select(AgentExecution)
@@ -458,8 +504,10 @@ class AgentCompletionRepository:
                     AgentExecution.status.in_(["waiting", "working", "blocked"]),
                 )
             )
+            .order_by(AgentExecution.started_at.desc())
+            .limit(1)
         )
-        return result.scalar_one_or_none()
+        return result.scalars().first()
 
     async def get_template_by_name(
         self,
@@ -476,14 +524,39 @@ class AgentCompletionRepository:
 
         Returns:
             AgentTemplate or None
+
+        BE-9325: soft-delete stamps ``deleted_at`` and deliberately leaves
+        ``is_active`` alone (``template_service.py:720``), so filtering on
+        ``is_active`` alone still matches a TRASHED template. Two consequences,
+        both reproduced before this fix:
+
+        1. A deleted agent still becomes a live agent's operating identity --
+           this lookup runs UPSTREAM of the local-file / server-fetch split, so
+           both delivery routes were affected.
+        2. Delete an agent, recreate it at the same name, activate it -- an
+           ordinary maintenance sequence nothing prevents, since the collision
+           check and the partial unique index both exclude deleted rows. Two
+           rows then matched, ``scalar_one_or_none()`` raised
+           ``MultipleResultsFound``, and ``job_lifecycle_service`` turned that
+           into a generic "Failed to spawn agent" -- permanently, for that name.
+
+        Excluding trashed rows fixes both. The ordering + ``.first()`` is kept
+        as belt-and-braces against any future multiplicity (the same shape
+        BE-9242 already applied to ``find_active_orchestrator`` 25 lines above,
+        which was hardened against this exact trap while this method was
+        missed): newest-created wins, deterministically, instead of raising.
         """
         result = await session.execute(
-            select(AgentTemplate).where(
+            select(AgentTemplate)
+            .where(
                 and_(
                     AgentTemplate.name == agent_name,
                     AgentTemplate.tenant_key == tenant_key,
                     AgentTemplate.is_active,
+                    AgentTemplate.deleted_at.is_(None),
                 )
             )
+            .order_by(AgentTemplate.created_at.desc())
+            .limit(1)
         )
-        return result.scalar_one_or_none()
+        return result.scalars().first()

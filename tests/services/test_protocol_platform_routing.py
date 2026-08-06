@@ -276,6 +276,7 @@ class TestServiceLayerExecModeMapping:
         assert tool_for_mode("multi_terminal") == "multi_terminal"
 
     def test_mission_service_fallback_default_is_multi_terminal(self):
+        import re
         from pathlib import Path
 
         src = Path("src/giljo_mcp/services/mission_service.py").read_text(encoding="utf-8")
@@ -283,7 +284,15 @@ class TestServiceLayerExecModeMapping:
         # BE-6041b: the duplicate inline dicts were hoisted to the module-level
         # _EXECUTION_MODE_TO_TOOL constant; the fallback default stays multi_terminal.
         assert '_EXECUTION_MODE_TO_TOOL.get(project_exec_mode, "claude-code")' not in src
-        assert '_EXECUTION_MODE_TO_TOOL.get(project_exec_mode, "multi_terminal")' in src
+        # BE-9335: assert the DEFAULT of every lookup rather than one exact call
+        # string. The lookup key is no longer the bare project column (a chain member
+        # resolves its mode through effective_execution_mode), and pinning the old
+        # literal made this guard fail on a change that never touched the fallback it
+        # exists to protect. Matching every call site also widens the guard: a second
+        # lookup added later cannot slip in with the wrong default.
+        defaults = re.findall(r'_EXECUTION_MODE_TO_TOOL\.get\(.*?,\s*"([\w-]+)"\s*\)', src, re.DOTALL)
+        assert defaults, "expected at least one _EXECUTION_MODE_TO_TOOL.get() lookup in mission_service"
+        assert set(defaults) == {"multi_terminal"}, f"fail-safe default must be multi_terminal, found {set(defaults)}"
 
     def test_mission_orchestration_service_fallback_default_is_multi_terminal(self):
         """BE-3010a replaced the inline ``execution_mode_to_tool`` dict + .get()
@@ -347,3 +356,153 @@ class TestGiljoSignoffToken:
         for tool in ("claude", "gemini"):
             block = self._giljo_block(tool)
             assert "/giljo" in block and "$giljo" not in block
+
+
+# ---------------------------------------------------------------------------
+# BE-9260: the ORCHESTRATOR body's own closeout signoff line ("Project complete.
+# Use `/giljo` ...") hardcoded "/giljo" unconditionally -- the same class of bug
+# TestGiljoSignoffToken above locks for the WORKER giljo_block, just in a
+# different render site. Fixed to derive the token from giljo_invocation(tool)
+# the same way.
+# ---------------------------------------------------------------------------
+
+
+class TestOrchestratorClosingGiljoSignoffToken:
+    def _orchestrator_protocol(self, tool: str) -> str:
+        return _generate_agent_protocol(
+            job_id="job-test",
+            tenant_key="tk_test",
+            agent_name="orchestrator",
+            agent_id="exec-test",
+            execution_mode="subagent",
+            git_integration_enabled=False,
+            job_type="orchestrator",
+            tool=tool,
+        )
+
+    def test_codex_and_antigravity_orchestrator_signoff_uses_dollar_giljo(self):
+        for tool in ("codex", "antigravity"):
+            protocol = self._orchestrator_protocol(tool)
+            assert "$giljo" in protocol and "/giljo" not in protocol, f"tool={tool!r}"
+
+    def test_claude_code_and_gemini_orchestrator_signoff_uses_slash_giljo(self):
+        for tool in ("claude-code", "gemini"):
+            protocol = self._orchestrator_protocol(tool)
+            assert "/giljo" in protocol and "$giljo" not in protocol, f"tool={tool!r}"
+
+
+# ---------------------------------------------------------------------------
+# BE-9260: protocol-section text is rendered LIVE to every tenant's agents,
+# regardless of what product/tech-stack they run. A non-Claude-Code harness
+# (codex, gemini) must never see Claude-Code-only tool names (TodoWrite) or
+# THIS repo's own toolchain (pytest/ruff) and protected-file list asserted as
+# universal mandates. A claude-code render must still carry the harness-
+# specific TodoWrite guidance -- the over-correction check.
+# ---------------------------------------------------------------------------
+
+
+class TestBE9260ProtocolNeutralityByHarness:
+    """Render worker / orchestrator / staging prompts for a non-claude-code
+    harness and assert no dogfooding contamination leaks through; render for
+    claude-code and assert the harness-specific guidance is still present."""
+
+    def _worker_protocol(self, tool: str) -> str:
+        return _generate_agent_protocol(
+            job_id="job-test",
+            tenant_key="tk_test",
+            agent_name="implementer",
+            agent_id="exec-test",
+            execution_mode="subagent",
+            git_integration_enabled=True,
+            job_type="agent",
+            tool=tool,
+        )
+
+    def _orchestrator_protocol(self, tool: str) -> str:
+        return _generate_agent_protocol(
+            job_id="job-test",
+            tenant_key="tk_test",
+            agent_name="orchestrator",
+            agent_id="exec-test",
+            execution_mode="subagent",
+            git_integration_enabled=True,
+            job_type="orchestrator",
+            tool=tool,
+        )
+
+    def _staging_prompt(self, tool: str) -> str:
+        from unittest.mock import MagicMock
+
+        from giljo_mcp.prompts.staging_prompt_builder import StagingPromptBuilder
+
+        builder = StagingPromptBuilder()
+        project = MagicMock()
+        project.id = "proj-abc"
+        project.name = "Test Project"
+        project.description = "Test desc"
+        project.mission = ""
+        project.taxonomy_alias = None
+        project.project_type_id = None
+        project.series_number = None
+        product = MagicMock()
+        product.id = "prod-xyz"
+        return builder.build_thin_prompt(
+            orchestrator_id="orch-1",
+            agent_id="agent-1",
+            project_id="proj-abc",
+            project=project,
+            product=product,
+            tool=tool,
+            field_toggles={},
+            depth_config={},
+            user_id=None,
+        )
+
+    # -- non-claude-code harness: no dogfooding contamination -------------
+
+    def test_worker_protocol_omits_todowrite_for_non_claude_tool(self):
+        for tool in ("codex", "gemini"):
+            protocol = self._worker_protocol(tool)
+            assert "TodoWrite" not in protocol, f"tool={tool!r} leaked Claude-Code TodoWrite wording"
+
+    def test_orchestrator_protocol_omits_todowrite_for_non_claude_tool(self):
+        for tool in ("codex", "gemini"):
+            protocol = self._orchestrator_protocol(tool)
+            assert "TodoWrite" not in protocol, f"tool={tool!r} leaked Claude-Code TodoWrite wording"
+
+    def test_staging_prompt_omits_todowrite_for_non_claude_tool(self):
+        for tool in ("codex", "gemini"):
+            prompt = self._staging_prompt(tool)
+            assert "TodoWrite" not in prompt, f"tool={tool!r} leaked Claude-Code TodoWrite wording"
+
+    def test_orchestrator_protocol_does_not_mandate_pytest_or_ruff(self):
+        for tool in ("codex", "gemini"):
+            protocol = self._orchestrator_protocol(tool)
+            assert "pytest" not in protocol.lower(), f"tool={tool!r} leaked a pytest mandate"
+            assert "ruff" not in protocol.lower(), f"tool={tool!r} leaked a ruff mandate"
+
+    def test_orchestrator_protocol_does_not_hardcode_repo_protected_files(self):
+        for tool in ("codex", "gemini"):
+            protocol = self._orchestrator_protocol(tool)
+            assert "CLAUDE.md" not in protocol, f"tool={tool!r} leaked our repo's protected-file list"
+            assert "pyproject.toml" not in protocol, f"tool={tool!r} leaked our repo's protected-file list"
+            assert "alembic.ini" not in protocol, f"tool={tool!r} leaked our repo's protected-file list"
+
+    def test_orchestrator_protocol_does_not_leak_this_repo_ticket_refs_or_branch(self):
+        for tool in ("codex", "gemini"):
+            protocol = self._orchestrator_protocol(tool)
+            assert "BE-9083c" not in protocol, f"tool={tool!r} leaked an internal ticket ref"
+            assert "master bug" not in protocol, f"tool={tool!r} assumed 'master' as THE branch"
+
+    # -- claude-code: over-correction check --------------------------------
+    # (The orchestrator's 3-phase coordination protocol never mentioned
+    # TodoWrite even before BE-9260 -- it's a worker/staging-prompt concept
+    # only -- so there is no orchestrator-side over-correction case to guard.)
+
+    def test_worker_protocol_keeps_todowrite_for_claude_code(self):
+        protocol = self._worker_protocol("claude-code")
+        assert "TodoWrite" in protocol
+
+    def test_staging_prompt_keeps_todowrite_for_claude_code(self):
+        prompt = self._staging_prompt("claude-code")
+        assert "TodoWrite" in prompt

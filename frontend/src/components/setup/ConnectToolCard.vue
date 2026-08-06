@@ -54,6 +54,24 @@
       Paste one command. Your browser opens for a one-click sign-in.
     </p>
 
+    <!-- Web-app connector endpoint (generic card only, FE-9225). Carried over from the
+         retired configurator's "Web & app" route: apps that accept an MCP connector URL
+         (claude.ai, ChatGPT, IDEs) need the endpoint itself, not the key-bearing JSON
+         below — they run their own browser sign-in. Shown regardless of key state. -->
+    <div v-if="method === 'manual'" class="command-card" data-testid="web-endpoint-block">
+      <div class="command-card-head">
+        <span class="command-label">Connector URL</span>
+        <button class="copy-pill" data-testid="web-endpoint-copy-btn" @click="copyText(mcpEndpoint)">
+          <v-icon size="11">mdi-content-copy</v-icon>COPY
+        </button>
+      </div>
+      <pre class="command-code config-code">{{ mcpEndpoint }}</pre>
+      <p class="connect-subline">
+        Connecting a web app or IDE instead? Paste this URL into its MCP connector settings
+        (claude.ai, ChatGPT, and most IDEs), then sign in when the browser opens. No key needed.
+      </p>
+    </div>
+
     <!-- Key flow (key + manual methods): Card 1 Generate + config/env/cert extras -->
     <SetupStep2KeyFlow
       v-if="showKeyStep"
@@ -77,6 +95,24 @@
       @set-platform="(p) => (platform = p)"
       @copy-text="({ text }) => copyText(text)"
     />
+
+    <!-- FE-9339: cert-trust entry point, standing where the failure happens. A CE
+         self-hoster on HTTPS copies the command above, their Node-based CLI refuses
+         on a certificate error, and the walkthrough used to be reachable only from
+         Tools > Startup. Same modal, no navigation. Hidden on plain HTTP (nothing to
+         trust) and on SaaS (a hosted tenant has no server certificate of its own). -->
+    <div v-if="showCertTrustLink" class="fallback-row">
+      <span
+        class="fallback-link"
+        role="button"
+        tabindex="0"
+        data-testid="cert-trust-link"
+        @click="showCertTrust = true"
+        @keydown.enter.prevent="showCertTrust = true"
+      >
+        Tool rejecting the connection? Trust the certificate.
+      </span>
+    </div>
 
     <!-- Command card — sign-in path (no bearer). Key/manual paths show their command inside KeyFlow. -->
     <div v-if="method === 'oauth'" class="command-card" data-testid="oauth-section">
@@ -155,6 +191,14 @@
         I already configured this
       </span>
     </div>
+
+    <!-- FE-9339: the card owns its own instance rather than emitting up — both of
+         this card's hosts (the wizard step and the tools directory) would otherwise
+         need identical plumbing for a modal that holds no state worth sharing. -->
+    <CertTrustModal
+      v-model="showCertTrust"
+      @continue="recordCertTrustDismissal"
+    />
   </div>
 </template>
 
@@ -178,6 +222,8 @@ import {
 } from '@/composables/useMcpConfig'
 import { toolName } from '@/config/setupTools'
 import SetupStep2KeyFlow from './SetupStep2KeyFlow.vue'
+import CertTrustModal from './CertTrustModal.vue'
+import { recordCertTrustDismissal } from '@/utils/certTrustPreference'
 
 const props = defineProps({
   // Wizard tool id (claude_code, codex_cli, gemini_cli, antigravity_cli, opencode, generic).
@@ -260,9 +306,18 @@ const configCommand = computed(() =>
 const oauthCommand = computed(() =>
   generateConfigForTool(props.toolId, serverUrl.value, '', { authMethod: 'oauth' }),
 )
+// Bare MCP endpoint for web/IDE connectors (FE-9225 — the generic card's connector URL).
+const mcpEndpoint = computed(() => `${serverUrl.value}/mcp`)
 const envVarText = computed(() => generateCodexEnvVar(currentApiKey.value, platform.value))
 const certCommand = computed(() => getCertTrustCommand(platform.value))
 const needsCertTrust = computed(() => isBackendHttps(backendConfig.value))
+
+// FE-9339 cert-trust link gate. Keyed on the resolved server URL the user is about
+// to paste, not on `needsCertTrust` (ssl_enabled): a CE box behind a reverse proxy
+// reports ssl_enabled=false while still handing the user an https URL whose CA their
+// CLI may not trust. If the URL is https, the failure is reachable.
+const showCertTrust = ref(false)
+const showCertTrustLink = computed(() => isCe.value && serverUrl.value.startsWith('https:'))
 
 async function copyText(text) {
   const success = await clipboardCopy(text)

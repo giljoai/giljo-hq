@@ -16,7 +16,11 @@ Edition Scope: CE.
 
 from __future__ import annotations
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import (
     ACCEPTED_EXECUTION_MODES,
     MAX_SEQUENCE_PROJECTS,
@@ -138,3 +142,75 @@ def validate_update_fields(
         _validate_project_statuses(project_statuses)
         project_statuses = validate_sequence_run_project_statuses(project_statuses)
     return resolved_order, project_statuses
+
+
+# Run statuses that mean implementation is in flight. Mirrors the service's own
+# tier constant; kept here so the mode-freeze refusal is self-contained.
+_RUNNING_STATUSES: frozenset[str] = frozenset({"running", "stalled"})
+
+
+async def refuse_mode_change_if_live(session: AsyncSession, run, run_id: str, tenant_key: str) -> None:
+    """Refuse an execution_mode change once the chain's agents are LIVE (BE-9335).
+
+    The run's mode is what a chain member actually runs in, so changing it while
+    agents already hold rendered prompts would re-point their harness mid-flight
+    — exactly the desync ``projects.execution_mode`` refuses after launch. This
+    is that same per-project lock at the tier that owns a chain, so it keys on
+    the SAME signal: ``implementation_launched_at``.
+
+    Deliberately NOT the ultralock tier. Ultralock means "the Implement button is
+    available" (any member at ``staging_complete``), which is reached while every
+    agent is still cold — refusing there took away a mode change the server had
+    always allowed, and pointed at Unstage, which ultralock itself refuses. It
+    also does not engage on the straight-to-implementation path this fixes:
+    ``GET /prompts/chain-implementation`` is a pure read that sets neither
+    ``status`` nor ``locked``, so a driven chain stays pending + unlocked while
+    its members run. The launch gate is true in exactly that case.
+
+    Re-staging clears ``implementation_launched_at``, so the remedy named in the
+    message is one the user can actually carry out.
+    """
+    launched = await _launched_member_names(session, run, tenant_key)
+    if launched:
+        named = ", ".join(launched)
+        raise ValidationError(
+            message=(
+                f"Cannot change the execution mode: implementation has already launched for {named}. "
+                "Agents are live with prompts already rendered for the current mode. To change it you "
+                "must Reset the launched project(s) first — that discards their agents and progress. "
+                "(Re-staging is refused once implementation has launched.)"
+            ),
+            context={
+                "field": "execution_mode",
+                "run_id": run_id,
+                "status": run.status,
+                "launched_members": launched,
+            },
+        )
+    if run.status in _RUNNING_STATUSES:
+        raise ValidationError(
+            message=("Cannot change the execution mode: the chain is already running. Re-stage it to change the mode."),
+            context={"field": "execution_mode", "run_id": run_id, "status": run.status},
+        )
+
+
+async def _launched_member_names(session: AsyncSession, run, tenant_key: str) -> list[str]:
+    """Names of member projects that have crossed their launch gate. Tenant-scoped.
+
+    Names rather than ids: this feeds a user-facing refusal, and a refusal that
+    does not say which member froze the chain makes the user hunt for it.
+    """
+    member_ids = list(run.project_ids or [])
+    if not member_ids:
+        return []
+    stmt = (
+        select(Project.name)
+        .where(
+            Project.tenant_key == tenant_key,
+            Project.id.in_(member_ids),
+            Project.implementation_launched_at.isnot(None),
+        )
+        .order_by(Project.name)
+    )
+    result = await session.execute(stmt)
+    return [row[0] for row in result.all()]

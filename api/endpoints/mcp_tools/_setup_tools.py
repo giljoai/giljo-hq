@@ -26,10 +26,22 @@ from api.endpoints.mcp_tools._base import (
     logger,
     mcp,
 )
-from giljo_mcp.platform_registry import EXPORT_PLATFORMS, WORKSPACE_SHARED_WORKING_TREE, get_preset
+from api.endpoints.mcp_tools._tool_annotations import _tool_hints
+from giljo_mcp import branding
+from giljo_mcp.platform_registry import (
+    EXPORT_GENERIC,
+    EXPORT_PLATFORMS,
+    WORKSPACE_NONE,
+    WORKSPACE_SHARED_WORKING_TREE,
+    get_preset,
+)
 
 
-@mcp.tool(description="Check MCP server health status")
+@mcp.tool(
+    title="Health Check",
+    description=f"Check MCP server health status. {branding.TWO_HUB_DISAMBIGUATION}",
+    annotations=_tool_hints("health_check"),
+)
 async def health_check(ctx: Context = None) -> dict[str, Any]:
     # BE-3010b: call the OrchestrationService static directly. health_check is
     # tenant-independent and never went through _call_tool; routing it past the
@@ -40,12 +52,14 @@ async def health_check(ctx: Context = None) -> dict[str, Any]:
 
 
 @mcp.tool(
+    title="Get GiljoAI Guide",
     description=(
         "Return the GiljoAI cross-tool guide: the routing/judgment layer for the project/task "
         "tools (chain convention, Edition Scope, read-vs-write routing, the staging -> human-gate "
         "-> implement lifecycle). No arguments. Call once, early, to become competent before "
         "creating or reading projects and tasks."
     ),
+    annotations=_tool_hints("get_giljo_guide"),
 )
 async def get_giljo_guide(ctx: Context = None) -> dict[str, Any]:
     # Static, tenant-independent content -- no _call_tool / accessor dispatch needed.
@@ -55,6 +69,7 @@ async def get_giljo_guide(ctx: Context = None) -> dict[str, Any]:
 
 
 @mcp.tool(
+    title="Set Up GiljoAI",
     description=(
         "First-time setup: installs the /giljo command/skill and agent templates. Run once after "
         "connecting; re-run with the 'Agents only' scope to refresh templates later. Pass platform "
@@ -62,6 +77,7 @@ async def get_giljo_guide(ctx: Context = None) -> dict[str, Any]:
         "session with no home directory (web sandbox / pure chat), pass harness to get templates "
         "and guidance returned inline instead of file-install instructions."
     ),
+    annotations=_tool_hints("giljo_setup"),
 )
 async def giljo_setup(
     # BE-9035a: derived from the registry's EXPORT_PLATFORMS (was a hand-copied
@@ -86,8 +102,25 @@ async def giljo_setup(
     if preset is not None and preset.workspace_model != WORKSPACE_SHARED_WORKING_TREE:
         from giljo_mcp.tools.setup_instructions import build_inline_primer_note
 
-        result = await _call_tool(ctx, "list_agent_templates", {"platform": platform})
+        # BE-9327: request the PLATFORM-NEUTRAL renderer, ignoring the caller's
+        # file-install platform. ``platform`` defaults to claude_code and was forwarded
+        # unchanged, so a chat client correctly asking for inline templates received
+        # Claude Code markdown -- YAML frontmatter, a ``color`` field, and a per-agent
+        # ``filename`` for a file it has nowhere to write. The override is
+        # unconditional inside this branch because the branch condition IS "this
+        # session has no filesystem", which no declared platform can change.
+        result = await _call_tool(ctx, "list_agent_templates", {"platform": EXPORT_GENERIC})
         result.pop("install_paths", None)
+        # AUDIT-9327 F1: strip the per-agent ``filename`` only for a session with NO
+        # filesystem at all. This branch is entered by web_sandbox too, but that preset
+        # carries WORKSPACE_ISOLATED_PR -- an isolated PR checkout it CAN write to -- so
+        # it keeps the suggested name. Only WORKSPACE_NONE (pure chat) has nowhere to put
+        # a file and would be handed a name it cannot use. The renderer override above
+        # stays unconditional: neither preset wants claude_code frontmatter.
+        if preset.workspace_model == WORKSPACE_NONE:
+            for agent in result.get("agents", []):
+                if isinstance(agent, dict):
+                    agent.pop("filename", None)
         result["mode"] = "inline"
         result["message"] = (
             f"This session ({preset.display_label}) has no home directory to install into, so "
@@ -192,11 +225,13 @@ class _TuningProposal(BaseModel):
 
 
 @mcp.tool(
+    title="Apply Context Tuning",
     description=(
         "Apply reviewed product context tuning directly to product fields, comparing current "
         "context against recent project history. Approved proposals are written immediately -- no "
         "separate dashboard review step. See the proposals param for its exact per-item shape."
     ),
+    annotations=_tool_hints("apply_context_tuning"),
 )
 async def apply_context_tuning(
     product_id: Annotated[str, Field(max_length=MCP_ID_MAX)],

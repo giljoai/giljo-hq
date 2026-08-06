@@ -7,7 +7,7 @@
             <div class="d-flex flex-column align-center w-100">
               <v-img
                 src="/Giljo_YW.svg"
-                alt="GiljoAI MCP"
+                :alt="productName"
                 height="50"
                 width="auto"
                 max-width="200"
@@ -64,6 +64,10 @@
  * CE-space component (edition rule): SaaS views import this, never the
  * reverse.
  */
+import { PRODUCT_NAME } from '@/branding'
+
+const productName = PRODUCT_NAME
+
 defineProps({
   title: {
     type: String,

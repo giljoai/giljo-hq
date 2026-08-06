@@ -7,7 +7,13 @@
 
 from __future__ import annotations
 
+from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.platform_registry import Platform, is_subagent_render
+
+# BE-9292b: CH5's final-acceptance prose (closing a job; accepting a stalled agent)
+# lives in its own module for the 800-line file-size guardrail and _build_ch5_reference's
+# shrink-only length budget. Interpolated verbatim below.
+from giljo_mcp.services.protocol_sections.closing_jobs import _CLOSING_JOBS_REFERENCE
 
 # BE-9013: the generic_mcp CH3 rung prose lives beside the ladder renderer in
 # orchestrator_body (moved there for the 800-line file-size guardrail); the
@@ -353,8 +359,8 @@ _REACTIVATION_SPAWN_BLOCKS: dict[str, str] = {
   Tell the user: "Open a new session with your AI and paste this prompt for the {role} agent"
   Include in the prompt: "You are resuming job_id={job_id}. Call get_job_mission(job_id='{job_id}') to load your full context."
   Do NOT call spawn_job again — the job already exists.""",
-    "claude-code": """Reactivation Spawn — Claude Code:
-  Task(subagent_type='{agent_name}', instructions='You are resuming a reactivated Giljo job. Call mcp__giljo_mcp__get_job_mission(job_id="{job_id}") immediately to load your mission and prior context.')
+    "claude-code": f"""Reactivation Spawn — Claude Code:
+  Task(subagent_type='{{agent_name}}', instructions='You are resuming a reactivated Giljo job. Call mcp__{MCP_ALIAS}__get_job_mission(job_id="{{job_id}}") immediately to load your mission and prior context.')
   Do NOT call spawn_job again — the job already exists.""",
 }
 
@@ -502,7 +508,7 @@ GOOD (passes validator):
                    fields. Pydantic GitCommitEntry validator now coerces
                    None to 0 at the schema boundary."
   key_outcomes:   ["Validator coerces None->0", "3 regression tests added",
-                   "BE-5025 closed clean"]
+                   "Verified end-to-end via the MCP boundary test"]
   decisions_made: ["Used schema-boundary coercion vs runtime guards",
                    "Kept legacy entries unchanged"]
   deliverables:   []   <- empty is fine; field is deprecated
@@ -542,7 +548,7 @@ If the command succeeds (prints "true"), proceed:
   1. Run `git status` to review pending changes
   2. Stage deliverables: `git add` relevant files (never `git add -A`)
   3. Commit with a descriptive message: `git commit -m "<summary of project work>"`
-  4. Record the commit SHA (from `git log --oneline -1`) for the git_commits parameter
+  4. Record a TITLED git_commits entry (SHA alone is rejected): `git log --format='%H%x09%s%x09%an' -1`
 
 If the command FAILS (project_path is not a git repo), STOP and ASK the user:
   "Git integration is enabled in your settings, but this project path
@@ -610,7 +616,7 @@ Tell user: "Project complete. Use `/giljo` to create follow-ups or look up exist
 
 ────────────────────────────────────────────────────────────────────────────
 
-AGENT REACTIVATION PROTOCOL (Handover 0435c):
+AGENT REACTIVATION PROTOCOL:
 
 When a downstream agent reports an issue requiring rework from an already-completed
 upstream agent, follow this sequence:
@@ -618,7 +624,7 @@ upstream agent, follow this sequence:
 ── STEP 1: Post a direct message to the completed agent's coordination thread ──
 Call: post_to_thread(thread_id=<your coordination thread>, to_participant="<completed-agent-id>",
       content="REWORK_REQUIRED: <specific issue>", from_agent="{orchestrator_id}", requires_action=true)
-This auto-blocks the completed agent (server-side, Handover 0827b).
+This auto-blocks the completed agent (server-side).
 
 ── STEP 2: Reactivate the job ─────────────────────────────────────────────
 Call: resolve_reactivation(job_id="<completed-agent-job-id>", action="resume")
@@ -652,13 +658,7 @@ When a completed agent receives a message and gets auto-blocked:
 4. If it requires rework:
    → Follow the Reactivation Protocol above (Steps 1-4)
 
-CLOSING JOBS (FINAL ACCEPTANCE):
-
-After verifying all deliverables from a completed agent:
-- Call close_job(job_id=...) for each agent whose work is accepted
-- Agents marked 'closed' will not be auto-reactivated on new messages
-- Use 'decommissioned' only for failed/replaced/abandoned agents
-- Lifecycle: working → complete (agent self-reports) → closed (orchestrator accepts)
+{_CLOSING_JOBS_REFERENCE}
 
 ────────────────────────────────────────────────────────────────────────────
 

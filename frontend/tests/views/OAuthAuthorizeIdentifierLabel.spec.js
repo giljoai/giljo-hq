@@ -1,7 +1,7 @@
 /**
  * AUTH-EMAIL Phase 4 frontend contract: the OAuth consent login identifier
  * field must indicate that either an email OR a username can be entered.
- * See handovers/completed/AUTH_EMAIL_USERNAME_DECISION.md (Option A, Phase 4 copy
+ * See the AUTH_EMAIL_USERNAME_DECISION record (Option A, Phase 4 copy
  * consolidation).
  *
  * Guard-rails:

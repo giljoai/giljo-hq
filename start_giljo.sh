@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# GiljoAI MCP Linux/macOS Launcher
+# Giljo HQ Linux/macOS Launcher
 # Updated to use unified startup.py
 
 set -e
 
 echo "==============================================="
-echo "   GiljoAI MCP Launcher"
+echo "   Giljo HQ Launcher"
 echo "==============================================="
 echo ""
 

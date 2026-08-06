@@ -20,6 +20,7 @@ from sqlalchemy import select
 
 from giljo_mcp.models.agent_identity import AgentTodoItem
 from giljo_mcp.models.user_approval import UserApproval
+from giljo_mcp.repositories.agent_operations_repository import AgentOperationsRepository
 
 
 @dataclass
@@ -85,6 +86,29 @@ async def incomplete_todos_by_jobs(session: Any, job_ids: list[str], tenant_key:
     for todo in rows:
         todos_by_job.setdefault(todo.job_id, []).append(todo)
     return todos_by_job
+
+
+async def live_action_required_unread_by_agent(
+    session: Any, tenant_key: str, project_id: str, executions: list[Any]
+) -> dict[str, int]:
+    """Live ack-based action-required unread count per scanned agent (TSK-9268).
+
+    The closeout gate's ``messages_waiting`` must read the SAME store the
+    ``get_thread_history(mark_read=True)`` drain writes (a
+    ``message_acknowledgments`` row per (message_id, agent_id)) — i.e. the
+    complete_job gate definition (BE-9108/BE-9012b: ``requires_action=True``,
+    ``auto_generated=False``, not yet acked). The former source, the
+    denormalized ``AgentExecution.messages_waiting_count`` column, is
+    increment-only (nothing in src/ decrements it), so a fully-drained agent
+    blocked project closeout forever with a stuck count. Takes the scanned
+    execution rows and extracts the agent ids itself; thin wrapper over
+    ``AgentOperationsRepository.get_live_action_required_unread_counts_by_agent``
+    (one batched GROUP BY across all agents, no N+1).
+    """
+    agent_ids = [execution.agent_id for execution in executions if execution.agent_id]
+    return await AgentOperationsRepository().get_live_action_required_unread_counts_by_agent(
+        session, tenant_key, project_id, agent_ids
+    )
 
 
 async def pending_approval_ids_by_execution(

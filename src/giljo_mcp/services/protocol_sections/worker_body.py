@@ -12,7 +12,7 @@ only the module location changed. ``agent_protocol`` keeps the thin
 
 from __future__ import annotations
 
-from giljo_mcp.platform_registry import Platform, giljo_invocation
+from giljo_mcp.platform_registry import Platform, giljo_invocation, task_list_phrase
 from giljo_mcp.services.protocol_sections.orchestrator_body import render_capability_ladder
 
 
@@ -24,6 +24,7 @@ from giljo_mcp.services.protocol_sections.orchestrator_body import render_capabi
 _PHASE1_STEP0_SHELL = r"""0. **ENVIRONMENT DETECTION**:
    Detect your shell environment before executing tasks:
    Call: `python -c "import os; print(os.environ.get('SHELL', os.environ.get('COMSPEC', 'unknown')))"`
+   If `python` is not on PATH: fall back to `echo $SHELL` (POSIX) / `echo %COMSPEC%` (Windows).
    This detects the **actual shell** (bash, zsh, powershell, cmd), not just the OS.
    Adapt commands to the detected shell:
    - If shell contains "bash" or "zsh" (includes Git Bash on Windows):
@@ -89,8 +90,10 @@ def _build_conditional_blocks(
 Before calling `complete_job()`, commit your work:
 1. Stage your changes: `git add` relevant files (never use `git add -A`)
 2. Write a descriptive commit message summarizing your work
-3. Include the commit hash in your completion result:
-   `complete_job(job_id, result={"summary": "...", "commits": ["abc123"], "artifacts": [...]})`
+3. Include the commit SHA AND its title (not the SHA alone) in your
+   completion result, so the orchestrator has enough to build a titled
+   git_commits entry at closeout:
+   `complete_job(job_id, result={"summary": "...", "commits": ["<sha> <one-line commit title>"], "artifacts": [...]})`
 """
 
     giljo_block = ""
@@ -122,25 +125,25 @@ def _build_worker_protocol_body(
     protocol_framing: str,
     preset: Platform | None = None,
     comm_thread_id: str | None = None,
+    tool: str = "multi_terminal",
 ) -> str:
     """
-    Render the complete 5-phase worker protocol string.
-
-    All parameters are injected via f-string; no side effects.
+    Render the complete 5-phase worker protocol string. All parameters are injected via f-string; no side effects.
 
     BE-8003f (D3-S4): ``preset`` gates the Phase-1 shell env-detection block. Default
     None -> today's exact bytes (D1); a chat preset (no shell) swaps step 0 for the
     no-shell ladder. web_sandbox / desktop_app (has_shell) keep the shell block.
 
     BE-9012d: ``comm_thread_id`` is the project's bound Hub thread (resolved by
-    ``MissionService.get_agent_mission`` via ``CommThreadService``, on the SAME
-    session as the render). A worker always belongs to a project and therefore
-    always has a resolved thread; ``None`` only reaches here for a caller that
-    renders without one (a direct/test render, or a hypothetical project-less
-    job) — the prose then degrades to a banner telling the agent to skip the
-    Hub calls below rather than embedding a bogus thread id into a tool example.
+    ``MissionService.get_agent_mission`` via ``CommThreadService``). A worker always
+    has a resolved thread; ``None`` only reaches here for a caller that renders
+    without one (a direct/test render, or a hypothetical project-less job) — the
+    prose then degrades to a banner telling the agent to skip the Hub calls below
+    rather than embedding a bogus thread id into a tool example.
+    BE-9260: ``tool`` drives the harness-neutral ``task_list_phrase`` wording (was hardcoded "TodoWrite").
     """
     phase1_step0 = _phase1_step0(preset)
+    todo_phrase = task_list_phrase(tool)
     thread_ref = f'"{comm_thread_id}"' if comm_thread_id else '"<none>"'
     no_thread_banner = (
         ""
@@ -177,10 +180,10 @@ def _build_worker_protocol_body(
 {phase1_step4}
 
 ### Phase 2: EXECUTION
-Execute your assigned tasks (TodoWrite created in Phase 1):
+Execute your assigned tasks (your {todo_phrase}, created in Phase 1):
 - Maintain focus on mission objectives
 - Update todos as you progress
-- **MESSAGE CHECK**: Call `get_thread_history()` after completing each TodoWrite task
+- **MESSAGE CHECK**: Call `get_thread_history()` after completing each item on your {todo_phrase}
   - Full call: `get_thread_history(thread_id={thread_ref}, as_participant="{executor_id}", unread_only=true, mark_read=true)`
   - If any messages are returned: Process them BEFORE continuing
   - If none are returned: Safe to proceed
@@ -207,21 +210,21 @@ Status values: "pending", "in_progress", "completed"
 current statuses. Omitting completed items will be REJECTED by the server (regression guard).
 Use todo_append to add genuinely new items discovered mid-work.
 
-### CRITICAL: Sync TodoWrite with MCP Progress (Handover 0392)
+### CRITICAL: Sync your {todo_phrase} with MCP Progress
 
-Every time you update TodoWrite status (mark item complete or in_progress),
+Every time you update a task's status on your {todo_phrase} (mark item complete or in_progress),
 IMMEDIATELY call report_progress() with your updated todo_items list.
 
 The todo_items array appears in the Plan/TODOs tab of the dashboard.
-Do NOT skip this step - the backend cannot see your TodoWrite updates.
+Do NOT skip this step - the backend cannot see your {todo_phrase} updates.
 
-### BACKEND MONITORING ACTIVE (Handover 0406)
+### BACKEND MONITORING ACTIVE
 The backend monitors report_progress() calls. If todo_items is missing:
 - You will receive a WARNING in the response
 - Warnings are throttled (1 per 5 minutes per job)
 - Dashboard cannot display your progress without todo_items
 
-**MESSAGE HANDLING (CRITICAL - Issue 0361-5):**
+**MESSAGE HANDLING (CRITICAL):**
 - ALWAYS use `get_thread_history(..., mark_read=true)` to drain your unread posts (it marks
   the returned posts read and advances your cursor)
 - `get_thread_history(...)` WITHOUT `mark_read` is the read-only inspection — posts stay
@@ -229,7 +232,7 @@ The backend monitors report_progress() calls. If todo_items is missing:
 
 ### Phase 4: COMPLETION
 Before calling `complete_job()`, you MUST verify:
-1. All TODO items completed (your TodoWrite list is fully marked completed)
+1. All TODO items completed (your {todo_phrase} is fully marked completed)
 2. All messages read (queue empty after `get_thread_history(..., mark_read=true)`)
 
 **Follow-up work:** When you finish work and a follow-up is needed, create a task via `create_task` — or a project via `create_project` if it's multi-step — and cite the returned ID in `decisions_made` when you call `write_project_closeout`.
@@ -248,8 +251,8 @@ If you call `complete_job()` without meeting these requirements:
 #### Phase 4 — ORCHESTRATOR ADDENDUM: Closeout sequence
 
 Orchestrators MUST NOT place `write_memory_entry(...)` or `write_project_closeout(...)`
-on their TodoWrite list. Those calls execute AFTER `complete_job()` returns success — a
-TodoWrite entry for them would be unmarkable until after `complete_job` runs, and the
+on their {todo_phrase}. Those calls execute AFTER `complete_job()` returns success — an
+entry for them there would be unmarkable until after `complete_job` runs, and the
 COMPLETION_BLOCKED gate would then trap you with an unfinished TODO.
 
 Your final pre-completion TODO should read something like
@@ -291,7 +294,7 @@ write_project_closeout(project_id="...", force=False)                        # c
 
 **Use BLOCKED for**: Unclear requirements, missing context, waiting for decisions, unrecoverable errors (all errors use blocked status)
 
-## If You Are Reactivated (Handover 0435c)
+## If You Are Reactivated
 
 If you receive context indicating you are resuming a previously completed job:
 1. Call `get_job_mission(job_id="...")` to load your full prior context
@@ -331,11 +334,11 @@ Concrete examples (one per category):
 - Worker `baseline`: `write_memory_entry(entry_type="baseline", ...)` after seeding
   the architecture snapshot from a frozen reference doc.
 - Worker `decision`: `write_memory_entry(entry_type="decision", ...)` to record
-  "chose Postgres JSONB over a separate audit table — rationale: tenant scoping".
+  "chose a caching layer over a separate audit table — rationale: latency budget".
 - Worker `architecture`: `write_memory_entry(entry_type="architecture", ...)` to
-  capture a new layered boundary (e.g. EventBus introduced between CE and SaaS).
+  capture a new layered boundary (e.g. a queue introduced between two services).
 - Worker `discovery`: `write_memory_entry(entry_type="discovery", ...)` for a
-  surprising finding (e.g. "Alembic skips offline migrations on PG18 boot").
+  surprising finding (e.g. "a startup-ordering gotcha causes a race during boot").
 - Orchestrator deferred work: create a follow-up task via `create_task` (or a project via `create_project` for multi-step work) and cite the returned ID in `decisions_made` at closeout.
 
 Use `discovery` for one-off findings worth remembering.
@@ -366,7 +369,7 @@ If your mission references undefined entities, has unclear dependencies, or ambi
 
 **When to Check Messages:**
 - Phase 1 (STARTUP): Before starting work
-- Phase 2 (EXECUTION): After each TodoWrite task
+- Phase 2 (EXECUTION): After each item on your {todo_phrase}
 - Phase 3 (PROGRESS): Before reporting progress
 - Phase 4 (COMPLETION): Before calling complete_job()
 

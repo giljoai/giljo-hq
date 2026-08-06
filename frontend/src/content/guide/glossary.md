@@ -1,6 +1,6 @@
 ## Glossary
 
-Quick definitions for the terms used throughout GiljoAI MCP. Terms are grouped by what they describe.
+Quick definitions for the terms used throughout Giljo HQ. Terms are grouped by what they describe.
 
 **The hierarchy — how your work is organized:**
 

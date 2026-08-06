@@ -20,20 +20,12 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
-from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES, AgentExecution, AgentJob
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.templates import AgentTemplate
 
 
 logger = logging.getLogger(__name__)
-
-# BE-9165: agent-execution statuses that mean the agent's work has ENDED
-# (deliverables recorded or the agent was taken out of service). Anything else
-# ('waiting', 'working', 'blocked', 'silent', 'awaiting_user', ...) counts as
-# in flight — unknown statuses deliberately fall on the in-flight side so the
-# closeout gates stay conservative. Mirrors the orchestrator active-set in
-# thin_prompt_lifecycle.implement() step 4 and the closeout decommission set.
-TERMINAL_AGENT_STATUSES: tuple[str, ...] = ("complete", "closed", "decommissioned", "failed")
 
 
 class MissionRepository:
@@ -82,7 +74,7 @@ class MissionRepository:
                 and_(
                     AgentExecution.job_id == job_id,
                     AgentExecution.tenant_key == tenant_key,
-                    AgentExecution.status.not_in(["complete", "closed", "decommissioned"]),
+                    AgentExecution.status.not_in(TERMINAL_EXECUTION_STATUSES),
                 )
             )
             .order_by(AgentExecution.started_at.desc())
@@ -127,12 +119,20 @@ class MissionRepository:
         tenant_key: str,
         template_id: str,
     ) -> AgentTemplate | None:
-        """Get an agent template by ID with tenant isolation."""
+        """Get a live agent template by ID with tenant isolation.
+
+        BE-9325: ``deleted_at IS NULL`` is load-bearing here. ``AgentJob.template_id``
+        is only nulled at the 30-day hard purge (``template_service.nullify_job_template_refs``),
+        never at soft-delete, so a job bound to a since-trashed template would otherwise
+        keep rendering that template's instructions as its live identity on every
+        ``get_job_mission`` call for up to 30 days.
+        """
         result = await session.execute(
             select(AgentTemplate).where(
                 and_(
                     AgentTemplate.id == template_id,
                     AgentTemplate.tenant_key == tenant_key,
+                    AgentTemplate.deleted_at.is_(None),
                 )
             )
         )
@@ -146,26 +146,46 @@ class MissionRepository:
     ) -> AgentTemplate | None:
         """Get an active agent template for a role.
 
-        Resolution: tenant-specific -> system default.
+        Resolution: tenant-specific -> role default.
+
+        BE-9357: ``deleted_at IS NULL`` is load-bearing on both branches, for the same
+        reason it is on :meth:`get_template_by_id` directly above. Soft-delete stamps
+        ``deleted_at`` and leaves ``is_active``/``is_default`` set, so an ``is_active``
+        predicate alone still matches a template the operator deleted -- and role
+        resolution would hand its instructions back as a live agent identity.
+
+        The ``tenant_key`` predicate on the default branch is defence in depth rather
+        than a live leak fix: ``tenant_guard`` injects a tenant filter into every SELECT
+        touching a tenant-scoped model, so no real caller read across tenants here. It is
+        added because the house rule has no "something else also filters it" exception,
+        and because it matches the shape of the live role-default read in
+        ``thin_prompt_lifecycle``. Note the consequence: the default branch is now a
+        strict subset of the tenant branch above, so it can no longer return a row the
+        first branch would have missed. It is left in place rather than deleted -- the
+        seeder writes every tenant its own ``is_default`` rows, and removing a resolution
+        branch is a separate decision.
         """
         # 1. Tenant-specific
         stmt = select(AgentTemplate).where(
             AgentTemplate.tenant_key == tenant_key,
             AgentTemplate.role == role,
             AgentTemplate.is_active,
+            AgentTemplate.deleted_at.is_(None),
         )
         result = await session.execute(stmt)
         template = result.scalar_one_or_none()
         if template:
             return template
 
-        # 2. System default
+        # 2. Role default
         stmt = (
             select(AgentTemplate)
             .where(
+                AgentTemplate.tenant_key == tenant_key,
                 AgentTemplate.role == role,
                 AgentTemplate.is_default,
                 AgentTemplate.is_active,
+                AgentTemplate.deleted_at.is_(None),
             )
             .limit(1)
         )
@@ -210,14 +230,15 @@ class MissionRepository:
         ``(total, in_flight)`` (BE-9165).
 
         ``in_flight`` counts executions whose status is NOT in
-        :data:`TERMINAL_AGENT_STATUSES`. ``total >= 1 and in_flight == 0`` is the
-        "all deliverables already recorded" predicate shared by the force-close
-        orchestrator-decommission guard and the staging-finale closeout reroute.
+        :data:`~giljo_mcp.models.agent_identity.TERMINAL_EXECUTION_STATUSES`.
+        ``total >= 1 and in_flight == 0`` is the "all deliverables already
+        recorded" predicate shared by the force-close orchestrator-decommission
+        guard and the staging-finale closeout reroute.
         """
         result = await session.execute(
             select(
                 func.count(),
-                func.count().filter(AgentExecution.status.not_in(TERMINAL_AGENT_STATUSES)),
+                func.count().filter(AgentExecution.status.not_in(TERMINAL_EXECUTION_STATUSES)),
             )
             .select_from(AgentExecution)
             .join(AgentJob, AgentExecution.job_id == AgentJob.job_id)
@@ -276,10 +297,21 @@ class MissionRepository:
         tenant_key: str,
         limit: int = 8,
     ) -> list[AgentTemplate]:
-        """Get active agent templates for a tenant."""
+        """Get active agent templates for a tenant.
+
+        BE-9325: soft-delete leaves ``is_active`` True, so without the ``deleted_at``
+        filter a trashed agent stays on the roster the orchestrator is shown as
+        available to spawn -- and spawning it then resolves nothing.
+        """
         result = await session.execute(
             select(AgentTemplate)
-            .where(and_(AgentTemplate.tenant_key == tenant_key, AgentTemplate.is_active))
+            .where(
+                and_(
+                    AgentTemplate.tenant_key == tenant_key,
+                    AgentTemplate.is_active,
+                    AgentTemplate.deleted_at.is_(None),
+                )
+            )
             .limit(limit)
         )
         return list(result.scalars().all())

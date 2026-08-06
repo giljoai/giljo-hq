@@ -8,7 +8,7 @@
             <div class="d-flex flex-column align-center w-100">
               <v-img
                 src="/Giljo_YW.svg"
-                alt="GiljoAI MCP"
+                :alt="productName"
                 height="50"
                 width="auto"
                 max-width="200"
@@ -243,6 +243,9 @@ import AppAlert from '@/components/ui/AppAlert.vue'
 import api, { apiClient } from '@/services/api'
 import configService from '@/services/configService'
 import { PIN_RULES as pinRules, onlyNumbers, usePasswordForm } from '@/composables/usePasswordForm'
+import { PRODUCT_NAME } from '@/branding'
+
+const productName = PRODUCT_NAME
 
 // Composables
 const router = useRouter()

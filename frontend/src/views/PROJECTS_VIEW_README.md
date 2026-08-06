@@ -487,8 +487,8 @@ await saveProject()
 
 ## Contributors
 
-Frontend Testing Agent - GiljoAI MCP
+Frontend Testing Agent - Giljo HQ
 
 ## License
 
-Same as GiljoAI MCP project
+Same as Giljo HQ project

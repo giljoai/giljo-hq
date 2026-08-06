@@ -250,4 +250,143 @@ describe('memoryStore — FE-5042 normalized owner + client-side search', () => 
     expect(result[0].id).toBe('e-742')
     expect(elapsed).toBeLessThan(200)
   })
+
+  // FE-9338 follow-up: inFlightSearch is public store state, so it must not
+  // outlive the search it describes. A settled promise left parked in the ref
+  // is a permanently-rejected value every later awaiter re-throws on.
+  it('clears inFlightSearch once a successful search settles', async () => {
+    const store = useMemoryStore()
+    mockGetMemoryEntries.mockResolvedValue({
+      data: { entries: [entry({ id: 's1' })], total_count: 1, filtered_count: 1 },
+    })
+
+    const started = store.searchMemoryEntries('prod-1', 'tenant guard')
+    expect(store.inFlightSearch).not.toBeNull() // assigned synchronously
+    await started
+
+    expect(store.inFlightSearch).toBeNull()
+  })
+
+  it('clears inFlightSearch when a search rejects, so later awaiters do not re-throw', async () => {
+    const store = useMemoryStore()
+    // The one synchronous throw path outside _runSearch's try block: a non-string
+    // term has no .trim(). Reachable from the store API, not from the view.
+    await expect(store.searchMemoryEntries('prod-1', 12345)).rejects.toThrow()
+
+    // The whole point: awaiting the ref again must be a harmless no-op rather
+    // than re-throwing the rejection for the lifetime of the store.
+    expect(store.inFlightSearch).toBeNull()
+    await store.inFlightSearch
+  })
+
+  it('an older search settling does not clear a newer in-flight search', async () => {
+    const store = useMemoryStore()
+    let resolveA
+    let resolveB
+    const payload = { data: { entries: [], total_count: 0, filtered_count: 0 } }
+    mockGetMemoryEntries
+      .mockImplementationOnce(() => new Promise((r) => { resolveA = () => r(payload) }))
+      .mockImplementationOnce(() => new Promise((r) => { resolveB = () => r(payload) }))
+
+    store.searchMemoryEntries('prod-1', 'older')
+    const newer = store.searchMemoryEntries('prod-1', 'newer')
+
+    // The slow FIRST search lands after the second is already in flight.
+    resolveA()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(store.inFlightSearch).not.toBeNull()
+
+    resolveB()
+    await newer
+    expect(store.inFlightSearch).toBeNull()
+  })
+
+  // IMP-9342 item 1 — response sequencing. The FE-9338 guard above only protects
+  // the inFlightSearch REF; the loaded set itself was still last-writer-wins, so a
+  // slow older response landed on top of a newer one after an awaiter already
+  // believed the store had settled. Reachable: type a term, pause past the view's
+  // 250ms debounce, type more — if the first response is slower, the list shows
+  // results for the earlier prefix while the box shows the later one.
+  function deferredEntries(id) {
+    let resolve
+    const promise = new Promise((r) => {
+      resolve = () => r({ data: { entries: [entry({ id })], total_count: 1, filtered_count: 1 } })
+    })
+    return { promise, resolve: () => resolve() }
+  }
+
+  it('a slow OLDER search must not overwrite the newer search results', async () => {
+    const store = useMemoryStore()
+    const slowA = deferredEntries('SLOW-A')
+    const fastB = deferredEntries('FAST-B')
+    mockGetMemoryEntries
+      .mockImplementationOnce(() => slowA.promise)
+      .mockImplementationOnce(() => fastB.promise)
+
+    store.searchMemoryEntries('prod-1', 'a') // older, slow
+    const newer = store.searchMemoryEntries('prod-1', 'ab') // newer, fast
+
+    fastB.resolve()
+    await newer
+    expect(store.entries.map((e) => e.id)).toEqual(['FAST-B'])
+
+    // The superseded response lands last. It must be dropped, not applied.
+    slowA.resolve()
+    await slowA.promise
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(store.entries.map((e) => e.id)).toEqual(['FAST-B'])
+  })
+
+  it('a superseded response must not clear loading while a newer search is in flight', async () => {
+    const store = useMemoryStore()
+    const slowA = deferredEntries('SLOW-A')
+    const fastB = deferredEntries('FAST-B')
+    mockGetMemoryEntries
+      .mockImplementationOnce(() => slowA.promise)
+      .mockImplementationOnce(() => fastB.promise)
+
+    const older = store.searchMemoryEntries('prod-1', 'a')
+    store.searchMemoryEntries('prod-1', 'ab')
+
+    slowA.resolve()
+    await older
+    // The newer search has not landed yet, so the view must still read as loading.
+    expect(store.loading).toBe(true)
+    expect(store.entries).toHaveLength(0)
+
+    fastB.resolve()
+    await store.inFlightSearch
+    expect(store.loading).toBe(false)
+    expect(store.entries.map((e) => e.id)).toEqual(['FAST-B'])
+  })
+
+  it('a slow blank-term full reload must not overwrite a newer search', async () => {
+    const store = useMemoryStore()
+    // User clears the box (blank -> full client-side reload), then immediately
+    // types again. The full reload is the slower of the two.
+    const slowFull = deferredEntries('FULL-SET')
+    const fastSearch = deferredEntries('SEARCH-HIT')
+    mockGetMemoryEntries
+      .mockImplementationOnce(() => slowFull.promise)
+      .mockImplementationOnce(() => fastSearch.promise)
+
+    store.searchMemoryEntries('prod-1', '   ') // blank -> fetchMemoryEntries path
+    const newer = store.searchMemoryEntries('prod-1', 'tenant')
+
+    fastSearch.resolve()
+    await newer
+    expect(store.entries.map((e) => e.id)).toEqual(['SEARCH-HIT'])
+    expect(store.serverSearch).toBe(true)
+
+    slowFull.resolve()
+    await slowFull.promise
+    await Promise.resolve()
+    await Promise.resolve()
+    // The stale full reload must not resurrect the unsearched set, and must not
+    // flip serverSearch off underneath the newer server-search result.
+    expect(store.entries.map((e) => e.id)).toEqual(['SEARCH-HIT'])
+    expect(store.serverSearch).toBe(true)
+  })
 })

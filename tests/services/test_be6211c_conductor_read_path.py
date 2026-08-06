@@ -91,10 +91,17 @@ async def test_fetch_context_no_ids_falls_back_to_active_product(monkeypatch) ->
         seen["product_id"] = product_id
         return {"data": {}, "directives": {}}
 
+    async def _fake_last_modified(product_id, tenant_key, dbm):  # noqa: ANN001
+        # Not under test here: the real helper opens its own session via
+        # db_manager.get_session_async(), which this bare MagicMock() cannot
+        # answer meaningfully.
+        return {}
+
     monkeypatch.setattr(fc, "_resolve_active_product_id", _fake_resolve)
     monkeypatch.setattr(fc, "_is_category_enabled", _fake_enabled)
     monkeypatch.setattr(fc, "_load_user_depth_config", _fake_depths)
     monkeypatch.setattr(fc, "_fetch_category", _fake_fetch_category)
+    monkeypatch.setattr(fc, "_build_last_modified_map", _fake_last_modified)
 
     result = await fc.fetch_context(
         product_id="",
@@ -146,9 +153,11 @@ async def _resolve_orchestrator_identity(*, is_chain_conductor: bool) -> str:
 
     with patch("giljo_mcp.system_prompts.service.SystemPromptService") as sp_cls:
         sp_cls.return_value.get_orchestrator_prompt = AsyncMock(return_value=prompt_record)
-        return await svc._resolve_mission_template(
+        # BE-9333: _resolve_mission_template now returns (identity, identity_status).
+        identity, _status = await svc._resolve_mission_template(
             MagicMock(), job, execution, "tk_6211g", is_chain_conductor=is_chain_conductor
         )
+        return identity
 
 
 @pytest.mark.asyncio

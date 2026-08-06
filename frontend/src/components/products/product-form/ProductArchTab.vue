@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div data-testid="product-form-panel-arch">
     <div class="text-body-large mb-1">Architecture & Design Patterns</div>
     <div class="text-body-small text-warning mb-4">
       Optionally included as context source by orchestrator.

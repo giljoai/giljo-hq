@@ -112,15 +112,20 @@
       <span v-else>—</span>
     </td>
 
-    <!-- Messages (waiting count) — tinted badge (0870j) -->
+    <!-- Messages (waiting count) — tinted badge (0870j); BE-9273: needs-action tint distinguishes "waiting on user" -->
     <td class="messages-waiting-cell text-center hide-mobile">
       <button
         type="button"
         class="message-count-button"
-        aria-label="View messages"
+        :aria-label="getActionRequiredUnread(agent) > 0 ? 'View messages — action required' : 'View messages'"
         @click="emit('messages', agent)"
       >
-        <span class="msg-badge" :class="getMessagesWaiting(agent) > 0 ? 'has-msgs' : 'zero'">{{ getMessagesWaiting(agent) }}</span>
+        <span
+          class="msg-badge"
+          data-testid="messages-badge"
+          :class="getMessageBadgeClass(agent)"
+          :title="getActionRequiredUnread(agent) > 0 ? `${getActionRequiredUnread(agent)} message(s) need your action` : undefined"
+        >{{ getMessagesWaiting(agent) }}</span>
       </button>
     </td>
 
@@ -401,6 +406,26 @@ function getMessagesWaiting(agent) {
 }
 
 /**
+ * BE-9273: the subset of messages_waiting_count that is genuinely
+ * requires_action + non-auto_generated (the same definition the closeout
+ * gate blocks complete_job on) — i.e. work actually waiting on the USER,
+ * not just unread mail the agent hasn't drained yet.
+ */
+function getActionRequiredUnread(agent) {
+  return agent?.action_required_unread ?? 0
+}
+
+/**
+ * Three-state badge tint: needs-action (action_required_unread > 0, the
+ * strictest/strongest signal) takes priority over has-msgs (plain unread >
+ * 0) takes priority over zero.
+ */
+function getMessageBadgeClass(agent) {
+  if (getActionRequiredUnread(agent) > 0) return 'needs-action'
+  return getMessagesWaiting(agent) > 0 ? 'has-msgs' : 'zero'
+}
+
+/**
  * formatDuration — pure function that takes the agent and a nowMs timestamp.
  * No closure over refs; receives `now` via the prop so AgentRow has no timer.
  *
@@ -659,6 +684,16 @@ tbody td {
     &.has-msgs {
       background: rgba($color-status-blocked, 0.15);
       color: $color-status-blocked;
+    }
+
+    // BE-9273: reuses $color-status-staged — the SAME amber statusConfig.js
+    // (STATUS_COLORS.CLOSEOUT) already uses for "Decision Required" on the
+    // status cell, so "needs your action" reads as one consistent signal
+    // across the row rather than a one-off color.
+    &.needs-action {
+      background: rgba($color-status-staged, 0.2);
+      color: $color-status-staged;
+      font-weight: 700;
     }
   }
 

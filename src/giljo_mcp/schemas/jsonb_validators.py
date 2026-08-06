@@ -134,18 +134,21 @@ def validate_agent_job_metadata(data: dict | None) -> dict | None:
 class GitCommitEntry(BaseModel):
     """Single git commit in product_memory_entries.git_commits.
 
-    ``files_changed`` / ``lines_added`` are optional. Missing values are
-    normalized to ``0`` so downstream arithmetic never encounters ``None``.
+    ``files_changed`` / ``lines_added`` are optional, normalized to ``0``.
+    ``pr_url`` (BE-9256) is freeform and stored verbatim -- never parsed --
+    so this shape stays correct for GitHub, Gitea, GitLab, or any other host.
+    Length caps (BE-9256 #3) restore the old 64-char sha cap + message/author/pr_url caps -- hard rejection.
     """
 
     model_config = ConfigDict(extra="ignore")
 
-    sha: str
-    message: str
-    author: str | None = None
+    sha: str = Field(max_length=64)
+    message: str = Field(max_length=500)
+    author: str | None = Field(default=None, max_length=200)
     date: str | None = None
     files_changed: int = 0
     lines_added: int = 0
+    pr_url: str | None = Field(default=None, max_length=500)
 
     @field_validator("files_changed", "lines_added", mode="before")
     @classmethod
@@ -229,13 +232,13 @@ def validate_agent_execution_result(data: dict) -> dict:
 class ProductMemoryConfig(BaseModel):
     """Validates products.product_memory JSONB.
 
-    Keys match the server_default: {"github": {}, "context": {}}.
-    The legacy key "git_integration" is also written by product_service in one
-    code path; extra="allow" tolerates it without validator breakage.
+    BE-9261: seed key renamed github -> git_integration. github stays a
+    declared field for READ tolerance of pre-rename rows only.
     """
 
     model_config = ConfigDict(extra="allow")
 
+    git_integration: dict | None = None
     github: dict | None = None
     context: dict | None = None
 
@@ -358,30 +361,76 @@ class ContextIndexKeywords(BaseModel):
 # --- Convenience validators ---
 
 
-def validate_git_commits(data: list | None) -> list | None:
-    """Validate git_commits array.
+GIT_LOG_TITLED_COMMAND_HINT = "git log --format='%H%x09%s%x09%an' <base>..HEAD"
 
-    BE-6208a: accept BOTH the canonical list-of-dicts shape
-    (``{"sha": ..., "message": ..., ...}``) AND a list of bare SHA strings.
-    Each bare string is normalized server-side to
-    ``{"sha": <str>, "message": ""}`` so an agent that ran
-    ``git log --format=%H`` can pass the raw SHAs directly. Genuinely
-    malformed entries (empty/oversized SHA, or neither dict nor str) are
-    rejected.
+
+class GitCommitTitleRequiredError(ValueError):
+    """Raised by validate_git_commits when a commit entry has no title.
+
+    BE-9256: a title-less SHA-only string (or empty message/subject) was
+    previously normalized to ``{"sha": ..., "message": ""}``, rendering a
+    blank title on every UI surface. Fails closed instead, with the exact
+    command to self-correct.
+    """
+
+    def __init__(self, offending: object):
+        self.offending = offending
+        self.hint = f"Run: {GIT_LOG_TITLED_COMMAND_HINT}"
+        super().__init__(
+            f"git_commits entry has no commit title: {offending!r}. Provide either a "
+            f"{{sha, message, author?, pr_url?}} dict with a non-empty message, or a "
+            f"tab-delimited porcelain string '<sha>\\t<subject>\\t<author>' (author "
+            f"segment optional). {self.hint}"
+        )
+
+
+def _parse_porcelain_commit_line(line: str) -> dict[str, str]:
+    """Parse one ``<sha>\\t<subject>\\t<author>`` porcelain line (author optional).
+
+    Matches the output of ``git log --format='%H%x09%s%x09%an'``.
+    """
+    parts = line.split("\t")
+    sha = parts[0].strip() if parts else ""
+    message = parts[1].strip() if len(parts) > 1 else ""
+    author = parts[2].strip() if len(parts) > 2 and parts[2].strip() else None
+    parsed: dict[str, str] = {"sha": sha, "message": message}
+    if author:
+        parsed["author"] = author
+    return parsed
+
+
+def validate_git_commits(data: list | None) -> list | None:
+    """Validate git_commits array (BE-9256: fail closed on a missing commit title).
+
+    Each entry must be EITHER a dict ``{"sha", "message", "author"?, "pr_url"?,
+    ...}`` with a non-empty ``message``, OR a tab-delimited porcelain string
+    ``"<sha>\\t<subject>\\t<author>"`` (author optional), parsed into that dict
+    shape. A plain SHA-only string (no tabs) or any empty title raises
+    ``GitCommitTitleRequiredError`` (BE-6208a used to silently normalize such
+    a string to an empty-titled entry -- fixed here). Empty list / ``None``
+    stays valid (the non-git-repo escape hatch is untouched).
     """
     if data is None:
         return None
     normalized: list = []
     for entry in data:
         if isinstance(entry, str):
-            sha = entry.strip()
-            if not sha or len(sha) > 64:
-                raise ValueError(f"git_commits: invalid bare SHA string {entry!r}")
-            normalized.append(GitCommitEntry(sha=sha, message="").model_dump())
+            # rstrip \r\n only -- a full .strip() let a leading tab (empty sha) through (BE-9256 #2).
+            raw = entry.rstrip("\r\n")
+            if "\t" not in raw:
+                # Plain SHA-only string (no tabs) -- the exact pre-BE-9256 empty-title shape.
+                raise GitCommitTitleRequiredError(entry)
+            parsed = _parse_porcelain_commit_line(raw)
+            if not parsed.get("sha") or not parsed.get("message"):
+                raise GitCommitTitleRequiredError(entry)
+            normalized.append(GitCommitEntry(**parsed).model_dump())
         elif isinstance(entry, dict):
+            message = entry.get("message")
+            if not isinstance(message, str) or not message.strip():
+                raise GitCommitTitleRequiredError(entry)
             normalized.append(GitCommitEntry(**entry).model_dump())
         else:
-            raise TypeError(f"git_commits entries must be a dict or SHA string, got {type(entry).__name__}")
+            raise TypeError(f"git_commits entries must be a dict or SHA/porcelain string, got {type(entry).__name__}")
     return normalized
 
 

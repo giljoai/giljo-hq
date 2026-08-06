@@ -263,13 +263,21 @@ class ChainPromptResponse(BaseModel):
     GET /api/v1/prompts/chain-staging/{run_id}
     GET /api/v1/prompts/chain-implementation/{run_id}
 
-    Returns the full orchestrator protocol (with chain chapters) for the
-    head project of a sequential multi-project run.
+    Returns a THIN bootstrap prompt for the chain run's dedicated, project-less
+    conductor — the single prompt the user pastes to stage or drive the whole
+    chain. The bootstrap carries the conductor's identity and tells it to fetch
+    its own full chain protocol over MCP (get_staging_instructions for staging,
+    get_job_mission for implementation); since BE-6191 the protocol chapters are
+    named here, never pasted in. The conductor owns no project of its own, so
+    this response is about the chain, not about the head project.
     """
 
-    run_id: str = Field(..., description="SequenceRun UUID")
+    run_id: str = Field(..., description="Chain run UUID")
     head_project_id: str = Field(..., description="Head project UUID (resolved_order[0])")
-    orchestrator_job_id: str = Field(..., description="Orchestrator job UUID for the head project")
-    prompt: str = Field(..., description="Full conductor protocol prompt (with chain chapters)")
+    orchestrator_job_id: str = Field(
+        ...,
+        description=("Job UUID of the chain's dedicated, project-less conductor (not the head project's orchestrator)"),
+    )
+    prompt: str = Field(..., description="Thin conductor bootstrap prompt (fetches its chain protocol over MCP)")
 
     model_config = ConfigDict(from_attributes=True)

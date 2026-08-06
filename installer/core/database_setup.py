@@ -24,6 +24,48 @@ from typing import Any
 class DatabaseSetupMixin:
     """PostgreSQL path validation, database creation, and migration execution."""
 
+    def detect_postgresql_port(self) -> int:
+        """Point settings['pg_port'] at the port the cluster is really on.
+
+        Everything downstream -- the DatabaseInstaller connection, config.yaml,
+        .env's DATABASE_URL, the saved credentials file and the generated
+        create_db script -- reads this one setting, so correcting it here
+        corrects all of them. Before INF-9321 it was a hardcoded 5432, and an
+        install whose cluster landed on 5433 (because something else already
+        held 5432) aimed every one of those at a server that was not ours.
+
+        Best-effort by design: when nothing can be determined the configured
+        port stands, which is exactly the old behaviour.
+
+        Returns:
+            The port now in settings['pg_port'].
+        """
+        from installer.shared.postgres import detect_cluster_port
+
+        configured = int(self.settings.get("pg_port", 5432))
+
+        try:
+            detected = detect_cluster_port(current_port=configured)
+        except Exception as exc:  # pragma: no cover - defensive
+            self._print_warning(f"Could not determine the PostgreSQL cluster port: {exc}")
+            return configured
+
+        if detected is None:
+            self._print_info(f"Using PostgreSQL port {configured} (cluster port not reported)")
+            return configured
+
+        if detected != configured:
+            self._print_warning(
+                f"PostgreSQL is listening on port {detected}, not {configured} — "
+                f"something else is using {configured}. Using {detected} for the "
+                "database, .env and config.yaml."
+            )
+            self.settings["pg_port"] = detected
+        else:
+            self._print_success(f"PostgreSQL cluster port confirmed: {detected}")
+
+        return detected
+
     def setup_database(self) -> dict[str, Any]:
         """
         Setup PostgreSQL database using Alembic-first strategy (v3.1.0+)

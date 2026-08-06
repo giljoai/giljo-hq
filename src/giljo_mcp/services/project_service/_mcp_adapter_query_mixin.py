@@ -68,7 +68,11 @@ def _parse_iso_datetime(value: Any) -> datetime | None:
         return None
 
 
-def _resolve_inner_status(status_list: list[str] | None, include_completed: bool) -> str | list[str] | None:
+def _resolve_inner_status(
+    status_list: list[str] | None,
+    include_completed: bool,
+    has_completion_filter: bool = False,
+) -> str | list[str] | None:
     """SQL-side status filter for the agent list (Seq 161 / IMP-5036 pushdown).
 
     - explicit ``status`` -> pushed to the repo IN clause (single value or list);
@@ -77,10 +81,26 @@ def _resolve_inner_status(status_list: list[str] | None, include_completed: bool
     - default agent view -> the lifecycle-ACTIVE complement, excluding every
       lifecycle-finished state (completed/cancelled/terminated/deleted/superseded)
       at the SQL boundary instead of post-fetch.
+
+    BE-9343 (audit F2) -- ``has_completion_filter`` (a ``completed_after`` /
+    ``completed_before`` bound was supplied) implies ``include_completed``. A
+    completion-date filter is an unambiguous request for FINISHED projects, but
+    without this the default branch below excluded every completed project at the
+    SQL boundary, so the query returned the projects NOT marked completed and
+    dropped the ones that were. Before BE-9343 that returned nothing (every
+    ``completed_at`` was NULL), which reads as "nothing found"; after the backfill
+    it would have returned an INVERTED set, which reads as an answer -- the worse
+    failure of the two, and the reason this is fixed at the mechanism rather than
+    documented. An explicit ``status`` still wins, so
+    ``list_projects(status="active", completed_after=X)`` keeps its narrow filter.
+
+    Reachable by design: ``template_seeder.py`` seeds the orchestrator's
+    duplicate/continuation check with ``completed_after`` and marks
+    ``include_completed`` optional, so omitting it is documented-normal.
     """
     if status_list is not None:
         return status_list[0] if len(status_list) == 1 else status_list
-    if include_completed:
+    if include_completed or has_completion_filter:
         return None
     return sorted({s.value for s in ProjectStatus} - {s.value for s in LIFECYCLE_FINISHED_STATUSES})
 
@@ -263,7 +283,13 @@ class McpAdapterQueryMixin:
             )
 
         # Seq 161 + IMP-5036: SQL pushdown for the status filter (see helper).
-        inner_status = _resolve_inner_status(status_list, include_completed)
+        # BE-9343 (audit F2): a completion-date bound implies include_completed --
+        # rationale in _resolve_inner_status.
+        inner_status = _resolve_inner_status(
+            status_list,
+            include_completed,
+            has_completion_filter=completed_after is not None or completed_before is not None,
+        )
 
         # BE-6071 F6a: pass a high defensive ceiling (newest-first via the repo's
         # limit-fallback order). This is a safety cap against a pathological

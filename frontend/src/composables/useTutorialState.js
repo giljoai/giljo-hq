@@ -36,12 +36,27 @@ export const TUTORIAL_STOPS = Object.freeze([
 // same class of persistence as the cert-modal "don't show again" flag.
 const BREADCRUMB_KEY = 'giljo_tutorial_activate_breadcrumb'
 
+// FE-9320: the nudge is rendered by SystemStatusBanner, which DefaultLayout
+// mounts OUTSIDE <router-view> with no :key — so it never remounts and read the
+// armed flag exactly once, at app start. Arming afterwards (which is the only
+// time it is ever armed: on the way out of the tutorial) was therefore inert for
+// the rest of the session. Announcing the arming on the window lets that
+// long-lived banner re-read the flag. Same idiom as 'api-key-created'; the
+// listener is in SystemStatusBanner.vue and imports the constant below.
+//
+// Exported as the single source of truth rather than repeated as a literal: this
+// event is the ONLY thing that reaches the banner once it is mounted, so if one
+// side's spelling drifted the nudge would silently stop appearing while each
+// side's tests kept passing against their own copy of the string.
+export const ACTIVATE_BREADCRUMB_ARMED_EVENT = 'tutorial-activate-breadcrumb-armed'
+
 export function armActivateBreadcrumb() {
   try {
     localStorage.setItem(BREADCRUMB_KEY, '1')
   } catch {
     /* storage unavailable — nudge simply won't persist */
   }
+  window.dispatchEvent(new Event(ACTIVATE_BREADCRUMB_ARMED_EVENT))
 }
 
 export function clearActivateBreadcrumb() {

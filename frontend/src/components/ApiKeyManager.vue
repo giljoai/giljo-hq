@@ -8,16 +8,6 @@
         </template>
         Keys are automatically generated when you copy an MCP connection command from the Connect tab.
       </v-tooltip>
-      <!-- FE-6242: Configurator shortcut — opens the wizard pre-set to bearer/key-generation mode. -->
-      <button
-        data-testid="apikey-configurator-btn"
-        class="apikey-configurator-btn smooth-border ml-auto"
-        type="button"
-        @click="wizardRef?.openForKeyGeneration()"
-      >
-        <v-icon size="15" class="apikey-configurator-icon">mdi-wrench-outline</v-icon>
-        Configurator
-      </button>
     </div>
     <p class="text-body-medium text-muted-a11y mb-4">View and revoke API keys used by AI coding agent integrations</p>
 
@@ -129,10 +119,6 @@
       </v-alert>
     </BaseDialog>
   </v-card>
-
-  <!-- FE-6242: Wizard rendered without its built-in activator pill so this
-       component controls the trigger via the "Configurator" header button. -->
-  <AiToolConfigWizard ref="wizardRef" :no-activator="true" />
   </div>
 </template>
 
@@ -141,15 +127,11 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { formatDistanceToNow } from 'date-fns'
 import api from '@/services/api'
 import BaseDialog from '@/components/common/BaseDialog.vue'
-import AiToolConfigWizard from '@/components/AiToolConfigWizard.vue'
 import { useFormatDate } from '@/composables/useFormatDate'
 import { useToast } from '@/composables/useToast'
 
 const { formatDateTime } = useFormatDate()
 const { showToast } = useToast()
-
-// FE-6242: wizard ref for the Configurator header button trigger
-const wizardRef = ref(null)
 
 // State
 const apiKeys = ref([])
@@ -240,6 +222,11 @@ async function revokeKey() {
     apiKeys.value = apiKeys.value.filter((k) => k.id !== revokedId)
     await loadKeys()
 
+    // Tell durable-status listeners (Connect directory, FE-9274) a key just went away.
+    try {
+      window.dispatchEvent(new Event('api-key-revoked'))
+    } catch { /* no-op */ }
+
     // Close dialog
     showRevokeDialog.value = false
     keyToRevoke.value = null
@@ -255,7 +242,7 @@ async function revokeKey() {
 // Lifecycle
 onMounted(() => {
   loadKeys()
-  // Listen for keys created elsewhere (e.g., wizard)
+  // Listen for keys created elsewhere (the connect flow's key step generates them)
   window.addEventListener('api-key-created', refreshKeys)
 })
 
@@ -266,33 +253,6 @@ onUnmounted(() => {
 
 <style lang="scss" scoped>
 @use '../styles/design-tokens' as *;
-
-/* FE-6242: Configurator header button — plain <button> matching .configurator-pill
-   from AiToolConfigWizard (right-aligned in the API Keys card header). */
-.apikey-configurator-btn {
-  --smooth-border-color: #{$color-brand-yellow};
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border-radius: $border-radius-rounded;
-  padding: 5px 14px;
-  height: 34px;
-  font-size: 0.82rem;
-  font-weight: 500;
-  background: transparent;
-  color: $color-brand-yellow;
-  border: none;
-  cursor: pointer;
-  transition: background $transition-fast;
-  white-space: nowrap;
-}
-.apikey-configurator-btn:hover,
-.apikey-configurator-btn:focus-visible {
-  background: rgba($color-brand-yellow, 0.1);
-}
-.apikey-configurator-icon {
-  color: $color-brand-yellow;
-}
 
 /* 0873: smooth-border card panel */
 .apikey-card {

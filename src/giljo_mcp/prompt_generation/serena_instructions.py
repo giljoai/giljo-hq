@@ -49,15 +49,18 @@ _AVAILABILITY_LEAD = (
 )
 
 
-# Caveat shared by every role: the Serena LSP is Python-only in this project.
-# Symbol tools silently return nothing on non-Python files, which reads as a
+# Caveat shared by every role: Serena's LSP only covers the language(s) it is
+# configured for in a given workspace (Python-only in THIS repo). Symbol tools
+# silently return nothing on files outside that coverage, which reads as a
 # "no results" false negative rather than an error. Steer agents to pattern
-# search for frontend/style files.
+# search for anything outside the configured language(s). BE-9260: worded
+# conditionally rather than asserting "Python-only" as a universal fact — the
+# customer's own product may configure Serena for a different language.
 _PYTHON_ONLY_CAVEAT = (
-    "Serena's LSP is Python-only in this project — do NOT call symbol tools "
-    "(find_symbol, find_referencing_symbols, replace_symbol_body, rename_symbol, etc.) "
-    "on .vue/.js/.ts/.scss/.css files. Use search_for_pattern or standard file "
-    "tools (Read/Grep/Edit) for those."
+    "Serena's symbol tools (find_symbol, find_referencing_symbols, replace_symbol_body, "
+    "rename_symbol, etc.) cover only the language(s) its LSP is configured for in this "
+    "workspace. For any file type outside that coverage, use search_for_pattern or "
+    "standard file tools (Read/Grep/Edit) instead."
 )
 
 

@@ -210,12 +210,19 @@ class ProductAgentAssignmentService:
 
         try:
             async with self._get_session() as session:
-                # Verify the template belongs to this tenant
+                # Verify the template belongs to this tenant and is not trashed.
+                # BE-9334: ``deleted_at IS NULL`` is load-bearing. Soft-delete stamps
+                # ``deleted_at`` and deliberately leaves ``is_active`` alone
+                # (``template_service.py:720``), so an id-plus-tenant check matched
+                # trashed rows and this endpoint created a junction row pointing at a
+                # deleted agent instead of 404-ing. Same omission, same one-line
+                # remedy, as the six sites BE-9325 fixed.
                 template_check = await session.execute(
                     select(AgentTemplate.id).where(
                         and_(
                             AgentTemplate.id == template_id,
                             AgentTemplate.tenant_key == self._tenant_key,
+                            AgentTemplate.deleted_at.is_(None),
                         )
                     )
                 )

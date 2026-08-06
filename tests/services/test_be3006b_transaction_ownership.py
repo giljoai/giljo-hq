@@ -5,7 +5,7 @@
 
 """BE-3006b: transaction-ownership convention regression tests (agent-jobs domain).
 
-Convention (handovers/Reference_docs/TRANSACTION_OWNERSHIP_CONVENTION.md):
+Convention (the TRANSACTION_OWNERSHIP_CONVENTION reference doc):
 repositories FLUSH, the session OWNER (service entry point) COMMITS, and
 WebSocket/EventBus events emit ONLY after the commit succeeds.
 

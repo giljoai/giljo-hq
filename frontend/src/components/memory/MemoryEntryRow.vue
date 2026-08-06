@@ -74,7 +74,7 @@
         <ul class="mem-list mem-list--mono">
           <li v-for="(commit, i) in entry.git_commits" :key="`gc-${i}`">
             <span v-if="commit.sha" class="mem-sha">{{ String(commit.sha).slice(0, 8) }}</span>
-            {{ commit.message || commit }}
+            {{ commitTrailingText(commit) }}
           </li>
         </ul>
       </div>
@@ -86,6 +86,17 @@
 import { computed } from 'vue'
 import { hexToRgba, getAgentBadgeStyle } from '@/utils/colorUtils'
 import { getAgentColor } from '@/config/agentColors'
+import { commitTitle } from '@/utils/gitCommitDisplay'
+
+// BE-9256: the sha (when present) is already shown via the separate .mem-sha
+// prefix span, so the trailing text only needs the shared floor (short sha)
+// for the rare "no sha at all" combination — otherwise it would duplicate
+// the sha that's already visible in the prefix. commitTitle() is the single
+// source of truth for the fallback rule shared with the other 3 surfaces.
+function commitTrailingText(commit) {
+  if (commit.message) return commit.message
+  return commit.sha ? '' : commitTitle(commit)
+}
 
 const props = defineProps({
   entry: { type: Object, required: true },

@@ -79,6 +79,7 @@ def _make_accessor(tenant_key: str = "tenant-be9157"):
     db_manager.get_session_async = Mock(return_value=mock_session)
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=False)
+    mock_session.info = {}  # tenant_session_context save/restore target
     tenant_manager = Mock()
     tenant_manager.get_current_tenant = Mock(return_value=tenant_key)
     return ToolAccessor(

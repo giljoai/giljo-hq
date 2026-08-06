@@ -18,7 +18,9 @@ import logging
 from typing import Any
 
 from giljo_mcp.database import DatabaseManager
+from giljo_mcp.services.comm_thread_service import CommThreadService
 from giljo_mcp.services.sequence_run_service import SequenceRunService
+from giljo_mcp.tenant import TenantManager
 
 
 logger = logging.getLogger(__name__)
@@ -44,6 +46,8 @@ async def get_chain_context(
                 "run_id": "uuid",
                 "chain_mission": "...",
                 "resolved_order": ["p1", "p2", ...],
+                "hub_thread_id": "uuid" | None,
+                "hub_chat_id": "CHT-####" | None,
             },
             "metadata": {"project_id": "uuid", "tenant_key": "..."}
         }
@@ -79,10 +83,21 @@ async def get_chain_context(
             "metadata": {"project_id": project_id, "tenant_key": tenant_key, "error": "no_active_chain_run"},
         }
 
+    # BE-9291: hand the caller its hub instead of making it go looking. This is what
+    # replaced search_threads(query="{run_id}") -- resolution is on
+    # comm_threads.sequence_run_id now, so the hub is found whatever its subject says.
+    # None means the conductor has not stood the hub up yet, which is a legitimate
+    # early state and reads as an absent key rather than an error.
+    hub = await CommThreadService(db_manager, TenantManager()).resolve_chain_hub_thread(
+        sequence_run_id=run["id"], tenant_key=tenant_key
+    )
+
     data = {
         "run_id": run["id"],
         "chain_mission": run.get("chain_mission"),
         "resolved_order": run.get("resolved_order") or [],
+        "hub_thread_id": hub["thread_id"] if hub else None,
+        "hub_chat_id": hub["chat_id"] if hub else None,
     }
 
     logger.info(

@@ -487,12 +487,13 @@ SKILL_SLASH_TOOL_TYPES: frozenset[str] = frozenset(
 
 
 def giljo_invocation(tool_type: str | None) -> str:
-    """Return the ``/giljo`` command's invocation token for a ``tool_type``.
-
-    ``$giljo`` for platforms that install it as a skill (Codex, Antigravity);
-    ``/giljo`` for everyone else (Claude, Gemini, opencode, multi_terminal, unknown).
-    """
+    """``$giljo`` for skill-install platforms (Codex, Antigravity); ``/giljo`` otherwise."""
     return "$giljo" if (tool_type or "") in SKILL_SLASH_TOOL_TYPES else "/giljo"
+
+
+def task_list_phrase(tool_type: str | None) -> str:
+    """ "TodoWrite list" for claude-code, else "task list" (BE-9260, guard-exempt module)."""
+    return "TodoWrite list" if (tool_type or "") == HARNESS_CLAUDE_CODE else "task list"
 
 
 def export_platform_pattern() -> str:

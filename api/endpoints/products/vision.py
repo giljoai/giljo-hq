@@ -269,13 +269,18 @@ async def list_vision_documents(
         "User %s listing vision documents for product %s", sanitize(current_user.username), sanitize(product_id)
     )
 
-    # Query vision documents for this product
+    # Query vision documents for this product. deleted_at IS NULL is the same
+    # trashed-parent exclusion the chunks reader below needs, and the sibling
+    # router api/endpoints/vision_documents.py already applies it alongside a
+    # dedicated /deleted trash view -- so a trashed doc surfacing in the main
+    # list here contradicted the product's own model of what "trash" means.
     stmt = (
         select(VisionDocument)
         .where(
             and_(
                 VisionDocument.tenant_key == tenant_key,
                 VisionDocument.product_id == product_id,
+                VisionDocument.deleted_at.is_(None),
             )
         )
         .order_by(VisionDocument.display_order, VisionDocument.created_at)
@@ -415,20 +420,33 @@ async def get_vision_chunks(
     """
     from sqlalchemy import and_, select
 
-    from giljo_mcp.models import MCPContextIndex
+    from giljo_mcp.models import MCPContextIndex, VisionDocument
 
     logger.debug(
         "User %s retrieving vision chunks for product %s", sanitize(current_user.username), sanitize(product_id)
     )
 
-    # Query context chunks for this product
+    # Query context chunks for this product.
+    #
+    # The join to VisionDocument is load-bearing, not decoration. Soft-delete
+    # stamps deleted_at and deliberately LEAVES the chunks intact so a restore
+    # brings the document and its chunks back as one unit, so filtering on the
+    # junction columns alone kept serving a trashed document's full text.
+    # VisionDocumentRepository.soft_delete states the contract in its own
+    # docstring -- "chunk retrieval excludes chunks of a trashed parent" -- and
+    # the sibling reader ContextRepository.search_chunks already honours it.
+    # Matching that sibling exactly: trashed parents only, since it is the
+    # reader doing the identical job.
     stmt = (
         select(MCPContextIndex)
+        .join(VisionDocument, VisionDocument.id == MCPContextIndex.vision_document_id)
         .where(
             and_(
                 MCPContextIndex.tenant_key == tenant_key,
                 MCPContextIndex.product_id == product_id,
                 MCPContextIndex.vision_document_id.isnot(None),
+                VisionDocument.tenant_key == tenant_key,
+                VisionDocument.deleted_at.is_(None),
             )
         )
         .order_by(MCPContextIndex.vision_document_id, MCPContextIndex.chunk_order)

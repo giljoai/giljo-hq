@@ -146,7 +146,13 @@ EXPECTED_ROUTE_SIGNATURES = frozenset(
 # /workflow/{id} + /{id}/executions + /{id}/clear-silent + /jobs/{id}/health.
 # then 244 -> 245 for FE-9203 "Add default agents": the additive default-template
 # import verb POST /api/v1/templates/import-defaults.
-EXPECTED_ROUTE_COUNT = 245
+# then 245 -> 246 for FE-9274 "Connect configured-state": the additive read-only
+# GET /api/connect/credential-status endpoint.
+# then 246 -> 247 for BE-9289b "thread API for Quiet Cards": the additive
+# PATCH /api/v1/threads/{thread_id} — the operator's rename + set-status verb. A
+# thread could previously only be named at CREATE time, and status moved only as a
+# side effect of an agent posting.
+EXPECTED_ROUTE_COUNT = 247
 
 # FULL frozen route-signature set — the STRICT set-equality lock. Snapshotted
 # from the UNMODIFIED 1,237-line api/app.py (git HEAD~1, the BE-6042a pilot) and
@@ -187,6 +193,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/auth/register", frozenset({"POST"})),
         ("/api/auth/verify-pin", frozenset({"POST"})),
         ("/api/auth/verify-pin-and-reset-password", frozenset({"POST"})),
+        ("/api/connect/credential-status", frozenset({"GET"})),
         ("/api/download/agent-templates.zip", frozenset({"GET"})),
         ("/api/download/bootstrap-prompt", frozenset({"GET"})),
         ("/api/download/generate-token", frozenset({"POST"})),
@@ -364,6 +371,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/threads/search", frozenset({"GET"})),
         ("/api/v1/threads/{thread_id}", frozenset({"GET"})),
         ("/api/v1/threads/{thread_id}", frozenset({"DELETE"})),
+        ("/api/v1/threads/{thread_id}", frozenset({"PATCH"})),  # BE-9289b: rename + status
         ("/api/v1/threads/{thread_id}/baton", frozenset({"POST"})),
         ("/api/v1/threads/{thread_id}/participants", frozenset({"GET"})),
         ("/api/v1/threads/{thread_id}/post", frozenset({"POST"})),

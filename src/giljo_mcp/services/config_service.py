@@ -10,8 +10,14 @@ config values are read from YAML files with dynamic, deployment-specific schemas
 
 Runtime settings (git, serena, SSL, cookie domains) now live in the database
 (Settings table) and should be read via SettingsService. The sync
-get_serena_config() method remains as a fallback for synchronous callers
-(e.g., template_manager) that cannot use async DB access.
+get_serena_config() method remains as a fallback for synchronous callers that
+cannot use async DB access.
+
+BE-9360: that fallback's only production caller was ``template_manager``, which
+has been deleted, so ``get_serena_config()`` is now exercised solely by
+``tests/unit/test_config_service.py``. It is left in place deliberately -- BE-9360
+was scoped to the template-manager cluster and this is a separate module, so the
+observation is recorded here rather than acted on.
 """
 
 import logging

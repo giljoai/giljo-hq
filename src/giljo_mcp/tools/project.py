@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Project Management Tools for GiljoAI MCP (Sprint 003b: dead code removed).
+Project Management Tools for Giljo HQ (Sprint 003b: dead code removed).
 
 All project tool functions have been migrated to ProjectService.
 This module is kept as an empty namespace for backward compatibility.

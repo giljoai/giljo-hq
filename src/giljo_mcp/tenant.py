@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Tenant Management System for GiljoAI MCP.
+Tenant Management System for Giljo HQ.
 
 Provides tenant key generation, validation, and context management
 for complete project isolation in multi-tenant environments.

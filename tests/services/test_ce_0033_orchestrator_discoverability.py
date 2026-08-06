@@ -259,11 +259,13 @@ class TestTask5SpawnPromptBootstrap:
         # The exact call line appears verbatim in the Claude-Code identity.
         assert rendered_call in identity, "Identity ToolSearch call must use the canonical helper output"
         # Sanity: tools are present in the rendered call.
+        from giljo_mcp.branding import MCP_ALIAS
+
         for tool_name in (
-            "mcp__giljo_mcp__health_check",
-            "mcp__giljo_mcp__spawn_job",
-            "mcp__giljo_mcp__report_progress",
-            "mcp__giljo_mcp__complete_job",
+            f"mcp__{MCP_ALIAS}__health_check",
+            f"mcp__{MCP_ALIAS}__spawn_job",
+            f"mcp__{MCP_ALIAS}__report_progress",
+            f"mcp__{MCP_ALIAS}__complete_job",
         ):
             assert tool_name in rendered_call
             assert tool_name in CANONICAL_ORCHESTRATOR_TOOLS

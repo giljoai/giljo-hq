@@ -15,7 +15,7 @@ PUBLIC Tool (Handover 0350a - exposed via MCP):
 INTERNAL Tools (10 total - called by fetch_context, NOT exposed via MCP):
 - get_vision_document: Fetch vision document chunks with configurable chunking depth
 - get_360_memory: Fetch sequential project history from product memory
-- get_git_history: Fetch git commit history (when GitHub integration enabled)
+- get_git_history: Fetch git commit history (when git integration enabled)
 - get_agent_templates: Fetch agent template metadata
 - get_tech_stack: Fetch tech stack information (Handover 0316: Fixed to use config_data)
 - get_architecture: Fetch architecture documentation (Handover 0316: Fixed to use config_data)

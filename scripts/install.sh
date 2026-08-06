@@ -5,7 +5,7 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-# GiljoAI MCP -- Linux/macOS One-Liner Installer
+# Giljo HQ -- Linux/macOS One-Liner Installer
 #
 # Quick install:
 #   curl -fsSL giljo.ai/install.sh | bash
@@ -26,7 +26,7 @@ set -euo pipefail
 # GILJO_INSTALL_SOURCE -- LAN / self-hosted override (INF-5090)
 #
 # Default (env var unset or empty): release metadata is fetched from
-#   https://api.github.com/repos/giljoai/GiljoAI_MCP/releases/latest
+#   https://api.github.com/repos/giljoai/giljo-hq/releases/latest
 # which is the standard public GitHub path for CE installs.
 #
 # LAN / internal override: set this env var to the Gitea API base URL
@@ -41,7 +41,7 @@ set -euo pipefail
 # intentionally placed at the TOP of the source-URL section so that merge
 # does not collide with INF-0004's atomic-extract / unified-log additions.
 # ---------------------------------------------------------------------------
-GITHUB_REPO="giljoai/GiljoAI_MCP"
+GITHUB_REPO="giljoai/giljo-hq"
 
 if [[ -n "${GILJO_INSTALL_SOURCE:-}" ]]; then
     # Override: use the caller-supplied API base (e.g. LAN Gitea)
@@ -155,7 +155,7 @@ fi
 
 print_banner() {
     echo ""
-    echo -e "    ${BRAND}GiljoAI MCP Community Edition${NC}"
+    echo -e "    ${BRAND}Giljo HQ Community Edition${NC}"
     echo -e "    ${MUTED}Linux / macOS Installer${NC}"
     echo ""
 }
@@ -951,7 +951,7 @@ save_service_files() {
         linux)
             cat > "${target_dir}/giljoai-mcp.service" <<UNIT
 [Unit]
-Description=GiljoAI MCP Server
+Description=Giljo HQ Server
 After=network.target postgresql.service
 
 [Service]

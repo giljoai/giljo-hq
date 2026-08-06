@@ -1,0 +1,18 @@
+{
+  "commands": {
+    "antigravity_cli": "{\n  \"mcpServers\": {\n    \"giljo_hq\": {\n      \"serverUrl\": \"https://app.giljo.ai/mcp\",\n      \"headers\": {\n        \"Authorization\": \"Bearer tk_test_api_key_0000000000000000\"\n      }\n    }\n  }\n}",
+    "claude_code": "claude mcp add --scope user --transport http giljo_hq https://app.giljo.ai/mcp \\\n  --header \"Authorization: Bearer tk_test_api_key_0000000000000000\" ",
+    "claude_code_oauth": "claude mcp add --transport http giljo_hq https://app.giljo.ai/mcp --scope user",
+    "claude_desktop": "{\n  \"mcpServers\": {\n    \"giljo_hq\": {\n      \"command\": \"npx\",\n      \"args\": [\n        \"mcp-remote\",\n        \"https://app.giljo.ai/mcp\",\n        \"--header\",\n        \"Authorization:${AUTH_HEADER}\"\n      ],\n      \"env\": {\n        \"AUTH_HEADER\": \"Bearer tk_test_api_key_0000000000000000\"\n      }\n    }\n  }\n}",
+    "claude_desktop_oauth": "Add the GiljoAI connector in Claude Desktop or claude.ai settings; it runs OAuth in the browser.",
+    "codex_cli": "codex mcp add giljo_hq --url https://app.giljo.ai/mcp --bearer-token-env-var GILJO_API_KEY",
+    "codex_oauth": "codex mcp add giljo_hq --url https://app.giljo.ai/mcp",
+    "gemini_cli": "gemini mcp add -t http -H \"Authorization: Bearer tk_test_api_key_0000000000000000\" giljo_hq https://app.giljo.ai/mcp",
+    "gemini_oauth": "gemini mcp add --scope user --transport http giljo_hq https://app.giljo.ai/mcp"
+  },
+  "inputs": {
+    "api_key": "tk_test_api_key_0000000000000000",
+    "self_signed_https": false,
+    "server_url": "https://app.giljo.ai"
+  }
+}

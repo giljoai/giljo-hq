@@ -77,6 +77,11 @@ class JobResponse(BaseModel):
     # Handover 0407: Counter fields for message tracking (used by frontend store)
     messages_sent_count: int = 0
     messages_waiting_count: int = 0
+    # BE-9273: the subset of messages_waiting_count that is genuinely
+    # requires_action + non-auto_generated (the same definition the closeout
+    # gate blocks complete_job on) -- surfaced distinctly so the dashboard can
+    # tell "someone is waiting on THIS agent" apart from plain unread.
+    action_required_unread: int = 0
     messages_read_count: int = 0
     started_at: datetime | None = None
     completed_at: datetime | None = None

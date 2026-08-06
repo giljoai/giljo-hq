@@ -215,10 +215,6 @@ PRODUCT_REST_ALLOWLIST: dict[str, str] = {
     "consolidated_vision_medium_tokens": "Internal consolidated-summary cache; surfaced via vision endpoints",
     "consolidated_vision_hash": "Internal consolidated-summary cache; surfaced via vision endpoints",
     "consolidated_at": "Internal consolidated-summary cache timestamp",
-    "extraction_custom_instructions": (
-        "Surfaced via ProductUpdate write path and the vision extraction endpoint; "
-        "intentionally not echoed back on ProductResponse to keep payload focused"
-    ),
 }
 
 

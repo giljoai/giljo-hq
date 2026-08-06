@@ -235,12 +235,19 @@ CH1/CH2 finale below, THIS wins.
 ── ORDER OF OPERATIONS (in this order; complete_job is LAST) ────────────────
 
 0. STAND UP THE HUB THREAD (your VERY FIRST action, before writing anything):
-   create_thread(subject="Chain run {run_id} coordination hub")
-   Record the returned thread_id. This is the coordination channel for every
-   sub-orchestrator in this chain. They will find it on their own via:
-     search_threads(query="{run_id}")
-   so the run_id MUST appear in the subject (it does, above). Join it yourself as
-   the conductor: join_thread(thread_id=<the returned id>). Then proceed to STEP 0.5.
+   create_thread(subject="Chain: <a few words naming what this chain delivers>",
+                 sequence_run_id="{run_id}")
+   sequence_run_id is the ONLY thing marking this thread as this run's hub. Pass it,
+   then CHECK it came back set - if null you passed it wrong, and a hub with no link is
+   one no sub-orchestrator finds. That failure is SILENT: no error, they never join and
+   the chain loses its coordination channel with nobody told.
+   The subject is now purely human-readable: the run id does NOT belong in it and
+   discovery never reads it. A few words, not a sentence - the operator sees this in a
+   card list that truncates from the end, so the front is all they read.
+   Record the returned thread_id. Every sub-orchestrator resolves it from the link via
+   get_context(categories=["chain"]) -> hub_thread_id.
+   Join it yourself as the conductor: join_thread(thread_id=<the returned id>).
+   Then proceed to STEP 0.5.
 
 0.5 READ DEEP BEFORE YOU PLAN (this is what makes your contracts concrete):
    You cannot write a useful cross-project contract from project titles alone. Read
@@ -343,8 +350,8 @@ def _chain_drive_step_a_preset(run_id: str, preset: Platform) -> str:
         orchestrator: author its project mission, spawn and coordinate its agents, then
         complete_job. Only then advance.
 
-    A3. COMMS — coordinate via the chain Hub thread: search_threads(query="{run_id}") then
-        get_thread_history / get_my_turn. Proceed to STEP B (advance on ready_to_advance)."""
+    A3. COMMS — coordinate via the chain Hub thread (get_context chain -> hub_thread_id)
+        then get_thread_history / get_my_turn. Proceed to STEP B (advance on ready_to_advance)."""
     fallback = (
         "If your harness supports in-process subagents, spawn ONE subagent as P_i's\n"
         "sub-orchestrator instead of adopting the role inline — still one project at a time, and\n"
@@ -387,8 +394,8 @@ def _build_chain_drive_step_a(run_id: str, spawn_command: str, preset: Platform 
 
 {spawn_command}
 
-    A3. Your launch returns NO result — coordinate ONLY via the Hub: search_threads(query=
-        "{run_id}") then get_thread_history / get_my_turn. The sub-orch runs the COMBINED flow
+    A3. Your launch returns NO result — coordinate ONLY via the Hub (get_context chain ->
+        hub_thread_id) then get_thread_history / get_my_turn. The sub-orch runs the COMBINED flow
         (CH_SUB_ORCHESTRATOR) free; you do NOT write its mission, stage it, or gate it. → STEP B.
     FAIL LOUD (no silent downgrade): if headless — no $DISPLAY and no $WAYLAND_DISPLAY (key on
     DISPLAY, NOT "is WSL", so WSLg is not blocked) — STOP and tell the user to RE-STAGE in a
@@ -476,7 +483,7 @@ the chain yourself.
 SCOPE IS HANDED -- this {n}-project run is your whole scope; do NOT hunt for work. Where the
 solo protocol tells you to scan for a project to continue, or a duplicate to merge, IGNORE
 it. You are the ESCALATION SINK -- sub-orchestrators surface blockers to YOU on the Hub
-thread (search_threads(query="{run_id}")), not to the user; escalate to the user only a
+thread (get_context chain -> hub_thread_id), not to the user; escalate to the user only a
 genuine chain-level decision. When YOU post to the Hub, set from_agent to your UNIQUE label
 "Chain Conductor" (never the generic "orchestrator" -- your finale gate self-excludes only
 the unique label, so a generic-name self-post would wrongly arm your own gate). This chapter
@@ -542,7 +549,7 @@ order, do these IN ORDER:
     label, but the BACKGROUND SLEEP is what wakes you. On each wake:
       1. get_thread_history(thread_id=<Hub>, as_participant="{conductor_id_str}",
          unread_only=true, mark_read=true) -- resolve <Hub> ONCE via
-         search_threads(query="{run_id}") and reuse it. This ONE poll is BOTH your USER-
+         get_context(categories=["chain"]) -> hub_thread_id and reuse it. This ONE poll is BOTH your USER-
          directive inbox (above) and the Hub log -- one messaging surface; the unread_only +
          mark_read cursor returns only what's new since your last read.
       2. get_workflow_status(project_id=<P_i>) -> read ready_to_advance (the advance gate).
@@ -626,9 +633,9 @@ def _build_ch_sub_orchestrator(
     mode = execution_mode or "multi_terminal"
 
     if phase == "implementation":
-        staging_steps = f"""2.-4. STAGING -- ALREADY COMPLETE. You authored your project mission, spawned your
+        staging_steps = """2.-4. STAGING -- ALREADY COMPLETE. You authored your project mission, spawned your
    inert agent team, ended staging (complete_job), and posted a staging-complete note
-   to the Hub thread (search_threads(query='{run_id}') finds it). Your chain-mission
+   to the Hub thread (get_context(categories=["chain"]) -> hub_thread_id finds it). Your chain-mission
    contract slice is not re-shipped here -- fetch the full chain mission via
    get_context(categories=["chain"]) if you need cross-project context. ESCALATION unchanged: the CONDUCTOR
    is your escalation path, NOT the user -- post blockers to the Hub thread and POLL
@@ -679,7 +686,7 @@ def _build_ch_sub_orchestrator(
    IMPLEMENTATION phase (step 6), after staging-end.
 
 4. END STAGING + POST -- call complete_job (staging-end). Find the Hub thread:
-   search_threads(query='{run_id}'); post a "staging-complete" note there so the
+   get_context(categories=["chain"]) -> hub_thread_id; post a "staging-complete" note there so the
    conductor and the user can follow your run. The Hub is effectively LOG-ONLY: posting
    pushes no reply, so if you ever need a conductor decision, POLL the Hub yourself with
    get_thread_history / get_my_turn -- do not wait for a pushed answer.

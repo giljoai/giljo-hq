@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Database models package for GiljoAI MCP.
+Database models package for Giljo HQ.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ⚠️  IMPORT GUIDANCE FOR NEW CODE (Post-Handover 0128a)

@@ -94,3 +94,39 @@ describe('notificationRouting — regression map: other families keep their targ
     expect(projectRouteFor({ type: 'project.pre_launch_workproduct' })).toBeNull()
   })
 })
+
+describe('notificationRouting — FE-9222 context-tuning banner deep-links to the tune dialog', () => {
+  it('system.context_tuning_due routes to Products with ?tune=<product_id>', () => {
+    const route = resolveNotificationRoute({
+      type: 'system.context_tuning_due',
+      payload: { product_id: 'prod-42', product_name: 'Acme' },
+    })
+    expect(route).toEqual({ name: 'Products', query: { tune: 'prod-42' } })
+  })
+
+  it('reads the product id from metadata as well as payload', () => {
+    const route = resolveNotificationRoute({
+      type: 'system.context_tuning_due',
+      metadata: { product_id: 'prod-99' },
+    })
+    expect(route).toEqual({ name: 'Products', query: { tune: 'prod-99' } })
+  })
+
+  it('carries an undefined tune when the row has no product context (fails soft to Products)', () => {
+    const route = resolveNotificationRoute({ type: 'system.context_tuning_due' })
+    expect(route).toEqual({ name: 'Products', query: { tune: undefined } })
+  })
+
+  it('FE-9289c: a handover routes to its thread via the ?thread= deep link', () => {
+    const route = resolveNotificationRoute({ type: 'handover', metadata: { thread_id: 'thr-42' } })
+    expect(route).toEqual({ path: '/hub', query: { thread: 'thr-42' } })
+  })
+
+  it('plain system banners (no product/project context) resolve to null so the banner falls back to cta_route', () => {
+    // The two-sided regression: pending_migrations / skills_drift carry no
+    // project or product id, so the shared map returns null and SystemStatusBanner
+    // pushes their bare cta_route named-route unchanged.
+    expect(resolveNotificationRoute({ type: 'system.pending_migrations', payload: { pending: 3, head: 'x' } })).toBeNull()
+    expect(resolveNotificationRoute({ type: 'system.skills_drift', payload: { current: '2', announced: '1' } })).toBeNull()
+  })
+})
