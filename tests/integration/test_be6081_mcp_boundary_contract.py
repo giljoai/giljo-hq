@@ -414,7 +414,7 @@ async def test_porcelain_git_commits_accepted_at_boundary(memory_tool_client):
     """BE-9256: a tab-delimited porcelain string (the raw `git log --format=...`
     output) is accepted and parsed into the titled shape."""
     client, tenant_key, session = memory_tool_client
-    _product, project = await _seed_org_product_project(session, tenant_key, "BE9256Porcelain")
+    _product, project = await _seed_org_product_project(session, tenant_key, "porcelain-titled-commit")
     await _enable_git_integration(session, tenant_key)
 
     async with client() as mcp_session:
@@ -446,7 +446,7 @@ async def test_bare_sha_git_commits_rejected_at_closeout_boundary(memory_tool_cl
     the write_project_closeout @mcp.tool) was not. Same rejection shape, same
     Tier-2 contract (normal content, not isError), different tool."""
     client, tenant_key, session = memory_tool_client
-    _product, project = await _seed_org_product_project(session, tenant_key, "BE9256CloseoutBareSha")
+    _product, project = await _seed_org_product_project(session, tenant_key, "closeout-bare-sha")
 
     async with client() as mcp_session:
         result = await mcp_session.call_tool(
