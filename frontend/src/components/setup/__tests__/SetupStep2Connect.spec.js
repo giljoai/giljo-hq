@@ -149,8 +149,8 @@ describe('SetupStep2Connect — SaaS: sign-in primary path (FE-6259b vocabulary 
   it('OpenCode (added FE-9204) is sign-in-capable — emits the opencode add+auth command, no bearer', async () => {
     const wrapper = await mountStep(['opencode'], 'saas')
     const pre = wrapper.find('pre.config-code')
-    expect(pre.text()).toContain('opencode mcp add giljo_mcp')
-    expect(pre.text()).toContain('opencode mcp auth giljo_mcp')
+    expect(pre.text()).toContain('opencode mcp add giljo_hq')
+    expect(pre.text()).toContain('opencode mcp auth giljo_hq')
     expect(pre.text()).not.toContain('Bearer')
     expect(wrapper.find('[data-testid="fallback-toggle"]').exists()).toBe(true)
   })
@@ -161,6 +161,27 @@ describe('SetupStep2Connect — SaaS: sign-in primary path (FE-6259b vocabulary 
     expect(wrapper.find('[data-testid="fallback-toggle"]').exists()).toBe(false)
     // Manual config shows the generate card immediately; the JSON appears once a key exists.
     expect(wrapper.text()).toContain('Generate API Key')
+  })
+
+  // FE-9225: the retired configurator's "Web & app" route is ported (reduced) onto the
+  // generic card — apps that take an MCP connector URL need the bare endpoint, not the
+  // key-bearing JSON, because they run their own browser sign-in.
+  it('Generic MCP client exposes the connector URL + web-app hint, with no key required', async () => {
+    const wrapper = await mountStep(['generic'], 'saas')
+    const block = wrapper.find('[data-testid="web-endpoint-block"]')
+    expect(block.exists()).toBe(true)
+    // buildServerUrl path 1: browser is already on the backend host, so the endpoint
+    // is origin-derived (this is what proxied deployments depend on).
+    expect(block.find('pre').text()).toBe(`${window.location.origin}/mcp`)
+    expect(block.find('[data-testid="web-endpoint-copy-btn"]').exists()).toBe(true)
+    expect(block.text()).toContain('claude.ai')
+    // Present before any key is generated — the web connector never needs one.
+    expect(wrapper.text()).toContain('Generate API Key')
+  })
+
+  it('does NOT show the connector URL block for a CLI tool', async () => {
+    const wrapper = await mountStep(['claude_code'], 'saas')
+    expect(wrapper.find('[data-testid="web-endpoint-block"]').exists()).toBe(false)
   })
 })
 

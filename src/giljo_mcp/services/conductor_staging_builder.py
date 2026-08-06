@@ -23,7 +23,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from giljo_mcp.platform_registry import Platform, get_platform
+from giljo_mcp.services.conductor_job_minter import projectless_conductor_staging_directive
 from giljo_mcp.services.protocol_sections.chapters_chain import (
     _build_ch_capability,
     _build_ch_chain_staging,
@@ -102,7 +105,8 @@ def build_conductor_staging_response(
     # BE-6187: the conductor STANDS UP the Hub thread itself as Step 0 of
     # CH_CHAIN_STAGING (create_thread), then joins it (join_thread). The server does
     # NOT create the thread; it only exposes the tools the conductor needs to do so.
-    # Sub-orchestrators later discover the thread via search_threads(run_id).
+    # Sub-orchestrators later discover the thread via its sequence_run_id link
+    # (BE-9291): get_context(categories=["chain"]) -> hub_thread_id.
     #
     # BE-6177 (UNIT 1): get_context + list_projects are the conductor's deep-read
     # affordance (read the product conventions + every project description before
@@ -129,3 +133,59 @@ def build_conductor_staging_response(
         "mcp_tools_available": mcp_tools_available,
         "thin_client": True,
     }
+
+
+async def resolve_conductor_early_return(
+    session: AsyncSession,
+    *,
+    chain: Any,
+    repo: Any,
+    execution: Any,
+    job_id: str,
+    tenant_key: str,
+    preset: Platform | None = None,
+) -> dict[str, Any]:
+    """Resolve the project-less chain conductor's staging early-return payload.
+
+    BE-6184/BE-6186: the DEDICATED chain conductor is project-less. It has no project
+    row to stage but DOES need a real staging protocol (it stages the whole chain in
+    one session). Resolve its active run by the calling agent_id (the run-phase gate)
+    and return the rewritten CH_CHAIN_STAGING as ``orchestrator_protocol``; no project
+    row is dereferenced. Fall back to the STOP-shaped directive only when this agent is
+    not the live conductor of any active run (nothing to stage).
+
+    BE-9291-F1: lifted verbatim out of ``MissionOrchestrationService`` — that branch
+    took ``_build_orchestrator_context`` to 296 lines against a 295 shrink-only budget
+    (the guardrail-7 breach), while the module itself sat at exactly its 835-line
+    budget, so the extraction had to leave the file rather than move within it. This is
+    the same seam BE-6186 opened for the same reason. Unlike the pure builder above,
+    this resolver DOES take a session: it is the caller-side resolution step that feeds
+    ``build_conductor_staging_response``. ``chain`` is the SequenceChainContextResolver
+    and ``repo`` the MissionRepository, passed in so this module owns no service wiring.
+    """
+    conductor_ctx = await chain.resolve_for_conductor(
+        session,
+        conductor_agent_id=str(execution.agent_id),
+        tenant_key=tenant_key,
+        is_staging=True,
+    )
+    if conductor_ctx is not None:
+        # BE-6177 (UNIT 1): resolve the head project's product_id so the conductor can
+        # read deep (get_context(product_id=...)) before writing its cross-project
+        # contracts. Best-effort: a missing/gone head project yields product_id=None
+        # and the conductor degrades to list_projects.
+        head_product_id: str | None = None
+        resolved_order = conductor_ctx.resolved_order
+        if resolved_order:
+            head_project = await repo.get_project_by_id(session, tenant_key, resolved_order[0])
+            if head_project is not None:
+                head_product_id = head_project.product_id
+        return build_conductor_staging_response(
+            chain_ctx=conductor_ctx,
+            job_id=job_id,
+            agent_id=str(execution.agent_id),
+            tenant_key=tenant_key,
+            product_id=head_product_id,
+            preset=preset,
+        )
+    return projectless_conductor_staging_directive(job_id)

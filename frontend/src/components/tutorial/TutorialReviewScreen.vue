@@ -16,6 +16,29 @@
       </div>
 
       <p v-if="descriptionExcerpt" class="review-desc">{{ descriptionExcerpt }}</p>
+
+      <!-- FE-9320: the agent-driven doors create the card with a DELIBERATELY
+           empty name — that is what lets the agent name it (update_product_context
+           only writes product_name when the existing name is blank; locked by
+           tests/test_fe9200_tutorial_prompt_contract.py). So the name cannot be
+           pre-filled at creation. But if the agent never got to it, a fresh
+           install's very first product would go live nameless. Catch it here, at
+           the moment it becomes the user's real product. -->
+      <div v-if="needsName" class="name-fix" data-testid="tutorial-name-required">
+        <label class="name-label" for="tutorial-product-name">
+          Your agent did not give this product a name. Name it before activating.
+        </label>
+        <input
+          id="tutorial-product-name"
+          v-model="nameDraft"
+          class="name-input"
+          type="text"
+          maxlength="200"
+          placeholder="Product name"
+          data-testid="tutorial-product-name-input"
+        />
+        <span v-if="nameError" class="name-error" data-testid="tutorial-name-error">{{ nameError }}</span>
+      </div>
     </div>
 
     <div class="review-actions">
@@ -25,7 +48,7 @@
         class="activate-btn"
         data-testid="tutorial-activate"
         prepend-icon="mdi-play"
-        :disabled="!product"
+        :disabled="!product || (needsName && !nameDraft.trim())"
         @click="activate"
       >
         Activate product
@@ -110,8 +133,28 @@ const descriptionExcerpt = computed(() => {
   return desc.length > 220 ? `${desc.slice(0, 220)}…` : desc
 })
 
+const nameDraft = ref('')
+const nameError = ref('')
+
+/** A product the agent never named must not be activated nameless. */
+const needsName = computed(() => Boolean(product.value) && !(product.value.name || '').trim())
+
 async function activate() {
   if (!product.value) return
+
+  if (needsName.value) {
+    const name = nameDraft.value.trim()
+    if (!name) return
+    nameError.value = ''
+    try {
+      await productStore.updateProduct(product.value.id, { name })
+    } catch {
+      nameError.value = 'Could not save that name. Check your connection and try again.'
+      return
+    }
+    product.value = { ...product.value, name }
+  }
+
   // Already active (e.g. the user activated it from the Products page
   // mid-flow): toggleProductActivation would DEACTIVATE it — skip straight
   // to done instead (gate F1's deactivation hazard).
@@ -137,6 +180,38 @@ async function confirmAndFinish() {
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+
+.name-fix {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.name-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.name-input {
+  background: $color-background-primary;
+  border-radius: $border-radius-default;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  color: $color-text-primary;
+
+  &:focus-visible {
+    outline: 2px solid rgba($color-brand-yellow, 0.55);
+    outline-offset: 1px;
+  }
+}
+
+.name-error {
+  font-size: 11.5px;
+  color: $color-status-error;
 }
 
 .beat-eyebrow {

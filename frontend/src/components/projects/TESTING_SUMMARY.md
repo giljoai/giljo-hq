@@ -2,7 +2,7 @@
 
 **Component**: JobsTab.vue **Handover**: 0077 - Launch Jobs Dual Tab Interface
 **Test Suite Creation Date**: 2025-10-30 **Test Agent**: Frontend Tester Agent
-(GiljoAI MCP)
+(Giljo HQ)
 
 ## Executive Summary
 
@@ -273,9 +273,9 @@ execution and efficient rendering
 **Test Suite Status**: ✅ **PRODUCTION READY**
 
 All tests pass successfully and the component is ready for integration into the
-GiljoAI MCP frontend application.
+Giljo HQ frontend application.
 
 ---
 
-**Frontend Tester Agent** GiljoAI MCP Date:
+**Frontend Tester Agent** Giljo HQ Date:
 2025-10-30 Handover: 0077

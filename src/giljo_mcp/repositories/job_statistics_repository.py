@@ -154,6 +154,31 @@ class JobStatisticsRepository:
         Configured templates that were never spawned are still returned (count
         0) so the roster stays stable across polls.
 
+        BE-9334 -- the template query below deliberately does NOT filter
+        ``deleted_at``, and that is not an oversight. This is the third audit to
+        flag it; it is being recorded here so it is the last.
+
+        The query is neither an existence check nor an authorization check. It is
+        the label/colour lookup table that ``_base_role`` folds historical
+        executions onto, and history outlives the template it was produced by
+        (``AgentJob.template_id`` survives soft-delete until the 30-day purge).
+        Excluding a trashed row does not remove its executions from the chart --
+        it removes their *fold target*, so ``implementer-backend`` and
+        ``implementer-frontend`` stop collapsing onto a since-deleted
+        ``implementer`` and split one historical segment into several.
+
+        The symptom that makes this look like the BE-9325 defect class -- a
+        deleted agent lingering in the Dashboard roster -- is not rendered. Both
+        the bar and the legend are built from ``buildSegments``, which drops every
+        zero-count entry (``DashboardView.vue:346``), so a trashed template that
+        was never spawned emits count 0 and never reaches the screen. Filtering
+        here would cost real fidelity on the spawned case and buy nothing on the
+        unspawned one.
+
+        Pinned by
+        ``tests/services/test_be9334_trashed_template_assignment_paths.py::test_role_distribution_deliberately_keeps_trashed_templates_as_fold_targets``
+        -- adding the filter turns that test red on purpose.
+
         Args:
             session: Async database session
             tenant_key: Tenant key for isolation

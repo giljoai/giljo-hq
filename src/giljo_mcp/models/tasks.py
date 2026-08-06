@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Task and message-related models for GiljoAI MCP.
+Task and message-related models for Giljo HQ.
 
 This module contains models for tasks and inter-agent messages.
 Tasks track work items across sessions, while messages handle agent communication.
@@ -263,6 +263,18 @@ class Message(Base):
     # 0840b: Extracted from meta_data JSONB
     from_agent_id = Column(String(64), nullable=True)  # BE-9214: hub agent ids validate to 64
     from_display_name = Column(String(255), nullable=True)
+    # BE-9289a: who the author IS ('agent' | 'user'), resolved SERVER-SIDE at post time.
+    # from_agent_id is the FUNCTIONAL identity (self-exclusion, baton matching, read
+    # cursors) and is self-declared, so its SHAPE says nothing about the author's kind —
+    # an agent may legitimately post under a UUID slug. Readers previously guessed from
+    # that shape and mislabeled such agents as the human user. CommThreadService.post()
+    # already branches on the agent path vs the principal fallback, which is the only
+    # place the server actually knows; this column records that answer.
+    # NOT NULL with a server default ON PURPOSE: a nullable column would force every
+    # reader to keep exactly the fallback heuristic this replaces. 'agent' is the right
+    # default because every non-Hub insert path here (project bus, agent job messaging,
+    # forwarding) is agent traffic; only post() produces 'user', and it says so.
+    from_kind = Column(String(10), nullable=False, server_default="agent")
     auto_generated = Column(Boolean, server_default="false", nullable=False)
 
     # 0435d: Message intent — controls whether completed agents get auto-blocked

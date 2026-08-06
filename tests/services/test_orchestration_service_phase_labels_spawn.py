@@ -130,6 +130,7 @@ class TestSpawnWebSocketBroadcastPhase:
         session.commit = AsyncMock()
         session.refresh = AsyncMock()
         session.add = MagicMock()
+        session.info = {}  # tenant_session_context save/restore target
         db_manager.get_session_async = MagicMock(return_value=session)
 
         mock_ws = AsyncMock()
@@ -219,6 +220,7 @@ class TestSpawnWebSocketBroadcastPhase:
         session.commit = AsyncMock()
         session.refresh = AsyncMock()
         session.add = MagicMock()
+        session.info = {}  # tenant_session_context save/restore target
         db_manager.get_session_async = MagicMock(return_value=session)
 
         mock_ws = AsyncMock()

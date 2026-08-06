@@ -202,6 +202,8 @@ async def test_reset_system_instructions(db_session, template_service, sample_te
     await template_service.reset_system_instructions(db_session, sample_template)
 
     # Canonical default is slim bootstrap directing agents to get_job_mission()
-    assert "GiljoAI MCP Agent" in sample_template.system_instructions
+    from giljo_mcp.branding import PRODUCT_NAME
+
+    assert f"{PRODUCT_NAME} Agent" in sample_template.system_instructions
     assert "get_job_mission" in sample_template.system_instructions
     assert "health_check" in sample_template.system_instructions

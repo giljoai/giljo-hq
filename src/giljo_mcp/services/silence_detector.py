@@ -25,6 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.models.agent_identity import AgentExecution
 from giljo_mcp.repositories.agent_operations_repository import AgentOperationsRepository
+from giljo_mcp.repositories.configuration_repository import ConfigurationRepository
+from giljo_mcp.services.settings_service import AGENT_SILENCE_THRESHOLD_KEY, MAX_AGENT_SILENCE_THRESHOLD_MINUTES
 
 
 logger = logging.getLogger(__name__)
@@ -97,12 +99,22 @@ class SilenceDetector:
     async def _run_detection_cycle(self) -> None:
         """Execute one complete silence detection cycle."""
         async with self.db.get_session_async() as session:
-            # The silence threshold is deployment-wide, stored in system_settings.
+            # The deployment-wide default is stored in system_settings (unchanged, CE + SaaS).
             repo = AgentOperationsRepository()
             threshold_val = await repo.get_silence_threshold_setting(session)
-            threshold = threshold_val if threshold_val is not None else DEFAULT_SILENCE_THRESHOLD_MINUTES
+            default_threshold = threshold_val if threshold_val is not None else DEFAULT_SILENCE_THRESHOLD_MINUTES
 
-            count = await self._detect_silent_agents(session, threshold_minutes=threshold)
+            # FE-9241 (SaaS expansion): per-tenant overrides live in `configurations`,
+            # loaded in ONE cross-tenant query (no N+1 — never queried per-agent
+            # below). CE never writes these rows, so this is always {} on CE and
+            # detection collapses to the pre-FE-9241 single-threshold behavior.
+            config_repo = ConfigurationRepository(self.db)
+            raw_overrides = await config_repo.get_all_values_for_key(session, AGENT_SILENCE_THRESHOLD_KEY)
+            tenant_overrides = _coerce_threshold_overrides(raw_overrides)
+
+            count = await self._detect_silent_agents(
+                session, threshold_minutes=default_threshold, tenant_overrides=tenant_overrides
+            )
 
             if count > 0:
                 logger.info("Silence detection cycle: marked %d agent(s) as silent", count)
@@ -111,21 +123,37 @@ class SilenceDetector:
         self,
         session: AsyncSession,
         threshold_minutes: int = DEFAULT_SILENCE_THRESHOLD_MINUTES,
+        tenant_overrides: dict[str, int] | None = None,
     ) -> int:
         """Detect and mark silent agents.
 
-        Finds agents where:
+        Finds agents where, under THEIR OWN effective threshold (a SaaS
+        per-tenant override from `tenant_overrides` if one exists for that
+        agent's tenant, else `threshold_minutes`):
         - status == 'working'
-        - last_progress_at < (now - threshold) OR last_progress_at IS NULL
+        - last_progress_at < (now - own threshold) OR last_progress_at IS NULL
 
         Args:
             session: Database session
-            threshold_minutes: Minutes of inactivity before marking silent
+            threshold_minutes: Deployment-wide default threshold in minutes
+            tenant_overrides: FE-9241 SaaS per-tenant overrides ({tenant_key: minutes}).
+                Empty/None on CE (no override rows exist there), so every agent
+                uses threshold_minutes — identical to pre-FE-9241 behavior.
 
         Returns:
             Number of agents marked as silent
         """
-        cutoff = datetime.now(UTC) - timedelta(minutes=threshold_minutes)
+        tenant_overrides = tenant_overrides or {}
+        now = datetime.now(UTC)
+
+        # SQL pre-filter cutoff: the MOST LENIENT (smallest) effective threshold
+        # across the deployment default and every tenant override, so the single
+        # cross-tenant scan can't miss an agent that's already stale under some
+        # tenant's tighter threshold. A candidate that only looks stale under a
+        # SMALLER threshold than its own tenant's is dropped below, per-agent,
+        # once we know which tenant it belongs to.
+        min_threshold = min([threshold_minutes, *tenant_overrides.values()])
+        cutoff = now - timedelta(minutes=min_threshold)
 
         # TENANT ISOLATION NOTE (Phase C audit, Feb 2026):
         # This query intentionally scans ALL tenants. The silence detector is a
@@ -133,20 +161,34 @@ class SilenceDetector:
         # a tenant-facing operation. It runs on a server timer with no user/tenant
         # context. Cross-tenant scope is BY DESIGN.
         repo = AgentOperationsRepository()
-        stale_agents = await repo.find_stale_working_agents(session, cutoff)
+        candidate_agents = await repo.find_stale_working_agents(session, cutoff)
 
-        # BE-6190: capture each silenced agent's chain context so the run-stall check
-        # can reuse the agents we already marked silent (no second cross-tenant scan).
-        silenced: list[tuple[str, str | None, datetime | None]] = []
+        # Drop candidates not actually stale under THEIR OWN tenant's effective
+        # threshold (only matters when that threshold is larger than
+        # min_threshold — the SQL pre-filter above is intentionally wider than
+        # strictly necessary so no tenant's stale agent is missed).
+        stale_agents = []
+        for agent in candidate_agents:
+            own_threshold = tenant_overrides.get(agent.tenant_key, threshold_minutes)
+            reference_time = agent.last_progress_at or agent.started_at
+            if reference_time is not None and reference_time >= now - timedelta(minutes=own_threshold):
+                continue
+            stale_agents.append(agent)
+
+        # BE-6190: capture each silenced agent's chain context + its own effective
+        # threshold so the run-stall check can reuse the agents we already marked
+        # silent (no second cross-tenant scan) and stall using the RIGHT deadline.
+        silenced: list[tuple[str, str | None, datetime | None, int]] = []
 
         count = 0
         for agent in stale_agents:
             old_status = agent.status
+            own_threshold = tenant_overrides.get(agent.tenant_key, threshold_minutes)
 
             # Extract project context from eagerly-loaded relationships
             project_id = str(agent.job.project_id) if agent.job and agent.job.project_id else None
             if project_id is not None:
-                silenced.append((agent.tenant_key, project_id, agent.last_progress_at))
+                silenced.append((agent.tenant_key, project_id, agent.last_progress_at, own_threshold))
             project_name = agent.job.project.name if agent.job and agent.job.project else None
 
             logger.info(
@@ -194,22 +236,24 @@ class SilenceDetector:
         if count > 0:
             await repo.mark_agents_silent(session, stale_agents)
 
-        await self._stall_runs_for_silenced_projects(session, silenced, threshold_minutes)
+        await self._stall_runs_for_silenced_projects(session, silenced)
 
         return count
 
     async def _stall_runs_for_silenced_projects(
         self,
         session: AsyncSession,
-        silenced: list[tuple[str, str | None, datetime | None]],
-        threshold_minutes: int,
+        silenced: list[tuple[str, str | None, datetime | None, int]],
     ) -> None:
         """Flip an active chain run to "stalled" when its CURRENT in-flight project's
-        orchestrator has gone silent past the threshold (BE-6190 — wires the previously
-        dead SequenceChainContextResolver.mark_stalled_if_past_deadline). Reuses the
-        agents _detect_silent_agents already marked silent; only the run whose CURRENT
-        member (resolved_order[current_index]) is the silent project stalls. Solo / no
-        active run / non-current member => no-op. Best-effort: never breaks the cycle.
+        orchestrator has gone silent past ITS OWN tenant's threshold (BE-6190 — wires
+        the previously dead SequenceChainContextResolver.mark_stalled_if_past_deadline;
+        FE-9241 extends it to use each agent's own effective threshold instead of one
+        global value, so a SaaS tenant's tighter/looser override affects its own chain's
+        stall deadline). Reuses the agents _detect_silent_agents already marked silent;
+        only the run whose CURRENT member (resolved_order[current_index]) is the silent
+        project stalls. Solo / no active run / non-current member => no-op. Best-effort:
+        never breaks the cycle.
         """
         from giljo_mcp.services.sequence_chain_context import SequenceChainContextResolver
         from giljo_mcp.services.sequence_run_service import SequenceRunService
@@ -217,7 +261,7 @@ class SilenceDetector:
 
         now = datetime.now(UTC)
         tm = TenantManager()
-        for tenant_key, project_id, last_progress_at in silenced:
+        for tenant_key, project_id, last_progress_at, threshold_minutes in silenced:
             if not project_id:
                 continue
             try:
@@ -374,6 +418,37 @@ async def _get_silence_threshold(session: AsyncSession) -> int:
         logger.exception("Failed to read silence threshold from settings")
 
     return DEFAULT_SILENCE_THRESHOLD_MINUTES
+
+
+def _coerce_threshold_overrides(raw: dict[str, object]) -> dict[str, int]:
+    """Coerce raw per-tenant Configuration JSONB values to valid minute ints.
+
+    Defensive (FE-9241, hardened per TSK-9271): `configurations.value` is
+    schemaless JSONB, so a row written outside the validated
+    TenantConfigurationService write path could in principle hold anything —
+    a dict/list, None, a boolean, a non-numeric string, or a JSON number so
+    large it overflows a Python float to +/-inf (e.g. a `1e400` literal).
+    Every one of those is dropped rather than crashing the background
+    detection cycle; the cycle proceeds using the deployment-wide default for
+    any tenant whose override row is malformed.
+    """
+    overrides: dict[str, int] = {}
+    for tenant_key, value in raw.items():
+        # bool is an int subclass in Python (int(True) == 1) -- reject it
+        # explicitly so a stray JSONB `true`/`false` never silently becomes a
+        # 1- or 0-minute threshold.
+        if isinstance(value, bool):
+            continue
+        try:
+            minutes = int(value)
+        except (TypeError, ValueError, OverflowError):
+            # OverflowError: a JSON number like `1e400` decodes to a Python
+            # float that overflows to +/-inf; int(inf) raises OverflowError,
+            # not ValueError.
+            continue
+        if 1 <= minutes <= MAX_AGENT_SILENCE_THRESHOLD_MINUTES:
+            overrides[tenant_key] = minutes
+    return overrides
 
 
 async def _broadcast_status_change(

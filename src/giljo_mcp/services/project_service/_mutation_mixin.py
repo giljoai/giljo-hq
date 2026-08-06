@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 
 from giljo_mcp.domain.project_status import (
     IMMUTABLE_PROJECT_STATUSES,
+    LIFECYCLE_FINISHED_STATUSES,
     ProjectStatus,
 )
 from giljo_mcp.exceptions import (
@@ -32,6 +33,7 @@ from giljo_mcp.platform_registry import ACCEPTED_EXECUTION_MODES, mode_csv
 from giljo_mcp.schemas.service_responses import (
     ProjectCompleteResult,
     ProjectData,
+    ProjectDetail,
     ProjectLaunchResult,
     ProjectMissionUpdateResult,
 )
@@ -65,7 +67,7 @@ class MutationMixin:
         project_type_id: str | None = None,
         series_number: int | None = None,
         subseries: str | None = None,
-    ) -> Project:
+    ) -> ProjectDetail:
         """
         Create a new project.
 
@@ -81,7 +83,9 @@ class MutationMixin:
             subseries: Single-letter subseries suffix (Handover 0440a)
 
         Returns:
-            Project: The created project instance
+            ProjectDetail: The created project, fully materialized inside the
+            creating session (BE-9326). Deliberately NOT the live ORM row —
+            callers read it after the session has closed.
 
         Raises:
             BaseGiljoError: When project creation fails
@@ -169,9 +173,11 @@ class MutationMixin:
                 await session.commit()
                 await self._repo.refresh(session, project)
 
-                # Handover 0440a: Eagerly load project_type relationship for taxonomy_alias
-                if project.project_type_id:
-                    project = await self._repo.get_with_project_type(session, tenant_key, project.id)
+                # Handover 0440a: Eagerly load project_type relationship for taxonomy_alias.
+                # BE-9326: unconditional — this used to run only when a
+                # project_type_id was supplied, so an un-typed create returned a
+                # row whose ``project_type`` was never loaded.
+                project = await self._repo.get_with_project_type(session, tenant_key, project.id)
 
                 self._logger.info(
                     f"Created project {sanitize(project.id)} with status '{sanitize(status)}' "
@@ -190,7 +196,17 @@ class MutationMixin:
                     except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
                         self._logger.warning(f"WebSocket broadcast failed: {ws_error}")
 
-                return project
+                # BE-9326: build the response HERE, while the session is still
+                # open, and return that instead of the live ORM row. The REST
+                # endpoint used to receive the raw ``Project`` and read
+                # ``proj.project_type`` -- a lazy relationship -- from the shared
+                # response builder after the session had closed, so a successful
+                # INSERT surfaced as a 500 and the caller never learned the id of
+                # the row it had just created. Returning a fully materialized
+                # DTO (what every other ProjectService read already does) closes
+                # the whole class: no attribute of the result can trigger a load
+                # after the session is gone.
+                return self._build_created_project_detail(project)
 
         except IntegrityError as e:
             if "uq_project_taxonomy" in str(e):
@@ -454,11 +470,91 @@ class MutationMixin:
             # BE-9157: successor pointer, set when marking a project superseded.
             "successor_project_id",
         }
+        previous_status = project.status
+
         for field, value in updates.items():
             if field in allowed_fields:
                 setattr(project, field, value)
 
-        project.updated_at = datetime.now(UTC)
+        now = datetime.now(UTC)
+
+        # BE-9343: the backend owns completed_at on a lifecycle transition. It used
+        # to be written only ``if field in updates``, so a caller doing everything
+        # right -- update_project(status="completed") -- produced status=completed
+        # with completed_at NULL, and the dashboard hid it by falling back to
+        # updated_at. Nobody is asked to supply the field; this is the chokepoint
+        # every MCP and REST write through update_project flows through. It is NOT
+        # the only terminal write path -- closeout, staging-cancel and soft-delete
+        # set a terminal status directly -- so it does not mean the backend always
+        # stamps.
+        #
+        # Additive, never an override: an explicitly supplied completed_at and an
+        # already-set value both win, so a completed project later marked
+        # superseded keeps its real date. No production caller currently supplies
+        # one; the branch guards the allowlisted field. Do NOT delete it as dead
+        # scaffolding -- completed_at is in allowed_fields, so dropping the guard
+        # would silently turn the additive rule into an override rule for the next
+        # caller that does pass a date (BE-9343 audit F3 removed the last such
+        # caller, the archive endpoint).
+        # Symmetric on the way back out -- leaving a terminal status clears the
+        # date, mirroring continue_working. That branch is genuinely reachable:
+        # terminated and deleted are lifecycle-finished but NOT immutable, so the
+        # generic write path can move them back to active/inactive.
+        if "status" in updates and "completed_at" not in updates:
+            if project.status in LIFECYCLE_FINISHED_STATUSES:
+                if project.completed_at is None:
+                    project.completed_at = now
+            elif previous_status in LIFECYCLE_FINISHED_STATUSES:
+                project.completed_at = None
+
+        project.updated_at = now
+
+    @staticmethod
+    def _build_created_project_detail(project) -> ProjectDetail:
+        """Materialize a just-created project into a session-independent DTO.
+
+        BE-9326: called INSIDE ``create_project``'s session, so every attribute
+        is read while the row is still attached. ``project`` must have been
+        fetched with ``project_type`` eagerly loaded.
+
+        A freshly created project has no agents and no staging/launch history,
+        so those fields are their empty values by construction rather than by
+        query — mirroring the ``agents=[] / agent_count=0 / message_count=0``
+        the REST create endpoint has always passed.
+        """
+        return ProjectDetail(
+            id=str(project.id),
+            alias=project.alias,
+            name=project.name,
+            mission=project.mission,
+            description=project.description,
+            status=project.status,
+            staging_status=project.staging_status,
+            implementation_launched_at=(
+                project.implementation_launched_at.isoformat() if project.implementation_launched_at else None
+            ),
+            product_id=project.product_id,
+            tenant_key=project.tenant_key,
+            execution_mode=project.execution_mode,
+            auto_checkin_enabled=project.auto_checkin_enabled,
+            auto_checkin_interval=project.auto_checkin_interval,
+            cancellation_reason=project.cancellation_reason,
+            early_termination=project.early_termination,
+            created_at=project.created_at.isoformat() if project.created_at else None,
+            updated_at=project.updated_at.isoformat() if project.updated_at else None,
+            completed_at=project.completed_at.isoformat() if project.completed_at else None,
+            agents=[],
+            agent_count=0,
+            message_count=0,
+            # Handover 0440a: Taxonomy fields
+            project_type_id=project.project_type_id,
+            project_type=project.project_type,
+            series_number=project.series_number,
+            subseries=project.subseries,
+            taxonomy_alias=project.taxonomy_alias,
+            hidden=project.hidden is True,
+            successor_project_id=project.successor_project_id,
+        )
 
     @staticmethod
     def _build_project_data(project) -> ProjectData:

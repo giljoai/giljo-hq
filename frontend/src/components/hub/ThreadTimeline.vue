@@ -16,49 +16,21 @@
       No messages yet.
     </div>
 
-    <!-- FE-9012c (D3): message-relative waiting/read/sent filter, backed by the D4
-         recipient junctions (surfaced via include_recipient_state). Waiting = an
-         action-required post with recipients yet to act; Read = recipients acted;
-         Sent = authored by you. Hidden in readonly mode (Phase 5 / D1(a) surfaces
-         like the Project Review pane show the plain message list only). -->
-    <div
-      v-if="effectiveThreadId && messages.length > 0 && !readonly"
-      class="tab-pills thread-timeline__filter"
-      role="tablist"
-      data-testid="thread-filter"
-    >
-      <button
-        v-for="opt in filterOptions"
-        :key="opt.key"
-        type="button"
-        class="pill-btn"
-        :class="{ active: activeFilter === opt.key }"
-        role="tab"
-        :aria-selected="activeFilter === opt.key ? 'true' : 'false'"
-        :data-testid="`thread-filter-${opt.key}`"
-        @click="activeFilter = opt.key"
-      >
-        {{ opt.label }} ({{ opt.count }})
-      </button>
-    </div>
-
-    <div
-      v-if="effectiveThreadId && messages.length > 0 && visibleMessages.length === 0 && !readonly"
-      class="thread-timeline__empty"
-      data-testid="timeline-filter-empty"
-    >
-      No {{ activeFilterLabel }} messages.
-    </div>
-
     <div
       v-for="message in decoratedMessages"
       :key="message.message_id"
       class="timeline-msg"
-      :class="message._isUser ? 'timeline-msg--user' : 'timeline-msg--agent'"
+      :class="[
+        message._isUser ? 'timeline-msg--user' : 'timeline-msg--agent',
+        { 'timeline-msg--grouped': message._grouped },
+      ]"
       :data-testid="`timeline-message-${message.message_id}`"
     >
-      <!-- Sender badge: user -> brand-yellow avatar+initials; agent -> tinted role color badge -->
+      <!-- Sender badge: user -> brand-yellow avatar+initials; agent -> tinted role color
+           badge. A grouped continuation keeps the column but shows no badge, so the
+           run of posts reads as one person speaking. -->
       <div
+        v-if="!message._grouped"
         class="timeline-msg__avatar smooth-border"
         :class="{ 'timeline-msg__avatar--user': message._isUser }"
         :style="message._isUser ? undefined : avatarStyle(message._name)"
@@ -67,27 +39,43 @@
       >
         {{ avatarInitials(message._name) }}
       </div>
+      <div v-else class="timeline-msg__avatar-spacer" aria-hidden="true" />
 
       <div class="timeline-msg__body">
-        <!-- Header row -->
-        <div class="timeline-msg__header">
+        <!-- Header row: who / harness / time. NO host — the server cannot know a
+             client's hostname, so it would have to be self-declared, which is the
+             thing BE-9289a removed. -->
+        <div v-if="!message._grouped" class="timeline-msg__header">
+          <!-- FE-9365d: the name is WHITE for every agent. Role colour lives in the
+               badge and only there. Tinting the name too made six agents in a thread
+               read as six different levels of importance — a hierarchy the data does
+               not contain and the operator cannot act on. -->
           <span
             class="timeline-msg__sender"
             :class="{ 'timeline-msg__sender--user': message._isUser }"
-            :style="message._isUser ? undefined : senderColor(message._name)"
           >
             {{ message._name }}
+          </span>
+          <span
+            v-if="message._harness"
+            class="timeline-msg__harness"
+            data-testid="message-harness"
+          >
+            {{ message._harness }}
           </span>
           <span class="timeline-msg__time" data-testid="message-time">
             {{ formatTime(message.created_at) }}
           </span>
-          <!-- broadcast / direct chip -->
+          <!-- Direct posts only. "broadcast" is the server-side DEFAULT, so badging it
+               marked effectively every message and carried no information; the chip now
+               fires only on the case that is actually a choice. -->
           <span
+            v-if="message._isDirect"
             class="timeline-msg__type-chip smooth-border"
-            :style="typeChipStyle(message.message_type)"
+            :style="directChipStyle"
             data-testid="message-type-chip"
           >
-            {{ message.message_type === 'broadcast' ? 'broadcast' : 'direct' }}
+            direct
           </span>
           <!-- requires_action marker -->
           <span
@@ -100,9 +88,21 @@
           </span>
         </div>
 
-        <!-- Content -->
+        <!-- SEC-0003: message bodies are agent-authored, so every one goes through
+             useSanitizeMarkdown -> marked -> hardened DOMPurify (renderedBody is the
+             only producer of this string and has no other path). Nothing reaches the
+             DOM unsanitized. v-html sanctioned via eslint.config.js file override. -->
         <div class="timeline-msg__content" data-testid="message-content">
-          {{ message.content }}
+          <div class="timeline-msg__md" v-html="renderedBody(message)" />
+          <button
+            v-if="message._foldable"
+            type="button"
+            class="timeline-msg__unfold"
+            :data-testid="`message-unfold-${message.message_id}`"
+            @click="toggleExpanded(message.message_id)"
+          >
+            {{ expanded.has(message.message_id) ? 'show less' : '…show the full post' }}
+          </button>
         </div>
       </div>
     </div>
@@ -110,8 +110,9 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useCommHubStore } from '@/stores/commHubStore'
+import { useSanitizeMarkdown } from '@/composables/useSanitizeMarkdown'
 import { getAgentColor } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
 
@@ -120,59 +121,16 @@ const props = defineProps({
   // to the store's selected thread when omitted, so existing callers like
   // HubView.vue (`<ThreadTimeline />` with no props) keep working identically.
   threadId: { type: String, default: null },
-  // Hides the interactive waiting/read/sent filter pills -- for embedding in a
-  // read-only pane (e.g. ProjectReviewModal's "Project Comms" section) that
-  // must not offer interactive filtering chrome.
-  readonly: { type: Boolean, default: false },
 })
 
 const commHub = useCommHubStore()
+const { sanitizeMarkdown } = useSanitizeMarkdown()
 const timelineEl = ref(null)
 
 const effectiveThreadId = computed(() => props.threadId || commHub.selectedThreadId)
 const messages = computed(() => {
   if (!effectiveThreadId.value) return []
   return commHub.messagesFor(effectiveThreadId.value)
-})
-
-// ---- FE-9012c (D3): waiting / read / sent filter ----
-// MESSAGE-relative (per-recipient junction state), NOT the viewer's inbox — this
-// is what the human user audits: what did agents DO with each post. A message
-// with no loaded junction state (e.g. a live WS arrival) simply isn't counted in
-// Waiting/Read until the thread reloads with include_recipient_state.
-const activeFilter = ref('all')
-
-function isSent(m) {
-  // Authored by the human user (participant_type "user" on the thread).
-  return isUserMessage(m)
-}
-function isWaiting(m) {
-  return !!m.requires_action && Array.isArray(m.pending_for) && m.pending_for.length > 0
-}
-function isRead(m) {
-  // Every recipient has acted (acked or completed) — nobody left pending.
-  if (!Array.isArray(m.recipients) || m.recipients.length === 0) return false
-  const acted = (m.acked_by?.length || 0) + (m.completed_by?.length || 0)
-  return acted > 0 && Array.isArray(m.pending_for) && m.pending_for.length === 0
-}
-
-const filterOptions = computed(() => [
-  { key: 'all', label: 'All', count: messages.value.length },
-  { key: 'waiting', label: 'Waiting', count: messages.value.filter(isWaiting).length },
-  { key: 'read', label: 'Read', count: messages.value.filter(isRead).length },
-  { key: 'sent', label: 'Sent', count: messages.value.filter(isSent).length },
-])
-
-const activeFilterLabel = computed(
-  () => (filterOptions.value.find((o) => o.key === activeFilter.value)?.label || 'All').toLowerCase(),
-)
-
-const visibleMessages = computed(() => {
-  const list = messages.value
-  if (activeFilter.value === 'waiting') return list.filter(isWaiting)
-  if (activeFilter.value === 'read') return list.filter(isRead)
-  if (activeFilter.value === 'sent') return list.filter(isSent)
-  return list
 })
 
 // Auto-scroll to bottom when new messages arrive
@@ -189,43 +147,89 @@ watch(
 
 // ---- display helpers ----
 
-// Resolve each message's author from the thread's participant directory — the
-// AUTHORITATIVE signal: participant_type distinguishes a genuine human user from
-// an agent, and display_name carries the agent's friendly role. This replaces the
-// old "from_agent_id is UUID-shaped => user" heuristic, which misfired once the
-// worker protocol had agents post under their own agent_id UUID: agent posts were
-// mislabeled as USER posts and rendered with the brand-yellow user avatar and a raw
-// UUID name. Falls back to the message's own fields + the UUID heuristic when the
-// author isn't in the loaded participant list, so an un-enrolled poster never
-// renders worse than before.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
+// WHAT the author is comes from the server: `from_kind` ('agent' | 'user') is resolved
+// at post time, where the backend actually knows which attribution branch ran. The
+// client does not decide this and must not try to.
+//
+// It used to guess from the SHAPE of from_agent_id ("looks like a UUID therefore
+// human"), which broke the moment agents began posting under their own agent_id UUID:
+// those posts rendered as the HUMAN user, right-aligned and brand-yellow, with a raw
+// UUID for a name. The guess was unfixable on this side — from_agent_id is a
+// self-declared functional key (recipient self-exclusion, baton matching, read
+// cursors), so its shape carries no information about the author. BE-9289a made the
+// server answer the question instead, and every poster is now registered, so the
+// heuristic is gone rather than merely demoted to a fallback.
+//
+// The participant directory is still consulted, but only for the friendlier NAME and
+// the harness the poster connected from.
 function authorFor(message) {
   const p = commHub
     .participantsFor(effectiveThreadId.value)
     .find((x) => x.participant_id === message.from_agent_id)
-  if (p) {
-    return {
-      isUser: p.participant_type === 'user',
-      name: p.display_name || message.from_display_name || message.from_agent_id,
-    }
-  }
   return {
-    isUser: UUID_RE.test(message.from_agent_id || ''),
-    name: message.from_display_name || message.from_agent_id,
+    isUser: message.from_kind === 'user',
+    name: p?.display_name || message.from_display_name || message.from_agent_id,
+    harness: p?.harness || '',
   }
 }
 
-function isUserMessage(message) {
-  return authorFor(message).isUser
+// `generic` is the resolver's fail-safe floor, not a harness name — label it. An
+// author with no participant row shows NO harness rather than a guessed one.
+function harnessLabel(harness) {
+  if (!harness) return ''
+  return harness === 'generic' ? 'Generic Harness' : harness
+}
+
+// A run of posts by the same author, close in time, reads as one person speaking:
+// the continuation keeps the column but drops the badge and the header row.
+const GROUP_WINDOW_MS = 5 * 60 * 1000
+
+function continuesRun(message, previous) {
+  if (!previous) return false
+  if (previous.from_agent_id !== message.from_agent_id) return false
+  if (previous.from_kind !== message.from_kind) return false
+  if (message.requires_action) return false
+  const a = new Date(previous.created_at).getTime()
+  const b = new Date(message.created_at).getTime()
+  if (Number.isNaN(a) || Number.isNaN(b)) return false
+  return b - a < GROUP_WINDOW_MS
+}
+
+// Long posts fold to their first sentence until the reader asks for the rest.
+const FOLD_THRESHOLD = 420
+const expanded = reactive(new Set())
+
+function toggleExpanded(id) {
+  if (expanded.has(id)) expanded.delete(id)
+  else expanded.add(id)
+}
+
+function firstSentence(text) {
+  const match = text.match(/^[\s\S]*?[.!?](?=\s|$)/)
+  const lead = match ? match[0] : text.slice(0, 200)
+  return lead.length < text.length ? lead : text
+}
+
+function renderedBody(message) {
+  const raw = message.content || ''
+  const body = message._foldable && !expanded.has(message.message_id) ? firstSentence(raw) : raw
+  return sanitizeMarkdown(body)
 }
 
 // Enrich the visible messages with resolved author identity so the template binds
-// off stable per-message fields (_isUser / _name) instead of re-resolving per node.
+// off stable per-message fields instead of re-resolving per node.
 const decoratedMessages = computed(() =>
-  visibleMessages.value.map((m) => {
+  messages.value.map((m, i) => {
     const author = authorFor(m)
-    return { ...m, _isUser: author.isUser, _name: author.name }
+    return {
+      ...m,
+      _isUser: author.isUser,
+      _name: author.name,
+      _harness: author.isUser ? '' : harnessLabel(author.harness),
+      _isDirect: m.message_type === 'direct',
+      _grouped: continuesRun(m, messages.value[i - 1]),
+      _foldable: (m.content || '').length > FOLD_THRESHOLD,
+    }
   }),
 )
 
@@ -249,28 +253,15 @@ function avatarStyle(name) {
   }
 }
 
-function senderColor(name) {
-  const colorObj = getAgentColor(name)
-  const hex = colorObj?.hex || FALLBACK_HEX
-  return { color: hex }
-}
-
-// Type chip: broadcast = sky-blue (implementer), direct = lavender (reviewer).
-// Hex derived from getAgentColor() — no hardcoded hex literals.
-const TYPE_CHIP_AGENT_MAP = {
-  broadcast: 'implementer',
-  direct: 'reviewer',
-}
-
-function typeChipStyle(type) {
-  const agentName = TYPE_CHIP_AGENT_MAP[type?.toLowerCase()] || TYPE_CHIP_AGENT_MAP.direct
-  const hex = getAgentColor(agentName)?.hex
+// Direct chip: lavender (reviewer). Hex derived from getAgentColor() — no hardcoded hex.
+const directChipStyle = computed(() => {
+  const hex = getAgentColor('reviewer')?.hex
   return {
     backgroundColor: hexToRgba(hex, 0.15),
     color: hex,
     borderRadius: '8px',
   }
-}
+})
 
 function formatTime(iso) {
   if (!iso) return ''
@@ -302,26 +293,17 @@ function formatTime(iso) {
     text-align: center;
     padding: v.$spacing-xl 0;
   }
-
-  // FE-9012c (D3): the filter stays pinned while the message list scrolls under it.
-  // Opaque base-surface background so scrolled messages don't bleed through.
-  &__filter {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    flex-shrink: 0;
-    padding: v.$spacing-xs v.$spacing-xs v.$spacing-sm;
-    margin: (-#{v.$spacing-md}) (-#{v.$spacing-md}) 0;
-    background: $elevation-flat;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
 }
 
 .timeline-msg {
   display: flex;
   gap: v.$spacing-sm;
   align-items: flex-start;
+
+  // A continuation sits tighter against the post above it.
+  &--grouped {
+    margin-top: -#{v.$spacing-sm};
+  }
 
   &--user {
     flex-direction: row-reverse;
@@ -354,7 +336,7 @@ function formatTime(iso) {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.65rem;
+    font-size: 0.6875rem; // 11 — the floor
     font-weight: 700;
     letter-spacing: 0.02em;
 
@@ -365,6 +347,11 @@ function formatTime(iso) {
       color: $color-brand-yellow;
       border-radius: 8px;
     }
+  }
+
+  &__avatar-spacer {
+    width: 32px;
+    flex-shrink: 0;
   }
 
   &__body {
@@ -382,23 +369,29 @@ function formatTime(iso) {
   }
 
   &__sender {
-    font-size: 0.75rem;
-    font-weight: 700;
-    text-transform: capitalize;
+    font-size: 0.78125rem; // 12.5
+    font-weight: 600;
+    // White for every agent — the badge beside it already carries the role colour.
+    color: #fff;
+    // Names are identifiers (LANE_A, worker-2). Capitalising them rewrites the
+    // string the operator quotes back to an agent.
+    text-transform: none;
 
     &--user {
       color: $color-brand-yellow;
     }
   }
 
+  &__harness,
   &__time {
-    font-size: 0.68rem;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.6875rem; // 11 — the floor
     color: var(--text-muted);
   }
 
   &__type-chip,
   &__action-flag {
-    font-size: 0.65rem;
+    font-size: 0.6875rem; // 11 — the floor
     font-weight: 600;
     padding: 1px 6px;
     text-transform: lowercase;
@@ -418,8 +411,63 @@ function formatTime(iso) {
     line-height: 1.55;
     color: $color-text-primary;
     padding: v.$spacing-sm v.$spacing-md;
-    white-space: pre-wrap;
     word-break: break-word;
+  }
+
+  // Markdown output. Kept close to the plain-text rhythm the pane had before, so a
+  // post without any markdown looks unchanged.
+  &__md {
+    // pre-wrap inside the paragraph, not on the container: agents write single
+    // newlines and `marked` leaves them as raw newlines inside the <p>, so without
+    // this a hard-wrapped post reflows into one block. Scoping it to <p> keeps the
+    // inter-block whitespace from rendering as stray blank lines.
+    :deep(p) { margin: 0 0 0.5em; white-space: pre-wrap; }
+    :deep(p:last-child) { margin-bottom: 0; }
+    :deep(ul),
+    :deep(ol) { margin: 0 0 0.5em; padding-left: 1.2em; }
+    :deep(h1),
+    :deep(h2),
+    :deep(h3),
+    :deep(h4) { font-size: 0.9rem; font-weight: 700; margin: 0.4em 0 0.3em; }
+    :deep(code) {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.75rem;
+      background: rgba(255, 255, 255, 0.07);
+      border-radius: $border-radius-sharp;
+      padding: 1px 4px;
+    }
+    :deep(pre) {
+      background: rgba(0, 0, 0, 0.28);
+      border-radius: $border-radius-default;
+      padding: v.$spacing-sm;
+      overflow-x: auto;
+      margin: 0 0 0.5em;
+
+      code { background: none; padding: 0; }
+    }
+    :deep(blockquote) {
+      margin: 0 0 0.5em;
+      padding-left: v.$spacing-sm;
+      border-left: 2px solid rgba(255, 255, 255, 0.18);
+      color: var(--text-secondary);
+    }
+    :deep(a) { color: $color-brand-yellow; }
+    :deep(table) { border-collapse: collapse; }
+    :deep(th),
+    :deep(td) { border: 1px solid rgba(255, 255, 255, 0.12); padding: 2px 6px; }
+  }
+
+  &__unfold {
+    display: inline-block;
+    margin-top: 2px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: $color-brand-yellow;
+    font-size: 0.75rem;
+    cursor: pointer;
+
+    &:hover { text-decoration: underline; }
   }
 }
 </style>

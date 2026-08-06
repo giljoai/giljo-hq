@@ -40,6 +40,14 @@ class TestDepthDefaultsConsolidation:
             f"defaults.py={canonical['git_commits']}"
         )
 
+        # BE-9322: tech_stack in DEFAULT_DEPTHS maps to tech_stack_sections in canonical.
+        # Before the fix these carried a hardcoded None -- a category can only be
+        # resolved from the DB-stored user setting if its default entry exists.
+        assert DEFAULT_DEPTHS["tech_stack"] == canonical["tech_stack_sections"], (
+            f"tech_stack mismatch: fetch_context={DEFAULT_DEPTHS['tech_stack']}, "
+            f"defaults.py={canonical['tech_stack_sections']}"
+        )
+
         # vision_documents - same key
         assert DEFAULT_DEPTHS["vision_documents"] == canonical["vision_documents"]
 
@@ -357,6 +365,7 @@ class TestFetchContextDepthFromDB:
             git_commits=50,
             vision_documents="full",
             agent_templates="full",
+            tech_stack_sections="required",
         )
 
         # Mock the DB session and query
@@ -367,6 +376,7 @@ class TestFetchContextDepthFromDB:
         mock_session.execute = AsyncMock(return_value=mock_result)
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session.info = {}  # tenant_session_context save/restore target
 
         mock_db = MagicMock()
         mock_db.get_session_async = MagicMock(return_value=mock_session)
@@ -378,6 +388,14 @@ class TestFetchContextDepthFromDB:
         assert result["git_history"] == 50
         assert result["vision_documents"] == "full"
         assert result["agent_templates"] == "full"
+        # BE-9322: the DB-format key must map to the CATEGORY_TOOLS/effective_depths
+        # key name ("tech_stack"), not pass through unmapped as
+        # "tech_stack_sections" -- that mismatch was the root cause of the dead
+        # control: fetch_context.py looked up effective_depths.get("tech_stack")
+        # and always got None back.
+        assert result["tech_stack"] == "required", (
+            f"tech_stack_sections must normalize to the 'tech_stack' key, got keys={list(result.keys())}"
+        )
 
     def test_load_user_depth_config_returns_none_when_no_user(self):
         """_load_user_depth_config returns None when no user found."""
@@ -393,6 +411,7 @@ class TestFetchContextDepthFromDB:
         mock_session.execute = AsyncMock(return_value=mock_result)
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session.info = {}  # tenant_session_context save/restore target
 
         mock_db = MagicMock()
         mock_db.get_session_async = MagicMock(return_value=mock_session)
@@ -417,6 +436,7 @@ class TestFetchContextDepthFromDB:
         mock_session.execute = AsyncMock(return_value=mock_result)
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session.info = {}  # tenant_session_context save/restore target
 
         mock_db = MagicMock()
         mock_db.get_session_async = MagicMock(return_value=mock_session)
@@ -444,6 +464,7 @@ class TestFetchContextDepthFromDB:
         mock_session.execute = AsyncMock(return_value=mock_result)
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session.info = {}  # tenant_session_context save/restore target
 
         mock_db = MagicMock()
         mock_db.get_session_async = MagicMock(return_value=mock_session)

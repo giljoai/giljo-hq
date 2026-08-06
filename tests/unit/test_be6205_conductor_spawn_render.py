@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import pytest
 
+import giljo_mcp.prompts.launch_command_synth as lcs
 from giljo_mcp.prompts.launch_command_synth import (
     AUTONOMY_FLAGS,
     autonomy_flag,
@@ -90,12 +91,53 @@ def test_no_tabcolor_noise(mode: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_windows_command_is_direct_wt_with_pwd_and_inline_prompt() -> None:
+def test_windows_command_is_direct_wt_with_pwd_and_inline_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
     # BE-9035c: the direct pwsh -NoExit / claude launch line now lives on the
     # multi_terminal (list-every-classic-harness) path.
+    # TSK-9263: pin pwsh-present so the byte assertion is host-independent
+    # (a no-PS7 Windows host would otherwise render the powershell fallback).
+    monkeypatch.setattr(lcs, "_pwsh_available", lambda: True)
     out = render_suborch_spawn_command("multi_terminal", _RUN)
     assert "wt -w 0 new-tab --title 'giljo sub-orch' -d \"$PWD\"" in out, "direct wt, spaced title, $PWD cwd"
     assert "pwsh -NoExit -Command \"claude --dangerously-skip-permissions '" in out, "inline single-quoted prompt"
+
+
+# ---------------------------------------------------------------------------
+# TSK-9263 — Windows launch-shell ladder: pwsh (PS7) preferred, powershell
+# (stock Windows PowerShell 5.1) as the runtime fallback. PS7 is NOT stock
+# Windows, so a CE install on a plain Windows host must get a spawn command
+# its box can actually run. Mirrors the Linux gnome-terminal ->
+# x-terminal-emulator fallback ladder idiom already in this module.
+# ---------------------------------------------------------------------------
+
+
+def test_win_spawn_stays_pwsh_when_pwsh_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PS7 host: the validated pwsh -NoExit launch line is unchanged."""
+    monkeypatch.setattr(lcs, "_is_windows_host", lambda: True)
+    monkeypatch.setattr(lcs, "_pwsh_available", lambda: True)
+    out = render_suborch_spawn_command("multi_terminal", _RUN)
+    assert "pwsh -NoExit -Command" in out, "PS7 host keeps the preferred pwsh launch shell"
+    assert "powershell -NoExit" not in out, "no fallback shell when pwsh exists"
+
+
+def test_win_spawn_falls_back_to_powershell_when_pwsh_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No-PS7 Windows host: fall back to the stock powershell binary."""
+    monkeypatch.setattr(lcs, "_is_windows_host", lambda: True)
+    monkeypatch.setattr(lcs, "_pwsh_available", lambda: False)
+    out = render_suborch_spawn_command("multi_terminal", _RUN)
+    assert "powershell -NoExit -Command" in out, "stock Windows host must get a runnable shell"
+    assert "pwsh -NoExit" not in out, "must not emit a binary the host does not have"
+
+
+def test_win_spawn_keeps_pwsh_on_non_windows_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-Windows server host (SaaS / Linux CI): which('pwsh') says nothing about
+    the REMOTE Windows reader's box — keep the validated pwsh default so the
+    render (and its byte-pinned goldens) stays host-independent off-Windows."""
+    monkeypatch.setattr(lcs, "_is_windows_host", lambda: False)
+    monkeypatch.setattr(lcs, "_pwsh_available", lambda: False)
+    out = render_suborch_spawn_command("multi_terminal", _RUN)
+    assert "pwsh -NoExit -Command" in out, "non-Windows host keeps the validated default"
+    assert "powershell -NoExit" not in out
 
 
 def test_linux_command_is_direct_gnome_terminal_with_pwd() -> None:
@@ -361,6 +403,49 @@ def test_thin_prompt_is_inline_safe() -> None:
     assert "<SUB_ORCH_JOB_ID>" in prompt
     assert "get_job_mission" in prompt
     assert "health_check" in prompt
+
+
+# ---------------------------------------------------------------------------
+# BE-9291 (DoD step 5) — the spawn prompt must name the FK Hub-discovery path
+#
+# The retired convention discovered a chain hub by substring-searching its own
+# SUBJECT for the run id. BE-9291 moved discovery onto ``comm_threads.sequence_run_id``
+# and then removed the run id from new hub subjects — so ``search_threads`` with the
+# run id as the query now returns NOTHING. The spawn prompt hands the sub-orch its run
+# id in the same sentence, so naming a search tool without naming its argument is an
+# invitation to search by the one identifier in scope. That is this project's own
+# SILENT failure shape: no error, the sub-orch simply never finds its hub.
+#
+# The prompt must therefore name the CALL and what it RETURNS, not just a tool.
+# ---------------------------------------------------------------------------
+
+
+def test_thin_prompt_names_the_fk_hub_discovery_path() -> None:
+    """The spawn prompt routes Hub discovery through the FK, not the retired subject
+    search: it names the CALL (``get_context`` chain) and its RESULT (``hub_thread_id``),
+    plus the read tool. Naming a tool without its argument is what let the sub-orch fall
+    back to the run id, which no longer resolves."""
+    prompt = build_conductor_thin_prompt(_RUN)
+    assert "get_context chain" in prompt, "the discovery CALL must be named, not just its result"
+    assert "hub_thread_id" in prompt, "the spawn prompt must name the FK discovery result"
+    assert "get_thread_history" in prompt, "the sub-orch still needs the Hub READ tool"
+    # NEGATIVE ON THE FORM, NOT THE BARE NAME — deliberate, and it is not a weaker
+    # assertion by accident. ``search_threads`` is still a legitimate general-purpose
+    # tool whose bare name appears in the CH_SUB_ORCHESTRATOR ToolSearch bootstrap hint.
+    # This prompt is embedded VERBATIM into the CH_CHAIN_DRIVE render (once per platform
+    # preset), so a bare-name negative copied from here to any render-level test would be
+    # false for a reason with nothing to do with discovery. Pin the retired PAIR instead.
+    assert "(search_threads," not in prompt, "the retired subject-search discovery pair must not return"
+
+
+@pytest.mark.parametrize("mode", _ALL_MODES)
+def test_spawn_command_ships_the_fk_hub_discovery_path(mode: str) -> None:
+    """Every rendered spawn command — the thing a sub-orchestrator is actually launched
+    with, on every mode — carries the FK discovery path and not the retired pair."""
+    out = render_suborch_spawn_command(mode, _RUN)
+    assert "get_context chain" in out
+    assert "hub_thread_id" in out
+    assert "(search_threads," not in out, "the retired subject-search discovery pair must not return"
 
 
 # ---------------------------------------------------------------------------

@@ -51,7 +51,7 @@
             :key="archive.filename"
             @click="$emit('download-archive', archive.filename)"
           >
-            <v-list-item-title>{{ formatArchiveDate(archive.date) }}</v-list-item-title>
+            <v-list-item-title>{{ archiveTitle(archive) }}</v-list-item-title>
             <v-list-item-subtitle class="log-archive-size"
               >{{ archive.size_kb }} KB</v-list-item-subtitle
             >
@@ -87,6 +87,13 @@ function formatArchiveDate(dateStr) {
   if (!dateStr) return 'Unknown'
   const date = new Date(`${dateStr}T00:00:00`)
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+// Size-rotated archives can share a date, so the date alone does not identify
+// them. Legacy date-named archives have no index and need no suffix.
+function archiveTitle(archive) {
+  const when = formatArchiveDate(archive.date)
+  return archive.rotation_index ? `${when} (#${archive.rotation_index})` : when
 }
 </script>
 

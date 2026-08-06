@@ -452,7 +452,7 @@ class TenantExportService:
     @staticmethod
     def _build_schema_md(model_counts: dict[str, int], *, fidelity: bool = False) -> str:
         lines: list[str] = [
-            "# GiljoAI MCP — Tenant Data Export",
+            "# Giljo HQ — Tenant Data Export",
             "",
             _FIDELITY_NOTICE if fidelity else _REDACTION_NOTICE,
             "",

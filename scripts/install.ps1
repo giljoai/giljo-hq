@@ -7,10 +7,10 @@
 
 <#
 .SYNOPSIS
-    GiljoAI MCP -- Windows One-Liner Installer
+    Giljo HQ -- Windows One-Liner Installer
 
 .DESCRIPTION
-    Downloads, verifies, and installs GiljoAI MCP from the latest GitHub release.
+    Downloads, verifies, and installs Giljo HQ from the latest GitHub release.
     Handles prerequisite checking/installation, SHA256 verification, environment
     setup, and first-run launch.
 
@@ -18,7 +18,7 @@
         irm giljo.ai/install.ps1 | iex
 
     Customized install:
-        .\install.ps1 -InstallDir "D:\GiljoAI" -SkipPrereqs
+        .\install.ps1 -InstallDir "C:\GiljoAI" -SkipPrereqs
 
 .PARAMETER InstallDir
     Installation directory. Defaults to $HOME\GiljoAI_MCP.
@@ -49,7 +49,7 @@ $ProgressPreference = 'SilentlyContinue'
 # GILJO_INSTALL_SOURCE -- LAN / self-hosted override (INF-5090)
 #
 # Default (env var unset or empty): release metadata is fetched from
-#   https://api.github.com/repos/giljoai/GiljoAI_MCP/releases/latest
+#   https://api.github.com/repos/giljoai/giljo-hq/releases/latest
 # which is the standard public GitHub path for CE installs.
 #
 # LAN / internal override: set this env var to the Gitea API base URL
@@ -64,7 +64,7 @@ $ProgressPreference = 'SilentlyContinue'
 # intentionally placed at the TOP of the source-URL section so that merge
 # does not collide with INF-0004's atomic-extract / unified-log additions.
 # ---------------------------------------------------------------------------
-$script:GITHUB_REPO = "giljoai/GiljoAI_MCP"
+$script:GITHUB_REPO = "giljoai/giljo-hq"
 
 if ($env:GILJO_INSTALL_SOURCE -and $env:GILJO_INSTALL_SOURCE.Trim() -ne "") {
     # Override: use the caller-supplied API base (e.g. LAN Gitea)
@@ -119,7 +119,7 @@ $script:SensitivePattern  = '(?i)(password|passwd|secret|token|key|credential)([
 
 function Write-Banner {
     Write-Host ""
-    Write-Host "    GiljoAI MCP Community Edition" -ForegroundColor Yellow
+    Write-Host "    Giljo HQ Community Edition" -ForegroundColor Yellow
     Write-Host "    Windows Installer" -ForegroundColor $script:MUTED_COLOR
     Write-Host ""
 }
@@ -192,6 +192,35 @@ function Test-RealCommand {
         return $false
     }
     return $true
+}
+
+function Test-PortInUse {
+    <#
+    .SYNOPSIS
+        True when something is already listening on a local TCP port.
+
+        Used to pre-check 5432 before the winget PostgreSQL install, which pins
+        --serverport 5432 and fails opaquely when the port is taken. A raw
+        TcpClient is used rather than Test-NetConnection: it needs no elevation,
+        adds no module load, and returns in milliseconds. (INF-9321)
+    #>
+    param(
+        [int]$Port,
+        [int]$TimeoutMs = 700
+    )
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $async = $client.BeginConnect("127.0.0.1", $Port, $null, $null)
+        if (-not $async.AsyncWaitHandle.WaitOne($TimeoutMs, $false)) {
+            return $false
+        }
+        $client.EndConnect($async)
+        return $true
+    } catch {
+        return $false
+    } finally {
+        $client.Close()
+    }
 }
 
 function Get-ParsedVersion {
@@ -413,6 +442,15 @@ function Test-Prerequisites {
             Exit-WithError "winget is required to install PostgreSQL. Please install PostgreSQL manually from https://www.postgresql.org/download/windows/ and re-run this script."
         }
 
+        # Port pre-check (INF-9321). The winget override below pins
+        # --serverport 5432. If something else already holds that port the EDB
+        # installer fails, and the only signal is a numeric winget exit code
+        # several minutes later -- after the user has typed a password. Say it
+        # up front, in words, before anything is installed.
+        if (Test-PortInUse -Port 5432) {
+            Exit-WithError "Port 5432 is already in use, and PostgreSQL must be installed on it.`nSomething is already listening there - most likely an existing PostgreSQL, or a Docker container publishing 5432.`nStop or reconfigure whatever holds port 5432, then re-run this script."
+        }
+
         # A) PostgreSQL admin password + DB name.
         # Unattended (GILJO_UNATTENDED=1): read from env, no prompts. install.py
         # reads the same env vars for its own DB step. (INF-6037)
@@ -454,7 +492,7 @@ function Test-Prerequisites {
 
             # B) Prompt for database name
             Write-Host ""
-            Write-Host "    Choose the database name for GiljoAI MCP." -ForegroundColor $script:INFO_COLOR
+            Write-Host "    Choose the database name for Giljo HQ." -ForegroundColor $script:INFO_COLOR
             Write-Host "    Change this only if running multiple installations on the same server." -ForegroundColor $script:MUTED_COLOR
             $pgDbInput = Read-Host "    Database name [giljo_mcp]"
             if ([string]::IsNullOrWhiteSpace($pgDbInput)) {
@@ -531,15 +569,25 @@ function Test-Prerequisites {
         Write-Ok "PostgreSQL detected after install"
     }
 
-    # Final verification of winget-installed items
+    # Final verification of winget-installed items.
+    # Test-RealCommand, NOT Test-CommandExists: the prereq check above already
+    # treats a WindowsApps stub as missing, so verifying with the weaker test
+    # would let the very stub we routed around satisfy the check -- winget could
+    # fail, or land python somewhere behind the stub on PATH, and this gate would
+    # still pass. The install then dies later, further from the cause. (INF-9321)
+    #
+    # Only these winget-installed items get the stricter test. Do NOT extend it to
+    # the `winget` probes above: winget itself ships as an MSIX whose own launcher
+    # lives in WindowsApps, so Test-RealCommand reports it missing and the
+    # installer would abort on every machine that has it.
     foreach ($item in $wingetItems) {
         $cmd = switch ($item) {
             "python" { "python" }
             "node"   { "node" }
             "git"    { "git" }
         }
-        if (-not (Test-CommandExists $cmd)) {
-            Exit-WithError "$item was installed but is not on PATH. Please close and reopen your terminal, then re-run this script."
+        if (-not (Test-RealCommand $cmd)) {
+            Exit-WithError "$item was installed but is not usable from PATH (a Windows Store app-execution-alias stub may still be shadowing it). Please close and reopen your terminal, then re-run this script."
         }
     }
 
@@ -888,7 +936,7 @@ function Install-Shortcuts {
     $batPath = Join-Path $TargetDir "start-giljoai.bat"
     $batContent = @"
 @echo off
-title GiljoAI MCP Server
+title Giljo HQ Server
 cd /d "%~dp0"
 call venv\Scripts\activate.bat
 python startup.py --verbose
@@ -905,14 +953,14 @@ pause
 
     # Create Start Menu shortcut
     $startMenuDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
-    $shortcutPath = Join-Path $startMenuDir "GiljoAI MCP.lnk"
+    $shortcutPath = Join-Path $startMenuDir "Giljo HQ.lnk"
 
     try {
         $wshShell = New-Object -ComObject WScript.Shell
         $shortcut = $wshShell.CreateShortcut($shortcutPath)
         $shortcut.TargetPath = $batPath
         $shortcut.WorkingDirectory = $TargetDir
-        $shortcut.Description = "GiljoAI MCP Server v$Version"
+        $shortcut.Description = "Giljo HQ Server v$Version"
         if (Test-Path $iconPath) { $shortcut.IconLocation = "$iconPath, 0" }
         $shortcut.Save()
         Write-Ok "Start Menu shortcut created"
@@ -921,13 +969,13 @@ pause
     }
 
     # Desktop shortcut
-    $desktopPath = Join-Path ([Environment]::GetFolderPath("Desktop")) "GiljoAI MCP.lnk"
+    $desktopPath = Join-Path ([Environment]::GetFolderPath("Desktop")) "Giljo HQ.lnk"
     try {
         $wshShell2 = New-Object -ComObject WScript.Shell
         $desktopShortcut = $wshShell2.CreateShortcut($desktopPath)
         $desktopShortcut.TargetPath = $batPath
         $desktopShortcut.WorkingDirectory = $TargetDir
-        $desktopShortcut.Description = "GiljoAI MCP Server v$Version"
+        $desktopShortcut.Description = "Giljo HQ Server v$Version"
         if (Test-Path $iconPath) { $desktopShortcut.IconLocation = "$iconPath, 0" }
         $desktopShortcut.Save()
         Write-Ok "Desktop shortcut created"
@@ -986,6 +1034,18 @@ function Confirm-UpdateAction {
         existing installation is detected.
     #>
     param([string]$CurrentVersion, [string]$LatestVersion)
+
+    # Unattended runs have no console to answer this, so Read-Host below would
+    # block forever against any non-clean target -- the automated installer lab
+    # hung here rather than failing. Abort instead of guessing: "update" would
+    # touch an install we were not asked to touch, and "reinstall" would destroy
+    # it. The caller can state its intent explicitly with -Update, or point
+    # GILJO_INSTALL_DIR at a directory that has no install in it. (INF-9321)
+    if ($env:GILJO_UNATTENDED -eq "1") {
+        Exit-WithError ("An existing Giljo HQ installation (version $CurrentVersion) was found in the target directory, " +
+            "and GILJO_UNATTENDED=1 leaves no way to ask what to do with it. Re-run with -Update to upgrade it in " +
+            "place (config and data are preserved), or set GILJO_INSTALL_DIR to an empty directory for a fresh install.")
+    }
 
     Write-Host ""
     Write-Host "    Existing installation detected!" -ForegroundColor $script:BRAND_COLOR

@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Template validation system for GiljoAI MCP.
+Template validation system for Giljo HQ.
 
 Provides runtime validation of agent templates with Redis caching
 for sub-millisecond performance on cache hits.

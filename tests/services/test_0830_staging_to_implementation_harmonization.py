@@ -47,6 +47,7 @@ def mock_db_manager():
     session.refresh = AsyncMock()
     session.add = MagicMock()
     session.get = AsyncMock()
+    session.info = {}  # tenant_session_context save/restore target
     db_manager.get_session_async = MagicMock(return_value=session)
     return db_manager, session
 
@@ -752,15 +753,23 @@ class TestImplementationPromptGateUsesProjectFlags:
         terminal statuses. The spawned-agent fallback may still use status.in_ separately;
         this test is scoped to the orchestrator query block.
         """
+        from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES
+
         src = self._source()
         idx = src.find('agent_display_name == "orchestrator"')
         assert idx >= 0, "orchestrator query block missing"
         orchestrator_block = src[idx : idx + 400]
         assert 'status.in_(["waiting", "working"])' not in orchestrator_block
         assert "status.not_in" in orchestrator_block
-        assert "complete" in orchestrator_block
-        assert "closed" in orchestrator_block
-        assert "decommissioned" in orchestrator_block
+        # BE-9304 (changed deliberately): this block used to hand-write the three
+        # statuses, and the next three assertions matched that literal text. It now
+        # binds to the ONE shared constant. Pinning the constant BY NAME plus its
+        # VALUE is strictly stronger than the old substring checks, which also passed
+        # for a literal that dropped a status or carried an extra one — this very
+        # query carried a fourth element ("failed") that no other site did, which is
+        # the drift BE-9304 removed.
+        assert "TERMINAL_EXECUTION_STATUSES" in orchestrator_block
+        assert set(TERMINAL_EXECUTION_STATUSES) == {"complete", "closed", "decommissioned"}
 
     def test_gate_checks_staging_complete_flag(self):
         src = self._source()
@@ -925,20 +934,19 @@ class TestStagingLockProtocolRewrites:
 
     def test_mcp_tool_description_includes_staging_lock_note(self):
         """mcp_tools_available description for set_agent_status mentions the lock."""
-        import re
         from pathlib import Path
 
         # BE-6042d: the set_agent_status @mcp.tool wrapper moved into the
         # mcp_tools subpackage (_job_tools.py).
         src = Path("api/endpoints/mcp_tools/_job_tools.py").read_text(encoding="utf-8")
-        # Find the @mcp.tool(...) block immediately preceding `async def set_agent_status`
-        match = re.search(
-            r"@mcp\.tool\(\s*description=\((.*?)\)\s*,?\s*\)\s*async def set_agent_status",
-            src,
-            re.DOTALL,
-        )
-        assert match is not None, "set_agent_status @mcp.tool description block not found"
-        description = match.group(1)
+        # Isolate set_agent_status's @mcp.tool(...) decorator: the nearest
+        # @mcp.tool( immediately preceding `async def set_agent_status`. Slicing
+        # (rather than a spanning regex) is robust to decorator-kwarg ordering
+        # (BE-9251 added title= before and annotations= after description=).
+        def_idx = src.index("async def set_agent_status")
+        block_start = src.rindex("@mcp.tool(", 0, def_idx)
+        description = src[block_start:def_idx]
+        assert "async def" not in description, "set_agent_status @mcp.tool block spanned another function"
         assert "STAGING_LOCK" in description
         assert "staging" in description.lower()
         assert "report_progress" in description

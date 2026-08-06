@@ -92,7 +92,7 @@
             </template>
 
             <!-- Content -->
-            <v-list-item-title class="text-body-large font-weight-medium mb-1">
+            <v-list-item-title class="notification-title mb-1">
               {{ notification.title }}
             </v-list-item-title>
             <div
@@ -219,6 +219,7 @@ const getNotificationIcon = (type) => {
     system_alert: 'mdi-alert-circle',
     connection_lost: 'mdi-wifi-off',
     connection_restored: 'mdi-wifi-check',
+    handover: 'mdi-hand-back-right-outline', // FE-9289c: Message Hub "it's your call"
     context_tuning: 'mdi-tune',
     vision_analysis: 'mdi-file-document-check',
     // IMP-5037a Day-1 type
@@ -240,6 +241,7 @@ const getNotificationColor = (type) => {
     system_alert: 'error',
     connection_lost: 'error',
     connection_restored: 'success',
+    handover: 'warning', // FE-9289c: the yellow "waiting on you" tone
     context_tuning: 'info',
     vision_analysis: 'success',
     // IMP-5037a Day-1 type
@@ -446,9 +448,31 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
+/* FE-9229: notification title — wraps instead of clipping.
+   Vuetify's .v-list-item-title defaults to `white-space: nowrap` +
+   `text-overflow: ellipsis`, and the title column is only ~255px wide inside the
+   440px dropdown (the prepend icon and the append timestamp take the rest). The
+   enriched taxonomy-led titles ("FE-9229 — <project>: recorded without an
+   Implement click") measured 911px against that 255px box, so ~72% of the title
+   was invisible. Unset the three clip properties so long titles wrap, and step
+   the size down to the design-system body rung while going BOLD so a smaller
+   title still reads as the row heading. */
+.notification-title {
+  font-size: $typography-font-size-body;
+  font-weight: 700;
+  line-height: 1.35;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
 /* Notification message text */
 .notification-message {
   color: $color-text-muted;
+  /* Sits one rung under the title so the heading still wins the hierarchy — the
+     former `text-body-*` classes are undefined no-ops, so this text was silently
+     inheriting the 16px root size and out-ranking its own title. */
+  font-size: $typography-font-size-small;
   line-height: 1.4;
   cursor: pointer;
 }

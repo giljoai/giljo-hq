@@ -733,7 +733,7 @@ describe('useVisionAnalysis — BE-9164 slim single-source prompt', () => {
     vi.resetModules()
   })
 
-  it('points the agent at get_vision_doc + extraction_instructions and requires a single update_product_context call', async () => {
+  it('points the agent at get_vision_doc + extraction_instructions and teaches staged update_product_context calls', async () => {
     vi.doUnmock('@/composables/useVisionAnalysis')
     const copyMock = vi.fn(() => Promise.resolve(true))
     vi.doMock('@/composables/useClipboard', () => ({
@@ -749,7 +749,11 @@ describe('useVisionAnalysis — BE-9164 slim single-source prompt', () => {
     expect(prompt).toContain('get_vision_doc(product_id="prod-xyz")')
     expect(prompt).toMatch(/extraction_instructions/)
     expect(prompt).toContain('update_product_context')
-    expect(prompt).toMatch(/ONE single|single call/i)
+    // FE-9320: this asserted "ONE single call". That mandate is the defect — a real
+    // run died at 62,420 bytes obeying it — so the prompt now teaches STAGED writes
+    // with emit_completion on the last call.
+    expect(prompt).toMatch(/stages|staged/i)
+    expect(prompt).toMatch(/emit_completion/)
     expect(prompt).toMatch(/vision_analysis_complete/)
     expect(prompt).toContain('MyProduct')
   })

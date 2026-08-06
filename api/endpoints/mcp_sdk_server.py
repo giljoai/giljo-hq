@@ -148,11 +148,13 @@ from api.endpoints.mcp_transport import (  # noqa: F401  (re-export surface)
     _send_raw_status,
     _stamp_declared_profile,
     _stamp_resolved_harness,
+    _stamp_url_profile,
     _subscription_required_response,
     _unauthenticated_response,
     _unsupported_version_response,
     _validate_protocol_version,
     _wrap_send_with_session_id,
+    describe_absorbed_argument,
 )
 
 # Re-export JWT symbols external tests patch/reference off this module
@@ -328,7 +330,37 @@ async def _scope_gated_call_tool(name, arguments):
             f"Tool '{name}' is gated by the human Implement step (HITL mode is the default). "
             "Enable Headless mode in Settings to let a CLI agent self-advance staging to implementation."
         )
+    # TSK-9309: when a required argument is absent because a neighbouring string
+    # argument absorbed it, say so instead of letting pydantic blame the missing
+    # field. A genuine omission keeps the ordinary validation error.
+    #
+    # BE-9348: this also runs on calls that would otherwise SUCCEED. Absorption of an
+    # OPTIONAL argument leaves every required one present, so nothing rejects it and
+    # the residue is persisted verbatim. Refusing such a call is therefore a real
+    # behaviour change, bounded on that path by conclusive evidence plus a tail that
+    # is pure call syntax carrying an actual serialized value.
+    absorbed = _describe_absorbed_argument_for(name, arguments)
+    if absorbed is not None:
+        raise ToolError(absorbed)
     return await _orig_call_tool(name, arguments)
+
+
+def _describe_absorbed_argument_for(name: str, arguments) -> str | None:
+    """Resolve the tool's advertised schema and diagnose an absorbed argument."""
+    if not isinstance(arguments, dict):
+        return None
+    try:
+        schema = mcp._tool_manager.get_tool(name).parameters
+    except Exception:  # noqa: BLE001 - an unknown/odd tool keeps the SDK's own error path
+        return None
+    if not isinstance(schema, dict):
+        return None
+    return describe_absorbed_argument(
+        tool_name=name,
+        arguments=arguments,
+        required=list(schema.get("required") or []),
+        parameter_names=list((schema.get("properties") or {}).keys()),
+    )
 
 
 # Re-register against the lowlevel MCP server. _setup_handlers() ran during

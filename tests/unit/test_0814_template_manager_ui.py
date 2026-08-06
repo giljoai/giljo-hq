@@ -69,6 +69,7 @@ def _make_mock_session():
     session.delete = Mock()
     session.flush = AsyncMock()
     session.rollback = AsyncMock()
+    session.info = {}  # tenant_session_context save/restore target
 
     async def _simulate_refresh(obj, *args, **kwargs):
         """Simulate DB refresh by filling server-default columns."""
@@ -131,7 +132,9 @@ class TestResetSystemInstructionsCanonical:
         assert "health_check" in template.system_instructions
         assert "get_job_mission" in template.system_instructions
         assert "full_protocol" in template.system_instructions
-        assert "GiljoAI MCP" in template.system_instructions
+        from giljo_mcp.branding import PRODUCT_NAME
+
+        assert PRODUCT_NAME in template.system_instructions
 
     @pytest.mark.asyncio
     async def test_reset_canonical_does_not_contain_protocol_sections(self):
@@ -185,7 +188,9 @@ class TestRenderClaudeAgentConsistency:
         template = _make_template()
         result = render_claude_agent(template)
 
-        assert "GiljoAI MCP Agent" in result
+        from giljo_mcp.branding import PRODUCT_NAME
+
+        assert f"{PRODUCT_NAME} Agent" in result
         assert "health_check" in result
         assert "get_job_mission" in result
 
@@ -227,7 +232,9 @@ class TestRenderClaudeAgentConsistency:
         result = render_claude_agent(template)
 
         body = result.split("---\n", 2)[-1]
-        bootstrap_pos = body.find("GiljoAI MCP Agent")
+        from giljo_mcp.branding import PRODUCT_NAME
+
+        bootstrap_pos = body.find(f"{PRODUCT_NAME} Agent")
         user_pos = body.find("specialized reviewer agent")
         assert bootstrap_pos >= 0, "Bootstrap must be present in body"
         assert user_pos >= 0, "User instructions must be present in body"
@@ -258,7 +265,9 @@ class TestRenderClaudeAgentConsistency:
         result = render_claude_agent(template)
 
         assert result.startswith("---\n")
-        assert "GiljoAI MCP Agent" in result
+        from giljo_mcp.branding import PRODUCT_NAME
+
+        assert f"{PRODUCT_NAME} Agent" in result
         assert "## Behavioral Rules" not in result
         assert "## Success Criteria" not in result
 

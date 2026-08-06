@@ -311,6 +311,17 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
         "staging_status": Project.staging_status,
     }
 
+    # BE-9354: parent-product liveness is DELIBERATELY not a project-visibility
+    # criterion. This module holds no reference to ``Product`` and never filters
+    # on one, and that is the rule the rest of the app follows: ``task_repository``
+    # lists tasks off a plain ``select(Task)`` with no ``Product`` join, and
+    # ``sequence_run_live_filter`` resolves chain members straight from ``Project``
+    # without passing through this repository at all. Soft-deleting a product does
+    # not cascade, so adding the predicate HERE alone would hide a trashed
+    # product's projects while its tasks, chain runs, roadmap items and jobs all
+    # stayed visible — one surface disagreeing with four. If a trashed product's
+    # children should ever disappear, that is a cascade decision made at the
+    # delete writer, not a WHERE clause bolted onto one reader.
     def _build_list_conditions(
         self,
         tenant_key: str,

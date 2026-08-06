@@ -39,6 +39,7 @@ class TestBuildProductResponseVisionAnalysisFields:
         product.product_memory = None
         product.core_features = ""
         product.brand_guidelines = None
+        product.extraction_custom_instructions = None
         product.is_active = True
         product.target_platforms = ["all"]
         product.vision_analysis_complete = True
@@ -91,3 +92,45 @@ class TestBuildProductResponseVisionAnalysisFields:
         response = _build_product_response(self._make_product(vision_analysis_complete=None))
 
         assert response.vision_analysis_complete is False
+
+
+class TestBuildProductResponseMemoryDefault:
+    """BE-9261: the product_memory None-fallback seeds the renamed git_integration
+    key, not the legacy github key."""
+
+    def _make_product(self, **overrides):
+        product = MagicMock()
+        product.id = "prod-be9261"
+        product.name = "BE-9261 fixture"
+        product.description = "fixture"
+        product.project_path = "/tmp/be9261"
+        now = datetime(2026, 7, 22, 12, 0, 0, tzinfo=UTC)
+        product.created_at = now
+        product.updated_at = now
+        product.tech_stack = None
+        product.architecture = None
+        product.test_config = None
+        product.product_memory = None
+        product.core_features = ""
+        product.brand_guidelines = None
+        product.extraction_custom_instructions = None
+        product.is_active = True
+        product.target_platforms = ["all"]
+        product.vision_analysis_complete = True
+        product.consolidated_vision_light = None
+        product.consolidated_vision_medium = None
+        product.consolidated_vision_light_tokens = None
+        product.consolidated_vision_medium_tokens = None
+        product.consolidated_vision_hash = None
+        product.consolidated_at = None
+        for key, value in overrides.items():
+            setattr(product, key, value)
+        return product
+
+    def test_none_product_memory_defaults_to_git_integration_key(self):
+        from api.endpoints.products.crud import _build_product_response
+
+        response = _build_product_response(self._make_product(product_memory=None))
+
+        assert response.product_memory["git_integration"] == {}
+        assert "github" not in response.product_memory

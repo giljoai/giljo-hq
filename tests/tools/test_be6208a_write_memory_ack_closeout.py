@@ -109,6 +109,10 @@ async def test_ack_closeout_todo_unblocks_series_summary_write(
         entry_type="project_completion",
         author_job_id=job_id,
         acknowledge_closeout_todo=True,
+        # user_id supplied so the staleness check (faked by _stub_staleness
+        # above) skips its db_manager-backed tenant-user lookup -- db_manager
+        # is otherwise unused by this test.
+        user_id=str(uuid.uuid4()),
         db_manager=MagicMock(),
         session=db_session,
     )
@@ -141,6 +145,10 @@ async def test_without_flag_closeout_todo_still_blocks(db_session, test_tenant_k
         decisions_made=["decision"],
         entry_type="project_completion",
         author_job_id=job_id,
+        # user_id supplied so the staleness check (faked by _stub_staleness
+        # above) skips its db_manager-backed tenant-user lookup -- db_manager
+        # is otherwise unused by this test.
+        user_id=str(uuid.uuid4()),
         db_manager=MagicMock(),
         session=db_session,
     )
@@ -162,6 +170,10 @@ async def test_ack_does_not_bypass_non_closeout_todo(db_session, test_tenant_key
         entry_type="project_completion",
         author_job_id=job_id,
         acknowledge_closeout_todo=True,
+        # user_id supplied so the staleness check (faked by _stub_staleness
+        # above) skips its db_manager-backed tenant-user lookup -- db_manager
+        # is otherwise unused by this test.
+        user_id=str(uuid.uuid4()),
         db_manager=MagicMock(),
         session=db_session,
     )

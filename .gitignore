@@ -263,3 +263,6 @@ backups/
 
 # Chain conductor sub-orch spawn scratch (server-authored launcher + prompt files)
 .giljo/
+
+# OpenCode harness local config (per-machine tool config, lane-local; never committed)
+.opencode/

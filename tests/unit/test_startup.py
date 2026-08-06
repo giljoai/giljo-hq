@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Test suite for startup.py - Unified entry point for GiljoAI MCP.
+Test suite for startup.py - Unified entry point for Giljo HQ.
 
 Tests cover:
 - PostgreSQL detection

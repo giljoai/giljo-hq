@@ -21,6 +21,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from giljo_mcp.exceptions import ResourceNotFoundError
+from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES
 from giljo_mcp.repositories.agent_job_repository import AgentJobRepository
 from giljo_mcp.schemas.service_responses import build_next_action
 
@@ -29,6 +30,16 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from giljo_mcp.database import DatabaseManager
+
+
+# BE-9292b: statuses meaning "this agent has not reported in long enough that an
+# orchestrator completing the job on its behalf is legitimate". 'silent' is set by
+# the health monitor's inactivity timeout, so it means UNRESPONSIVE FOR AT LEAST THE
+# SILENCE THRESHOLD -- not "stopped". A live agent inside one long uninterrupted
+# operation is silent and entirely alive, which is why every surface that offers this
+# recovery tells the orchestrator to verify the deliverable independently first: that
+# verification, not the status, is what makes accepting the work honest.
+_UNATTENDED_STATUSES = frozenset({"silent"})
 
 
 async def not_found_or_wrong_state_error(
@@ -93,14 +104,80 @@ async def not_found_or_wrong_state_error(
             "reason": "wrong_state",
             "actual_status": latest.status,
             "expected_status": expected_status,
-            "next_action": build_next_action(
-                tool="diagnose_project_state",
-                args_hint={"project_id": project_id} if project_id else None,
-                why=(
-                    f"Job is in '{latest.status}' status, not '{expected_status}'. Call "
-                    "diagnose_project_state to see the current agent/job state and the "
-                    "suggested recovery step."
-                ),
+            "next_action": _wrong_state_next_action(
+                job_id=job_id,
+                project_id=project_id,
+                actual_status=latest.status,
+                expected_status=expected_status,
             ),
         },
+    )
+
+
+def _wrong_state_next_action(
+    *,
+    job_id: str,
+    project_id: str | None,
+    actual_status: str,
+    expected_status: str,
+) -> dict:
+    """Pick the forward guidance for a wrong-state miss (BE-9292b).
+
+    The generic answer is "go look at the project state". For ONE pairing that is
+    a dead end, and it is the pairing an orchestrator hits when a worker stalls:
+    ``close_job`` needs 'complete', the execution is 'silent' (the health
+    monitor's inactivity timeout), and the agent that would normally call
+    ``complete_job`` is never coming back. ``diagnose_project_state`` reports
+    that state accurately and suggests nothing that resolves it, so the
+    orchestrator's only VISIBLE exit was ``write_project_closeout(force=true)``
+    — which decommissions, labelling an audited, committed contributor
+    "failed/replaced/abandoned".
+
+    The accepting exit already existed: ``complete_job`` accepts any non-terminal
+    execution, 'silent' included, and takes the verified deliverable as its
+    ``result``; ``close_job`` then reaches 'closed'. Name it here, because an
+    error that refuses without naming the remedy is where the orchestrator
+    actually stands when it gives up.
+
+    Both halves of the condition are load-bearing, and they are different facts:
+
+    * ``_UNATTENDED_STATUSES`` — nobody else will make this call. Deliberately
+      NOT extended to 'working' / 'blocked' / 'idle' / 'sleeping' / 'waiting':
+      those agents are alive and reachable, and telling an orchestrator to
+      complete a live agent's job out from under it would be worse advice than
+      the dead end this replaces. They keep the generic guidance.
+    * ``TERMINAL_EXECUTION_STATUSES`` — ``complete_job`` would actually accept
+      it. This is the same predicate its lookup uses, so if 'silent' is ever
+      reclassified as terminal the hint stops being offered instead of becoming
+      a lie. An error payload that advertises a remedy that does not work is the
+      exact defect this project was opened to fix; it must not reintroduce one.
+    """
+    if (
+        expected_status == "complete"
+        and actual_status in _UNATTENDED_STATUSES
+        and actual_status not in TERMINAL_EXECUTION_STATUSES
+    ):
+        return build_next_action(
+            tool="complete_job",
+            args_hint={"job_id": job_id, "result": {"summary": "<the deliverable you verified>"}},
+            why=(
+                f"This agent stopped responding (status '{actual_status}') and will not report its own "
+                "completion. 'closed' is reachable only from 'complete', but complete_job DOES accept a "
+                f"'{actual_status}' execution — so if you have VERIFIED this agent's deliverable, call "
+                "complete_job(job_id, result={...}) yourself to record it, then close_job again. "
+                "If complete_job returns COMPLETION_BLOCKED, settle its leftover ledger "
+                "first: report_progress(job_id, todo_items=[...], replace=true) and drain any "
+                "action-required messages. Do NOT reach for write_project_closeout(force=true) to "
+                "get past this — force DECOMMISSIONS the agent, which records accepted work as "
+                "failed/replaced/abandoned."
+            ),
+        )
+    return build_next_action(
+        tool="diagnose_project_state",
+        args_hint={"project_id": project_id} if project_id else None,
+        why=(
+            f"Job is in '{actual_status}' status, not '{expected_status}'. Call "
+            "diagnose_project_state to see the current agent/job state and the "
+            "suggested recovery step."
+        ),
     )

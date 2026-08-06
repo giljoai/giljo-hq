@@ -326,24 +326,33 @@ async def _revoke_refresh_token_family(
         models=(OAuthRefreshToken,),
     ):
         row = await db_session.execute(
-            select(OAuthRefreshToken.family_id, OAuthRefreshToken.tenant_key).where(
-                OAuthRefreshToken.token_hash == token_hash
-            )
+            select(
+                OAuthRefreshToken.family_id,
+                OAuthRefreshToken.tenant_key,
+                OAuthRefreshToken.user_id,
+            ).where(OAuthRefreshToken.token_hash == token_hash)
         )
         found = row.first()
     if found is None:
         return False
 
-    family_id, tenant_key = found.family_id, found.tenant_key
+    family_id, tenant_key, user_id = found.family_id, found.tenant_key, found.user_id
     with tenant_session_context(db_session, tenant_key):
-        await db_session.execute(
-            update(OAuthRefreshToken)
-            .where(
-                OAuthRefreshToken.family_id == family_id,
-                OAuthRefreshToken.tenant_key == tenant_key,
-            )
-            .values(revoked=True)
+        # SEC-9227c (H3): user-first lock (SEC-9217b lock order), revoke the family,
+        # then bump the epoch iff LIVE rows were actually revoked — so the access
+        # JWTs derived from this family die too (principal.py `rev` check), the
+        # enforcement half a `revoked` flip alone lacks. Gating keeps RFC 7009's
+        # idempotency: a repeat /revoke of an already-dead token does not re-bump
+        # and spuriously invalidate the user's fresh tokens.
+        from giljo_mcp.services.oauth_refresh_service import (
+            bump_epoch_if_revoked,
+            lock_user_for_update,
+            revoke_family,
         )
+
+        user = await lock_user_for_update(db_session, user_id=user_id, tenant_key=tenant_key)
+        revoked = await revoke_family(db_session, family_id=family_id, tenant_key=tenant_key)
+        bump_epoch_if_revoked(user, revoked)
         await db_session.flush()
     logger.info(
         "Revoked refresh-token family: family_id=%s tenant_key=%s",

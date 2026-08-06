@@ -26,7 +26,7 @@ Two independent checks:
      add/remove/bump that was committed without regenerating the lock — even
      when check 1 would still pass, e.g. a removed dep).
 
-Regenerate the lock with: python internal/gen_requirements_lock.py
+Regenerate the lock with the requirements-lock generator.
 
 Parallel-safe: pure file parsing, no DB, no network, no module-level mutable
 state. Scope is RUNTIME deps only — dev/optional extras are not locked.
@@ -54,7 +54,10 @@ HASH_PREFIX = "# requirements-txt-hash: sha256:"
 # starlette CVEs (CVE-2026-48818/48817/54283/54282, fixed >=1.3.1) regress. The
 # fastapi 0.137 _IncludedRouter route-surface change is handled by flattening in
 # tests/helpers/route_surface.py.
-PINNED_EXACT = {"fastapi": "0.139.0", "starlette": "1.3.1"}
+# 2026-07-22: fastapi pin deliberately moved 0.139.0 -> 0.139.2 (operator-approved
+# incremental update, not a re-float); starlette floor is unchanged. Route-surface
+# tests confirmed green on 0.139.2 (CI run 4453).
+PINNED_EXACT = {"fastapi": "0.139.2", "starlette": "1.3.1"}
 
 
 pytestmark = pytest.mark.skipif(
@@ -65,7 +68,7 @@ pytestmark = pytest.mark.skipif(
 
 def _normalize(dep_str: str) -> tuple:
     """(canonical name, sorted extras, sorted specifiers) — identical to
-    internal/gen_requirements_lock.py and test_dependency_manifest_sync.py."""
+    the requirements-lock generator and test_dependency_manifest_sync.py."""
     req = Requirement(dep_str)
     name = canonicalize_name(req.name)
     extras = tuple(sorted(canonicalize_name(e) for e in req.extras))
@@ -85,7 +88,7 @@ def _requirements_direct_deps() -> list[Requirement]:
 
 def _canonical_dep_hash() -> str:
     """sha256 of the canonical direct-dep SET of requirements.txt (must match
-    internal/gen_requirements_lock.canonical_dep_hash exactly)."""
+    the requirements-lock generator's canonical_dep_hash exactly)."""
     deps = []
     for raw in REQUIREMENTS.read_text(encoding="utf-8").splitlines():
         line = raw.split("#", 1)[0].strip()
@@ -125,7 +128,7 @@ def test_lock_satisfies_requirements():
 
     assert not problems, (
         "requirements.lock is out of sync with requirements.txt. Regenerate it:\n"
-        "    python internal/gen_requirements_lock.py\n"
+        "    (run the requirements-lock generator)\n"
         "and commit both files.\n  " + "\n  ".join(problems)
     )
 
@@ -154,11 +157,11 @@ def test_lock_header_hash_matches_requirements():
 
     assert header_hash, (
         f"requirements.lock is missing its '{HASH_PREFIX}<hex>' header line. "
-        "Regenerate it: python internal/gen_requirements_lock.py"
+        "Regenerate it with the requirements-lock generator."
     )
     assert header_hash == _canonical_dep_hash(), (
         "requirements.txt changed without regenerating requirements.lock (dep-set hash mismatch).\n"
-        "Run: python internal/gen_requirements_lock.py  and commit both files."
+        "Run the requirements-lock generator and commit both files."
     )
 
 

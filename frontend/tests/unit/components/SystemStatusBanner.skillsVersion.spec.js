@@ -77,7 +77,7 @@ function makeUpdateAvailable(overrides = {}) {
     cta_route: null,
     payload: {
       commits_behind: 5,
-      release_url: 'https://github.com/giljoai/GiljoAI_MCP/releases',
+      release_url: 'https://github.com/giljoai/giljo-hq/releases',
       tag: null,
     },
     dismissible: true,
@@ -279,7 +279,7 @@ describe('SystemStatusBanner — notification-driven (IMP-5037b)', () => {
 
     await wrapper.find('[data-testid="banner-cta-btn"]').trigger('click')
     expect(openSpy).toHaveBeenCalledWith(
-      'https://github.com/giljoai/GiljoAI_MCP/releases',
+      'https://github.com/giljoai/giljo-hq/releases',
       '_blank',
       'noopener',
     )

@@ -43,10 +43,10 @@ from giljo_mcp.platform_registry import (
 )
 from giljo_mcp.repositories.mission_repository import MissionRepository
 from giljo_mcp.schemas.service_responses import build_next_action
-from giljo_mcp.services.conductor_job_minter import projectless_conductor_staging_directive
-from giljo_mcp.services.conductor_staging_builder import build_conductor_staging_response
+from giljo_mcp.services.conductor_staging_builder import resolve_conductor_early_return
 from giljo_mcp.services.execution_mode_gate import (
-    EXECUTION_MODE_NOT_SELECTED_MESSAGE,
+    effective_execution_mode,
+    execution_mode_not_selected_message,
     execution_mode_selected,
 )
 from giljo_mcp.services.mission_orchestration_builders import (
@@ -295,48 +295,22 @@ class MissionOrchestrationService:
                 },
             )
 
-        # BE-6184/BE-6186: the DEDICATED chain conductor is project-less. It has no
-        # project row to stage but DOES need a real staging protocol (it stages the
-        # whole chain in one session). Resolve its active run by the calling agent_id
-        # (the run-phase gate) and return the rewritten CH_CHAIN_STAGING as
-        # orchestrator_protocol; no project row is dereferenced. Fall back to the
-        # STOP-shaped directive only when this agent is not the live conductor of any
-        # active run (nothing to stage).
+        # BE-6184/BE-6186: the DEDICATED chain conductor is project-less and stages the
+        # whole chain in one session. Resolving its staging payload is its own concern —
+        # conductor_staging_builder.resolve_conductor_early_return owns that branch
+        # entirely, and the composition is pinned by substitution in the BE-9291 suite.
         if agent_job.project_id is None:
-            conductor_ctx = await self._chain.resolve_for_conductor(
-                session,
-                conductor_agent_id=str(execution.agent_id),
-                tenant_key=tenant_key,
-                is_staging=True,
-            )
-            if conductor_ctx is not None:
-                # BE-6187: the Hub thread is NOT created server-side. The conductor
-                # stands it up itself as Step 0 of CH_CHAIN_STAGING (create_thread is
-                # an agent prose step, not a server call). Sub-orchestrators discover
-                # it via search_threads(run_id). This keeps thread ownership/baton with
-                # the conductor agent and the server out of the comms path.
-                #
-                # BE-6177 (UNIT 1): resolve the head project's product_id so the
-                # conductor can read deep (get_context(product_id=...)) before writing
-                # its cross-project contracts. Best-effort: a missing/gone head project
-                # yields product_id=None and the conductor degrades to list_projects.
-                head_product_id: str | None = None
-                resolved_order = conductor_ctx.resolved_order
-                if resolved_order:
-                    head_project = await self._repo.get_project_by_id(session, tenant_key, resolved_order[0])
-                    if head_project is not None:
-                        head_product_id = head_project.product_id
-                return {
-                    "early_return": build_conductor_staging_response(
-                        chain_ctx=conductor_ctx,
-                        job_id=job_id,
-                        agent_id=str(execution.agent_id),
-                        tenant_key=tenant_key,
-                        product_id=head_product_id,
-                        preset=preset,
-                    )
-                }
-            return {"early_return": projectless_conductor_staging_directive(job_id)}
+            return {
+                "early_return": await resolve_conductor_early_return(
+                    session,
+                    chain=self._chain,
+                    repo=self._repo,
+                    execution=execution,
+                    job_id=job_id,
+                    tenant_key=tenant_key,
+                    preset=preset,
+                )
+            }
 
         project = await self._repo.get_project_by_id(session, tenant_key, agent_job.project_id)
 
@@ -373,7 +347,7 @@ class MissionOrchestrationService:
                         "project_id": str(project.id),
                         "project_name": project.name,
                     },
-                    "message": EXECUTION_MODE_NOT_SELECTED_MESSAGE,
+                    "message": execution_mode_not_selected_message(project.name),
                     "thin_client": True,
                 }
             }
@@ -742,7 +716,10 @@ class MissionOrchestrationService:
                 ]
             )
 
-        execution_mode = getattr(project, "execution_mode", None) or metadata.get("execution_mode", "multi_terminal")
+        # BE-9335: a chain member RUNS in the chain's mode (already-resolved chain_ctx).
+        execution_mode = effective_execution_mode(
+            getattr(project, "execution_mode", None), getattr(ctx.get("chain_ctx"), "execution_mode", None)
+        ) or metadata.get("execution_mode", "multi_terminal")
 
         # BE-9035b/9035c (the precedence rule, in ONE place): for per-harness RENDERING a
         # DETECTED harness beats the declared execution_mode. effective_harness() owns

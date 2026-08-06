@@ -13,6 +13,13 @@ first round-trips.
 
 from __future__ import annotations
 
+from giljo_mcp.branding import MCP_ALIAS
+
+
+# BE-9275b: derive the tool prefix from the branding constant instead of a
+# fresh literal, so a future alias change only requires editing branding.py.
+_PREFIX = f"mcp__{MCP_ALIAS}__"
+
 
 # The load-bearing tools every orchestrator needs schemas for.
 # Order chosen for readability; runtime order is irrelevant — ToolSearch
@@ -32,16 +39,16 @@ from __future__ import annotations
 # surfaced (callable, load-on-demand) via get_giljo_guide's lifecycle section instead
 # — the correct home for tools used at specific lifecycle points.
 CANONICAL_ORCHESTRATOR_TOOLS: tuple[str, ...] = (
-    "mcp__giljo_mcp__health_check",
-    "mcp__giljo_mcp__get_giljo_guide",
-    "mcp__giljo_mcp__get_context",
-    "mcp__giljo_mcp__spawn_job",
-    "mcp__giljo_mcp__get_job_mission",
+    f"{_PREFIX}health_check",
+    f"{_PREFIX}get_giljo_guide",
+    f"{_PREFIX}get_context",
+    f"{_PREFIX}spawn_job",
+    f"{_PREFIX}get_job_mission",
     # BE-9017 (F3): the staging prompt's step 2 calls get_staging_instructions, so
     # it must be in the orchestrator's ToolSearch boot bundle — its omission left the
     # schema unloaded exactly when the staging flow needs it (same class of late-hint
     # friction CE-0033 fixed for the rest of this roster).
-    "mcp__giljo_mcp__get_staging_instructions",
+    f"{_PREFIX}get_staging_instructions",
     # BE-9012d: send_message / receive_messages / get_messages (the retired bus)
     # dropped in favor of the Hub. post_to_thread + get_thread_history replace them
     # in the SOLO orchestrator's own core coordination loop (Unblock / Broadcast /
@@ -51,23 +58,23 @@ CANONICAL_ORCHESTRATOR_TOOLS: tuple[str, ...] = (
     # stays a deliberate ToolSearch add-on for chain roles only (see
     # CH_SUB_ORCHESTRATOR's "ADD ... to your FIRST ToolSearch query" note in
     # chapters_chain.py) rather than a boot-bundle default.
-    "mcp__giljo_mcp__post_to_thread",
-    "mcp__giljo_mcp__get_thread_history",
-    "mcp__giljo_mcp__report_progress",
-    "mcp__giljo_mcp__set_agent_status",
-    "mcp__giljo_mcp__get_workflow_status",
-    "mcp__giljo_mcp__update_project_mission",
-    "mcp__giljo_mcp__update_job_mission",
-    "mcp__giljo_mcp__complete_job",
-    "mcp__giljo_mcp__close_job",
-    "mcp__giljo_mcp__resolve_reactivation",
-    "mcp__giljo_mcp__write_memory_entry",
-    "mcp__giljo_mcp__write_project_closeout",
-    "mcp__giljo_mcp__get_agent_result",
-    "mcp__giljo_mcp__create_task",
-    "mcp__giljo_mcp__create_project",
-    "mcp__giljo_mcp__list_projects",
-    "mcp__giljo_mcp__request_approval",
+    f"{_PREFIX}post_to_thread",
+    f"{_PREFIX}get_thread_history",
+    f"{_PREFIX}report_progress",
+    f"{_PREFIX}set_agent_status",
+    f"{_PREFIX}get_workflow_status",
+    f"{_PREFIX}update_project_mission",
+    f"{_PREFIX}update_job_mission",
+    f"{_PREFIX}complete_job",
+    f"{_PREFIX}close_job",
+    f"{_PREFIX}resolve_reactivation",
+    f"{_PREFIX}write_memory_entry",
+    f"{_PREFIX}write_project_closeout",
+    f"{_PREFIX}get_agent_result",
+    f"{_PREFIX}create_task",
+    f"{_PREFIX}create_project",
+    f"{_PREFIX}list_projects",
+    f"{_PREFIX}request_approval",
 )
 
 

@@ -120,6 +120,12 @@ async def _seed_api_key(db_manager) -> tuple[str, str]:
 
 
 class TestWebSocketAuthFailureThrottle:
+    @pytest.fixture(autouse=True)
+    def _real_limiter(self, real_auth_rate_limiter):
+        """SEC-9227 (H4): this suite exercises the real WS auth-failure throttle,
+        so keep the global test-bypass OFF for all its tests."""
+        return
+
     @pytest.mark.asyncio
     async def test_repeated_bad_api_key_over_ws_trips_lockout(self, db_session, monkeypatch):
         """``limit`` bad keys over the WS handshake are plain 1008 rejections;

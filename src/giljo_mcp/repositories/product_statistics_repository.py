@@ -17,6 +17,61 @@ from giljo_mcp.platform_registry import normalize_execution_mode
 from giljo_mcp.utils.taxonomy_alias import format_taxonomy_alias
 
 
+# What makes a 360 memory entry eligible for the dashboard. Two independent
+# liveness facts, both of which these readers used to ignore:
+#
+# 1. Soft-deleting a PRODUCT does not cascade -- ``delete_product`` stamps
+#    ``deleted_at`` on the product row alone -- so a reader has to revalidate the
+#    product each entry points at, or a trashed product keeps feeding the
+#    dashboard for the whole recovery window.
+# 2. Purging a PROJECT does reach these rows: ``mark_entries_deleted``
+#    (product_memory_repository) flags its entries ``deleted_by_user`` and keeps
+#    them for history. Reached from the project purge endpoint AND from the
+#    background expiry sweep -- a live path, not scaffolding.
+#
+# One definition, two call sites on purpose: the 360 Memories panel and the
+# Commits tile are derived from the same rows (DashboardView builds its commit
+# preview out of ``recent_memories``), so a predicate applied to only one of them
+# would leave the panel and the counter disagreeing -- the same defect, moved.
+# Both joins carry the same ON clause for the same reason.
+#
+# ``deleted_at`` and NOT ``is_active``: deactivating a product is not trashing it
+# (``deactivate_product`` clears ``is_active`` and leaves ``deleted_at`` NULL),
+# and a dormant product's history still belongs on the dashboard. This matches
+# every sibling reader (product_repository, task_repository,
+# vision_document_repository, product_memory_repository).
+#
+# ``is_not(True)`` rather than the sibling ``== False`` spelling because the
+# column is NULLABLE in the shipped schema and the 0390a backfill wrote
+# ``COALESCE(..., false)`` -- a NULL means "not deleted", and must not silently
+# drop a live entry off the dashboard.
+#
+# Deliberately NOT extended to the projects a trashed product owns:
+# ``project_repository`` holds no reference to ``Product`` and never filters on
+# product liveness, so those projects stay visible everywhere else in the app --
+# hiding them here alone would manufacture a disagreement rather than remove one.
+# Do not reach for FK nullability to justify that line: ``projects.product_id``
+# and ``product_memory_entries.product_id`` are BOTH ``ondelete="CASCADE"``, so
+# nullability says nothing about ownership. The reason is the reader survey above.
+#
+# BE-9354 closed the remaining dashboard half WITHOUT reopening that decision.
+# ``get_recent_projects`` still SELECTed ``Product.name``, so a trashed product's
+# name kept rendering beside its completed projects (RecentProjectsList.vue:18).
+# The fix neutralises the NAME -- the same liveness predicate, moved into that
+# method's ``Product`` outerjoin ON clause, so a trashed parent yields a NULL
+# ``product_name`` -- and leaves project visibility exactly as it was. Hiding the
+# projects instead would have relocated the disagreement rather than removed it:
+# their tasks, chain runs (``sequence_run_live_filter`` reads ``Project``
+# directly, bypassing the repository), roadmap items and jobs would all have
+# stayed visible.
+#
+# Callers must have joined :class:`Product`.
+_LIVE_MEMORY_ENTRY_CRITERIA = (
+    Product.deleted_at.is_(None),
+    ProductMemoryEntry.deleted_by_user.is_not(True),
+)
+
+
 class ProductStatisticsRepository:
     """
     Repository for product-level statistics queries.
@@ -52,9 +107,11 @@ class ProductStatisticsRepository:
             tenant_key: Tenant key for isolation
 
         Returns:
-            Total project count
+            Total project count (soft-deleted projects excluded — BE-9355)
         """
-        result = await session.scalar(select(func.count(Project.id)).where(Project.tenant_key == tenant_key))
+        result = await session.scalar(
+            select(func.count(Project.id)).where(Project.tenant_key == tenant_key, Project.deleted_at.is_(None))
+        )
         return result or 0
 
     async def count_projects_by_status(
@@ -73,9 +130,20 @@ class ProductStatisticsRepository:
 
         Returns:
             Project count for status
+
+        BE-9355 (hygiene, not a defect fix): the soft-delete writer stamps
+        ``status='deleted'`` and ``deleted_at`` together
+        (``project_deletion_service.py:99-100``) and ``restore_project`` clears
+        both, so a trashed row already sits in a bucket no caller asks for. The
+        predicate makes the two liveness facts stop depending on each other, and
+        matches every sibling in this file.
         """
         result = await session.scalar(
-            select(func.count(Project.id)).where(Project.tenant_key == tenant_key, Project.status == status)
+            select(func.count(Project.id)).where(
+                Project.tenant_key == tenant_key,
+                Project.status == status,
+                Project.deleted_at.is_(None),
+            )
         )
         return result or 0
 
@@ -84,11 +152,16 @@ class ProductStatisticsRepository:
         session: AsyncSession,
         tenant_key: str,
     ) -> int:
-        """Count projects with staging_status in ('staged', 'staging_complete') for tenant."""
+        """Count LIVE projects with staging_status in ('staged', 'staging_complete').
+
+        BE-9355: ``staging_status`` is untouched by soft-delete, so a trashed
+        project kept its staged marking and inflated this tile.
+        """
         result = await session.scalar(
             select(func.count(Project.id)).where(
                 Project.tenant_key == tenant_key,
                 Project.staging_status.in_(("staged", "staging_complete")),
+                Project.deleted_at.is_(None),
             )
         )
         return result or 0
@@ -108,6 +181,11 @@ class ProductStatisticsRepository:
         subqueries keep each project to exactly one row (no join fan-out). Returns
         rows of (Project, agent_count, message_count, task_count,
         completed_task_count, last_activity); counts are non-NULL ints.
+
+        BE-9355 (hygiene): no PRODUCTION caller reaches this method today — the
+        only callers are tests. The liveness predicate is applied anyway so that
+        whichever paginated project surface adopts it later does not inherit the
+        defect its siblings in this file had.
         """
         agent_count = (
             select(func.count(AgentExecution.agent_id))
@@ -158,7 +236,7 @@ class ProductStatisticsRepository:
             func.coalesce(task_count, 0),
             func.coalesce(completed_task_count, 0),
             last_activity,
-        ).where(Project.tenant_key == tenant_key)
+        ).where(Project.tenant_key == tenant_key, Project.deleted_at.is_(None))
 
         if status:
             query = query.where(Project.status == status)
@@ -386,6 +464,13 @@ class ProductStatisticsRepository:
                 and_(
                     Project.product_id == Product.id,
                     Product.tenant_key == tenant_key,
+                    # BE-9354: in the ON clause, not the WHERE. A trashed parent
+                    # must fail the join so ``product_name`` comes back NULL and
+                    # the dashboard stops naming it -- while the project itself
+                    # stays listed. In the WHERE this predicate would instead
+                    # DROP the project, which is the visibility change this fix
+                    # deliberately does not make.
+                    Product.deleted_at.is_(None),
                 ),
             )
             .where(
@@ -457,8 +542,14 @@ class ProductStatisticsRepository:
                 ProductMemoryEntry.git_commits,
                 Product.name.label("product_name"),
             )
-            .outerjoin(Product, ProductMemoryEntry.product_id == Product.id)
-            .where(ProductMemoryEntry.tenant_key == tenant_key)
+            .outerjoin(
+                Product,
+                and_(
+                    ProductMemoryEntry.product_id == Product.id,
+                    Product.tenant_key == tenant_key,
+                ),
+            )
+            .where(ProductMemoryEntry.tenant_key == tenant_key, *_LIVE_MEMORY_ENTRY_CRITERIA)
             .order_by(ProductMemoryEntry.timestamp.desc())
             .limit(limit)
         )
@@ -486,13 +577,17 @@ class ProductStatisticsRepository:
         tenant_key: str,
         product_id: str | None = None,
     ) -> int:
-        """Count ALL git commits recorded across 360 memory entries (BE-6078).
+        """Count the git commits recorded across live 360 memory entries (BE-6078).
 
-        Sums ``jsonb_array_length(git_commits)`` over every
+        Sums ``jsonb_array_length(git_commits)`` over every LIVE
         ``product_memory_entries`` row for the tenant (and product, when the
         per-product dashboard filter is active). This is the true cumulative
         commit count — the dashboard previously showed only the capped 10-item
         preview length (DashboardView.vue), which never exceeded 10.
+
+        Liveness is :data:`_LIVE_MEMORY_ENTRY_CRITERIA`, the same set the 360
+        Memories panel applies, so the Commits tile and the commit preview built
+        from that panel cannot disagree about which entries exist.
 
         Tenant-scoped and product-filter-aware. The ``jsonb_typeof = 'array'``
         guard skips rows whose ``git_commits`` is NULL or a non-array shape so a
@@ -500,7 +595,15 @@ class ProductStatisticsRepository:
         """
         stmt = (
             select(func.coalesce(func.sum(func.jsonb_array_length(ProductMemoryEntry.git_commits)), 0))
-            .where(ProductMemoryEntry.tenant_key == tenant_key)
+            .select_from(ProductMemoryEntry)
+            .outerjoin(
+                Product,
+                and_(
+                    ProductMemoryEntry.product_id == Product.id,
+                    Product.tenant_key == tenant_key,
+                ),
+            )
+            .where(ProductMemoryEntry.tenant_key == tenant_key, *_LIVE_MEMORY_ENTRY_CRITERIA)
             .where(func.jsonb_typeof(ProductMemoryEntry.git_commits) == "array")
         )
         if product_id:
@@ -558,10 +661,16 @@ class ProductStatisticsRepository:
         fold each stored value through :func:`normalize_execution_mode` and SUM the
         counts, so a legacy CLI row collapses into ``subagent`` (stored values are
         never rewritten — the fold is display-only). NULL stays ``unset``.
+
+        BE-9355: soft-deleted projects are excluded. ``execution_mode`` survives a
+        soft delete untouched, so a trashed project kept its bucket here while
+        :meth:`get_project_status_distribution` — served in the SAME dashboard
+        payload — already excluded it. One response described two different
+        project totals at once.
         """
         stmt = (
             select(Project.execution_mode, func.count(Project.id))
-            .where(Project.tenant_key == tenant_key)
+            .where(Project.tenant_key == tenant_key, Project.deleted_at.is_(None))
             .group_by(Project.execution_mode)
         )
         if product_id:
@@ -590,6 +699,11 @@ class ProductStatisticsRepository:
 
         Returns:
             List of dicts with keys: product_id, product_name, project_count
+
+        Trashed products are omitted and their soft-deleted projects are not
+        counted, so this rollup agrees with
+        :meth:`get_project_status_distribution` and with the product list the
+        rest of the app serves.
         """
         stmt = (
             select(
@@ -602,9 +716,12 @@ class ProductStatisticsRepository:
                 and_(
                     Product.id == Project.product_id,
                     Project.tenant_key == tenant_key,
+                    # In the ON clause, not the WHERE: a product whose only
+                    # projects are trashed must still be listed, with a count of 0.
+                    Project.deleted_at.is_(None),
                 ),
             )
-            .where(Product.tenant_key == tenant_key)
+            .where(Product.tenant_key == tenant_key, Product.deleted_at.is_(None))
             .group_by(Product.id, Product.name)
             .order_by(Product.name)
         )

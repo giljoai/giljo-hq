@@ -24,16 +24,25 @@ function normalizeMessage(raw) {
     thread_id: raw.thread_id || null,
     from_agent_id: raw.from_agent_id || null,
     from_display_name: raw.from_display_name || raw.from_agent_id || 'unknown',
+    // BE-9289a: 'agent' | 'user', resolved SERVER-SIDE at post time — the ONLY signal
+    // for which side of the timeline a message belongs on. Carried by both the history
+    // read and the live WS event. Defaults to 'agent' to match the column's own
+    // default, so a payload from an older server never renders as the human user.
+    from_kind: raw.from_kind || 'agent',
     content: raw.content || '',
     message_type: raw.message_type || 'broadcast',
     priority: raw.priority || 'normal',
     status: raw.status || null,
     requires_action: raw.requires_action || false,
     created_at: raw.created_at || null,
-    // FE-9012c (D3/D4): per-message recipient acted-on state for the in-thread
-    // waiting/read/sent filter. Present only on a history read with
-    // include_recipient_state=true; null (not []) when absent so the filter can
-    // tell "no junction data loaded" (e.g. a live WS message) from "no recipients".
+    // FE-9012c (D3/D4): per-message recipient acted-on state. Present only on a
+    // history read with include_recipient_state=true; null (not []) when absent, so a
+    // reader can tell "no junction data loaded" (e.g. a live WS message) from "no
+    // recipients". FE-9289c: the Hub no longer opts in — the filter row that rendered
+    // these is deleted — so today these are always null here. The normalizer keeps
+    // carrying them because the REST parameter still exists and a caller that DOES
+    // opt in must get them shaped correctly rather than silently dropped by an
+    // allowlist. That allowlist-drops-a-new-field defect already cost this chain once.
     recipients: Array.isArray(raw.recipients) ? raw.recipients : null,
     acked_by: Array.isArray(raw.acked_by) ? raw.acked_by : null,
     completed_by: Array.isArray(raw.completed_by) ? raw.completed_by : null,
@@ -57,6 +66,16 @@ function normalizeThread(raw) {
     created_at: raw.created_at || null,
     // Derived: use updated_at if provided, else created_at, for activity sort
     last_activity_at: raw.updated_at || raw.last_activity_at || raw.created_at || null,
+    // FE-9289c: the Quiet Cards enriched-list payload (BE-9289b). Present ONLY on the
+    // list read, so each key is carried ONLY when raw actually has it — a partial
+    // thread_update WS event (status/baton/subject) must not null a card's participants
+    // or last_message. _upsertThread merges, so an omitted key preserves the prior value
+    // (the same guard the b WS-subject fix taught).
+    ...('title' in raw ? { title: raw.title || null } : {}),
+    ...('project_name' in raw ? { project_name: raw.project_name || null } : {}),
+    ...('participants' in raw ? { participants: Array.isArray(raw.participants) ? raw.participants : [] } : {}),
+    ...('last_message' in raw ? { last_message: raw.last_message || null } : {}),
+    ...('unread' in raw ? { unread: !!raw.unread } : {}),
   }
 }
 
@@ -216,7 +235,12 @@ export const useCommHubStore = defineStore('commHub', () => {
     loading.value = true
     error.value = null
     try {
-      const res = await api.threads.history(id, { includeRecipientState: true })
+      // FE-9289c: the opt-in is dropped. The waiting/read/sent filter row was the only
+      // thing that rendered the recipient junctions, and it is gone (DoD 7), so asking
+      // for them fetched a payload nothing displays. The service parameter and the REST
+      // query param stay — `include_recipient_state` is a clean opt-in read a future
+      // caller may want; this is only the Hub declining to opt in.
+      const res = await api.threads.history(id)
       const thread = res.data?.thread
       const messages = res.data?.messages || []
       if (thread) _upsertThread(thread)
@@ -259,14 +283,44 @@ export const useCommHubStore = defineStore('commHub', () => {
     return thread
   }
 
+  /**
+   * TSK-9300 — a 200 does not mean it worked.
+   *
+   * BE-9292a gave two thread routes (post, baton) a structured DECLINE returned at
+   * HTTP 200: `{ success: false, error: <CODE>, hint, ... }`. That is deliberate — a
+   * domain rejection is not an error (the BE-6081 carve-out) — so axios does not throw
+   * and every `await` below looked like it had succeeded.
+   *
+   * These calls predate that shape: on these routes a 200 always DID mean success, so
+   * checking was pointless when they were written. It is not any more. A refusal now
+   * raises, carrying the server's own `hint` as the message so the caller shows the
+   * operator what to do instead of a generic failure — the same contract renameThread
+   * already follows. Callers must NOT discard the user's input on a throw.
+   */
+  function refusalToError(data) {
+    const err = new Error(data.hint || data.error || 'The server declined this request.')
+    err.refusal = data
+    return err
+  }
+
+  function isRefusal(data) {
+    return data?.success === false
+  }
+
   async function postMessage(id, body) {
     const res = await api.threads.post(id, body)
+    if (isRefusal(res.data)) throw refusalToError(res.data)
     return res.data
   }
 
   async function passBaton(id, to) {
     const res = await api.threads.passBaton(id, to)
     const updated = res.data
+    // TSK-9297: patch on SUCCESS, never on the mere presence of a thread_id — a refusal
+    // carries one too. The server currently reports the UNCHANGED owner in its refusal,
+    // so a naive patch happens to land on the truth; that is the server being careful,
+    // not this store being correct, and it is not a property to depend on.
+    if (isRefusal(updated)) throw refusalToError(updated)
     if (updated?.thread_id) {
       const existing = threadsById.value.get(updated.thread_id)
       if (existing) {
@@ -276,6 +330,24 @@ export const useCommHubStore = defineStore('commHub', () => {
           immutableObjectPatch(existing, { next_action_owner: updated.next_action_owner }),
         )
       }
+    }
+    return updated
+  }
+
+  /**
+   * FE-9289c: rename a thread (BE-9289b PATCH), then patch the local subject on success
+   * so the card and header reflect it immediately. Throws on rejection (e.g. a project
+   * thread) so the caller can surface the reason as a toast — the store does not swallow
+   * it. Also carries the returned title, since a rename can change the derived card title.
+   */
+  async function renameThread(id, subject) {
+    const res = await api.threads.update(id, { subject })
+    const updated = res.data
+    const existing = threadsById.value.get(id)
+    if (existing && updated) {
+      const patch = { subject: updated.subject ?? subject }
+      if ('title' in updated) patch.title = updated.title
+      threadsById.value = immutableMapSet(threadsById.value, id, immutableObjectPatch(existing, patch))
     }
     return updated
   }
@@ -385,6 +457,9 @@ export const useCommHubStore = defineStore('commHub', () => {
     if (payload.status != null) patch.status = payload.status
     if (payload.next_action_owner != null) patch.next_action_owner = payload.next_action_owner
     if (payload.chat_id != null) patch.chat_id = payload.chat_id
+    // BE-9289b: a rename arrives on the same event. Null-guarded like the rest, so an
+    // event that carries no subject leaves the existing one alone.
+    if (payload.subject != null) patch.subject = payload.subject
 
     if (Object.keys(patch).length === 0) return
     const updated = immutableObjectPatch(existing, patch)
@@ -444,6 +519,7 @@ export const useCommHubStore = defineStore('commHub', () => {
     loadThread,
     loadParticipants,
     createThread,
+    renameThread,
     postMessage,
     passBaton,
     deleteThread,

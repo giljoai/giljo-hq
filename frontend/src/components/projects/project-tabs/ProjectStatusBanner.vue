@@ -1,6 +1,6 @@
 <template>
   <!-- State A: Project is done -> status banner -->
-  <div v-if="projectDoneStatus" class="action-buttons-row">
+  <div v-if="projectDoneStatus" class="action-buttons-row action-buttons-row--stacked">
     <v-chip
       :color="projectDoneStatus === 'completed' ? 'success' : projectDoneStatus === 'terminated' ? 'warning' : 'grey'"
       variant="flat"
@@ -17,7 +17,7 @@
          (skips the archive write); terminated/cancelled keep pill-only so the
          archive path can never overwrite those statuses. -->
     <v-btn
-      v-if="projectDoneStatus === 'completed'"
+      v-if="projectDoneStatus === 'completed' && !isChainMember"
       class="closeout-btn"
       color="yellow-darken-2"
       variant="flat"
@@ -183,6 +183,14 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  // FE-9244: chain member context — hides the "Review project" button once a
+  // chain-completed project's pill is showing (buildChainAwareProjectDoneStatus
+  // in reviewDispatch.js already only returns 'completed' post-review, so the
+  // pill itself is correct; this just suppresses the redundant re-review CTA).
+  isChainMember: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 defineEmits([
@@ -206,6 +214,14 @@ defineEmits([
   gap: 12px;
   margin-bottom: 16px;
   flex-shrink: 0;
+}
+
+/* FE-9244: State A only — stack the done pill above the Review button
+   instead of side-by-side. Scoped to its own modifier class so the other
+   5 banner states sharing .action-buttons-row are unaffected. */
+.action-buttons-row--stacked {
+  flex-direction: column;
+  gap: 8px;
 }
 
 .closeout-btn {

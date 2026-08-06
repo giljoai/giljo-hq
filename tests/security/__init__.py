@@ -17,7 +17,7 @@ SEC-0005a/SEC-0005b:
 - ``test_ce_mode_required`` (Mode gate): every SERVER-LEVEL admin-gated endpoint
   must depend on ``require_ce_mode`` so that the route 404s in demo/SaaS modes.
 
-The endpoint inventory is the lane (a)/(b) taxonomy in
-``handovers/SEC-0005c_sweep_taxonomy.md``. If a new admin-gated endpoint is
+The endpoint inventory is the lane (a)/(b) taxonomy in the SEC-0005c sweep
+taxonomy. If a new admin-gated endpoint is
 added, classify it in the taxonomy and add a row here.
 """

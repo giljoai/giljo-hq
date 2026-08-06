@@ -1,10 +1,10 @@
 #!/bin/bash
-# GiljoAI MCP Service Stopper (Linux/macOS)
+# Giljo HQ Service Stopper (Linux/macOS)
 
 set -e
 
 echo "==============================================="
-echo "   GiljoAI MCP - Stopping Services"
+echo "   Giljo HQ - Stopping Services"
 echo "==============================================="
 echo
 
@@ -12,7 +12,7 @@ echo
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
-echo "Stopping all GiljoAI MCP services..."
+echo "Stopping all Giljo HQ services..."
 echo
 
 # Find and kill processes gracefully
@@ -29,6 +29,6 @@ pkill -9 -f "python.*giljo_mcp" 2>/dev/null || true
 
 echo
 echo "==============================================="
-echo "   All GiljoAI MCP services stopped"
+echo "   All Giljo HQ services stopped"
 echo "==============================================="
 echo

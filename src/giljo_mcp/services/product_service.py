@@ -51,6 +51,9 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 logger = logging.getLogger(__name__)
 
 
+# FE-9320: matches the String(500) products.project_path column.
+PROJECT_PATH_MAX_LENGTH = 500
+
 _ALLOWED_PRODUCT_FIELDS = {
     "name",
     "description",
@@ -161,6 +164,59 @@ class ProductService:
 
         return True, None
 
+    @staticmethod
+    def _column_holds_a_value(value: Any) -> bool:
+        """True when a config column already carries content worth protecting.
+
+        NULL and whitespace-only text are treated as empty — a column the user has
+        never filled must never block a write (FE-9320).
+        """
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        return True
+
+    def _collides_per_column(self, product: Product, incoming_blocks: dict[str, Any]) -> dict[str, list[str]]:
+        """Return {block: [columns]} for incoming columns that already hold a value.
+
+        FE-9320: the overwrite guard's granularity. A block whose relation row does
+        not exist yet cannot collide at all; a block whose row exists collides only
+        on the specific columns that are already populated.
+        """
+        collisions: dict[str, list[str]] = {}
+        for block_name, incoming in incoming_blocks.items():
+            if not incoming or not isinstance(incoming, dict):
+                continue
+            row = getattr(product, block_name, None)
+            if row is None:
+                continue
+            clashing = [column for column in incoming if self._column_holds_a_value(getattr(row, column, None))]
+            if clashing:
+                collisions[block_name] = clashing
+        return collisions
+
+    def _validate_project_path(self, project_path: Any, *, operation: str, product_id: str | None = None) -> None:
+        """Reject an over-length project_path at the owning-service write boundary.
+
+        FE-9320: ``products.project_path`` is String(500) at the DB but the MCP tool
+        boundary caps it at 20000, and nothing in between checked — so an over-long
+        path became an opaque sanitized 500 instead of an actionable rejection.
+        Mirrors the BE-9215 name cap.
+        """
+        if project_path is None or len(project_path) <= PROJECT_PATH_MAX_LENGTH:
+            return
+        context: dict[str, Any] = {"operation": operation}
+        if product_id is not None:
+            context["product_id"] = product_id
+        raise ValidationError(
+            message=(
+                f"project_path exceeds {PROJECT_PATH_MAX_LENGTH} character limit "
+                f"(got {len(project_path)}). Pass the repository folder path, not its contents."
+            ),
+            context=context,
+        )
+
     # ============================================================================
     # CRUD Operations
     # ============================================================================
@@ -191,7 +247,7 @@ class ProductService:
             architecture: Architecture configuration dict
             test_config: Test configuration dict
             core_features: Core product features string
-            product_memory: 360 Memory data (GitHub, sequential_history, context) - Handover 0135
+            product_memory: 360 Memory data (git integration, sequential_history, context) - Handover 0135
             target_platforms: Target platforms (windows, linux, macos, android, ios, web, or all) - Handover 0425
 
         Returns:
@@ -210,6 +266,7 @@ class ProductService:
                     message=f"Product name exceeds 255 character limit (got {len(name)}).",
                     context={"operation": "create_product"},
                 )
+            self._validate_project_path(project_path, operation="create_product")
             if target_platforms is not None:
                 is_valid, error_msg = self._validate_target_platforms(target_platforms)
                 if not is_valid:
@@ -224,8 +281,12 @@ class ProductService:
                     )
 
                 # Handover 0135 + 0700c: Initialize product_memory (history in table)
+                # BE-9261: seed key renamed github -> git_integration (server_default
+                # column left untouched; _ensure_product_memory_initialized backfills
+                # existing rows, and the git_integration-preferred/github-legacy read
+                # fallback in _build_product_memory_response covers pre-rename rows).
                 default_memory = {
-                    "github": {},
+                    "git_integration": {},
                     "context": {},
                 }
 
@@ -380,6 +441,7 @@ class ProductService:
                     message=f"Product name exceeds 255 character limit (got {len(updates['name'])}).",
                     context={"product_id": product_id},
                 )
+            self._validate_project_path(updates.get("project_path"), operation="update_product", product_id=product_id)
             if "target_platforms" in updates:
                 is_valid, error_msg = self._validate_target_platforms(updates["target_platforms"])
                 if not is_valid:
@@ -403,22 +465,34 @@ class ProductService:
                 test_config = updates.pop("test_config", None)
                 core_features = updates.pop("core_features", None)
 
-                # WI-2: Overwrite Confirmation — prevent accidental overwrites of populated JSONB fields
+                # WI-2: Overwrite Confirmation — prevent accidental overwrites of populated
+                # config fields. FE-9320: the guard used to fire on the relation ROW existing
+                # (``product.tech_stack is not None``), but that row is created by the FIRST
+                # write, so every later repair call had its whole block rejected — discarding
+                # columns that were still EMPTY. It now compares COLUMN by COLUMN: only the
+                # columns that actually hold a value collide, and the rest of the block writes.
                 if not force:
-                    populated_fields = []
-                    if tech_stack and isinstance(tech_stack, dict) and product.tech_stack is not None:
-                        populated_fields.append("tech_stack")
-                    if architecture_data and isinstance(architecture_data, dict) and product.architecture is not None:
-                        populated_fields.append("architecture")
-                    if test_config and isinstance(test_config, dict) and product.test_config is not None:
-                        populated_fields.append("test_config")
-                    if populated_fields:
+                    populated_columns = self._collides_per_column(
+                        product,
+                        {
+                            "tech_stack": tech_stack,
+                            "architecture": architecture_data,
+                            "test_config": test_config,
+                        },
+                    )
+                    if populated_columns:
+                        detail = "; ".join(
+                            f"{block}: {', '.join(columns)}" for block, columns in populated_columns.items()
+                        )
                         raise ValidationError(
-                            message=(
-                                f"Fields already populated: {', '.join(populated_fields)}. "
-                                "Pass force=True to overwrite."
-                            ),
-                            context={"populated_fields": populated_fields, "product_id": product_id},
+                            message=f"Fields already populated: {detail}. Pass force=True to overwrite.",
+                            # populated_fields stays the block-name list every existing caller
+                            # reads; populated_columns carries the per-column detail.
+                            context={
+                                "populated_fields": list(populated_columns),
+                                "populated_columns": populated_columns,
+                                "product_id": product_id,
+                            },
                         )
 
                 if core_features is not None:
@@ -445,14 +519,11 @@ class ProductService:
 
                 self._logger.info(f"Updated product {sanitize(product_id)}")
 
-                # Handover 0139a: Emit WebSocket event if product_memory was updated
-                # Handover 0390b: Build product_memory from table for WebSocket event
-                if "product_memory" in updates:
-                    product_memory = await self.memory._build_product_memory_response(session, product)
-                    await self.lifecycle._emit_websocket_event(
-                        event_type="product:memory:updated",
-                        data={"product_id": product_id, "product_memory": product_memory},
-                    )
+                # TSK-9265: no product:memory:updated emit here. product_memory is
+                # not in _ALLOWED_PRODUCT_FIELDS, so this method never applies it —
+                # the removed emit keyed on the RAW input dict and broadcast stale
+                # memory for a silently-dropped field. The owning write paths
+                # (write_memory_entry / project closeout) emit their own event.
 
                 return product
 

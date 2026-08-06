@@ -42,72 +42,18 @@ from giljo_mcp.security.upload_guard import (
 from giljo_mcp.services._session_helpers import tenant_scoped_session
 from giljo_mcp.services.product_field_map import assemble_update_kwargs
 from giljo_mcp.services.product_vision_service import ProductVisionService
+from giljo_mcp.tools._unknown_keys import split_known
+from giljo_mcp.tools.vision_extraction_prompt import VISION_EXTRACTION_PROMPT
 
 
 logger = logging.getLogger(__name__)
 
 
-VISION_EXTRACTION_PROMPT = """You are analyzing the vision documents for a software product.
-Work in TWO roles, then commit everything in ONE update_product_context call.
-
-ROLE 1 — PRODUCT MANAGER (the summaries)
-Write a synthesized narrative that explains what the product is and WHY it exists: the
-developer's purpose, what they are trying to achieve, important callouts, and any proposal
-context worth retaining. This is a product story, not a mechanical extraction.
-- vision_summaries: a list of {doc_id, light, medium} entries -- ONE per active vision
-  document. doc_id is the UUID returned alongside each chunk's content by get_vision_doc.
-  light ≈ 33% of that document's original length; medium ≈ 66%.
-- consolidated_vision: a single {light, medium} dict telling the UNIFIED cross-document
-  product story at the same two zoom levels (light ≈ 33%, medium ≈ 66% of the combined
-  originals). Do NOT put per-document section headers (e.g. `## filename.md`) inside the
-  consolidated summary -- it is one product narrative, not a stitched concatenation.
-  Per-document traceability lives elsewhere in the UI.
-
-ROLE 2 — ENGINEERING MANAGER (the structured fields)
-For tech_stack / architecture / quality / testing, write absolutes -- committed technical
-decisions. EXTRACT them if the user defined them in the documents; PROPOSE sensible defaults
-if the user did not (the user can modify them later). Do not leave a structured field blank
-just because the document is silent on it -- propose a reasonable value instead.
-
-FIELD RULES
-- product_description: 2-3 sentences.
-- testing_strategy MUST be one of: TDD, BDD, Integration-First, E2E-First, Manual, Hybrid.
-- target_platforms MUST be a list from: windows, linux, macos, android, ios, web, all.
-  Use 'web' for browser-based apps (SPA, PWA, responsive). Use 'all' alone if cross-platform.
-- Do NOT pass product_name unless the product currently has no name -- the product name is
-  user-owned.
-- project_path: set it to the absolute path of the repository folder you are operating from
-  (your working directory) -- this is the user's local codebase folder the orchestrator later
-  uses. OMIT it entirely if you are not running with filesystem access inside the user's
-  repository (never invent or guess a path). Like product_name it is user-owned -- the server
-  skips it when already set.
-
-HOW TO CALL
-Make ONE single update_product_context call covering EVERYTHING (per-doc summaries,
-consolidated summary, and all structured fields) so the backend evaluates the
-completion flag atomically. tech_stack / architecture / quality / testing are NESTED JSON
-OBJECTS -- not flat top-level parameters and not strings. Example call shape:
-
-  update_product_context(
-      product_id="<id>",
-      product_description="...",
-      project_path="...",
-      core_features="...",
-      tech_stack={"programming_languages": "...", "frontend_frameworks": "...",
-                  "backend_frameworks": "...", "databases": "...",
-                  "infrastructure": "...", "target_platforms": ["web"]},
-      architecture={"architecture_pattern": "...", "design_patterns": "...",
-                    "api_style": "...", "architecture_notes": "...",
-                    "coding_conventions": "...", "brand_guidelines": "..."},
-      quality={"quality_standards": "..."},
-      testing={"testing_strategy": "TDD", "testing_frameworks": "...",
-               "test_coverage_target": 80},
-      vision_summaries=[{"doc_id": "<uuid from get_vision_doc>", "light": "...",
-                         "medium": "..."}],
-      consolidated_vision={"light": "...", "medium": "..."},
-  )
-
-{custom_instructions}"""
+# VISION_EXTRACTION_PROMPT (the agent-facing extraction brief) is imported above from
+# tools/vision_extraction_prompt.py -- see that module for why it lives beside the tool
+# rather than inside it. get_vision_doc below returns it as extraction_instructions, and
+# the import keeps the long-standing `from ...vision_analysis import VISION_EXTRACTION_PROMPT`
+# path resolving.
 
 
 VALID_TESTING_STRATEGIES = {"TDD", "BDD", "Integration-First", "E2E-First", "Manual", "Hybrid"}
@@ -122,6 +68,7 @@ FIELD_MAP = {
     "backend_frameworks": ("tech_stack", "backend_frameworks"),
     "databases": ("tech_stack", "databases_storage"),
     "infrastructure": ("tech_stack", "infrastructure"),
+    "dev_tools": ("tech_stack", "dev_tools"),
     "target_platforms": ("products", "target_platforms"),
     "architecture_pattern": ("architecture", "primary_pattern"),
     "design_patterns": ("architecture", "design_patterns"),
@@ -135,13 +82,11 @@ FIELD_MAP = {
     "test_coverage_target": ("test_config", "coverage_target"),
 }
 
-# Extraction field names grouped by target relation block. Used by the
-# overwrite-protection rollback below to map a skipped block back to the
-# extraction fields that didn't write. (The column->block grouping itself lives in
-# the shared product-field translator, services/product_field_map.py.)
-_TECH_STACK_FIELDS = {k for k, (t, _) in FIELD_MAP.items() if t == "tech_stack"}
-_ARCHITECTURE_FIELDS = {k for k, (t, _) in FIELD_MAP.items() if t == "architecture"}
-_TEST_CONFIG_FIELDS = {k for k, (t, _) in FIELD_MAP.items() if t == "test_config"}
+# Reverse of FIELD_MAP: (block, column) -> extraction field name. Used by the
+# overwrite-protection rollback below to name the exact extraction field behind a
+# skipped COLUMN. (The column->block grouping itself lives in the shared
+# product-field translator, services/product_field_map.py.)
+_FIELD_FOR_COLUMN = {target: field_name for field_name, target in FIELD_MAP.items()}
 
 
 @asynccontextmanager
@@ -169,7 +114,10 @@ async def get_vision_doc(
     Retrieve vision document content as paginated chunks with extraction instructions.
 
     Call with no chunk parameter to get metadata (total_chunks, extraction_instructions).
-    Then call with chunk=1, chunk=2, etc. to retrieve each chunk's content.
+    Then fetch chunk=1..total_chunks. Chunk reads are independent and side-effect free,
+    so they can be requested in PARALLEL -- there is no ordering requirement (FE-9320:
+    the old "chunk=1, chunk=2, etc." phrasing read as sequential and cost a real run six
+    round trips for one document).
 
     Args:
         product_id: Target product UUID
@@ -306,8 +254,11 @@ async def get_vision_doc(
             base["chunk_token_count"] = only["token_count"]
             base["usage"] = "All content is included above; no further get_vision_doc calls are needed."
         else:
-            # Metadata only — no content, agent should request chunks individually
-            base["usage"] = f"Call again with chunk=1 through chunk={total_chunks} to retrieve content"
+            # Metadata only — no content, agent should request the chunks.
+            base["usage"] = (
+                f"Fetch chunk=1 through chunk={total_chunks} to retrieve content. These reads are "
+                "independent and side-effect free -- request them in PARALLEL, in any order."
+            )
 
         # Notify frontend that the agent has connected and started analysis
         if websocket_manager and chunk is None:
@@ -453,35 +404,42 @@ async def _apply_overwrite_protection(
     *,
     force: bool,
 ) -> None:
-    """Handle ProductService JSONB overwrite-protection as structured skips.
+    """Handle ProductService overwrite-protection as structured skips.
 
-    ProductService raises ValidationError with context={"populated_fields": [...]}
-    when JSONB blocks (tech_stack/architecture/test_config) are already populated and
-    force=False. Roll the affected fields out of ``fields_written`` into
-    ``fields_skipped``, then re-attempt the write with the conflicting blocks stripped
-    so non-conflicting fields still land. Re-raise any other ValidationError.
+    ProductService raises ValidationError carrying
+    ``context={"populated_columns": {block: [column, ...]}}`` when specific config
+    COLUMNS already hold a value and force=False. Roll exactly those columns'
+    extraction fields out of ``fields_written`` into ``fields_skipped``, then
+    re-attempt the write with only the conflicting columns stripped. Re-raise any
+    other ValidationError.
+
+    FE-9320: this used to strip the whole BLOCK, so a repair call discarded every
+    column of tech_stack / architecture / test_config -- including the ones that
+    were still empty. Only the colliding columns are dropped now.
     """
-    populated = (exc.context or {}).get("populated_fields") if hasattr(exc, "context") else None
-    if not populated:
+    populated_columns = (exc.context or {}).get("populated_columns") if hasattr(exc, "context") else None
+    if not populated_columns:
         raise exc
-    block_field_map = {
-        "tech_stack": _TECH_STACK_FIELDS,
-        "architecture": _ARCHITECTURE_FIELDS,
-        "test_config": _TEST_CONFIG_FIELDS,
-    }
-    for block in populated:
-        block_fields = block_field_map.get(block, set())
-        for field_name in list(fields_written):
-            if field_name in block_fields:
+
+    safe_kwargs = dict(kwargs)
+    for block, columns in populated_columns.items():
+        for column in columns:
+            field_name = _FIELD_FOR_COLUMN.get((block, column))
+            if field_name in fields_written:
                 fields_written.remove(field_name)
                 fields_skipped.append(
                     {
                         "field": field_name,
-                        "reason": f"{block} already populated",
+                        "reason": f"{block}.{column} already has a value",
                         "hint": "Pass force=True to overwrite.",
                     }
                 )
-    safe_kwargs = {k: v for k, v in kwargs.items() if k not in populated}
+        remaining = {c: v for c, v in safe_kwargs.get(block, {}).items() if c not in columns}
+        if remaining:
+            safe_kwargs[block] = remaining
+        else:
+            safe_kwargs.pop(block, None)
+
     if safe_kwargs:
         await product_service.update_product(product_id, force=force, **safe_kwargs)
 
@@ -515,56 +473,35 @@ def _skip_user_owned_field(
         )
 
 
-async def update_product_fields(
+def _validate_extraction_input(
     product_id: str,
-    tenant_key: str,
-    db_manager: DatabaseManager | None = None,
-    websocket_manager: Any = None,
-    _test_session: AsyncSession | None = None,
-    force: bool = False,
-    **fields: Any,
-) -> dict[str, Any]:
+    fields: dict[str, Any],
+) -> tuple[list[dict] | None, dict | None]:
+    """Validate agent input at the MCP boundary, BEFORE any DB access.
+
+    Rejects the removed legacy summary fields, the enum-like extraction fields, and
+    the two JSONB summary payloads, so bad agent input becomes a clean 422-style
+    ValidationError instead of a DB-constraint 500. Pops ``vision_summaries`` /
+    ``consolidated_vision`` out of ``fields`` (they are written through their own
+    paths, not the column mapper) and returns them validated.
     """
-    Write product fields extracted from vision document analysis.
-
-    Performs merge-write: only updates fields that are explicitly provided.
-    Creates child table rows (tech_stack, architecture, test_config) on first write.
-
-    Args:
-        product_id: Target product UUID
-        tenant_key: Tenant isolation key
-        db_manager: Injected by ToolAccessor
-        websocket_manager: Injected by ToolAccessor for event emission
-        **fields: Extracted field key-value pairs
-
-    Returns:
-        Dict with success, fields_written count, and fields list
-
-    Raises:
-        ResourceNotFoundError: If product not found for tenant
-    """
-    if not db_manager and _test_session is None:
-        raise ValueError("db_manager is required")
-
     # BE-5117b: legacy summary fields were the parallel write path into
     # vision_document_summaries. That table is gone and only the column
     # path (vision_summaries / consolidated_vision) is valid. Silent no-op
     # would mask agent-prompt drift -- raise loudly so the caller sees it.
-    _legacy_summary_fields = {"summary_33", "summary_66"}
-    _legacy_passed = _legacy_summary_fields.intersection(fields)
-    if _legacy_passed:
+    legacy_passed = {"summary_33", "summary_66"}.intersection(fields)
+    if legacy_passed:
         raise ValidationError(
             message=(
-                f"Unknown fields: {sorted(_legacy_passed)}. "
-                "summary_33 / summary_66 were removed in BE-5117b. Use "
+                f"Unknown fields: {sorted(legacy_passed)}. "
+                "summary_33 / summary_66 were removed. Use "
                 "vision_summaries=[{doc_id, light, medium}] for per-document "
                 "summaries and consolidated_vision={light, medium} for the "
                 "product-level aggregate."
             ),
-            context={"unknown_fields": sorted(_legacy_passed)},
+            context={"unknown_fields": sorted(legacy_passed)},
         )
 
-    # -- Input validation before any DB access --
     if "testing_strategy" in fields:
         strategy = fields["testing_strategy"]
         if strategy not in VALID_TESTING_STRATEGIES:
@@ -582,34 +519,85 @@ async def update_product_fields(
                 context={"test_coverage_target": target},
             )
 
-    # BE-5117: agent-supplied vision summaries (per-doc + aggregate) are
-    # validated at the MCP tool boundary BEFORE reaching the service layer.
-    # Type, shape, length caps, and doc_id UUID format are enforced here so
-    # invalid input produces a clean 422-style ValidationError instead of a
-    # DB constraint 500.
+    # BE-5117: type, shape, length caps, and doc_id UUID format are enforced here.
     vision_summaries_payload: list[dict] | None = None
     consolidated_vision_payload: dict | None = None
     if "vision_summaries" in fields:
-        raw = fields.pop("vision_summaries")
         try:
-            vision_summaries_payload = validate_vision_summaries(raw)
+            vision_summaries_payload = validate_vision_summaries(fields.pop("vision_summaries"))
         except (PydanticValidationError, TypeError, ValueError) as exc:
             raise ValidationError(
                 message=f"Invalid vision_summaries payload: {exc}",
                 context={"product_id": product_id},
             ) from exc
     if "consolidated_vision" in fields:
-        raw = fields.pop("consolidated_vision")
         try:
-            consolidated_vision_payload = validate_consolidated_vision(raw)
+            consolidated_vision_payload = validate_consolidated_vision(fields.pop("consolidated_vision"))
         except (PydanticValidationError, TypeError, ValueError) as exc:
             raise ValidationError(
                 message=f"Invalid consolidated_vision payload: {exc}",
                 context={"product_id": product_id},
             ) from exc
+    return vision_summaries_payload, consolidated_vision_payload
+
+
+async def update_product_fields(
+    product_id: str,
+    tenant_key: str,
+    db_manager: DatabaseManager | None = None,
+    websocket_manager: Any = None,
+    _test_session: AsyncSession | None = None,
+    force: bool = False,
+    emit_completion: bool = False,
+    **fields: Any,
+) -> dict[str, Any]:
+    """
+    Write product fields extracted from vision document analysis.
+
+    Performs merge-write: only updates fields that are explicitly provided.
+    Creates child table rows (tech_stack, architecture, test_config) on first write.
+
+    Safe to call in STAGES (FE-9320): each call writes what it carries, and every
+    response reports the live completion state so the agent never has to infer
+    whether the analysis finished.
+
+    Args:
+        product_id: Target product UUID
+        tenant_key: Tenant isolation key
+        db_manager: Injected by ToolAccessor
+        websocket_manager: Injected by ToolAccessor for event emission
+        emit_completion: Marks this as the FINAL staged call. Re-evaluates the
+            completion flag and signals the dashboard even when this call writes no
+            fields (the emit is otherwise gated on something having been written).
+        **fields: Extracted field key-value pairs
+
+    Returns:
+        Dict with success, fields_written count, fields list, fields_skipped,
+        vision_analysis_complete and missing_for_completion.
+
+    Raises:
+        ResourceNotFoundError: If product not found for tenant
+    """
+    if not db_manager and _test_session is None:
+        raise ValueError("db_manager is required")
+
+    vision_summaries_payload, consolidated_vision_payload = _validate_extraction_input(product_id, fields)
 
     fields_written: list[str] = []
     fields_skipped: list[dict[str, str]] = []
+
+    # BE-9322: name back any field this tool cannot map (_build_update_kwargs iterates
+    # FIELD_MAP, not `fields`). DEFENSIVE ONLY -- unreachable in production, kept
+    # deliberately: the reachable set is exactly FIELD_MAP's 21 names, because the grouped
+    # MCP models declare extra="forbid", FastMCP drops unknown top-level args before entry,
+    # and vision_summaries/consolidated_vision are popped above. Relax any of those and the
+    # behaviour is specified, not rediscovered. Neither dead code nor a live feature.
+    _mappable, unmappable_fields = split_known(fields, FIELD_MAP)
+    _unmappable_hint = f"Valid fields: {', '.join(sorted(FIELD_MAP))}."
+    fields_skipped.extend(
+        {"field": name, "reason": "unrecognized field -- no product column maps to it", "hint": _unmappable_hint}
+        for name in unmappable_fields
+    )
 
     async with _session_scope(db_manager, _test_session) as session:
         stmt = (
@@ -680,6 +668,7 @@ async def update_product_fields(
                 product_id,
                 db_manager,
                 fields_written,
+                fields_skipped,
             )
         if consolidated_vision_payload is not None:
             await _write_consolidated_vision(
@@ -691,16 +680,21 @@ async def update_product_fields(
                 fields_written,
                 force=force,
             )
-        if vision_summaries_payload is not None or consolidated_vision_payload is not None:
-            vision_service = ProductVisionService(
-                db_manager=db_manager,
-                tenant_key=tenant_key,
-                test_session=_test_session,
-            )
-            await vision_service.evaluate_vision_analysis_complete(session, product_id)
+        # FE-9320: evaluate on EVERY call, not only when summaries were in the
+        # payload. Staged writes need each response to carry the true completion
+        # state -- a real run had to guess whether the flag had flipped, and guessed.
+        vision_service = ProductVisionService(
+            db_manager=db_manager,
+            tenant_key=tenant_key,
+            test_session=_test_session,
+        )
+        analysis_complete, missing_for_completion = await vision_service.evaluate_vision_completion(session, product_id)
 
-    # WebSocket emission (after commit via context manager)
-    if websocket_manager and fields_written:
+    # WebSocket emission (after commit via context manager). The per-write emit is
+    # load-bearing for the tutorial's progressive-fill contract (each event is a
+    # refresh tick, not a completion signal), so it stays; emit_completion only ADDS
+    # the case where the final staged call wrote nothing of its own.
+    if websocket_manager and (fields_written or emit_completion):
         from giljo_mcp.events.schemas import EventFactory
 
         event = EventFactory.tenant_envelope(
@@ -710,6 +704,7 @@ async def update_product_fields(
                 "product_id": product_id,
                 "fields_written": len(fields_written),
                 "fields": fields_written,
+                "vision_analysis_complete": analysis_complete,
             },
         )
         await websocket_manager.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
@@ -719,6 +714,8 @@ async def update_product_fields(
         "fields_written": len(fields_written),
         "fields": fields_written,
         "fields_skipped": fields_skipped,
+        "vision_analysis_complete": analysis_complete,
+        "missing_for_completion": missing_for_completion,
     }
 
 
@@ -729,13 +726,17 @@ async def _write_vision_summaries(
     product_id: str,
     db_manager: DatabaseManager | None,
     fields_written: list[str],
+    fields_skipped: list[dict[str, str]],
 ) -> None:
     """Persist agent-supplied per-document light/medium summaries (BE-5117).
 
     Routes through VisionDocumentRepository (the owning repo for vision
     documents). Per-doc tenant scoping is enforced inside ``update_summaries``.
-    Docs that do not belong to this tenant/product are silently skipped --
-    the agent learns from ``fields_written`` which docs landed.
+
+    FE-9320: a doc_id that matched nothing used to be dropped with only a log line
+    while the response still reported ``vision_summaries`` written -- the one place
+    in this ingest that lost agent data silently. Every miss is now reported to the
+    caller with its doc_id and the reason it did not land.
     """
     repo = VisionDocumentRepository(db_manager=db_manager)
     landed: list[str] = []
@@ -747,13 +748,22 @@ async def _write_vision_summaries(
             light=entry["light"],
             medium=entry["medium"],
         )
-        if updated is not None and str(updated.product_id) == str(product_id):
-            landed.append(entry["doc_id"])
+        if updated is None:
+            reason = "no vision document with this doc_id exists for this tenant"
+        elif str(updated.product_id) != str(product_id):
+            reason = "this doc_id belongs to a different product"
         else:
-            logger.warning(
-                "vision_summaries.skip: doc_id=%s not found for tenant or product mismatch",
-                entry["doc_id"],
-            )
+            landed.append(entry["doc_id"])
+            continue
+        logger.warning("vision_summaries.skip: doc_id=%s %s", entry["doc_id"], reason)
+        fields_skipped.append(
+            {
+                "field": "vision_summaries",
+                "doc_id": entry["doc_id"],
+                "reason": reason,
+                "hint": "Use a doc_id returned by get_vision_doc for THIS product.",
+            }
+        )
     if landed:
         fields_written.append("vision_summaries")
 

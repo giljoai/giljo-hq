@@ -29,12 +29,14 @@ import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.models.projects import Project
+from giljo_mcp.services.execution_mode_gate import effective_execution_mode
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
 
@@ -65,6 +67,47 @@ class ChainContext:
     # Injected into a sub-orchestrator's runtime protocol so it reads the conductor's
     # cross-project plan live (no stale snapshot). None for solo (no run).
     chain_mission: str | None = None
+
+
+async def chain_execution_mode_for_project(session: AsyncSession, *, project_id: str, tenant_key: str) -> str | None:
+    """Return the ACTIVE run's execution_mode for a chain member, else None (BE-9335).
+
+    The read half of the chain-member mode rule, for the boundaries that resolve a
+    project's mode WITHOUT already holding a ChainContext (``spawn_job`` and the
+    chain double-spawn reuse path). Callers pair it with
+    ``execution_mode_gate.effective_execution_mode``.
+
+    Takes the caller's ``session`` and an explicit ``tenant_key``, which is all
+    SequenceRunService needs to scope the read: it consults its db_manager only
+    when no session was injected, and its tenant_manager only when tenant_key is
+    empty. Neither applies here, so neither is threaded through.
+
+    Best-effort by design, matching the sibling chain lookups: a failure returns
+    None so the caller falls back to the project column and a chain-detection
+    problem can never break spawning. None is also the common solo answer.
+    """
+    try:
+        svc = SequenceRunService(db_manager=None, tenant_manager=None, session=session)
+        run = await svc.find_active_run_for_project(project_id=project_id, tenant_key=tenant_key)
+        return run.get("execution_mode") if run else None
+    except Exception:  # noqa: BLE001 - best-effort; never break the spawn path
+        logger.warning("[BE-9335] chain execution-mode lookup failed (non-fatal); using the project's own mode")
+        return None
+
+
+async def renders_multi_terminal(session: AsyncSession, *, project: Any, project_id: str, tenant_key: str) -> bool:
+    """True when a spawned agent's bootstrap is the multi_terminal dashboard pointer.
+
+    BE-9335: for a member of an active chain the CHAIN's mode decides, so a chain
+    never hands its members the spawn syntax of whatever mode they happened to be
+    staged with individually. Solo (no active run) resolves to the project column,
+    so the non-chain bootstrap is unchanged.
+    """
+    mode = effective_execution_mode(
+        getattr(project, "execution_mode", "multi_terminal"),
+        await chain_execution_mode_for_project(session, project_id=project_id, tenant_key=tenant_key),
+    )
+    return (mode or "multi_terminal") == "multi_terminal"
 
 
 class SequenceChainContextResolver:

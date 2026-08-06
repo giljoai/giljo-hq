@@ -21,7 +21,7 @@ from sqlalchemy import func as sa_func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from giljo_mcp.models.agent_identity import AgentExecution, AgentJob, AgentTodoItem
+from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES, AgentExecution, AgentJob, AgentTodoItem
 
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ class ProgressRepository:
             .where(
                 AgentExecution.job_id == job_id,
                 AgentExecution.tenant_key == tenant_key,
-                AgentExecution.status.not_in(["complete", "closed", "decommissioned"]),
+                AgentExecution.status.not_in(TERMINAL_EXECUTION_STATUSES),
             )
             .order_by(AgentExecution.started_at.desc())
             .limit(1)

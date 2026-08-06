@@ -36,19 +36,51 @@
         />
       </div>
 
-      <!-- Step 2: discovery prompt staged, waiting on the agent's analysis -->
+      <!-- Step 2: discovery prompt staged, waiting on the agent's analysis.
+           FE-9320: the prompt is VISIBLE and copying it is an explicit button —
+           uploading a file no longer takes the clipboard on the user's behalf. -->
       <div v-else class="analysis-panel" data-testid="tutorial-analysis-panel">
         <p class="analysis-lead">
-          Discovery prompt copied. Paste it into your AI agent to analyze your vision doc.
+          Your document is uploaded. Copy this prompt and paste it into an AI agent that is
+          connected to {{ PRODUCT_NAME }} — it reads the document and fills in your product card.
         </p>
-        <div v-if="promptFallbackText" class="prompt-fallback">{{ promptFallbackText }}</div>
+
+        <div class="prompt-box" data-testid="tutorial-analysis-prompt">{{ analysisPromptText }}</div>
+
+        <v-btn
+          color="primary"
+          variant="flat"
+          class="copy-btn"
+          data-testid="tutorial-copy-analysis-prompt"
+          :prepend-icon="promptCopied ? 'mdi-check' : 'mdi-content-copy'"
+          @click="copyAnalysisPrompt"
+        >
+          {{ promptCopied ? 'Copied' : 'Copy discovery prompt' }}
+        </v-btn>
+
         <div class="analysis-status">
           <span class="waiting-dot" />
           <span>Waiting for your agent's analysis…</span>
         </div>
-        <p v-if="analysisHintVisible" class="analysis-hint">
-          Still running? Make sure the prompt was pasted into an MCP-connected agent session.
-        </p>
+
+        <!-- Honest dead-end state: this step cannot finish without a connected
+             agent, and the wizard lets you skip the Connect step, so say so and
+             offer a real way out instead of spinning forever. -->
+        <div v-if="analysisHintVisible" class="analysis-stalled" data-testid="tutorial-analysis-stalled">
+          <p class="analysis-hint">
+            Nothing back yet. This step only completes when an agent connected to
+            {{ PRODUCT_NAME }} runs the prompt — a chat tool with no connection cannot finish it.
+            If you have not connected one yet, you can fill the product in yourself instead.
+          </p>
+          <v-btn
+            variant="text"
+            class="stalled-btn"
+            data-testid="tutorial-analysis-manual"
+            @click="$emit('manual')"
+          >
+            Fill it in myself instead
+          </v-btn>
+        </div>
       </div>
     </div>
   </div>
@@ -57,8 +89,10 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useProductStore } from '@/stores/products'
+import { useClipboard } from '@/composables/useClipboard'
 import { useProductVisionUpload } from '@/composables/useProductVisionUpload'
 import { useVisionAnalysis } from '@/composables/useVisionAnalysis'
+import { PRODUCT_NAME } from '@/branding'
 
 const props = defineProps({
   /** THE tutorial-run product id, threaded via useTutorialState (gate F3). */
@@ -68,7 +102,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['review', 'product-created', 'product-invalidated'])
+const emit = defineEmits(['review', 'product-created', 'product-invalidated', 'manual'])
 
 const productStore = useProductStore()
 
@@ -107,13 +141,32 @@ const {
 
 // patchProductForm is invoked exactly once per completed analysis (event path
 // and FE-9166 poll path both funnel through it) — it is the completion hook.
+// FE-9320: copyPromptOnStage:false — staging happens as a side effect of
+// dropping a file here, and a clipboard write must never be a side effect of
+// another action. The prompt is rendered instead, with the explicit copy button
+// below. (ProductForm stages from a button the user pressed, so it keeps the
+// automatic copy — that path is correct and is left alone.)
 const {
-  promptFallbackText,
+  analysisPromptText,
   analysisHintVisible,
   stageAnalysis,
   onVisionAnalysisComplete,
   resetAnalysisState,
-} = useVisionAnalysis(() => emit('review'))
+} = useVisionAnalysis(() => emit('review'), { copyPromptOnStage: false })
+
+const { copy } = useClipboard()
+const promptCopied = ref(false)
+let copiedTimer = null
+
+// Same shape as TutorialPromptScreen.copyPrompt: the affirmative state is only
+// set when the copy is verified, never on a failed write.
+async function copyAnalysisPrompt() {
+  const ok = await copy(analysisPromptText.value)
+  if (!ok) return
+  promptCopied.value = true
+  clearTimeout(copiedTimer)
+  copiedTimer = setTimeout(() => { promptCopied.value = false }, 1500)
+}
 
 function onVisionCompleteEvent(event) {
   onVisionAnalysisComplete(event, editingProduct.value?.id)
@@ -149,6 +202,7 @@ function onBrowse(event) {
 
 onBeforeUnmount(() => {
   window.removeEventListener('vision-analysis-complete', onVisionCompleteEvent)
+  clearTimeout(copiedTimer)
   resetAnalysisState()
 })
 </script>
@@ -243,6 +297,19 @@ onBeforeUnmount(() => {
   display: none;
 }
 
+/* Matches TutorialPromptScreen's copy control — same brand-yellow primary. */
+.copy-btn {
+  font-family: 'Outfit', $typography-font-primary;
+  font-weight: 600;
+  border-radius: $border-radius-default;
+  background: $color-brand-yellow !important;
+  color: $color-on-yellow-ink !important;
+
+  &:hover {
+    background: $color-brand-yellow-hover !important;
+  }
+}
+
 .analysis-panel {
   width: 480px;
   display: flex;
@@ -259,7 +326,8 @@ onBeforeUnmount(() => {
   color: var(--text-secondary);
 }
 
-.prompt-fallback {
+.prompt-box {
+  align-self: stretch;
   background: $color-background-primary;
   border-radius: $border-radius-md;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
@@ -270,9 +338,24 @@ onBeforeUnmount(() => {
   color: var(--text-secondary);
   white-space: pre-wrap;
   text-align: left;
-  max-height: 220px;
+  max-height: 180px;
   overflow-y: auto;
   user-select: all;
+}
+
+.analysis-stalled {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.stalled-btn {
+  color: var(--text-secondary) !important;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  border-radius: $border-radius-default;
 }
 
 .analysis-status {

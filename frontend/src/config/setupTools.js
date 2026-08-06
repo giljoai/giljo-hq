@@ -6,8 +6,7 @@
  * across SetupStep2Connect / SetupStep3Commands.
  *
  * Each tool carries EITHER `logo` (an <img> asset path) OR `icon` (an mdi glyph name)
- * for the icon well. OpenCode ships no brand asset in this repo yet, so it renders an
- * mdi glyph until a real SVG lands.
+ * for the icon well. All six tools currently ship a real logo asset.
  */
 import { getAuthCapabilities } from '@/composables/useMcpConfig'
 
@@ -17,7 +16,7 @@ export const SETUP_TOOLS = [
   { id: 'codex_cli', name: 'Codex CLI', logo: '/icons/codex_mark_white.svg' },
   { id: 'gemini_cli', name: 'Gemini CLI', logo: '/gemini-icon.svg' },
   { id: 'antigravity_cli', name: 'Antigravity CLI', logo: '/antigravity-color.svg' },
-  { id: 'opencode', name: 'OpenCode', icon: 'mdi-console' },
+  { id: 'opencode', name: 'OpenCode', logo: '/opencode-mark-white.svg' },
   { id: 'generic', name: 'Generic MCP client', logo: '/logo-mcp.svg' },
 ]
 

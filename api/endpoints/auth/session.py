@@ -123,6 +123,28 @@ async def _load_db_cookie_domains(db: AsyncSession, tenant_key: str | None) -> l
         return []
 
 
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _is_loopback_host(host_header: str) -> bool:
+    """True when the Host header names a loopback address.
+
+    BE-9328: ``localhost`` / ``127.0.0.1`` / ``::1`` are the documented default
+    CE install posture (INF-6236: loopback bind over plain http, cross-domain
+    auth opt-in), not unknown hosts. Used for LOG LEVEL only -- loopback still
+    gets the same host-only cookie it always did.
+
+    Handles the bracketed IPv6 form (``[::1]:7272``, RFC 3986) that the plain
+    ``split(":")`` host parsing below mangles into ``"["``.
+    """
+    host = host_header.strip().lower()
+    if host.startswith("["):
+        host = host[1:].partition("]")[0]
+    elif host.count(":") == 1:
+        host = host.split(":")[0]
+    return host in _LOOPBACK_HOSTS
+
+
 def _build_cookie_params(request: Request, db_cookie_domains: list[str] | None = None) -> dict:
     """Build cookie parameters for access_token cookie with secure domain validation.
 
@@ -130,7 +152,9 @@ def _build_cookie_params(request: Request, db_cookie_domains: list[str] | None =
     the appropriate cookie domain:
     - IP addresses: domain omitted (browser uses origin-matching per RFC 6265)
     - Domain names: must be whitelisted (see below) or domain=None (fail secure)
-    - Unknown hosts: domain=None (fail secure)
+    - Loopback hosts: domain omitted, logged at DEBUG (BE-9328 -- the default
+      install posture, not something to warn a first-run user about)
+    - Unknown hosts: domain=None (fail secure), logged at WARNING
 
     BE-9152: the whitelist is the union of the DB-backed tenant settings store the
     admin Settings panel writes (``db_cookie_domains``, the authoritative path) and
@@ -199,12 +223,25 @@ def _build_cookie_params(request: Request, db_cookie_domains: list[str] | None =
             elif host_only in allowed_domains:
                 cookie_domain = host_only
                 logger.info(f"Cookie domain set to whitelisted domain: {host_only}")
+            # BE-9328: loopback is the default install posture, not an unknown
+            # host. Same host-only cookie as before (domain=None, identical to
+            # the branch below) -- only the log level changes, so a first-run
+            # localhost install no longer warns about a setting it does not need.
+            # Deliberately AFTER the whitelist check: an operator who explicitly
+            # whitelisted "localhost" keeps the domain-scoped cookie they asked for.
+            elif _is_loopback_host(host_header):
+                cookie_domain = None
+                # host_header, not host_only: the split(":") above mangles the
+                # bracketed IPv6 form ("[::1]:7272") down to "[".
+                logger.debug(f"Cookie domain omitted for loopback host: {sanitize(host_header)} (host-only cookie)")
+
             else:
                 cookie_domain = None
                 logger.warning(
-                    f"Cookie domain set to None for unknown host '{host_only}' "
-                    f"(not in whitelist: {allowed_domains}). "
-                    f"Add it in Settings -> Network -> cookie domains if cross-domain auth is needed."
+                    f"Host '{host_only}' is not in the cookie-domain whitelist ({allowed_domains}), "
+                    f"so the session cookie is scoped to this host only. "
+                    f"That is fine for a single-host install; add the domain in "
+                    f"Settings -> Network -> cookie domains only if you need cross-domain authentication."
                 )
 
     return {

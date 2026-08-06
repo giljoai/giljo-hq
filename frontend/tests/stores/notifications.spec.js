@@ -520,7 +520,11 @@ describe('useNotificationStore', () => {
 
       store.addNotification(notification)
 
-      expect(store.notifications[0]).toEqual(notification)
+      // FE-9241: addNotification() now tags every row `_local: true` (these
+      // client-originated rows are mirrored to localStorage so silent-agent
+      // notifications survive a refresh) — assert the input fields verbatim
+      // plus that tag, rather than a strict toEqual against the raw input.
+      expect(store.notifications[0]).toEqual({ ...notification, _local: true })
       expect(store.unreadCount).toBe(0) // Because read: true
     })
 

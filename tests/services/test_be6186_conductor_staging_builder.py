@@ -253,8 +253,18 @@ def test_chain_staging_prose_contract() -> None:
 
 
 def test_ch_chain_staging_includes_hub_thread_step() -> None:
-    """BE-6187: the conductor creates the Hub thread itself as Step 0 (create_thread),
-    and the run_id appears so sub-orchestrators can discover it via search_threads."""
+    """BE-6187: the conductor creates the Hub thread itself as Step 0 (create_thread).
+
+    BE-9291 DELIBERATELY CHANGED what this asserts. It used to require the chapter to
+    name ``search_threads`` and to carry the run_id "so sub-orchs can find the Hub
+    thread" — because discovery really did work by substring-matching the run_id out of
+    the subject. Discovery now runs on ``comm_threads.sequence_run_id``, a real FK, so
+    naming ``search_threads`` here would pin a mechanism that no longer exists.
+
+    The INTENT is unchanged and still enforced: the chapter must name a discovery path,
+    and the run_id must still appear — but now as the value the conductor STAMPS on the
+    thread, not as a substring anyone parses back out.
+    """
     from giljo_mcp.services.protocol_sections.chapters_chain import _build_ch_chain_staging
 
     chapter = _build_ch_chain_staging(
@@ -264,9 +274,12 @@ def test_ch_chain_staging_includes_hub_thread_step() -> None:
 
     # The conductor stands up the Hub thread itself (no server-side creation).
     assert "create_thread" in chapter, "the conductor must be told to create_thread for the Hub"
-    # Sub-orchestrators discover it by run_id; both the discovery call and the run_id appear.
-    assert "search_threads" in chapter, "the discovery path (search_threads) must be named"
-    assert "run-test" in chapter, "the run_id must appear so sub-orchs can find the Hub thread"
+    # It must STAMP the link -- that is the only thing marking the thread as this run's hub.
+    assert "sequence_run_id" in chapter, "the conductor must be told to stamp sequence_run_id"
+    assert "run-test" in chapter, "the run_id must appear as the value to stamp"
+    # And the chapter must name the discovery path sub-orchs actually use.
+    assert "hub_thread_id" in chapter, "the discovery path (get_context chain) must be named"
+    assert "search_threads" not in chapter, "the retired substring-discovery path must not be re-introduced here"
     # Existing prose contracts still hold.
     assert "terminate_chain" not in low, "no TERMINATE_CHAIN prose"
     assert "symmetric" in low and "not special" in low, "head stays symmetric"

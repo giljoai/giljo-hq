@@ -123,9 +123,12 @@ async def test_sub_orch_runtime_gets_ch_sub_orchestrator(db_manager):
     assert "CH_SUB_ORCHESTRATOR" in out, "sub-orch must receive its chain-member chapter at runtime"
     assert "CH_CHAIN_DRIVE" not in out, "sub-orch must NOT get the conductor drive chapters"
     assert _BASE_PROTOCOL in out, "base protocol preserved, chapter appended"
-    # Position 2 of 2 (p2 is index 1 in resolved_order) and the run_id discovery path.
+    # Position 2 of 2 (p2 is index 1 in resolved_order) and the Hub discovery path.
+    # BE-9291 DELIBERATELY CHANGED the probe: discovery moved off the run_id subject
+    # substring onto the comm_threads.sequence_run_id FK, and the bare `search_threads`
+    # name now survives here only as a ToolSearch bootstrap hint.
     assert "project 2 of 2" in out
-    assert "search_threads" in out
+    assert "hub_thread_id" in out
 
 
 async def test_solo_no_active_run_is_noop(db_manager):

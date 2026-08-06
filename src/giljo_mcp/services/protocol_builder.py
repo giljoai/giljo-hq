@@ -183,7 +183,8 @@ def _build_orchestrator_protocol(
 
     # BE-6187: a sub_orchestrator chain member (every project's own orchestrator
     # after BE-6184) gets CH_SUB_ORCHESTRATOR — its chain position, the Hub thread
-    # discovery path (search_threads on run_id), and the close-out advance signal.
+    # discovery path (get_context(categories=["chain"]) -> hub_thread_id), and the
+    # close-out advance signal.
     # Rendered for both staging and runtime; the runtime injector mirrors this for
     # the chain-blind runtime mission path. Solo (chain_ctx=None) renders nothing
     # (Deletion Test holds).

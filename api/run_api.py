@@ -6,7 +6,7 @@
 # [CE] Community Edition.
 
 """
-Run the GiljoAI MCP REST API server
+Run the Giljo HQ REST API server
 """
 
 import argparse
@@ -388,7 +388,7 @@ class _NoiseFilter(logging.Filter):
 
 def main():
     """Main entry point for running the API server"""
-    parser = argparse.ArgumentParser(description="GiljoAI MCP REST API Server")
+    parser = argparse.ArgumentParser(description="Giljo HQ REST API Server")
     parser.add_argument("--host", default=None, help="Host to bind to (default: auto-detect from config)")
     parser.add_argument("--port", type=int, default=None, help="Port to bind to (default: auto-detect from config/env)")
     parser.add_argument(
@@ -456,7 +456,7 @@ def main():
 
     # Log startup information
     logger.info("=" * 60)
-    logger.info(f"  GiljoAI MCP REST API v{giljo_version}")
+    logger.info(f"  Giljo HQ REST API v{giljo_version}")
     logger.info("=" * 60)
 
     logger.info(f"Server binding to {args.host}:{args.port}")

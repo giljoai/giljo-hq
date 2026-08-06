@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Repository layer for GiljoAI MCP database operations.
+Repository layer for Giljo HQ database operations.
 
 Handover 0017: Provides clean abstractions for new agentic models with tenant filtering.
 Handover 0043 Phase 2: Added VisionDocumentRepository for multi-vision document support.

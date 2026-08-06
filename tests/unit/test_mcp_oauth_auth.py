@@ -23,6 +23,7 @@ def _mock_db() -> AsyncMock:
     mock_db.commit = AsyncMock()
     mock_db.add = MagicMock()
     mock_db.refresh = AsyncMock()
+    mock_db.info = {}  # tenant_session_context save/restore target
     return mock_db
 
 

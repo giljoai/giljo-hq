@@ -44,6 +44,7 @@ def mock_db_manager():
     session.delete = Mock()
     session.flush = AsyncMock()
     session.rollback = AsyncMock()
+    session.info = {}  # tenant_session_context save/restore target
     db_manager.get_session_async = Mock(return_value=session)
     db_manager.get_tenant_session_async = Mock(return_value=session)
     return db_manager, session
@@ -156,6 +157,7 @@ def make_mock_session(**overrides):
     session.refresh = AsyncMock()
     session.add = Mock()
     session.delete = Mock()
+    session.info = {}  # tenant_session_context save/restore target
 
     for key, value in overrides.items():
         setattr(session, key, value)

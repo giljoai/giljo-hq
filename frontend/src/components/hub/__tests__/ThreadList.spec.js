@@ -1,19 +1,20 @@
 /**
- * ThreadList.spec.js — FE-6054e
+ * ThreadList.spec.js — FE-6054e, rewritten for the Quiet Cards card list (FE-9289c)
  *
- * Tests:
- *  - filter change triggers loadThreads with updated filters
- *  - selecting a thread emits 'select' with thread_id
- *  - renders thread rows from the store
+ * ThreadList now owns list-level state (scope, search, selection, the delete dialog)
+ * and renders one ThreadCard per thread. The card emits open/rename/copy/delete/lock-info;
+ * ThreadList turns those into store calls + toasts. These tests exercise that seam and
+ * the scope split; ThreadCard's own rendering is covered in ThreadCard.spec.js.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { createVuetify } from 'vuetify'
 
-// ---- mocks ----
 const loadThreadsMock = vi.fn()
 const searchThreadsMock = vi.fn()
+const updateMock = vi.fn()
+const deleteMock = vi.fn()
 const copyMock = vi.fn(() => Promise.resolve(true))
 const showToastMock = vi.fn()
 
@@ -22,52 +23,30 @@ vi.mock('@/services/api', () => ({
     threads: {
       list: (...args) => loadThreadsMock(...args),
       search: (...args) => searchThreadsMock(...args),
+      update: (...args) => updateMock(...args),
+      delete: (...args) => deleteMock(...args),
     },
   },
 }))
-
 vi.mock('@/composables/useClipboard', () => ({
   useClipboard: () => ({ copy: copyMock, copied: { value: false } }),
 }))
-
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ showToast: showToastMock }),
 }))
 
 import ThreadList from '@/components/hub/ThreadList.vue'
+import ThreadCard from '@/components/hub/ThreadCard.vue'
 import { useCommHubStore } from '@/stores/commHubStore'
+import { useUserStore } from '@/stores/user'
 
 const vuetify = createVuetify()
 
-const THREAD_A = {
-  thread_id: 'thr-a',
-  chat_id: 'CHT-0001',
-  subject: 'Alpha thread',
-  status: 'open',
-  next_action_owner: null,
-  created_at: '2026-06-17T09:00:00Z',
-  last_activity_at: '2026-06-17T09:00:00Z',
+function mountList(pinia, props = {}) {
+  return mount(ThreadList, { props, global: { plugins: [pinia, vuetify] } })
 }
 
-const THREAD_B = {
-  thread_id: 'thr-b',
-  chat_id: 'CHT-0002',
-  subject: 'Beta thread',
-  status: 'closed',
-  next_action_owner: 'implementer',
-  created_at: '2026-06-17T08:00:00Z',
-  last_activity_at: '2026-06-17T08:00:00Z',
-}
-
-function mountList(activePinia) {
-  return mount(ThreadList, {
-    global: {
-      plugins: [activePinia, vuetify],
-    },
-  })
-}
-
-describe('ThreadList', () => {
+describe('ThreadList (Quiet Cards)', () => {
   let pinia
   let store
 
@@ -75,187 +54,104 @@ describe('ThreadList', () => {
     pinia = createPinia()
     setActivePinia(pinia)
     store = useCommHubStore()
-    loadThreadsMock.mockReset()
+    loadThreadsMock.mockReset().mockResolvedValue({ data: { threads: [], count: 0 } })
     searchThreadsMock.mockReset()
+    updateMock.mockReset()
+    deleteMock.mockReset().mockResolvedValue({ data: {} })
     copyMock.mockClear()
     showToastMock.mockClear()
-    loadThreadsMock.mockResolvedValue({ data: { threads: [], count: 0 } })
   })
 
-  afterEach(() => {
-    vi.restoreAllMocks()
+  afterEach(() => vi.restoreAllMocks())
+
+  it('renders one ThreadCard per thread in the store', async () => {
+    store._testSeedThread({ thread_id: 'a', chat_id: 'CHT-0001', subject: 'Alpha', project_id: null })
+    store._testSeedThread({ thread_id: 'b', chat_id: 'CHT-0002', subject: 'Beta', project_id: null })
+    const wrapper = mountList(pinia)
+    await flushPromises()
+    expect(wrapper.findAllComponents(ThreadCard).length).toBe(2)
   })
 
-  // ---------------------------------------------------------------------------
-  // renders thread rows
-  // ---------------------------------------------------------------------------
-  it('renders thread rows from the store', async () => {
-    loadThreadsMock.mockResolvedValueOnce({ data: { threads: [THREAD_A, THREAD_B], count: 2 } })
-    await store.loadThreads()
+  it('never decorates a TERMINAL thread as your-turn, wherever the baton stopped', async () => {
+    // FE-9365i, caught live by the operator: resolved threads wore the gold frame and
+    // raised hand because the baton simply stopped where the conversation stopped.
+    // "Done" and "waiting on you" cannot both be true.
+    const userStore = useUserStore()
+    userStore.currentUser = { id: 'op-1' }
+    store._testSeedThread({ thread_id: 'open1', chat_id: 'CHT-0001', subject: 'live', project_id: null, status: 'open', next_action_owner: 'op-1' })
+    store._testSeedThread({ thread_id: 'done1', chat_id: 'CHT-0002', subject: 'done', project_id: null, status: 'resolved', next_action_owner: 'op-1' })
 
     const wrapper = mountList(pinia)
     await flushPromises()
 
-    const rows = wrapper.findAll('[data-testid="thread-row"]')
-    expect(rows.length).toBe(2)
+    const byId = Object.fromEntries(
+      wrapper.findAllComponents(ThreadCard).map((c) => [c.props('thread').thread_id, c.props('thread')]),
+    )
+    expect(byId.open1._yourTurn).toBe(true)
+    expect(byId.done1._yourTurn).toBe(false)
   })
 
-  it('shows subject text in the row', async () => {
-    loadThreadsMock.mockResolvedValueOnce({ data: { threads: [THREAD_A], count: 1 } })
-    await store.loadThreads()
-
+  it('open event selects the thread and emits select', async () => {
+    store._testSeedThread({ thread_id: 'a', chat_id: 'CHT-0001', subject: 'Alpha', project_id: null })
     const wrapper = mountList(pinia)
     await flushPromises()
-
-    expect(wrapper.find('[data-testid="thread-subject"]').text()).toBe('Alpha thread')
+    await wrapper.findComponent(ThreadCard).vm.$emit('open', 'a')
+    expect(store.selectedThreadId).toBe('a')
+    expect(wrapper.emitted('select')[0]).toEqual(['a'])
   })
 
-  it('renders the badge slot placeholder on each row', async () => {
-    loadThreadsMock.mockResolvedValueOnce({ data: { threads: [THREAD_A], count: 1 } })
-    await store.loadThreads()
-
+  it('rename event calls the store PATCH and toasts success', async () => {
+    store._testSeedThread({ thread_id: 'a', chat_id: 'CHT-0001', subject: 'Old', project_id: null })
+    updateMock.mockResolvedValueOnce({ data: { thread_id: 'a', subject: 'New' } })
     const wrapper = mountList(pinia)
     await flushPromises()
-
-    // Badge slot exists for FE-6054f (unread / baton indicators to be added)
-    expect(wrapper.find('[data-testid="thread-badge-slot"]').exists()).toBe(true)
+    await wrapper.findComponent(ThreadCard).vm.$emit('rename', { thread: { thread_id: 'a' }, subject: 'New' })
+    await flushPromises()
+    expect(updateMock).toHaveBeenCalledWith('a', { subject: 'New' })
+    expect(showToastMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'success' }))
   })
 
-  // ---------------------------------------------------------------------------
-  // thread id only — never the raw next_action_owner UUID (FE-6121 DoD-2)
-  // ---------------------------------------------------------------------------
-  it('does NOT render the raw next_action_owner participant id on the row', async () => {
-    // THREAD_B carries next_action_owner: 'implementer' — must not surface as the id.
-    loadThreadsMock.mockResolvedValueOnce({ data: { threads: [THREAD_B], count: 1 } })
-    await store.loadThreads()
-
+  it('a rejected rename surfaces the reason as an error toast', async () => {
+    store._testSeedThread({ thread_id: 'a', chat_id: 'CHT-0001', subject: 'Old', project_id: null })
+    updateMock.mockRejectedValueOnce({ response: { data: { detail: 'named after its project' } } })
     const wrapper = mountList(pinia)
     await flushPromises()
-
-    expect(wrapper.find('[data-testid="thread-owner"]').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('implementer')
+    await wrapper.findComponent(ThreadCard).vm.$emit('rename', { thread: { thread_id: 'a' }, subject: 'x' })
+    await flushPromises()
+    expect(showToastMock).toHaveBeenCalledWith({ type: 'error', message: 'named after its project' })
   })
 
-  it('shows the CHT-#### thread identifier on the row', async () => {
-    loadThreadsMock.mockResolvedValueOnce({ data: { threads: [THREAD_A], count: 1 } })
-    await store.loadThreads()
-
+  it('copy event copies the thread_id UUID (not the CHT alias)', async () => {
+    store._testSeedThread({ thread_id: 'uuid-a', chat_id: 'CHT-0001', subject: 'Alpha', project_id: null })
     const wrapper = mountList(pinia)
     await flushPromises()
-
-    expect(wrapper.find('[data-testid="thread-chat-id"]').text()).toContain('CHT-0001')
+    await wrapper.findComponent(ThreadCard).vm.$emit('copy', { thread_id: 'uuid-a', chat_id: 'CHT-0001' })
+    await flushPromises()
+    expect(copyMock).toHaveBeenCalledWith('uuid-a')
   })
 
-  it('clicking the thread id copies the thread_id (not the chat id) and does not select the row', async () => {
-    loadThreadsMock.mockResolvedValueOnce({ data: { threads: [THREAD_A], count: 1 } })
-    await store.loadThreads()
-
+  it('lock-info explains the project lock instead of deleting', async () => {
+    store._testSeedThread({ thread_id: 'p', chat_id: 'CHT-0003', subject: 'Bound', project_id: 'proj-1' })
     const wrapper = mountList(pinia)
     await flushPromises()
-
-    await wrapper.find('[data-testid="thread-chat-id"]').trigger('click')
-    await flushPromises()
-
-    expect(copyMock).toHaveBeenCalledWith('thr-a')
-    // @click.stop — copying must not also emit a row select.
-    expect(wrapper.emitted('select')).toBeFalsy()
+    await wrapper.findComponent(ThreadCard).vm.$emit('lock-info', {})
+    expect(showToastMock).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('360 memory') }))
+    expect(deleteMock).not.toHaveBeenCalled()
   })
 
-  // ---------------------------------------------------------------------------
-  // soft delete
-  // ---------------------------------------------------------------------------
-  it('clicking delete opens the confirm dialog without selecting the row', async () => {
-    loadThreadsMock.mockResolvedValueOnce({ data: { threads: [THREAD_A], count: 1 } })
-    await store.loadThreads()
-
+  it('delete event opens the confirm dialog, and confirming calls deleteThread', async () => {
+    store._testSeedThread({ thread_id: 'a', chat_id: 'CHT-0001', subject: 'Alpha', project_id: null })
     const wrapper = mountList(pinia)
     await flushPromises()
-
-    await wrapper.find('[data-testid="thread-delete"]').trigger('click')
-    expect(wrapper.vm.showDeleteDialog).toBe(true)
-    expect(wrapper.vm.threadToDelete.thread_id).toBe('thr-a')
-    // @click.stop — opening the delete dialog must not select the row.
-    expect(wrapper.emitted('select')).toBeFalsy()
-  })
-
-  it('confirming delete calls commHub.deleteThread with the thread id', async () => {
-    loadThreadsMock.mockResolvedValueOnce({ data: { threads: [THREAD_A], count: 1 } })
-    await store.loadThreads()
-    const deleteSpy = vi.spyOn(store, 'deleteThread').mockResolvedValue()
-
-    const wrapper = mountList(pinia)
+    await wrapper.findComponent(ThreadCard).vm.$emit('delete', { thread_id: 'a', chat_id: 'CHT-0001' })
     await flushPromises()
-
-    await wrapper.find('[data-testid="thread-delete"]').trigger('click')
-    await wrapper.vm.onConfirmDelete()
-    await flushPromises()
-
-    expect(deleteSpy).toHaveBeenCalledWith('thr-a')
-    expect(wrapper.vm.showDeleteDialog).toBe(false)
-  })
-
-  // ---------------------------------------------------------------------------
-  // select emits
-  // ---------------------------------------------------------------------------
-  it('clicking a thread row emits select with thread_id', async () => {
-    loadThreadsMock.mockResolvedValueOnce({ data: { threads: [THREAD_A], count: 1 } })
-    await store.loadThreads()
-
-    const wrapper = mountList(pinia)
-    await flushPromises()
-
-    await wrapper.find('[data-testid="thread-row"]').trigger('click')
-    expect(wrapper.emitted('select')).toBeTruthy()
-    expect(wrapper.emitted('select')[0]).toEqual(['thr-a'])
-  })
-
-  it('clicking a thread row also calls commHub.selectThread', async () => {
-    loadThreadsMock.mockResolvedValueOnce({ data: { threads: [THREAD_A], count: 1 } })
-    await store.loadThreads()
-
-    const wrapper = mountList(pinia)
-    await flushPromises()
-
-    await wrapper.find('[data-testid="thread-row"]').trigger('click')
-    expect(store.selectedThreadId).toBe('thr-a')
-  })
-
-  // ---------------------------------------------------------------------------
-  // filter change triggers loadThreads
-  // ---------------------------------------------------------------------------
-  it('changing status filter calls loadThreads with updated filters', async () => {
-    const wrapper = mountList(pinia)
-    await flushPromises()
-    loadThreadsMock.mockClear()
-    loadThreadsMock.mockResolvedValue({ data: { threads: [], count: 0 } })
-
-    // Trigger onFilterChange via component method
-    wrapper.vm.localFilters.status = 'closed'
-    wrapper.vm.onFilterChange()
-    await flushPromises()
-
-    expect(loadThreadsMock).toHaveBeenCalled()
-  })
-
-  // ---------------------------------------------------------------------------
-  // severity strip (FE-6121 residual removed) — must stay gone
-  // ---------------------------------------------------------------------------
-  it('does NOT render the severity filter or per-row severity badge', async () => {
-    loadThreadsMock.mockResolvedValueOnce({ data: { threads: [THREAD_A, THREAD_B], count: 2 } })
-    await store.loadThreads()
-
-    const wrapper = mountList(pinia)
-    await flushPromises()
-
-    expect(wrapper.find('[data-testid="filter-severity"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="thread-severity-badge"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="thread-delete-dialog"]').exists()).toBe(true)
+    // The dialog body states the real consequence.
+    expect(wrapper.text()).toContain('no longer shown')
   })
 })
 
-// ---------------------------------------------------------------------------
-// FE-9012c (D2): the scope prop splits the SAME list into the two Hub tabs.
-// ---------------------------------------------------------------------------
-describe('ThreadList scope prop (FE-9012c)', () => {
+describe('ThreadList scope prop', () => {
   let pinia
   let store
 
@@ -263,45 +159,29 @@ describe('ThreadList scope prop (FE-9012c)', () => {
     pinia = createPinia()
     setActivePinia(pinia)
     store = useCommHubStore()
-    loadThreadsMock.mockReset()
-    loadThreadsMock.mockResolvedValue({ data: { threads: [], count: 0 } })
+    loadThreadsMock.mockReset().mockResolvedValue({ data: { threads: [], count: 0 } })
     store._testSeedThread({ thread_id: 'pb', project_id: 'projA', subject: 'Bound', chat_id: 'CHT-0009' })
     store._testSeedThread({ thread_id: 'ts', project_id: null, subject: 'Standalone', chat_id: 'CHT-0010' })
   })
 
-  function mountScoped(scope) {
-    return mount(ThreadList, { props: { scope }, global: { plugins: [pinia, vuetify] } })
-  }
-
   it("scope='project' renders only project-bound threads", async () => {
-    const wrapper = mountScoped('project')
+    const wrapper = mountList(pinia, { scope: 'project' })
     await flushPromises()
-    expect(wrapper.findAll('[data-testid="thread-row"]').length).toBe(1)
+    expect(wrapper.findAllComponents(ThreadCard).length).toBe(1)
     expect(wrapper.text()).toContain('Bound')
     expect(wrapper.text()).not.toContain('Standalone')
   })
 
   it("scope='town' renders only standalone threads", async () => {
-    const wrapper = mountScoped('town')
+    const wrapper = mountList(pinia, { scope: 'town' })
     await flushPromises()
-    expect(wrapper.findAll('[data-testid="thread-row"]').length).toBe(1)
+    expect(wrapper.findAllComponents(ThreadCard).length).toBe(1)
     expect(wrapper.text()).toContain('Standalone')
-    expect(wrapper.text()).not.toContain('Bound')
   })
 
-  it("default scope ('all') renders both tabs' threads", async () => {
-    const wrapper = mountScoped(undefined)
+  it("default scope ('all') renders both", async () => {
+    const wrapper = mountList(pinia)
     await flushPromises()
-    expect(wrapper.findAll('[data-testid="thread-row"]').length).toBe(2)
-  })
-
-  it('a project-bound thread shows NO delete affordance (D1); a standalone one does', async () => {
-    const wrapper = mountScoped('all')
-    await flushPromises()
-    const rows = wrapper.findAll('[data-testid="thread-row"]')
-    const boundRow = rows.find((r) => r.text().includes('Bound'))
-    const townRow = rows.find((r) => r.text().includes('Standalone'))
-    expect(boundRow.find('[data-testid="thread-delete"]').exists()).toBe(false)
-    expect(townRow.find('[data-testid="thread-delete"]').exists()).toBe(true)
+    expect(wrapper.findAllComponents(ThreadCard).length).toBe(2)
   })
 })

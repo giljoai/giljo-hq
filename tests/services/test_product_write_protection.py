@@ -29,6 +29,7 @@ def mock_db_manager():
     """Mock database manager that yields a mock async session."""
     db_manager = Mock()
     session = AsyncMock()
+    session.info = {}  # tenant_session_context save/restore target
 
     async_cm = AsyncMock()
     async_cm.__aenter__ = AsyncMock(return_value=session)
@@ -274,6 +275,59 @@ class TestOverwriteConfirmation:
 
 
 # ============================================================================
+# TSK-9265: dropped fields must not broadcast
+# ============================================================================
+
+
+class TestDroppedFieldFiresNoEvent:
+    """TSK-9265: update_product() silently drops any field outside
+    _ALLOWED_PRODUCT_FIELDS (a deliberate security gate), but the old
+    product:memory:updated emit keyed on the RAW input dict — so a dropped
+    ``product_memory`` write persisted nothing yet broadcast a stale memory
+    payload to every connected browser. The emit must track what was APPLIED,
+    not what was submitted; memory's owning write paths (write_memory_entry /
+    project closeout) broadcast their own event.
+    """
+
+    @pytest.mark.asyncio
+    async def test_dropped_product_memory_fires_no_event(self, mock_db_manager, active_product):
+        """A product_memory kwarg is dropped by the allowlist -> NO websocket
+        broadcast, NO stale-memory payload build, NO write to the model."""
+        service = _build_service_with_product(mock_db_manager, active_product)
+
+        emit = AsyncMock()
+        service.lifecycle._emit_websocket_event = emit
+        build_memory = AsyncMock(return_value={"stale": "payload"})
+        service.memory._build_product_memory_response = build_memory
+
+        active_product.product_memory = {"original": True}
+
+        result = await service.update_product(
+            "active-product-id",
+            force=True,
+            product_memory={"injected": "never persisted"},
+        )
+
+        assert result is not None
+        emit.assert_not_awaited()
+        build_memory.assert_not_awaited()
+        assert active_product.product_memory == {"original": True}, "allowlist gate must hold: nothing applied"
+
+    @pytest.mark.asyncio
+    async def test_allowed_field_update_fires_no_memory_event(self, mock_db_manager, active_product):
+        """A normal allowed-field update never fires product:memory:updated."""
+        service = _build_service_with_product(mock_db_manager, active_product)
+
+        emit = AsyncMock()
+        service.lifecycle._emit_websocket_event = emit
+
+        result = await service.update_product("active-product-id", force=True, name="Renamed")
+
+        assert result is not None
+        emit.assert_not_awaited()
+
+
+# ============================================================================
 # WI-3: tenant_key Consistency on API Key Authentication
 # ============================================================================
 
@@ -324,6 +378,7 @@ class TestApiKeyTenantKeyConsistency:
         key_record.key_hash = "hashed"
 
         mock_db = AsyncMock()
+        mock_db.info = {}  # tenant_session_context save/restore target
 
         # First query returns api_key candidates; second returns the matching user
         first_result = MagicMock()
@@ -365,6 +420,7 @@ class TestApiKeyTenantKeyConsistency:
         key_record.key_hash = "hashed"
 
         mock_db = AsyncMock()
+        mock_db.info = {}  # tenant_session_context save/restore target
 
         # First query: returns the api_key candidate
         first_result = MagicMock()
@@ -409,6 +465,7 @@ class TestApiKeyTenantKeyConsistency:
         key_record.key_hash = "hashed"
 
         mock_db = AsyncMock()
+        mock_db.info = {}  # tenant_session_context save/restore target
 
         # First query: api_key found
         first_result = MagicMock()
@@ -454,6 +511,7 @@ class TestApiKeyTenantKeyConsistency:
         wrong_prefix_key.key_hash = "hashed"
 
         mock_db = AsyncMock()
+        mock_db.info = {}  # tenant_session_context save/restore target
 
         # DB query returns empty (prefix did not match)
         first_result = MagicMock()
@@ -495,6 +553,7 @@ class TestApiKeyTenantKeyConsistency:
         key_record.key_hash = "hashed"
 
         mock_db = AsyncMock()
+        mock_db.info = {}  # tenant_session_context save/restore target
 
         # First query: api_key candidates (uses scalars().all())
         first_result = MagicMock()
@@ -530,6 +589,7 @@ class TestApiKeyTenantKeyConsistency:
         key_record.key_hash = "hashed"
 
         mock_db = AsyncMock()
+        mock_db.info = {}  # tenant_session_context save/restore target
 
         # First query: api_key candidates (uses scalars().all())
         first_result = MagicMock()

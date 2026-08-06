@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
@@ -22,12 +22,17 @@ vi.mock('@/stores/user', () => ({
   }),
 }))
 
-// ConnectToolCard's dependencies (rendered real within the directory).
+// ConnectToolCard's dependencies (rendered real within the directory) + the
+// durable credential-status endpoint (FE-9274) this component now reads.
+const mockCredentialStatus = vi.fn()
 vi.mock('@/services/api', () => ({
   default: {
     apiKeys: {
       getActive: vi.fn().mockResolvedValue({ data: [] }),
       create: vi.fn().mockResolvedValue({ data: { api_key: 'gk_test' } }),
+    },
+    connect: {
+      credentialStatus: (...a) => mockCredentialStatus(...a),
     },
   },
 }))
@@ -52,9 +57,19 @@ const globalStubs = {
   'v-tooltip': { template: '<div><slot name="activator" :props="{}" /><slot /></div>' },
 }
 
+const NO_CREDS = { has_valid_api_key: false, has_valid_oauth: false, has_expired_oauth: false }
+const VALID_KEY = { has_valid_api_key: true, has_valid_oauth: false, has_expired_oauth: false }
+const EXPIRED_OAUTH = { has_valid_api_key: false, has_valid_oauth: false, has_expired_oauth: true }
+
+// ToolsConnectDirectory now registers real window listeners (api-key-created /
+// api-key-revoked, FE-9274) on mount. Track every mounted wrapper and unmount it
+// after each test — otherwise listeners from earlier tests in this file pile up
+// on the shared jsdom `window` and fire on later tests' event dispatches too.
+let mountedWrappers = []
 async function mountDir() {
   const ToolsConnectDirectory = (await import('@/components/tools/ToolsConnectDirectory.vue')).default
   const wrapper = mount(ToolsConnectDirectory, { global: { stubs: globalStubs } })
+  mountedWrappers.push(wrapper)
   await flushPromises()
   return wrapper
 }
@@ -63,6 +78,13 @@ beforeEach(() => {
   wsHandlers = {}
   mockSelectedTools = ['claude_code', 'codex_cli']
   updateSetupState.mockClear()
+  mockCredentialStatus.mockReset()
+  mockCredentialStatus.mockResolvedValue({ data: { ...NO_CREDS } })
+})
+
+afterEach(() => {
+  mountedWrappers.forEach((w) => w.unmount())
+  mountedWrappers = []
 })
 
 describe('ToolsConnectDirectory (C2, FE-9204)', () => {
@@ -103,15 +125,6 @@ describe('ToolsConnectDirectory (C2, FE-9204)', () => {
     expect(wrapper.find('[data-testid="connect-card-opencode"]').exists()).toBe(true)
   })
 
-  it('the generic connect event flips only the SELECTED tool (active-only, proposal §6)', async () => {
-    const wrapper = await mountDir()
-    // Default selection is the first fleet tool (claude_code).
-    wsHandlers['setup:tool_connected']({ tool_name: 'mcp_connected' })
-    await nextTick()
-    expect(wrapper.find('[data-testid="dir-tool-claude_code"] .dir-rail-dot--connected').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="dir-tool-codex_cli"] .dir-rail-dot--connected').exists()).toBe(false)
-  })
-
   it('removing a tool drops it from the fleet and persists', async () => {
     const wrapper = await mountDir()
     await wrapper.find('[data-testid="dir-remove-tool"]').trigger('click')
@@ -120,5 +133,121 @@ describe('ToolsConnectDirectory (C2, FE-9204)', () => {
     expect(updateSetupState).toHaveBeenCalledWith(
       expect.objectContaining({ setup_selected_tools: expect.not.arrayContaining(['claude_code']) }),
     )
+  })
+})
+
+describe('ToolsConnectDirectory — FE-9274 durable Configured state', () => {
+  it('fetches credential-status on mount and renders idle ("Not set up") when nothing is valid', async () => {
+    const wrapper = await mountDir()
+    expect(mockCredentialStatus).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"] .dir-rail-dot--configured').exists()).toBe(false)
+    // claude_code is the default-selected card, so it shows the pulsing "Waiting"
+    // state while nothing is configured yet; the non-selected row is plain idle.
+    expect(wrapper.find('[data-testid="dir-tool-codex_cli"]').text()).toContain('Not set up')
+  })
+
+  it('renders Configured (green) on mount when a valid API key already exists — workspace-level, ALL rows', async () => {
+    mockCredentialStatus.mockResolvedValue({ data: { ...VALID_KEY } })
+    const wrapper = await mountDir()
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"] .dir-rail-dot--configured').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="dir-tool-codex_cli"] .dir-rail-dot--configured').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).toContain('Configured')
+  })
+
+  it('renders the amber "Requires re-authentication" state when OAuth expired and no valid key covers it', async () => {
+    mockCredentialStatus.mockResolvedValue({ data: { ...EXPIRED_OAUTH } })
+    const wrapper = await mountDir()
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"] .dir-rail-dot--reauth').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).toContain('Requires re-authentication')
+  })
+
+  it('CORE BUG FIX: status survives unmount + remount (navigate away and back) instead of reverting to waiting', async () => {
+    mockCredentialStatus.mockResolvedValue({ data: { ...VALID_KEY } })
+    const wrapper = await mountDir()
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).toContain('Configured')
+
+    wrapper.unmount()
+
+    const wrapper2 = await mountDir()
+    expect(mockCredentialStatus).toHaveBeenCalledTimes(2)
+    expect(wrapper2.find('[data-testid="dir-tool-claude_code"]').text()).toContain('Configured')
+    expect(wrapper2.find('[data-testid="dir-tool-claude_code"] .dir-rail-dot--configured').exists()).toBe(true)
+  })
+
+  it('refetches and flips to Configured on the generic setup:tool_connected WS event', async () => {
+    const wrapper = await mountDir()
+    expect(wrapper.find('[data-testid="dir-tool-codex_cli"]').text()).toContain('Not set up')
+
+    mockCredentialStatus.mockResolvedValue({ data: { ...VALID_KEY } })
+    wsHandlers['setup:tool_connected']({ tool_name: 'mcp_connected' })
+    await flushPromises()
+
+    expect(mockCredentialStatus).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).toContain('Configured')
+    expect(wrapper.find('[data-testid="dir-tool-codex_cli"]').text()).toContain('Configured')
+  })
+
+  it('refetches on the api-key-created window event', async () => {
+    const wrapper = await mountDir()
+    mockCredentialStatus.mockResolvedValue({ data: { ...VALID_KEY } })
+
+    window.dispatchEvent(new Event('api-key-created'))
+    await flushPromises()
+
+    expect(mockCredentialStatus).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).toContain('Configured')
+  })
+
+  it('an api-key-revoked event that leaves no valid credential shows "API key deleted" (in-session only)', async () => {
+    mockCredentialStatus.mockResolvedValue({ data: { ...VALID_KEY } })
+    const wrapper = await mountDir()
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).toContain('Configured')
+
+    mockCredentialStatus.mockResolvedValue({ data: { ...NO_CREDS } })
+    window.dispatchEvent(new Event('api-key-revoked'))
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).toContain('API key deleted')
+
+    // A fresh mount (reload) has no memory of the revoke — settles to plain "Not set up"
+    // (the non-selected row; claude_code is still the default-selected pulsing "Waiting" card).
+    const wrapper2 = await mountDir()
+    expect(wrapper2.find('[data-testid="dir-tool-codex_cli"]').text()).toContain('Not set up')
+    expect(wrapper2.find('[data-testid="dir-tool-claude_code"]').text()).not.toContain('API key deleted')
+  })
+
+  it('an api-key-revoked event that STILL leaves a valid credential does not show "API key deleted"', async () => {
+    mockCredentialStatus.mockResolvedValue({ data: { ...VALID_KEY } })
+    const wrapper = await mountDir()
+
+    window.dispatchEvent(new Event('api-key-revoked'))
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).toContain('Configured')
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).not.toContain('API key deleted')
+  })
+
+  it('"I already configured this" optimistically shows Configured ahead of the next durable fetch', async () => {
+    const wrapper = await mountDir()
+    await wrapper.find('[data-testid="already-configured"]').trigger('click')
+    await nextTick()
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).toContain('Configured')
+  })
+
+  it('BUG (auditor-found): a later authoritative fetch supersedes a stale optimistic "Configured" click', async () => {
+    // No valid credential from the start.
+    const wrapper = await mountDir()
+    await wrapper.find('[data-testid="already-configured"]').trigger('click')
+    await nextTick()
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).toContain('Configured')
+
+    // ...user later revokes their key. The post-revoke refetch authoritatively finds
+    // nothing valid — this must win over the stale optimistic flag, not be OR'd away.
+    mockCredentialStatus.mockResolvedValue({ data: { ...NO_CREDS } })
+    window.dispatchEvent(new Event('api-key-revoked'))
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).not.toContain('Configured')
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).toContain('API key deleted')
   })
 })

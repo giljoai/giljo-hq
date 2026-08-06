@@ -8,13 +8,13 @@
             <div class="d-flex flex-column align-center w-100">
               <v-img
                 src="/Giljo_YW.svg"
-                alt="GiljoAI MCP"
+                :alt="productName"
                 height="50"
                 width="auto"
                 max-width="200"
                 class="mb-3"
               />
-              <h1 class="text-headline-small font-weight-bold">GiljoAI MCP Login</h1>
+              <h1 class="text-headline-small font-weight-bold">{{ productName }} Login</h1>
               <span class="edition-badge mt-2 text-body-small">
                 {{ editionLabel }}
               </span>
@@ -200,6 +200,9 @@ import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import api, { apiClient } from '@/services/api'
 import { getRuntimeConfig } from '@/config/api'
+import { PRODUCT_NAME } from '@/branding'
+
+const productName = PRODUCT_NAME
 import configService from '@/services/configService'
 import { isCeModeValue, isNonCeModeValue } from '@/composables/useGiljoMode'
 

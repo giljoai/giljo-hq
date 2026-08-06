@@ -46,6 +46,7 @@ from giljo_mcp.services.sequence_run_query_mixin import SequenceRunQueryMixin
 from giljo_mcp.services.sequence_run_serialization import serialize_sequence_run
 from giljo_mcp.services.sequence_run_validation import (
     MAX_CHAIN_MISSION_CHARS,
+    refuse_mode_change_if_live,
     validate_create_fields,
     validate_update_fields,
 )
@@ -286,6 +287,8 @@ class SequenceRunService(SequenceRunQueryMixin):
                         ),
                         context={"field": "chain_mission", "run_id": run_id, "status": run.status},
                     )
+                if execution_mode is not None:
+                    await refuse_mode_change_if_live(session, run, run_id, effective_tenant_key)
 
                 if current_index is not None:
                     run.current_index = current_index
@@ -447,8 +450,11 @@ class SequenceRunService(SequenceRunQueryMixin):
         dead ``completed`` run row is removed rather than left forever.
 
         In ONE tenant-scoped transaction:
-          * DELETE the ``sequence_runs`` row (tenant-filtered). No FK references it,
-            so this cascades to nothing.
+          * DELETE the ``sequence_runs`` row (tenant-filtered). BE-9291: exactly one FK
+            references it — ``comm_threads.sequence_run_id``, the chain hub's link —
+            and it is ``ON DELETE SET NULL`` precisely so this delete stays safe. The
+            hub thread OUTLIVES its run (the coordination history is durable; the chain
+            grouping is not) and is simply unlinked here. Nothing cascades.
           * DELETE the conductor's ``AgentJob`` + ``AgentExecution`` rows. These are
             PROJECT-LESS (``project_id IS NULL``) and linked to the run ONLY via
             ``agent_jobs.job_metadata->>'run_id'`` (JSON, not an FK) — so they would

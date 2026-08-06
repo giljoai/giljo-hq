@@ -43,8 +43,8 @@ def test_claude_desktop_self_signed_https_injects_tls_bypass():
     cfg = _parse(raw)
 
     assert "mcpServers" in cfg
-    assert "giljo_mcp" in cfg["mcpServers"]
-    entry = cfg["mcpServers"]["giljo_mcp"]
+    assert "giljo_hq" in cfg["mcpServers"]
+    entry = cfg["mcpServers"]["giljo_hq"]
 
     assert entry["command"] == "npx"
     assert entry["args"] == [
@@ -66,7 +66,7 @@ def test_claude_desktop_proxied_https_omits_tls_bypass():
     )
     cfg = _parse(raw)
 
-    entry = cfg["mcpServers"]["giljo_mcp"]
+    entry = cfg["mcpServers"]["giljo_hq"]
     assert entry["args"][1] == f"{SERVER_URL_PROXIED}/mcp"
     assert entry["env"]["AUTH_HEADER"] == f"Bearer {API_KEY}"
     assert "NODE_TLS_REJECT_UNAUTHORIZED" not in entry["env"]
@@ -81,7 +81,7 @@ def test_claude_desktop_plain_http_omits_tls_bypass():
     )
     cfg = _parse(raw)
 
-    entry = cfg["mcpServers"]["giljo_mcp"]
+    entry = cfg["mcpServers"]["giljo_hq"]
     assert entry["args"][1] == f"{SERVER_URL_HTTP}/mcp"
     assert entry["env"]["AUTH_HEADER"] == f"Bearer {API_KEY}"
     assert "NODE_TLS_REJECT_UNAUTHORIZED" not in entry["env"]

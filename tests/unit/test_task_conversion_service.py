@@ -44,6 +44,7 @@ def _make_session():
     session.add = Mock()
     session.delete = AsyncMock()
     session.flush = AsyncMock()
+    session.info = {}  # tenant_session_context save/restore target
     return session
 
 

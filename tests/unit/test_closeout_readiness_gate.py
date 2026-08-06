@@ -57,8 +57,10 @@ def _execute_then_empty(executions):
 
     The unified ``evaluate_closeout_readiness`` issues one execution-scan query
     followed by per-agent TODO queries (and, for awaiting_user agents, an approval
-    lookup). Returns the execution list for the first call and an empty result for
-    every subsequent call.
+    lookup). TSK-9268 added one batched live action-required-unread query (the
+    ack-based store the drain writes), which consumes ``result.all()`` — so every
+    result also serves an empty iterable there. Returns the execution list for the
+    first call and an empty result for every subsequent call.
     """
     state = {"n": 0}
 
@@ -69,6 +71,7 @@ def _execute_then_empty(executions):
         scalars.all.return_value = executions if state["n"] == 1 else []
         result.scalars.return_value = scalars
         result.scalar_one_or_none.return_value = None
+        result.all.return_value = []
         return result
 
     return _execute
@@ -111,6 +114,8 @@ class TestCheckAgentReadiness:
         async def mock_execute(*args, **kwargs):
             call_count["n"] += 1
             result = Mock()
+            # TSK-9268: the live action-required-unread query consumes result.all().
+            result.all.return_value = []
             if call_count["n"] == 1:
                 # Execution query
                 scalars = Mock()
@@ -185,11 +190,13 @@ class TestForceDecommissionAgents:
         agent_working = _make_execution(str(uuid4()), "ui-builder", "working")
         agent_silent = _make_execution(str(uuid4()), "tester", "silent")
 
-        scalars_mock = Mock()
-        scalars_mock.all.return_value = [agent_working, agent_silent]
-        result_mock = Mock()
-        result_mock.scalars.return_value = scalars_mock
-        session.execute = AsyncMock(return_value=result_mock)
+        # BE-9242: decommissioning now also resolves each agent's dead message
+        # cursors (resolve_terminal_agent_cursors), which issues one extra
+        # lookup query per decommissioned agent. Returns the executions-to-
+        # decommission list for the first (scan) call and empty for every
+        # subsequent per-agent cursor lookup -- same pattern as
+        # ``_execute_then_empty`` above.
+        session.execute = AsyncMock(side_effect=_execute_then_empty([agent_working, agent_silent]))
 
         decommissioned = await _force_decommission_agents(session, project_id, "test-tenant")
 
@@ -198,6 +205,9 @@ class TestForceDecommissionAgents:
         assert agent_silent.status == "decommissioned"
         assert "ui-builder" in decommissioned
         assert "tester" in decommissioned
+        # No live unread cursors were found for either agent (all subsequent
+        # queries returned empty), so no additional ack-driven flush fires --
+        # the final decommission_project_agents flush is still the only one.
         session.flush.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -242,6 +252,7 @@ class TestCloseoutGateIntegration:
         agent_working = _make_execution(str(uuid4()), "impl-1", "working")
 
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
         mock_db_manager = MagicMock()
         mock_db_manager.get_session_async.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_db_manager.get_session_async.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -251,6 +262,9 @@ class TestCloseoutGateIntegration:
         async def mock_execute(*args, **kwargs):
             call_count["n"] += 1
             result = MagicMock()
+            # TSK-9268: the readiness gathering now issues a batched live
+            # action-required-unread query (call 5) that consumes result.all().
+            result.all.return_value = []
             if call_count["n"] == 1:
                 # Project lookup
                 result.scalar_one_or_none.return_value = mock_project
@@ -318,6 +332,7 @@ class TestCloseoutGateIntegration:
         agent_working = _make_execution(str(uuid4()), "impl-1", "working")
 
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
         mock_db_manager = MagicMock()
         mock_db_manager.get_session_async.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_db_manager.get_session_async.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -327,6 +342,8 @@ class TestCloseoutGateIntegration:
         async def mock_execute(*args, **kwargs):
             call_count["n"] += 1
             result = MagicMock()
+            # TSK-9268: live action-required-unread query added at call 5.
+            result.all.return_value = []
             if call_count["n"] == 1:
                 result.scalar_one_or_none.return_value = mock_project
             elif call_count["n"] == 2:
@@ -341,10 +358,10 @@ class TestCloseoutGateIntegration:
                 scalars = MagicMock()
                 scalars.all.return_value = []
                 result.scalars.return_value = scalars
-            elif call_count["n"] == 5:
+            elif call_count["n"] == 6:
                 # Orchestrator guard query — no active orchestrator (agent is "impl-1")
                 result.scalar_one_or_none.return_value = None
-            elif call_count["n"] == 6:
+            elif call_count["n"] == 7:
                 # Force decommission query — returns same working agent
                 scalars = MagicMock()
                 scalars.all.return_value = [agent_working]
@@ -420,6 +437,7 @@ class TestOrchestratorSelfDecommissionGuard:
         )
 
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
         mock_db_manager = MagicMock()
         mock_db_manager.get_session_async.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_db_manager.get_session_async.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -429,6 +447,8 @@ class TestOrchestratorSelfDecommissionGuard:
         async def mock_execute(*args, **kwargs):
             call_count["n"] += 1
             result = MagicMock()
+            # TSK-9268: live action-required-unread query added at call 5.
+            result.all.return_value = []
             if call_count["n"] == 1:
                 # Project lookup
                 result.scalar_one_or_none.return_value = mock_project
@@ -445,7 +465,7 @@ class TestOrchestratorSelfDecommissionGuard:
                 scalars = MagicMock()
                 scalars.all.return_value = []
                 result.scalars.return_value = scalars
-            elif call_count["n"] == 5:
+            elif call_count["n"] == 6:
                 # Orchestrator guard query -- finds the active orchestrator
                 result.scalar_one_or_none.return_value = orchestrator_agent
             return result
@@ -464,8 +484,8 @@ class TestOrchestratorSelfDecommissionGuard:
             )
 
         assert exc_info.value.context["status"] == "ORCHESTRATOR_SELF_DECOMMISSION_BLOCKED"
-        # Must NOT have reached force decommission (call_count should be 5, not 6)
-        assert call_count["n"] == 5
+        # Must NOT have reached force decommission (call_count should be 6, not 7)
+        assert call_count["n"] == 6
 
     @pytest.mark.asyncio
     async def test_force_close_allowed_when_only_specialists_active(self):
@@ -497,6 +517,7 @@ class TestOrchestratorSelfDecommissionGuard:
         )
 
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
         mock_db_manager = MagicMock()
         mock_db_manager.get_session_async.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_db_manager.get_session_async.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -506,6 +527,8 @@ class TestOrchestratorSelfDecommissionGuard:
         async def mock_execute(*args, **kwargs):
             call_count["n"] += 1
             result = MagicMock()
+            # TSK-9268: live action-required-unread query added at call 5.
+            result.all.return_value = []
             if call_count["n"] == 1:
                 # Project lookup
                 result.scalar_one_or_none.return_value = mock_project
@@ -522,10 +545,11 @@ class TestOrchestratorSelfDecommissionGuard:
                 scalars = MagicMock()
                 scalars.all.return_value = []
                 result.scalars.return_value = scalars
-            elif call_count["n"] == 5:
-                # Orchestrator guard query -- no active orchestrator
-                result.scalar_one_or_none.return_value = None
             elif call_count["n"] == 6:
+                # Orchestrator guard query -- no active orchestrator
+                # (call 5 is the TSK-9268 live action-required-unread query)
+                result.scalar_one_or_none.return_value = None
+            elif call_count["n"] == 7:
                 # Force decommission query -- returns the specialist
                 scalars = MagicMock()
                 scalars.all.return_value = [specialist_agent]
@@ -599,6 +623,7 @@ class TestOrchestratorSelfDecommissionGuard:
         )
 
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
         mock_db_manager = MagicMock()
         mock_db_manager.get_session_async.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_db_manager.get_session_async.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -608,6 +633,8 @@ class TestOrchestratorSelfDecommissionGuard:
         async def mock_execute(*args, **kwargs):
             call_count["n"] += 1
             result = MagicMock()
+            # TSK-9268: live action-required-unread query added at call 5.
+            result.all.return_value = []
             if call_count["n"] == 1:
                 # Project lookup
                 result.scalar_one_or_none.return_value = mock_project
@@ -625,10 +652,10 @@ class TestOrchestratorSelfDecommissionGuard:
                 scalars = MagicMock()
                 scalars.all.return_value = []
                 result.scalars.return_value = scalars
-            elif call_count["n"] == 5:
+            elif call_count["n"] == 6:
                 # Orchestrator guard query -- no active orchestrator (it is complete)
                 result.scalar_one_or_none.return_value = None
-            elif call_count["n"] == 6:
+            elif call_count["n"] == 7:
                 # Force decommission query -- returns the working specialist
                 scalars = MagicMock()
                 scalars.all.return_value = [working_specialist]
@@ -694,6 +721,7 @@ class TestOrchestratorSelfDecommissionGuard:
         )
 
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
         mock_db_manager = MagicMock()
         mock_db_manager.get_session_async.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_db_manager.get_session_async.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -703,6 +731,8 @@ class TestOrchestratorSelfDecommissionGuard:
         async def mock_execute(*args, **kwargs):
             call_count["n"] += 1
             result = MagicMock()
+            # TSK-9268: live action-required-unread query added at call 5.
+            result.all.return_value = []
             if call_count["n"] == 1:
                 result.scalar_one_or_none.return_value = mock_project
             elif call_count["n"] == 2:
@@ -715,7 +745,7 @@ class TestOrchestratorSelfDecommissionGuard:
                 scalars = MagicMock()
                 scalars.all.return_value = []
                 result.scalars.return_value = scalars
-            elif call_count["n"] == 5:
+            elif call_count["n"] == 6:
                 result.scalar_one_or_none.return_value = orchestrator_agent
             return result
 

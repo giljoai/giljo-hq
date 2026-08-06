@@ -108,6 +108,7 @@ import { useProductStore } from '@/stores/products'
 import { useProjectStore } from '@/stores/projects'
 import { getAgentColor } from '@/config/agentColors'
 import api from '@/services/api'
+import { PRODUCT_NAME } from '@/branding'
 import GilMascot from '@/components/GilMascot.vue'
 import SetupWizardOverlay from '@/components/setup/SetupWizardOverlay.vue'
 import TutorialOverlay from '@/components/tutorial/TutorialOverlay.vue'
@@ -115,6 +116,7 @@ import CertTrustModal from '@/components/setup/CertTrustModal.vue'
 import RecentProjectsList from '@/components/dashboard/RecentProjectsList.vue'
 import ProjectReviewModal from '@/components/projects/ProjectReviewModal.vue'
 import configService from '@/services/configService'
+import { recordCertTrustDismissal } from '@/utils/certTrustPreference'
 import { PROJECT_TEMPLATES } from '@/composables/projectTemplates'
 import { useToast } from '@/composables/useToast'
 import { useDeferredHomeData } from '@/composables/useDeferredHomeData'
@@ -213,10 +215,7 @@ async function handleDismiss() {
 
 function handleCertContinue(dontShowAgain = false) {
   certModalDismissed.value = true
-  sessionStorage.setItem('cert_modal_dismissed', '1')
-  if (dontShowAgain) {
-    localStorage.setItem('cert_modal_never', '1')
-  }
+  recordCertTrustDismissal(dontShowAgain)
   if (pendingSetupOpen.value) {
     pendingSetupOpen.value = false
     showSetupOverlay.value = true
@@ -276,7 +275,7 @@ const hasAnyProject = computed(() => (projectStore.projects?.length ?? 0) > 0)
 // Onboarding-aware quick launch card definitions
 const setupCard = {
   title: 'Quick Setup',
-  description: 'Connect your AI coding tools and configure GiljoAI MCP.',
+  description: `Connect your AI coding tools and configure ${PRODUCT_NAME}.`,
   icon: 'mdi-rocket-launch',
   iconBg: 'rgba(255,195,0,0.1)',
   iconColor: 'var(--brand-yellow)',

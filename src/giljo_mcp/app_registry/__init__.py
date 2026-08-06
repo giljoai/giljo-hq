@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Application service registry for GiljoAI MCP.
+Application service registry for Giljo HQ.
 
 Provides module-level holders for singletons that are created at startup
 and needed by lower-layer code that cannot import from api/.

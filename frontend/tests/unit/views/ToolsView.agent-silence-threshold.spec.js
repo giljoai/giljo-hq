@@ -105,21 +105,22 @@ describe('ToolsView agent silence threshold settings', () => {
     // default when this spec runs alongside the two -n6 pytest jobs on a busy CI runner.
   }, 15000)
 
-  it('hosted mode hides the CE-only threshold and does not save it', async () => {
+  it('hosted (SaaS) mode shows the threshold and saves it as a per-tenant override (FE-9241)', async () => {
     modeState.value = 'demo'
     const wrapper = await mountView()
 
-    expect(wrapper.find('[data-test="agent-monitoring-settings"]').exists()).toBe(false)
-    expect(apiMock.settings.getAgentSilenceThreshold).not.toHaveBeenCalled()
+    expect(apiMock.settings.getAgentSilenceThreshold).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-test="agent-monitoring-settings"]').exists()).toBe(true)
+    expect(wrapper.vm.agentSilenceThresholdMinutes).toBe(22)
 
     wrapper.vm.agentSilenceThresholdMinutes = 17
     await wrapper.vm.saveNotificationSettings()
 
-    // FE-9000d: notifications still persist to localStorage in hosted mode
-    // (browser-only save path is edition-agnostic); only the CE-only
-    // agent-silence-threshold sync is skipped.
+    // FE-9000d: notifications are browser-only -- no server-sync call for those.
+    // FE-9241: the silence threshold DOES sync to the server in hosted mode now
+    // (it writes this tenant's own override, not the deployment-wide default).
     const lastSave = JSON.parse(window.localStorage.setItem.mock.calls.at(-1)[1])
-    expect(lastSave.notifications).toBeDefined()
-    expect(apiMock.settings.updateAgentSilenceThreshold).not.toHaveBeenCalled()
+    expect(lastSave.notifications).toEqual({ position: 'top-right', duration: 7 })
+    expect(apiMock.settings.updateAgentSilenceThreshold).toHaveBeenCalledWith(17)
   }, 15000)
 })

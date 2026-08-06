@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Settings Service for GiljoAI MCP system settings management.
+Settings Service for Giljo HQ system settings management.
 
 SettingsService handles CRUD operations for tenant-scoped settings (general, network, database).
 Handover 0506: Settings endpoints implementation.
@@ -34,6 +34,10 @@ logger = logging.getLogger(__name__)
 
 AGENT_SILENCE_THRESHOLD_KEY = "agent_silence_threshold_minutes"
 GLOBAL_GENERAL_SETTING_KEYS = {AGENT_SILENCE_THRESHOLD_KEY}
+# FE-9241: shared upper bound for the SaaS per-tenant override (configurations
+# table). CE's deployment-wide system_settings write path is intentionally left
+# unbounded above (Field(ge=1) only) so this constant does NOT touch CE behavior.
+MAX_AGENT_SILENCE_THRESHOLD_MINUTES = 1440
 
 # INF-6049a: deployment-wide counter for the first-3-boots CE tool-rename notice
 # (the get_orchestrator_instructions -> get_staging_instructions migration prompt).

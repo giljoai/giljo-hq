@@ -9,7 +9,7 @@ BE-6063c: pure-ASGI middleware-stack behavior locks.
 The six custom security middleware (auth, csrf, metrics, rate_limiter,
 security, input_validator) were converted from ``BaseHTTPMiddleware`` to pure
 ASGI to shed the per-layer anyio task-group + memory-stream tax (~45us/layer,
-~271us across the stack — spike ``internal/perf/BE6063C_SPIKE_RESULTS.md``).
+~271us across the stack — see the BE6063C perf spike results).
 This file locks the two behaviors a pure-ASGI rewrite is most likely to break
 and that the per-middleware tests do not cover end-to-end:
 

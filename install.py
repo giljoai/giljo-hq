@@ -6,7 +6,7 @@
 # [CE] Community Edition.
 
 """
-GiljoAI MCP v3.0 - Unified Installer
+Giljo HQ v3.0 - Unified Installer
 
 Single-file installer that replaces the entire installer/cli/ system.
 Handles cross-platform PostgreSQL discovery, dependency management,
@@ -127,7 +127,7 @@ _file_handler = logging.FileHandler(_log_path, mode="a", encoding="utf-8")
 _file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
 _logger.addHandler(_file_handler)
 _logger.info("=" * 60)
-_logger.info("GiljoAI MCP Installer started")
+_logger.info("Giljo HQ Installer started")
 _logger.info("=" * 60)
 
 # Patterns that look like credentials — redact before writing to install.log
@@ -264,7 +264,7 @@ def getpass_with_asterisks(prompt: str = "Password: ") -> str:
 
 class UnifiedInstaller(PythonEnvSetupMixin, FrontendSetupMixin, DatabaseSetupMixin):
     """
-    Unified installer for GiljoAI MCP v3.0
+    Unified installer for Giljo HQ v3.0
 
     Handles complete installation workflow:
     - PostgreSQL discovery
@@ -430,6 +430,13 @@ class UnifiedInstaller(PythonEnvSetupMixin, FrontendSetupMixin, DatabaseSetupMix
                 result["steps"].append("dependencies_installed")
                 _logger.info("Dependencies installed successfully")
 
+            # Step 4.5: resolve the real PostgreSQL port BEFORE anything writes it
+            # down. Outside the `not setup_only` block on purpose: --repair and
+            # --setup-only skip discovery but still rewrite .env/config.yaml, so
+            # they must not re-stamp a wrong port. (INF-9321)
+            self._print_header("Detecting PostgreSQL Port")
+            _logger.info("PostgreSQL port resolved: %s", self.detect_postgresql_port())
+
             # Step 5: Generate configs (MUST happen before database setup!)
             # Table creation in step 6 needs .env file with DATABASE_URL
             self._print_header("Generating Configuration Files")
@@ -548,10 +555,10 @@ class UnifiedInstaller(PythonEnvSetupMixin, FrontendSetupMixin, DatabaseSetupMix
         separator = "=" * 70
 
         print(f"\n{Fore.YELLOW}{Style.BRIGHT}{separator}{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}{Style.BRIGHT}  GiljoAI MCP - Unified Installer v3.0{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}{Style.BRIGHT}  Giljo HQ - Unified Installer v3.0{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}{Style.BRIGHT}{separator}{Style.RESET_ALL}\n")
 
-        print(f"{Fore.CYAN}Welcome to GiljoAI MCP!{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}Welcome to Giljo HQ, a GiljoAI product!{Style.RESET_ALL}")
         print(f"{Fore.CYAN}This installer will set up your coding orchestrator.{Style.RESET_ALL}\n")
 
         print(f"{Fore.WHITE}What will be installed:{Style.RESET_ALL}")
@@ -1748,8 +1755,10 @@ class UnifiedInstaller(PythonEnvSetupMixin, FrontendSetupMixin, DatabaseSetupMix
         # Database credentials
         if self.database_credentials:
             db_display = self.settings.get("db_name", "giljo_mcp")
+            # INF-9321: DETECTED port -- hardcoding 5432 here recreated the bug in the one line users act on.
+            db_port = self.settings.get("pg_port", 5432)
             print(  # CodeQL: db_name and role names are not sensitive
-                f"{Fore.YELLOW}Database: {Fore.WHITE}{db_display} @ localhost:5432 (owner: giljo_owner, user: giljo_user){Style.RESET_ALL}\n"
+                f"{Fore.YELLOW}Database: {Fore.WHITE}{db_display} @ localhost:{db_port} (owner: giljo_owner, user: giljo_user){Style.RESET_ALL}\n"
             )
 
         # Detect protocol and ports
@@ -1936,7 +1945,7 @@ def main(
     headless: bool, dev: bool, pg_password: str, api_port: int, frontend_port: int, setup_only: bool, repair: bool
 ) -> None:
     """
-    GiljoAI MCP v3.0 - Unified Installer
+    Giljo HQ v3.0 - Unified Installer
 
     Single-command installation for all platforms.
     Use --dev to include developer tools (pre-commit hooks).

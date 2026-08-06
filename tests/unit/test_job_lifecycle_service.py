@@ -52,6 +52,7 @@ def _make_session():
     session.add = Mock()
     session.delete = Mock()
     session.flush = AsyncMock()
+    session.info = {}  # tenant_session_context save/restore target
     return session
 
 
@@ -381,7 +382,9 @@ class TestValidateSpawnAgent:
 
         session = _make_session()
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = existing_orch
+        # find_active_orchestrator_in_project extracts via .scalars().first()
+        # (BE-9242 FIX 1: multiplicity-tolerant, deterministic).
+        mock_result.scalars.return_value.first.return_value = existing_orch
         session.execute = AsyncMock(return_value=mock_result)
 
         service = _make_service(session)
@@ -404,7 +407,9 @@ class TestValidateSpawnAgent:
 
         session = _make_session()
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = existing_orch
+        # find_active_orchestrator_in_project extracts via .scalars().first()
+        # (BE-9242 FIX 1: multiplicity-tolerant, deterministic).
+        mock_result.scalars.return_value.first.return_value = existing_orch
         session.execute = AsyncMock(return_value=mock_result)
 
         service = _make_service(session)
@@ -488,7 +493,20 @@ class TestBuildAgentPrompt:
 
 
 class TestResolveSpawnTemplate:
-    """Tests for template ID resolution at spawn time."""
+    """Tests for template ID resolution at spawn time.
+
+    These stub the result object, so they assert how ``_resolve_spawn_template``
+    HANDLES a row -- not what the query selects. BE-9325 is the standing reminder
+    that they cannot see a WHERE-clause defect at all; the real-row coverage lives
+    in ``tests/services/test_be9325_trashed_template_lifecycle.py`` and
+    ``tests/integration/test_be9325_spawn_boundary_trashed_template.py``.
+
+    BE-9325 moved the repository from ``scalar_one_or_none()`` to
+    ``.scalars().first()`` so a duplicate name cannot raise instead of resolving.
+    The stubs below follow that shape -- stubbing the old one silently returned a
+    MagicMock chain that is not None, which is how the not-found case passed while
+    asserting nothing.
+    """
 
     @pytest.mark.asyncio
     async def test_template_found_returns_id(self):
@@ -498,7 +516,7 @@ class TestResolveSpawnTemplate:
 
         session = _make_session()
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = template
+        mock_result.scalars.return_value.first.return_value = template
         session.execute = AsyncMock(return_value=mock_result)
 
         project = _make_project()
@@ -520,7 +538,7 @@ class TestResolveSpawnTemplate:
         """When no matching template, returns None template_id."""
         session = _make_session()
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
+        mock_result.scalars.return_value.first.return_value = None
         session.execute = AsyncMock(return_value=mock_result)
 
         project = _make_project()
@@ -536,3 +554,43 @@ class TestResolveSpawnTemplate:
 
         assert template_id is None
         assert mission == "Do work"
+
+    @pytest.mark.asyncio
+    async def test_failed_resolution_is_logged(self, caplog):
+        """IMP-9342 item 4: a FAILED resolution must leave a log line.
+
+        Resolution logged on success only, with no ``else`` branch, so an agent
+        that silently lost its identity left nothing behind. An operator asking
+        "why did this agent behave generically" had no line to correlate against
+        -- the degradation was invisible in the logs as well as to the user.
+
+        Asserted at the service layer because that is where the gap is: the
+        method returns ``(mission, None)`` on both the healthy and the degraded
+        path, so no caller and no boundary test can tell them apart.
+        """
+        session = _make_session()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.first.return_value = None
+        session.execute = AsyncMock(return_value=mock_result)
+
+        project = _make_project()
+        service = _make_service(session)
+
+        with caplog.at_level(logging.WARNING):
+            _mission, template_id = await service._resolve_spawn_template(
+                session=session,
+                project=project,
+                agent_name="retired-specialist",
+                mission="Do work",
+                tenant_key=TENANT_KEY,
+                agent_display_name="impl-1",
+            )
+
+        assert template_id is None
+        records = [r for r in caplog.records if "TEMPLATE_RESOLVE" in r.getMessage()]
+        assert records, f"no [TEMPLATE_RESOLVE] failure log emitted; saw: {[r.getMessage() for r in caplog.records]}"
+        assert records[0].levelno >= logging.WARNING, "a failed resolution must not be logged at INFO"
+        # The agent name is the whole point -- it is what an operator correlates on.
+        assert "retired-specialist" in records[0].getMessage() or "retired-specialist" in str(
+            getattr(records[0], "agent_name", "")
+        )

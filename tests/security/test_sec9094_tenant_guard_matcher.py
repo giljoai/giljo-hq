@@ -221,13 +221,16 @@ async def test_select_scoping_unchanged(db_session):
 
 
 # ---------------------------------------------------------------------------
-# (-) enforcement mode untouched: a genuinely-unmatchable UPDATE/DELETE STILL warns, never raises
+# (-) matcher-scope boundary: a genuinely-unmatchable, predicate-absent UPDATE/DELETE still
+#     WARNS (audit-logged) -- and, since SEC-9156 shipped Step 2, now also RAISES (Class-B).
+#     SEC-9094 only widens WHICH shapes inject; the enforcement-mode flip is a separate,
+#     later-authorized change (SEC-9156) pinned here so a revert of either is caught.
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_genuine_no_match_still_warns_and_does_not_raise(db_session, caplog, monkeypatch):
+async def test_genuine_no_match_warns_and_raises(db_session, caplog, monkeypatch):
     """The target table is NOT a detected tenant model (walk forced to report an unrelated model),
-    so nothing is injectable -- the guard must STILL warn-and-continue (no raise). SEC-9094 only
-    widens WHICH shapes inject; it does not change the warn-mode enforcement of the no-match branch."""
+    so nothing is injectable, and the statement carries no explicit tenant predicate (Class-B) --
+    the guard audit-logs (unchanged) and now raises TenantIsolationError (SEC-9156)."""
     tenant_a = _tk()
     prod = Product(id=str(uuid4()), tenant_key=tenant_a, name="no-match", description="x", product_memory={})
     db_session.add(prod)
@@ -240,8 +243,9 @@ async def test_genuine_no_match_still_warns_and_does_not_raise(db_session, caplo
     monkeypatch.setattr(tenant_guard, "_tenant_models_for_statement", lambda statement: frozenset({Task}))
 
     with caplog.at_level("WARNING", logger="giljo_mcp.tenant_guard"):
-        await db_session.execute(sql_delete(Product).where(Product.id == prod.id))  # completing == no raise
+        with pytest.raises(tenant_guard.TenantIsolationError):
+            await db_session.execute(sql_delete(Product).where(Product.id == prod.id))
 
     warns = _guard_warns(caplog)
-    assert warns, "a genuinely-unmatchable UPDATE/DELETE must still warn"
+    assert warns, "a genuinely-unmatchable UPDATE/DELETE must still be audit-logged before raising"
     assert any("would have blocked" in m and "Task" in m for m in warns)

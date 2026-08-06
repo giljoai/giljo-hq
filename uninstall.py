@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-GiljoAI MCP Production Uninstaller
+Giljo HQ Production Uninstaller
 TRUE NUCLEAR OPTION - Removes EVERYTHING including all dependencies
 
 WARNING: Use this ONLY on production servers with no other Python projects!
@@ -284,7 +284,7 @@ class GiljoProductionUninstaller:
     def run(self):
         """Run the complete production uninstall"""
         print("\n" + "=" * 70)
-        print("   GiljoAI MCP Production Uninstaller")
+        print("   Giljo HQ Production Uninstaller")
         print("   TRUE NUCLEAR OPTION - REMOVES EVERYTHING")
         print("=" * 70)
 
@@ -296,7 +296,7 @@ class GiljoProductionUninstaller:
         print("  - ALL Python packages installed by GiljoAI (196+ packages)")
         print("  - PostgreSQL database AND server (if installed by us)")
         print("  - All configuration in APPDATA/user directories")
-        print("  - EVERYTHING related to GiljoAI MCP")
+        print("  - EVERYTHING related to Giljo HQ")
 
         print("\n[CRITICAL] This WILL:")
         print("  - Break other Python projects using these packages")
@@ -334,7 +334,7 @@ class GiljoProductionUninstaller:
         # Create completion log
         log_path = self.root_path / "uninstall_complete.log"
         with open(log_path, "w") as f:
-            f.write("GiljoAI MCP Nuclear Uninstall Complete\n")
+            f.write("Giljo HQ Nuclear Uninstall Complete\n")
             f.write(f"MCP unregistrations: {mcp_unregistered}\n")
             f.write(f"Files removed: {files_removed}\n")
             f.write(f"APPDATA locations removed: {appdata_removed}\n")
@@ -351,7 +351,7 @@ class GiljoProductionUninstaller:
         print("PostgreSQL: REMOVED")
 
         print("\n[OK] Complete production uninstall successful!")
-        print("[OK] All GiljoAI MCP components removed from system.")
+        print("[OK] All Giljo HQ components removed from system.")
         print(f"\n[INFO] Log saved to: {log_path}")
 
         print("\n" + "=" * 70)

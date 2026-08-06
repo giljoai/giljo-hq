@@ -42,6 +42,8 @@ from api.endpoints.mcp_transport import (
     _send_raw_status,
     _stamp_declared_profile,
     _stamp_resolved_harness,
+    _stamp_resolved_preset,
+    _stamp_url_profile,
     _subscription_required_response,
     _unauthenticated_response,
     _validate_protocol_version,
@@ -400,6 +402,15 @@ class MCPAuthMiddleware:
             # _apply_session_lifecycle already sent a 404; do not invoke inner app.
             return
 
+        # BE-9253: the URL-selected tool profile (?profile=listing on the published
+        # connector URL). Stamped LAST, so the auth discriminator, the token scopes
+        # and any session-DECLARED profile are all already on state — that resolved
+        # ladder is the baseline the stamp is required to narrow within, and it
+        # cannot widen. Sited here rather than inside _apply_session_lifecycle so it
+        # covers every arm: initialize, the session-row path, and the BE-9066
+        # no-session-header passthrough.
+        _stamp_url_profile(scope)
+
         from giljo_mcp.tenant import TenantManager, current_tenant
 
         # Capture the token and reset() to the exact prior value (BE6004C-1);
@@ -565,6 +576,10 @@ class MCPAuthMiddleware:
             # BE-9035d: surface the persisted DETECTED harness so the tool render can
             # read it after stateless_http drops the live clientInfo on this tools/call.
             _stamp_resolved_harness(scope, session_row)
+            # BE-9327: same vehicle for the PRESET axis — giljo_setup's no-filesystem
+            # branch is a tools/call, so it can only see a preset that survived the
+            # stateless_http clientInfo drop.
+            _stamp_resolved_preset(scope, session_row)
             # BE-6070 (F5.4): the session SELECT above is the auth check and
             # STAYS. The extend is bookkeeping — since BE-9066 removed the
             # per-request get_or_create path (old F5.2), this is the SINGLE

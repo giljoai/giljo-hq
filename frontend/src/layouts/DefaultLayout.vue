@@ -54,6 +54,7 @@ import { useTaskStatusesStore } from '@/stores/taskStatusesStore'
 import { useWebSocketStore } from '@/stores/websocket'
 import { useProjectStore } from '@/stores/projects'
 import { initWebsocketEventRouter, registerReconnectResync } from '@/stores/websocketEventRouter'
+import { useHubNotifications } from '@/composables/useHubNotifications'
 import StarField from '@/components/StarField.vue'
 import NavigationDrawer from '@/components/navigation/NavigationDrawer.vue'
 import ToastManager from '@/components/ToastManager.vue'
@@ -84,6 +85,16 @@ const projectStatusesStore = useProjectStatusesStore()
 const taskStatusesStore = useTaskStatusesStore()
 const wsStore = useWebSocketStore()
 const projectStore = useProjectStore()
+
+// FE-9289c: the Hub handover bell is mounted HERE, app-wide, not in HubView. The
+// operator does not live in the Hub, so a "waiting on you" handover has to reach them
+// from any page. The WS->window-event bridge (commHubEventRoutes via
+// initWebsocketEventRouter, below) is already app-wide; this is the one consumer, and
+// it belongs at the same level. Mount it in EXACTLY ONE place: the de-dupe set is
+// per-instance, so a second mount (e.g. re-adding it to HubView) would double-fire
+// every toast + browser notification. useHubPresence keeps it silent while the
+// operator is actually on /hub.
+useHubNotifications()
 
 // FE-3007b: unregister fns for the reconnect-resync callbacks this layout owns.
 const resyncUnregisters = []

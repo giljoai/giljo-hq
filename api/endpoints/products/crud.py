@@ -109,9 +109,10 @@ def _build_product_response(product, stats=None, override_active=None) -> Produc
     )
 
     # Handover 0412: Ensure product_memory is never None
+    # BE-9261: seed key renamed github -> git_integration
     pm = product.product_memory
     if pm is None:
-        pm = {"github": {}, "sequential_history": [], "context": {}}
+        pm = {"git_integration": {}, "sequential_history": [], "context": {}}
 
     is_active = override_active if override_active is not None else product.is_active
 
@@ -134,6 +135,7 @@ def _build_product_response(product, stats=None, override_active=None) -> Produc
         test_config=test_config,
         core_features=product.core_features,
         brand_guidelines=product.brand_guidelines,
+        extraction_custom_instructions=product.extraction_custom_instructions,
         is_active=is_active,
         product_memory=pm,
         target_platforms=product.target_platforms or ["all"],
@@ -310,9 +312,13 @@ async def list_deleted_products(
 
     # BE-6073 (m13): batched stats in a fixed query count, mirroring the active
     # list_products bulk path that BE-6066 introduced — not a per-product loop.
-    # A deleted product's children are cascade-soft-deleted, so the bulk counts
-    # come back zero-filled, identical to the prior per-product path (which raised
-    # ResourceNotFoundError on a deleted product and defaulted to 0/0).
+    # The bulk path returns an entry for every supplied id, so every deleted
+    # product is present here.
+    # BE-9356: these counts are NOT zeros. delete_product cascades nothing — it
+    # writes deleted_at/is_active/updated_at on the product row alone — so the
+    # children are still live, and the counts below are the product's real child
+    # counts. They reach zero only once purge_product hard-deletes the product and
+    # the FK cascade fires.
     product_ids = [str(p.id) for p in products]
     stats_map = await service.memory.get_product_statistics_bulk(product_ids)
 

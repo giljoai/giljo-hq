@@ -6,7 +6,7 @@
 # [CE] Community Edition.
 
 """
-GiljoAI MCP - Production Startup Script (DEPRECATED)
+Giljo HQ - Production Startup Script (DEPRECATED)
 
 DEPRECATED: Use 'python startup.py' instead.
 Production mode is now automatic when frontend/dist/ exists.
@@ -222,7 +222,7 @@ def run_production_startup(
     Returns:
         Exit code (0 for success, non-zero for failure)
     """
-    print_header("GiljoAI MCP - PRODUCTION Startup v3.0")
+    print_header("Giljo HQ - PRODUCTION Startup v3.0")
     print_warning("Running in PRODUCTION MODE")
     print_info("Frontend will serve pre-built files from frontend/dist/")
 
@@ -333,7 +333,7 @@ def run_production_startup(
             print_success(f"Network URL: {http_proto}://{network_ip}:{frontend_port}")
         print_success(f"Localhost URL: {http_proto}://localhost:{frontend_port}")
 
-        print_header("GiljoAI MCP - Production Mode Active")
+        print_header("Giljo HQ - Production Mode Active")
     else:
         # Auto-launch browser
         network_ip = get_network_ip()
@@ -392,9 +392,9 @@ def run_production_startup(
 @click.option("--no-migrations", is_flag=True, help="Skip automatic database migrations")
 def main(check_only: bool, verbose: bool, no_browser: bool, no_migrations: bool) -> None:
     """
-    GiljoAI MCP - Production Startup Script
+    Giljo HQ - Production Startup Script
 
-    Launches GiljoAI MCP in PRODUCTION mode with pre-built frontend.
+    Launches Giljo HQ in PRODUCTION mode with pre-built frontend.
 
     DEPRECATED: Use 'python startup.py' instead.
     """

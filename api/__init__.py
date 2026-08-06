@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-GiljoAI MCP API Package
+Giljo HQ API Package
 FastAPI-based REST and WebSocket API for orchestration system
 
 Note: `create_app` is intentionally NOT eagerly imported here. Importing it would

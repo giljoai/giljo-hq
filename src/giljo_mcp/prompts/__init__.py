@@ -3,7 +3,7 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Prompt builders subpackage for GiljoAI MCP.
+"""Prompt builders subpackage for Giljo HQ.
 
 Extracted from ThinClientPromptGenerator (Handover 0950g).
 Shared logic in ExecutionPromptBuilderBase (quality-sprint-002e).

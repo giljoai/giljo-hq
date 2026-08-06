@@ -317,6 +317,10 @@ async def get_vision_document_stats(
                 VisionDocument.tenant_key == tenant_key,
                 VisionDocument.product_id == product_id,
                 VisionDocument.is_active == True,  # noqa: E712
+                # Soft-delete deliberately leaves is_active alone, so filtering
+                # is_active without deleted_at let trashed docs keep inflating
+                # the token and chunk totals.
+                VisionDocument.deleted_at.is_(None),
             )
         )
         .order_by(VisionDocument.created_at.desc())

@@ -357,11 +357,13 @@ class TestTask6ToolSearchBootstrap:
         assert "TOOLSEARCH BOOTSTRAP" in identity
         assert "ToolSearch(query=" in identity
         # Sanity: hint must include the load-bearing core tools, not just one.
+        from giljo_mcp.branding import MCP_ALIAS
+
         for tool_name in (
-            "mcp__giljo_mcp__health_check",
-            "mcp__giljo_mcp__spawn_job",
-            "mcp__giljo_mcp__report_progress",
-            "mcp__giljo_mcp__complete_job",
+            f"mcp__{MCP_ALIAS}__health_check",
+            f"mcp__{MCP_ALIAS}__spawn_job",
+            f"mcp__{MCP_ALIAS}__report_progress",
+            f"mcp__{MCP_ALIAS}__complete_job",
         ):
             assert tool_name in identity, f"Bootstrap hint missing {tool_name}"
 

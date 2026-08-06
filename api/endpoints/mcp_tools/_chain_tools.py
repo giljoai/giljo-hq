@@ -22,25 +22,24 @@ from api.endpoints.mcp_tools._base import (
     _call_tool,
     mcp,
 )
+from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 
 
 @mcp.tool(
+    title="Start Chain Run",
     description=(
-        "Start a chain run (linked multi-project sequential run) from a headless / CLI agent -- the "
-        "MCP equivalent of the dashboard 'Run Sequential' button. Needs >= 2 distinct, CHAINABLE "
-        "project_ids and a REQUIRED execution_mode ('subagent' or 'multi_terminal'). A bad input returns a "
-        "structured {success:false, error:CODE} rejection. On success, invoking this turns your "
-        "session into the chain conductor -- see get_giljo_guide for the conductor protocol "
-        "(get_staging_instructions, the human-gate STOP, and drive-to-finale sequence)."
+        "Start a chain run (linked multi-project sequential run) -- the MCP equivalent of the "
+        "dashboard 'Run Sequential' button. On success, your session becomes the chain conductor."
     ),
+    annotations=_tool_hints("start_chain_run"),
 )
 async def start_chain_run(
     project_ids: Annotated[
         list[str],
         Field(
             description=(
-                "The projects to link into the chain (>= 2 distinct project_id strings), in run order. "
-                "Capped at the server's MAX_SEQUENCE_PROJECTS."
+                "The projects to link into the chain (>= 2 distinct, CHAINABLE project_id strings), "
+                "in run order. Capped at the server's MAX_SEQUENCE_PROJECTS."
             )
         ),
     ],
@@ -78,6 +77,13 @@ async def start_chain_run(
     ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
+    """Start a chain run from a headless / CLI agent.
+
+    A bad input (e.g. fewer than 2 distinct project_ids, a non-chainable project)
+    returns a structured {success: false, error: CODE} rejection rather than
+    raising. See get_giljo_guide for the conductor protocol (get_staging_instructions,
+    the human-gate STOP, and the drive-to-finale sequence) once this call succeeds.
+    """
     kwargs: dict[str, Any] = {
         "project_ids": project_ids,
         "execution_mode": execution_mode,

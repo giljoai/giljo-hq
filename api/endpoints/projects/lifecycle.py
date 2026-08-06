@@ -505,27 +505,32 @@ async def archive_project(
     # Check early_termination flag to determine target status (Handover 0498)
     target_status = ProjectStatus.TERMINATED if proj.early_termination else ProjectStatus.COMPLETED
 
-    # Set completed_at timestamp to mark as archived (raises exceptions on error)
-    await project_service.update_project(
-        project_id=project_id, updates={"status": target_status, "completed_at": datetime.now(UTC)}
-    )
+    # BE-9343 (audit F3): deliberately does NOT pass completed_at. The service stamps
+    # it on the transition into a terminal status when it is not already set, so the
+    # archive press fills a missing date but never overwrites a real one.
+    #
+    # It used to pass datetime.now(UTC) unconditionally, which silently destroyed the
+    # ship date on the ordinary solo flow: an agent closes the project out at T1 (the
+    # closeout stamps it), the user presses Archive at T2, and the stored value became
+    # T2 -- the archive-press time. That is the same "archiving a project changed its
+    # completion date" defect BE-9343 exists to remove, and it contradicted ce_0088,
+    # which deliberately prefers the exact closeout_executed_at over a drifted stamp.
+    # (raises exceptions on error)
+    await project_service.update_project(project_id=project_id, updates={"status": target_status})
 
-    # Handover 0435b: transition 'complete' agents to 'closed' on user archive action
+    # Handover 0435b: transition 'complete' agents to 'closed' on user archive action.
+    # BE-9246: reuse project_service.closeout (already constructed with the request's
+    # real websocket_manager via get_project_service -> state.websocket_manager) instead
+    # of building a throwaway ProjectCloseoutService with no WS manager -- that gap was
+    # exactly why the closed-agent tiles never got a live update on archive.
     try:
-        from giljo_mcp.services.project_closeout_service import ProjectCloseoutService
-        from giljo_mcp.tenant import TenantManager
-
-        closeout_service = ProjectCloseoutService(
-            db_manager=project_service.db_manager,
-            tenant_manager=TenantManager(),
-        )
-        closed_names = await closeout_service.close_completed_agents_with_commit(
+        closed_names = await project_service.closeout.close_completed_agents_with_commit(
             project_id=project_id,
             tenant_key=current_user.tenant_key,
         )
         if closed_names:
             logger.info("Closed %d agent(s) on archive: %s", len(closed_names), ", ".join(closed_names))
-    except (ImportError, OSError):
+    except OSError:
         logger.warning("Failed to close agents during project archive")
 
     logger.info("Archived project %s", sanitize(project_id))

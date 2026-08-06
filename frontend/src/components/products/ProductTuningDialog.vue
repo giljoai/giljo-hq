@@ -1,6 +1,7 @@
 <template>
   <BaseDialog
     v-model="isOpen"
+    data-testid="product-tuning-dialog"
     type="primary"
     icon="mdi-tune"
     title="Tune Context"
@@ -28,7 +29,7 @@
 
     <template #actions>
       <v-spacer />
-      <v-btn variant="text" @click="handleClose">Close</v-btn>
+      <v-btn variant="text" data-testid="product-tuning-close" @click="handleClose">Close</v-btn>
     </template>
   </BaseDialog>
 </template>

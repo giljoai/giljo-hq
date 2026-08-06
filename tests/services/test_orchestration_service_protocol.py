@@ -124,9 +124,18 @@ class TestAgentProtocolFormat:
 
             assert "tenant_key=" not in call, f"get_thread_history example must omit tenant_key: {call}"
 
-    def test_protocol_includes_todowrite_sync_instructions(self):
-        """Verify protocol includes instructions to sync TodoWrite with report_progress (Bug 4)."""
-        protocol = _generate_agent_protocol(job_id="job-123", tenant_key="tenant-abc", agent_name="test-agent")
+    def test_protocol_includes_todowrite_sync_instructions_for_claude_code(self):
+        """Verify the claude-code protocol includes instructions to sync TodoWrite with
+        report_progress (Bug 4).
+
+        BE-9260: TodoWrite is a Claude-Code-only tool, so the "sync your task list"
+        section now phrases itself per-harness (``task_list_phrase``) instead of
+        hardcoding "TodoWrite" for every tool. This test pins the CLAUDE-CODE render
+        (the harness Bug 4 was actually about); the harness-neutral case is covered by
+        ``test_protocol_uses_harness_neutral_phrasing_for_non_claude_tool`` below."""
+        protocol = _generate_agent_protocol(
+            job_id="job-123", tenant_key="tenant-abc", agent_name="test-agent", tool="claude-code"
+        )
 
         # Verify protocol mentions syncing TodoWrite with progress reporting
         assert "TodoWrite" in protocol, "Protocol should mention TodoWrite tool"
@@ -152,6 +161,19 @@ class TestAgentProtocolFormat:
                     break
 
         assert todowrite_section_found, "Protocol should have a section explaining TodoWrite sync with report_progress"
+
+    def test_protocol_uses_harness_neutral_phrasing_for_non_claude_tool(self):
+        """BE-9260: a non-claude-code (or default/unspecified) tool must get the
+        harness-neutral "task list" phrasing instead of the Claude-Code-only
+        TodoWrite tool name, while still carrying the same sync-with-report_progress
+        guidance."""
+        protocol = _generate_agent_protocol(job_id="job-123", tenant_key="tenant-abc", agent_name="test-agent")
+
+        assert "TodoWrite" not in protocol, "Default/non-claude-code render must not leak TodoWrite wording"
+        assert "task list" in protocol
+        assert "report_progress" in protocol
+        protocol_lower = protocol.lower()
+        assert "sync" in protocol_lower or "immediately" in protocol_lower or "every time" in protocol_lower
 
 
 class TestCH2ProgressTracking:

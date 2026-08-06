@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Roadmap models for GiljoAI MCP (FE-6022a).
+Roadmap models for Giljo HQ (FE-6022a).
 
 The Roadmapping Pane gives a product ONE prioritized execution plan built from
 its own projects and tasks. The schema is deliberately thin:

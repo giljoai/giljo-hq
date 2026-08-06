@@ -31,6 +31,7 @@ import pytest_asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from giljo_mcp.database import tenant_isolation_bypass
 from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.models import Product, Project
@@ -48,7 +49,10 @@ _MODE = "claude_code_cli"
 async def _wipe_sequence_runs(db_manager):
     yield
     async with db_manager.get_session_async() as session:
-        await session.execute(delete(SequenceRun))
+        with tenant_isolation_bypass(
+            session, reason="test teardown: wipe sequence_runs (per-worker DB)", models=(SequenceRun,)
+        ):
+            await session.execute(delete(SequenceRun))
         await session.commit()
 
 

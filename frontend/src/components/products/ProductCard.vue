@@ -1,5 +1,5 @@
 <template>
-  <v-card variant="flat" class="product-card h-100 smooth-border">
+  <v-card variant="flat" class="product-card h-100 smooth-border" data-testid="product-card" :data-product-id="product.id">
     <v-card-text>
       <div class="d-flex align-center justify-space-between mb-2">
         <div
@@ -96,6 +96,7 @@
             v-bind="props"
             class="icon-interactive"
             aria-label="View product details"
+            data-testid="product-card-info"
             @click="$emit('info', product)"
           >
             <v-icon>mdi-information-outline</v-icon>
@@ -112,6 +113,7 @@
             v-bind="props"
             class="icon-interactive"
             aria-label="Tune context"
+            data-testid="product-card-tune"
             @click="$emit('tune', product)"
           >
             <v-icon>mdi-tune</v-icon>
@@ -128,6 +130,7 @@
             v-bind="props"
             class="icon-interactive-play"
             :aria-label="isActive ? 'Deactivate product' : 'Activate product'"
+            data-testid="product-card-activation"
             @click="$emit('toggle-activation', product)"
           >
             <v-icon>{{ isActive ? 'mdi-stop' : 'mdi-play' }}</v-icon>
@@ -144,6 +147,7 @@
             v-bind="props"
             class="icon-interactive"
             aria-label="Edit product"
+            data-testid="product-card-edit"
             @click="$emit('edit', product)"
           >
             <v-icon>mdi-pencil</v-icon>
@@ -160,6 +164,7 @@
             color="error"
             v-bind="props"
             aria-label="Delete product"
+            data-testid="product-card-delete"
             @click="$emit('delete', product)"
           >
             <v-icon>mdi-delete</v-icon>

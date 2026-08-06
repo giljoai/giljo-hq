@@ -67,6 +67,7 @@ def _make_session_returning_row(agent, project_id):
         agent, project_id = row
     """
     session = AsyncMock()
+    session.info = {}  # tenant_session_context save/restore target
     mock_result = Mock()
     mock_result.one_or_none = Mock(return_value=(agent, project_id))
     session.execute = AsyncMock(return_value=mock_result)
@@ -77,6 +78,7 @@ def _make_session_returning_row(agent, project_id):
 def _make_session_returning_none():
     """Build an AsyncMock session whose execute().one_or_none() returns None."""
     session = AsyncMock()
+    session.info = {}  # tenant_session_context save/restore target
     mock_result = Mock()
     mock_result.one_or_none = Mock(return_value=None)
     session.execute = AsyncMock(return_value=mock_result)

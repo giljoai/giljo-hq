@@ -81,7 +81,7 @@
               <v-icon size="20">mdi-rocket-launch</v-icon>
             </div>
             <div class="startup-card-title">Setup Wizard</div>
-            <div class="startup-card-desc">Connect AI coding tools, install skills, and configure GiljoAI MCP.</div>
+            <div class="startup-card-desc">Connect AI coding tools, install skills, and configure {{ productName }}.</div>
           </div>
           <div
             class="startup-card smooth-border"
@@ -107,7 +107,6 @@
             <div class="startup-card-desc">Trust the HTTPS certificate your server uses so AI coding tools can connect.</div>
           </div>
         </div>
-        <CertTrustModal v-model="showCertModal" />
       </v-window-item>
 
       <!-- Notification Settings -->
@@ -143,20 +142,20 @@
               class="mt-4"
             />
 
-            <div v-if="isCe" data-test="agent-monitoring-settings">
+            <div data-test="agent-monitoring-settings">
               <v-divider class="my-4" />
               <h3 class="text-body-large mb-2">Agent Monitoring</h3>
               <v-text-field
                 v-model.number="agentSilenceThresholdMinutes"
                 type="number"
                 label="Agent Silence Threshold (minutes)"
-                hint="Time without communication before an agent is marked as silent"
+                hint="Time without communication before an agent is marked as silent. Raise this for slow-inference models so they aren't falsely flagged."
                 persistent-hint
                 variant="outlined"
                 :min="1"
-                :max="60"
+                :max="1440"
                 :rules="[
-                  v => (v >= 1 && v <= 60) || 'Must be between 1 and 60 minutes',
+                  v => (v >= 1 && v <= 1440) || 'Must be between 1 and 1440 minutes',
                   v => Number.isInteger(v) || 'Must be a whole number',
                 ]"
                 data-test="silence-threshold-input"
@@ -208,6 +207,64 @@
             :loading="togglingGit"
             @update:enabled="toggleGit"
           />
+
+          <!-- FE-9339: the symptom is "my tool cannot connect", so this is where the
+               user looks. Same modal the Startup card opens — that card stays, this is
+               a second door, not a move. CE only: a hosted tenant has no certificate
+               of its own to trust. -->
+          <div
+            v-if="isCe"
+            class="intg-line smooth-border"
+            style="--card-accent: var(--agent-implementer-primary)"
+            data-testid="cert-trust-line"
+          >
+            <div
+              class="intg-line-icon intg-line-icon--link"
+              style="background: var(--agent-implementer-tinted); color: var(--agent-implementer-primary)"
+              title="Open the certificate trust steps"
+              @click="showCertModal = true"
+            >
+              <v-icon size="22">mdi-certificate</v-icon>
+            </div>
+
+            <div class="intg-line-main">
+              <div class="intg-line-title-row">
+                <span class="intg-line-title">Certificate Trust</span>
+                <v-tooltip location="top" max-width="400">
+                  <template #activator="{ props }">
+                    <v-icon v-bind="props" size="small" style="color: var(--text-muted)">mdi-help-circle-outline</v-icon>
+                  </template>
+                  <div>
+                    <strong>One-time setup for servers running HTTPS</strong>
+                    <p class="mt-2 mb-0">
+                      Command-line AI tools built on Node (Claude Code, Codex CLI, Gemini CLI)
+                      do not read your operating system&rsquo;s trust store, so they refuse a
+                      private or self-signed certificate even after your browser has accepted it.
+                    </p>
+                    <p class="mt-2 mb-0 text-body-small">
+                      The steps cover downloading the certificate, installing it, and pointing
+                      Node at it. Skip them if your server runs over plain HTTP.
+                    </p>
+                  </div>
+                </v-tooltip>
+              </div>
+              <div class="intg-line-sub">AI tool refusing to connect over HTTPS? Trust your server&rsquo;s certificate.</div>
+            </div>
+
+            <div class="intg-line-action">
+              <v-btn
+                color="primary"
+                variant="outlined"
+                size="small"
+                class="intg-toggle-pill"
+                data-testid="cert-trust-open"
+                @click="showCertModal = true"
+              >
+                <v-icon start size="16">mdi-open-in-new</v-icon>
+                Open
+              </v-btn>
+            </div>
+          </div>
         </div>
 
         <!-- Credentials (compact section, formerly the "API Keys" peer tab) -->
@@ -216,6 +273,15 @@
         </div>
       </v-window-item>
     </v-window>
+
+    <!-- FE-9339: mounted at container level, not inside the Startup tab. VWindowItem
+         renders its slot lazily, and Connect is the default tab — a modal parked
+         inside a tab the user has never opened is simply not in the DOM, so the
+         Connect entry point would have opened nothing. One instance, both doors. -->
+    <CertTrustModal
+      v-model="showCertModal"
+      @continue="recordCertTrustDismissal"
+    />
     </div>
 
   </v-container>
@@ -229,6 +295,9 @@ import { useWebSocketStore } from '@/stores/websocket'
 import { useToast } from '@/composables/useToast'
 import TemplateManager from '@/components/TemplateManager.vue'
 import ApiKeyManager from '@/components/ApiKeyManager.vue'
+import { PRODUCT_NAME } from '@/branding'
+
+const productName = PRODUCT_NAME
 import AgentExport from '@/components/AgentExport.vue'
 import ContextPriorityConfig from '@/components/settings/ContextPriorityConfig.vue'
 import ToolsConnectDirectory from '@/components/tools/ToolsConnectDirectory.vue'
@@ -237,6 +306,7 @@ import GitIntegrationCard from '@/components/settings/integrations/GitIntegratio
 import setupService from '@/services/setupService'
 import { isCeModeValue } from '@/composables/useGiljoMode'
 import CertTrustModal from '@/components/setup/CertTrustModal.vue'
+import { recordCertTrustDismissal } from '@/utils/certTrustPreference'
 // Stores and Theme
 const settingsStore = useSettingsStore()
 const router = useRouter()
@@ -290,9 +360,9 @@ async function saveNotificationSettings() {
       duration: settings.value.notifications.duration,
     }
     await settingsStore.updateSettings({ notifications })
-    if (isCe.value) {
-      await settingsStore.updateAgentSilenceThreshold(agentSilenceThresholdMinutes.value)
-    }
+    // FE-9241: the silence threshold now saves in both editions (CE writes the
+    // deployment-wide default; SaaS writes a per-tenant override) — same API path.
+    await settingsStore.updateAgentSilenceThreshold(agentSilenceThresholdMinutes.value)
   } catch (error) {
     console.error('Failed to save notification settings:', error)
     showToast({ message: 'Failed to save notification settings. Please try again.', type: 'error' })
@@ -367,9 +437,8 @@ onMounted(async () => {
   if (settingsStore.settings.notifications) {
     settings.value.notifications = { ...settings.value.notifications, ...settingsStore.settings.notifications }
   }
-  if (isCe.value) {
-    agentSilenceThresholdMinutes.value = await settingsStore.loadAgentSilenceThreshold()
-  }
+  // FE-9241: the silence threshold now loads in both editions (see saveNotificationSettings).
+  agentSilenceThresholdMinutes.value = await settingsStore.loadAgentSilenceThreshold()
 
   // Load git integration settings (system-level)
   await loadGitSettings()
@@ -486,6 +555,10 @@ function handleTemplateExportEvent(data) {
 
 <style lang="scss" scoped>
 @use '../styles/design-tokens' as *;
+/* FE-9339: the Certificate Trust line is authored inline in this view rather than as
+   a component, so it needs the shared line-card styles its three grid siblings pull
+   in through their own scoped blocks. No new card CSS. */
+@use '../styles/intg-card';
 .settings-subtitle {
   color: var(--text-muted);
 }

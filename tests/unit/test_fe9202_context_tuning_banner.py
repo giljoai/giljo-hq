@@ -145,6 +145,7 @@ def _mock_db_manager():
     check_tuning_staleness can run with only the repos mocked.
     """
     session = AsyncMock()
+    session.info = {}  # tenant_session_context save/restore target
     async_cm = AsyncMock()
     async_cm.__aenter__ = AsyncMock(return_value=session)
     async_cm.__aexit__ = AsyncMock(return_value=False)

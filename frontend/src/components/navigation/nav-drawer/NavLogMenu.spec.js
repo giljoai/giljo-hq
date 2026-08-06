@@ -57,6 +57,35 @@ describe('NavLogMenu', () => {
     expect(wrapper.find('.v-list-item-title').exists()).toBe(true)
   })
 
+  // BE-9347: size-rotated archives all carry the same mtime date, so the date
+  // alone cannot tell them apart. The rotation index is what distinguishes them.
+  it('shows the rotation index for size-rotated archives', () => {
+    const wrapper = mountMenu({
+      logArchives: [
+        { filename: 'giljo_mcp.log.1', date: '2026-08-02', rotation_index: 1, size_kb: 10240 },
+        { filename: 'giljo_mcp.log.2', date: '2026-08-02', rotation_index: 2, size_kb: 10240 },
+      ],
+      logArchivesLoading: false,
+    })
+    const titles = wrapper.findAll('.v-list-item-title').map((t) => t.text())
+    expect(titles[0]).toContain('#1')
+    expect(titles[1]).toContain('#2')
+    expect(titles[0]).toContain('Aug 2, 2026')
+    expect(titles[0]).not.toBe(titles[1])
+  })
+
+  it('shows a legacy date-named archive without a rotation index', () => {
+    const wrapper = mountMenu({
+      logArchives: [
+        { filename: 'giljo_mcp.log.2026-04-12', date: '2026-04-12', rotation_index: null, size_kb: 512 },
+      ],
+      logArchivesLoading: false,
+    })
+    const title = wrapper.find('.v-list-item-title').text()
+    expect(title).toContain('Apr 12, 2026')
+    expect(title).not.toContain('#')
+  })
+
   it('emits download-current when Download Current Log is clicked', async () => {
     const wrapper = mountMenu()
     const items = wrapper.findAll('.v-list-item')

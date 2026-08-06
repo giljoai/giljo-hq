@@ -38,7 +38,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Only check tracked files that MUST reach the public/LAN export. Operator
-# infra (audit/, handovers/, internal/, CLAUDE.md, .stignore, etc.) is
+# infra (audit/, private handover + tooling dirs, CLAUDE.md, .stignore, etc.) is
 # intentionally both gitignored AND in .export-exclude -- those collisions
 # are expected. Real source code being gitignored is the bug we're hunting.
 SOURCE_PATH_PREFIXES = (

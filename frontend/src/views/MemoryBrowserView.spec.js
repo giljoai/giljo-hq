@@ -11,6 +11,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 
 // Use the global api mock from tests/setup.js, but control getMemoryEntries.
@@ -124,16 +125,25 @@ describe('MemoryBrowserView — FE-5042', () => {
   it('shows the filtered-empty state when search matches nothing', async () => {
     const wrapper = await mountView()
     const memoryStore = useMemoryStore()
-    // The search box is debounced (250ms) and then hits the server ?search= path
-    // (BE-6082). Drive that debounce deterministically with fake timers and let
-    // the (no-match → empty) server result settle before asserting, instead of
-    // racing the real timer under coverage-instrumented CI (BE-6162).
+    // The search box is debounced (250ms) and the view fires the resulting
+    // server ?search= call fire-and-forget (BE-6082), so the settle is not
+    // observable from the DOM alone. Asserting after a fixed flush guesses at
+    // when that lands and loses the race (BE-6162, TSK-9219); polling the DOM
+    // instead only moved the guess into a wall-clock window, which then had to
+    // be widened twice and still expired under a starved CI event loop
+    // (TSK-9232, TSK-9237). So wait on the promise itself, not on the clock:
+    // nextTick() guarantees the watcher has registered its debounce while fake
+    // timers are still installed, advancing them fires it, and awaiting the
+    // store's inFlightSearch waits for THIS search to settle. (It says nothing
+    // about the store reaching a final state — _runSearch does not sequence
+    // requests — but this test fires exactly one search, so that is enough.)
     vi.useFakeTimers()
     memoryStore.searchText = 'zzz-nope'
-    await vi.advanceTimersByTimeAsync(300) // fire the 250ms debounce + resolve the empty server search
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(300) // fire the 250ms debounce
     vi.useRealTimers()
-    await flushPromises()
-    await wrapper.vm.$nextTick()
+    await memoryStore.inFlightSearch
+    await flushPromises() // let Vue render the settled state
     expect(wrapper.find('[data-test="memory-empty"]').exists()).toBe(true)
   })
 

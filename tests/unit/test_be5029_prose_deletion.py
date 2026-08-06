@@ -12,7 +12,7 @@ source, API, test, or frontend file reintroduces the dead string outside the
 allowed survivors.
 
 Allowed survivors (audit / historical / migration):
-- ``handovers/`` -- archived comms logs and historical session state
+- private handover archives -- archived comms logs and historical session state
 - ``docs/`` -- audit snapshots and the BE-5029a deletion list itself
 - ``migrations/`` -- migration docstrings (historical record)
 - ``src/giljo_mcp/models/user_approval.py`` -- model docstring referencing

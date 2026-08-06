@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Context Management for GiljoAI MCP.
+Context Management for Giljo HQ.
 
 Provides vision document chunking with tiktoken-based token counting
 and semantic chunking. All operations enforce multi-tenant isolation

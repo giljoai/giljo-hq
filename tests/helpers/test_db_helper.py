@@ -21,6 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from giljo_mcp.database import DatabaseManager
+from giljo_mcp.models import Base
 
 
 # =============================================================================
@@ -246,6 +247,46 @@ class PostgreSQLTestHelper:
         )
 
     @staticmethod
+    async def _missing_columns(target_db: str) -> dict[str, list[str]]:
+        """Diff ``target_db``'s live ``public`` schema against ``Base.metadata``.
+
+        Narrow by design (BE-9288) -- flags ONLY "a table that EXISTS in the DB
+        is missing a column ``Base.metadata`` declares for it". Everything else
+        is deliberately left alone (these are the documented false-positive
+        sources, each asserted by the BE-9288 regression tests):
+          - a table in ``Base.metadata`` absent from the DB entirely (normal
+            CE-vs-SaaS split -- see memory
+            ``feedback_local_createall_schema_differs_from_ce``)
+          - a table in the DB that ``Base.metadata`` doesn't know about
+            (alembic bookkeeping, leftover SaaS tables on a reused DB name)
+          - extra columns the DB has that the model no longer declares
+          - JSONB internals, type mismatches, nullability, defaults
+
+        Returns ``{table_name: [missing_column, ...]}``; empty dict = no drift.
+        """
+        db_url = PostgreSQLTestHelper.get_test_db_url(database=target_db)
+        engine = create_async_engine(db_url, isolation_level="AUTOCOMMIT")
+        try:
+            async with engine.connect() as conn:
+                rows = await conn.execute(
+                    text("SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public'")
+                )
+                live_columns: dict[str, set[str]] = {}
+                for table_name, column_name in rows:
+                    live_columns.setdefault(table_name, set()).add(column_name)
+        finally:
+            await engine.dispose()
+
+        drift: dict[str, list[str]] = {}
+        for table_name, table in Base.metadata.tables.items():
+            if table_name not in live_columns:
+                continue  # table absent from the DB -- not drift, see docstring
+            missing = [c.name for c in table.columns if c.name not in live_columns[table_name]]
+            if missing:
+                drift[table_name] = missing
+        return drift
+
+    @staticmethod
     async def ensure_test_database_exists():
         """
         Ensure the (per-worker) test database exists, create if it doesn't.
@@ -254,6 +295,25 @@ class PostgreSQLTestHelper:
         if needed, then ensures the ``pg_trgm`` extension is present (used by
         fuzzy context search via ``similarity()``; on a shared dev DB this is
         created at install time, but a fresh per-worker DB starts empty).
+
+        SCHEMA-DRIFT GUARD (BE-9288): a per-worker DB left over from an earlier
+        run silently keeps its OLD schema -- ``Base.metadata.create_all()``
+        (called by ``create_test_tables`` at worker bootstrap) only creates
+        tables that don't exist yet; it never adds a column to a table that's
+        already there. So a model column added since the DB was last created
+        stays missing, and tests fail far from the real cause. If the DB
+        already exists, its live columns are diffed against ``Base.metadata``
+        (``_missing_columns``, narrow by design) and, on drift, the DB is
+        dropped and recreated so the bootstrap ``create_all`` starts clean.
+
+        Drop+recreate (rather than failing loudly) is the chosen response
+        because it IS race-safe here: the target DB name is per-worker-unique
+        (``resolve_test_db_name``), so no sibling xdist worker ever targets
+        this same name, and the whole drop+recreate below runs while this call
+        still holds ``_DB_CREATE_LOCK_KEY`` -- the same process-wide advisory
+        lock that already serializes CREATE DATABASE against the
+        ``template1``-copy race -- so no other process can be mid CREATE
+        against ANY test DB while this one is dropped and recreated.
         """
         target_db = PostgreSQLTestHelper.resolve_test_db_name()
         # Defence-in-depth: never CREATE/connect a name that isn't a test DB.
@@ -265,7 +325,8 @@ class PostgreSQLTestHelper:
         try:
             async with admin_engine.connect() as conn:
                 # Serialize concurrent CREATE DATABASE across xdist workers so
-                # template1 is only copied by one session at a time.
+                # template1 is only copied by one session at a time. Also
+                # covers the drop+recreate drift path below -- see docstring.
                 await conn.execute(text("SELECT pg_advisory_lock(:k)"), {"k": _DB_CREATE_LOCK_KEY})
                 try:
                     result = await conn.execute(
@@ -276,6 +337,11 @@ class PostgreSQLTestHelper:
                         # DDL cannot be parameterised; target_db is validated
                         # above and matches ^(giljo_mcp_test|giljo_test)(_gw\d+)?$
                         # (safe id).
+                        await conn.execute(text(f'CREATE DATABASE "{target_db}"'))
+                    elif await PostgreSQLTestHelper._missing_columns(target_db):
+                        # Stale schema: reuse the existing drop path, then the
+                        # same CREATE statement as the fresh-DB branch above.
+                        await PostgreSQLTestHelper.drop_test_database()
                         await conn.execute(text(f'CREATE DATABASE "{target_db}"'))
                 finally:
                     await conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _DB_CREATE_LOCK_KEY})
@@ -412,19 +478,37 @@ async def purge_tenant_rows(db_manager: DatabaseManager, tenant_key: str) -> Non
 
     Call this after ``yield`` in the fixture that MINTS the suite's unique
     tenant_key — it deletes every row committed under that tenant, in FK-safe
-    order (executions -> jobs -> templates -> projects -> products). The
+    order (executions -> jobs -> templates -> projects -> products ->
+    sequence runs -> users -> organizations). ``User.org_id`` references
+    ``Organization``, so users are always deleted before organizations. The
     tenant-scoped session authorizes the tenant-predicate deletes under the
     fail-closed isolation guard. If a suite starts committing into a table not
     listed here, the FK violation surfaces loudly at teardown — extend the
     order list rather than suppressing it.
+
+    A suite whose tenant has no rows in a given table simply deletes nothing,
+    so the extra models are a no-op for the suites that predate them
+    (TSK-9199 added SequenceRun/User/Organization for the REST suites that
+    seed their own org+user).
     """
     from sqlalchemy import delete
 
-    from giljo_mcp.models import AgentTemplate, Product, Project
+    from giljo_mcp.models import AgentTemplate, Product, Project, User
     from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+    from giljo_mcp.models.organizations import Organization
+    from giljo_mcp.models.sequence_runs import SequenceRun
 
     async with db_manager.get_session_async(tenant_key=tenant_key) as session:
-        for model in (AgentExecution, AgentJob, AgentTemplate, Project, Product):
+        for model in (
+            AgentExecution,
+            AgentJob,
+            AgentTemplate,
+            Project,
+            Product,
+            SequenceRun,
+            User,
+            Organization,
+        ):
             await session.execute(delete(model).where(model.tenant_key == tenant_key))
         await session.commit()
 

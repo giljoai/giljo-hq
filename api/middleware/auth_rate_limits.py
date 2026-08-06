@@ -77,12 +77,69 @@ DEFAULTS: dict[str, int] = {
     # "login"/"social_login_confirm_link" (5) as defense-in-depth on top of
     # the password_hash-IS-NULL guard in UserAuthService.set_initial_password.
     "set_initial_password": 5,
+    # SEC-9227d (M3): the OAuth token-endpoint family (public/unauthenticated
+    # by spec; every bad client_secret costs a server-side bcrypt verify, so
+    # unlimited attempts are CPU amplification + secret brute-force).
+    # oauth_token: per IP per 60s. Generous: a legitimate client exchanges ONE
+    # code per authorization, but connector backends (ChatGPT multi-egress)
+    # retry in bursts; 30 absorbs honest retry storms while capping bcrypt
+    # spend. NOTE: different egress IPs bucket separately — this limit is
+    # per-IP by design.
+    "oauth_token": 30,
+    # oauth_refresh: per IP per 60s. A healthy client refreshes ~1/hour after
+    # SEC-9227c; 30/min absorbs retry bursts + multi-client households behind
+    # one NAT.
+    "oauth_refresh": 30,
+    # oauth_revoke: per IP per 60s. Revocation is rare; RFC 7009 responses are
+    # always-200 so throttling can't leak validity, but unlimited calls let an
+    # attacker grind the DB-lookup path.
+    "oauth_revoke": 10,
 }
 
 # Toggle for the CE loopback exemption. Default ON. Any of these (case-insensitive)
 # turns it OFF: "0", "false", "no", "off".
 _EXEMPT_LOCALHOST_ENV = "GILJO_RL_EXEMPT_LOCALHOST"
 _FALSEY = {"0", "false", "no", "off"}
+
+
+class _TestBypass:
+    """Holder for the test-only bypass flag (avoids a module-level ``global``).
+
+    Mirrors the ``_RateLimiterHolder`` idiom in ``auth_rate_limiter``.
+    """
+
+    enabled: bool = False
+
+
+def set_test_bypass(enabled: bool) -> None:
+    """Test-only escape hatch: turn the pre-auth rate-limit bypass on/off.
+
+    Production code MUST NOT call this. The suite drives it from an autouse
+    fixture in ``tests/conftest.py``; suites that exercise the limiter itself
+    opt out via the ``real_auth_rate_limiter`` fixture.
+    """
+    _TestBypass.enabled = bool(enabled)
+
+
+def is_test_bypass_enabled() -> bool:
+    """Whether the test-only rate-limit bypass is active. Default: ``False``.
+
+    SEC-9227 (H4). This replaced a bypass that read ``request.base_url`` — i.e.
+    the inbound ``Host`` header — and exempted anything starting with
+    ``http://test``. ``Host`` is attacker-controlled, so on a plain-HTTP
+    deployment any client could disable every pre-auth limit (login, register,
+    DCR, PIN recovery) for itself by sending ``Host: testanything``. A
+    rate-limit decision must never be derived from request data.
+
+    This flag takes no request input at all: it is process-local module state,
+    settable only by calling ``set_test_bypass`` from Python, which no request
+    path does. It defaults to OFF, so a production process never bypasses.
+
+    Deliberately named ``is_test_bypass_enabled`` rather than
+    ``test_bypass_enabled``: a ``test_``-prefixed name imported into a test
+    module gets collected by pytest as a test case.
+    """
+    return _TestBypass.enabled
 
 
 def limit_for(name: str) -> int:

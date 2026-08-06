@@ -266,7 +266,12 @@ class ProductMemoryService:
                     total_projects=total_projects,
                     total_tasks=total_tasks,
                     total_vision_documents=total_vision_docs,
-                    warning="Deleting this product will soft-delete all related entities",
+                    warning=(
+                        "These related items are kept unchanged while the product is in the "
+                        "trash. They are permanently deleted only when the product itself is — "
+                        "either when you delete it permanently from the trash, or automatically "
+                        "after 10 days."
+                    ),
                 )
 
         except ResourceNotFoundError:
@@ -297,7 +302,11 @@ class ProductMemoryService:
             Dict with keys: git_integration, sequential_history, context
         """
         base_memory = product.product_memory or {}
-        git_integration = base_memory.get("git_integration", {})
+        # BE-9261: seed key renamed github -> git_integration. Rows written before
+        # the rename only carry "github"; this is the single production reader of
+        # that config, so the legacy-key tolerance lives here (folded in from the
+        # now-deleted _get_git_config helper, which had no callers).
+        git_integration = base_memory.get("git_integration") or base_memory.get("github") or {}
         context = base_memory.get("context", {})
 
         entries = await self._repo.get_entries_by_product(
@@ -330,8 +339,12 @@ class ProductMemoryService:
             - Updates product.product_memory if incomplete
             - Commits changes to database when modifications are made
         """
+        # BE-9261: seed key renamed github -> git_integration. This only ADDS
+        # missing keys (never overwrites), so a legacy row's "github" data survives
+        # untouched and stays readable via the fallback in
+        # _build_product_memory_response above.
         default_structure = {
-            "github": {},
+            "git_integration": {},
             "context": {},
         }
 

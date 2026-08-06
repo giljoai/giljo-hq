@@ -40,7 +40,7 @@ import pytest
 from sqlalchemy import select
 
 from api.endpoints.mcp_session import MCPSessionManager
-from giljo_mcp.database import tenant_isolation_bypass
+from giljo_mcp.database import tenant_isolation_bypass, tenant_session_context
 from giljo_mcp.download_tokens import TokenManager
 from giljo_mcp.file_staging import FileStaging
 from giljo_mcp.models import DownloadToken, MCPSession
@@ -258,8 +258,9 @@ async def _add_notification(
         resolved_at=resolved_at,
         expires_at=expires_at,
     )
-    # Notification is NOT in the tenant-isolation guard registry (isolation is by
-    # explicit tenant_key predicate), so no bypass is needed or allowed here.
+    # Notification is registered in the tenant-isolation guard (SEC-9276), but INSERT
+    # statements are not guarded (only select/update/delete) -- session.add()+flush needs
+    # no bypass here.
     session.add(row)
     await session.flush()
     await session.commit()
@@ -267,7 +268,23 @@ async def _add_notification(
 
 
 async def _notification_ids(session, tenant_key: str) -> set[str]:
-    rows = (await session.execute(select(Notification.id).where(Notification.tenant_key == tenant_key))).scalars().all()
+    """Read back a tenant's Notification ids under an explicit tenant context.
+
+    SEC-9276: this helper is called back-to-back for DIFFERENT tenants in the same
+    shared ``db_session`` (e.g. tenant A then tenant B). Without an explicit
+    ``tenant_session_context`` here, the session's flush-derived tenant context (set by
+    the guard's after_flush listener to whichever tenant was last inserted) would be
+    stale by the time this SELECT's explicit ``tenant_key == tenant_key`` predicate runs
+    for a DIFFERENT tenant, and the guard correctly refuses to trust it -- exactly the
+    real cross-tenant-session bug this guard exists to catch. Scoping the read to the
+    right tenant here (not bypassing the guard) keeps the isolation check live.
+    """
+    with tenant_session_context(session, tenant_key):
+        rows = (
+            (await session.execute(select(Notification.id).where(Notification.tenant_key == tenant_key)))
+            .scalars()
+            .all()
+        )
     return set(rows)
 
 

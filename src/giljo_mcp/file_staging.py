@@ -43,7 +43,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database import tenant_session_context
-from .models import AgentTemplate
+from .models import AgentTemplate, DownloadToken
 from .platform_registry import EXPORT_ANTIGRAVITY_CLI, EXPORT_CODEX_CLI, SKILL_SLASH_PLATFORMS
 from .tools.slash_command_templates import get_all_templates
 
@@ -56,29 +56,45 @@ logger = logging.getLogger(__name__)
 _TEMPLATE_BEARING_ZIPS = frozenset({"agent_templates.zip", "giljo_setup.zip"})
 
 
-async def staged_agent_zip_is_stale(session: AsyncSession, tenant_key: str, filename: str) -> bool:
+async def staged_agent_zip_is_stale(session: AsyncSession, tenant_key: str, filename: str, token: str) -> bool:
     """True if a template-bearing staged ZIP would serve a pre-change snapshot (BE-9208 D1).
 
     The token download endpoint serves the ZIP bytes frozen at staging time; we refuse
     to serve one older than the tenant's latest template write. Compared over the
     tenant's templates:
       content_watermark = MAX(COALESCE(updated_at, created_at))  # latest create/edit/toggle/delete
-      export_watermark  = MAX(last_exported_at)                  # latest staging (stamps packaged templates)
-    Staging keeps last_exported_at >= updated_at for everything it packaged (existing
-    invariant — test_stage_agent_templates_preserves_staleness_after_export), so a fresh
-    token has content <= export; any template write AFTER staging pushes content past
-    export -> stale.
 
-    NB: anchoring on ``token.created_at`` would false-positive on EVERY fresh download —
-    the staging ``last_exported_at`` write bumps ``updated_at`` PAST the token's creation
-    time (verified empirically). The export-watermark moves in lockstep with that bump
-    and is the correct baseline. Non-template ZIPs (slash_commands.zip) are never stale.
+    TSK-9210: the baseline is THIS token's own ``staged_at`` (stamped in
+    ``TokenManager.mark_ready()``, which runs after staging commits
+    ``last_exported_at``). BE-9208 originally compared against the tenant-global
+    export watermark ``MAX(last_exported_at)``, which two overlapping tokens can
+    defeat: token A staged, template edited, token B staged -> B's staging pushes the
+    export watermark past the edit, so A's genuinely-stale link reads as fresh and is
+    served 200. Anchoring per token removes the masking, because A is judged against
+    A's staging time.
+
+    NB: anchoring on ``token.created_at`` instead would false-positive on EVERY fresh
+    download — the staging ``last_exported_at`` write bumps ``updated_at`` PAST the
+    token's creation time (verified empirically). ``staged_at`` is stamped after that
+    write, so it does not have that problem. Non-template ZIPs (slash_commands.zip)
+    are never stale.
+
+    Legacy tolerance: tokens minted before the ce_0081 migration carry
+    ``staged_at IS NULL`` (additive column, no backfill). Those fall back to the
+    BE-9208 export-watermark comparison rather than erroring or being blanket-refused.
+    Tokens expire after 15 minutes, so that path self-drains almost immediately.
     """
     if filename not in _TEMPLATE_BEARING_ZIPS:
         return False
 
     content_stmt = select(func.max(func.coalesce(AgentTemplate.updated_at, AgentTemplate.created_at))).where(
         AgentTemplate.tenant_key == tenant_key
+    )
+    # tenant_key is redundant for lookup (token is globally unique) but kept in the
+    # WHERE so the fail-closed tenant guard sees a properly scoped query rather than a
+    # bare token read — same reason increment_download_count takes tenant_key.
+    staged_stmt = select(DownloadToken.staged_at).where(
+        DownloadToken.token == token, DownloadToken.tenant_key == tenant_key
     )
     export_stmt = select(func.max(AgentTemplate.last_exported_at)).where(AgentTemplate.tenant_key == tenant_key)
 
@@ -87,11 +103,17 @@ async def staged_agent_zip_is_stale(session: AsyncSession, tenant_key: str, file
     # TokenManager.increment_download_count).
     with tenant_session_context(session, tenant_key):
         content_watermark = (await session.execute(content_stmt)).scalar_one_or_none()
-        export_watermark = (await session.execute(export_stmt)).scalar_one_or_none()
+        staged_at = (await session.execute(staged_stmt)).scalar_one_or_none()
+        export_watermark = None if staged_at is not None else (await session.execute(export_stmt)).scalar_one_or_none()
 
     if content_watermark is None:
         # No templates exist at all -> no staged snapshot that can be stale.
         return False
+
+    if staged_at is not None:
+        return content_watermark > staged_at
+
+    # Legacy (pre-ce_0081) token: fall back to the tenant-global export watermark.
     if export_watermark is None:
         # Templates exist but NONE was ever exported: the staged ZIP predates all of
         # the tenant's current templates (e.g. staged slash-commands-only when the
@@ -305,7 +327,13 @@ class FileStaging:
             zip_path = staging_path / "agent_templates.zip"
 
             # Query active templates for tenant
-            stmt = select(AgentTemplate).where(AgentTemplate.tenant_key == tenant_key, AgentTemplate.is_active)
+            # BE-9325: soft-delete leaves is_active alone -- deleted_at IS NULL
+            # is required or a trashed template ships back onto the user's disk.
+            stmt = select(AgentTemplate).where(
+                AgentTemplate.tenant_key == tenant_key,
+                AgentTemplate.is_active,
+                AgentTemplate.deleted_at.is_(None),
+            )
 
             result = await session.execute(stmt)
             all_active = result.scalars().all()
@@ -419,10 +447,13 @@ class FileStaging:
                 from .template_renderer import select_templates_for_packaging
                 from .tools.agent_template_assembler import AgentTemplateAssembler
 
+                # BE-9325: soft-delete leaves is_active alone -- deleted_at IS NULL
+                # is required or a trashed template ships back onto the user's disk.
                 result = await session.execute(
                     select(AgentTemplate).where(
                         AgentTemplate.tenant_key == tenant_key,
                         AgentTemplate.is_active,
+                        AgentTemplate.deleted_at.is_(None),
                     )
                 )
                 all_active = result.scalars().all()

@@ -42,6 +42,8 @@ from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.services.dto import BroadcastAgentCreatedContext
 from giljo_mcp.services.execution_mode_gate import require_execution_mode
 from giljo_mcp.services.protocol_survival import build_spawn_footer
+from giljo_mcp.services.sequence_chain_context import renders_multi_terminal
+from giljo_mcp.system_roles import ORCHESTRATOR_AGENT_NAME
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -269,7 +271,9 @@ class JobLifecycleService:
                 await session.commit()
 
                 # BE-5103: multi_terminal swaps the bootstrap for a dashboard pointer.
-                _mt = (getattr(project, "execution_mode", "multi_terminal") or "multi_terminal") == "multi_terminal"
+                _mt = await renders_multi_terminal(
+                    session, project=project, project_id=project_id, tenant_key=tenant_key
+                )
                 thin_agent_prompt = (
                     _MULTI_TERMINAL_PROMPT_POINTER.format(agent_display_name=agent_display_name)
                     if _mt
@@ -371,7 +375,7 @@ class JobLifecycleService:
         # Regenerate the launch command for the EXISTING job via the same synthesis
         # the normal spawn path uses, so the returned shape is byte-compatible.
         project = await AgentJobRepository(None).get_project_by_id(session, tenant_key, project_id)
-        _mt = (getattr(project, "execution_mode", "multi_terminal") or "multi_terminal") == "multi_terminal"
+        _mt = await renders_multi_terminal(session, project=project, project_id=project_id, tenant_key=tenant_key)
         thin_agent_prompt = (
             _MULTI_TERMINAL_PROMPT_POINTER.format(agent_display_name=existing.agent_display_name)
             if _mt
@@ -530,8 +534,16 @@ class JobLifecycleService:
             AlreadyExistsError: Duplicate orchestrator
         """
         repo = AgentCompletionRepository()
-        if agent_display_name != "orchestrator":
-            # Agent name validation against active templates (backported from tools layer)
+        is_orchestrator = agent_display_name == "orchestrator"
+
+        # Agent name validation against active templates (backported from tools layer).
+        # BE-9333: the orchestrator door used to skip this ENTIRELY, so a name that
+        # resolved to nothing was accepted, the job was stored with template_id NULL, and
+        # -- because AgentJob.job_type is the display name verbatim -- the agent read back
+        # the DEFAULT orchestrator identity. The caller asked for agent X and silently got
+        # a generic orchestrator. Only the ORCHESTRATOR_AGENT_NAME sentinel legitimately
+        # binds no template (no such row is ever seeded); every other name is checked here.
+        if not (is_orchestrator and agent_name == ORCHESTRATOR_AGENT_NAME):
             valid_agent_names = await repo.get_active_template_names(session, tenant_key)
 
             if agent_name not in valid_agent_names:
@@ -545,32 +557,30 @@ class JobLifecycleService:
                     },
                 )
 
+        if not is_orchestrator:
             # v1.1.6: Auto-suffix display name on collision (replaces AlreadyExistsError)
             return await self._resolve_display_name(session, agent_display_name, tenant_key, project_id)
 
         # Duplicate orchestrator prevention (backported from tools layer)
-        if agent_display_name == "orchestrator":
-            existing_orchestrator = await repo.find_active_orchestrator_in_project(session, tenant_key, project_id)
+        existing_orchestrator = await repo.find_active_orchestrator_in_project(session, tenant_key, project_id)
 
-            if existing_orchestrator:
-                # Allow succession: parent_job_id matches existing orchestrator's agent_id
-                if parent_job_id and parent_job_id == existing_orchestrator.agent_id:
-                    self._logger.info(
-                        "Handover: Allowing successor spawn from orchestrator %s",
-                        sanitize(parent_job_id),
-                    )
-                else:
-                    raise AlreadyExistsError(
-                        message=(
-                            f"Orchestrator already exists for project with status '{existing_orchestrator.status}'"
-                        ),
-                        context={
-                            "project_id": project_id,
-                            "tenant_key": tenant_key,
-                            "existing_agent_id": existing_orchestrator.agent_id,
-                            "existing_status": existing_orchestrator.status,
-                        },
-                    )
+        if existing_orchestrator:
+            # Allow succession: parent_job_id matches existing orchestrator's agent_id
+            if parent_job_id and parent_job_id == existing_orchestrator.agent_id:
+                self._logger.info(
+                    "Handover: Allowing successor spawn from orchestrator %s",
+                    sanitize(parent_job_id),
+                )
+            else:
+                raise AlreadyExistsError(
+                    message=(f"Orchestrator already exists for project with status '{existing_orchestrator.status}'"),
+                    context={
+                        "project_id": project_id,
+                        "tenant_key": tenant_key,
+                        "existing_agent_id": existing_orchestrator.agent_id,
+                        "existing_status": existing_orchestrator.status,
+                    },
+                )
 
         return agent_display_name
 
@@ -613,6 +623,21 @@ class JobLifecycleService:
                 extra={
                     "agent_name": sanitize(agent_name),
                     "template_id": template.id,
+                    "execution_mode": project.execution_mode,
+                },
+            )
+        else:
+            # The spawn still succeeds with template_id=None, and the agent gets
+            # no identity section from get_job_mission -- it just behaves
+            # generically. Without this line that degradation is invisible, so an
+            # operator asking "why did this agent behave generically" has nothing
+            # to correlate against.
+            self._logger.warning(
+                "[TEMPLATE_RESOLVE] No template resolved for agent_name=%s -- job spawns without an identity",
+                sanitize(agent_name),
+                extra={
+                    "agent_name": sanitize(agent_name),
+                    "agent_display_name": sanitize(agent_display_name),
                     "execution_mode": project.execution_mode,
                 },
             )

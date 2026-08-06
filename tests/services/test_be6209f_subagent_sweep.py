@@ -164,7 +164,33 @@ def test_multi_terminal_render_is_byte_identical_to_golden() -> None:
     orchestrator_body.py's closeout-checklist f-string had a literal `{id}` that Python
     interpolated as the `id` builtin (rendering "POST /api/approvals/<built-in function
     id>/decide"); escaped to the literal `{{id}}` placeholder. git-verified that is the
-    ONLY change to the golden."""
+    ONLY change to the golden.
+
+    BE-9260: re-frozen for the protocol-section neutrality sweep -- orchestrator_body.py's
+    non-blocking-findings triage bullets stopped mandating THIS repo's pytest/ruff toolchain,
+    'master' as THE branch, and this repo's hardcoded protected-file list, wording them
+    product-derived instead. git-verified that reword (appearing twice, IMPL + STAGING) is
+    the ONLY change to the golden -- the orchestrator render never mentioned TodoWrite, so
+    this golden is untouched by the harness-neutral task-list phrasing changes elsewhere.
+
+    BE-9256: re-frozen for the closeout git_commits fail-closed-on-missing-title project --
+    chapters_reference.py's worked-example key_outcomes dropped the "BE-5025 closed clean"
+    internal ticket ref (neutrality guard baseline entry, also removed) in favor of a
+    product-neutral outcome string. diff-verified that single line is the ONLY change to
+    the golden.
+
+    BE-9292b: re-frozen for the stalled-agent terminal-state project -- chapters_reference.py
+    gained an "ACCEPTING A STALLED AGENT" subsection under CLOSING JOBS, telling the
+    orchestrator to complete_job + close_job a 'silent' agent whose deliverable it verified
+    instead of force-decommissioning it (which mislabels accepted work as failed). Purely
+    additive: diff-verified as 25 inserted lines and ZERO deletions or modifications.
+
+    TSK-9314: re-frozen for the neutrality-baseline cleanup -- chapters_reference.py's
+    AGENT REACTIVATION PROTOCOL heading and its auto-block sentence dropped the two
+    internal handover numbers ("Handover 0435c" / "Handover 0827b", both neutrality
+    guard baseline entries, both removed) that a customer cannot dereference. Same shape
+    as the BE-9256 re-freeze above. diff-verified as exactly 2 changed lines, both
+    citation removals, with no other edit and no line-ending change."""
     golden = _GOLDEN.read_text(encoding="utf-8")
     assert _multi_terminal_golden_render() == golden
 

@@ -80,7 +80,7 @@ class TestInstallPs1Structure:
         assert "function Invoke-GiljoInstaller" in self.content
 
     def test_github_repo_reference(self):
-        assert "giljoai/GiljoAI_MCP" in self.content
+        assert "giljoai/giljo-hq" in self.content
 
     def test_sha256_verification(self):
         assert "Get-FileHash" in self.content
@@ -129,23 +129,43 @@ class TestInstallPs1Syntax:
 
 
 class TestStartBat:
-    """Verify the start-giljoai.bat launcher script."""
+    """Verify the start-giljoai.bat launcher script (INF-9321 contract).
+
+    The pre-INF-9321 version of this class pinned the DRIFTED launcher:
+    it asserted `activate.bat` and `api.run_api` were present -- the exact
+    pattern check_installer_integrity.py forbids in install.ps1's heredoc --
+    and its `api.run_api` assertion kept passing against the fixed bat by
+    matching a COMMENT. These tests now pin the corrected contract, and the
+    behavioural asserts look only at CODE lines (comments stripped) so prose
+    can never satisfy or violate them again.
+    """
+
+    @staticmethod
+    def _code_lines() -> list[str]:
+        content = START_BAT.read_text(encoding="utf-8")
+        return [line for line in content.splitlines() if line.strip() and not line.strip().upper().startswith("REM ")]
 
     def test_bat_file_exists(self):
         assert START_BAT.exists(), f"Expected {START_BAT} to exist"
-
-    def test_bat_contains_activate(self):
-        content = START_BAT.read_text(encoding="utf-8")
-        assert "activate.bat" in content
-
-    def test_bat_contains_run_api(self):
-        content = START_BAT.read_text(encoding="utf-8")
-        assert "api.run_api" in content
 
     def test_bat_has_echo_off(self):
         content = START_BAT.read_text(encoding="utf-8")
         assert "@echo off" in content
 
-    def test_bat_uses_cd_dp0(self):
-        content = START_BAT.read_text(encoding="utf-8")
-        assert 'cd /d "%~dp0"' in content
+    def test_bat_launches_startup_py_with_the_venv_python(self):
+        """The launcher must run venv\\Scripts\\python.exe startup.py -- never a
+        bare `python` (the Store alias trap) and never api.run_api (skips
+        migrations, frontend build, and the browser open)."""
+        code = self._code_lines()
+        assert any("venv\\Scripts\\python.exe" in line and "startup.py" in line for line in code), code
+
+    def test_bat_never_invokes_run_api_or_activate_in_code(self):
+        """The drifted launcher used `call activate.bat` + `python -m api.run_api`."""
+        code = self._code_lines()
+        assert not any("api.run_api" in line for line in code), code
+        assert not any("activate.bat" in line for line in code), code
+
+    def test_bat_cds_to_the_install_root(self):
+        """The bat ships inside scripts/ but venv + startup.py live one level up."""
+        code = self._code_lines()
+        assert any('cd /d "%~dp0..' in line for line in code), code

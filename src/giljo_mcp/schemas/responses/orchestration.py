@@ -35,6 +35,17 @@ class AgentTodoCounts(BaseModel):
     skipped: int = 0
 
 
+class ThreadUnreadDetail(BaseModel):
+    """Per-thread unread breakdown for one agent (BE-9242 deliverable #2).
+
+    ``thread_id`` is "" for unread messages with no thread (legacy/non-hub
+    direct messages) so every unread message is still accounted for.
+    """
+
+    thread_id: str
+    unread_count: int
+
+
 class AgentWorkflowDetail(BaseModel):
     """Per-agent detail within workflow status."""
 
@@ -45,6 +56,18 @@ class AgentWorkflowDetail(BaseModel):
     status: str = ""
     job_type: str = ""
     unread_messages: int = 0
+    # BE-9242 deliverable #3: the subset of unread_messages (the broader
+    # badge total) that is genuinely requires_action + non-auto_generated --
+    # i.e. the subset that will actually block complete_job. Sourced from the
+    # same gate-definition query the closeout gate uses, in
+    # agent_completion_repository's get_unread_messages_for_agent method,
+    # aggregated per agent. A badge>0 with action_required_unread==0 will NOT
+    # block completion.
+    action_required_unread: int = 0
+    # BE-9242 deliverable #2: WHICH thread(s) the unread total lives on.
+    # sum(t.unread_count for t in unread_by_thread) == unread_messages by
+    # construction (same "unread" definition, thread_id added to the group-by).
+    unread_by_thread: list[ThreadUnreadDetail] = []
     todos: AgentTodoCounts = AgentTodoCounts()
 
 
@@ -148,6 +171,19 @@ class SpawnResult(BaseModel):
     )
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# BE-9333: identity-resolution status vocabulary (the wire contract, so it lives
+# with the field). Two healthy outcomes and two degraded ones; only the degraded
+# pair is serialized, so the key's presence is itself the signal.
+# ---------------------------------------------------------------------------
+IDENTITY_RESOLVED = "resolved"  # bound template loaded
+IDENTITY_ORCHESTRATOR_DEFAULT = "orchestrator_default"  # composed orchestrator seed (by design)
+IDENTITY_TEMPLATE_UNRESOLVED = "template_unresolved"  # bound, then the template was deleted
+IDENTITY_TEMPLATE_UNBOUND = "template_unbound"  # never bound to any template
+
+_HEALTHY_IDENTITY_STATUSES = frozenset({IDENTITY_RESOLVED, IDENTITY_ORCHESTRATOR_DEFAULT})
 
 
 class MissionResponse(BaseModel):
@@ -262,6 +298,17 @@ class MissionResponse(BaseModel):
         ),
     )
     agent_identity: str | None = None
+    # BE-9333: WHY agent_identity looks the way it does. An empty identity used to be
+    # indistinguishable from a healthy one (blocked false, error null), so an agent whose
+    # template was deleted mid-run degraded silently with nothing to correlate against.
+    identity_status: str = Field(
+        default=IDENTITY_RESOLVED,
+        description=(
+            "How this agent's identity resolved: 'resolved' (bound template loaded), "
+            "'orchestrator_default' (composed orchestrator seed), 'template_unresolved' "
+            "(the bound template was deleted), 'template_unbound' (never bound)."
+        ),
+    )
     full_protocol: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -290,6 +337,12 @@ class MissionResponse(BaseModel):
             data.pop("protocol_section", None)
         if self.protocol_section_content is None:
             data.pop("protocol_section_content", None)
+        # BE-9333: identity_status rides the wire ONLY when the identity is DEGRADED.
+        # 'resolved' and 'orchestrator_default' are the two healthy, by-design outcomes and
+        # say nothing actionable, so omitting them keeps every healthy response
+        # byte-identical. The key's PRESENCE is therefore itself the signal.
+        if self.identity_status in _HEALTHY_IDENTITY_STATUSES:
+            data.pop("identity_status", None)
         return data
 
 
@@ -442,6 +495,27 @@ class ErrorReportResult(BaseModel):
     status: str = "blocked"
     block_reason: str | None = None
     guidance: str = "To resume, call report_progress() with updated todo_items."
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgentStatusChangeEvent(BaseModel):
+    """One per-agent status transition surfaced for a POST-COMMIT WS broadcast (BE-9246).
+
+    ``ProjectCloseoutService.decommission_project_agents`` / ``close_completed_agents``
+    capture ``old_status`` BEFORE overwriting ``execution.status``, then return a list of
+    these alongside their existing ``list[str]`` display-name return (additive -- the
+    string consumers are untouched). The caller emits the actual ``agent:status_changed``
+    WS event from this record only AFTER its transaction commits -- never mid-flush,
+    since an earlier emit would announce a status a rollback could still undo.
+    """
+
+    job_id: str
+    agent_id: str
+    agent_display_name: str | None = None
+    agent_name: str | None = None
+    old_status: str | None = None
+    new_status: str
 
     model_config = ConfigDict(from_attributes=True)
 

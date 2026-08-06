@@ -18,13 +18,37 @@
  * De-duplicates: same signal key does not fire twice until the key changes.
  */
 import { onScopeDispose, getCurrentScope } from 'vue'
+import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import { useCommHubStore } from '@/stores/commHubStore'
+import { useNotificationStore } from '@/stores/notifications'
 import { useHubPresence } from './useHubPresence'
 import { useToast } from './useToast'
 
 export function useHubNotifications() {
   const { showToast } = useToast()
   const { isHubPresent } = useHubPresence()
+  const router = useRouter()
+
+  // FE-9289c: the handover deep-links to its thread. HubView reads ?thread=<id> on
+  // mount and selects it, so this works from a COLD page (bell clicked while the app is
+  // on Dashboard) — route first, HubView selects on arrival.
+  function openThread(threadId) {
+    if (!threadId) return
+    try {
+      window.focus()
+    } catch {
+      // noop — focus can throw in some embeddings
+    }
+    router.push({ path: '/hub', query: { thread: threadId } }).catch(() => {})
+  }
+
+  // A human-readable name for the thread if the store knows it, else the id — the
+  // handover payload does not carry the thread's subject, only its id.
+  function threadLabel(threadId) {
+    const t = useCommHubStore().threadsById?.get?.(threadId)
+    return t?.subject || t?.title || `thread ${threadId}`
+  }
 
   // De-dupe: track the last-signalled key so identical back-to-back events don't spam
   const lastSignalledKey = new Set()
@@ -46,19 +70,14 @@ export function useHubNotifications() {
     }
   }
 
-  function fireNotification(title, body) {
+  function fireNotification(title, body, threadId) {
     if (typeof Notification === 'undefined') return
     requestPermissionLazy()
     if (Notification.permission !== 'granted') return
     try {
       const n = new Notification(title, { body, icon: '/Giljo_YW.svg' })
-      n.onclick = () => {
-        try {
-          window.focus()
-        } catch {
-          // noop
-        }
-      }
+      // FE-9289c: clicking the handover lands on its thread, not just the app.
+      n.onclick = () => openThread(threadId)
     } catch {
       // Notification constructor can throw in some environments
     }
@@ -110,20 +129,40 @@ export function useHubNotifications() {
     if (lastSignalledKey.has(key)) return
     lastSignalledKey.add(key)
 
-    // If user is in the Hub pane: in-pane cues (badges/highlights) cover it — no toast/push
+    const threadId = payload.thread_id || ''
+
+    // FE-9289c: a handover (baton to the operator) is the "it's your call" moment —
+    // distinct copy from an ordinary mention/action message. "Baton" stays the
+    // code-level name; the operator sees "waiting on you".
+    const isHandover = eventName === 'hub:thread_update'
+    const title = isHandover ? "It's your call" : 'Message Hub'
+    const body = isHandover
+      ? `${threadLabel(threadId)} — waiting on you`
+      : typeof payload.content === 'string'
+        ? payload.content.slice(0, 80)
+        : 'You have a new message'
+
+    // FE-9289c: a HANDOVER drops a persistent entry in the notification bell, so it
+    // survives navigation and the operator can Answer it later from any page. Fed by the
+    // same WS event; the row is client-local (useNotificationStore _local shim), deduped
+    // by a stable per-thread id so repeated baton events don't stack. Recorded BEFORE the
+    // presence gate — the dropdown is the durable record whether or not the operator is
+    // in the Hub — while the toast + browser Notification below stay gated on being AWAY.
+    if (isHandover && threadId) {
+      useNotificationStore().addNotification({
+        id: `handover:${threadId}`,
+        type: 'handover',
+        title,
+        body,
+        metadata: { thread_id: threadId },
+      })
+    }
+
+    // In the Hub pane: in-pane cues (the yellow strip) cover it — no toast/push.
     if (isHubPresent.value) return
 
-    const threadId = payload.thread_id || ''
-    const title = 'Message Hub'
-    const body =
-      eventName === 'hub:thread_update'
-        ? `Your turn — thread ${threadId}`
-        : typeof payload.content === 'string'
-          ? payload.content.slice(0, 80)
-          : 'You have a new message'
-
     showToast({ type: 'info', message: body })
-    fireNotification(title, body)
+    fireNotification(title, body, threadId)
   }
 
   function onThreadMessage(e) {

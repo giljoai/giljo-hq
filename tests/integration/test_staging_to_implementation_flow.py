@@ -60,6 +60,7 @@ def _wire_state_service(svc, execution, job, project):
     """Wire the repo mocks on a state-service instance."""
     mock_session = AsyncMock()
     mock_session.flush = AsyncMock()
+    mock_session.info = {}  # tenant_session_context save/restore target
     svc._get_session = MagicMock(return_value=_ctx(mock_session))
     svc._job_repo.find_active_execution_for_job = AsyncMock(return_value=execution)
     svc._job_repo.get_agent_job_by_job_id = AsyncMock(return_value=job)
@@ -219,9 +220,23 @@ class TestStagingToImplementationFlow:
         templates_result = MagicMock()
         templates_result.all.return_value = []
 
+        # BE-9335: implement() resolves the chain's execution mode right after loading
+        # the project (a member runs in the CHAIN's mode). These are SOLO fixtures, so
+        # the lookup must find no active run and fall back to the project column.
+        chain_run_result = MagicMock()
+        chain_run_result.scalar_one_or_none.return_value = None
+
         db = AsyncMock()
+        db.info = {}  # tenant_session_context save/restore target
         db.execute = AsyncMock(
-            side_effect=[project_result, orch_result, agents_result, settings_result, templates_result]
+            side_effect=[
+                project_result,
+                chain_run_result,
+                orch_result,
+                agents_result,
+                settings_result,
+                templates_result,
+            ]
         )
 
         user = MagicMock()
@@ -286,9 +301,23 @@ class TestStagingToImplementationFlow:
         templates_result = MagicMock()
         templates_result.all.return_value = []
 
+        # BE-9335: implement() resolves the chain's execution mode right after loading
+        # the project (a member runs in the CHAIN's mode). These are SOLO fixtures, so
+        # the lookup must find no active run and fall back to the project column.
+        chain_run_result = MagicMock()
+        chain_run_result.scalar_one_or_none.return_value = None
+
         db = AsyncMock()
+        db.info = {}  # tenant_session_context save/restore target
         db.execute = AsyncMock(
-            side_effect=[project_result, orch_result, agents_result, settings_result, templates_result]
+            side_effect=[
+                project_result,
+                chain_run_result,
+                orch_result,
+                agents_result,
+                settings_result,
+                templates_result,
+            ]
         )
 
         user = MagicMock()
@@ -319,6 +348,7 @@ class TestStagingToImplementationFlow:
         result = MagicMock()
         result.scalar_one_or_none.return_value = project
         db = AsyncMock()
+        db.info = {}  # tenant_session_context save/restore target
         db.execute = AsyncMock(return_value=result)
 
         user = MagicMock()
@@ -397,10 +427,18 @@ class TestStagingToImplementationFlow:
         role_defaults_result = MagicMock()
         role_defaults_result.all.return_value = []
 
+        # BE-9335: implement() resolves the chain's execution mode right after loading
+        # the project (a member runs in the CHAIN's mode). These are SOLO fixtures, so
+        # the lookup must find no active run and fall back to the project column.
+        chain_run_result = MagicMock()
+        chain_run_result.scalar_one_or_none.return_value = None
+
         db = AsyncMock()
+        db.info = {}  # tenant_session_context save/restore target
         db.execute = AsyncMock(
             side_effect=[
                 project_result,
+                chain_run_result,
                 orch_result,
                 agents_result,
                 settings_result,
@@ -494,9 +532,23 @@ class TestDogfoodSmokeReplay4b57c639:
         templates_result = MagicMock()
         templates_result.all.return_value = []
 
+        # BE-9335: implement() resolves the chain's execution mode right after loading
+        # the project (a member runs in the CHAIN's mode). These are SOLO fixtures, so
+        # the lookup must find no active run and fall back to the project column.
+        chain_run_result = MagicMock()
+        chain_run_result.scalar_one_or_none.return_value = None
+
         db = AsyncMock()
+        db.info = {}  # tenant_session_context save/restore target
         db.execute = AsyncMock(
-            side_effect=[project_result, orch_result, agents_result, settings_result, templates_result]
+            side_effect=[
+                project_result,
+                chain_run_result,
+                orch_result,
+                agents_result,
+                settings_result,
+                templates_result,
+            ]
         )
 
         user = MagicMock()
@@ -559,9 +611,23 @@ class TestDogfoodSmokeReplay4b57c639:
         templates_result = MagicMock()
         templates_result.all.return_value = []
 
+        # BE-9335: implement() resolves the chain's execution mode right after loading
+        # the project (a member runs in the CHAIN's mode). These are SOLO fixtures, so
+        # the lookup must find no active run and fall back to the project column.
+        chain_run_result = MagicMock()
+        chain_run_result.scalar_one_or_none.return_value = None
+
         db = AsyncMock()
+        db.info = {}  # tenant_session_context save/restore target
         db.execute = AsyncMock(
-            side_effect=[project_result, orch_result, agents_result, settings_result, templates_result]
+            side_effect=[
+                project_result,
+                chain_run_result,
+                orch_result,
+                agents_result,
+                settings_result,
+                templates_result,
+            ]
         )
 
         user = MagicMock()

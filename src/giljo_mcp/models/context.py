@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-MCP Context Index model for GiljoAI MCP.
+MCP Context Index model for Giljo HQ.
 
 Stores chunked vision documents for agentic RAG. Keyword search uses the
 `keywords` JSONB column (see context_repository).

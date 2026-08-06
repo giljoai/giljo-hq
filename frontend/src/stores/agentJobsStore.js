@@ -21,6 +21,10 @@ function normalizeJob(rawJob) {
     unique_key,
     messages_sent_count: rawJob?.messages_sent_count ?? 0,
     messages_waiting_count: rawJob?.messages_waiting_count ?? 0,
+    // BE-9273: the subset of messages_waiting_count that is genuinely
+    // requires_action + non-auto_generated (blocks complete_job) -- lets the
+    // AgentRow badge distinguish "waiting on THIS agent" from plain unread.
+    action_required_unread: rawJob?.action_required_unread ?? 0,
     messages_read_count: rawJob?.messages_read_count ?? 0,
   }
 }
@@ -279,7 +283,8 @@ export const useAgentJobsStore = defineStore('agentJobsDomain', () => {
   // =========================
   // A hub thread_message WS event only says "a post landed" — the authoritative
   // per-agent waiting counts live in the /jobs REST response (BE-6200 GROUP BY).
-  // Refetch once per quiet window and patch ONLY messages_waiting_count onto
+  // Refetch once per quiet window and patch ONLY messages_waiting_count +
+  // action_required_unread (BE-9273: same REST row, same GROUP BY family) onto
   // jobs already in the store: count-only so a stale REST row can never regress
   // fresher WS lifecycle state, existing-only so a late or cross-project row can
   // never create a ghost entry (Handover 0463).
@@ -301,9 +306,19 @@ export const useAgentJobsStore = defineStore('agentJobsDomain', () => {
       const previous = jobsById.value.get(key)
       if (!previous) continue
       const count = raw?.messages_waiting_count ?? 0
-      if ((previous.messages_waiting_count ?? 0) === count) continue
+      const actionRequiredCount = raw?.action_required_unread ?? 0
+      if (
+        (previous.messages_waiting_count ?? 0) === count &&
+        (previous.action_required_unread ?? 0) === actionRequiredCount
+      ) {
+        continue
+      }
       // Handover 0463: spread previous to preserve identity fields
-      upsertJob({ ...previous, messages_waiting_count: count })
+      upsertJob({
+        ...previous,
+        messages_waiting_count: count,
+        action_required_unread: actionRequiredCount,
+      })
     }
   }
 

@@ -1,5 +1,5 @@
 /**
- * Sentry browser SDK initialization for GiljoAI MCP frontend (INF-5063).
+ * Sentry browser SDK initialization for Giljo HQ frontend (INF-5063).
  *
  * **Edition Scope:** SaaS + Demo only. CE MUST NOT call initSentry() with a
  * non-null DSN — the backend setup-status payload returns sentryDsn=null in

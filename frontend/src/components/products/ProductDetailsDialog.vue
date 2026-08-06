@@ -1,5 +1,5 @@
 <template>
-  <v-dialog v-model="isOpen" max-width="600" scrollable>
+  <v-dialog v-model="isOpen" max-width="600" scrollable data-testid="product-details-dialog">
     <v-card v-draggable class="smooth-border product-details-card">
       <div class="dlg-header">
         <v-icon class="dlg-icon" icon="mdi-information-outline" />

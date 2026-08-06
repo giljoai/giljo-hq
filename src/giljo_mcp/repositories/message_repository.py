@@ -153,23 +153,27 @@ class MessageRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_message_project_id(
+    async def get_message_by_id(
         self,
         session: AsyncSession,
         tenant_key: str,
         message_id: str,
-    ) -> str | None:
-        """Return the ``project_id`` a message is bound to, or None (BE-9012b, D5).
+    ) -> Message | None:
+        """Fetch a persisted message row by id (BE-9012b, D5; widened BE-9247).
 
         A thread post persists ``messages.project_id = thread.project_id`` (NULL for
-        a town-square thread). The relocated auto-block reads it back off the message
-        it is reacting to — reusing this repo's own ``messages`` table rather than
-        touching the locked ``CommThreadService`` — to decide project-bound vs
-        town-square without a second service round-trip. Returns None for a
-        town-square post (NULL project), which the caller treats as side-effect-free.
+        a town-square thread). The relocated auto-block / forward-on-send redirect
+        reads this back off the message it is reacting to — reusing this repo's own
+        ``messages`` table rather than touching the locked ``CommThreadService`` —
+        to decide project-bound vs. town-square, AND (BE-9247) to get the same row's
+        ``content``/``thread_id``/``from_agent_id``/``from_display_name`` for a
+        send-time redirect to the live orchestrator, all off ONE query instead of a
+        project-id-only lookup plus a second round-trip. Returns None if the message
+        does not exist (or is in another tenant); a NULL ``project_id`` on the
+        returned row is a town-square post, which callers treat as side-effect-free.
         """
         result = await session.execute(
-            select(Message.project_id).where(
+            select(Message).where(
                 and_(
                     Message.tenant_key == tenant_key,
                     Message.id == message_id,

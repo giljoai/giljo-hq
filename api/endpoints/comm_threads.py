@@ -53,6 +53,17 @@ class CreateThreadRequest(BaseModel):
     project_id: str | None = Field(None, max_length=_ID_MAX)
 
 
+class UpdateThreadRequest(BaseModel):
+    """BE-9289b: operator edit of a thread. Both fields optional — send either or both.
+
+    ``status`` is constrained to the settable lifecycle here as well as in the service,
+    so a bad value is a 422 at the boundary rather than reaching the owning service.
+    """
+
+    subject: str | None = Field(None, max_length=_SUBJECT_MAX)
+    status: Literal["open", "active", "resolved", "closed"] | None = Field(None)
+
+
 class PostToThreadRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=_CONTENT_MAX)
     to_participant: str | None = Field(None, max_length=_ID_MAX)
@@ -105,6 +116,10 @@ async def list_threads(
         project_id=project_id,
         limit=limit,
         before_id=before_id,
+        # BE-9289b: the dashboard is a card surface, so it gets the enriched payload —
+        # project_name, participants, last_message and a per-viewer unread flag — in one
+        # extra round trip instead of the follow-up call per thread it used to make.
+        viewer_id=current_user.id,
         tenant_key=current_user.tenant_key,
     )
 
@@ -268,6 +283,13 @@ async def post_to_thread(
         user_id=current_user.id,
         tenant_key=current_user.tenant_key,
     )
+    # BE-9292a-F1: this route forwards no baton, so before the addressee was screened
+    # it could never be refused and every access below was safe. It can be now — a
+    # directed post naming a display label is declined — and a rejection carries no
+    # message_id, so returning early is what keeps `result["message_id"]` honest
+    # instead of turning a clean refusal into a 500.
+    if result.get("success") is False:
+        return result
     # BE-9012b (D5): a human posting a DIRECTED, action-required post to a
     # project-bound thread SHOULD wake the completed agent (that's the feature) —
     # the same relocated auto-block the MCP wrapper runs. Town-square / informational
@@ -275,13 +297,18 @@ async def post_to_thread(
     # effort: never unwind the already-committed post if reactivation hiccups.
     if body.requires_action and body.to_participant:
         try:
-            await routing_service.auto_block_for_thread_post(
+            outcome = await routing_service.auto_block_for_thread_post(
                 message_id=result["message_id"],
                 to_participant=body.to_participant,
                 sender_display_name=result.get("from_display_name", current_user.display_name),
                 requires_action=body.requires_action,
                 tenant_key=current_user.tenant_key,
             )
+            # BE-9247: surface the forward-on-send outcome in the SAME response so the
+            # sender learns immediately (e.g. "Tester was closed -- your message was
+            # forwarded to the orchestrator"), rather than discarding it silently.
+            if outcome.notice:
+                result["forward_notice"] = outcome.notice
         except Exception:  # noqa: BLE001 - reactivation is a follow-on side-effect; post stays authoritative
             logger.warning(
                 "REST post_to_thread reactivation auto-block (D5) failed for message %s -> %s (non-fatal)",
@@ -299,6 +326,7 @@ async def post_to_thread(
             message_id=result["message_id"],
             from_agent_id=current_user.id,
             from_display_name=result.get("from_display_name", current_user.display_name),
+            from_kind=result.get("from_kind", "user"),  # BE-9289a (REST post = the operator)
             content=body.content,
             message_type="direct" if body.to_participant else "broadcast",
             priority=body.priority,
@@ -317,6 +345,46 @@ async def post_to_thread(
                 next_action_owner=t.get("next_action_owner"),
                 update_type="status",
             )
+    return result
+
+
+@router.patch("/{thread_id}")
+async def update_thread(
+    thread_id: str,
+    body: UpdateThreadRequest,
+    current_user: User = Depends(get_current_active_user),
+    service: CommThreadService = Depends(get_comm_thread_service),
+) -> dict[str, Any]:
+    """Rename a thread and/or set its status (BE-9289b). Broadcasts thread_update.
+
+    Two things the operator could not do before: a thread could only be named at CREATE
+    time, and status moved only as a side effect of an agent posting — which is why the
+    thread list is a wall of stale "Open".
+
+    A rename is REFUSED on a project-bound thread (clean 400 with the reason, never a
+    500): that thread is named after its project and is kept with the project's 360
+    memory. Status has no such restriction — resolving or closing a project thread is a
+    normal operator action and says nothing about the project's identity.
+    """
+    result = await service.update_thread(
+        thread_id=thread_id,
+        subject=body.subject,
+        status=body.status,
+        tenant_key=current_user.tenant_key,
+    )
+    from api.app_state import state
+
+    if state.websocket_manager:
+        await broadcast_thread_update(
+            state.websocket_manager,
+            current_user.tenant_key,
+            thread_id=thread_id,
+            chat_id=result["chat_id"],
+            status=result["status"],
+            next_action_owner=result["next_action_owner"],
+            subject=result["subject"],
+            update_type="updated",
+        )
     return result
 
 
@@ -387,6 +455,10 @@ async def pass_baton(
         to=body.to,
         tenant_key=current_user.tenant_key,
     )
+    # BE-9292a: an undeliverable target is refused and the owner is unchanged —
+    # broadcasting here would tell the Hub the baton had moved when it had not.
+    if result.get("success") is False:
+        return result
     from api.app_state import state
 
     if state.websocket_manager:

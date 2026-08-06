@@ -7,6 +7,7 @@
       color="primary"
       :loading="loadingSections"
       :disabled="loadingSections"
+      data-testid="product-tuning-trigger"
       @click="togglePanel"
     >
       <v-icon start>mdi-tune</v-icon>
@@ -89,6 +90,7 @@
           <v-spacer />
           <v-btn
             variant="text"
+            data-testid="product-tuning-cancel"
             @click="panelOpen = false"
           >
             Cancel
@@ -98,6 +100,7 @@
             color="primary"
             :loading="generatingPrompt"
             :disabled="selectedSections.length === 0 || generatingPrompt"
+            data-testid="product-tuning-generate"
             @click="generatePrompt"
           >
             <v-icon start>mdi-creation</v-icon>

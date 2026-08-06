@@ -62,27 +62,52 @@ async def check_and_emit_prelaunch_workproduct(
         from giljo_mcp.services.notification_service import NotificationService
 
         project_id = str(project.id)
+        # taxonomy_alias is a SELECT-time column_property already loaded on the
+        # ORM instance (zero extra queries); may be None for a project without a
+        # resolvable tag. Lead the human-facing copy with it when present.
+        alias = getattr(project, "taxonomy_alias", None)
+        label = f"{alias} — {project.name}" if alias else project.name
+        commit_count = len(git_commits)
+        commits_phrase = f"{commit_count} commit{'s' if commit_count != 1 else ''}"
+
         service = NotificationService(db_manager=db_manager)
         await service.upsert_by_dedupe_key(
             tenant_key=tenant_key,
             user_id=None,
             notification_type="project.pre_launch_workproduct",
             severity="warning",
-            title="Project closed out without a launch approval",
+            title=f"{label}: recorded without an Implement click",
+            # Informational, not error-toned: this event usually just means the
+            # project's agents ran headless against Giljo HQ, or it was closed
+            # from the CLI -- both authorized. The work was recorded; it simply
+            # never passed the in-app Implement click.
             body=(
-                f"Project '{project.name}' was closed out with {len(git_commits)} "
-                "commit(s) recorded, but the Implement gate was never approved "
-                "at any point in this project's life (ever_launched_at is unset)."
+                f"{label} was closed out with {commits_phrase} recorded, but it "
+                "never passed the in-app Implement click. This usually just means "
+                "its agents ran headless against Giljo HQ, or you closed it "
+                "from the CLI -- the work was saved either way. Open it to review "
+                "what was recorded."
             ),
             dedupe_key=f"project.pre_launch_workproduct:{project_id}",
-            surface="banner",
+            # FE-9229: the bell, NOT the banner. This row was previously emitted
+            # with surface="banner", but SystemStatusBanner renders only its
+            # ALLOWED_TYPES allowlist of singleton ``system.*`` state -- a
+            # ``project.*`` row is silently discarded there, so the notification
+            # rendered on no surface it was addressed to. It stayed reachable in
+            # the bell only because the bell ignores ``surface`` entirely, which
+            # is an accident rather than a contract. The bell is also the right
+            # home on the merits: this fires once PER PROJECT, so a headless
+            # chain of N closeouts would stack N sticky banners, and the bell
+            # already deep-links the row to its project.
+            surface="bell",
             cta_label="Review project",
             cta_route="Projects",
             dismissible=True,
             payload={
                 "project_id": project_id,
                 "project_name": project.name,
-                "commit_count": len(git_commits),
+                "taxonomy_alias": alias,
+                "commit_count": commit_count,
             },
         )
     except Exception as detect_err:  # noqa: BLE001 -- fail-open by design (BE-9085)

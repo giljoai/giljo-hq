@@ -52,7 +52,6 @@ from __future__ import annotations
 
 import ast
 import os
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -291,31 +290,31 @@ class TestEndpointCallSitePattern:
     """
 
     def test_site_4_slash_commands_zip_uses_helper(self):
-        src = _source("api/endpoints/downloads.py")
+        src = _source("api/endpoints/downloads/bundles.py")
         assert _calls_get_public_base_url_with_request(src, "download_slash_commands"), (
             "Site #4 GET /api/download/slash-commands.zip must call get_public_base_url(request)"
         )
 
     def test_site_5_agent_templates_zip_uses_helper(self):
-        src = _source("api/endpoints/downloads.py")
+        src = _source("api/endpoints/downloads/bundles.py")
         assert _calls_get_public_base_url_with_request(src, "download_agent_templates"), (
             "Site #5 GET /api/download/agent-templates.zip must call get_public_base_url(request)"
         )
 
     def test_site_6_install_script_uses_helper(self):
-        src = _source("api/endpoints/downloads.py")
+        src = _source("api/endpoints/downloads/bundles.py")
         assert _calls_get_public_base_url_with_request(src, "download_install_script"), (
             "Site #6 GET /api/download/install-script must call get_public_base_url(request)"
         )
 
     def test_site_7_bootstrap_prompt_uses_helper(self):
-        src = _source("api/endpoints/downloads.py")
+        src = _source("api/endpoints/downloads/bundles.py")
         assert _calls_get_public_base_url_with_request(src, "get_bootstrap_prompt"), (
             "Site #7 GET /api/download/bootstrap-prompt must call get_public_base_url(request)"
         )
 
     def test_site_8_generate_token_uses_helper(self):
-        src = _source("api/endpoints/downloads.py")
+        src = _source("api/endpoints/downloads/tokens.py")
         assert _calls_get_public_base_url_with_request(src, "generate_download_token"), (
             "Site #8 POST /api/download/generate-token must call get_public_base_url(request)"
         )
@@ -518,7 +517,8 @@ class TestNoExternalHostInUrlBuildCode:
     # thin_prompt_generator.py, and staging_prompt_builder.py (now read
     # GILJO_PUBLIC_URL env-var). All URL-build sites are complete.
     URL_BUILD_FILES = (
-        "api/endpoints/downloads.py",
+        "api/endpoints/downloads/bundles.py",
+        "api/endpoints/downloads/tokens.py",
         "api/endpoints/configuration.py",
         "src/giljo_mcp/tools/tool_accessor/_setup_tools.py",
         "src/giljo_mcp/http/url_resolver.py",
@@ -549,22 +549,42 @@ class TestNoExternalHostInUrlBuildCode:
         Guardrail: after INF-5012b, services.external_host appears only in
         non-URL-build contexts (CORS allow-list + docstring examples).
         Fails loudly if the reference re-enters any URL-composition code.
+
+        Scanned in Python rather than by shelling out to ``grep``, for two
+        reasons measured on this repo:
+
+        1. ``grep`` is not on PATH on a Windows workstation unless Git's
+           ``usr/bin`` happens to be there, so this test failed locally with
+           FileNotFoundError while CI reported the same commit green. The local
+           and CI signals disagreed, and only one of them was telling the truth.
+        2. More seriously, the old form was VACUOUS. It passed ``check=False``
+           and read hits out of stdout, so a grep that could not run — exit 2,
+           a renamed directory, a missing binary — produced an empty stdout that
+           is indistinguishable from "clean", and the assertion passed over a
+           scan that never happened. Measured: pointing it at a non-existent
+           directory gives rc=2, empty hits, and a GREEN test.
+
+        The replacement uses the same pure-Python read the sibling test above
+        already uses, and the file-count anchor below makes a collapsed walk
+        fail instead of passing quietly.
         """
-        result = subprocess.run(
-            [
-                "grep",
-                "-rln",
-                "--include=*.py",
-                "services.external_host",
-                "api/",
-                "src/giljo_mcp/",
-            ],
-            capture_output=True,
-            text=True,
-            cwd=str(REPO_ROOT),
-            check=False,
+        scanned = 0
+        files_with_hits = set()
+        for rel_dir in ("api", "src/giljo_mcp"):
+            for path in (REPO_ROOT / rel_dir).rglob("*.py"):
+                try:
+                    content = path.read_text(encoding="utf-8")
+                except (UnicodeDecodeError, OSError):
+                    continue
+                scanned += 1
+                if "services.external_host" in content:
+                    files_with_hits.add(path.relative_to(REPO_ROOT).as_posix())
+
+        assert scanned > 100, (
+            f"only {scanned} .py files were scanned under api/ and src/giljo_mcp/ — the walk "
+            "collapsed, so a clean result here would mean nothing. Check that the directories "
+            "still exist and are named as expected."
         )
-        files_with_hits = {line.strip() for line in result.stdout.splitlines() if line.strip()}
         # Only non-URL-build references are allowed to remain.
         known = {
             "api/middleware/security.py",  # CORS/CSP host allow-list, not URL build

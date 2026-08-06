@@ -27,6 +27,7 @@ function mountBanner(props = {}) {
       allJobsTerminal: false,
       memoryPollTimedOut: false,
       memoryPollError: false,
+      isChainMember: false,
       ...props,
     },
     global: { stubs: globalStubs },
@@ -124,6 +125,32 @@ describe('ProjectStatusBanner — FE-9191 Review project on the completed pill',
 
   it('does NOT render the Review project button for cancelled projects (pill only)', () => {
     const wrapper = mountBanner({ projectDoneStatus: 'cancelled' })
+    expect(wrapper.find('[data-testid="review-completed-btn"]').exists()).toBe(false)
+  })
+})
+
+describe('ProjectStatusBanner — FE-9244 stacked layout + chain-mode gating', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('applies the stacked modifier class to State A only, not to State B', () => {
+    const doneWrapper = mountBanner({ projectDoneStatus: 'completed' })
+    expect(doneWrapper.find('[data-testid="project-done-banner"]').element.parentElement.classList.contains('action-buttons-row--stacked')).toBe(true)
+
+    const closeoutWrapper = mountBanner({ showCloseoutButton: true })
+    expect(closeoutWrapper.find('[data-testid="close-project-btn"]').element.parentElement.classList.contains('action-buttons-row--stacked')).toBe(false)
+  })
+
+  it('solo mode (isChainMember false, default): Review project button still renders when completed — byte-identical to prior behavior', () => {
+    const wrapper = mountBanner({ projectDoneStatus: 'completed', isChainMember: false })
+    expect(wrapper.find('[data-testid="project-done-banner"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="review-completed-btn"]').exists()).toBe(true)
+  })
+
+  it('chain mode (isChainMember true) + completed: hides the Review project button, pill still shows', () => {
+    const wrapper = mountBanner({ projectDoneStatus: 'completed', isChainMember: true })
+    expect(wrapper.find('[data-testid="project-done-banner"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="review-completed-btn"]').exists()).toBe(false)
   })
 })

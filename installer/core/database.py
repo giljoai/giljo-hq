@@ -85,6 +85,15 @@ class DatabaseInstaller:
             self.logger.info("Detecting PostgreSQL version...")
             version_result = self.detect_postgresql_version()
             if not version_result["success"]:
+                # First contact with the server. A failure here is usually the
+                # real story (wrong port, wrong password) and used to sit in a
+                # warnings list nothing printed. (INF-9321)
+                self.logger.warning(
+                    "Could not detect PostgreSQL version at %s:%s: %s",
+                    self.host,
+                    self.port,
+                    version_result.get("error", "Unknown"),
+                )
                 result["warnings"].append(
                     f"Could not detect PostgreSQL version: {version_result.get('error', 'Unknown')}"
                 )
@@ -121,9 +130,21 @@ class DatabaseInstaller:
                 result = direct_result
                 result["warnings"] = result.get("warnings", [])
             else:
-                # Need elevation - generate fallback scripts
+                # Need elevation - generate fallback scripts.
+                #
+                # Carry the direct-creation errors forward. Rebinding `result`
+                # here used to discard them, so the only text an operator ever
+                # saw was the generic "run the script by hand" banner -- which an
+                # unattended install cannot act on, and which names no cause. The
+                # real psql/connection error is the whole diagnosis. (INF-9321)
+                direct_errors = direct_result.get("errors", [])
+                for err in direct_errors:
+                    self.logger.error("Direct database creation failed: %s", err)
                 self.logger.info("Direct creation failed, generating fallback scripts...")
+
                 result = self.fallback_setup()
+                if not result.get("success"):
+                    result["errors"] = direct_errors + result.get("errors", [])
 
             return result
 
@@ -381,15 +402,23 @@ class DatabaseInstaller:
             return result
 
         except psycopg2.OperationalError as e:
+            # Always name the host:port that was tried. A port mismatch is then a
+            # single readable line instead of a forensics exercise on the guest --
+            # the failure that cost a lab re-run in INF-9321 read "Cannot connect
+            # to PostgreSQL server" with no clue that 5432 was not our cluster.
+            target = f"{self.host}:{self.port}"
             error_msg = str(e).lower()
             if "password authentication failed" in error_msg:
-                result["errors"].append("Invalid PostgreSQL admin password")
+                result["errors"].append(
+                    f"Invalid PostgreSQL password for user '{self.username}' at {target} "
+                    "(is another PostgreSQL answering on that port?)"
+                )
             elif "could not connect" in error_msg or "connection refused" in error_msg:
-                result["errors"].append("Cannot connect to PostgreSQL server")
+                result["errors"].append(f"Cannot connect to PostgreSQL server at {target}")
             elif "permission denied" in error_msg:
-                result["errors"].append("Insufficient privileges - try fallback script")
+                result["errors"].append(f"Insufficient privileges at {target} - try fallback script")
             else:
-                result["errors"].append(f"Database operation failed: {e}")
+                result["errors"].append(f"Database operation failed at {target}: {e}")
             return result
 
         except psycopg2.Error as e:
@@ -532,7 +561,7 @@ class DatabaseInstaller:
         """Generate Windows PowerShell elevation script"""
         script_path = scripts_dir / "create_db.ps1"
 
-        script_content = f'''# GiljoAI MCP Database Creation Script for Windows
+        script_content = f'''# Giljo HQ Database Creation Script for Windows
 # Generated: {datetime.now().isoformat()}
 #
 # INSTRUCTIONS:
@@ -552,7 +581,7 @@ $ErrorActionPreference = "Stop"
 
 Write-Host ""
 Write-Host "====================================================================" -ForegroundColor Cyan
-Write-Host "   GiljoAI MCP - PostgreSQL Database Creation Script" -ForegroundColor Cyan
+Write-Host "   Giljo HQ - PostgreSQL Database Creation Script" -ForegroundColor Cyan
 Write-Host "====================================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -712,7 +741,7 @@ Write-Host ""
         script_path = scripts_dir / "create_db.sh"
 
         script_content = f'''#!/bin/bash
-# GiljoAI MCP Database Creation Script for Linux/macOS
+# Giljo HQ Database Creation Script for Linux/macOS
 # Generated: {datetime.now().isoformat()}
 #
 # INSTRUCTIONS:
@@ -730,7 +759,7 @@ set -euo pipefail
 
 echo ""
 echo "====================================================================="
-echo "   GiljoAI MCP - PostgreSQL Database Creation Script"
+echo "   Giljo HQ - PostgreSQL Database Creation Script"
 echo "====================================================================="
 echo ""
 
@@ -1046,7 +1075,7 @@ echo ""
         # Note: Credentials are also saved in .env, this is just a backup
         self.credentials_file = credentials_dir / "db_credentials.txt"
 
-        content = f"""# GiljoAI MCP Database Credentials
+        content = f"""# Giljo HQ Database Credentials
 # Generated: {datetime.now().isoformat()}
 # KEEP THIS FILE SECURE!
 

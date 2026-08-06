@@ -34,6 +34,7 @@
           flat
           aria-label="Search products by name"
           class="filter-search"
+          data-testid="products-search"
         />
         <v-select
           v-model="sortBy"
@@ -47,8 +48,9 @@
           density="compact"
           hide-details
           class="filter-select"
+          data-testid="products-sort"
         />
-        <v-btn color="primary" prepend-icon="mdi-plus" @click="openNewProductDialog">
+        <v-btn color="primary" prepend-icon="mdi-plus" data-testid="products-new" @click="openNewProductDialog">
           New Product
         </v-btn>
         <v-btn
@@ -56,6 +58,7 @@
           :color="deletedProductsCount > 0 ? 'warning' : 'grey'"
           prepend-icon="mdi-delete-restore"
           :disabled="deletedProductsCount === 0"
+          data-testid="products-deleted-open"
           @click="showDeletedProductsDialog = true"
         >
           Deleted ({{ deletedProductsCount }})
@@ -462,6 +465,13 @@ async function editProduct(product) {
 
 async function confirmDelete(product) {
   deletingProduct.value = product
+  // Drop the previous product's impact before the dialog can paint. The dialog
+  // opens before the fetch resolves, and the close paths (successful delete,
+  // 404 cleanup) do not reset this — so without the clear here, a failed fetch
+  // leaves the last product's counts on screen under THIS product's name.
+  // Clearing at the single entry point keeps that invariant true for any future
+  // exit path too.
+  cascadeImpact.value = null
   showDeleteDialog.value = true
 
   // Fetch cascade impact
@@ -640,7 +650,19 @@ onMounted(async () => {
     router?.replace({ path: route.path })
   }
 
+  // FE-9222: the context-tuning banner deep-links here with ?tune=<product_id>
+  // to open the tuning dialog for that product. Captured before loadProducts so
+  // a concurrent ?create strip cannot swallow it; the lookup runs after the list
+  // loads, and an unknown/missing id fails soft (no dialog, param still stripped).
+  const tuneProductId = route?.query?.tune
+
   await loadProducts()
+
+  if (tuneProductId) {
+    const target = productStore.products.find((product) => product.id === tuneProductId)
+    if (target) showProductTuning(target)
+    router?.replace({ path: route.path })
+  }
   // Load field toggle configuration (Handover 0049, 0820)
   try {
     await settingsStore.fetchFieldToggleConfig()

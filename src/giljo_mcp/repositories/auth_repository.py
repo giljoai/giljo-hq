@@ -19,9 +19,9 @@ the user's tenant is unknown until after authentication succeeds.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import tenant_isolation_bypass
@@ -242,6 +242,25 @@ class AuthRepository:
             )
         result = await session.execute(stmt)
         return list(result.scalars().all())
+
+    async def has_valid_api_key(self, session: AsyncSession, tenant_key: str) -> bool:
+        """True if the tenant has >=1 active, non-expired API key (FE-9274 connect-status).
+
+        Tenant-scoped (not user-scoped) -- ADR-009 makes this equivalent to
+        "this user's key is live" (tenant_key is per-user, permanently), but
+        matches the credential-status contract's tenant-scoped definition.
+        """
+        stmt = (
+            select(APIKey.id)
+            .where(
+                APIKey.tenant_key == tenant_key,
+                APIKey.is_active.is_(True),
+                or_(APIKey.expires_at.is_(None), APIKey.expires_at > datetime.now(UTC)),
+            )
+            .limit(1)
+        )
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none() is not None
 
     async def create_api_key(self, session: AsyncSession, api_key: APIKey) -> APIKey:
         """

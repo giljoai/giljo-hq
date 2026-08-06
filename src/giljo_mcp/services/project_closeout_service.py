@@ -30,16 +30,23 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.repositories.project_lifecycle_repository import ProjectLifecycleRepository
 from giljo_mcp.repositories.project_repository import ProjectRepository
 from giljo_mcp.schemas.service_responses import (
+    AgentStatusChangeEvent,
     CanCloseResult,
     CloseoutData,
     CloseoutPromptResult,
     ProjectCloseOutResult,
 )
 from giljo_mcp.services._session_helpers import optional_tenant_session
+from giljo_mcp.services.agent_terminal_cursor_service import resolve_terminal_agent_cursors
+from giljo_mcp.services.closeout_ws_broadcast import (
+    broadcast_agent_status_events,
+    build_agent_status_change_events,
+)
 from giljo_mcp.services.project_closeout_readiness import (
     AgentReadinessFinding,
     CloseoutReadinessReport,
     incomplete_todos_by_jobs,
+    live_action_required_unread_by_agent,
     pending_approval_ids_by_execution,
 )
 from giljo_mcp.services.project_helpers import mark_chain_member_status
@@ -93,17 +100,6 @@ class ProjectCloseoutService:
         Raises:
             ResourceNotFoundError: When project not found or access denied
             BaseGiljoError: When operation fails
-
-        Example:
-            >>> result = await service.close_out_project(
-            ...     "abc-123",
-            ...     "tenant-key-456"
-            ... )
-            >>> # Returns: {
-            ...     "message": "Project closed out successfully",
-            ...     "agents_decommissioned": 5,
-            ...     "decommissioned_agent_ids": ["job-1", "job-2", ...]
-            ... }
         """
         try:
             async with self._get_session(tenant_key) as session:
@@ -193,7 +189,7 @@ class ProjectCloseoutService:
         session: AsyncSession,
         project_id: str,
         tenant_key: str,
-    ) -> list[str]:
+    ) -> tuple[list[str], list[AgentStatusChangeEvent]]:
         """
         Decommission all active agents for a project (session-in pattern).
 
@@ -206,29 +202,57 @@ class ProjectCloseoutService:
             tenant_key: Tenant isolation key.
 
         Returns:
-            List of agent display names that were decommissioned.
+            Tuple of (agent display names decommissioned, one AgentStatusChangeEvent
+            per agent). BE-9246: the display-name list is unchanged (additive); the
+            caller must emit the events POST-COMMIT, never mid-flush.
         """
         active_statuses = ["waiting", "working", "blocked", "silent"]
         executions = await self._lifecycle_repo.get_executions_by_status(
             session, tenant_key, project_id, active_statuses
         )
 
+        # BE-9242 defense-in-depth: resolve_terminal_agent_cursors forwards each
+        # agent's action-required cursor to the LIVE orchestrator, which is
+        # re-resolved from the DB per iteration. Setting the orchestrator's own
+        # row to 'decommissioned' first would autoflush it out of the live set,
+        # so a peer processed afterward would find "no live orchestrator" and be
+        # left un-acked even though one WAS live at call start. Process the
+        # orchestrator's row LAST (stable sort keeps all other ordering intact)
+        # so every peer still sees it live while forwarding.
+        executions = sorted(executions, key=lambda e: e.agent_display_name == "orchestrator")
+
+        # BE-9246: build events BEFORE the overwrite below so old_status is the
+        # pre-transition value; the caller emits them POST-COMMIT.
+        status_events = build_agent_status_change_events(executions, "decommissioned")
+
         decommissioned_names: list[str] = []
         for execution in executions:
             execution.status = "decommissioned"
-            decommissioned_names.append(execution.agent_display_name or execution.agent_name or execution.agent_id)
+            label = execution.agent_display_name or execution.agent_name or execution.agent_id
+            decommissioned_names.append(label)
+            # BE-9242: decommissioned is terminal -- resolve any live message
+            # cursor this agent still holds (auto-ack informational, forward
+            # action-required to the live orchestrator) so it cannot linger.
+            await resolve_terminal_agent_cursors(
+                session,
+                tenant_key=tenant_key,
+                project_id=project_id,
+                agent_id=execution.agent_id,
+                agent_label=label,
+                terminal_status="decommissioned",
+            )
 
         if decommissioned_names:
             await self._lifecycle_repo.flush(session)
 
-        return decommissioned_names
+        return decommissioned_names, status_events
 
     async def close_completed_agents(
         self,
         session: AsyncSession,
         project_id: str,
         tenant_key: str,
-    ) -> list[str]:
+    ) -> tuple[list[str], list[AgentStatusChangeEvent]]:
         """
         Transition all 'complete' agents to 'closed' during project closeout (session-in pattern).
 
@@ -241,14 +265,30 @@ class ProjectCloseoutService:
             tenant_key: Tenant isolation key.
 
         Returns:
-            List of agent display names that were closed.
+            Tuple of (agent display names closed, one AgentStatusChangeEvent per
+            agent). BE-9246: the display-name list is unchanged (additive); the
+            caller must emit the events POST-COMMIT, never mid-flush.
         """
         executions = await self._lifecycle_repo.get_executions_by_status(session, tenant_key, project_id, ["complete"])
+
+        # BE-9246: build events BEFORE the overwrite below so old_status is the
+        # pre-transition value; the caller emits them POST-COMMIT.
+        status_events = build_agent_status_change_events(executions, "closed")
 
         closed_names: list[str] = []
         for execution in executions:
             execution.status = "closed"
-            closed_names.append(execution.agent_display_name or execution.agent_name or execution.agent_id)
+            label = execution.agent_display_name or execution.agent_name or execution.agent_id
+            closed_names.append(label)
+            # BE-9242: closed is terminal -- same auto-resolve as decommission above.
+            await resolve_terminal_agent_cursors(
+                session,
+                tenant_key=tenant_key,
+                project_id=project_id,
+                agent_id=execution.agent_id,
+                agent_label=label,
+                terminal_status="closed",
+            )
 
         if closed_names:
             await self._lifecycle_repo.flush(session)
@@ -258,7 +298,7 @@ class ProjectCloseoutService:
                 ", ".join(closed_names),
             )
 
-        return closed_names
+        return closed_names, status_events
 
     async def close_completed_agents_with_commit(
         self,
@@ -279,13 +319,21 @@ class ProjectCloseoutService:
             List of agent display names that were closed.
         """
         async with self._get_session(tenant_key) as session:
-            closed_names = await self.close_completed_agents(
+            closed_names, status_events = await self.close_completed_agents(
                 session=session,
                 project_id=project_id,
                 tenant_key=tenant_key,
             )
             await session.commit()
-            return closed_names
+
+        # BE-9246 POST-COMMIT: emit only after `session.commit()` above and only
+        # after the `async with` block has released the session -- never mid-flush,
+        # so a broadcast can never announce a status a rollback could still undo.
+        await broadcast_agent_status_events(
+            self._websocket_manager, tenant_key=tenant_key, project_id=project_id, events=status_events
+        )
+
+        return closed_names
 
     async def get_closeout_data(self, project_id: str, db_session: Any | None = None) -> CloseoutData:
         """
@@ -585,6 +633,9 @@ class ProjectCloseoutService:
         approval_exec_ids = [execution.id for execution in scanned if execution.status == "awaiting_user"]
         approval_by_exec = await pending_approval_ids_by_execution(session, approval_exec_ids, tenant_key)
 
+        # TSK-9268: the live ack-based unread store the mark_read drain writes.
+        live_unread_by_agent = await live_action_required_unread_by_agent(session, tenant_key, project_id, scanned)
+
         findings: list[AgentReadinessFinding] = []
         for execution in scanned:
             incomplete = todos_by_job.get(execution.job_id, [])
@@ -596,7 +647,7 @@ class ProjectCloseoutService:
                     agent_id=execution.agent_id,
                     agent_name=execution.agent_name or execution.agent_display_name,
                     status=execution.status,
-                    messages_waiting=execution.messages_waiting_count or 0,
+                    messages_waiting=(live_unread_by_agent.get(execution.agent_id, 0) if execution.agent_id else 0),
                     incomplete_todos=[t.content for t in incomplete],
                     incomplete_pending=sum(1 for t in incomplete if t.status == "pending"),
                     incomplete_in_progress=sum(1 for t in incomplete if t.status == "in_progress"),

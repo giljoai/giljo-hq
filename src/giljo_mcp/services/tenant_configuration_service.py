@@ -19,7 +19,9 @@ from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
+from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.repositories.configuration_repository import ConfigurationRepository
+from giljo_mcp.services.settings_service import AGENT_SILENCE_THRESHOLD_KEY, MAX_AGENT_SILENCE_THRESHOLD_MINUTES
 
 
 logger = logging.getLogger(__name__)
@@ -67,3 +69,60 @@ class TenantConfigurationService:
         """
         async with self._get_session() as session:
             return await self._repo.execute_health_check(session)
+
+    async def get_agent_silence_threshold_minutes(self) -> int | None:
+        """Return this tenant's per-tenant silence-threshold override, or None if unset.
+
+        FE-9241 (SaaS expansion): a per-tenant override stored in `configurations`
+        (key="agent_silence_threshold_minutes"). CE never writes this row — CE's
+        deployment-wide threshold lives in `system_settings` via
+        SystemSettingsService, read separately by callers.
+
+        Returns:
+            The tenant's override in minutes, or None if this tenant has no
+            override row (caller falls back to the deployment-wide default).
+        """
+        async with self._get_session() as session:
+            raw = await self._repo.get_value(session, self.tenant_key, AGENT_SILENCE_THRESHOLD_KEY)
+
+        if raw is None:
+            return None
+        try:
+            minutes = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return minutes if 1 <= minutes <= MAX_AGENT_SILENCE_THRESHOLD_MINUTES else None
+
+    async def set_agent_silence_threshold_minutes(self, minutes: int) -> int:
+        """Upsert this tenant's per-tenant silence-threshold override.
+
+        Single write path: ConfigurationRepository.upsert_value (INSERT ... ON
+        CONFLICT), tenant-scoped by self.tenant_key (ADR-009).
+
+        Args:
+            minutes: New threshold in minutes.
+
+        Returns:
+            The persisted threshold in minutes.
+
+        Raises:
+            ValidationError: if minutes is not an int in [1, MAX_AGENT_SILENCE_THRESHOLD_MINUTES]
+                (untrusted agent/API input — clean 4xx, not a DB constraint 500).
+        """
+        if type(minutes) is not int or not (1 <= minutes <= MAX_AGENT_SILENCE_THRESHOLD_MINUTES):
+            raise ValidationError(
+                "agent_silence_threshold_minutes must be an integer between 1 and "
+                f"{MAX_AGENT_SILENCE_THRESHOLD_MINUTES}"
+            )
+
+        async with self._get_session() as session:
+            await self._repo.upsert_value(
+                session,
+                self.tenant_key,
+                AGENT_SILENCE_THRESHOLD_KEY,
+                minutes,
+                category="system",
+            )
+            await session.commit()
+
+        return minutes

@@ -7,12 +7,14 @@
         role="dialog"
         aria-modal="true"
         aria-label="Trust the server's HTTPS certificate"
+        @keydown.escape="handleSkip"
+        @keydown.tab="trapTab"
       >
         <!-- Backdrop — click does NOT close (same as setup wizard) -->
         <div class="setup-wizard-backdrop" />
 
         <!-- Content panel — identical structure to SetupWizardOverlay -->
-        <div class="setup-wizard-panel smooth-border" tabindex="-1">
+        <div ref="panelRef" class="setup-wizard-panel smooth-border" tabindex="-1">
           <!-- Header -->
           <div class="setup-wizard-header">
             <h2 class="setup-wizard-title">
@@ -160,16 +162,87 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { getApiBaseURL } from '@/config/api'
 import { useClipboard } from '@/composables/useClipboard'
 import { useToast } from '@/composables/useToast'
 
-defineProps({
+const props = defineProps({
   modelValue: { type: Boolean, required: true },
 })
 
 const emit = defineEmits(['update:modelValue', 'continue'])
+
+// ── Focus containment (IMP-9342) ───────────────────────────────────────────
+// role="dialog" aria-modal="true" is a promise that focus stays inside. Without
+// a trap, Tab walked out into the page behind the overlay — from the Connect tab
+// that let a keyboard user reach the inline cert-trust link and open a SECOND
+// copy of this dialog at the same z-index, which reads as a broken close button.
+const panelRef = ref(null)
+let focusOnOpen = null
+
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ')
+
+function focusableItems() {
+  const panel = panelRef.value
+  return panel ? Array.from(panel.querySelectorAll(FOCUSABLE_SELECTOR)) : []
+}
+
+function trapTab(event) {
+  const panel = panelRef.value
+  if (!panel) return
+  const items = focusableItems()
+  if (!items.length) {
+    // Nothing tabbable inside: park focus on the panel rather than let it leave.
+    event.preventDefault()
+    panel.focus()
+    return
+  }
+
+  const first = items[0]
+  const last = items[items.length - 1]
+  const active = document.activeElement
+  // The panel itself carries tabindex="-1", so it holds focus without being a
+  // tab stop — treat it as "not inside" so either direction wraps deliberately.
+  const inside = panel.contains(active) && active !== panel
+
+  if (event.shiftKey) {
+    if (!inside || active === first) {
+      event.preventDefault()
+      last.focus()
+    }
+  } else if (!inside || active === last) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+watch(
+  () => props.modelValue,
+  async (open) => {
+    if (open) {
+      focusOnOpen = document.activeElement
+      await nextTick()
+      panelRef.value?.focus()
+      return
+    }
+    // Closing: hand focus back to whatever opened us, so a keyboard user resumes
+    // where they were instead of at the top of the document.
+    const opener = focusOnOpen
+    focusOnOpen = null
+    if (opener && typeof opener.focus === 'function' && document.contains(opener)) {
+      opener.focus()
+    }
+  },
+  { immediate: true },
+)
 
 const { copy: clipboardCopy } = useClipboard()
 const { showToast } = useToast()
@@ -249,6 +322,11 @@ async function downloadCert() {
 
 async function copyCommand(text, which) {
   const success = await clipboardCopy(text)
+  // FE-9320: the check mark is an assertion that the command is on the
+  // clipboard, so it may only be set once the copy is verified. It used to be
+  // set unconditionally, which made a failed copy look done — the user pasted
+  // nothing and the cert-trust step still read as complete.
+  if (!success) return
   if (which === 'node') {
     copiedNode.value = true
     setTimeout(() => { copiedNode.value = false }, 2000)
@@ -256,9 +334,7 @@ async function copyCommand(text, which) {
     copiedOs.value = true
     setTimeout(() => { copiedOs.value = false }, 2000)
   }
-  if (success) {
-    showToast({ message: 'Copied to clipboard', type: 'success', duration: 2000 })
-  }
+  showToast({ message: 'Copied to clipboard', type: 'success', duration: 2000 })
 }
 
 function handleContinue() {

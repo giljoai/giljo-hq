@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "giljo-mcp"
-version = "2.0.1.1"
-description = "GiljoAI MCP Coding Orchestrator - Multi-agent orchestration system"
+version = "2.0.2"
+description = "Giljo HQ Coding Orchestrator - Multi-agent orchestration system"
 readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "Elastic License 2.0"}
@@ -35,7 +35,7 @@ dependencies = [
     # effective_candidates(). INF-6053 deferred by pinning last-known-good; this change completes the bump
     # (route-introspection tests flatten _IncludedRouter via tests/helpers/route_surface). starlette 1.3.1
     # clears 4 CVEs (CVE-2026-48818/48817/54283/54282) that 1.0.1 carried. Keep these two in lockstep.
-    "fastapi==0.139.0",
+    "fastapi==0.139.2",
     "starlette==1.3.1",  # Pinned with fastapi (clears CVE-2026-48818/48817/54283/54282; needs >=1.3.1)
     "uvicorn[standard]>=0.23.0",
     "pydantic>=2.0.0",
@@ -49,7 +49,7 @@ dependencies = [
 
     # Authentication & Security
     "bcrypt>=4.0.0",
-    "cryptography>=48.0.0",  # Fernet encryption for auth tokens (auth_manager.py)
+    "cryptography>=50.0.0",  # Fernet encryption for auth tokens (auth_manager.py)
     "python-multipart>=0.0.6",
     "PyJWT>=2.8.0",
     "email-validator>=2.1.0",  # Required by Pydantic EmailStr (auth.py, users.py)
@@ -269,6 +269,9 @@ addopts = [
     "--timeout-method=thread",
 ]
 timeout_func_only = true
+# This file ships to CE, so it must not name operator-only directories. The
+# operator-tooling suites are collected by CI explicit pytest paths (INF-9310),
+# not from here; a bare local pytest needs those paths passed explicitly.
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]

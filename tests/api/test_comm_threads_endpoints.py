@@ -30,6 +30,7 @@ from httpx import AsyncClient
 from giljo_mcp.auth.jwt_manager import JWTManager
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.models import User
+from giljo_mcp.models.comm import CommParticipant
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
@@ -561,3 +562,59 @@ async def test_history_after_and_since_mutually_exclusive_returns_400(api_client
         params={"after_message_id": "anything", "since": "2026-01-01T00:00:00+00:00"},
     )
     assert resp.status_code == 400, resp.text
+
+
+@pytest.mark.asyncio
+async def test_post_to_a_display_label_is_refused_cleanly_not_a_500(api_client: AsyncClient, db_manager) -> None:
+    """BE-9292a-F1 second-order guard at the REST layer.
+
+    This route forwards no baton, so before the ADDRESSEE was screened the service
+    could never refuse it and every ``result["message_id"]`` access below was safe. A
+    directed post naming a display label is declined now, and a rejection carries no
+    ``message_id`` — so without the early return the clean refusal became a KeyError
+    500 on the reactivation hop and the WS fan-out.
+    """
+    seed = await _seed_tenant(db_manager)
+    thread = await _create_thread(api_client, seed["headers"])
+    thread_id = thread["thread_id"]
+
+    # No REST route enrols a participant (join_thread is MCP-side), so the conductor's
+    # id-with-a-display-name row is seeded directly.
+    async with db_manager.get_session_async() as session:
+        session.add(
+            CommParticipant(
+                tenant_key=seed["tenant_key"],
+                thread_id=thread_id,
+                participant_id="36eac157-uuid",
+                participant_type="agent",
+                display_name="Ledger Zero Conductor",
+            )
+        )
+        await session.commit()
+
+    # The websocket manager MUST be live for this test to mean anything. The
+    # reactivation hop's own result["message_id"] read sits inside a best-effort
+    # try/except that swallows the KeyError, so the only place the missing key
+    # actually reaches the client is the WS fan-out — with no manager installed this
+    # test passes whether or not the guard exists.
+    from api.app_state import state
+
+    mock_ws = AsyncMock()
+    original = state.websocket_manager
+    state.websocket_manager = mock_ws
+    try:
+        resp = await api_client.post(
+            f"/api/v1/threads/{thread_id}/post",
+            headers=seed["headers"],
+            json={"content": "decision needed", "to_participant": "Ledger Zero Conductor", "requires_action": True},
+        )
+    finally:
+        state.websocket_manager = original
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is False
+    assert body["error"] == "TARGET_IS_A_DISPLAY_NAME"
+    assert body["registered_id"] == "36eac157-uuid"
+    # A refusal is not a post: nothing was persisted, so nothing may be announced.
+    mock_ws.broadcast_event_to_tenant.assert_not_called()

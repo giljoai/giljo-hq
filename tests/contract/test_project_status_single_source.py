@@ -81,6 +81,9 @@ _CANONICAL_ORDER: list[str] = [
     # order from ce_0078's ``ALTER TYPE ... ADD VALUE``). ce_0008 (the original
     # CREATE TYPE, still asserted below) declared only the first six.
     "superseded",
+    # IMP-9258: parked is appended after superseded (ce_0083's
+    # ``ALTER TYPE ... ADD VALUE``).
+    "parked",
 ]
 
 

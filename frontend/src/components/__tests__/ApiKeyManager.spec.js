@@ -1,28 +1,16 @@
 /**
- * ApiKeyManager.spec.js — FE-6242
+ * ApiKeyManager.spec.js — FE-9225
  *
- * Tests the "Configurator" pill button added to the API Keys header and the
- * AiToolConfigWizard integration. Edition scope: Both.
+ * The API Keys card is view-and-revoke ONLY. FE-6242's "Configurator" pill and the
+ * AiToolConfigWizard it mounted were retired here: the FE-9204 connect directory
+ * above this card owns tool connection, and the operator verified both the OAuth and
+ * the API-key path end-to-end through that new flow before deletion.
+ *
+ * These assertions are the inverse pin of the ones they replace — they fail if the
+ * legacy configurator path is reintroduced into this card. Edition scope: Both.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-
-// AiToolConfigWizard is a complex child — stub it so these tests focus on
-// ApiKeyManager's own UI: the Configurator button and the wizard ref wiring.
-vi.mock('@/components/AiToolConfigWizard.vue', () => ({
-  default: {
-    name: 'AiToolConfigWizard',
-    props: { noActivator: Boolean },
-    template: '<div class="wizard-stub" />',
-    // Expose the tracked method as a component instance method so the parent
-    // ref call can be validated.
-    setup() {
-      return {
-        openForKeyGeneration: vi.fn(),
-      }
-    },
-  },
-}))
 
 // BaseDialog is used for the revoke confirmation — stub it.
 vi.mock('@/components/common/BaseDialog.vue', () => ({
@@ -76,27 +64,21 @@ beforeEach(() => {
 
 // -----------------------------------------------------------------------
 
-describe('ApiKeyManager — Configurator pill button (FE-6242)', () => {
-  it('renders the Configurator button in the header', async () => {
+describe('ApiKeyManager — view/revoke only (FE-9225 retirement of the configurator)', () => {
+  it('does NOT render the legacy Configurator pill', async () => {
     const wrapper = await mountManager()
-    // The button is identified by data-testid="apikey-configurator-btn"
-    const btn = wrapper.find('[data-testid="apikey-configurator-btn"]')
-    expect(btn.exists()).toBe(true)
+    expect(wrapper.find('[data-testid="apikey-configurator-btn"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Configurator')
   })
 
-  it('renders the AiToolConfigWizard with noActivator=true', async () => {
+  it('does NOT mount AiToolConfigWizard', async () => {
     const wrapper = await mountManager()
-    const wizard = wrapper.findComponent({ name: 'AiToolConfigWizard' })
-    expect(wizard.exists()).toBe(true)
-    expect(wizard.props('noActivator')).toBe(true)
+    expect(wrapper.findComponent({ name: 'AiToolConfigWizard' }).exists()).toBe(false)
   })
 
-  it('calls openForKeyGeneration on the wizard when the button is clicked', async () => {
+  it('still renders its own view/revoke chrome', async () => {
     const wrapper = await mountManager()
-    const btn = wrapper.find('[data-testid="apikey-configurator-btn"]')
-    await btn.trigger('click')
-    // wizard ref's openForKeyGeneration should have been called
-    const wizard = wrapper.findComponent({ name: 'AiToolConfigWizard' })
-    expect(wizard.vm.openForKeyGeneration).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('API Keys')
+    expect(wrapper.text()).toContain('View and revoke API keys used by AI coding agent integrations')
   })
 })

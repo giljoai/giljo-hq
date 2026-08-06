@@ -91,23 +91,33 @@ async def get_task_service(
     tenant_key: str = Depends(get_tenant_key),
     db_manager: DatabaseManager = Depends(get_db_manager),
     tenant_manager: TenantManager = Depends(get_tenant_manager),
+    websocket_manager=Depends(get_websocket_manager),
 ) -> TaskService:
     """
     Get TaskService instance for task management.
 
     Sets the tenant context before returning the service instance.
 
+    FE-9274: was missing ``websocket_manager`` (unlike its sibling dependencies
+    below -- SequenceRunService, MessageRoutingService, ProductService all
+    receive it). TaskService's own broadcast calls silently no-op when
+    ``self._websocket_manager is None``, so every REST task mutation (create,
+    update, status change) landed in the DB but never told a connected
+    dashboard tab to refresh its task list -- BE-9246's "stale dashboard
+    tiles" bug, but for tasks instead of agent status.
+
     Args:
         tenant_key: Tenant key from request context
         db_manager: Database manager instance
         tenant_manager: Tenant manager instance
+        websocket_manager: WebSocket manager for real-time task:created/task:updated events
 
     Returns:
         TaskService instance for task operations
     """
     # Set tenant context for this request
     tenant_manager.set_current_tenant(tenant_key)
-    return TaskService(db_manager=db_manager, tenant_manager=tenant_manager)
+    return TaskService(db_manager=db_manager, tenant_manager=tenant_manager, websocket_manager=websocket_manager)
 
 
 async def get_roadmap_service(

@@ -779,7 +779,9 @@ watch(
   top: 12px;
   left: 12px;
   z-index: 100;
-  border-radius: 50%;
+  // FE-9365a: a rounded square, not a circle. FABs are not exempt from the
+  // button-shape standard — see the Button Shape Standard block in main.scss.
+  border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 

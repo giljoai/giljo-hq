@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from giljo_mcp.platform_registry import Platform
+from giljo_mcp.platform_registry import Platform, task_list_phrase
 from giljo_mcp.services.protocol_sections.agent_lifecycle import _generate_orchestrator_protocol
 from giljo_mcp.services.protocol_sections.worker_body import (
     _build_conditional_blocks,
@@ -87,12 +87,16 @@ def _generate_agent_protocol(
 
     git_commit_block, giljo_block = _build_conditional_blocks(git_integration_enabled, execution_mode, tool)
 
-    # Conditional Phase 1 Step 5: scope TodoWrite to job_type. BE-9012d: renumbered
-    # from "4." to "5." — the worker body's Phase 1 gained a step 2 (join_thread),
-    # shifting every subsequent Phase 1 step down by one.
+    # BE-9260: harness-neutral task-list phrasing ("TodoWrite list" only for the
+    # detected claude-code harness; "task list" for everyone else).
+    todo_phrase = task_list_phrase(tool)
+
+    # Conditional Phase 1 Step 5: scope the task-list step to job_type. BE-9012d:
+    # renumbered from "4." to "5." — the worker body's Phase 1 gained a step 2
+    # (join_thread), shifting every subsequent Phase 1 step down by one.
     if job_type == "orchestrator":
         phase1_step4 = (
-            "5. **MANDATORY: Create TodoWrite task list** (BEFORE coordination):\n"
+            f"5. **MANDATORY: Create your {todo_phrase}** (BEFORE coordination):\n"
             "   - Orchestration ONLY: spawning, monitoring, coordinating, unblocking, closing out\n"
             "   - NEVER include implementation, testing, or documentation tasks — those belong to your agents\n"
             '   - Count and announce: "X steps to complete: [list items]"\n'
@@ -100,7 +104,7 @@ def _generate_agent_protocol(
         )
     else:
         phase1_step4 = (
-            "5. **MANDATORY: Create TodoWrite task list** (BEFORE implementation):\n"
+            f"5. **MANDATORY: Create your {todo_phrase}** (BEFORE implementation):\n"
             "   - Break mission into 3-7 specific, actionable tasks\n"
             '   - Count and announce: "X steps to complete: [list items]"\n'
             "   - NEVER skip this step - planning prevents poor execution"
@@ -120,4 +124,5 @@ def _generate_agent_protocol(
         protocol_framing=protocol_framing,
         preset=preset,
         comm_thread_id=comm_thread_id,
+        tool=tool,
     )

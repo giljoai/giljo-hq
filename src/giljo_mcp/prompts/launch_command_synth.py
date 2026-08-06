@@ -29,6 +29,8 @@ entry carries ``macos_validated=False`` so callers can surface that.
 
 from __future__ import annotations
 
+import shutil
+import sys
 from typing import Any
 
 # Coding-tool identifier (the agent_templates.cli_tool vocabulary) -> the CLI
@@ -323,7 +325,7 @@ def build_conductor_thin_prompt(run_id: str) -> str:
         "You are the sub-orchestrator for project <P_i> in chain run "
         f"{rid}. Verify the MCP connection with health_check, then load your mission by "
         "calling get_job_mission with job_id <SUB_ORCH_JOB_ID> and execute it. Coordinate "
-        "via the chain Hub thread (search_threads, get_thread_history), not return values."
+        "via get_context chain -> hub_thread_id and get_thread_history, not return values."
     )
 
 
@@ -350,7 +352,37 @@ def _harness_prefix(binary: str) -> str:
 # two UUIDs inside the prompt and runs the line. Windows is e2e-verified; the title is
 # intentionally hyphenless-free of the tabColor (dropped: cosmetic, and a spaced/extra
 # arg is just more to mis-quote).
-_WIN_SPAWN = "wt -w 0 new-tab --title 'giljo sub-orch' -d \"$PWD\" pwsh -NoExit -Command \"{prefix} '{prompt}'\""
+# TSK-9263: the Windows launch-shell LADDER — pwsh (PS7) preferred, powershell
+# (stock Windows PowerShell 5.1) as the fallback. PS7 is NOT stock Windows, so a
+# CE install on a plain Windows host must get a spawn line its box can run. Same
+# idiom as the Linux gnome-terminal -> x-terminal-emulator ladder above: prefer
+# the primary, degrade to what exists. Resolution is HOST-gated: only a Windows
+# host without pwsh degrades (CE runs the server on the user's own box, so the
+# probe is truthful there); a non-Windows server host (SaaS / CI) cannot probe
+# the REMOTE Windows reader's box and keeps the validated pwsh default — which
+# also keeps the byte-pinned render goldens host-independent off-Windows.
+_WIN_SHELL_PRIMARY = "pwsh"
+_WIN_SHELL_FALLBACK = "powershell"
+
+
+def _is_windows_host() -> bool:
+    return sys.platform == "win32"
+
+
+def _pwsh_available() -> bool:
+    return shutil.which(_WIN_SHELL_PRIMARY) is not None
+
+
+def resolve_windows_launch_shell() -> str:
+    """The shell binary the Windows spawn line uses: ``pwsh``, unless synthesizing
+    ON a Windows host where pwsh is absent — then stock ``powershell`` (TSK-9263).
+    Both accept the identical ``-NoExit -Command`` form the template emits."""
+    if _is_windows_host() and not _pwsh_available():
+        return _WIN_SHELL_FALLBACK
+    return _WIN_SHELL_PRIMARY
+
+
+_WIN_SPAWN = "wt -w 0 new-tab --title 'giljo sub-orch' -d \"$PWD\" {win_shell} -NoExit -Command \"{prefix} '{prompt}'\""
 _LINUX_SPAWN = (
     "gnome-terminal --working-directory=\"$PWD\" --title='giljo sub-orch' -- bash -c \"{prefix} '{prompt}'; exec bash\""
 )
@@ -466,8 +498,15 @@ def _validation_label(binary: str, os_name: str) -> str:
 
 
 def _harness_command(template: str, binary: str, os_name: str, prompt: str) -> str:
-    """One harness's spawn command line, labelled with its validation state."""
-    cmd = template.format(prefix=_harness_prefix(binary), prompt=prompt)
+    """One harness's spawn command line, labelled with its validation state.
+
+    ``win_shell`` (TSK-9263) only appears in the Windows template; the extra
+    kwarg is ignored by the Linux/macOS templates."""
+    cmd = template.format(
+        prefix=_harness_prefix(binary),
+        prompt=prompt,
+        win_shell=resolve_windows_launch_shell(),
+    )
     return f"  [{binary} | {_validation_label(binary, os_name)}]\n  {cmd}"
 
 

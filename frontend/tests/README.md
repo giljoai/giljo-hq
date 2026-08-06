@@ -1,8 +1,8 @@
-# GiljoAI MCP Frontend Test Suite
+# Giljo HQ Frontend Test Suite
 
 ## Overview
 
-This test suite comprehensively validates the authentication and setup flow for the GiljoAI MCP frontend. The tests cover various scenarios including component interactions, integration flows, and end-to-end user journeys.
+This test suite comprehensively validates the authentication and setup flow for the Giljo HQ frontend. The tests cover various scenarios including component interactions, integration flows, and end-to-end user journeys.
 
 ## Test Types
 

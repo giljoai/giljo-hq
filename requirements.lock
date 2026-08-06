@@ -15,19 +15,19 @@
 # truth, mirrors pyproject.toml). After ANY requirements.txt change, regen:
 #   uv pip compile requirements.txt --python-version 3.12 \
 #       --python-platform x86_64-unknown-linux-gnu
-# or simply: python internal/gen_requirements_lock.py  (also stamps the hash below).
+# or run the repo's requirements-lock generator (also stamps the hash below).
 #
 # The hash below is the canonical direct-dep set of requirements.txt. The CI
 # drift gate (tests/unit/test_requirements_lock_drift.py) REDs if it no longer
 # matches — i.e. requirements.txt was changed without regenerating this lock.
-# requirements-txt-hash: sha256:248da4f20675d41c2fca54a836bd93cb4123f1ebf9544da18221d04823c08086
+# requirements-txt-hash: sha256:f555b6e29b33e271f75e03ace9b5924d24c4652e3dffb0f4e7af530e272ef03d
 aiosmtplib==5.1.2
     # via -r requirements.txt
 alembic==1.18.5
     # via -r requirements.txt
-annotated-doc==0.0.4
+annotated-doc==0.0.5
     # via fastapi
-annotated-types==0.7.0
+annotated-types==0.8.0
     # via pydantic
 anyio==4.14.2
     # via
@@ -46,19 +46,19 @@ authlib==1.7.2
     # via -r requirements.txt
 bcrypt==5.0.0
     # via -r requirements.txt
-boto3==1.43.48
+boto3==1.43.63
     # via -r requirements.txt
-botocore==1.43.48
+botocore==1.43.63
     # via
     #   boto3
     #   s3transfer
-certifi==2026.6.17
+certifi==2026.7.22
     # via
     #   httpcore
     #   httpx
     #   requests
     #   sentry-sdk
-cffi==2.1.0
+cffi==2.1.1
     # via cryptography
 charset-normalizer==3.4.9
     # via requests
@@ -68,7 +68,7 @@ click==8.4.2
     #   uvicorn
 colorama==0.4.6
     # via -r requirements.txt
-cryptography==49.0.0
+cryptography==50.0.0
     # via
     #   -r requirements.txt
     #   authlib
@@ -78,11 +78,11 @@ dnspython==2.8.0
     # via email-validator
 email-validator==2.3.0
     # via -r requirements.txt
-fastapi==0.139.0
+fastapi==0.139.2
     # via
     #   -r requirements.txt
     #   sentry-sdk
-greenlet==3.5.3
+greenlet==3.5.4
     # via
     #   -r requirements.txt
     #   sqlalchemy
@@ -112,7 +112,7 @@ jmespath==1.1.0
     # via
     #   boto3
     #   botocore
-joserfc==1.7.3
+joserfc==1.7.4
     # via authlib
 jsonschema==4.26.0
     # via mcp
@@ -163,27 +163,27 @@ pyyaml==6.0.3
     # via
     #   -r requirements.txt
     #   uvicorn
-redis==8.0.1
+redis==8.1.0
     # via -r requirements.txt
 referencing==0.37.0
     # via
     #   jsonschema
     #   jsonschema-specifications
-regex==2026.7.10
+regex==2026.7.19
     # via tiktoken
 requests==2.34.2
     # via
     #   resend
     #   tiktoken
-resend==2.33.0
+resend==2.35.0
     # via -r requirements.txt
 rpds-py==2026.6.3
     # via
     #   jsonschema
     #   referencing
-s3transfer==0.19.1
+s3transfer==0.19.2
     # via boto3
-sentry-sdk==2.65.0
+sentry-sdk==2.66.1
     # via -r requirements.txt
 six==1.17.0
     # via python-dateutil
@@ -191,7 +191,7 @@ sqlalchemy==2.0.51
     # via
     #   -r requirements.txt
     #   alembic
-sse-starlette==3.4.5
+sse-starlette==3.4.6
     # via mcp
 starlette==1.3.1
     # via
@@ -227,7 +227,7 @@ urllib3==2.7.0
     #   botocore
     #   requests
     #   sentry-sdk
-uvicorn==0.51.0
+uvicorn==0.52.1
     # via
     #   -r requirements.txt
     #   mcp
@@ -237,5 +237,5 @@ watchdog==6.0.0
     # via -r requirements.txt
 watchfiles==1.2.0
     # via uvicorn
-websockets==16.1
+websockets==17.0.1
     # via uvicorn

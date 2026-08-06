@@ -148,7 +148,9 @@ class McpAdapterMixin:
             "project_type": resolved_type_label,
             "series_number": project.series_number or 0,
             "taxonomy_alias": project.taxonomy_alias,
-            "created_at": project.created_at.isoformat() if project.created_at else None,
+            # BE-9326: create_project now returns a ProjectDetail whose timestamps
+            # are already ISO strings (the MCP wire format), not datetimes.
+            "created_at": project.created_at,
             "message": f"Project '{project.name}' created successfully",
             # BE-6049d: advertise that numbering is automatic so agents stop
             # supplying series_number. The serial is minted continue-upward on a

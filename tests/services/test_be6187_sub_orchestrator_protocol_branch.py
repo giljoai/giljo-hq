@@ -73,7 +73,13 @@ def test_sub_orch_staging_gets_ch_sub_orchestrator() -> None:
     assert "CH_SUB_ORCHESTRATOR" in body
     # p2 is index 1 → position 2 of 2.
     assert "project 2 of 2" in body
-    assert "run-187" in body and "search_threads" in body, "Hub-thread discovery path must be present"
+    # BE-9291 DELIBERATELY CHANGED the discovery probe. This asserted `search_threads`,
+    # which after BE-9291 is satisfied ONLY by the ToolSearch BOOTSTRAP line (a tool-loading
+    # hint), so it kept passing while proving nothing about discovery. Discovery now runs on
+    # the comm_threads.sequence_run_id FK. Same intent, current truth.
+    assert "run-187" in body, "the chain-member render must carry its run context"
+    assert "hub_thread_id" in body, "Hub-thread discovery path must be present"
+    assert "search_threads(query=" not in body, "the retired substring-discovery path must not be re-introduced"
 
     # The conductor-only chapters must NOT render for a sub-orchestrator.
     for key in ("ch_capability", "ch_chain_staging", "ch_chain_drive"):

@@ -1,4 +1,4 @@
-// Vuetify Theme Configuration for GiljoAI MCP Dashboard
+// Vuetify Theme Configuration for Giljo HQ Dashboard
 export const darkTheme = {
   dark: true,
   colors: {

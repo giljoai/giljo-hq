@@ -9,8 +9,10 @@ Covers atomic create_pending: insert + status flip + WS broadcast, plus
 duplicate-pending rejection and tenant isolation.
 """
 
+import logging
 import random
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -211,3 +213,83 @@ async def test_create_pending_tenant_isolation(approval_service, approval_seed, 
     with tenant_session_context(db_session, other_tenant):
         result = await db_session.execute(select(UserApproval).where(UserApproval.tenant_key == other_tenant))
     assert result.scalars().all() == []
+
+
+# --- BE-9292a-F2: a refusal that used to go unheard ---------------------------
+
+
+class _RefusingCommThreadService:
+    """A Hub that DECLINES the post instead of raising.
+
+    ``post_to_thread`` returns a BE-6081 domain rejection for a declined request — it
+    does not raise — so the caller's ``except`` never sees it. That is the whole point
+    of this test: the failure is invisible to exception handling.
+    """
+
+    def __init__(self, response):
+        self._response = response
+        self.calls = 0
+
+    async def resolve_or_create_bound_thread(self, *, project_id, tenant_key):
+        return {"thread_id": "t-approval-1"}
+
+    async def post_to_thread(self, **kwargs):
+        self.calls += 1
+        return self._response
+
+
+def _decision_fixture():
+    execution = SimpleNamespace(agent_id="Relay")
+    decided = SimpleNamespace(
+        id="apr-1",
+        job_id="job-1",
+        project_id="prj-1",
+        reason="Ship it?",
+        options=[{"id": "yes", "label": "Yes"}],
+    )
+    return execution, decided
+
+
+@pytest.mark.asyncio
+async def test_a_declined_hub_notice_is_logged_not_swallowed(caplog):
+    """BE-9292a-F2 — the approval-cleared notice must never disappear in silence.
+
+    Before BE-9292a this call could not be refused: it forwards no baton, and only the
+    baton target was screened. Screening the ADDRESSEE made a refusal reachable here —
+    ``to_participant`` is an agent_id, and an agent_id that collides with another
+    participant's display name is now declined. The return value was discarded, and the
+    rejection is returned rather than raised, so the surrounding ``except`` never fired
+    and nothing was written anywhere: the ``awaiting_user`` gate clears in the database
+    while the orchestrator polls a thread that will never tell it.
+    """
+    service = UserApprovalService(db_manager=None, tenant_manager=TenantManager())
+    service._comm_thread_service = _RefusingCommThreadService(
+        {"success": False, "error": "TARGET_IS_A_DISPLAY_NAME", "requested": "Relay"}
+    )
+    execution, decided = _decision_fixture()
+
+    with caplog.at_level(logging.WARNING, logger="giljo_mcp.services.user_approval_service"):
+        await service._notify_orchestrator_of_decision(
+            tenant_key="tk-1", execution=execution, decided=decided, option_id="yes"
+        )
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings, "a declined approval notice left no trace at all"
+    assert any("TARGET_IS_A_DISPLAY_NAME" in m for m in warnings), warnings
+    assert any("apr-1" in m for m in warnings), "the operator cannot find the approval this belongs to"
+
+
+@pytest.mark.asyncio
+async def test_an_accepted_hub_notice_stays_quiet(caplog):
+    """The other side, so the guard cannot pass by warning on everything. A normal post
+    answers no ``success`` key at all, and must not be reported as a failure."""
+    service = UserApprovalService(db_manager=None, tenant_manager=TenantManager())
+    service._comm_thread_service = _RefusingCommThreadService({"message_id": "m-1", "baton_passed": False})
+    execution, decided = _decision_fixture()
+
+    with caplog.at_level(logging.WARNING, logger="giljo_mcp.services.user_approval_service"):
+        await service._notify_orchestrator_of_decision(
+            tenant_key="tk-1", execution=execution, decided=decided, option_id="yes"
+        )
+
+    assert [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING] == []

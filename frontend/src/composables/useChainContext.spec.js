@@ -351,6 +351,98 @@ describe('useChainContext — tab isWorking derivation (bug fix: position != act
   })
 })
 
+describe('useChainContext — tab isPlanning derivation (FE-9239)', () => {
+  it('isPlanning is true when staging_status is "staging" (record fallback, no live state)', async () => {
+    projectByIdMock.mockImplementation((id) =>
+      makeProject(id, { staging_status: id === 'p1' ? 'staging' : '' }),
+    )
+    setup()
+    await ctx.loadRun('run-1')
+    await flushPromises()
+    const [t1, t2] = ctx.chainCtx.value.tabs
+    expect(t1.isPlanning).toBe(true)
+    expect(t2.isPlanning).toBe(false)
+  })
+
+  it('isPlanning is true when staging_status is "staged"', async () => {
+    projectByIdMock.mockImplementation((id) =>
+      makeProject(id, { staging_status: id === 'p1' ? 'staged' : '' }),
+    )
+    setup()
+    await ctx.loadRun('run-1')
+    await flushPromises()
+    const [t1] = ctx.chainCtx.value.tabs
+    expect(t1.isPlanning).toBe(true)
+  })
+
+  it('isPlanning is false for staging_complete (default: falls through to WAITING, not PLANNING)', async () => {
+    projectByIdMock.mockImplementation((id) =>
+      makeProject(id, { staging_status: id === 'p1' ? 'staging_complete' : '' }),
+    )
+    setup()
+    await ctx.loadRun('run-1')
+    await flushPromises()
+    const [t1] = ctx.chainCtx.value.tabs
+    expect(t1.isPlanning).toBe(false)
+  })
+
+  it('isPlanning is false for a completed member even if staging_status is stale "staging"', async () => {
+    fetchRunMock.mockResolvedValue(
+      makeRun({ project_statuses: { p1: 'completed', p2: 'pending', p3: 'pending' } }),
+    )
+    projectByIdMock.mockImplementation((id) =>
+      makeProject(id, { staging_status: id === 'p1' ? 'staging' : '' }),
+    )
+    setup()
+    await ctx.loadRun('run-1')
+    await flushPromises()
+    const [t1] = ctx.chainCtx.value.tabs
+    expect(t1.isCompleted).toBe(true)
+    expect(t1.isPlanning).toBe(false)
+  })
+
+  it('isPlanning is false for a working (implementing) member even if staging_status is stale "staged"', async () => {
+    fetchRunMock.mockResolvedValue(
+      makeRun({ project_statuses: { p1: 'implementing', p2: 'pending', p3: 'pending' } }),
+    )
+    projectByIdMock.mockImplementation((id) =>
+      makeProject(id, { staging_status: id === 'p1' ? 'staged' : '' }),
+    )
+    setup()
+    await ctx.loadRun('run-1')
+    await flushPromises()
+    const [t1] = ctx.chainCtx.value.tabs
+    expect(t1.isWorking).toBe(true)
+    expect(t1.isPlanning).toBe(false)
+  })
+
+  it('prefers the live projectStateStore flags over the record staging_status fallback (live says staging)', async () => {
+    getProjectStateMock.mockImplementation((id) =>
+      id === 'p1' ? { isStaging: true, isStaged: false } : null,
+    )
+    projectByIdMock.mockImplementation((id) => makeProject(id, { staging_status: '' }))
+    setup()
+    await ctx.loadRun('run-1')
+    await flushPromises()
+    const [t1] = ctx.chainCtx.value.tabs
+    expect(t1.isPlanning).toBe(true)
+  })
+
+  it('live store flags override a stale record staging_status (record says staging, live says settled)', async () => {
+    getProjectStateMock.mockImplementation((id) =>
+      id === 'p1' ? { isStaging: false, isStaged: false } : null,
+    )
+    projectByIdMock.mockImplementation((id) =>
+      makeProject(id, { staging_status: id === 'p1' ? 'staging' : '' }),
+    )
+    setup()
+    await ctx.loadRun('run-1')
+    await flushPromises()
+    const [t1] = ctx.chainCtx.value.tabs
+    expect(t1.isPlanning).toBe(false)
+  })
+})
+
 describe('useChainContext — chainMission (FE-6199 B2)', () => {
   it('exposes chainMission from run.chain_mission (not headMission)', async () => {
     fetchRunMock.mockResolvedValue(makeRun({ chain_mission: 'Ship the whole product' }))

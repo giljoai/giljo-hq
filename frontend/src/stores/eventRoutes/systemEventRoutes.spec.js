@@ -12,12 +12,16 @@ import { setActivePinia, createPinia } from 'pinia'
 
 const mockGet = vi.fn()
 const mockList = vi.fn()
+const mockTasksList = vi.fn()
 
 vi.mock('@/services/api', () => {
   const apiMock = {
     products: {
       get: (...a) => mockGet(...a),
       list: (...a) => mockList(...a),
+    },
+    tasks: {
+      list: (...a) => mockTasksList(...a),
     },
   }
   return { api: apiMock, default: apiMock }
@@ -26,12 +30,14 @@ vi.mock('@/services/api', () => {
 import { SYSTEM_EVENT_ROUTES } from './systemEventRoutes'
 import { useProductStore } from '../products'
 import { useNotificationStore } from '../notifications'
+import { useTaskStore } from '../tasks'
 
 describe('systemEventRoutes — FE-9121 vision:analysis_complete write-through', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     mockList.mockResolvedValue({ data: [] })
+    mockTasksList.mockResolvedValue({ data: [] })
   })
 
   it('refreshes productsById[product_id] even when NOT the selected product', async () => {
@@ -98,5 +104,28 @@ describe('systemEventRoutes — FE-9121 vision:analysis_complete write-through',
     await SYSTEM_EVENT_ROUTES['vision:analysis_complete'].handler({})
 
     expect(addSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('systemEventRoutes — FE-9274 P2 task:updated live refresh', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    mockTasksList.mockResolvedValue({ data: [{ id: 't-1', status: 'in_progress' }] })
+  })
+
+  it('is registered as a route (the client-side drop the backend implementer flagged)', () => {
+    expect(SYSTEM_EVENT_ROUTES['task:updated']).toBeDefined()
+    expect(typeof SYSTEM_EVENT_ROUTES['task:updated'].handler).toBe('function')
+  })
+
+  it('refetches the task list on task:updated, mirroring task:created', async () => {
+    const taskStore = useTaskStore()
+    expect(taskStore.tasks).toEqual([])
+
+    await SYSTEM_EVENT_ROUTES['task:updated'].handler({ task_id: 't-1', status: 'in_progress' })
+
+    expect(mockTasksList).toHaveBeenCalledTimes(1)
+    expect(taskStore.tasks).toEqual([{ id: 't-1', status: 'in_progress' }])
   })
 })

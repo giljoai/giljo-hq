@@ -12,9 +12,81 @@
  * - Loading state
  * - Warning alert display
  */
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, it, expect } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import ProductDeleteDialog from '@/components/products/ProductDeleteDialog.vue'
+
+// BE-9356: this spec used to hardcode the cascade-impact field names in its own
+// fixture and then assert those same names rendered -- it verified that Vue
+// interpolates a prop the test invented, so it stayed green for months while the
+// dialog rendered six blanks against a backend that never had those fields.
+// The names below are now DERIVED from the authoritative Pydantic model, so a
+// schema change fails this file instead of passing silently.
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../..')
+const MODELS_PY = resolve(REPO_ROOT, 'api/endpoints/products/models.py')
+const DIALOG_VUE = resolve(REPO_ROOT, 'frontend/src/components/products/ProductDeleteDialog.vue')
+
+/**
+ * Extract `name -> annotation` for a Pydantic model's declared fields.
+ * Reads the class body until the first line back at column 0.
+ */
+const pydanticFields = (source, className) => {
+  const start = source.indexOf(`class ${className}(BaseModel):`)
+  if (start === -1) throw new Error(`${className} not found in ${MODELS_PY}`)
+
+  const body = source.slice(start).split('\n').slice(1)
+  const fields = {}
+  let inDocstring = false
+
+  for (const line of body) {
+    if (line.trim() === '') continue
+    if (!/^\s/.test(line)) break // dedent to column 0 -- class body is over
+
+    const quotes = (line.match(/"""/g) || []).length
+    if (inDocstring) {
+      if (quotes > 0) inDocstring = false
+      continue
+    }
+    if (line.trim().startsWith('"""')) {
+      if (quotes === 1) inDocstring = true
+      continue
+    }
+
+    const match = line.match(/^ {4}([a-z_][a-z0-9_]*)\s*:\s*([^=]+?)\s*(?:=|$)/i)
+    if (match) fields[match[1]] = match[2].trim()
+  }
+
+  if (Object.keys(fields).length === 0) throw new Error(`${className} parsed to zero fields`)
+  return fields
+}
+
+const CASCADE_IMPACT_FIELDS = pydanticFields(readFileSync(MODELS_PY, 'utf8'), 'CascadeImpact')
+
+/**
+ * The integer counts the backend exposes -- exactly what the dialog must render.
+ * Exact annotation match, not a substring: `includes('int')` would also claim
+ * `Literal["print"]`, `Point`, or `Interval` and redden this block for a
+ * non-reason.
+ */
+const INT_ANNOTATIONS = ['int', 'int | None']
+const BACKEND_COUNT_FIELDS = Object.keys(CASCADE_IMPACT_FIELDS)
+  .filter((name) => INT_ANNOTATIONS.includes(CASCADE_IMPACT_FIELDS[name]))
+  .sort()
+
+/** Every `cascadeImpact.<field>` the dialog template actually reads. */
+const dialogReadFields = () => {
+  const source = readFileSync(DIALOG_VUE, 'utf8')
+  const template = source.slice(0, source.indexOf('<script'))
+  const found = [...template.matchAll(/cascadeImpact\.([a-zA-Z_][a-zA-Z0-9_]*)/g)]
+  return [...new Set(found.map((m) => m[1]))].sort()
+}
+
+/** A fixture whose KEYS come from the backend model, not from this test file. */
+const impactFrom = (values = {}) =>
+  Object.fromEntries(BACKEND_COUNT_FIELDS.map((name, i) => [name, values[name] ?? (i + 1) * 3]))
 
 describe('ProductDeleteDialog Component', () => {
   const createWrapper = (props = {}) => {
@@ -24,14 +96,7 @@ describe('ProductDeleteDialog Component', () => {
         id: 'test-product-id',
         name: 'Test Product'
       },
-      cascadeImpact: {
-        unfinished_projects: 3,
-        projects_count: 5,
-        unresolved_tasks: 10,
-        tasks_count: 20,
-        vision_documents_count: 2,
-        total_chunks: 50
-      },
+      cascadeImpact: impactFrom(),
       loading: false
     }
 
@@ -98,89 +163,74 @@ describe('ProductDeleteDialog Component', () => {
     })
   })
 
-  describe('Cascade Impact Display', () => {
-    it('shows unfinished projects count', async () => {
-      const cascadeImpact = {
-        unfinished_projects: 5,
-        projects_count: 10,
-        unresolved_tasks: 0,
-        tasks_count: 0,
-        vision_documents_count: 0,
-        total_chunks: 0
-      }
+  describe('Backend Contract', () => {
+    it('reads exactly the count fields the backend CascadeImpact model exposes', () => {
+      // Drift in EITHER direction fails: a field the dialog reads but the backend
+      // does not send (the BE-9356 bug -- six blanks), or a count the backend
+      // added that the dialog silently drops.
+      expect(dialogReadFields()).toEqual(BACKEND_COUNT_FIELDS)
+    })
 
-      const wrapper = createWrapper({ cascadeImpact })
+    it('declares a prop default whose keys all exist on the backend model', () => {
+      // cascadeImpact: undefined -> Vue resolves the component's own default.
+      const wrapper = createWrapper({ cascadeImpact: undefined })
+
+      expect(Object.keys(wrapper.props('cascadeImpact')).sort()).toEqual(BACKEND_COUNT_FIELDS)
+    })
+
+    it('backend model still exposes the three counts this dialog was built for', () => {
+      // Guards the parser itself: if it ever silently matched nothing, the two
+      // assertions above would compare two empty arrays and pass.
+      expect(BACKEND_COUNT_FIELDS).toEqual([
+        'total_projects',
+        'total_tasks',
+        'total_vision_documents'
+      ])
+    })
+  })
+
+  describe('Cascade Impact Display', () => {
+    it('renders a value for every count the backend sends', async () => {
+      const wrapper = createWrapper({ cascadeImpact: impactFrom() })
+      await flushPromises()
+
+      for (const [field, value] of Object.entries(impactFrom())) {
+        expect(wrapper.text(), `no rendered value for ${field}`).toContain(String(value))
+      }
+    })
+
+    it('shows the projects count', async () => {
+      const wrapper = createWrapper({ cascadeImpact: impactFrom({ total_projects: 5 }) })
       await flushPromises()
 
       expect(wrapper.text()).toContain('5')
-      expect(wrapper.text()).toContain('unfinished projects')
+      expect(wrapper.text()).toContain('projects')
     })
 
-    it('shows total projects count', async () => {
-      const cascadeImpact = {
-        unfinished_projects: 3,
-        projects_count: 8,
-        unresolved_tasks: 0,
-        tasks_count: 0,
-        vision_documents_count: 0,
-        total_chunks: 0
-      }
-
-      const wrapper = createWrapper({ cascadeImpact })
-      await flushPromises()
-
-      expect(wrapper.text()).toContain('8 total projects')
-    })
-
-    it('shows unresolved tasks count', async () => {
-      const cascadeImpact = {
-        unfinished_projects: 0,
-        projects_count: 0,
-        unresolved_tasks: 15,
-        tasks_count: 30,
-        vision_documents_count: 0,
-        total_chunks: 0
-      }
-
-      const wrapper = createWrapper({ cascadeImpact })
+    it('shows the tasks count', async () => {
+      const wrapper = createWrapper({ cascadeImpact: impactFrom({ total_tasks: 15 }) })
       await flushPromises()
 
       expect(wrapper.text()).toContain('15')
-      expect(wrapper.text()).toContain('unresolved tasks')
+      expect(wrapper.text()).toContain('tasks')
     })
 
-    it('shows vision documents count', async () => {
-      const cascadeImpact = {
-        unfinished_projects: 0,
-        projects_count: 0,
-        unresolved_tasks: 0,
-        tasks_count: 0,
-        vision_documents_count: 7,
-        total_chunks: 0
-      }
-
-      const wrapper = createWrapper({ cascadeImpact })
+    it('shows the vision documents count', async () => {
+      const wrapper = createWrapper({ cascadeImpact: impactFrom({ total_vision_documents: 7 }) })
       await flushPromises()
 
       expect(wrapper.text()).toContain('7')
       expect(wrapper.text()).toContain('vision documents')
     })
 
-    it('shows context chunks count', async () => {
-      const cascadeImpact = {
-        unfinished_projects: 0,
-        projects_count: 0,
-        unresolved_tasks: 0,
-        tasks_count: 0,
-        vision_documents_count: 0,
-        total_chunks: 100
-      }
-
-      const wrapper = createWrapper({ cascadeImpact })
+    it('does not claim the listed items are being deleted', async () => {
+      const wrapper = createWrapper()
       await flushPromises()
 
-      expect(wrapper.text()).toContain('100')
-      expect(wrapper.text()).toContain('context chunks')
+      // delete_product cascades nothing -- these items stay with the product in
+      // the trash and go only if it is never restored.
+      expect(wrapper.text()).not.toContain('This will delete:')
+      expect(wrapper.text()).toContain('Kept with this product in the trash')
     })
   })
 
@@ -324,22 +374,12 @@ describe('ProductDeleteDialog Component', () => {
     })
 
     it('hides cascade impact details while loading', async () => {
-      const wrapper = createWrapper({
-        loading: true,
-        cascadeImpact: {
-          unfinished_projects: 5,
-          projects_count: 10,
-          unresolved_tasks: 15,
-          tasks_count: 30,
-          vision_documents_count: 7,
-          total_chunks: 100
-        }
-      })
+      const wrapper = createWrapper({ loading: true, cascadeImpact: impactFrom() })
       await flushPromises()
 
       // Should show loading, not the cascade impact
       expect(wrapper.text()).toContain('Calculating impact')
-      expect(wrapper.text()).not.toContain('unfinished projects')
+      expect(wrapper.text()).not.toContain('Kept with this product in the trash')
     })
 
     it('shows cascade impact when loading is complete', async () => {
@@ -347,7 +387,7 @@ describe('ProductDeleteDialog Component', () => {
       await flushPromises()
 
       expect(wrapper.text()).not.toContain('Calculating impact')
-      expect(wrapper.text()).toContain('unfinished projects')
+      expect(wrapper.text()).toContain('Kept with this product in the trash')
     })
   })
 

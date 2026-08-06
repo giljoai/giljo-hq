@@ -30,7 +30,8 @@ from giljo_mcp.domain.project_status import (
 
 
 def test_enum_has_exactly_canonical_members() -> None:
-    """Canonical enum members; no STAGING, no ARCHIVED. BE-9157 added superseded."""
+    """Canonical enum members; no STAGING, no ARCHIVED. BE-9157 added superseded;
+    IMP-9258 added parked."""
 
     assert {s.value for s in ProjectStatus} == {
         "inactive",
@@ -40,12 +41,14 @@ def test_enum_has_exactly_canonical_members() -> None:
         "terminated",
         "deleted",
         "superseded",
+        "parked",
     }
 
 
 def test_enum_declaration_order_matches_postgres_enum() -> None:
     """Order matches the Postgres ENUM. ce_0008 declared the first six;
-    BE-9157's ce_0078 appended ``superseded`` LAST."""
+    BE-9157's ce_0078 appended ``superseded``; IMP-9258's ce_0083 appended
+    ``parked`` LAST."""
 
     assert [s.value for s in ProjectStatus] == [
         "inactive",
@@ -55,6 +58,7 @@ def test_enum_declaration_order_matches_postgres_enum() -> None:
         "terminated",
         "deleted",
         "superseded",
+        "parked",
     ]
 
 
@@ -128,13 +132,21 @@ def test_immutable_set_matches_legacy() -> None:
 
     Superseded is immutable — an already-replaced project takes no further
     generic metadata edits (only the supersede transition itself reaches it).
+    (IMP-9258) ``parked`` is deliberately NOT in this set -- it must stay a
+    two-way door so the generic update_project() write path can unpark it.
     """
 
     assert {s.value for s in IMMUTABLE_PROJECT_STATUSES} == {"completed", "cancelled", "superseded"}
+    assert "parked" not in IMMUTABLE_PROJECT_STATUSES
 
 
 def test_lifecycle_finished_matches_legacy() -> None:
-    """v1.2.1 BE-5037 set + (BE-9157) superseded: a closed, replaced state."""
+    """v1.2.1 BE-5037 set + (BE-9157) superseded: a closed, replaced state.
+
+    (IMP-9258) ``parked`` is deliberately NOT in this set -- it is its own
+    "hidden-but-not-finished" concept (own roadmap exclusion), not lumped in
+    with the terminal states, so it stays visible in default project lists.
+    """
 
     assert {s.value for s in LIFECYCLE_FINISHED_STATUSES} == {
         "completed",
@@ -143,16 +155,32 @@ def test_lifecycle_finished_matches_legacy() -> None:
         "deleted",
         "superseded",
     }
+    assert "parked" not in LIFECYCLE_FINISHED_STATUSES
+
+
+def test_parked_status_properties() -> None:
+    """(IMP-9258) ``parked`` is resumable (not finished, not immutable) and
+    agent-settable via update_project."""
+
+    assert ProjectStatus.PARKED.is_lifecycle_finished is False
+    assert ProjectStatus.PARKED.is_immutable is False
+    assert ProjectStatus.PARKED.is_user_mutable_via_mcp is True
+    assert ProjectStatus.PARKED.label == "Parked"
 
 
 def test_valid_update_set_matches_legacy() -> None:
-    """``VALID_UPDATE_STATUSES`` == legacy MCP-tool whitelist."""
+    """``VALID_UPDATE_STATUSES`` == legacy MCP-tool whitelist + (IMP-9258) parked.
+
+    Parked is agent-settable via update_project(status='parked') -- and
+    unpark (status='active'|'inactive') reuses the same whitelist.
+    """
 
     assert {s.value for s in VALID_UPDATE_STATUSES} == {
         "inactive",
         "active",
         "completed",
         "cancelled",
+        "parked",
     }
 
 

@@ -12,7 +12,7 @@ Request/response models for product operations.
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class TechStackSchema(BaseModel):
@@ -48,6 +48,13 @@ class TestConfigSchema(BaseModel):
 class ProductCreate(BaseModel):
     """Request model for creating a product"""
 
+    # FE-9320: a blank name is DELIBERATELY accepted here and must stay that way.
+    # The onboarding "existing codebase" door pre-creates a nameless draft so the
+    # agent can name it -- update_product_context writes product_name only while the
+    # existing name is blank, and skips it once non-empty (locked by
+    # tests/test_fe9200_tutorial_prompt_contract.py). A min_length here forces that
+    # door's fallback to "My product", which the agent can then never rename. The
+    # nameless-product problem is guarded at ACTIVATION instead, in the wizard.
     name: str = Field(..., max_length=255, description="Product name")
     description: str | None = Field(None, description="Product description")
     project_path: str | None = Field(None, description="File system path to product folder (required for agent export)")
@@ -57,7 +64,7 @@ class ProductCreate(BaseModel):
     core_features: str | None = Field(None, description="Core product features - Handover 0840i")
     brand_guidelines: str | None = Field(None, description="Brand & design guidelines for frontend agents")
     product_memory: dict[str, Any] | None = Field(
-        None, description="360 Memory storage (GitHub, learnings, context) - Handover 0135"
+        None, description="360 Memory storage (git integration, learnings, context) - Handover 0135"
     )
     target_platforms: list[str] | None = Field(
         default=["all"],
@@ -80,11 +87,26 @@ class ProductUpdate(BaseModel):
         None, description="Custom instructions for vision document extraction"
     )
     product_memory: dict[str, Any] | None = Field(
-        None, description="360 Memory storage (GitHub, learnings, context) - Handover 0135"
+        None,
+        description=(
+            "Not updatable via this endpoint — product memory has its own write path "
+            "(360 memory tools). Sending this field returns 422. (TSK-9265)"
+        ),
     )
     target_platforms: list[str] | None = Field(
         None, description="Target platforms: windows, linux, macos, android, ios, web, or all - Handover 0425"
     )
+
+    @field_validator("product_memory")
+    @classmethod
+    def _reject_product_memory(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        """TSK-9265: the service allowlist silently dropped this field while the
+        endpoint returned 200 — reject it honestly at the boundary instead."""
+        raise ValueError(
+            "product_memory cannot be updated via PUT /api/v1/products/{id}; "
+            "product memory is written through the 360 memory tools "
+            "(write_memory_entry / project closeout)."
+        )
 
 
 class ProductResponse(BaseModel):
@@ -107,11 +129,18 @@ class ProductResponse(BaseModel):
     test_config: TestConfigSchema | None = Field(None, description="Test configuration - Handover 0840i")
     core_features: str | None = Field(None, description="Core product features - Handover 0840i")
     brand_guidelines: str | None = Field(None, description="Brand & design guidelines for frontend agents")
+    # INF-9321: was write-only (ProductUpdate accepted it, ProductResponse never
+    # echoed it), so the wizard's patch map received undefined and VISUALLY
+    # cleared a user's typed custom instructions on analysis completion, and the
+    # form could never display the persisted value at all.
+    extraction_custom_instructions: str | None = Field(
+        None, description="Custom instructions for vision document extraction"
+    )
     is_active: bool = Field(default=False, description="Whether this product is currently active")
     project_path: str | None = Field(None, description="File system path to product folder (required for agent export)")
     product_memory: dict[str, Any] | None = Field(
-        default_factory=lambda: {"github": {}, "sequential_history": [], "context": {}},
-        description="360 Memory storage (GitHub, sequential_history, context) - Handover 0412",
+        default_factory=lambda: {"git_integration": {}, "sequential_history": [], "context": {}},
+        description="360 Memory storage (git integration, sequential_history, context) - Handover 0412",
     )
     target_platforms: list[str] | None = Field(
         default=["all"],

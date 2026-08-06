@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Project and session-related models for GiljoAI MCP.
+Project and session-related models for Giljo HQ.
 
 This module contains models for projects and taxonomy types. Projects are work
 initiatives that belong to products. Taxonomy types define classification

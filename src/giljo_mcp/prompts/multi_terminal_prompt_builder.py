@@ -11,19 +11,23 @@ instruction to call get_job_mission(). All behavioral protocol lives
 server-side.
 """
 
+from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.platform_registry import Platform
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
 from giljo_mcp.services.protocol_sections.orchestrator_body import render_capability_ladder
 
 
+# BE-9275b: derived from the branding constant instead of a fresh literal.
+_PREFIX = f"mcp__{MCP_ALIAS}__"
+
 # INF-6049b: the minimal MCP tool schemas an agent terminal needs to boot,
 # self-fetch its mission, and report. Kept deliberately small (NOT the full
 # orchestrator canonical set) so a seeded agent terminal loads only what it uses.
 _AGENT_SEED_TOOLS = (
-    "mcp__giljo_mcp__health_check",
-    "mcp__giljo_mcp__get_job_mission",
-    "mcp__giljo_mcp__report_progress",
-    "mcp__giljo_mcp__complete_job",
+    f"{_PREFIX}health_check",
+    f"{_PREFIX}get_job_mission",
+    f"{_PREFIX}report_progress",
+    f"{_PREFIX}complete_job",
 )
 
 # INF-6049c: coding-tool identifiers whose harness DEFERS MCP tool schemas behind
@@ -52,8 +56,8 @@ def build_agent_seed_lines(cli_tool: str, job_id: str) -> list[str]:
         lines.append('ToolSearch(query="select:' + ",".join(_AGENT_SEED_TOOLS) + '", max_results=10)')
         lines.extend(
             [
-                "mcp__giljo_mcp__health_check()",
-                f'mcp__giljo_mcp__get_job_mission(job_id="{job_id}")',
+                f"{_PREFIX}health_check()",
+                f'{_PREFIX}get_job_mission(job_id="{job_id}")',
             ]
         )
     else:
@@ -115,9 +119,9 @@ class MultiTerminalPromptBuilder:
                     "",
                 ]
             )
-        health_check_call = "mcp__giljo_mcp__health_check()" if tool == "claude-code" else "health_check()"
+        health_check_call = f"{_PREFIX}health_check()" if tool == "claude-code" else "health_check()"
         get_job_mission_call = (
-            f'mcp__giljo_mcp__get_job_mission(job_id="{orchestrator_id}")'
+            f'{_PREFIX}get_job_mission(job_id="{orchestrator_id}")'
             if tool == "claude-code"
             else f'get_job_mission(job_id="{orchestrator_id}")'
         )

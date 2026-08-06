@@ -118,6 +118,16 @@ export const SYSTEM_EVENT_ROUTES = {
     },
   },
 
+  // Tasks (REST status change / MCP update — FE-9274 P2, same class as BE-9246:
+  // the backend now broadcasts this on PATCH /tasks/{id}/status/ and update_task,
+  // but nothing repainted the list until this route existed).
+  'task:updated': {
+    handler: async () => {
+      const taskStore = useTaskStore()
+      await taskStore.fetchTasks()
+    },
+  },
+
   // Template updates (enable/disable, field changes) — dispatch to TemplateManager
   'template:updated': {
     handler: async (payload) => {

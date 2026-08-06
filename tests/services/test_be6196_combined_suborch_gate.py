@@ -201,7 +201,10 @@ def test_combined_suborch_prose() -> None:
     # Chain-member identity + position preserved (the injector tests assert these).
     assert "CH_SUB_ORCHESTRATOR" in chapter
     assert "project 2 of 3" in chapter
-    assert "search_threads" in chapter
+    # BE-9291 DELIBERATELY CHANGED this from `search_threads` to the FK discovery path.
+    # After BE-9291 the bare tool name survives here only in the ToolSearch bootstrap hint,
+    # so the old assertion passed without pinning discovery at all.
+    assert "hub_thread_id" in chapter
 
     # §14 combined flow: the sub-orch makes ONE ungated get_job_mission call at the
     # staging→implementation seam (no gate, no sleep-poll).

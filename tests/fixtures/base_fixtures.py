@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Base test fixtures for GiljoAI MCP test suite.
+Base test fixtures for Giljo HQ test suite.
 Provides reusable fixtures for database, models, and common test data.
 
 All tests now use PostgreSQL for consistency with production.

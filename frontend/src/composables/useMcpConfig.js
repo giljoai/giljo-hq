@@ -3,8 +3,10 @@
 /**
  * Shared MCP configuration generation composable (Handover 0855d)
  *
- * Extracted from AiToolConfigWizard.vue so both the standalone modal
- * and the setup wizard (SetupStep2Connect.vue) share one source of truth.
+ * The single source of truth for MCP connection commands/JSON. Consumed by the
+ * setup wizard's connect step and the /tools connect directory (both via
+ * ConnectToolCard.vue). Originally extracted from the standalone configurator
+ * modal that FE-9225 retired; the generators outlived it unchanged.
  *
  * Tool ID conventions:
  *   - Setup wizard uses: claude_code, codex_cli, gemini_cli, antigravity_cli
@@ -12,6 +14,8 @@
  *   - Claude Desktop uses claude_desktop in both (JSON output, distinct from Claude Code CLI).
  *   Both are supported via normalizeToolId().
  */
+
+import { MCP_ALIAS } from '@/branding'
 
 /**
  * Normalize tool IDs between wizard (claude_code) and legacy (claude) formats.
@@ -123,7 +127,7 @@ export function isBackendHttps(backendConfig) {
  * Generate Claude Code CLI MCP add command.
  */
 export function generateClaudeConfig(serverUrl, apiKey) {
-  return `claude mcp add --scope user --transport http giljo_mcp ${serverUrl}/mcp --header "Authorization: Bearer ${apiKey}"`
+  return `claude mcp add --scope user --transport http ${MCP_ALIAS} ${serverUrl}/mcp --header "Authorization: Bearer ${apiKey}"`
 }
 
 /**
@@ -157,7 +161,7 @@ export function generateClaudeDesktopConfig(serverUrl, apiKey, options = {}) {
   }
   const config = {
     mcpServers: {
-      giljo_mcp: {
+      [MCP_ALIAS]: {
         command: 'npx',
         args: [
           'mcp-remote',
@@ -177,7 +181,7 @@ export function generateClaudeDesktopConfig(serverUrl, apiKey, options = {}) {
  * Codex reads bearer token from env var at runtime.
  */
 export function generateCodexConfig(serverUrl) {
-  return `codex mcp add giljo_mcp --url ${serverUrl}/mcp --bearer-token-env-var GILJO_API_KEY`
+  return `codex mcp add ${MCP_ALIAS} --url ${serverUrl}/mcp --bearer-token-env-var GILJO_API_KEY`
 }
 
 // ─── OAuth-flavored generators (BE-6157) ──────────────────────────
@@ -193,7 +197,7 @@ export function generateCodexConfig(serverUrl) {
  * the URL, or you can authenticate at claude.ai and it syncs.
  */
 export function generateClaudeOAuthConfig(serverUrl) {
-  return `claude mcp add --transport http giljo_mcp ${serverUrl}/mcp --scope user`
+  return `claude mcp add --transport http ${MCP_ALIAS} ${serverUrl}/mcp --scope user`
 }
 
 /**
@@ -201,14 +205,14 @@ export function generateClaudeOAuthConfig(serverUrl) {
  * Codex auto-detects OAuth on add.
  */
 export function generateCodexOAuthConfig(serverUrl) {
-  return `codex mcp add giljo_mcp --url ${serverUrl}/mcp`
+  return `codex mcp add ${MCP_ALIAS} --url ${serverUrl}/mcp`
 }
 
 /**
  * Generate Gemini CLI MCP add command for the OAuth flow (no Authorization header).
  */
 export function generateGeminiOAuthConfig(serverUrl) {
-  return `gemini mcp add --scope user --transport http giljo_mcp ${serverUrl}/mcp`
+  return `gemini mcp add --scope user --transport http ${MCP_ALIAS} ${serverUrl}/mcp`
 }
 
 /**
@@ -216,7 +220,7 @@ export function generateGeminiOAuthConfig(serverUrl) {
  * OpenCode registers the server, then runs its own browser sign-in via `mcp auth`.
  */
 export function generateOpenCodeOAuthConfig(serverUrl) {
-  return `opencode mcp add giljo_mcp ${serverUrl}/mcp && opencode mcp auth giljo_mcp`
+  return `opencode mcp add ${MCP_ALIAS} ${serverUrl}/mcp && opencode mcp auth ${MCP_ALIAS}`
 }
 
 /**
@@ -234,7 +238,7 @@ export function generateClaudeDesktopOAuthConfig() {
  * Generate Gemini CLI MCP add command.
  */
 export function generateGeminiConfig(serverUrl, apiKey) {
-  return `gemini mcp add -t http -H "Authorization: Bearer ${apiKey}" giljo_mcp ${serverUrl}/mcp`
+  return `gemini mcp add -t http -H "Authorization: Bearer ${apiKey}" ${MCP_ALIAS} ${serverUrl}/mcp`
 }
 
 /**
@@ -243,7 +247,7 @@ export function generateGeminiConfig(serverUrl, apiKey) {
  * `mcp auth` browser step is needed when a key is supplied.
  */
 export function generateOpenCodeConfig(serverUrl, apiKey) {
-  return `opencode mcp add giljo_mcp ${serverUrl}/mcp --header "Authorization: Bearer ${apiKey}"`
+  return `opencode mcp add ${MCP_ALIAS} ${serverUrl}/mcp --header "Authorization: Bearer ${apiKey}"`
 }
 
 /**
@@ -255,7 +259,7 @@ export function generateOpenCodeConfig(serverUrl, apiKey) {
 // eslint-disable-next-line giljo-internal/no-orphaned-exports -- referenced internally by generateConfigForTool() and imported in tests/unit/composables/useMcpConfig.spec.js (outside src/)
 export function generateGenericMcpConfig(serverUrl, apiKey) {
   return JSON.stringify({
-    'giljo_mcp': {
+    [MCP_ALIAS]: {
       transport: 'streamable-http',
       url: `${serverUrl}/mcp`,
       headers: { Authorization: `Bearer ${apiKey}` },
@@ -268,7 +272,7 @@ export function generateGenericMcpConfig(serverUrl, apiKey) {
  *
  * Source of truth: this output MUST be byte-identical to the backend generator
  * api/endpoints/ai_tools.py → get_antigravity_config() (commit 28cb6c0b4).
- * Shape: { mcpServers: { giljo_mcp: { serverUrl, headers: { Authorization } } } }
+ * Shape: { mcpServers: { giljo_hq: { serverUrl, headers: { Authorization } } } }
  * Key order and 2-space indent are significant — see byte-parity spec.
  *
  * This `serverUrl`-based config is the SUPPORTED connection path (streamable HTTP,
@@ -287,7 +291,7 @@ export function generateGenericMcpConfig(serverUrl, apiKey) {
 export function generateAntigravityConfig(serverUrl, apiKey) {
   return JSON.stringify({
     mcpServers: {
-      giljo_mcp: {
+      [MCP_ALIAS]: {
         serverUrl: `${serverUrl}/mcp`,
         headers: {
           Authorization: `Bearer ${apiKey}`,

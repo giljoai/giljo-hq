@@ -163,6 +163,20 @@ export function useChainContext() {
     orderedIds.value.map((pid, i) => {
       const proj = projects.value.find((p) => p.id === pid)
       const status = statusFor(pid)
+      const isCompleted = status === 'completed'
+      const isWorking = WORKING_STATUSES.has(status)
+      // isPlanning (FE-9239): the member is actively being staged, so the tab strip
+      // can show PLANNING instead of a generic WAITING. Prefer the live WS-updated
+      // projectStateStore flags (isStaging/isStaged) — they react instantly to
+      // staging events without waiting for a project refetch — and fall back to the
+      // resolved project record's staging_status only when no live state exists yet.
+      // 'staging_complete' (mission written, Implement lit, no workers yet) is
+      // deliberately NOT planning by default — it renders WAITING pending design
+      // review (see ProjectTabStrip.vue badgeState for the one-line change spot).
+      const liveState = projectStateStore.getProjectState(pid)
+      const stagingActive = liveState
+        ? Boolean(liveState.isStaging || liveState.isStaged)
+        : proj?.staging_status === 'staging' || proj?.staging_status === 'staged'
       return {
         projectId: pid,
         order: i,
@@ -172,12 +186,13 @@ export function useChainContext() {
         productId: proj?.product_id || '',
         status,
         isCurrent: pid === currentPid.value,
-        isCompleted: status === 'completed',
+        isCompleted,
         // needsReview: completed by the conductor AND not yet reviewed client-side.
         // 'awaiting_review' is a dead state (no BE code ever writes it) — ignore it.
-        needsReview: status === 'completed' && !sequenceRunStore.isReviewed(run.value?.id, pid),
+        needsReview: isCompleted && !sequenceRunStore.isReviewed(run.value?.id, pid),
         isStarted: status !== '' && status !== 'pending',
-        isWorking: WORKING_STATUSES.has(status),
+        isWorking,
+        isPlanning: stagingActive && !isCompleted && !isWorking,
       }
     }),
   )

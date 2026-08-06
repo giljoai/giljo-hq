@@ -659,7 +659,7 @@ class TestResponseCeilingPreservesHasFullBody:
     def test_ceiling_sets_truncated_flag_after_field_drop(self):
         """_apply_response_ceiling must set entry['truncated']=True when it
         drops fields, AND must not strip the unrelated has_full_body flag."""
-        from giljo_mcp.tools.context_tools.fetch_context import (
+        from giljo_mcp.tools.context_tools._response_ceiling import (
             RESPONSE_CHAR_CEILING,
             _apply_response_ceiling,
         )
@@ -684,9 +684,9 @@ class TestResponseCeilingPreservesHasFullBody:
 
     def test_ceiling_does_not_rename_truncated_to_has_full_body(self):
         """Defensive: prove the rename in get_360_memory.py did NOT bleed
-        into fetch_context.py. The ceiling path must still emit the literal
+        into the ceiling path. It must still emit the literal
         key 'truncated', not 'has_full_body', when it drops fields."""
-        from giljo_mcp.tools.context_tools.fetch_context import (
+        from giljo_mcp.tools.context_tools._response_ceiling import (
             _apply_response_ceiling,
         )
 

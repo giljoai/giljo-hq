@@ -4,10 +4,10 @@
 # [CE] Community Edition.
 
 """
-Centralized Exception Hierarchy for GiljoAI MCP
+Centralized Exception Hierarchy for Giljo HQ
 
 This module provides a standardized exception hierarchy for consistent error handling
-across the entire GiljoAI MCP system.
+across the entire Giljo HQ system.
 """
 
 from datetime import UTC
@@ -15,7 +15,7 @@ from datetime import UTC
 
 class BaseGiljoError(Exception):
     """
-    Base exception for all GiljoAI MCP errors.
+    Base exception for all Giljo HQ errors.
 
     All custom exceptions in the system should inherit from this base class
     to enable consistent error handling and categorization.

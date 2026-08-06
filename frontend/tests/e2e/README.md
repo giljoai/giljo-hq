@@ -1,6 +1,6 @@
 # Playwright E2E Tests
 
-This directory contains end-to-end tests for the GiljoAI MCP frontend, focusing on critical user workflows including project staging, agent orchestration, and real-time WebSocket updates.
+This directory contains end-to-end tests for the Giljo HQ frontend, focusing on critical user workflows including project staging, agent orchestration, and real-time WebSocket updates.
 
 ## Test Suite Overview
 
@@ -300,4 +300,4 @@ When adding new E2E tests:
 
 ## License
 
-GiljoAI MCP - All rights reserved
+Giljo HQ - All rights reserved

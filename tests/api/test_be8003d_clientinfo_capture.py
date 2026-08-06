@@ -194,13 +194,15 @@ class TestGetSessionCapabilities:
 
         caps = get_session_capabilities(self._make_ctx(supports=True))
         # BE-9035b added the DETECTED "harness" key (generic here — no clientInfo).
-        assert caps == {"elicitation": True, "tasks": True, "harness": "generic"}
+        # BE-9327 added the DETECTED "preset" key, always present and None when no
+        # preset applies (as here: no clientInfo, so nothing to target).
+        assert caps == {"elicitation": True, "tasks": True, "harness": "generic", "preset": None}
 
     def test_both_capabilities_false_when_client_declines(self):
         from api.endpoints.mcp_tools._base import get_session_capabilities
 
         caps = get_session_capabilities(self._make_ctx(supports=False))
-        assert caps == {"elicitation": False, "tasks": False, "harness": "generic"}
+        assert caps == {"elicitation": False, "tasks": False, "harness": "generic", "preset": None}
 
     def test_probe_failure_never_raises(self):
         from api.endpoints.mcp_tools._base import get_session_capabilities
@@ -209,7 +211,7 @@ class TestGetSessionCapabilities:
         ctx.session.check_client_capability.side_effect = RuntimeError("no session")
         ctx.session.client_params.clientInfo = None
         caps = get_session_capabilities(ctx)
-        assert caps == {"elicitation": False, "tasks": False, "harness": "generic"}
+        assert caps == {"elicitation": False, "tasks": False, "harness": "generic", "preset": None}
 
     def test_harness_key_resolves_claude_code_from_client_info(self):
         """BE-9035b: a rich claude-code clientInfo surfaces as harness='claude-code'."""

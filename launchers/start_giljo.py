@@ -6,7 +6,7 @@
 # [CE] Community Edition.
 
 """
-GiljoAI MCP Universal Launcher
+Giljo HQ Universal Launcher
 Starts all services with proper dependency ordering
 """
 
@@ -80,7 +80,7 @@ class GiljoLauncher:
     def start_all_services(self):
         """Start all services in order"""
         print("=" * 60)
-        print("   Starting GiljoAI MCP Services")
+        print("   Starting Giljo HQ Services")
         print("=" * 60)
         print()
 

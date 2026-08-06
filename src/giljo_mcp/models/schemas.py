@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Response schemas for GiljoAI MCP API endpoints.
+Response schemas for Giljo HQ API endpoints.
 
 Professional, production-grade Pydantic models for API responses.
 Centralized location for all response schemas to ensure consistency

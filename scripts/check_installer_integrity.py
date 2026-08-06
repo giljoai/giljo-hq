@@ -17,6 +17,14 @@ fresh-machine installs in v1.1.9.x:
      'python startup.py', not 'python -m api.run_api'. The latter skips
      frontend, browser auto-open, and migrations.
 
+  2b. The standalone scripts/start-giljoai.bat launcher must obey the same
+     entry-point rule. Only the heredoc inside install.ps1 was ever guarded,
+     so the checked-in launcher drifted unnoticed to 'python -m api.run_api'
+     plus an unconditional 'pause' -- the exact shape check 2 exists to
+     forbid. It also has to survive being run by double-click, so a failure
+     must pause instead of flashing the window shut, while success must NOT
+     pause (that leaves a dead window sitting on a running server).
+
   3. startup.py must defer third-party imports (click, colorama) until
      AFTER ensure_project_virtualenv() runs. Otherwise 'python startup.py'
      from a fresh shell crashes with ModuleNotFoundError before the venv
@@ -54,6 +62,7 @@ INSTALLER_SCRIPTS = [
 INSTALL_PS1 = REPO_ROOT / "scripts" / "install.ps1"
 INSTALL_SH = REPO_ROOT / "scripts" / "install.sh"
 STARTUP_PY = REPO_ROOT / "startup.py"
+STANDALONE_BAT = REPO_ROOT / "scripts" / "start-giljoai.bat"
 
 UTF8_BOM = b"\xef\xbb\xbf"
 
@@ -94,6 +103,100 @@ def check_bat_entry_point() -> list[str]:
             "invoke 'python startup.py'. The launcher and the post-install "
             "text instruction must run the same canonical entry point."
         )
+    return failures
+
+
+def find_unconditional_pause(bat_text: str) -> list[int]:
+    """Line numbers of every 'pause' a .bat reaches without a preceding test.
+
+    cmd has no indentation rules, so "is this pause on the success path"
+    is answered structurally: a pause is conditional when it sits inside a
+    parenthesised 'if'/'for' block, or when it trails an 'if' on one line.
+    Anything else runs unconditionally.
+
+    Tracked by paren depth rather than by regex over the whole file so that
+    a pause nested two blocks deep still counts as guarded.
+    """
+    depth = 0
+    offenders: list[int] = []
+
+    for line_no, raw in enumerate(bat_text.splitlines(), start=1):
+        line = raw.strip()
+        lowered = line.lower()
+        if not line or lowered.startswith(("rem ", "::", "@rem ")):
+            continue
+
+        # ')' closes a block; ') else (' closes and reopens, so depth is unchanged.
+        if line.startswith(")"):
+            if not line.endswith("("):
+                depth = max(0, depth - 1)
+            continue
+
+        if re.match(r"^@?(if|for)\b", lowered) and line.endswith("("):
+            depth += 1
+            continue
+
+        # A bare 'pause' (not 'if errorlevel 1 pause') outside every block.
+        if re.match(r"^@?pause\b", lowered) and depth == 0:
+            offenders.append(line_no)
+
+    return offenders
+
+
+def check_standalone_bat() -> list[str]:
+    """The checked-in launcher must run the canonical entry point, like the heredoc.
+
+    check_bat_entry_point() reads install.ps1 -- the heredoc that WRITES a
+    launcher into the install dir. The launcher committed at
+    scripts/start-giljoai.bat is a second, unguarded file that also ships to
+    users, and it drifted to 'python -m api.run_api'. Same rule, same reason
+    (frontend launch, browser auto-open, migrations), now enforced on both.
+    """
+    failures: list[str] = []
+    if not STANDALONE_BAT.exists():
+        return failures
+    text = STANDALONE_BAT.read_text(encoding="utf-8", errors="replace")
+
+    if "python -m api.run_api" in text:
+        failures.append(
+            "scripts/start-giljoai.bat: invokes 'python -m api.run_api'. It MUST "
+            "invoke 'startup.py' so the launcher runs the canonical entry point "
+            "(frontend launch, browser auto-open, migrations), matching the "
+            "launcher install.ps1 writes."
+        )
+    if "startup.py" not in text:
+        failures.append(
+            "scripts/start-giljoai.bat: does not invoke 'startup.py'. The "
+            "committed launcher and the one install.ps1 writes must run the "
+            "same canonical entry point."
+        )
+    # The launcher sits in scripts/, one level below the venv and startup.py.
+    if not re.search(r'cd\s+/d\s+"%~dp0\.\.', text):
+        failures.append(
+            'scripts/start-giljoai.bat: does not cd to the parent of scripts/ '
+            '(expected: cd /d "%~dp0.."). The venv and startup.py live in the '
+            "repository root, so a launcher that stays in scripts/ cannot find "
+            "either of them."
+        )
+    if not re.search(r"venv[\\/]Scripts[\\/]python\.exe", text):
+        failures.append(
+            "scripts/start-giljoai.bat: does not launch via "
+            r"'venv\Scripts\python.exe'. Calling a bare 'python' runs whatever "
+            "is first on PATH -- on a fresh Windows that is the Store stub, "
+            "which prints 'Python was not found' and opens the Store."
+        )
+
+    unconditional = find_unconditional_pause(text)
+    if unconditional:
+        lines = ", ".join(str(n) for n in unconditional)
+        failures.append(
+            f"scripts/start-giljoai.bat:{lines}: 'pause' runs unconditionally, so "
+            "it also fires on the SUCCESS path and leaves a 'Press any key' "
+            "window sitting on top of a running server. Pause only inside a "
+            "failure branch (see the errorlevel block), so a double-clicked "
+            "launcher still shows its error instead of flashing shut."
+        )
+
     return failures
 
 
@@ -220,6 +323,7 @@ def main() -> int:
     all_failures: list[str] = []
     all_failures += check_no_bom()
     all_failures += check_bat_entry_point()
+    all_failures += check_standalone_bat()
     all_failures += check_startup_import_order()
     all_failures += check_staging_inside_target()
     all_failures += check_no_errexit_fatal_shopt()

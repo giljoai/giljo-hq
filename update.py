@@ -234,7 +234,7 @@ def _ensure_dependencies() -> bool:
 
 def main() -> int:
     print()
-    print(f"{Fore.YELLOW}  GiljoAI MCP — post-update{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}  Giljo HQ — post-update{Style.RESET_ALL}")
     print()
 
     # --- Ensure dependencies are installed ---

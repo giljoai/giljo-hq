@@ -7,7 +7,7 @@
 
 Closes seq 100 (load_dotenv at module scope) and seq 97
 (api/__init__.py import-time DATABASE_URL mutation) from
-handovers/ACTION_REQUIRED_AUDIT.md.
+the ACTION_REQUIRED audit.
 
 Importing `api` and `api.app` MUST NOT mutate `os.environ` or read any
 `.env` file. All such side effects belong in the FastAPI lifespan.

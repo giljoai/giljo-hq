@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import func, select
 
+from giljo_mcp.database import tenant_session_context
 from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
 from giljo_mcp.models import Product, Project, Task
@@ -88,9 +89,19 @@ def _svc(db_manager, db_session) -> RoadmapService:
 
 
 async def _count_items(db_session, tenant_key: str) -> int:
-    res = await db_session.execute(
-        select(func.count()).select_from(RoadmapItem).where(RoadmapItem.tenant_key == tenant_key)
-    )
+    """Count a tenant's roadmap items under an explicit tenant context.
+
+    SEC-9276: some tests (e.g. test_cross_product_project_id_rejected) seed a
+    SECOND, different tenant in the same shared db_session after the first, which
+    leaves the session's flush-derived tenant context stale relative to this call's
+    explicit tenant_key predicate. tenant_session_context re-anchors the read to
+    the tenant actually being asked about -- the guard stays live and enforced,
+    it is simply told which tenant this particular query is scoped to.
+    """
+    with tenant_session_context(db_session, tenant_key):
+        res = await db_session.execute(
+            select(func.count()).select_from(RoadmapItem).where(RoadmapItem.tenant_key == tenant_key)
+        )
     return res.scalar_one()
 
 
@@ -625,6 +636,27 @@ async def test_get_roadmap_drops_cancelled_and_terminated_projects(db_manager, d
 
     read = await svc.get_roadmap(tenant_key=seed["tenant_key"])
     assert read["items"] == []
+
+
+async def test_get_roadmap_drops_parked_project(db_manager, db_session):
+    """IMP-9258: a parked project is dropped from the canned roadmap plan too --
+    its own exclusion (NOT LIFECYCLE_FINISHED_STATUSES membership, since parked
+    is resumable and stays visible in normal project lists elsewhere)."""
+    seed = await _seed(db_session)
+    svc = _svc(db_manager, db_session)
+    await svc.upsert_metadata(
+        items=[{"item_type": "project", "project_id": seed["project_id"], "sort_order": 0}],
+        tenant_key=seed["tenant_key"],
+    )
+    proj = (await db_session.execute(select(Project).where(Project.id == seed["project_id"]))).scalar_one()
+    proj.status = ProjectStatus.PARKED
+    await db_session.commit()
+
+    read = await svc.get_roadmap(tenant_key=seed["tenant_key"])
+    assert read["items"] == []
+    # The roadmap_item row itself is untouched -- unparking would surface it
+    # again without a re-rank, mirroring the completed-project behavior above.
+    assert await _count_items(db_session, seed["tenant_key"]) == 1
 
 
 async def test_get_roadmap_drops_soft_deleted_project(db_manager, db_session):

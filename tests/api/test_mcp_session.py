@@ -79,15 +79,21 @@ async def _drive_middleware_with_body(
     middleware,
     headers: list[tuple[bytes, bytes]],
     body: bytes,
+    query_string: bytes = b"",
 ) -> tuple[int, dict[str, str], bytes]:
-    """Drive a single ASGI request through ``middleware`` with the given JSON body."""
+    """Drive a single ASGI request through ``middleware`` with the given JSON body.
+
+    ``query_string`` mirrors the ASGI key of the same name (BE-9253 uses it to
+    drive the ``/mcp?profile=...`` selection vehicle). ASGI carries the query
+    separately from ``path``/``raw_path``, so those stay bare.
+    """
     scope = {
         "type": "http",
         "asgi": {"version": "3.0", "spec_version": "2.3"},
         "method": "POST",
         "path": "/mcp",
         "raw_path": b"/mcp",
-        "query_string": b"",
+        "query_string": query_string,
         "headers": headers,
         "client": ("127.0.0.1", 12345),
         "server": ("test", 80),

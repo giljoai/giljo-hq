@@ -1,8 +1,8 @@
 @echo off
-REM GiljoAI MCP Windows Launcher
+REM Giljo HQ Windows Launcher
 
 echo ===============================================
-echo    GiljoAI MCP Launcher
+echo    Giljo HQ Launcher
 echo ===============================================
 echo.
 

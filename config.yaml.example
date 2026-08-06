@@ -1,4 +1,4 @@
-# GiljoAI MCP Orchestrator Configuration v2.0
+# Giljo HQ Orchestrator Configuration v2.0
 # Copy this file to config.yaml and adjust settings as needed
 # This configuration is production-ready with unified port architecture
 #
@@ -53,7 +53,7 @@ tenant:
 
 # Application Configuration
 app:
-  name: "GiljoAI MCP Orchestrator"
+  name: "Giljo HQ Orchestrator"
   version: "1.0.0"
 
   # Directory paths (relative or absolute)

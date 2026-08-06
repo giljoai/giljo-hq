@@ -6,7 +6,7 @@
 """
 SEC-0005c Property B regression suite -- "tenant_key is required".
 
-Source of truth for the endpoint inventory: handovers/SEC-0005c_sweep_taxonomy.md
+Source of truth for the endpoint inventory: the SEC-0005c sweep taxonomy
 (12 TENANT-LEVEL rows -- BE-9000b removed 4 dead-route rows: configuration
 GET/PUT/DELETE /tenant and settings PUT /network). For every row this suite
 asserts:
@@ -147,9 +147,13 @@ _TENANT_LEVEL_INVENTORY: list[tuple[str, str, str, str, str]] = [
     ("user_settings", "/api/v1/user", "DELETE", "/settings/cookie-domains", "service_injected"),
     ("user_settings", "/api/v1/user", "GET", "/settings/headless-launch", "service_injected"),
     ("user_settings", "/api/v1/user", "PUT", "/settings/headless-launch", "service_injected"),
-    # settings router (1 endpoint). Tenant flows from current_user.tenant_key
-    # into SettingsService at the handler; service_injected.
+    # settings router (2 endpoints). Tenant flows from current_user.tenant_key
+    # into SettingsService (or, for SaaS, TenantConfigurationService) at the
+    # handler; service_injected. FE-9241 moved agent-silence-threshold PUT here
+    # from the CE-mode-gated list -- it's now reachable (and tenant-resolving)
+    # in every edition, not require_ce_mode-gated.
     ("settings", "/api/v1/settings", "PUT", "/general", "service_injected"),
+    ("settings", "/api/v1/settings", "PUT", "/system/agent-silence-threshold", "service_injected"),
 ]
 
 
@@ -406,7 +410,6 @@ def test_no_admin_gated_endpoint_lacks_tenant_resolution():
         ("configuration", "POST", "/ssl/cert/reference"),
         ("configuration", "GET", "/network-info"),
         ("configuration", "GET", "/health/database"),
-        ("settings", "PUT", "/system/agent-silence-threshold"),
     ]
     classified: set[tuple[str, str, str]] = set()
     for module_attr, _prefix, method, path_suffix, _gate in _TENANT_LEVEL_INVENTORY:
@@ -462,6 +465,6 @@ def test_no_admin_gated_endpoint_lacks_tenant_resolution():
         "Bucket-(c) regression: the following admin-gated endpoints are not "
         "classified in the SEC-0005c sweep taxonomy. Add them to either the "
         "lane-(a) inventory in this file or the lane-(b) inventory in "
-        "test_ce_mode_required.py (and update handovers/SEC-0005c_sweep_taxonomy.md):\n"
+        "test_ce_mode_required.py (and update the SEC-0005c sweep taxonomy):\n"
         + "\n".join(f"  - {m}: {meth} {path}" for (m, meth, path) in sorted(unclassified))
     )

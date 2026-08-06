@@ -189,11 +189,13 @@ async def test_empty_or_none_commits_pass_none_to_closeout(
     """Regression (reviewer Finding #1): an empty/None manual closeout must forward
     ``git_commits=None`` to ``close_project_and_update_memory``, NOT ``[]``.
 
-    Passing ``[]`` sets ``agent_supplied_commits=True`` downstream, which silently
-    suppresses the SaaS GitHub auto-fetch (``elif GILJO_MODE == 'saas'``). FE-6018's
-    scope promised not to touch that path, so the empty manual case must preserve the
-    pre-FE-6018 ``None`` signal. Asserting the call-arg contract proves the auto-fetch
-    trigger is intact without needing a SaaS environment.
+    Passing ``[]`` sets ``agent_supplied_commits=True`` downstream, which suppresses
+    the ``git_unavailable_reason`` marker (BE-9256: the server is passive -- it never
+    fetches commits from a git host itself; ``None`` vs ``[]`` now only distinguishes
+    "commits not collected" from "explicitly none in range"). FE-6018's scope promised
+    not to touch that distinction, so the empty manual case must preserve the
+    pre-FE-6018 ``None`` signal. Asserting the call-arg contract proves that
+    distinction is intact.
     """
     spy = AsyncMock(return_value={"sequence_number": 1, "git_commits_count": 0, "memory_updated": True})
     monkeypatch.setattr("giljo_mcp.tools.project_closeout.close_project_and_update_memory", spy)

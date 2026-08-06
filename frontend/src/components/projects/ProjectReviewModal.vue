@@ -271,7 +271,10 @@
               class="pa-0 smooth-border project-comms-card"
               data-testid="project-comms-timeline"
             >
-              <ThreadTimeline :thread-id="boundThread.thread_id" readonly />
+              <!-- FE-9289c: the `readonly` prop is gone. Its only job was hiding the
+                   waiting/read/sent filter pills, and those are deleted — the pane has
+                   no interactive chrome left to hide in either mode. -->
+              <ThreadTimeline :thread-id="boundThread.thread_id" />
             </v-card>
             <p v-else class="text-body-small text-muted-a11y" data-testid="project-comms-empty">
               No project thread yet.
@@ -357,7 +360,7 @@
             <div v-if="gitCommits.length">
               <div v-for="commit in gitCommits" :key="commit.sha" class="d-flex align-center mb-1 commit-row">
                 <span class="text-mono commit-sha mr-3">{{ commit.sha?.slice(0, 8) }}</span>
-                <span class="text-body-medium">{{ commit.message }}</span>
+                <span class="text-body-medium">{{ commitTitle(commit) }}</span>
               </div>
             </div>
             <p v-else class="text-body-small text-muted-a11y">No commits recorded</p>
@@ -385,6 +388,7 @@ import { useClipboard } from '@/composables/useClipboard'
 import { useFormatDate } from '@/composables/useFormatDate'
 import { getAgentColor } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
+import { commitTitle } from '@/utils/gitCommitDisplay'
 import api from '@/services/api'
 import { useProjectStateStore } from '@/stores/projectStateStore'
 import { useProjectBoundThread } from '@/composables/useProjectBoundThread'

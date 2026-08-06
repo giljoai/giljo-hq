@@ -18,7 +18,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models import Message, ProductMemoryEntry, Project
-from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES, AgentExecution, AgentJob
 from giljo_mcp.models.tasks import MessageRecipient
 
 
@@ -238,6 +238,10 @@ class AgentJobRepository:
         """
         Find the latest non-terminal execution for a job.
 
+        BE-9292b: bound to the shared ``TERMINAL_EXECUTION_STATUSES`` so
+        "non-terminal" has one definition. Note 'silent' is NOT terminal — a
+        stalled agent remains completable.
+
         Args:
             session: Async database session
             tenant_key: Tenant key for isolation
@@ -251,7 +255,7 @@ class AgentJobRepository:
             .where(
                 AgentExecution.job_id == job_id,
                 AgentExecution.tenant_key == tenant_key,
-                AgentExecution.status.not_in(["complete", "closed", "decommissioned"]),
+                AgentExecution.status.not_in(TERMINAL_EXECUTION_STATUSES),
             )
             .order_by(AgentExecution.started_at.desc())
             .limit(1)
@@ -337,7 +341,7 @@ class AgentJobRepository:
                 AgentJob.tenant_key == tenant_key,
                 AgentExecution.tenant_key == tenant_key,
                 AgentExecution.agent_display_name == "orchestrator",
-                AgentExecution.status.not_in(["complete", "closed", "decommissioned"]),
+                AgentExecution.status.not_in(TERMINAL_EXECUTION_STATUSES),
             )
             .limit(1)
         )
@@ -413,7 +417,7 @@ class AgentJobRepository:
             AgentExecution.job_id == job_id,
             AgentExecution.tenant_key == tenant_key,
             AgentExecution.id != exclude_execution_id,
-            AgentExecution.status.not_in(["complete", "closed", "decommissioned"]),
+            AgentExecution.status.not_in(TERMINAL_EXECUTION_STATUSES),
         )
         result = await session.execute(stmt)
         return result.scalar_one_or_none()

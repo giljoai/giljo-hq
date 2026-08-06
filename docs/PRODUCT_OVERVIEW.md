@@ -1,10 +1,10 @@
-# GiljoAI MCP: Product Overview
+# Giljo HQ: Product Overview
 
 *Last updated: 2026-07-17*
 
-## What Is GiljoAI MCP
+## What Is Giljo HQ
 
-GiljoAI MCP is a context engineering platform for AI-assisted software development. It stores your product knowledge, generates focused prompts, and coordinates your agents through the Model Context Protocol (MCP). It never writes code or reasons about your codebase itself. Your own AI coding tool does that work, using your own subscription.
+Giljo HQ, a GiljoAI product, is a context engineering platform for AI-assisted software development. It stores your product knowledge, generates focused prompts, and coordinates your agents through the Model Context Protocol (MCP). It never writes code or reasons about your codebase itself. Your own AI coding tool does that work, using your own subscription.
 
 ## Who It Is For
 
@@ -14,7 +14,7 @@ GiljoAI MCP is a context engineering platform for AI-assisted software developme
 | Developer building production software across many sessions | Persistent product context and 360 Memory that carry across projects |
 | Anyone coordinating a crew of agents | A shared product definition, a ranked roadmap, task boards, and a message hub with an audit trail |
 
-GiljoAI MCP is for developers who already use AI coding tools and want a structured orchestration layer on top of them.
+Giljo HQ is for developers who already use AI coding tools and want a structured orchestration layer on top of them.
 
 ## Core Value Proposition
 
@@ -24,7 +24,7 @@ Without GiljoAI, each AI session starts blank. You re-explain your tech stack, c
 
 The platform also coordinates multi-agent teams. Rather than running one large context window, GiljoAI distributes context to the right agent for each role: an implementer gets code-relevant context, a reviewer gets quality-relevant context, a documenter gets specification context. Each agent gets exactly what it needs for its role.
 
-GiljoAI MCP sits at the intersection of product thinking and development. Whether you are a developer learning to define what you build before you build it, or a product manager turning a specification into working software, the platform gives you a structured path from vision to execution. The clearer your product definition, the more effective every agent session becomes.
+Giljo HQ sits at the intersection of product thinking and development. Whether you are a developer learning to define what you build before you build it, or a product manager turning a specification into working software, the platform gives you a structured path from vision to execution. The clearer your product definition, the more effective every agent session becomes.
 
 ---
 
@@ -65,4 +65,4 @@ GiljoAI MCP sits at the intersection of product thinking and development. Whethe
 Once you are signed in, the in-app **Setup Wizard** walks you through four steps: choose your tools, connect each one, install your skills and agent templates, and launch. An animated welcome tour then opens and helps you create your first product. The **Getting Started** chapter walks through all of it.
 
 > [!CE]
-> Self-hosting? Install GiljoAI MCP first by following [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md), then sign in and run the Setup Wizard.
+> Self-hosting? Install Giljo HQ first by following [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md), then sign in and run the Setup Wizard.

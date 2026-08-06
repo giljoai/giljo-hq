@@ -34,6 +34,24 @@ vi.mock('./useToast', () => ({
   useToast: () => ({ showToast: mockShowToast }),
 }))
 
+// FE-9289c: the composable now routes on handover click and reads the thread name
+// from the store for the notification body.
+const mockRouterPush = vi.fn(() => Promise.resolve())
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: mockRouterPush }),
+}))
+
+const mockThreadsById = new Map()
+vi.mock('@/stores/commHubStore', () => ({
+  useCommHubStore: () => ({ threadsById: mockThreadsById }),
+}))
+
+// FE-9289c: a handover also drops a persistent entry in the notification bell.
+const mockAddNotification = vi.fn()
+vi.mock('@/stores/notifications', () => ({
+  useNotificationStore: () => ({ addNotification: mockAddNotification }),
+}))
+
 // Minimal Notification mock
 let NotificationConstructorSpy
 function resetNotificationMock(permission = 'granted') {
@@ -60,6 +78,8 @@ describe('useHubNotifications', () => {
     vi.clearAllMocks()
     resetNotificationMock('granted')
     mockIsHubPresent.value = false
+    mockThreadsById.clear()
+    mockAddNotification.mockClear()
     mockCurrentUser.value = {
       id: 'user-001',
       display_name: 'Patrik',
@@ -236,6 +256,83 @@ describe('useHubNotifications', () => {
 
     expect(mockShowToast).toHaveBeenCalledOnce()
     expect(NotificationConstructorSpy).not.toHaveBeenCalled()
+  })
+
+  // ── FE-9289c: persistent bell entry (survives navigation) ──
+
+  it('drops a persistent handover entry on baton, deduped by a stable per-thread id', async () => {
+    mockIsHubPresent.value = false
+    const { useHubNotifications } = await import('./useHubNotifications')
+    useHubNotifications()
+
+    dispatchHubEvent('hub:thread_update', { thread_id: 'thread-9', next_action_owner: 'user-001' })
+
+    expect(mockAddNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'handover:thread-9', type: 'handover', metadata: { thread_id: 'thread-9' } }),
+    )
+  })
+
+  it('records the persistent entry even when the operator IS in the Hub (durable record)', async () => {
+    mockIsHubPresent.value = true
+    const { useHubNotifications } = await import('./useHubNotifications')
+    useHubNotifications()
+
+    dispatchHubEvent('hub:thread_update', { thread_id: 'thread-9', next_action_owner: 'user-001' })
+
+    // Persistent entry recorded, but the interruptive channels stayed silent in-pane.
+    expect(mockAddNotification).toHaveBeenCalledOnce()
+    expect(NotificationConstructorSpy).not.toHaveBeenCalled()
+    expect(mockShowToast).not.toHaveBeenCalled()
+  })
+
+  it('does NOT drop a bell entry for an ordinary message (only handovers persist)', async () => {
+    mockIsHubPresent.value = false
+    const { useHubNotifications } = await import('./useHubNotifications')
+    useHubNotifications()
+
+    dispatchHubEvent('hub:thread_message', {
+      thread_id: 'thread-1',
+      message_id: 'm1',
+      from_agent_id: 'agent-x',
+      content: 'hey patrik',
+      requires_action: false,
+    })
+
+    expect(mockAddNotification).not.toHaveBeenCalled()
+  })
+
+  // ── FE-9289c: handover copy + deep-link ──
+
+  it('titles a handover "It\'s your call" and names the thread, not "Message Hub / Your turn"', async () => {
+    mockIsHubPresent.value = false
+    mockThreadsById.set('thread-1', { thread_id: 'thread-1', subject: 'Laptop interop' })
+    const { useHubNotifications } = await import('./useHubNotifications')
+    useHubNotifications()
+
+    dispatchHubEvent('hub:thread_update', { thread_id: 'thread-1', next_action_owner: 'user-001' })
+
+    const [title, opts] = NotificationConstructorSpy.mock.calls[0]
+    expect(title).toBe("It's your call")
+    expect(opts.body).toContain('Laptop interop')
+    expect(opts.body).toContain('waiting on you')
+  })
+
+  it('deep-links the handover Notification click to the thread (works from a cold page)', async () => {
+    mockIsHubPresent.value = false
+    const { useHubNotifications } = await import('./useHubNotifications')
+    useHubNotifications()
+
+    dispatchHubEvent('hub:thread_update', { thread_id: 'thread-42', next_action_owner: 'user-001' })
+
+    // Simulate the operator clicking the browser notification.
+    const instance = NotificationConstructorSpy.mock.results[0]?.value ?? {}
+    // The composable assigns onclick to the constructed Notification; grab it off the
+    // instance the constructor was invoked with.
+    const onclick = NotificationConstructorSpy.mock.instances[0]?.onclick || instance.onclick
+    expect(typeof onclick).toBe('function')
+    onclick()
+
+    expect(mockRouterPush).toHaveBeenCalledWith({ path: '/hub', query: { thread: 'thread-42' } })
   })
 
   // ── De-dup: same signal key does not fire twice ──

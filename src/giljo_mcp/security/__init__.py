@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Security helper modules for GiljoAI MCP (Community Edition).
+Security helper modules for Giljo HQ (Community Edition).
 
 Subpackages:
     upload_guard: Filename sanitization and text-content byte-sniff for the

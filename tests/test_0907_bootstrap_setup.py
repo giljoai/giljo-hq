@@ -133,6 +133,7 @@ def templates():
 def mock_session(templates):
     """Mock async DB session that returns templates."""
     session = AsyncMock()
+    session.info = {}  # tenant_session_context save/restore target
     result = MagicMock()
     result.scalars.return_value.all.return_value = templates
     session.execute = AsyncMock(return_value=result)
@@ -261,6 +262,7 @@ class TestStageCombinedSetup:
     async def test_codex_agent_toml_dedupes_legacy_bootstrap(self, staging_dir):
         """Codex TOML removes legacy duplicated MCP startup blocks from role prose."""
         session = AsyncMock()
+        session.info = {}  # tenant_session_context save/restore target
         result = MagicMock()
         result.scalars.return_value.all.return_value = [_make_template_with_duplicate_bootstrap()]
         session.execute = AsyncMock(return_value=result)
@@ -279,7 +281,12 @@ class TestStageCombinedSetup:
 
         parsed = tomllib.loads(content)
         instructions = parsed["developer_instructions"]
-        assert instructions.count("You are part of a GiljoAI MCP orchestration system") == 1
+        # BE-9275b: the served bootstrap regenerates fresh from the current seed
+        # (PRODUCT_NAME wording), so the duplicate-removal check anchors on that,
+        # not the stale literal baked into this legacy-row fixture.
+        from giljo_mcp.branding import PRODUCT_NAME
+
+        assert instructions.count(f"You are part of a {PRODUCT_NAME} orchestration system") == 1
         assert "You are the testing specialist for GiljoAI MCP." in instructions
         assert all(line == line.rstrip() for line in instructions.splitlines())
 
@@ -287,6 +294,7 @@ class TestStageCombinedSetup:
     async def test_codex_agent_toml_dedupes_compact_legacy_bootstrap(self, staging_dir):
         """Codex TOML removes compact legacy MCP startup blocks from role prose."""
         session = AsyncMock()
+        session.info = {}  # tenant_session_context save/restore target
         result = MagicMock()
         result.scalars.return_value.all.return_value = [_make_template_with_compact_duplicate_bootstrap()]
         session.execute = AsyncMock(return_value=result)
@@ -306,7 +314,9 @@ class TestStageCombinedSetup:
 
             parsed = tomllib.loads(content)
             instructions = parsed["developer_instructions"]
-            assert instructions.count("You are part of a GiljoAI MCP orchestration system") == 1
+            from giljo_mcp.branding import PRODUCT_NAME
+
+            assert instructions.count(f"You are part of a {PRODUCT_NAME} orchestration system") == 1
             assert "## Role" in instructions
             assert "Testing specialist for GiljoAI MCP." in instructions
 
@@ -314,6 +324,7 @@ class TestStageCombinedSetup:
     async def test_codex_agent_toml_escapes_regex_backslashes(self, staging_dir):
         """Codex setup ZIP emits TOML that parses when instructions contain regex backslashes."""
         session = AsyncMock()
+        session.info = {}  # tenant_session_context save/restore target
         result = MagicMock()
         result.scalars.return_value.all.return_value = [_make_template_with_regex_backslashes()]
         session.execute = AsyncMock(return_value=result)
@@ -351,6 +362,7 @@ class TestStageCombinedSetup:
     async def test_no_templates_still_includes_slash_commands(self, staging_dir):
         """If no agent templates exist, ZIP still contains slash commands."""
         session = AsyncMock()
+        session.info = {}  # tenant_session_context save/restore target
         result = MagicMock()
         result.scalars.return_value.all.return_value = []
         session.execute = AsyncMock(return_value=result)

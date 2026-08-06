@@ -54,6 +54,7 @@ class TestRequiresActionAutoBlock:
     async def test_informational_message_does_not_auto_block(self, routing_service):
         """requires_action=False should return empty list (no auto-blocking)."""
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
         mock_project = MagicMock()
         mock_project.status = "active"
 
@@ -73,6 +74,7 @@ class TestRequiresActionAutoBlock:
     async def test_requires_action_true_proceeds_to_check(self, routing_service):
         """requires_action=True should proceed past the guard and check agent status."""
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
         mock_project = MagicMock()
         mock_project.status = "active"
         mock_project.tenant_key = "test_tenant"
@@ -106,6 +108,7 @@ class TestRequiresActionAutoBlock:
     async def test_broadcast_still_skips_auto_block(self, routing_service):
         """Broadcasts should still skip auto-block regardless of requires_action."""
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
         mock_project = MagicMock()
         mock_project.status = "active"
 

@@ -312,6 +312,16 @@ class OrchestrationService:
         """Facade: delegates to JobQueryService."""
         return await self._job_query.list_jobs(tenant_key, project_id, status_filter, agent_display_name, limit, offset)
 
+    async def get_job_detail(self, job_id: str, tenant_key: str) -> dict:
+        """Facade: delegates to JobQueryService.
+
+        BE-9330: the read behind ``GET /api/agent-jobs/{job_id}``. Deliberately
+        NOT ``get_agent_mission`` -- that delivers an agent's mission protocol
+        (and gates on execution state), which is a different question from
+        "describe this job row".
+        """
+        return await self._job_query.get_job_detail(tenant_key=tenant_key, job_id=job_id)
+
     # NOTE: update_context_usage(), estimate_message_tokens(), _trigger_auto_succession(),
     # and trigger_succession() were removed in Handover 0422/0700d - the MCP server is passive
     # and cannot track external CLI tool context usage.
@@ -320,6 +330,7 @@ class OrchestrationService:
     @staticmethod
     async def health_check() -> dict[str, Any]:
         """MCP server health check."""
+        from giljo_mcp import branding
         from giljo_mcp.services.version_service import get_installed_version
         from giljo_mcp.tools.slash_command_templates import SKILLS_VERSION
 
@@ -330,7 +341,7 @@ class OrchestrationService:
             "skills_version": SKILLS_VERSION,
             "timestamp": datetime.now(UTC).isoformat(),
             "database": "connected",
-            "message": "GiljoAI MCP server is operational",
+            "message": f"{branding.PRODUCT_NAME} server is operational",
         }
 
     # Succession methods removed (0391/0461/0700d)

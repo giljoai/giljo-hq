@@ -1,6 +1,6 @@
 ## When to Use What
 
-GiljoAI MCP gives you a few choices when you start work. This chapter helps you pick the right one each time. None of these decisions are permanent — you can capture a task now and run it as a project later, or start with one project and link more into a chain when the scope grows.
+Giljo HQ gives you a few choices when you start work. This chapter helps you pick the right one each time. None of these decisions are permanent — you can capture a task now and run it as a project later, or start with one project and link more into a chain when the scope grows.
 
 ### Project or Task?
 

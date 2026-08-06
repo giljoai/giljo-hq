@@ -336,6 +336,12 @@ def _request_with_ip(ip: str):
 
 
 class TestFailedAuthRateLimit:
+    @pytest.fixture(autouse=True)
+    def _real_limiter(self, real_auth_rate_limiter):
+        """SEC-9227 (H4): these tests assert the real failed-auth throttle fires,
+        so keep the global test-bypass OFF for the whole class."""
+        return
+
     @pytest.mark.asyncio
     async def test_failed_auth_429_engages_per_ip(self, monkeypatch):
         """N failures are allowed; the (N+1)th raises 429. A different IP is free."""

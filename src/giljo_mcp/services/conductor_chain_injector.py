@@ -135,7 +135,8 @@ async def inject_conductor_chain_drive(
 
     # BE-6187: a sub_orchestrator (every project's own orchestrator after BE-6184)
     # gets CH_SUB_ORCHESTRATOR at runtime — its chain position, where to find the Hub
-    # thread (search_threads on run_id), and the close-out advance signal. Best-effort:
+    # thread (get_context(categories=["chain"]) -> hub_thread_id), and the close-out
+    # advance signal. Best-effort:
     # any failure leaves the solo protocol untouched (Deletion Test holds).
     if chain_ctx.role == "sub_orchestrator":
         order = chain_ctx.resolved_order or []

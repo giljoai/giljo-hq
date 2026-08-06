@@ -1,6 +1,6 @@
 # Live black-box E2E suite (`tests/e2e_live/`)
 
-Black-box checks that hit a **deployed** GiljoAI MCP host through its real edge
+Black-box checks that hit a **deployed** Giljo HQ host through its real edge
 (TLS termination, reverse proxy, ASGI app) and assert the standard public
 contracts. This is the value localhost can't reproduce: it exercises the actual
 HTTPS path, proxy header forwarding, and routing — not an in-process TestClient.

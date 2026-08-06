@@ -154,7 +154,7 @@ class TestInstallShSecurity:
         assert "SHA256 mismatch" in self.content
 
     def test_github_repo_reference(self):
-        assert "giljoai/GiljoAI_MCP" in self.content
+        assert "giljoai/giljo-hq" in self.content
 
     def test_version_manifest_check(self):
         assert "version-manifest.json" in self.content
@@ -177,7 +177,7 @@ class TestInstallShServiceTemplates:
         assert "[Install]" in self.content
 
     def test_systemd_description(self):
-        assert "Description=GiljoAI MCP Server" in self.content
+        assert "Description=Giljo HQ Server" in self.content
 
     def test_systemd_after_postgresql(self):
         assert "postgresql.service" in self.content

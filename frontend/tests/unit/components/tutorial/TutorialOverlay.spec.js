@@ -102,7 +102,8 @@ describe('TutorialOverlay', () => {
 
   it('opens on Beat 1 with the approved copy', () => {
     const wrapper = mountOverlay()
-    expect(wrapper.text()).toContain('Your tools do the thinking. GiljoAI keeps the thread.')
+    // BE-9281: rebranded GiljoAI -> Giljo HQ in Beat 1 customer-facing copy.
+    expect(wrapper.text()).toContain('Your tools do the thinking. Giljo HQ keeps the thread.')
     expect(wrapper.find('[data-testid="tutorial-rail-stop-1"]').classes()).toContain(
       'rail-stop--active',
     )
@@ -286,7 +287,7 @@ describe('TutorialOverlay', () => {
       const wrapper = mountOverlay()
       expect(wrapper.find('.tutorial-panel').classes()).toContain('tutorial--reduced')
       // Final frames stay visible: the beat content still renders.
-      expect(wrapper.text()).toContain('Your tools do the thinking. GiljoAI keeps the thread.')
+      expect(wrapper.text()).toContain('Your tools do the thinking. Giljo HQ keeps the thread.')
     })
 
     it('omits the gate otherwise', () => {

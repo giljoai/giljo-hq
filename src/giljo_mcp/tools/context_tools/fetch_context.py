@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Unified context fetcher for GiljoAI MCP.
+Unified context fetcher for Giljo HQ.
 
 Handover 0350a: Single entry point for all context fetching.
 Dispatches to internal get_* tools based on categories parameter.
@@ -13,10 +13,7 @@ Handover 0351: Removed depth params for tech_stack, architecture, testing.
 Handover 0823b: Reads user depth_config from DB at runtime when not provided.
 IMP-2: Batch category support -- multiple categories per call allowed.
 
-Token Budget Savings:
-- Before: 9 tool schemas x ~100 tokens = ~900 tokens consumed at agent startup
-- After: 1 tool schema x ~180 tokens = ~180 tokens consumed at agent startup
-- Savings: ~720 tokens available for actual work
+Token Budget Savings: 9 tool schemas (~900 tokens) collapsed to 1 (~180 tokens).
 """
 # Read-only tool -- uses direct session.execute() for SELECT queries (no writes)
 
@@ -26,6 +23,9 @@ from typing import Any
 from giljo_mcp.config.defaults import DEFAULT_DEPTH_CONFIG as _RAW_DEPTH_CONFIG
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
+from giljo_mcp.tenant_guard import TenantIsolationError
+from giljo_mcp.tools._unknown_keys import split_known
+from giljo_mcp.tools.context_tools._response_ceiling import _apply_response_ceiling
 from giljo_mcp.tools.context_tools.get_360_memory import get_360_memory
 from giljo_mcp.tools.context_tools.get_agent_templates import get_agent_templates
 from giljo_mcp.tools.context_tools.get_architecture import get_architecture
@@ -39,6 +39,7 @@ from giljo_mcp.tools.context_tools.get_self_identity import get_self_identity
 from giljo_mcp.tools.context_tools.get_tasks import get_tasks
 from giljo_mcp.tools.context_tools.get_tech_stack import get_tech_stack
 from giljo_mcp.tools.context_tools.get_testing import get_testing
+from giljo_mcp.tools.context_tools.get_threads import get_threads
 from giljo_mcp.tools.context_tools.get_todos import get_todos
 from giljo_mcp.tools.context_tools.get_vision_document import get_vision_document
 
@@ -60,6 +61,7 @@ CATEGORY_TOOLS = {
     "tasks": get_tasks,
     "todos": get_todos,
     "chain": get_chain_context,
+    "threads": get_threads,
 }
 
 # Derive from canonical source (defaults.py) - single source of truth (Handover 0823)
@@ -68,7 +70,7 @@ _CANONICAL_DEPTHS = _RAW_DEPTH_CONFIG
 DEFAULT_DEPTHS = {
     "product_core": None,
     "vision_documents": _CANONICAL_DEPTHS.get("vision_documents", "medium"),
-    "tech_stack": None,
+    "tech_stack": _CANONICAL_DEPTHS.get("tech_stack_sections", "all"),  # BE-9322
     "architecture": None,
     "testing": None,
     "memory_360": _CANONICAL_DEPTHS.get("memory_last_n_projects", 3),
@@ -79,6 +81,7 @@ DEFAULT_DEPTHS = {
     "tasks": None,
     "todos": None,
     "chain": None,
+    "threads": None,
 }
 
 ALL_CATEGORIES = list(CATEGORY_TOOLS.keys())
@@ -91,6 +94,7 @@ _DEPTH_KEY_MAPPING: dict[str, str] = {
     "git_commits": "git_history",
     "agent_templates": "agent_templates",
     "vision_documents": "vision_documents",
+    "tech_stack_sections": "tech_stack",  # BE-9322
 }
 
 
@@ -109,7 +113,7 @@ async def _is_category_enabled(
         True if enabled or no toggle exists, False if explicitly disabled.
     """
     # Categories that are always on (no toggle)
-    always_on = {"product_core", "project", "self_identity", "agent_templates", "tasks", "todos", "chain"}
+    always_on = {"product_core", "project", "self_identity", "agent_templates", "tasks", "todos", "chain", "threads"}
     if category in always_on:
         return True
 
@@ -331,6 +335,29 @@ async def _resolve_active_product_id(tenant_key: str, db_manager: DatabaseManage
     return str(active_product.id)
 
 
+def _reject_unknown_depth_keys(depth_config: dict[str, Any] | None) -> None:
+    """Reject depth_config keys that are not category names (BE-9322).
+
+    depth_config is keyed by CATEGORY. A DB column name ("memory_last_n_projects")
+    used to apply the default silently while depth_config_applied truthfully
+    reported that default -- so nothing in the response named the dropped key.
+    The sibling `categories` argument already rejects unknown values; this makes
+    depth_config behave the same way.
+    """
+    if not depth_config:
+        return
+    _used, unknown = split_known(depth_config, CATEGORY_TOOLS)
+    if not unknown:
+        return
+    logger.warning("invalid_depth_config_keys invalid=%s valid=%s", unknown, ALL_CATEGORIES)
+    raise ValidationError(
+        f"Invalid depth_config key(s): {unknown}. Valid keys: {ALL_CATEGORIES}. "
+        f"Use the CATEGORY name, not the DB column name "
+        f"(e.g. 'memory_360' not 'memory_last_n_projects').",
+        context={"invalid_keys": unknown, "allowed": ALL_CATEGORIES},
+    )
+
+
 async def fetch_context(
     product_id: str,
     tenant_key: str,
@@ -361,8 +388,10 @@ async def fetch_context(
                    Valid: product_core, vision_documents, tech_stack, architecture,
                           testing, memory_360, git_history, agent_templates, project,
                           self_identity, chain
-        depth_config: Override depth settings per category. If None, reads from DB.
-                     Example: {"vision_documents": "light", "agent_templates": "minimal"}
+        depth_config: Override depth settings, keyed by CATEGORY name. If None, reads
+                     from DB. Unknown keys raise ValidationError (BE-9322) -- pass
+                     'memory_360', not the DB column name 'memory_last_n_projects'.
+                     Example: {"vision_documents": "light", "agent_templates": "full"}
         format: Response format - "structured" (nested by category) or "flat" (merged)
         agent_name: Agent template name (required for 'self_identity' category)
         db_manager: Database manager instance
@@ -388,16 +417,12 @@ async def fetch_context(
         All internal tools enforce tenant_key filtering.
 
     Token Budget Reference:
-        - product_core: ~100 tokens
-        - vision_documents: 0-24K tokens (depth: none/light/medium/full)
-        - tech_stack: 200-400 tokens (sections: required/all)
-        - architecture: 300-1.5K tokens (depth: overview/detailed)
-        - testing: 0-400 tokens (depth: none/basic/full)
-        - memory_360: 500-5K tokens (last_n_projects: 1/3/5/10)
-        - git_history: 500-5K tokens (commits: 10/25/50/100)
-        - agent_templates: 400-2.4K tokens (detail: minimal/standard/full)
-        - project: ~300 tokens
-        - self_identity: ~1-3K tokens (Handover 0430)
+        - product_core: ~100 tokens; vision_documents: 0-24K tokens (none/light/medium/full)
+        - tech_stack: 200-400 tokens (required/all); architecture: ~1K tokens, NOT depth-tunable
+          (get_architecture takes no depth parameter -- depth_architecture is stored but never applied)
+        - testing: 0-400 tokens (none/basic/full); memory_360: 500-5K tokens (last_n_projects: 1/3/5/10)
+        - git_history: 500-5K tokens (commits: 10/25/50/100); agent_templates: 400-2.4K tokens (basic/full)
+        - project: ~300 tokens; self_identity: ~1-3K tokens (Handover 0430)
         - chain: ~100-2K tokens (the caller's active chain run: run_id, chain_mission,
           resolved_order; empty + error="no_active_chain_run" outside a chain)
 
@@ -454,6 +479,8 @@ async def fetch_context(
     if invalid:
         logger.warning("invalid_categories invalid=%s valid=%s", invalid, ALL_CATEGORIES)
         raise ValidationError(f"Invalid categories: {invalid}. Valid categories: {ALL_CATEGORIES}")
+
+    _reject_unknown_depth_keys(depth_config)
 
     # BE-6208e: a combined-chain sub-orchestrator gets a project_id but no
     # product_id. When product_id is absent/empty and a project_id is present,
@@ -546,6 +573,10 @@ async def fetch_context(
                 empty_value: Any = [] if isinstance(cat_data, list) else {}
                 all_data[category] = empty_value
                 categories_empty.append(category)
+        except TenantIsolationError:
+            # Flattening this into `errors` below returns a SUCCESS leaking the guard's
+            # internal phrasing; it must reach the MCP boundary's not-found contract.
+            raise
         except Exception as e:  # Broad catch: tool boundary, logs per-category errors
             logger.error("category_fetch_error category=%s error=%s", category, e, exc_info=True)
             all_errors.append({"category": category, "error": str(e)})
@@ -603,86 +634,6 @@ async def fetch_context(
         categories_returned,
         len(all_errors),
     )
-
-    return response
-
-
-# INF-WriteShape: 30K-char ceiling -- single safety net when the assembled
-# response would otherwise blow an agent's context budget. Strategy:
-#   1. Iterate categories largest -> smallest by serialized size.
-#   2. Within each, drop the largest droppable field of the largest entry.
-#   3. Mark the affected entry with truncated:true.
-#   4. Loop until under cap or only protected fields remain.
-# Hard floor: NEVER drop required identity fields.
-RESPONSE_CHAR_CEILING = 30_000
-PROTECTED_ENTRY_FIELDS = frozenset({"id", "sequence", "project_name", "type", "timestamp"})
-
-
-def _serialized_size(obj: Any) -> int:
-    import json
-
-    return len(json.dumps(obj))
-
-
-def _apply_response_ceiling(response: dict[str, Any]) -> dict[str, Any]:
-    """Iteratively drop the largest droppable field until response <= cap."""
-    if _serialized_size(response) <= RESPONSE_CHAR_CEILING:
-        return response
-
-    data = response.get("data")
-    if not isinstance(data, dict):
-        return response
-
-    truncation_applied = False
-    # Bound the loop so a degenerate payload can't spin forever.
-    for _ in range(2000):
-        if _serialized_size(response) <= RESPONSE_CHAR_CEILING:
-            break
-
-        # Find largest category by serialized size
-        target_category = None
-        target_size = -1
-        for cat, cat_data in data.items():
-            size = _serialized_size(cat_data)
-            if size > target_size:
-                target_size = size
-                target_category = cat
-
-        if target_category is None:
-            break
-
-        cat_data = data[target_category]
-        if not (isinstance(cat_data, list) and cat_data):
-            # Cannot drop fields out of a non-list category structure safely
-            break
-
-        # Find largest entry in that category
-        largest_idx = max(range(len(cat_data)), key=lambda i: _serialized_size(cat_data[i]))
-        entry = cat_data[largest_idx]
-        if not isinstance(entry, dict):
-            break
-
-        # Find largest droppable field in that entry
-        # Skip 'truncated' (legacy field-drop signal we set ourselves below) and
-        # 'has_full_body' (BE-5031 headlines-shape flag that survives ceiling).
-        droppable = [
-            (k, _serialized_size(v))
-            for k, v in entry.items()
-            if k not in PROTECTED_ENTRY_FIELDS and k not in ("truncated", "has_full_body")
-        ]
-        if not droppable:
-            break
-
-        droppable.sort(key=lambda kv: kv[1], reverse=True)
-        field_to_drop, _ = droppable[0]
-        entry.pop(field_to_drop, None)
-        entry["truncated"] = True
-        truncation_applied = True
-
-    if truncation_applied:
-        meta = response.setdefault("metadata", {})
-        meta["truncation_applied"] = True
-        meta["truncation_reason"] = "30K char ceiling"
 
     return response
 
@@ -767,16 +718,32 @@ async def _fetch_category(
         if (commits := parse_git_history_depth(depth)) is not None:
             kwargs["commits"] = commits
 
-    elif category == "tech_stack" or category in ("architecture", "testing"):
+    elif category == "tech_stack":
         kwargs["product_id"] = product_id
         kwargs["tenant_key"] = tenant_key
-        # No depth param (Handover 0351)
+        if depth:
+            kwargs["sections"] = depth  # BE-9322: get_tech_stack's sections kwarg
+
+    elif category in ("architecture", "testing"):
+        kwargs["product_id"] = product_id
+        kwargs["tenant_key"] = tenant_key
+        # No depth param. BE-9322 leaves architecture_depth unwired on
+        # purpose: default "overview" would shrink every user's context.
 
     elif category == "tasks":
         kwargs["product_id"] = product_id
         kwargs["tenant_key"] = tenant_key
         if depth and isinstance(depth, int):
             kwargs["limit"] = depth
+
+    elif category == "threads":
+        kwargs["tenant_key"] = tenant_key
+        # Q-08: tenant-scoped only -- no product_id kwarg (see get_threads.py
+        # docstring: 38/419 production threads have product_id=None, so
+        # product-scoping would return [] on a tenant holding hundreds of
+        # threads). No depth param either -- the cap is fixed in
+        # get_threads.THREADS_CATEGORY_CAP, not tunable via depth_config
+        # (mirrors the architecture/testing precedent above, BE-9322).
 
     elif category == "todos":
         # INF-5077: TODO read-back. Requires job_id (the agent job whose

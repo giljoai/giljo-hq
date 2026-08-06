@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/hero-card.png" alt="GiljoAI MCP" width="100%">
+<img src="docs/images/hero-card.png" alt="Giljo HQ" width="100%">
 
 <br>
 
@@ -18,9 +18,9 @@ Define your product once. Every agent that connects gets the full picture.
 [![License](https://img.shields.io/badge/License-Elastic%20License%202.0-ffc300?style=flat-square&labelColor=0e1c2d)](LICENSE)
 [![Setup](https://img.shields.io/badge/Setup-6--10%20min-6bcf7f?style=flat-square&labelColor=0e1c2d)](docs/INSTALLATION_GUIDE.md)
 [![MCP Conformance](https://img.shields.io/badge/MCP%20Spec-Conformance-3a8ee6?style=flat-square&labelColor=0e1c2d)](docs/CONFORMANCE.md)
-[![Backend CI](https://github.com/giljoai/GiljoAI_MCP/actions/workflows/ci.yml/badge.svg)](https://github.com/giljoai/GiljoAI_MCP/actions/workflows/ci.yml)
-[![Frontend CI](https://github.com/giljoai/GiljoAI_MCP/actions/workflows/frontend.yml/badge.svg)](https://github.com/giljoai/GiljoAI_MCP/actions/workflows/frontend.yml)
-[![CodeQL](https://github.com/giljoai/GiljoAI_MCP/actions/workflows/codeql.yml/badge.svg)](https://github.com/giljoai/GiljoAI_MCP/actions/workflows/codeql.yml)
+[![Backend CI](https://github.com/giljoai/giljo-hq/actions/workflows/ci.yml/badge.svg)](https://github.com/giljoai/giljo-hq/actions/workflows/ci.yml)
+[![Frontend CI](https://github.com/giljoai/giljo-hq/actions/workflows/frontend.yml/badge.svg)](https://github.com/giljoai/giljo-hq/actions/workflows/frontend.yml)
+[![CodeQL](https://github.com/giljoai/giljo-hq/actions/workflows/codeql.yml/badge.svg)](https://github.com/giljoai/giljo-hq/actions/workflows/codeql.yml)
 
 <br>
 
@@ -37,7 +37,7 @@ Define your product once. Every agent that connects gets the full picture.
 <br>
 
 <div align="center">
-<img src="docs/images/staging-view.png" alt="GiljoAI MCP staging view: your description becomes a mission, agents are assigned automatically" width="100%">
+<img src="docs/images/staging-view.png" alt="Giljo HQ staging view: your description becomes a mission, agents are assigned automatically" width="100%">
 <br>
 <sub>The Staging view: write what you want done. GiljoAI generates the mission and assigns agents from your templates.</sub>
 </div>
@@ -45,10 +45,10 @@ Define your product once. Every agent that connects gets the full picture.
 <br>
 
 <div align="center">
-<img src="docs/images/section-what-is.png" alt="What Is GiljoAI MCP" width="100%">
+<img src="docs/images/section-what-is.png" alt="What Is Giljo HQ" width="100%">
 </div>
 
-GiljoAI MCP is a passive context server for AI coding tools. It stores your product knowledge, generates structured prompts, and coordinates multi-agent workflows via the Model Context Protocol (MCP). It does not write code or call any AI model. Your AI coding tool does all reasoning and coding using your own subscription.
+Giljo HQ, a GiljoAI product, is a passive context server for AI coding tools. It stores your product knowledge, generates structured prompts, and coordinates multi-agent workflows via the Model Context Protocol (MCP). It does not write code or call any AI model. Your AI coding tool does all reasoning and coding using your own subscription.
 
 GiljoAI sits at the intersection of product thinking and development. Whether you are a developer learning to define what you build before you build it, or a product manager turning a specification into working software, the platform gives you a structured path from vision to execution. The clearer your product definition, the more effective every agent session becomes.
 
@@ -76,8 +76,8 @@ The installer checks for prerequisites, downloads the latest release, sets up th
 <summary>Manual install (advanced)</summary>
 
 ```bash
-git clone https://github.com/giljoai/GiljoAI_MCP.git
-cd GiljoAI_MCP
+git clone https://github.com/giljoai/giljo-hq.git
+cd giljo-hq
 python install.py
 python startup.py
 ```
@@ -138,18 +138,16 @@ The Jobs page shows real-time agent activity: status, step progress, duration, a
 <img src="docs/images/section-edition.png" alt="Edition" width="100%">
 </div>
 
-This is the **GiljoAI MCP Community Edition**, free for single-user use under the [Elastic License 2.0](LICENSE).
+This is the **Giljo HQ Community Edition**, free for single-user use under the [Elastic License 2.0](LICENSE).
 
 | Community Edition (Free) | SaaS Edition |
 |---|---|
-| Self-hosted on your machine | Managed hosting |
+| Self-hosted on your machine | Managed hosting: nothing to install |
 | Full context assembly and agent coordination | Everything in CE, plus: |
-| 6 agent templates + customization | OAuth / SSO / MFA |
-| Real-time dashboard and monitoring | Team collaboration and role-based access |
-| Unlimited projects, up to 8 active agents | Billing, usage metering |
-| No telemetry, no cloud dependency | Enterprise deployment options |
-
-Multi-user use requires a [commercial license](LICENSING_AND_COMMERCIALIZATION_PHILOSOPHY.md).
+| 6 agent templates + customization | Sign in with Google or GitHub |
+| Real-time dashboard and monitoring | Nightly encrypted backups you can download or restore |
+| Unlimited projects, up to 16 active agent slots | Self-service Solo subscription and billing |
+| No telemetry, no cloud dependency | Managed updates: always on the latest version |
 
 <br>
 
@@ -221,7 +219,7 @@ python startup.py --verbose    # Detailed logging
 | [Product Overview](docs/PRODUCT_OVERVIEW.md) | What it is, who it is for, the Six Pillars |
 | [Getting Started](docs/GETTING_STARTED.md) | Post-install walkthrough, from setup wizard to first project |
 | [Installation Guide](docs/INSTALLATION_GUIDE.md) | Complete installation reference |
-| [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) | All 29 MCP tools with parameters and return values |
+| [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) | All 46 MCP tools with parameters and return values |
 | [Architecture](docs/ARCHITECTURE.md) | System design, network topology, component overview |
 
 **API docs** are served at runtime: Swagger UI at `/docs`, ReDoc at `/redoc`.
@@ -246,7 +244,7 @@ python startup.py --verbose    # Detailed logging
 <img src="docs/images/section-support.png" alt="Support" width="100%">
 </div>
 
-- **Issues:** [github.com/giljoai/GiljoAI_MCP/issues](https://github.com/giljoai/GiljoAI_MCP/issues)
+- **Issues:** [github.com/giljoai/giljo-hq/issues](https://github.com/giljoai/giljo-hq/issues)
 - **Website:** [giljo.ai](https://giljo.ai)
 - **License:** [Elastic License 2.0](LICENSE)
 - **Contributing:** See [CONTRIBUTING.md](CONTRIBUTING.md)
@@ -255,6 +253,6 @@ python startup.py --verbose    # Detailed logging
 
 <div align="center">
 
-**GiljoAI MCP** is built by [GiljoAI](https://giljo.ai).
+**Giljo HQ** is built by [GiljoAI](https://giljo.ai).
 
 </div>

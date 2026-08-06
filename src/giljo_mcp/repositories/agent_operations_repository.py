@@ -21,13 +21,31 @@ from sqlalchemy.orm import selectinload
 
 from giljo_mcp.database import tenant_isolation_bypass
 from giljo_mcp.models import AgentTodoItem, Message
-from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES, AgentExecution, AgentJob
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.system_setting import SystemSetting
 from giljo_mcp.models.tasks import MessageAcknowledgment, MessageRecipient
 
 
 SILENCE_THRESHOLD_SETTING_KEY = "agent_silence_threshold_minutes"
+
+
+def _already_acked_exists_clause(tenant_key: str):
+    """Shared EXISTS-subquery: a message is "acked" when a
+    ``message_acknowledgments`` row exists for (message_id, the recipient's
+    agent_id) in this tenant. BE-9273 DRY extraction -- byte-identical to the
+    inline block every ``get_live_*_unread_counts_*`` method below used to
+    duplicate; callers negate it (``~already_acked``) for "still unread".
+    """
+    return (
+        select(MessageAcknowledgment.id)
+        .where(
+            MessageAcknowledgment.message_id == Message.id,
+            MessageAcknowledgment.agent_id == MessageRecipient.agent_id,
+            MessageAcknowledgment.tenant_key == tenant_key,
+        )
+        .exists()
+    )
 
 
 class AgentOperationsRepository:
@@ -65,7 +83,7 @@ class AgentOperationsRepository:
         conditions = [
             AgentExecution.job_id == job_id,
             AgentExecution.tenant_key == tenant_key,
-            AgentExecution.status.notin_(["complete", "closed", "decommissioned"]),
+            AgentExecution.status.notin_(TERMINAL_EXECUTION_STATUSES),
             ((AgentExecution.last_activity_at.is_(None)) | (AgentExecution.last_activity_at < threshold)),
         ]
 
@@ -264,7 +282,7 @@ class AgentOperationsRepository:
                 AgentExecution.tenant_key == tenant_key,
                 AgentJob.tenant_key == tenant_key,
                 AgentJob.project_id == project_id,
-                AgentExecution.status.notin_(["complete", "closed", "decommissioned"]),
+                AgentExecution.status.notin_(TERMINAL_EXECUTION_STATUSES),
             )
         )
         rows = (await session.execute(query)).all()
@@ -359,15 +377,7 @@ class AgentOperationsRepository:
         if not agent_ids:
             return {}
 
-        already_acked = (
-            select(MessageAcknowledgment.id)
-            .where(
-                MessageAcknowledgment.message_id == Message.id,
-                MessageAcknowledgment.agent_id == MessageRecipient.agent_id,
-                MessageAcknowledgment.tenant_key == tenant_key,
-            )
-            .exists()
-        )
+        already_acked = _already_acked_exists_clause(tenant_key)
         stmt = (
             select(MessageRecipient.agent_id, func.count(Message.id))
             .join(MessageRecipient, Message.id == MessageRecipient.message_id)
@@ -411,15 +421,7 @@ class AgentOperationsRepository:
         if not project_ids or not agent_ids:
             return {}
 
-        already_acked = (
-            select(MessageAcknowledgment.id)
-            .where(
-                MessageAcknowledgment.message_id == Message.id,
-                MessageAcknowledgment.agent_id == MessageRecipient.agent_id,
-                MessageAcknowledgment.tenant_key == tenant_key,
-            )
-            .exists()
-        )
+        already_acked = _already_acked_exists_clause(tenant_key)
         stmt = (
             select(Message.project_id, MessageRecipient.agent_id, func.count(Message.id))
             .join(MessageRecipient, Message.id == MessageRecipient.message_id)
@@ -435,6 +437,137 @@ class AgentOperationsRepository:
         )
         result = await session.execute(stmt)
         return {(str(pid), aid): cnt for pid, aid, cnt in result.all()}
+
+    async def get_live_action_required_unread_counts_by_agent(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        project_id: str,
+        agent_ids: list[str],
+    ) -> dict[str, int]:
+        """Live action-required unread count per agent (BE-9242 deliverable #3).
+
+        Same shape as ``get_live_unread_counts_by_agent`` (the broader BADGE total)
+        but scoped to the SAME "genuinely actionable" definition the closeout gate
+        uses (``agent_completion_repository.get_unread_messages_for_agent``):
+        ``requires_action=True`` and ``auto_generated=False``. This is the subset
+        of the badge total that will actually block ``complete_job`` — surfaced
+        distinctly so a ``badge>0`` that will NOT block completion no longer reads
+        as "broken" on the dashboard.
+
+        ``auto_generated=False`` already excludes ``completion_report`` system
+        notices (they always carry ``auto_generated=True``), so no separate
+        ``message_type`` filter is needed here (unlike the broader badge query).
+
+        One GROUP BY query across all agent_ids (no N+1). Agents with zero
+        action-required unread messages are absent from the result; the caller
+        defaults them to 0.
+        """
+        if not agent_ids:
+            return {}
+
+        already_acked = _already_acked_exists_clause(tenant_key)
+        stmt = (
+            select(MessageRecipient.agent_id, func.count(Message.id))
+            .join(MessageRecipient, Message.id == MessageRecipient.message_id)
+            .where(
+                Message.tenant_key == tenant_key,
+                MessageRecipient.tenant_key == tenant_key,
+                Message.project_id == project_id,
+                Message.requires_action.is_(True),
+                Message.auto_generated.is_(False),
+                MessageRecipient.agent_id.in_(agent_ids),
+                ~already_acked,
+            )
+            .group_by(MessageRecipient.agent_id)
+        )
+        result = await session.execute(stmt)
+        return dict(result.all())
+
+    async def get_live_action_required_unread_counts_by_project_agent(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        project_ids: list[str],
+        agent_ids: list[str],
+    ) -> dict[tuple[str, str], int]:
+        """Multi-project sibling of ``get_live_action_required_unread_counts_by_agent``
+        (BE-9273), keyed ``(project_id, agent_id)`` for the /jobs list -- same
+        relationship as ``get_live_unread_counts_by_project_agent`` has to
+        ``get_live_unread_counts_by_agent``. Identical "genuinely actionable"
+        definition (requires_action, non-auto_generated, not yet acked). Missing
+        pairs default to 0; keys are stringified for ``str(project_id)`` lookup.
+        """
+        if not project_ids or not agent_ids:
+            return {}
+
+        already_acked = _already_acked_exists_clause(tenant_key)
+        stmt = (
+            select(Message.project_id, MessageRecipient.agent_id, func.count(Message.id))
+            .join(MessageRecipient, Message.id == MessageRecipient.message_id)
+            .where(
+                Message.tenant_key == tenant_key,
+                MessageRecipient.tenant_key == tenant_key,
+                Message.project_id.in_(project_ids),
+                Message.requires_action.is_(True),
+                Message.auto_generated.is_(False),
+                MessageRecipient.agent_id.in_(agent_ids),
+                ~already_acked,
+            )
+            .group_by(Message.project_id, MessageRecipient.agent_id)
+        )
+        result = await session.execute(stmt)
+        return {(str(pid), aid): cnt for pid, aid, cnt in result.all()}
+
+    async def get_live_unread_counts_by_agent_and_thread(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        project_id: str,
+        agent_ids: list[str],
+    ) -> dict[str, dict[str, int]]:
+        """Per-thread unread breakdown per agent (BE-9242 deliverable #2).
+
+        Sibling of ``get_live_unread_counts_by_agent`` with ``Message.thread_id``
+        added to the projection/group-by, so a caller can report WHICH thread an
+        agent's unread posts live on rather than only a project-wide total.
+        Uses the IDENTICAL "unread" definition (not yet acked, excludes
+        ``completion_report`` system notices) so, by construction,
+        ``sum(per-thread counts for an agent) == get_live_unread_counts_by_agent[agent]``.
+
+        Messages with no ``thread_id`` (legacy/non-hub direct messages) are
+        grouped under the "" key so every unread message is still counted
+        somewhere -- the sum-of-parts invariant holds even for pre-hub rows.
+
+        Returns: ``{agent_id: {thread_id_or_"": count}}``. Agents/threads with
+        zero unread messages are absent; the caller defaults to 0.
+        """
+        if not agent_ids:
+            return {}
+
+        already_acked = _already_acked_exists_clause(tenant_key)
+        stmt = (
+            select(
+                MessageRecipient.agent_id,
+                func.coalesce(Message.thread_id, "").label("thread_id"),
+                func.count(Message.id),
+            )
+            .join(MessageRecipient, Message.id == MessageRecipient.message_id)
+            .where(
+                Message.tenant_key == tenant_key,
+                MessageRecipient.tenant_key == tenant_key,
+                Message.project_id == project_id,
+                Message.message_type != "completion_report",
+                MessageRecipient.agent_id.in_(agent_ids),
+                ~already_acked,
+            )
+            .group_by(MessageRecipient.agent_id, "thread_id")
+        )
+        result = await session.execute(stmt)
+        breakdown: dict[str, dict[str, int]] = {}
+        for agent_id, thread_id, count in result.all():
+            breakdown.setdefault(agent_id, {})[thread_id] = count
+        return breakdown
 
     async def get_todo_counts_by_job(
         self,
@@ -556,6 +689,7 @@ class AgentOperationsRepository:
         agent_display_name: str | None = None,
         limit: int = 100,
         offset: int = 0,
+        job_id: str | None = None,
     ) -> tuple[list[tuple[AgentExecution, AgentJob]], int]:
         """List jobs with pagination, returning executions + jobs and total count.
 
@@ -578,6 +712,8 @@ class AgentOperationsRepository:
             .where(AgentExecution.tenant_key == tenant_key)
         )
 
+        if job_id:  # BE-9330: single-job read reuses this exact query, so detail cannot drift from list
+            query = query.where(AgentJob.job_id == job_id)
         if project_id:
             # BE-6200 (#6): the equality already excludes NULL; isnot(None) makes
             # the exclusion of project-less rows (chain conductor) explicit so a

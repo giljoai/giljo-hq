@@ -33,6 +33,7 @@ import pytest_asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from giljo_mcp.database import tenant_session_context
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.product_memory_entry import ProductMemoryEntry
 from giljo_mcp.models.products import Product
@@ -146,20 +147,33 @@ async def _create_run(session: AsyncSession, tenant_key: str, project_ids: list[
 
 
 async def _conductor_job_ids(session: AsyncSession, tenant_key: str, run_id: str) -> list[str]:
-    rows = await session.execute(
-        select(AgentJob.job_id).where(
-            AgentJob.tenant_key == tenant_key,
-            AgentJob.project_id.is_(None),
-            AgentJob.job_metadata["run_id"].astext == run_id,
+    """Read back a tenant's conductor job ids under an explicit tenant context.
+
+    SEC-9276: this shared session sees back-to-back setup for MULTIPLE tenants
+    (test_purge_is_tenant_scoped seeds tenant A then tenant B), so the session's
+    flush-derived tenant context can be stale relative to this call's explicit
+    tenant_key predicate by the time it runs. tenant_session_context re-anchors the
+    read to the tenant this call is actually asking about -- the guard stays live,
+    it is just told the truth about which tenant this query is for.
+    """
+    with tenant_session_context(session, tenant_key):
+        rows = await session.execute(
+            select(AgentJob.job_id).where(
+                AgentJob.tenant_key == tenant_key,
+                AgentJob.project_id.is_(None),
+                AgentJob.job_metadata["run_id"].astext == run_id,
+            )
         )
-    )
     return [r[0] for r in rows.all()]
 
 
 async def _run_exists(session: AsyncSession, tenant_key: str, run_id: str) -> bool:
-    row = await session.execute(
-        select(SequenceRun.id).where(SequenceRun.id == run_id, SequenceRun.tenant_key == tenant_key)
-    )
+    """Read back whether a run row exists, under an explicit tenant context (see
+    _conductor_job_ids above for why: the shared session sees multiple tenants)."""
+    with tenant_session_context(session, tenant_key):
+        row = await session.execute(
+            select(SequenceRun.id).where(SequenceRun.id == run_id, SequenceRun.tenant_key == tenant_key)
+        )
     return row.scalar_one_or_none() is not None
 
 

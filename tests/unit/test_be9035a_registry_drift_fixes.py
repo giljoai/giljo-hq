@@ -205,7 +205,19 @@ class TestImplementationPromptTypeMapCoverage:
         assert '("claude_code_cli", "multi_terminal", "codex_cli", "gemini_cli", "antigravity_cli")' not in src, (
             "the hand-copied supported_execution_modes tuple was reintroduced"
         )
-        assert "project.execution_mode not in ACCEPTED_EXECUTION_MODES" in src
+        # BE-9335: the gate now validates the mode a project actually RUNS in (a chain
+        # member resolves the chain's via effective_execution_mode), not the raw column.
+        # Guard BOTH halves: the registry-derived membership check is still there, AND
+        # the raw-column subject has not come back. Asserting only the former is weaker
+        # than the original literal, because "project.execution_mode not in ..." also
+        # contains "not in ...".
+        assert "not in ACCEPTED_EXECUTION_MODES" in src, (
+            "implement() no longer validates the execution mode against the registry-derived set"
+        )
+        assert "project.execution_mode not in ACCEPTED_EXECUTION_MODES" not in src, (
+            "implement() validates the raw project column again — a chain member must be "
+            "gated on the mode it actually runs in, not the one it was staged with"
+        )
 
 
 class TestGiljoSetupPlatformLiteral:

@@ -1,4 +1,4 @@
-# Ruff configuration for GiljoAI MCP Coding Orchestrator
+# Ruff configuration for Giljo HQ Coding Orchestrator
 # Production-ready Python linting configuration
 
 # Basic settings
@@ -252,9 +252,6 @@ inline-quotes = "double"
 "startup_support/**/*.py" = [
     "T201",   # startup.py helpers moved verbatim (BE-9060 split) - print() is the UI
     "BLE001", # Broad exception OK for graceful startup error handling (same policy as startup.py)
-]
-"api/startup/shutdown.py" = [
-    "T201",   # Console progress bars for shutdown steps - print() is intentional
 ]
 
 # --- CLI scripts and launchers (print() is the user interface) ---

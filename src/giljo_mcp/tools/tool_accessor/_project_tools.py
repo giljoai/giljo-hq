@@ -108,6 +108,9 @@ class ProjectToolsMixin:
         """
         from giljo_mcp.exceptions import ValidationError
         from giljo_mcp.platform_registry import ACCEPTED_EXECUTION_MODES, stage_mode_token
+        from giljo_mcp.services.orchestrator_prompt_ws_broadcast import (
+            broadcast_orchestrator_prompt_generated,
+        )
         from giljo_mcp.thin_prompt_generator import ThinClientPromptGenerator
 
         # BE-6177/BE-9035c backstop: accept the short token (claude / subagent) OR a full
@@ -137,11 +140,38 @@ class ProjectToolsMixin:
             result = await generator.stage(
                 project_id=project_id, user_id=user_id, tool=tool, execution_mode=execution_mode
             )
+            # The mark_staged single-writer transaction fix: stage() no longer
+            # persists the staged state itself -- route it through the OWNING service
+            # on this SAME session, so the whole staging call is one transaction
+            # instead of two. Ordering preserved: write, then chain-membership check
+            # (must see committed state), then the WS broadcast after the session
+            # closes (below).
+            await self._project_service.lifecycle.mark_staged(
+                project_id, execution_mode, tenant_key=tenant_key, db_session=db
+            )
             # BE-9015: the next_action must be chain-aware. A SOLO project keeps the
             # sacred human Implement gate (STOP); a CHAIN member has no such gate (the
             # conductor released it) and must continue via get_job_mission — else it
             # wedges waiting for a dashboard click chain mode never has.
             is_chain_member = await self._stage_is_chain_member(db, project_id, tenant_key)
+
+        # BE-9332: staging over MCP is the headless/CLI path, and it used to emit
+        # NOTHING — the orchestrator card never appeared in the dashboard for a
+        # CLI-driven staging. Emission is a TRANSPORT concern and stays with the
+        # caller by design (stage()'s docstring: "Transport concerns (HTTP guards,
+        # WebSocket broadcast, structured errors) stay with the caller"), so the
+        # REST endpoints and this tool are peers, all three going through the one
+        # shared emitter. POST-COMMIT: the session block above has closed, so this
+        # can never announce a state a rollback could still undo.
+        await broadcast_orchestrator_prompt_generated(
+            self._websocket_manager,
+            tenant_key=tenant_key,
+            project_id=project_id,
+            orchestrator_id=result["orchestrator_id"],
+            agent_id=result.get("agent_id"),
+            execution_id=result.get("execution_id"),
+            tool=tool,
+        )
 
         why = _STAGING_CHAIN_CONTINUE_INSTRUCTION if is_chain_member else _STAGING_STOP_INSTRUCTION
         return {

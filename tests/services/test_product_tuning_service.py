@@ -38,6 +38,7 @@ def mock_db_manager():
     """Create mock database manager with async session."""
     db_manager = Mock()
     session = AsyncMock()
+    session.info = {}  # tenant_session_context save/restore target
 
     async_cm = AsyncMock()
     async_cm.__aenter__ = AsyncMock(return_value=session)
@@ -62,7 +63,7 @@ def sample_product():
     product = Mock()
     product.id = PRODUCT_ID
     product.tenant_key = TENANT_KEY
-    product.name = "GiljoAI MCP"
+    product.name = "Giljo HQ"
     product.description = "An AI agent orchestration platform"
     product.quality_standards = "80% test coverage, all endpoints tested"
     product.target_platforms = ["windows", "linux"]
@@ -279,6 +280,75 @@ class TestAssembleTuningPromptSections:
         assert "Phase 2: QUICK SCAN" in prompt
         assert "Phase 3: INTERACTIVE REVIEW" in prompt
         assert "Phase 4: SUBMIT" in prompt
+
+    @pytest.mark.asyncio
+    async def test_prompt_reframe_carries_hard_rule_and_verdict_vocabulary(
+        self, mock_db_manager, mock_websocket_manager, sample_product, sample_user_settings
+    ):
+        """FE-9222 item 5: the server-authored prompt frames review as ADDITIVE
+        (state + intent), maps per-section authority, forbids removing unbuilt
+        items, and replaces binary drift Yes/No with the ADDED/CONTRADICTION/INTENT
+        verdict vocabulary. This is the BE-9164 server-side prompt authority."""
+        from giljo_mcp.services.product_tuning_service import ProductTuningService
+
+        db_manager, session = mock_db_manager
+        service = ProductTuningService(db_manager, TENANT_KEY, websocket_manager=mock_websocket_manager)
+
+        session.execute = AsyncMock(return_value=Mock(scalar_one_or_none=Mock(return_value=sample_product)))
+
+        with patch.object(service, "_get_user_configs", new_callable=AsyncMock, return_value=sample_user_settings):
+            result = await service.assemble_tuning_prompt(
+                product_id=PRODUCT_ID,
+                user_id=USER_ID,
+                sections=["description"],
+            )
+
+        prompt = result["prompt"]
+        # Additive framing (state + intent), not "verify stored context for accuracy".
+        assert "STATE + INTENT" in prompt
+        assert "BUILT, ADDED, or CHANGED" in prompt
+        assert "reviewing a product's stored context for accuracy" not in prompt
+        # Per-section authority map.
+        assert "Code-authoritative" in prompt
+        assert "Intent-bearing" in prompt
+        # The hard rule against removing merely-unbuilt items.
+        assert "NEVER propose removing an item merely because it is not in the code yet" in prompt
+        assert "planned — not yet built" in prompt
+        # Verdict vocabulary replaces the binary drift Yes/No.
+        assert "**Verdict:**" in prompt
+        assert "ADDED" in prompt
+        assert "CONTRADICTION" in prompt
+        assert "INTENT" in prompt
+        assert "**Drift detected:** Yes / No" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_prompt_test_discovery_step_is_multi_ecosystem(
+        self, mock_db_manager, mock_websocket_manager, sample_product, sample_user_settings
+    ):
+        """BE-9261: the Phase 1 test-discovery step must not mandate a Python-only
+        toolchain -- a Go/Node product must still get a sensible instruction, not
+        a literal `pytest` command."""
+        from giljo_mcp.services.product_tuning_service import ProductTuningService
+
+        db_manager, session = mock_db_manager
+        service = ProductTuningService(db_manager, TENANT_KEY, websocket_manager=mock_websocket_manager)
+
+        session.execute = AsyncMock(return_value=Mock(scalar_one_or_none=Mock(return_value=sample_product)))
+
+        with patch.object(service, "_get_user_configs", new_callable=AsyncMock, return_value=sample_user_settings):
+            result = await service.assemble_tuning_prompt(
+                product_id=PRODUCT_ID,
+                user_id=USER_ID,
+                sections=["description"],
+            )
+
+        prompt = result["prompt"]
+        assert "pytest" not in prompt
+        assert "4. Tests:" in prompt
+        assert "test-discovery/listing command" in prompt
+        assert "go test -list ." in prompt
+        # The good multi-ecosystem dependency example stays untouched.
+        assert "requirements.txt (or package.json, go.mod, etc.)" in prompt
 
 
 # ============================================================================

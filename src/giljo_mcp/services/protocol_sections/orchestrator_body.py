@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import re
 
-from giljo_mcp.platform_registry import is_subagent_render
+from giljo_mcp.platform_registry import giljo_invocation, is_subagent_render
 
 
 logger = logging.getLogger(__name__)
@@ -381,7 +381,7 @@ def slice_chain_mission_for_position(chain_mission: str, position: int) -> str:
             end = headers[idx + 1].start() if idx + 1 < len(headers) else len(chain_mission)
             return chain_mission[start:end].rstrip()
     logger.warning(
-        "[BE-9083c] chain_mission has P_i headers but none for position %d; shipping the whole mission (tolerance).",
+        "chain_mission has P_i headers but none for position %d; shipping the whole mission (tolerance).",
         position,
     )
     return chain_mission
@@ -495,6 +495,11 @@ def _build_orchestrator_protocol_body(
     # module constants above), so it keeps the compact delegate-only line.
     git_commit_constraint = _GIT_CONSTRAINT_CONDUCTOR if is_chain_conductor else _GIT_CONSTRAINT_SELF_ADOPT
 
+    # BE-9260: derive the closeout signoff token from the registry (same idiom as
+    # worker_body._build_conditional_blocks) instead of hardcoding "/giljo" — a
+    # literal would render wrong for tool types that install it as a skill ($giljo).
+    giljo_cmd = giljo_invocation(tool)
+
     body = f"""These are your coordination operating procedures. Follow them from startup through closeout.
 
 ## Orchestrator Coordination Protocol (3 Phases)
@@ -603,10 +608,10 @@ completing, an unblock event, or any other trigger — execute this loop:
   mission ("the implementer probably added X") — if the result is absent, note it as unknown and scope
   verification to what is confirmed.
 - **HOW to handle non-blocking findings (triage by RISK, not file count):**
-  - *Mechanical AND caused by this project* — drop a stranded field, delete vestigial code orphaned by this commit, rename a symbol this project introduced, fix a regex/constant that drifted as a side effect. → Fix inline regardless of file count, re-run the same verification (relevant `pytest` scope + `ruff` + the CI you push to), ship the fix in THIS project. Do NOT defer your own mess.
-  - *Out-of-scope finding* — pre-existing master bug not introduced by this project, unrelated cleanup the reviewer noticed in passing. → `create_task` and cite the ID in `decisions_made`. Audit purity matters.
-  - *Needs user approval* — protected zones (`pyproject.toml`, root `CLAUDE.md`, `docs/`, `alembic.ini`, `LICENSE`, `install.py`/`install.sh`/`install.ps1`, `startup.py`); irreversible actions; license/security/billing changes. → `create_task` with the approval gate stated in the description.
-  - *Architectural, multi-file logic, or risky* — anything that re-shapes a contract, crosses an edition boundary, touches concurrency/auth/migrations, or that the reviewer flagged as needing design discussion. → Re-spawn the deliverable agent with a scoped fix mission citing the exact finding. Do NOT fix inline.
+  - *Mechanical AND caused by this project* — drop a stranded field, delete vestigial code orphaned by this commit, rename a symbol this project introduced, fix a regex/constant that drifted as a side effect. → Fix inline regardless of file count, re-run the same verification (the project's test runner + linter + the CI you push to), ship the fix in THIS project. Do NOT defer your own mess.
+  - *Out-of-scope finding* — pre-existing default-branch bug not introduced by this project, unrelated cleanup the reviewer noticed in passing. → `create_task` and cite the ID in `decisions_made`. Audit purity matters.
+  - *Needs user approval* — the product's declared protected paths (repo-root config files, license/docs directories, install/startup scripts, or similar); irreversible actions; license/security/billing changes. → `create_task` with the approval gate stated in the description.
+  - *Architectural, multi-file logic, or risky* — anything that re-shapes a contract, spans a major structural boundary, touches concurrency/auth/migrations, or that the reviewer flagged as needing design discussion. → Re-spawn the deliverable agent with a scoped fix mission citing the exact finding. Do NOT fix inline.
 
 **PROGRESS REPORTING (MANDATORY after every coordination action):**
   → To update statuses: `report_progress(job_id="{job_id}", todo_items=[...FULL list with updated statuses...])`
@@ -664,7 +669,7 @@ re-verify before closeout.
    → When the closeout has deferred findings, call `request_approval(...)` — your execution status will be flipped to `awaiting_user` automatically, and `complete_job` will refuse until the user decides. UI note: the decide buttons render INSIDE the project's CloseoutModal (ApprovalCard component); the top-level dashboard only shows a passive "needs input" pill, not a clickable banner. Users frequently respond verbally instead — if they do, the gate does NOT auto-clear. `set_agent_status` only accepts blocked/idle/sleeping (it cannot transition out of `awaiting_user`); `report_progress` does not auto-wake from `awaiting_user` either. The ONLY way to clear the gate is `POST /api/approvals/{{id}}/decide` (which the ApprovalCard calls). On verbal approval, guide the user to open the project's CloseoutModal and click the ApprovalCard option, or to call the decide endpoint directly. Otherwise proceed with best judgment.
 3. Create follow-up tasks/projects for deferred findings via `create_task()` or `create_project()` and cite the returned IDs in `decisions_made`
 4. `write_project_closeout(project_id="...", summary="...", key_outcomes=[...], decisions_made=[...], tags=[...], git_commits=[...])` — final close. `tags` is REQUIRED-IN-SPIRIT: supply 1-5 from the 16-tag CONTROLLED_TAG_VOCABULARY (see Chapter 5). Unknown tags are rejected.
-5. Tell user: "Project complete. Use `/giljo` to create follow-ups or look up existing project/task state."
+5. Tell user: "Project complete. Use `{giljo_cmd}` to create follow-ups or look up existing project/task state."
 
 **IMPORTANT:** You MUST complete your own job (step 2) BEFORE closing the project (step 4). The server requires all agents including the orchestrator to be complete before project closeout.
 

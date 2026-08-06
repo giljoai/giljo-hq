@@ -22,9 +22,11 @@ from api.endpoints.mcp_tools._base import (
     _call_tool,
     mcp,
 )
+from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 
 
 @mcp.tool(
+    title="Update Roadmap",
     description=(
         "Persist a roadmap for the ACTIVE product. The local agent does all "
         "ranking/risk/complexity reasoning; the server runs no inference, just validates + "
@@ -32,6 +34,7 @@ from api.endpoints.mcp_tools._base import (
         "it in place. See the items/remove params for their exact per-item shape. Requires an "
         "active product."
     ),
+    annotations=_tool_hints("update_roadmap_metadata"),
 )
 async def update_roadmap_metadata(
     items: Annotated[
@@ -76,12 +79,14 @@ async def update_roadmap_metadata(
 
 
 @mcp.tool(
+    title="Get Roadmap",
     description=(
         "Read the current roadmap for the ACTIVE product (read-only). Items are sorted by "
         "sort_order; returns roadmap=null + items=[] when none exists yet. Call this before "
         "re-ranking to see the existing order and any terminal-state items. Requires an active "
         "product."
     ),
+    annotations=_tool_hints("get_roadmap"),
 )
 async def get_roadmap(ctx: Context = None) -> dict[str, Any]:
     # FE-6240: flag the agent path so the service emits roadmap:agent_active.

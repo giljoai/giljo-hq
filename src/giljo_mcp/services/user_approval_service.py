@@ -435,7 +435,7 @@ class UserApprovalService:
             thread = await self._comm_thread_service.resolve_or_create_bound_thread(
                 project_id=decided.project_id, tenant_key=tenant_key
             )
-            await self._comm_thread_service.post_to_thread(
+            posted = await self._comm_thread_service.post_to_thread(
                 thread_id=thread["thread_id"],
                 content=content,
                 from_agent="user",
@@ -445,6 +445,21 @@ class UserApprovalService:
                 requires_action=True,
                 tenant_key=tenant_key,
             )
+            # BE-9292a-F2: a DECLINED post is RETURNED, not raised (the BE-6081 domain
+            # rejection shape), so the except below never sees it. Until BE-9292a this
+            # call could not be declined at all — it forwards no baton, and only the
+            # baton target was screened; screening the addressee made a refusal reachable
+            # here. Left unread it would drop the gate-cleared notice in total silence
+            # while the orchestrator polls a thread that will never tell it. Best-effort
+            # stays best-effort: this reports, it does not raise.
+            if isinstance(posted, dict) and posted.get("success") is False:
+                logger.warning(
+                    "[USER_APPROVAL] Hub declined the decision notice approval=%s job=%s to=%s: %s",
+                    decided.id,
+                    decided.job_id,
+                    agent_id,
+                    posted.get("error"),
+                )
         except Exception as exc:  # noqa: BLE001 - Hub delivery is non-critical
             logger.warning(
                 "[USER_APPROVAL] Failed to notify orchestrator of decision approval=%s job=%s: %s",

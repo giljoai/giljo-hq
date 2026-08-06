@@ -94,7 +94,7 @@ def upgrade() -> None:
         """
         DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'project_status') THEN
-            CREATE TYPE project_status AS ENUM ('inactive', 'active', 'completed', 'cancelled', 'terminated', 'deleted', 'superseded');
+            CREATE TYPE project_status AS ENUM ('inactive', 'active', 'completed', 'cancelled', 'terminated', 'deleted', 'superseded', 'parked');
         END IF; END $$;
         """
     )
@@ -436,6 +436,20 @@ def upgrade() -> None:
             ),
             sa.Column("last_read_message_id", sa.String(length=36), nullable=True),
             sa.Column("last_read_at", sa.DateTime(timezone=True), nullable=True),
+            # BE-9289a parity (ce_0086 appends these; declared last so fresh-install and
+            # chain-replay column ORDER stay byte-identical -- the INF-5060 invariant).
+            sa.Column(
+                "harness",
+                sa.String(length=32),
+                nullable=True,
+                comment="BE-9289a: harness token stamped from the MCP handshake; never self-declared",
+            ),
+            sa.Column(
+                "last_seen_at",
+                sa.DateTime(timezone=True),
+                nullable=True,
+                comment="BE-9289a: last post/read/poll on this thread; drives the live-idle indicator",
+            ),
             sa.PrimaryKeyConstraint("id", name="comm_participants_pkey"),
             sa.UniqueConstraint("thread_id", "participant_id", name="uq_comm_participant"),
         )
@@ -462,6 +476,22 @@ def upgrade() -> None:
                 "updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=True
             ),
             sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
+            # BE-9291 parity (ce_0087 appends this; declared last so fresh-install and
+            # chain-replay column ORDER stay byte-identical -- the INF-5060 invariant).
+            #
+            # The COLUMN belongs here, but its index and FK deliberately do NOT go in
+            # the module-level _INDEXES / _FOREIGN_KEYS lists. Those run unconditionally
+            # on every baseline execution, including against a mid-chain ce_0077
+            # database where comm_threads already exists and this create_table is
+            # skipped -- so referencing sequence_run_id there fails with "column does
+            # not exist" (caught by test_at_head_ce0077_db_upgrades_as_pure_noop).
+            # ce_0087 adds both, guarded, for the fresh and the mid-chain path alike.
+            sa.Column(
+                "sequence_run_id",
+                sa.String(length=36),
+                nullable=True,
+                comment="BE-9291: the chain run this thread is the coordination hub for (NULL = not a hub)",
+            ),
             sa.PrimaryKeyConstraint("id", name="comm_threads_pkey"),
             sa.UniqueConstraint("tenant_key", "serial", name="uq_comm_thread_serial"),
         )
@@ -520,6 +550,15 @@ def upgrade() -> None:
                 comment="Token expiry timestamp (15 minutes after creation)",
             ),
             sa.Column("filename", sa.String(length=255), nullable=True),
+            # TSK-9210 parity: ce_0081 APPENDS this column on existing DBs, so it must be
+            # declared LAST here to keep the fresh-install and chain-replay schemas
+            # byte-identical (the INF-5060 parity invariant covers column ORDER).
+            sa.Column(
+                "staged_at",
+                sa.DateTime(timezone=True),
+                nullable=True,
+                comment="TSK-9210: when this token's ZIP was staged; anchors per-token staleness",
+            ),
             sa.CheckConstraint(
                 "staging_status IN ('pending', 'ready', 'failed')", name="ck_download_token_staging_status"
             ),
@@ -663,6 +702,15 @@ def upgrade() -> None:
             ),
             sa.Column("loop_interval_minutes", sa.Integer(), nullable=True),
             sa.Column("thread_id", sa.String(length=36), nullable=True),
+            # BE-9289a parity (ce_0086 appends this; declared last so fresh-install and
+            # chain-replay column ORDER stay byte-identical -- the INF-5060 invariant).
+            sa.Column(
+                "from_kind",
+                sa.String(length=10),
+                server_default=sa.text("'agent'"),
+                nullable=False,
+                comment="BE-9289a: author kind ('agent'|'user'), resolved server-side at post time",
+            ),
             sa.PrimaryKeyConstraint("id", name="messages_pkey"),
         )
 
@@ -737,6 +785,12 @@ def upgrade() -> None:
             sa.Column("issued_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
             sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
             sa.Column("revoked", sa.Boolean(), server_default=sa.text("false"), nullable=False),
+            sa.Column(
+                "origin_code_hash",
+                sa.String(length=64),
+                nullable=True,
+                comment="SEC-9227b: sha256 hex of the auth code that minted this family; enables reuse-revocation",
+            ),
             sa.PrimaryKeyConstraint("id", name="oauth_refresh_tokens_pkey"),
             sa.UniqueConstraint("token_hash", name="oauth_refresh_tokens_token_hash_key"),
         )
@@ -1132,6 +1186,7 @@ def upgrade() -> None:
                     "terminated",
                     "deleted",
                     "superseded",  # BE-9157
+                    "parked",  # IMP-9258
                     name="project_status",
                     create_type=False,
                 ),

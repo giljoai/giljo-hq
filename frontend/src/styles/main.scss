@@ -200,6 +200,36 @@ body {
 }
 
 // =========================================================================
+// Button Shape Standard (FE-9365a)
+// =========================================================================
+// One rule, one place: NOTHING in this app is a circle except status dots and
+// fully-rounded pills. Buttons are squares with rounded corners.
+//
+// Vuetify ships `.v-btn--icon { border-radius: 50% }`, so every `<v-btn icon>`
+// defaults to a circle. That default is why the same control reads as a circle
+// on Projects, a rectangle on Tasks and plain text on the Hub — each screen
+// improvised instead of inheriting a standard.
+//
+// WHY THIS IS A STYLESHEET RULE AND NOT A `defaults: { VBtn: … }` ENTRY, both
+// of which were tried first:
+//   * `rounded: true`  -> `.v-btn--rounded { border-radius: 24px }`, which turns
+//     every TEXT button into a pill. Wrong for "New Product".
+//   * `rounded: 'lg'`  -> the `.rounded-lg` utility, a SINGLE-class selector that
+//     ties with `.v-btn--icon` on specificity. The winner is then decided by
+//     stylesheet source order, and component CSS (`VBtn.css`) is bundled by Vite
+//     independently of `vuetify/styles` — so the tie resolves differently
+//     depending on bundling. A rule that works by accident of build order is not
+//     a standard.
+// `.v-btn.v-btn--icon` is two classes, so it beats Vuetify's one-class rule on
+// SPECIFICITY and is immune to load order.
+//
+// Exempt by construction: status dots and pills are not `<v-btn>`, so this rule
+// cannot reach them. Keep it that way — do not widen the selector.
+.v-btn.v-btn--icon {
+  border-radius: $border-radius-default; // 8px — same as the home-screen tiles
+}
+
+// =========================================================================
 // Interactive Icon Utilities
 // =========================================================================
 // Standard hover pattern for clickable icons: muted default → yellow on hover.
@@ -218,11 +248,13 @@ body {
 }
 
 // Prominent play/start button variant — yellow with glow on hover.
+// FE-9365a: rounded square, not a circle — it is a button (the ▶ in the Projects
+// table's ACTIONS column), and buttons are not round.
 .icon-interactive-play {
   color: #ffc300;
   cursor: pointer;
   transition: all 0.2s ease;
-  border-radius: 50%;
+  border-radius: $border-radius-default;
   background: rgba(255, 195, 0, 0.1);
 
   &:hover {
@@ -286,6 +318,27 @@ body {
 // Typography utility classes
 .font-mono {
   font-family: 'IBM Plex Mono', monospace;
+}
+
+// Body text scale (TSK-9231). These three classes are applied across the app as
+// a body type hierarchy but were previously DEFINED NOWHERE — every one fell back
+// to the 16px root, so a caption could visually out-rank the title above it
+// (FE-9229 found this on the notification dropdown). Defined once here to the
+// design-token scale: large 16 / medium 14 / small 12. font-size is !important so
+// the utility reliably wins wherever a developer applied it — matching the
+// sibling a11y text utilities above and Vuetify's own text-body-* convention.
+// Only the SIZE is forced (that is the finding); line-height and weight inherit
+// so no element layout shifts beyond the intended resize.
+.text-body-large {
+  font-size: 1rem !important; // 16px
+}
+
+.text-body-medium {
+  font-size: $typography-font-size-body !important; // 0.875rem / 14px
+}
+
+.text-body-small {
+  font-size: $typography-font-size-small !important; // 0.75rem / 12px
 }
 
 // Opacity utility classes

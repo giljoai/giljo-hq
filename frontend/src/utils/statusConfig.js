@@ -65,6 +65,15 @@ const statusConfig = {
     italic: false,
     chipColor: 'warning',
   },
+  // FE-9239: a chain member actively being staged (Project.staging_status
+  // 'staging'/'staged') — distinct from generic 'waiting' so a staged chain
+  // project doesn't look identical to a genuinely-queued one.
+  planning: {
+    label: 'Planning',
+    color: STATUS_COLORS.SLEEPING, // $color-status-sleeping — matches chain-tab__badge--planning
+    italic: false,
+    chipColor: 'default',
+  },
   // Handover 0435b: Final acceptance by orchestrator
   closed: {
     label: 'Closed',

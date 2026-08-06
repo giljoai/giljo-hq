@@ -164,3 +164,20 @@ def test_giljo_invocation_token_per_tool():
     assert reg.giljo_invocation("multi_terminal") == "/giljo"
     assert reg.giljo_invocation(None) == "/giljo"
     assert reg.giljo_invocation("") == "/giljo"
+
+
+# ---------------------------------------------------------------------------
+# BE-9260: harness-neutral task-list phrasing. "TodoWrite list" only for the
+# detected claude-code harness; every other/unknown tool gets "task list" so
+# customer-reaching protocol prose never names a tool the harness lacks.
+# ---------------------------------------------------------------------------
+
+
+def test_task_list_phrase_todowrite_only_for_claude_code():
+    assert reg.task_list_phrase("claude-code") == "TodoWrite list"
+    assert reg.task_list_phrase("codex") == "task list"
+    assert reg.task_list_phrase("gemini") == "task list"
+    assert reg.task_list_phrase("antigravity") == "task list"
+    assert reg.task_list_phrase("multi_terminal") == "task list"
+    assert reg.task_list_phrase(None) == "task list"
+    assert reg.task_list_phrase("") == "task list"

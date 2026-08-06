@@ -21,6 +21,7 @@ import logging
 import time
 
 from api.app_state import APIState
+from giljo_mcp.branding import PRODUCT_NAME
 
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,8 @@ async def shutdown(state: APIState) -> None:
     failed: list[str] = []
     t_start = time.monotonic()
     logger.info(
-        "Shutting down GiljoAI MCP API (%d steps, %ds timeout each)...",
+        "Shutting down %s API (%d steps, %ds timeout each)...",
+        PRODUCT_NAME,
         total_steps,
         STEP_TIMEOUT,
     )

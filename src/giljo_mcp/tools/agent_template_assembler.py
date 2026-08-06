@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from giljo_mcp import branding
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.platform_registry import (
     EXPORT_ANTIGRAVITY_CLI,
@@ -52,7 +53,7 @@ VALID_PLATFORMS = VALID_EXPORT_PLATFORMS
 # via `agy plugin install` to ~/.gemini/config/plugins/<name>/.
 ANTIGRAVITY_PLUGIN_NAME = "giljoai"
 ANTIGRAVITY_PLUGIN_VERSION = "1.0.0"
-ANTIGRAVITY_PLUGIN_DESCRIPTION = "GiljoAI MCP orchestration agents and skills for Antigravity CLI."
+ANTIGRAVITY_PLUGIN_DESCRIPTION = f"{branding.PRODUCT_NAME} orchestration agents and skills for Antigravity CLI."
 
 # Install path metadata per platform now lives on the PlatformRegistry
 # (BE-6116, imported above as ``_INSTALL_PATHS``) -- single source for the

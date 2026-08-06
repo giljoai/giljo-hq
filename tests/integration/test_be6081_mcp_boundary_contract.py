@@ -28,6 +28,15 @@ Known Tier-2 sites verified here:
     author_job_id="" skips the ORCHESTRATOR_ONLY and CLOSEOUT_BLOCKED gates
     (both only fire when author_job_id is non-empty), so the call reaches
     the GIT_COMMITS_REQUIRED gate cleanly.
+  write_memory_entry — GIT_COMMIT_TITLE_REQUIRED (BE-9256): fires when a
+    supplied git_commits entry has no title (bare SHA, or empty message).
+    validate_git_commits raises GitCommitTitleRequiredError, caught at the
+    write_360_memory call site and returned as the Tier-2 dict.
+  write_project_closeout — GIT_COMMIT_TITLE_REQUIRED (BE-9256 audit Finding
+    #5): the symmetric sibling site in project_closeout.py's
+    close_project_and_update_memory -- same GitCommitTitleRequiredError catch,
+    same build_git_commit_title_required_rejection dict. Only write_memory_entry
+    was transport-tested before this file; write_project_closeout was not.
 
 Transport: every test drives the REAL @mcp.tool transport via
   ``create_connected_server_and_client_session`` — the wrapper, the
@@ -99,14 +108,19 @@ async def memory_tool_client(db_manager, db_session, monkeypatch):
     the in-memory MCP transport.  Mirrors the complete_job_client pattern from
     test_be3006d_mcp_boundary_validation.py.
 
-    The accessor's write_memory_entry method is wrapped to inject the
-    rolled-back db_session, so that seeded data seeded inside the transaction
-    is visible to the tool call (write_360_memory accepts a session kwarg).
+    The accessor's write_memory_entry AND write_project_closeout methods are
+    both wrapped to inject the rolled-back db_session, so that seeded data
+    written inside the transaction is visible to the tool call (both
+    write_360_memory and close_project_and_update_memory accept a session
+    kwarg) -- BE-9256 audit Finding #5 needs the write_project_closeout side
+    transport-tested too, and reuses this same fixture rather than a near-
+    duplicate one.
 
     Yields (client_factory, tenant_key, db_session).
     """
     from api import app_state
     from api.endpoints.mcp_tools import _base
+    from giljo_mcp.tools.project_closeout import close_project_and_update_memory
     from giljo_mcp.tools.write_memory_entry import write_360_memory
 
     state = app_state.state
@@ -142,6 +156,23 @@ async def memory_tool_client(db_manager, db_session, monkeypatch):
         )
 
     accessor.write_memory_entry = _write_memory_entry_with_session
+
+    # Same reasoning as _write_memory_entry_with_session above, for the
+    # write_project_closeout tool (BE-9256 audit Finding #5). tenant_key must
+    # stay an explicit named parameter for the same _call_tool signature-
+    # inspection reason.
+    async def _write_project_closeout_with_session(
+        tenant_key: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        return await close_project_and_update_memory(
+            tenant_key=tenant_key,
+            session=db_session,
+            db_manager=db_manager,
+            **kwargs,
+        )
+
+    accessor.write_project_closeout = _write_project_closeout_with_session
     state.tool_accessor = accessor
 
     monkeypatch.setattr(_base, "_resolve_tenant", lambda ctx: tenant_key)
@@ -266,36 +297,20 @@ async def test_tier2_git_commits_required_is_content_not_error(memory_tool_clien
     assert parsed.get("error") == "GIT_COMMITS_REQUIRED", f"Expected error=='GIT_COMMITS_REQUIRED', got: {parsed!r}"
 
 
-@pytest.mark.asyncio
-async def test_bare_sha_git_commits_accepted_at_boundary(memory_tool_client):
-    """BE-6208a follow-up: a list of BARE SHA STRINGS for git_commits must be
-    ACCEPTED at the @mcp.tool boundary, not rejected by Pydantic.
-
-    Regression for the BE-5042-class miss: BE-6208a widened the service-layer
-    validator (validate_git_commits) to accept bare strings and the @mcp.tool
-    docstring promises "a list of bare SHA strings (normalized server-side)" —
-    but the boundary annotation was left as ``list[dict]``, so Pydantic rejected
-    ``["6c59b7e"]`` with "Input should be a valid dictionary" BEFORE the
-    normalization ever ran. A raw field agent hit exactly this at the final
-    closeout step. This test drives the REAL transport and asserts the bare-SHA
-    shape is accepted (no dict_type validation error on the wire) and the entry
-    is written.
-    """
+async def _seed_org_product_project(session, tenant_key: str, label: str):
+    """Seed with real-UUID ids so write_360_memory's ``UUID(product.id)`` succeeds."""
     import uuid
 
-    client, tenant_key, session = memory_tool_client
-
-    # Seed with real-UUID ids: this test reaches write_360_memory's
-    # ``UUID(product.id)`` (the GIT_COMMITS_REQUIRED gate is satisfied here, so
-    # the write proceeds, unlike the gate tests which stop earlier).
     suffix = TenantManager.generate_tenant_key()[:8]
-    org = Organization(name=f"BE6208a Org {suffix}", slug=f"be6208a-{suffix}", tenant_key=tenant_key, is_active=True)
+    org = Organization(
+        name=f"{label} Org {suffix}", slug=f"{label.lower()}-{suffix}", tenant_key=tenant_key, is_active=True
+    )
     session.add(org)
     await session.flush()
     product = Product(
         id=str(uuid.uuid4()),
-        name=f"BE6208a Product {suffix}",
-        description="BE-6208a bare-SHA boundary test",
+        name=f"{label} Product {suffix}",
+        description=f"{label} boundary test",
         tenant_key=tenant_key,
         is_active=True,
         product_memory={},
@@ -306,15 +321,36 @@ async def test_bare_sha_git_commits_accepted_at_boundary(memory_tool_client):
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
         product_id=product.id,
-        name=f"BE6208a Project {suffix}",
-        description="BE-6208a",
-        mission="Bare-SHA boundary test",
+        name=f"{label} Project {suffix}",
+        description=label,
+        mission="Boundary test",
         status="active",
         staging_status="staging_complete",
         series_number=random.randint(1, 9000),
     )
     session.add(project)
     await session.flush()
+    return product, project
+
+
+@pytest.mark.asyncio
+async def test_bare_sha_git_commits_rejected_at_boundary(memory_tool_client):
+    """BE-9256 (flips BE-6208a): a list of BARE SHA STRINGS for git_commits must be
+    REJECTED at the @mcp.tool boundary as a Tier-2 structured domain rejection —
+    NOT silently normalized to an empty-titled entry, and NOT raised as isError.
+
+    BE-6208a widened the boundary type to ``list[dict | str]`` so a bare SHA string
+    reaches the service layer instead of failing Pydantic's dict-shape check. That
+    was correct plumbing, but the SERVICE-layer validator then normalized the bare
+    string to ``{"sha": ..., "message": ""}``, and every UI surface (dashboard,
+    closeout modal, 360 timeline) rendered that as a blank commit title. BE-9256
+    fails closed at the validator instead: the boundary type stays widened (a bare
+    string still reaches the service, avoiding the original dict_type regression),
+    but the service now rejects it with GIT_COMMIT_TITLE_REQUIRED, delivered as
+    normal tool content (Tier 2, not isError) with the exact git command to fix it.
+    """
+    client, tenant_key, session = memory_tool_client
+    _product, project = await _seed_org_product_project(session, tenant_key, "BE9256BareSha")
     await _enable_git_integration(session, tenant_key)
 
     async with client() as mcp_session:
@@ -323,8 +359,8 @@ async def test_bare_sha_git_commits_accepted_at_boundary(memory_tool_client):
             {
                 "project_id": project.id,
                 "summary": "Completed the integration work",
-                "key_outcomes": ["Bare-SHA git_commits accepted at the boundary"],
-                "decisions_made": ["Boundary type widened to list[dict | str]"],
+                "key_outcomes": ["Bare-SHA git_commits rejected at the boundary"],
+                "decisions_made": ["Boundary type stays list[dict | str]; service fails closed"],
                 "entry_type": "project_completion",
                 "author_job_id": "",
                 "git_commits": ["6c59b7e", "a775e8e4"],
@@ -332,16 +368,131 @@ async def test_bare_sha_git_commits_accepted_at_boundary(memory_tool_client):
         )
 
     wire_text = _content_text(result)
-    # The exact failure the field agent saw — must NOT recur.
+    # The bare string must still REACH the service (BE-6208a's boundary-type fix
+    # holds) -- a dict_type Pydantic rejection here would mean that regressed.
     assert "valid dictionary" not in wire_text and "dict_type" not in wire_text, (
-        "bare-SHA git_commits was rejected at the @mcp.tool boundary "
-        f"(BE-6208a boundary type not widened): {wire_text!r}"
+        f"bare-SHA git_commits was rejected by Pydantic at the @mcp.tool boundary "
+        f"(BE-6208a boundary-type widening regressed): {wire_text!r}"
     )
-    assert not result.isError, f"bare-SHA closeout must not error at the boundary: {wire_text!r}"
+    assert not result.isError, f"GIT_COMMIT_TITLE_REQUIRED must be Tier 2 (normal content), not isError: {wire_text!r}"
 
     parsed = _parse_content_dict(result)
-    assert parsed.get("entry_id"), f"bare-SHA closeout should write an entry, got: {parsed!r}"
-    assert parsed.get("git_commits_count") == 2, f"both bare SHAs should normalize and persist, got: {parsed!r}"
+    assert parsed.get("success") is False, f"expected success==False, got: {parsed!r}"
+    assert parsed.get("error") == "GIT_COMMIT_TITLE_REQUIRED", f"expected GIT_COMMIT_TITLE_REQUIRED, got: {parsed!r}"
+    assert "git log --format=" in parsed.get("hint", ""), f"hint must carry the exact git command: {parsed!r}"
+
+
+@pytest.mark.asyncio
+async def test_titled_git_commits_accepted_at_boundary(memory_tool_client):
+    """BE-9256: a titled {sha, message, author} dict is accepted and persists."""
+    client, tenant_key, session = memory_tool_client
+    _product, project = await _seed_org_product_project(session, tenant_key, "BE9256Titled")
+    await _enable_git_integration(session, tenant_key)
+
+    async with client() as mcp_session:
+        result = await mcp_session.call_tool(
+            "write_memory_entry",
+            {
+                "project_id": project.id,
+                "summary": "Completed the integration work",
+                "key_outcomes": ["Titled git_commits accepted at the boundary"],
+                "decisions_made": ["Titled dict shape is the primary contract"],
+                "entry_type": "project_completion",
+                "author_job_id": "",
+                "git_commits": [{"sha": "6c59b7e", "message": "Fix the widget", "author": "Alice"}],
+            },
+        )
+
+    assert not result.isError, f"titled closeout must not error at the boundary: {_content_text(result)!r}"
+    parsed = _parse_content_dict(result)
+    assert parsed.get("entry_id"), f"titled closeout should write an entry, got: {parsed!r}"
+    assert parsed.get("git_commits_count") == 1, f"got: {parsed!r}"
+
+
+@pytest.mark.asyncio
+async def test_porcelain_git_commits_accepted_at_boundary(memory_tool_client):
+    """BE-9256: a tab-delimited porcelain string (the raw `git log --format=...`
+    output) is accepted and parsed into the titled shape."""
+    client, tenant_key, session = memory_tool_client
+    _product, project = await _seed_org_product_project(session, tenant_key, "BE9256Porcelain")
+    await _enable_git_integration(session, tenant_key)
+
+    async with client() as mcp_session:
+        result = await mcp_session.call_tool(
+            "write_memory_entry",
+            {
+                "project_id": project.id,
+                "summary": "Completed the integration work",
+                "key_outcomes": ["Porcelain git_commits accepted at the boundary"],
+                "decisions_made": ["Porcelain string is parsed server-side"],
+                "entry_type": "project_completion",
+                "author_job_id": "",
+                "git_commits": ["6c59b7e\tFix the widget\tAlice"],
+            },
+        )
+
+    assert not result.isError, f"porcelain closeout must not error at the boundary: {_content_text(result)!r}"
+    parsed = _parse_content_dict(result)
+    assert parsed.get("entry_id"), f"porcelain closeout should write an entry, got: {parsed!r}"
+    assert parsed.get("git_commits_count") == 1, f"got: {parsed!r}"
+
+
+@pytest.mark.asyncio
+async def test_bare_sha_git_commits_rejected_at_closeout_boundary(memory_tool_client):
+    """BE-9256 audit Finding #5: the symmetric write_project_closeout transport
+    test. write_memory_entry's GIT_COMMIT_TITLE_REQUIRED path was transport-
+    tested (test_bare_sha_git_commits_rejected_at_boundary above); its sibling
+    site in close_project_and_update_memory (project_closeout.py, reached via
+    the write_project_closeout @mcp.tool) was not. Same rejection shape, same
+    Tier-2 contract (normal content, not isError), different tool."""
+    client, tenant_key, session = memory_tool_client
+    _product, project = await _seed_org_product_project(session, tenant_key, "BE9256CloseoutBareSha")
+
+    async with client() as mcp_session:
+        result = await mcp_session.call_tool(
+            "write_project_closeout",
+            {
+                "project_id": project.id,
+                "summary": "Completed the integration work",
+                "key_outcomes": ["Bare-SHA git_commits rejected at the closeout boundary"],
+                "decisions_made": ["write_project_closeout mirrors write_memory_entry's Tier-2 gate"],
+                "git_commits": ["6c59b7e", "a775e8e4"],
+            },
+        )
+
+    wire_text = _content_text(result)
+    assert not result.isError, f"GIT_COMMIT_TITLE_REQUIRED must be Tier 2 (normal content), not isError: {wire_text!r}"
+
+    parsed = _parse_content_dict(result)
+    assert parsed.get("success") is False, f"expected success==False, got: {parsed!r}"
+    assert parsed.get("error") == "GIT_COMMIT_TITLE_REQUIRED", f"expected GIT_COMMIT_TITLE_REQUIRED, got: {parsed!r}"
+    assert "git log --format=" in parsed.get("hint", ""), f"hint must carry the exact git command: {parsed!r}"
+
+
+@pytest.mark.asyncio
+async def test_titled_git_commits_accepted_at_closeout_boundary(memory_tool_client):
+    """BE-9256 audit Finding #5 (happy-path sibling): a titled dict is accepted
+    and persists through write_project_closeout, matching write_memory_entry's
+    test_titled_git_commits_accepted_at_boundary above."""
+    client, tenant_key, session = memory_tool_client
+    _product, project = await _seed_org_product_project(session, tenant_key, "BE9256CloseoutTitled")
+
+    async with client() as mcp_session:
+        result = await mcp_session.call_tool(
+            "write_project_closeout",
+            {
+                "project_id": project.id,
+                "summary": "Completed the integration work",
+                "key_outcomes": ["Titled git_commits accepted at the closeout boundary"],
+                "decisions_made": ["Titled dict shape is the primary contract"],
+                "git_commits": [{"sha": "6c59b7e", "message": "Fix the widget", "author": "Alice"}],
+            },
+        )
+
+    assert not result.isError, f"titled closeout must not error at the boundary: {_content_text(result)!r}"
+    parsed = _parse_content_dict(result)
+    assert parsed.get("entry_id"), f"titled closeout should write an entry, got: {parsed!r}"
+    assert parsed.get("git_commits_count") == 1, f"got: {parsed!r}"
 
 
 # ---------------------------------------------------------------------------

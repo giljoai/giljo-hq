@@ -16,6 +16,8 @@ import pytest
 
 from giljo_mcp.repositories.product_memory_repository import ProductMemoryRepository
 from giljo_mcp.services.dto import MemoryEntryCreateParams
+from giljo_mcp.services.product_memory_service import ProductMemoryService
+from giljo_mcp.services.product_service import ProductService
 
 
 @pytest.mark.asyncio
@@ -191,3 +193,59 @@ async def test_repository_respects_include_deleted_flag(db_session, test_tenant_
     assert active_entries[0].sequence == 2
 
     assert len(all_entries) == 2
+
+
+# ============================================================================
+# BE-9261: product_memory seed key renamed github -> git_integration
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_legacy_github_key_still_loads_via_response_builder(
+    db_manager, db_session, test_tenant_key, test_product
+):
+    """A row written before BE-9261 only carries "github". The real reader
+    (_build_product_memory_response, called from ProductService.update_product's
+    websocket-event path) must still surface that data under git_integration --
+    this is the must-leave regression the seed-key rename is coordinated against."""
+    test_product.product_memory = {
+        "github": {"enabled": True, "commit_limit": 25},
+        "context": {},
+    }
+    await db_session.commit()
+
+    memory_service = ProductMemoryService(db_manager, test_tenant_key, test_session=db_session)
+    response = await memory_service._build_product_memory_response(db_session, test_product)
+
+    assert response["git_integration"] == {"enabled": True, "commit_limit": 25}
+
+
+@pytest.mark.asyncio
+async def test_git_integration_key_takes_precedence_over_legacy_github(
+    db_manager, db_session, test_tenant_key, test_product
+):
+    """If a row somehow carries both keys (mid-migration), the canonical
+    git_integration key wins over the legacy github fallback."""
+    test_product.product_memory = {
+        "git_integration": {"enabled": True},
+        "github": {"enabled": False, "stale": True},
+        "context": {},
+    }
+    await db_session.commit()
+
+    memory_service = ProductMemoryService(db_manager, test_tenant_key, test_session=db_session)
+    response = await memory_service._build_product_memory_response(db_session, test_product)
+
+    assert response["git_integration"] == {"enabled": True}
+
+
+@pytest.mark.asyncio
+async def test_new_product_seeds_git_integration_key(db_manager, db_session, test_tenant_key):
+    """New product creation paths write the renamed git_integration seed key,
+    not the legacy github key."""
+    service = ProductService(db_manager, tenant_key=test_tenant_key, test_session=db_session)
+
+    product = await service.create_product(name="BE-9261 seed check")
+
+    assert product.product_memory["git_integration"] == {}
+    assert "github" not in product.product_memory

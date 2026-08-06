@@ -74,6 +74,7 @@ def job_to_response(job: dict) -> JobResponse:
         # Handover 0407: Counter fields for message tracking (used by frontend store)
         messages_sent_count=job.get("messages_sent_count", 0),
         messages_waiting_count=job.get("messages_waiting_count", 0),
+        action_required_unread=job.get("action_required_unread", 0),  # BE-9273
         messages_read_count=job.get("messages_read_count", 0),
         started_at=job.get("started_at"),
         completed_at=job.get("completed_at"),
@@ -178,6 +179,17 @@ async def get_job(
     """
     Get job details by job_id.
 
+    BE-9330: reads the job/execution ROW (same producer as the list endpoint
+    above), not ``get_agent_mission``. The mission call returns a protocol
+    payload built for agent delivery, and two of its properties made it unfit
+    to back a details read: on the implementation-launch gate's BLOCKED branch
+    it carries only job_id + block wording (so the REQUIRED ``created_at``
+    arrived None and this route 500'd on any staging orchestrator), and it
+    rejects any job whose execution is not 'active' (so a COMPLETED job 404'd
+    "wrong_state" out of a read-only endpoint). Reading the row also drops the
+    hand-written dict bridge that hardcoded ``completed_at=None`` -- which had
+    the API report every finished agent as never having completed.
+
     Args:
         job_id: Job ID to retrieve
         current_user: Authenticated user (from dependency)
@@ -191,24 +203,10 @@ async def get_job(
     """
     logger.debug("User %s getting job %s", sanitize(current_user.username), sanitize(job_id))
 
-    result = await orchestration_service.get_agent_mission(job_id=job_id, tenant_key=current_user.tenant_key)
+    # Service raises ResourceNotFoundError (-> 404) when no such job exists for
+    # this tenant; caught by the global exception handler.
+    job = await orchestration_service.get_job_detail(job_id=job_id, tenant_key=current_user.tenant_key)
 
     logger.info("Retrieved job %s for tenant %s", sanitize(job_id), sanitize(current_user.tenant_key))
 
-    # 0731d: OrchestrationService returns MissionResponse typed model
-    # Convert to JobResponse via dict bridge (MissionResponse has different field set)
-    return job_to_response(
-        {
-            "agent_id": result.agent_id or "",  # 0366: use agent_id
-            "job_id": result.job_id,
-            "tenant_key": current_user.tenant_key,
-            "agent_display_name": result.agent_display_name or "unknown",
-            "mission": result.mission or "",
-            "status": result.status or "unknown",
-            "spawned_by": result.parent_job_id,
-            "context_chunks": [],
-            "started_at": result.started_at,
-            "completed_at": None,
-            "created_at": result.created_at,
-        }
-    )
+    return job_to_response(job)

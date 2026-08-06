@@ -10,7 +10,7 @@
 
           <v-card-text class="pa-6">
             <v-alert type="error" variant="tonal" class="mb-4">
-              Unable to connect to GiljoAI MCP
+              Unable to connect to {{ productName }}
             </v-alert>
 
             <p class="text-body-large mb-4">
@@ -86,6 +86,9 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/services/api'
 import { getApiBaseUrl } from '@/composables/useApiUrl'
+import { PRODUCT_NAME } from '@/branding'
+
+const productName = PRODUCT_NAME
 
 const router = useRouter()
 const retrying = ref(false)

@@ -36,6 +36,7 @@
                 @product-created="setProduct"
                 @review="goToReview"
                 @upload="goToUpload"
+                @manual="goManual"
               />
               <TutorialUploadScreen
                 v-else-if="s.screen === 'upload'"
@@ -43,13 +44,18 @@
                 @product-created="setProduct"
                 @product-invalidated="setProduct(null)"
                 @review="goToReview"
+                @manual="goManual"
               />
               <TutorialReviewScreen
                 v-else-if="s.screen === 'review'"
                 :product-id="s.productId"
                 @activated="finishToDone"
               />
-              <TutorialDoneScreen v-else-if="s.screen === 'done'" :router-choice="s.path" />
+              <TutorialDoneScreen
+                v-else-if="s.screen === 'done'"
+                :router-choice="s.path"
+                @close="handleSkip"
+              />
             </div>
 
             <TutorialFooter
@@ -177,15 +183,29 @@ function cancelDoorC() {
   showDoorCConfirm.value = false
 }
 
-function confirmDoorC() {
-  showDoorCConfirm.value = false
-  // Path C: the manual form. Leave the activate nudge behind, finish the
-  // tutorial, and open the classic ProductForm on the Products page.
-  pick('C')
+// Leave the tutorial for the manual form: drop the activate nudge behind, finish
+// the tutorial, and open the classic ProductForm on the Products page.
+function leaveForManualForm() {
   armActivateBreadcrumb()
   markComplete()
   close()
   router.push('/Products?create=true')
+}
+
+function confirmDoorC() {
+  showDoorCConfirm.value = false
+  // Path C: the manual form.
+  pick('C')
+  leaveForManualForm()
+}
+
+// FE-9320: escape hatch from either agent-driven door once it is clear no
+// connected agent is coming (the door's own stalled state offers it). The
+// recorded router_choice is deliberately NOT rewritten to 'C' — the user did
+// pick the door they picked, and this is the same destination, not the same
+// choice.
+function goManual() {
+  leaveForManualForm()
 }
 </script>
 

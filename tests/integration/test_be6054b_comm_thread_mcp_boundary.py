@@ -208,6 +208,12 @@ async def test_get_my_turn_and_pass_baton(comm_mcp_client):
     tid = thread["thread_id"]
 
     async with new_client() as s:
+        # BE-9292a: the baton target must be reachable, so beta joins before receiving
+        # it. What this test guards is unchanged — the baton moves and get_my_turn
+        # follows it from alpha to beta.
+        joined = await s.call_tool("join_thread", {"thread_id": tid, "agent_id": "agent-beta"})
+        assert joined.isError is False, _error_text(joined)
+
         mine = await s.call_tool("get_my_turn", {"agent_id": "agent-alpha"})
         assert mine.isError is False, _error_text(mine)
         assert tid in {t["thread_id"] for t in _payload(mine)["threads"]}

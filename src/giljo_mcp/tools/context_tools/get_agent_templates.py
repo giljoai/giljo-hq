@@ -18,12 +18,15 @@ Token Budget by Depth:
 # Read-only tool -- uses direct session.execute() for SELECT queries (no writes)
 
 import logging
+from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.models import AgentTemplate
+from giljo_mcp.tenant_guard import TenantIsolationError
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +40,16 @@ def estimate_tokens(data: Any) -> int:
     return len(text) // 4
 
 
+@asynccontextmanager
+async def _session_scope(db_manager: DatabaseManager | None, test_session: AsyncSession | None):
+    """Yield the test session directly or open a new managed session."""
+    if test_session is not None:
+        yield test_session
+    else:
+        async with db_manager.get_session_async() as session:
+            yield session
+
+
 async def get_agent_templates(
     product_id: str,
     tenant_key: str,
@@ -44,6 +57,7 @@ async def get_agent_templates(
     offset: int = 0,
     limit: int = None,
     db_manager: DatabaseManager | None = None,
+    _test_session: AsyncSession | None = None,
 ) -> dict[str, Any]:
     """
     Fetch agent templates for given tenant with depth control.
@@ -96,11 +110,11 @@ async def get_agent_templates(
     """
     logger.info("fetching_agent_templates_context product_id=%s tenant_key=%s depth=%s", product_id, tenant_key, detail)
 
-    if db_manager is None:
+    if db_manager is None and _test_session is None:
         logger.error("db_manager is required operation=get_agent_templates")
         raise ValueError("db_manager parameter is required")
 
-    async with db_manager.get_session_async() as session:
+    async with _session_scope(db_manager, _test_session) as session:
         # Query agent templates for this tenant (reuse pattern from thin_prompt_generator)
         # BE-6137: exclude soft-deleted templates from MCP context reads.
         stmt = (
@@ -128,6 +142,15 @@ async def get_agent_templates(
                 # Only filter if assignments exist (no assignments = show all)
                 if active_ids:
                     templates = [t for t in templates if t.id in active_ids]
+            except TenantIsolationError:
+                # TenantIsolationError subclasses RuntimeError, so it would otherwise match
+                # the transient-failure tuple below and be reported as a warning. The callee
+                # sets its own tenant_session_context, so the reachable shape here is a
+                # bypass-coverage miss: an active tenant_isolation_bypass covers the outer
+                # query's models but not the join's ProductAgentAssignment. That is a
+                # stop-condition, not a transient failure. fetch_context (this tool's only
+                # caller) re-raises it in turn rather than flattening it into its errors block.
+                raise
             except (OSError, RuntimeError, ValueError, TypeError, AttributeError) as exc:
                 # Non-fatal: fall back to showing all templates
                 logger.warning(

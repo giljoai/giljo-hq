@@ -1,6 +1,7 @@
 <template>
   <BaseDialog
     v-model="isOpen"
+    data-testid="product-delete-dialog"
     type="warning"
     title="Move Product to Trash?"
     icon="mdi-delete"
@@ -29,7 +30,7 @@
 
       <!-- Cascade Impact -->
       <div v-if="cascadeImpact" class="mb-4">
-        <div class="text-title-small mb-2">This will delete:</div>
+        <div class="text-title-small mb-2">Kept with this product in the trash:</div>
 
         <v-list density="compact">
           <v-list-item>
@@ -37,11 +38,8 @@
               <v-icon color="warning">mdi-folder-multiple</v-icon>
             </template>
             <v-list-item-title>
-              <strong>{{ cascadeImpact.unfinished_projects }}</strong> unfinished projects
+              <strong>{{ cascadeImpact.total_projects }}</strong> projects
             </v-list-item-title>
-            <v-list-item-subtitle>
-              ({{ cascadeImpact.projects_count }} total projects)
-            </v-list-item-subtitle>
           </v-list-item>
 
           <v-list-item>
@@ -49,11 +47,8 @@
               <v-icon color="warning">mdi-checkbox-marked-circle</v-icon>
             </template>
             <v-list-item-title>
-              <strong>{{ cascadeImpact.unresolved_tasks }}</strong> unresolved tasks
+              <strong>{{ cascadeImpact.total_tasks }}</strong> tasks
             </v-list-item-title>
-            <v-list-item-subtitle>
-              ({{ cascadeImpact.tasks_count }} total tasks)
-            </v-list-item-subtitle>
           </v-list-item>
 
           <v-list-item>
@@ -61,19 +56,16 @@
               <v-icon color="warning">mdi-file-document-multiple</v-icon>
             </template>
             <v-list-item-title>
-              <strong>{{ cascadeImpact.vision_documents_count }}</strong> vision documents
-            </v-list-item-title>
-          </v-list-item>
-
-          <v-list-item>
-            <template v-slot:prepend>
-              <v-icon color="warning">mdi-database</v-icon>
-            </template>
-            <v-list-item-title>
-              <strong>{{ cascadeImpact.total_chunks }}</strong> context chunks
+              <strong>{{ cascadeImpact.total_vision_documents }}</strong> vision documents
             </v-list-item-title>
           </v-list-item>
         </v-list>
+
+        <div class="text-body-small text-muted-a11y mt-2">
+          These items are not deleted now. They are permanently deleted only when the product
+          itself is — either when you delete it permanently from the trash, or automatically after
+          10 days.
+        </div>
       </div>
     </template>
   </BaseDialog>
@@ -92,15 +84,13 @@ const props = defineProps({
     type: Object,
     default: () => ({}),
   },
+  // Shape matches the backend CascadeImpact model (api/endpoints/products/models.py).
   cascadeImpact: {
     type: Object,
     default: () => ({
-      unfinished_projects: 0,
-      projects_count: 0,
-      unresolved_tasks: 0,
-      tasks_count: 0,
-      vision_documents_count: 0,
-      total_chunks: 0,
+      total_projects: 0,
+      total_tasks: 0,
+      total_vision_documents: 0,
     }),
   },
   loading: {

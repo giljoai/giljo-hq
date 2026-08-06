@@ -50,6 +50,26 @@ class SetupStateInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CredentialStatusResult(BaseModel):
+    """Durable connection-credential status for the current tenant (FE-9274).
+
+    Computed on the fly from ``api_keys`` + ``oauth_refresh_tokens`` -- no new
+    table, no migration. Backs the Connect surface's "Configured" state so it
+    survives a page reload instead of resetting to session-only state.
+
+    ``has_expired_oauth`` is true only when >=1 ``oauth_refresh_tokens`` row
+    exists for the tenant AND none of them are currently valid (all revoked
+    and/or past ``expires_at``) -- distinct from "never connected", which
+    reports all three fields false.
+    """
+
+    has_valid_api_key: bool
+    has_valid_oauth: bool
+    has_expired_oauth: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ApiKeyInfo(BaseModel):
     """API key summary information (no sensitive data).
 

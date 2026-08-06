@@ -253,7 +253,15 @@ async def test_explicit_param_beats_auto_rule(comm_mcp_client_ws):
     assert res.isError is False, _error_text(res)
     assert _payload(res)["next_action_owner"] == "gamma"
     assert await _owner_sees_turn(new_client, "gamma", tid)
-    assert not await _owner_sees_turn(new_client, "beta", tid)
+    # BE-9207: get_my_turn is no longer a pure baton proxy. beta received a directed
+    # requires_action post, so beta's own get_my_turn now surfaces this thread (via the
+    # additive directed_action list) even though the baton went to gamma — that
+    # decoupling IS the BE-9207 fix (a directed action must not vanish from its
+    # addressee's turn list when the baton moves to another lane). The baton-placement
+    # contract this test guards is asserted above (next_action_owner == gamma); the old
+    # `assert not _owner_sees_turn(beta)` conflated get_my_turn visibility with baton
+    # ownership and is intentionally replaced.
+    assert await _owner_sees_turn(new_client, "beta", tid)
 
 
 async def test_explicit_none_suppresses_auto_pass(comm_mcp_client_ws):
@@ -276,9 +284,15 @@ async def test_explicit_none_suppresses_auto_pass(comm_mcp_client_ws):
     assert res.isError is False, _error_text(res)
     payload = _payload(res)
     assert payload["baton_passed"] is False
-    # Creator alpha still holds the baton; beta never sees the turn.
+    # Creator alpha still holds the baton (pass_baton_to='none' suppressed the auto-pass).
     assert payload["next_action_owner"] == "alpha"
-    assert not await _owner_sees_turn(new_client, "beta", tid)
+    # BE-9207: beta received a directed requires_action post, so beta's get_my_turn now
+    # surfaces this thread via the additive directed_action list even though the baton
+    # never moved off alpha. The old `assert not _owner_sees_turn(beta)` used get_my_turn
+    # as a baton proxy; BE-9207 decouples the two (a directed action stays visible to its
+    # addressee regardless of baton position). The baton-suppression contract this test
+    # guards is asserted above (baton_passed False, next_action_owner == alpha, no baton event).
+    assert await _owner_sees_turn(new_client, "beta", tid)
     assert _baton_events(ws) == []
 
 

@@ -10,7 +10,7 @@ INF-6049a: the per-platform fleet (`gil_add` / `gil_get` / `gil_chain` /
 `gil_get_reference` / `gil_get_agents`) was collapsed to ONE thin command per
 platform -- `/giljo` -- whose entire job is to call the `get_giljo_guide` MCP
 tool (BE-9012d, F1: bare -- this body renders to Codex/Gemini/Desktop too, where
-the Claude Code `mcp__giljo_mcp__` prefix is wrong) and follow what it returns.
+the Claude Code `mcp__giljo_hq__` prefix is wrong) and follow what it returns.
 The routing/judgment that used to live in N markdown bodies now lives server-side
 in that one tool (see ``giljo_guide.py``), so the shipped command stays a 1-liner
 and never drifts. Agent-template installs/refreshes are handled by the
@@ -21,6 +21,7 @@ This module also provides bootstrap prompt templates for one-time CLI onboarding
 
 from __future__ import annotations
 
+from giljo_mcp import branding
 from giljo_mcp.platform_registry import (
     EXPORT_ANTIGRAVITY_CLI,
     EXPORT_CLAUDE_CODE,
@@ -48,7 +49,7 @@ _GILJO_DESCRIPTION = (
 # Shared instruction body (platform-neutral). Command invocation differs by
 # platform (/giljo vs $giljo) but the instruction is identical.
 _GILJO_BODY = (
-    "This command is a thin entry point to the GiljoAI MCP. Do this every time:\n"
+    f"This command is a thin entry point to {branding.PRODUCT_NAME}. Do this every time:\n"
     "\n"
     "1. Call the `get_giljo_guide` tool (no arguments; your MCP client may expose it\n"
     "   under a prefix, e.g. `mcp__<server>__get_giljo_guide` -- use the name your\n"
@@ -61,7 +62,7 @@ _GILJO_BODY = (
     "   - read-vs-write routing (reads: list_projects / list_tasks / get_context;\n"
     "     writes: create_* / update_*; never pass tenant_key; an active product is required),\n"
     "   - the staging -> human-gate -> implement lifecycle.\n"
-    "3. Then carry out the user's request with the GiljoAI MCP tools.\n"
+    f"3. Then carry out the user's request with the {branding.PRODUCT_NAME} tools.\n"
     "\n"
     "To install or refresh GiljoAI agent templates, run the `giljo_setup` tool and choose\n"
     '"Agents only" -- there is no separate agents command.'
@@ -72,7 +73,7 @@ GILJO_CLAUDE_MD = f"""---
 description: "{_GILJO_DESCRIPTION}"
 ---
 
-# /giljo -- GiljoAI MCP commands
+# /giljo -- {branding.PRODUCT_NAME} commands
 
 {_GILJO_BODY}
 """
@@ -81,7 +82,7 @@ description: "{_GILJO_DESCRIPTION}"
 GILJO_GEMINI_TOML = f"""description = "{_GILJO_DESCRIPTION}"
 
 prompt = '''
-# /giljo -- GiljoAI MCP commands
+# /giljo -- {branding.PRODUCT_NAME} commands
 
 {_GILJO_BODY}
 '''
@@ -93,7 +94,7 @@ name: giljo
 description: "{_GILJO_DESCRIPTION}"
 ---
 
-# $giljo -- GiljoAI MCP commands
+# $giljo -- {branding.PRODUCT_NAME} commands
 
 {_GILJO_BODY}
 """
@@ -184,7 +185,7 @@ Step 2 — Validate and install the plugin:
 Do NOT add experimental.enableAgents to any settings file — that flag is
 Gemini-CLI-only and is not used by agy.
 
-Step 3 — Connect agy to the GiljoAI MCP server:
+Step 3 — Connect agy to the Giljo HQ server:
 Visit your GiljoAI server's Tools -> Connect page, choose Antigravity CLI, and
 copy the mcp_config.json snippet into ~/.gemini/config/mcp_config.json.
 IMPORTANT — if migrating an existing config from Gemini CLI: agy uses the
@@ -219,8 +220,8 @@ _BUNDLE_NUDGE_LINE = (
     "## Skills bundle freshness (check once per session)\n"
     "\n"
     f"This skill was generated from GiljoAI skills bundle `bundle_version: {SKILLS_VERSION}`.\n"
-    "Any GiljoAI MCP tool response includes `_meta.skills_version` (the version the server "
-    "currently ships). The FIRST time in a chat session that you call a GiljoAI MCP tool, "
+    f"Any {branding.PRODUCT_NAME} tool response includes `_meta.skills_version` (the version the server "
+    f"currently ships). The FIRST time in a chat session that you call a {branding.PRODUCT_NAME} tool, "
     "compare that `_meta.skills_version` to this file's `bundle_version`. If the server's "
     'version is newer, tell the user once: "Your GiljoAI skills are out of date — run '
     '/giljo_setup to update." Do not repeat this notice again in the same session, and never '

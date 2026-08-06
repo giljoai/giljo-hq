@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Settings API endpoints for GiljoAI MCP.
+Settings API endpoints for Giljo HQ.
 
 Provides REST API for system settings management:
 - GET/PUT /general - General system settings
@@ -21,10 +21,11 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session, require_admin, require_ce_mode
+from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session, require_admin
 from giljo_mcp.models import User
 from giljo_mcp.services.settings_service import SettingsService, SystemSettingsService
 from giljo_mcp.services.silence_detector import DEFAULT_SILENCE_THRESHOLD_MINUTES
+from giljo_mcp.services.tenant_configuration_service import TenantConfigurationService
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 
@@ -111,40 +112,64 @@ async def update_general_settings(
     return SettingsUpdateResponse(settings=settings, message="Settings updated successfully")
 
 
-# SERVER-LEVEL: reads deployment-wide agent silence threshold from system_settings, CE-only.
+# CE: server-global threshold in system_settings (unchanged). SaaS (FE-9241): this
+# tenant's own override in `configurations` if set, else the deployment-wide default.
 @router.get(
     "/system/agent-silence-threshold",
     response_model=AgentSilenceThresholdResponse,
-    summary="Get deployment-wide agent silence threshold",
-    description="Get the server-global agent silence threshold in minutes",
+    summary="Get the agent silence threshold",
+    description="CE: the server-global threshold in minutes. SaaS: this tenant's own "
+    "override if set, else the deployment-wide default.",
 )
 async def get_agent_silence_threshold(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session),
-    _ce: None = Depends(require_ce_mode),
 ) -> AgentSilenceThresholdResponse:
     logger.debug("User %s retrieving agent silence threshold", sanitize(current_user.username))
 
-    service = SystemSettingsService(db)
-    threshold = await service.get_agent_silence_threshold_minutes()
+    # Mode gate evaluated at request time so tests can patch api.app_state.GILJO_MODE
+    # without re-importing this module (matches api/endpoints/tenant_data.py).
+    from api.app_state import GILJO_MODE, state
 
-    return AgentSilenceThresholdResponse(agent_silence_threshold_minutes=threshold or DEFAULT_SILENCE_THRESHOLD_MINUTES)
+    if GILJO_MODE == "saas":
+        tenant_service = TenantConfigurationService(db_manager=state.db_manager, tenant_key=current_user.tenant_key)
+        override = await tenant_service.get_agent_silence_threshold_minutes()
+        if override is not None:
+            return AgentSilenceThresholdResponse(agent_silence_threshold_minutes=override)
+
+    # CE always reaches here; SaaS only when no tenant override is set (fallback).
+    deployment_default = await SystemSettingsService(db).get_agent_silence_threshold_minutes()
+    return AgentSilenceThresholdResponse(
+        agent_silence_threshold_minutes=deployment_default or DEFAULT_SILENCE_THRESHOLD_MINUTES
+    )
 
 
-# SERVER-LEVEL: writes deployment-wide agent silence threshold to system_settings, CE-only.
+# CE: writes the server-global threshold in system_settings (unchanged, admin only).
+# SaaS (FE-9241): writes this tenant's own override in `configurations` (admin only —
+# every SaaS tenant's sole user is provisioned with role="admin", ADR-009 single-user).
 @router.put(
     "/system/agent-silence-threshold",
     response_model=AgentSilenceThresholdUpdateResponse,
-    summary="Update deployment-wide agent silence threshold",
-    description="Update the server-global agent silence threshold in minutes (admin only)",
+    summary="Update the agent silence threshold",
+    description="CE: the server-global threshold in minutes (admin only). SaaS: this "
+    "tenant's own override (admin only).",
 )
 async def update_agent_silence_threshold(
     request: AgentSilenceThresholdUpdate,
     current_user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
-    _ce: None = Depends(require_ce_mode),
 ) -> AgentSilenceThresholdUpdateResponse:
     logger.info("Admin %s updating agent silence threshold", sanitize(current_user.username))
+
+    from api.app_state import GILJO_MODE, state
+
+    if GILJO_MODE == "saas":
+        tenant_service = TenantConfigurationService(db_manager=state.db_manager, tenant_key=current_user.tenant_key)
+        threshold = await tenant_service.set_agent_silence_threshold_minutes(request.agent_silence_threshold_minutes)
+        return AgentSilenceThresholdUpdateResponse(
+            agent_silence_threshold_minutes=threshold,
+            message="Settings updated successfully",
+        )
 
     service = SystemSettingsService(db)
     threshold = await service.update_agent_silence_threshold_minutes(request.agent_silence_threshold_minutes)

@@ -59,7 +59,7 @@ describe('normalizeToolId', () => {
 
 describe('generateAntigravityConfig (byte-parity)', () => {
   // BYTE-PARITY SPEC: output MUST be byte-identical to Python:
-  //   json.dumps({"mcpServers": {"giljo_mcp": {"serverUrl": serverUrl + "/mcp",
+  //   json.dumps({"mcpServers": {"giljo_hq": {"serverUrl": serverUrl + "/mcp",
   //               "headers": {"Authorization": "Bearer " + api_key}}}}, indent=2)
   //
   // Backend reference: api/endpoints/ai_tools.py → get_antigravity_config()
@@ -70,7 +70,7 @@ describe('generateAntigravityConfig (byte-parity)', () => {
     const expected = [
       '{',
       '  "mcpServers": {',
-      '    "giljo_mcp": {',
+      '    "giljo_hq": {',
       '      "serverUrl": "https://giljo.example.com/mcp",',
       '      "headers": {',
       '        "Authorization": "Bearer <YOUR_API_KEY>"',
@@ -87,7 +87,7 @@ describe('generateAntigravityConfig (byte-parity)', () => {
     const expected = [
       '{',
       '  "mcpServers": {',
-      '    "giljo_mcp": {',
+      '    "giljo_hq": {',
       '      "serverUrl": "http://localhost:7272/mcp",',
       '      "headers": {',
       '        "Authorization": "Bearer tok_abc123"',
@@ -103,8 +103,8 @@ describe('generateAntigravityConfig (byte-parity)', () => {
     const result = generateAntigravityConfig('https://example.com', 'key123')
     expect(() => JSON.parse(result)).not.toThrow()
     const parsed = JSON.parse(result)
-    expect(parsed.mcpServers.giljo_mcp.serverUrl).toBe('https://example.com/mcp')
-    expect(parsed.mcpServers.giljo_mcp.headers.Authorization).toBe('Bearer key123')
+    expect(parsed.mcpServers.giljo_hq.serverUrl).toBe('https://example.com/mcp')
+    expect(parsed.mcpServers.giljo_hq.headers.Authorization).toBe('Bearer key123')
   })
 })
 
@@ -130,20 +130,20 @@ describe('OAuth generators (BE-6157, byte-parity with ai_tools.py)', () => {
 
   it('Claude OAuth command omits the bearer header', () => {
     const result = generateClaudeOAuthConfig('https://giljo.example.com')
-    expect(result).toBe('claude mcp add --transport http giljo_mcp https://giljo.example.com/mcp --scope user')
+    expect(result).toBe('claude mcp add --transport http giljo_hq https://giljo.example.com/mcp --scope user')
     expect(result).not.toContain('Authorization')
     expect(result).not.toContain('Bearer')
   })
 
   it('Codex OAuth command omits the bearer env var', () => {
     const result = generateCodexOAuthConfig('https://giljo.example.com')
-    expect(result).toBe('codex mcp add giljo_mcp --url https://giljo.example.com/mcp')
+    expect(result).toBe('codex mcp add giljo_hq --url https://giljo.example.com/mcp')
     expect(result).not.toContain('bearer-token-env-var')
   })
 
   it('Gemini OAuth command omits the bearer header', () => {
     const result = generateGeminiOAuthConfig('https://giljo.example.com')
-    expect(result).toBe('gemini mcp add --scope user --transport http giljo_mcp https://giljo.example.com/mcp')
+    expect(result).toBe('gemini mcp add --scope user --transport http giljo_hq https://giljo.example.com/mcp')
     expect(result).not.toContain('Authorization')
     expect(result).not.toContain('Bearer')
   })
@@ -158,14 +158,14 @@ describe('OAuth generators (BE-6157, byte-parity with ai_tools.py)', () => {
 
   it('OpenCode sign-in command registers then authenticates, no bearer (FE-9204)', () => {
     const result = generateOpenCodeOAuthConfig('https://giljo.example.com')
-    expect(result).toBe('opencode mcp add giljo_mcp https://giljo.example.com/mcp && opencode mcp auth giljo_mcp')
+    expect(result).toBe('opencode mcp add giljo_hq https://giljo.example.com/mcp && opencode mcp auth giljo_hq')
     expect(result).not.toContain('Authorization')
     expect(result).not.toContain('Bearer')
   })
 
   it('OpenCode bearer command carries the Authorization header (FE-9204)', () => {
     const result = generateOpenCodeConfig('https://giljo.example.com', 'tok_abc')
-    expect(result).toBe('opencode mcp add giljo_mcp https://giljo.example.com/mcp --header "Authorization: Bearer tok_abc"')
+    expect(result).toBe('opencode mcp add giljo_hq https://giljo.example.com/mcp --header "Authorization: Bearer tok_abc"')
   })
 })
 
@@ -195,14 +195,14 @@ describe('generateConfigForTool authMethod dispatch (BE-6157)', () => {
 
   it('routes opencode oauth to the sign-in-plus-auth command (FE-9204)', () => {
     const result = generateConfigForTool('opencode', URL, KEY, { authMethod: 'oauth' })
-    expect(result).toBe(`opencode mcp add giljo_mcp ${URL}/mcp && opencode mcp auth giljo_mcp`)
+    expect(result).toBe(`opencode mcp add giljo_hq ${URL}/mcp && opencode mcp auth giljo_hq`)
     expect(result).not.toContain('Authorization')
     expect(result).not.toContain('Bearer')
   })
 
   it('routes opencode bearer to the header command (FE-9204)', () => {
     expect(generateConfigForTool('opencode', URL, KEY)).toBe(
-      `opencode mcp add giljo_mcp ${URL}/mcp --header "Authorization: Bearer ${KEY}"`,
+      `opencode mcp add giljo_hq ${URL}/mcp --header "Authorization: Bearer ${KEY}"`,
     )
   })
 

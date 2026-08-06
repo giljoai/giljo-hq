@@ -28,11 +28,15 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import delete
 
+from giljo_mcp.database import tenant_session_context
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models.comm import CommThread
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import SequenceRun
+from giljo_mcp.services.comm_thread_service import CommThreadService
 from giljo_mcp.services.sequence_run_service import SequenceRunService
+from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools.context_tools.fetch_context import fetch_context
 from giljo_mcp.tools.context_tools.get_chain_context import get_chain_context
@@ -52,6 +56,9 @@ async def cleanup_tenants(db_manager):
         async with db_manager.get_session_async(tenant_key=tk) as session:
             await session.execute(delete(AgentExecution).where(AgentExecution.tenant_key == tk))
             await session.execute(delete(AgentJob).where(AgentJob.tenant_key == tk))
+            # BE-9291: hub threads FK the run (ON DELETE SET NULL, so this ordering is
+            # not load-bearing) — but they must be collected or they outlive the test.
+            await session.execute(delete(CommThread).where(CommThread.tenant_key == tk))
             await session.execute(delete(SequenceRun).where(SequenceRun.tenant_key == tk))
             await session.execute(delete(Project).where(Project.tenant_key == tk))
             await session.execute(delete(Product).where(Product.tenant_key == tk))
@@ -157,3 +164,81 @@ async def test_chain_category_no_active_run_returns_clean_error(db_manager, clea
     assert "chain" in response["categories_returned"]
     assert "chain" in response.get("categories_empty", [])
     assert response["data"]["chain"] == {}
+
+
+async def test_chain_category_hands_the_sub_orchestrator_its_hub(db_manager, cleanup_tenants: list[str]) -> None:
+    """BE-9291: the hub arrives WITH the chain context — no subject convention involved.
+
+    This is the seam that replaced ``search_threads(query="{run_id}")``. The hub below is
+    created with a subject that does not contain the run_id anywhere, which is precisely
+    what the old mechanism could not find. A sub-orchestrator now asks for its chain
+    context and gets the thread id handed to it.
+    """
+    tenant = TenantManager.generate_tenant_key()
+    cleanup_tenants.append(tenant)
+
+    product_id = await _create_product(db_manager, tenant)
+    p1 = await _create_project(db_manager, tenant, product_id)
+    p2 = await _create_project(db_manager, tenant, product_id)
+
+    svc = SequenceRunService(db_manager=db_manager)
+    run = await svc.create(
+        project_ids=[p1, p2],
+        resolved_order=[p1, p2],
+        execution_mode=_MODE,
+        status="pending",
+        project_statuses={p1: "pending", p2: "pending"},
+        tenant_key=tenant,
+    )
+
+    async with db_manager.get_session_async(tenant_key=tenant) as session:
+        with tenant_session_context(session, tenant):
+            await ensure_default_types_seeded(session, tenant)
+        await session.commit()
+
+    subject = "Chain: ship the widget"
+    assert run["id"] not in subject, "the premise: a hub the old substring search could never locate"
+    hub = await CommThreadService(db_manager, TenantManager()).create_thread(
+        subject=subject, sequence_run_id=run["id"], tenant_key=tenant
+    )
+
+    response = await fetch_context(
+        product_id=product_id,
+        tenant_key=tenant,
+        project_id=p1,
+        categories=["chain"],
+        db_manager=db_manager,
+    )
+
+    assert response["data"]["chain"]["hub_thread_id"] == hub["thread_id"]
+    assert response["data"]["chain"]["hub_chat_id"] == hub["chat_id"]
+
+
+async def test_chain_category_reports_no_hub_before_the_conductor_stands_one_up(
+    db_manager, cleanup_tenants: list[str]
+) -> None:
+    """A run whose conductor has not reached step 0 yet is a legitimate early state.
+
+    It reads as ``None``, not an error and not a missing key — a sub-orchestrator can
+    tell "no hub yet, poll again" apart from "the call failed".
+    """
+    tenant = TenantManager.generate_tenant_key()
+    cleanup_tenants.append(tenant)
+
+    product_id = await _create_product(db_manager, tenant)
+    p1 = await _create_project(db_manager, tenant, product_id)
+
+    svc = SequenceRunService(db_manager=db_manager)
+    await svc.create(
+        project_ids=[p1],
+        resolved_order=[p1],
+        execution_mode=_MODE,
+        status="pending",
+        project_statuses={p1: "pending"},
+        tenant_key=tenant,
+    )
+
+    result = await get_chain_context(project_id=p1, tenant_key=tenant, db_manager=db_manager)
+
+    assert result["data"]["hub_thread_id"] is None
+    assert result["data"]["hub_chat_id"] is None

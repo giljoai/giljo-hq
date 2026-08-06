@@ -1,10 +1,10 @@
-# GiljoAI MCP: Tools Reference
+# Giljo HQ: Tools Reference
 
 *Last updated: 2026-07-16*
 
 ## Overview
 
-GiljoAI MCP exposes **46 tools** to connected AI coding tools. Every tool requires a
+Giljo HQ, a GiljoAI product, exposes **46 tools** to connected AI coding tools. Every tool requires a
 valid API key passed as a Bearer token. Tenant isolation is enforced server-side;
 agents cannot cross tenant boundaries.
 

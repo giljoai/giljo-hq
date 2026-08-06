@@ -58,6 +58,7 @@ def create_mock_db_session(project_mock, product_mock):
     mock_session.commit = AsyncMock()
     mock_session.refresh = AsyncMock()
     mock_session.flush = AsyncMock()
+    mock_session.info = {}  # tenant_session_context save/restore target
 
     return mock_session, mock_db_manager
 

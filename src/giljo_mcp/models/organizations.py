@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Organization-related models for GiljoAI MCP.
+Organization-related models for Giljo HQ.
 
 This module contains models for organizations and organization memberships.
 Organizations provide a hierarchical tenant structure above products.

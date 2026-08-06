@@ -187,7 +187,7 @@ Adding more sentences here to ensure we have sufficient content for chunking.
         """Test that keywords are extracted from each chunk."""
         text = """# Database Configuration
 
-PostgreSQL setup for the GiljoAI MCP system.
+PostgreSQL setup for the Giljo HQ system.
 We use FastAPI for the backend API.
 
 # Agent Orchestration

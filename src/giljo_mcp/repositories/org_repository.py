@@ -23,6 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from giljo_mcp.database import tenant_isolation_bypass
 from giljo_mcp.models.organizations import Organization, OrgMembership
 
 
@@ -126,7 +127,19 @@ class OrgRepository:
             True if another organization already uses this slug
         """
         stmt = select(Organization.id).where(Organization.slug == slug, Organization.id != exclude_org_id).limit(1)
-        result = await session.execute(stmt)
+        # The tenant guard auto-scopes Organization queries to the caller's
+        # tenant, which silently defeats this check's cross-tenant purpose:
+        # another tenant's org holding the slug becomes invisible, the check
+        # passes, and the write then violates the GLOBAL idx_org_slug unique
+        # index (Sentry GILJOAI-BACKEND-R: a first-login user failed 15 times
+        # on the default slug). The bypass restores the global read this
+        # method's contract has always documented.
+        with tenant_isolation_bypass(
+            session,
+            reason="slug uniqueness is enforced by a global unique index; the collision check must see all tenants",
+            models=(Organization,),
+        ):
+            result = await session.execute(stmt)
         return result.scalar_one_or_none() is not None
 
     async def refresh_with_members(self, session: AsyncSession, org: Organization) -> None:

@@ -27,20 +27,12 @@ from sqlalchemy.orm import joinedload
 from giljo_mcp.database import DatabaseManager, tenant_isolation_bypass, tenant_session_context
 from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.models import Project
-from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES, AgentExecution, AgentJob
 from giljo_mcp.monitoring.health_config import AgentHealthStatus, HealthCheckConfig
 from giljo_mcp.protocols.websocket import WebSocketBroadcaster
 
 
 logger = logging.getLogger(__name__)
-
-
-# BE-9101: canonical terminal (inactive) execution statuses — mirrors the
-# ``status.not_in(["complete", "closed", "decommissioned"])`` active-execution
-# filter used across the agent repositories. Once an execution reaches one of
-# these it is finished and must never be re-alerted (guards double-detection
-# within a cycle and the give-up transition below).
-_TERMINAL_EXECUTION_STATUSES: frozenset[str] = frozenset({"complete", "closed", "decommissioned"})
 
 
 class AgentHealthMonitor:
@@ -404,9 +396,12 @@ class AgentHealthMonitor:
             logger.error(f"Execution {health_status.execution_id} not found in database")
             return
 
-        # Already terminal (e.g. decommissioned by an overlapping detector earlier
-        # this cycle, or completed between scan and handle) — nothing to alert.
-        if execution.status in _TERMINAL_EXECUTION_STATUSES:
+        # BE-9101: already terminal (e.g. decommissioned by an overlapping detector
+        # earlier this cycle, or completed between scan and handle) — nothing to
+        # alert. Guards both double-detection within a cycle and the give-up
+        # transition below. BE-9304: reads the shared constant; this module used to
+        # keep a private frozenset under an all-but-identical name.
+        if execution.status in TERMINAL_EXECUTION_STATUSES:
             return
 
         new_health = health_status.health_state

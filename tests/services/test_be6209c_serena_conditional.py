@@ -46,10 +46,17 @@ def test_orchestrator_block_drops_the_hard_mandate() -> None:
 
 
 def test_softening_preserves_load_bearing_markers() -> None:
-    """Markers other tests pin must survive the reword."""
+    """Markers other tests pin must survive the reword.
+
+    BE-9260: the CAVEAT text no longer asserts "Python-only" as a universal fact
+    (that was THIS repo's LSP config leaking into every customer's guidance) — it
+    now derives the claim from "the language(s) its LSP is configured for in this
+    workspace". Pin the CAVEAT section's survival on that reworded language instead.
+    """
     orch = for_role("orchestrator", enabled=True)
     assert "STAGING DISCOVERY" in orch
-    assert "Python-only" in orch
+    assert "CAVEAT:" in orch
+    assert "cover only the language(s) its LSP is configured for in this workspace" in orch
 
     impl = for_role("implementer", enabled=True)
     assert "SYMBOLIC EDITING" in impl

@@ -9,8 +9,14 @@ Extracted from ThinClientPromptGenerator (Handover 0950g).
 Refactored to inherit from ExecutionPromptBuilderBase (quality-sprint-002e).
 """
 
+from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
 from giljo_mcp.prompts.execution_prompt_base import ExecutionPromptBuilderBase
+
+
+# BE-9275b: single module-level constant derived from MCP_ALIAS, reused across
+# the many f-strings below instead of a fresh hardcoded tool-prefix literal.
+_PREFIX = f"mcp__{MCP_ALIAS}__"
 
 
 class ClaudePromptBuilder(ExecutionPromptBuilderBase):
@@ -36,7 +42,7 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
             "## STEP 0: TOOLSEARCH BOOTSTRAP (Claude Code only — first action)",
             "",
             "Claude Code defers MCP tool schemas behind `ToolSearch`. You CANNOT call",
-            "any `mcp__giljo_mcp__*` tool until its schema is loaded. Before health_check,",
+            f"any `{_PREFIX}*` tool until its schema is loaded. Before health_check,",
             "before anything else, fire this single call:",
             "",
             "```",
@@ -110,7 +116,7 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
             '    instructions="""',
             "    You are {agent_name} (job_id: {job_id})",
             "    ",
-            '    First action: Call mcp__giljo_mcp__get_job_mission(job_id="{job_id}")',
+            f'    First action: Call {_PREFIX}get_job_mission(job_id="{{job_id}}")',
             "    This returns your `mission` and `full_protocol`.",
             "    Follow `full_protocol` for all lifecycle behavior",
             "    (startup, planning, progress, messaging, completion, error handling).",
@@ -131,7 +137,7 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
                     '    instructions="""',
                     f"    You are {first.agent_name} (job_id: {first.job_id})",
                     "    ",
-                    f'    First action: Call mcp__giljo_mcp__get_job_mission(job_id="{first.job_id}")',
+                    f'    First action: Call {_PREFIX}get_job_mission(job_id="{first.job_id}")',
                     "    This returns your `mission` and `full_protocol`.",
                     "    Follow `full_protocol` for all lifecycle behavior",
                     "    (startup, planning, progress, messaging, completion, error handling).",
@@ -194,7 +200,7 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
             "## When You're Done",
             "",
             "### Verify Sub-Agents Completed",
-            "1. Check all agents via mcp__giljo_mcp__get_workflow_status()",
+            f"1. Check all agents via {_PREFIX}get_workflow_status()",
             "2. Ensure all have status='complete' (no failures or blockers)",
             "3. Review final deliverables",
             "",
@@ -204,12 +210,12 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
             "you MUST resolve them before closeout. For each non-complete agent:",
             "",
             "1. **Drain their messages:**",
-            '   `mcp__giljo_mcp__get_thread_history(thread_id=<your coordination thread>, as_participant="<their_agent_id>", unread_only=true, mark_read=true)`',
+            f'   `{_PREFIX}get_thread_history(thread_id=<your coordination thread>, as_participant="<their_agent_id>", unread_only=true, mark_read=true)`',
             "   Record any important content for the 360 Memory summary.",
             "",
             "2. **Process incomplete todos** — mark remaining items as completed or skipped:",
             "   ```python",
-            "   mcp__giljo_mcp__report_progress(",
+            f"   {_PREFIX}report_progress(",
             '       job_id="<their_job_id>",',
             "       todo_items=[",
             '           ...keep completed items as "completed",',
@@ -221,7 +227,7 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
             "",
             "3. **Force-complete the agent** (ONLY if NOT already 'complete'):",
             "   ```python",
-            "   mcp__giljo_mcp__complete_job(",
+            f"   {_PREFIX}complete_job(",
             '       job_id="<their_job_id>",',
             '       result={"summary": "Force-completed by orchestrator during closeout.", "status": "force_completed"}',
             "   )",
@@ -235,7 +241,7 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
             "### Complete Your Orchestrator Job",
             "When all sub-agents are done and project is complete:",
             "```python",
-            f'mcp__giljo_mcp__complete_job(job_id="{orchestrator_id}")',
+            f'{_PREFIX}complete_job(job_id="{orchestrator_id}")',
             "```",
             "",
             "### Handover (if needed)",

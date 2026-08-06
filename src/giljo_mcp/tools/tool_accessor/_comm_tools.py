@@ -28,13 +28,19 @@ class CommToolsMixin:
         agent_id: str,
         display_name: str | None = None,
         role: str | None = None,
+        detected_harness: str | None = None,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
+        # BE-9289a: ``detected_harness`` is resolved at the MCP boundary from the
+        # session clientInfo and passed straight through — the adapter never invents or
+        # defaults it, so a caller that cannot be detected reaches the service as None
+        # and the service applies the 'generic' floor in one place.
         return await self._comm_thread_service.join_thread(
             thread_id=thread_id,
             participant_id=agent_id,
             participant_type="agent",
             display_name=display_name,
             role=role,
+            detected_harness=detected_harness,
             tenant_key=tenant_key,
         )

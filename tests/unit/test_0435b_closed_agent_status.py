@@ -51,6 +51,7 @@ class TestCloseJobTransition:
         """close_job should raise ResourceNotFoundError (wrong-state) if the job exists
         but its latest execution is not 'complete' (BE-8003b disambiguation)."""
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
         state_service._get_session = MagicMock(return_value=_async_ctx(mock_session))
 
         working_execution = MagicMock()
@@ -67,6 +68,7 @@ class TestCloseJobTransition:
         """close_job should raise a distinct 'unknown job_id' error when the job_id
         does not exist in this tenant at all (BE-8003b disambiguation)."""
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
         state_service._get_session = MagicMock(return_value=_async_ctx(mock_session))
 
         state_service._job_repo.find_complete_execution_for_job = AsyncMock(return_value=None)
@@ -93,18 +95,25 @@ class TestCloseJobTransition:
         mock_execution.agent_display_name = "implementer"
         mock_execution.agent_name = "backend-impl"
         mock_execution.job_id = "test-job-123"
+        mock_execution.agent_id = "impl-agent-1"
 
         mock_job = MagicMock()
         mock_job.project_id = "proj-456"
 
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
 
-        # First call returns execution, second returns job
+        # First call returns execution, second returns job, third is the
+        # BE-9242 dead-cursor-resolution lookup (no live unread messages to
+        # resolve for this closing agent -- resolve_terminal_agent_cursors
+        # returns without any further queries).
         exec_result = MagicMock()
         exec_result.scalar_one_or_none.return_value = mock_execution
         job_result = MagicMock()
         job_result.scalar_one_or_none.return_value = mock_job
-        mock_session.execute = AsyncMock(side_effect=[exec_result, job_result])
+        undrained_result = MagicMock()
+        undrained_result.scalars.return_value.all.return_value = []
+        mock_session.execute = AsyncMock(side_effect=[exec_result, job_result, undrained_result])
         mock_session.flush = AsyncMock()
 
         state_service._get_session = MagicMock(return_value=_async_ctx(mock_session))
@@ -224,6 +233,7 @@ class TestStagingPhaseStatusLock:
     def _wire(state_service, execution, job, project):
         """Wire repo + session mocks so set_agent_status sees execution/job/project."""
         mock_session = AsyncMock()
+        mock_session.info = {}  # tenant_session_context save/restore target
         mock_session.flush = AsyncMock()
         state_service._get_session = MagicMock(return_value=_async_ctx(mock_session))
         state_service._job_repo.find_active_execution_for_job = AsyncMock(return_value=execution)

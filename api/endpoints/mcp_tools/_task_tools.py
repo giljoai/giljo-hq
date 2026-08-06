@@ -23,15 +23,20 @@ from api.endpoints.mcp_tools._base import (
     _call_tool,
     mcp,
 )
+from api.endpoints.mcp_tools._tool_annotations import _tool_hints
+from giljo_mcp import branding
 
 
 @mcp.tool(
+    title="Create Task",
     description=(
         "Create a new task (technical debt/TODO/bug/small fix) bound to the active product. Every "
-        "task is auto-tagged 'TSK' (task_type is accepted-but-ignored); the serial auto-assigns as "
-        "TSK-0001. Requires an active product. Use create_project instead for actionable multi-step "
-        "work. See get_giljo_guide for the full task-vs-project routing recipe."
+        "task is auto-tagged 'TSK' (task_type is accepted-but-ignored); the serial auto-assigns in "
+        "the TSK-nnnn form. Requires an active product. Use create_project instead for actionable multi-step "
+        "work. See get_giljo_guide for the full task-vs-project routing recipe. "
+        f"{branding.TWO_HUB_DISAMBIGUATION}"
     ),
+    annotations=_tool_hints("create_task"),
 )
 async def create_task(
     title: Annotated[
@@ -66,12 +71,16 @@ async def create_task(
 
 
 @mcp.tool(
+    title="Update Task",
     description=(
         "Update task metadata (title, description, status, priority, due_date). Only provided "
         "fields are written. task_type is immutable ('TSK'). Pass status='completed' to complete "
         "it (stamps completed_at); pass completion_notes to append an audit note as it completes. "
-        "Tenant-scoped."
+        "Tenant-scoped. "
+        f"{branding.TWO_HUB_DISAMBIGUATION}"
     ),
+    # BE-9251: status accepts terminal values (completed/cancelled) -- see _tool_hints docstring.
+    annotations=_tool_hints("update_task", destructive=True),
 )
 async def update_task(
     task_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Task UUID (required).")],
@@ -138,12 +147,15 @@ async def update_task(
 
 
 @mcp.tool(
+    title="List Tasks",
     description=(
         "List tasks for the active product. mode='summary' (default, light fields) or 'full' (all "
         "columns). Every task is tagged 'TSK' -- a non-TSK task_type filter matches nothing, "
         "normally omit it. hidden is UI declutter only (does not affect default visibility). "
-        "Requires an active product. See get_giljo_guide for read-vs-write routing."
+        "Requires an active product. See get_giljo_guide for read-vs-write routing. "
+        f"{branding.TWO_HUB_DISAMBIGUATION}"
     ),
+    annotations=_tool_hints("list_tasks"),
 )
 async def list_tasks(
     mode: Annotated[

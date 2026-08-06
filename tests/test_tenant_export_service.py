@@ -588,7 +588,7 @@ async def test_download_type_constraint_still_rejects_unknown(db_session: AsyncS
 # Fidelity mode KEEPS tenant_key / PKs / all FK columns, does NOT redact
 # credentials, and does NOT byte-scrub tk_ values, so a backup/restore can
 # faithfully rebuild a tenant. The round-trip proof is self-contained: the
-# 0844-series import service was DROPPED (handovers/completed/0844b is marked
+# 0844-series import service was DROPPED (the 0844b design is marked
 # SUPERSEDED — there is no tenant_import_service.py), so these tests act as the
 # importer — for every seeded model they (a) reconstruct each dumped row back
 # into an ORM instance (proves importable shape) and (b) assert the dumped value

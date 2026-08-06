@@ -13,7 +13,7 @@
 
       <v-card-text class="pa-4">
         <p class="text-body-large mb-4">
-          This GiljoAI MCP installation has
+          This {{ productName }} installation has
           <strong>{{ userCount }} user accounts</strong>.
         </p>
         <p class="text-body-medium mb-4">
@@ -47,12 +47,14 @@
 import { ref, onMounted } from 'vue'
 import setupService from '@/services/setupService'
 import configService from '@/services/configService'
+import { PRODUCT_NAME } from '@/branding'
 
 const STORAGE_KEY = 'giljo_license_dismissed_at'
 const REMINDER_DAYS = 30
 
 const showDialog = ref(false)
 const userCount = ref(0)
+const productName = PRODUCT_NAME
 
 async function checkLicensing() {
   try {

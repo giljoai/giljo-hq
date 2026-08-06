@@ -23,7 +23,12 @@ from giljo_mcp.platform_registry import (
     Platform,
     effective_harness,
 )
+from giljo_mcp.schemas.responses.orchestration import (
+    IDENTITY_TEMPLATE_UNBOUND,
+    IDENTITY_TEMPLATE_UNRESOLVED,
+)
 from giljo_mcp.schemas.service_responses import MissionResponse
+from giljo_mcp.services.execution_mode_gate import effective_execution_mode
 from giljo_mcp.services.protocol_builder import (
     _generate_agent_protocol,
     _generate_team_context_header,
@@ -44,6 +49,81 @@ def compute_is_chain_conductor(chain_execution_mode: str | None, project_id: Any
     run. Extracted from the duplicated inline literal both sites previously carried.
     """
     return bool(chain_execution_mode) and not project_id
+
+
+_UNRESOLVED_IDENTITY_BLOCK = """You are running WITHOUT a role identity. {cause}, so no role
+instructions, behavioral rules or success criteria could be loaded for you.
+
+Work your mission literally and conservatively — you have no role framing to lean on. Where the
+protocol tells you to take your role "from your activated agent template", you have none: use your
+display name '{display_name}' as your `from_agent` value instead.
+
+This is a degradation, not a stop. Keep working your mission, and report it once via
+report_progress (or post_to_thread) so whoever spawned you can {remedy}."""
+
+
+def compose_template_identity(identity_template: Any, execution: AgentExecution) -> str:
+    """Compose an agent's operating identity from its bound template.
+
+    BE-6211f-style extraction (BE-9333): lifted out of
+    ``MissionService._resolve_mission_template`` — pure, no I/O — so the identity
+    composition and its BE-9333 unresolved counterpart below live side by side.
+
+    Not a byte-for-byte move: two redundant truthiness guards were collapsed
+    (``if X:`` wrapping ``if isinstance(X, list) and len(X) > 0:``, where the inner
+    test already implies the outer for every value). Behaviour is unchanged.
+    """
+    # Framing directive -- tells the LLM how to process this field
+    role_label = (identity_template.role or execution.agent_name or "agent").upper()
+    identity_parts = [
+        f"You are {role_label}. The following defines your expertise, "
+        f"behavioral constraints, and success criteria. "
+        f"Internalize these as your operating identity.\n"
+    ]
+
+    # Role prose (user_instructions only -- system_instructions excluded
+    # because the thin prompt already handles MCP bootstrap)
+    if identity_template.user_instructions:
+        identity_parts.append(identity_template.user_instructions)
+
+    # Behavioral rules (structured list from template)
+    rules = identity_template.behavioral_rules
+    if isinstance(rules, list) and len(rules) > 0:
+        identity_parts.append("\n## Behavioral Rules\n" + "\n".join(f"- {r}" for r in rules))
+
+    # Success criteria (structured list from template)
+    criteria = identity_template.success_criteria
+    if isinstance(criteria, list) and len(criteria) > 0:
+        identity_parts.append("\n## Success Criteria\n" + "\n".join(f"- {c}" for c in criteria))
+
+    return "\n\n".join(identity_parts)
+
+
+def compose_unresolved_identity(job: AgentJob, execution: AgentExecution) -> tuple[str, str]:
+    """BE-9333: explicit identity text + status for a job whose template did not resolve.
+
+    Two distinct causes with two distinct remedies, so the response never blurs them:
+
+    * ``template_id`` is SET but the row no longer loads — the user soft-deleted (or the
+      30-day reaper purged) the agent template while this job was live. ``AgentJob.template_id``
+      is not cleared at soft-delete and ``get_template_by_id`` filters ``deleted_at IS NULL``
+      (``mission_repository.py``), so a healthy agent DEGRADES mid-run with nothing said.
+    * ``template_id`` is NULL on a non-orchestrator job — nothing was ever bound.
+
+    Returns ``(identity_text, identity_status)``. Never returns None: a bare null is precisely
+    the signal-less state this exists to remove.
+    """
+    display_name = execution.agent_display_name or execution.agent_name or "agent"
+    requested = execution.agent_name or display_name
+    if getattr(job, "template_id", None):
+        cause = f"The agent template this job was created against ('{requested}') has been DELETED"
+        remedy = "restore that agent from the trash, or re-spawn this work against a live agent"
+        status = IDENTITY_TEMPLATE_UNRESOLVED
+    else:
+        cause = f"This job was never bound to an agent template ('{requested}' resolved to none)"
+        remedy = "re-spawn this work against an agent that exists"
+        status = IDENTITY_TEMPLATE_UNBOUND
+    return _UNRESOLVED_IDENTITY_BLOCK.format(cause=cause, display_name=display_name, remedy=remedy), status
 
 
 def compute_protocol_etag(agent_identity: str | None, full_protocol: str | None) -> str:
@@ -152,7 +232,10 @@ def assemble_mission_context(
     # full_protocol header (EXECUTION_MODE / FORBIDDEN-Task banner) in agreement
     # with CH_CAPABILITY for the same run. None (solo path) → project mode,
     # byte-identical render.
-    protocol_exec_mode = chain_execution_mode or project_exec_mode
+    # BE-9335: this precedence is now the SHARED rule (effective_execution_mode), not a
+    # one-site expression — every chain-member mode reader resolves through it so the
+    # boundaries cannot disagree about which harness a member is in.
+    protocol_exec_mode = effective_execution_mode(project_exec_mode, chain_execution_mode)
     agent_tool = _EXECUTION_MODE_TO_TOOL.get(protocol_exec_mode, "multi_terminal")
     # BE-6205 follow-up: the project-less DEDICATED conductor (project_id is None,
     # resolved to an active run → chain_execution_mode populated) self-spawns each
@@ -195,7 +278,11 @@ def assemble_mission_context(
     # slider (and vice versa) without a restart. Keep the multi_terminal-only and
     # orchestrator-only guards: do NOT inject for CLI/Codex/Gemini modes or
     # non-orchestrator agents.
-    if execution.agent_display_name == "orchestrator" and project_exec_mode == "multi_terminal" and project:
+    # BE-9335: keyed off protocol_exec_mode, the SAME resolved value the header uses.
+    # Reading the raw column here made CH6 disagree with the header in both
+    # directions for a chain member: a multi_terminal chain lost its check-in loop,
+    # and a subagent chain was shipped a multi_terminal loop it must not run.
+    if execution.agent_display_name == "orchestrator" and protocol_exec_mode == "multi_terminal" and project:
         from giljo_mcp.services.protocol_sections.chapters_reference import _build_ch6_auto_checkin
 
         auto_checkin_interval = getattr(project, "auto_checkin_interval", 10)

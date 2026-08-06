@@ -16,7 +16,7 @@
               <div><span class="font-weight-medium">name (required):</span> Free text</div>
               <div class="mt-1"><span class="font-weight-medium">description (recommended):</span> Free text</div>
               <div class="mt-1"><span class="font-weight-medium">status (optional):</span></div>
-              <div class="ml-2 text-body-small">inactive · active · completed · cancelled · deleted</div>
+              <div class="ml-2 text-body-small">inactive · active · completed · cancelled · parked · deleted</div>
               <div class="mt-2"><span class="font-weight-medium">project_type (optional):</span></div>
               <div class="text-body-small text-center">Taxonomy category abbreviation (e.g. BE, FE, API)</div>
               <div class="mt-1"><span class="font-weight-medium">series_number (optional):</span></div>
@@ -350,9 +350,8 @@ const linkMode = ref(false)
 const lockedChainProjectIds = computed(() =>
   sequenceRunStore.activeChainProjectIds.filter((pid) => sequenceRunStore.isProjectRunLocked(pid)),
 )
-// FE-6180: a chain is active when any project belongs to an active run. The Linked
-// column then auto-shows (and stays) regardless of the manual Link toggle, so a user
-// returning to /projects always sees their linked selection.
+// FE-6180: a chain is active when any project belongs to an active run — the Linked column
+// then auto-shows (and stays) regardless of the manual Link toggle, so a returning user always sees their selection.
 const chainActive = computed(() => sequenceRunStore.activeChainProjectIds.length > 0)
 
 // FE-6180: confirm gate for the destructive Deactivate Chain / Reset back-out.
@@ -661,8 +660,7 @@ async function handleStatusAction({ action, projectId }) {
         await projectStore.deactivateProject(projectId)
         break
       case 'deactivate-chain': {
-        // FE-6180: warn (destructive rewind) then dissolve the chain — BE resets EVERY
-        // member to original (clears staging + hard-deletes agents/jobs, no audit).
+        // FE-6180: warn (destructive rewind) then dissolve the chain — BE resets EVERY member to original (clears staging + hard-deletes agents/jobs, no audit).
         const chainRun = sequenceRunStore.runForProject(projectId)
         if (!chainRun) {
           showToast({ message: 'Project is not in a chain run.', type: 'warning' })
@@ -709,6 +707,9 @@ async function handleStatusAction({ action, projectId }) {
         }
         break
       }
+      case 'park': // IMP-9258: generic PATCH (see ProjectsTable.vue statusActionDefs)
+      case 'unpark':
+        await projectStore.updateProject(projectId, { status: action === 'park' ? 'parked' : 'inactive' })
     }
     await reloadProjects()
   } catch (error) {

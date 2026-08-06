@@ -739,6 +739,10 @@ async def get_ai_summary(
         select(VisionDocument).where(
             VisionDocument.id == document_id,
             VisionDocument.tenant_key == tenant_key,
+            # Same exclusion the GET above applies. Without it these two
+            # endpoints disagreed about one document: GET /{id} returned 404
+            # while GET /{id}/ai-summary/{level} handed over the summary text.
+            VisionDocument.deleted_at.is_(None),
         )
     )
     doc = result.scalar_one_or_none()

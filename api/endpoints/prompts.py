@@ -37,6 +37,7 @@ from api.schemas.prompt import (
     ThinOrchestratorPromptResponse,
 )
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
+from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.exceptions import BaseGiljoError, ProjectStateError, ResourceNotFoundError
 from giljo_mcp.models import Project, User
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
@@ -48,6 +49,7 @@ from giljo_mcp.platform_registry import (
 )
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
 from giljo_mcp.services.mission_orchestration_service import MissionOrchestrationService
+from giljo_mcp.services.orchestrator_prompt_ws_broadcast import broadcast_orchestrator_prompt_generated
 from giljo_mcp.services.project_service import ProjectService
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
@@ -55,6 +57,7 @@ from giljo_mcp.thin_prompt_generator import ThinClientPromptGenerator
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 
+_TOOL_PREFIX = f"mcp__{MCP_ALIAS}__"  # BE-9275b: derived from branding, not a fresh literal.
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -206,19 +209,18 @@ async def generate_orchestrator_prompt_thin(
             tool=tool,
         )
 
-        # Broadcast WebSocket event for real-time UI update
+        # Broadcast WebSocket event for real-time UI update.
+        # BE-9332: shape owned by the shared emitter (same fields as before the
+        # extraction); this site keeps its own estimated_tokens + timestamp.
         if ws_dep.is_available():
-            await ws_dep.broadcast_to_tenant(
+            await broadcast_orchestrator_prompt_generated(
+                ws_dep,
                 tenant_key=current_user.tenant_key,
-                event_type="orchestrator:prompt_generated",
-                data={
-                    "project_id": project_id,
-                    "orchestrator_id": result["orchestrator_id"],
-                    "execution_id": result.get("execution_id"),  # UNIQUE row ID for frontend Map key
-                    "estimated_tokens": result["estimated_prompt_tokens"],
-                    "thin_client": True,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                },
+                project_id=project_id,
+                orchestrator_id=result["orchestrator_id"],
+                execution_id=result.get("execution_id"),  # no agent_id here -> this IS the store unique_key
+                estimated_tokens=result["estimated_prompt_tokens"],
+                timestamp=datetime.now(UTC).isoformat(),
             )
 
         return ThinOrchestratorPromptResponse(
@@ -298,7 +300,13 @@ async def generate_agent_prompt(
     tool_type = agent.tool_type or "universal"
 
     # Truncate mission for preview (first 200 chars)
-    mission = agent.job.mission if agent.job else ""
+    # BE-9330: AgentJob.mission is nullable BY DESIGN -- "null while staged;
+    # written at Phase-2". The old `if agent.job else ""` guarded only a missing
+    # JOB, so a staged agent (mission column NULL) reached len(None) -> 500 when
+    # the user clicked Play. Empty preview is the truthful rendering of "no
+    # mission written yet"; the prompt itself tells the agent to fetch its
+    # mission over MCP, so nothing is lost.
+    mission = (agent.job.mission if agent.job else None) or ""
     mission_preview = mission[:200] + "..." if len(mission) > 200 else mission
 
     # Build thin prompt (matches spawn_job pattern)
@@ -460,19 +468,20 @@ async def generate_staging_prompt(
         # Calculate token estimate for staging prompt (1 token ≈ 4 chars)
         staging_tokens = len(staging_prompt) // 4
 
-        # Broadcast WebSocket event for real-time UI update
+        # Broadcast WebSocket event for real-time UI update.
+        # BE-9332: shape owned by the shared emitter (same fields as before the
+        # extraction); this site keeps its own agent_id + tool.
         if ws_dep.is_available():
-            await ws_dep.broadcast_to_tenant(
+            await broadcast_orchestrator_prompt_generated(
+                ws_dep,
                 tenant_key=current_user.tenant_key,
-                event_type="orchestrator:prompt_generated",
-                data={
-                    "orchestrator_id": result["orchestrator_id"],
-                    "agent_id": result.get("agent_id"),  # Handover 0388: Include agent_id
-                    "execution_id": result.get("execution_id"),  # UNIQUE row ID for frontend Map key
-                    "project_id": project_id,
-                    "thin_client": True,
-                    "tool": tool,
-                },
+                project_id=project_id,
+                orchestrator_id=result["orchestrator_id"],
+                agent_id=result.get("agent_id"),  # Handover 0388: Include agent_id
+                # NOT the unique_key here (agent_id wins) -- sent so all three emit sites
+                # agree; full rationale at _IDENTITY_FIELDS in the integration test.
+                execution_id=result.get("execution_id"),
+                tool=tool,
             )
             logger.info(
                 "[STAGING PROMPT THIN] WebSocket broadcast sent for orchestrator %s",
@@ -500,11 +509,13 @@ async def generate_staging_prompt(
         if project:
             # BE-3006a single-writer rule: the staging-state write is owned by
             # ProjectStagingService.mark_staged (via the lifecycle facade), not a
-            # raw db.commit here. The generator already committed its orchestrator
-            # work in a separate transaction, so this flip to 'staged' is a
-            # standalone write; the service applies the same
-            # implementation_launched_at guard on execution_mode.
-            await project_service.lifecycle.mark_staged(project_id, effective_execution_mode)
+            # raw db.commit here; the service applies the same
+            # implementation_launched_at guard on execution_mode. Pass THIS
+            # request's own session + tenant so the write lands on it too, instead
+            # of opening a separate one.
+            await project_service.lifecycle.mark_staged(
+                project_id, effective_execution_mode, tenant_key=current_user.tenant_key, db_session=db
+            )
 
         # Return response with 'prompt' key for frontend compatibility
         # Handover 0260: Use staging_prompt (mode-specific) instead of thin_prompt
@@ -829,7 +840,7 @@ def _build_conductor_bootstrap(*, identity: dict, mcp_url: str, phase: str, harn
     agent_id = identity.get("agent_id") or ""
     run_id = identity.get("run_id") or ""
 
-    fetch_tool = "mcp__giljo_mcp__" if harness_is_claude else ""
+    fetch_tool = _TOOL_PREFIX if harness_is_claude else ""
     if phase == "staging":
         fetch_line = f"2. Fetch your chain protocol: {fetch_tool}get_staging_instructions(job_id='{job_id}')"
         protocol_note = (
@@ -857,15 +868,15 @@ def _build_conductor_bootstrap(*, identity: dict, mcp_url: str, phase: str, harn
         toolsearch_bootstrap = (
             "STEP 0 — TOOLSEARCH BOOTSTRAP (Claude Code only — do this FIRST):\n"
             "Claude Code defers MCP tool schemas. You CANNOT call any\n"
-            "mcp__giljo_mcp__* tool (including health_check) until its schema\n"
+            f"{_TOOL_PREFIX}* tool (including health_check) until its schema\n"
             "is loaded. Fire this single call before the START NOW workflow below:\n"
             f"  {render_toolsearch_call_one_line()}\n"
             "After that, every tool in the canonical orchestrator set is callable.\n"
             "\n"
         )
-        tool_prefix_line = "  Tool Prefix: mcp__giljo_mcp__"
+        tool_prefix_line = f"  Tool Prefix: {_TOOL_PREFIX}"
 
-    health_check_call = "mcp__giljo_mcp__health_check()" if harness_is_claude else "health_check()"
+    health_check_call = f"{_TOOL_PREFIX}health_check()" if harness_is_claude else "health_check()"
 
     return f"""You are the dedicated CHAIN ORCHESTRATOR (project-less). You stage/drive ALL projects in this run; you own no project of your own.
 

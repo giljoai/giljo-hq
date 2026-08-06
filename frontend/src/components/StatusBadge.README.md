@@ -272,4 +272,4 @@ describe('StatusBadge', () => {
 
 ## License
 
-Part of GiljoAI MCP - Internal component
+Part of Giljo HQ - Internal component

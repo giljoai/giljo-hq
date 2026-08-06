@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Settings model for GiljoAI MCP system settings.
+Settings model for Giljo HQ system settings.
 
 Stores general, network, and database settings per tenant in JSONB format.
 Handover 0506: Settings endpoints implementation.

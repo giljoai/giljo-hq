@@ -34,7 +34,11 @@ from giljo_mcp.repositories.agent_completion_repository import AgentCompletionRe
 from giljo_mcp.schemas.jsonb_validators import validate_agent_execution_result
 from giljo_mcp.schemas.service_responses import CompleteJobResult, StagingDirective, build_next_action
 from giljo_mcp.services._error_helpers import not_found_or_wrong_state_error
-from giljo_mcp.services.job_completion_closeout_gate import build_closeout_checklist, enforce_closeout_approval_mode
+from giljo_mcp.services.job_completion_closeout_gate import (
+    build_closeout_checklist,
+    build_completion_blocked_error,
+    enforce_closeout_approval_mode,
+)
 from giljo_mcp.services.job_completion_staging import (  # noqa: F401 — constant re-exports keep test imports stable
     _CHAIN_SUBORCH_STAGING_END_ACTION,
     _CHAIN_SUBORCH_STAGING_END_NEXT_ACTION,
@@ -428,13 +432,6 @@ class JobCompletionService:
             )
         return job
 
-    async def _check_360_memory_written(self, session: AsyncSession, job: AgentJob, tenant_key: str) -> bool:
-        """Check if a 360 memory entry exists for the project (Handover 0435d)."""
-        if not job.project_id:
-            return True
-        repo = AgentCompletionRepository()
-        return await repo.check_360_memory_for_project(session, tenant_key, job.project_id)
-
     async def _validate_completion_requirements(
         self,
         session: AsyncSession,
@@ -615,19 +612,6 @@ class JobCompletionService:
             incomplete_todos = remainder
 
         if unread_messages or incomplete_todos:
-            reasons = []
-            if unread_messages:
-                unread_ids = [str(msg.id) for msg in unread_messages[:5]]
-                reasons.append(
-                    f"Acknowledge {len(unread_messages)} action-required message(s) before completing. "
-                    f"Call get_thread_history(as_participant=<your agent id>, mark_read=true) on your "
-                    f"coordination thread (join_thread first if you are not a participant) to read and "
-                    f"acknowledge them — that ack is what clears this gate. Pending: {unread_ids}"
-                )
-            if incomplete_todos:
-                todo_names = [todo.content for todo in incomplete_todos[:5]]
-                reasons.append(f"{len(incomplete_todos)} TODO items not completed: {todo_names}")
-
             self._logger.info(
                 "Completion blocked by protocol validation",
                 extra={
@@ -637,16 +621,10 @@ class JobCompletionService:
                     "incomplete_todos": len(incomplete_todos),
                 },
             )
-
-            raise ValidationError(
-                message="COMPLETION_BLOCKED: Complete all TODO items and read all messages before calling complete_job()",
-                error_code="COMPLETION_BLOCKED",
-                context={
-                    "job_id": job_id,
-                    "reasons": reasons,
-                    "unread_messages": len(unread_messages),
-                    "incomplete_todos": len(incomplete_todos),
-                },
+            raise build_completion_blocked_error(
+                job_id=job_id,
+                unread_messages=unread_messages,
+                incomplete_todos=incomplete_todos,
             )
 
     def _is_before_attempt(self, message, completion_attempt_time: datetime) -> bool:

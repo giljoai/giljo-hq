@@ -127,7 +127,7 @@ def _build_ch2_fetch_calls(
             "depth_aware": False,
         },
         "architecture": {
-            "framing": "Patterns, API style, design. [migrations, edition boundaries, new services]",
+            "framing": "Patterns, API style, design. [migrations, module boundaries, new services]",
             "depth_aware": False,
         },
         "testing": {

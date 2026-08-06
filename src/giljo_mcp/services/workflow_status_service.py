@@ -22,6 +22,7 @@ from giljo_mcp.repositories.agent_operations_repository import AgentOperationsRe
 from giljo_mcp.schemas.service_responses import (
     AgentTodoCounts,
     AgentWorkflowDetail,
+    ThreadUnreadDetail,
     WorkflowStatus,
     build_next_action,
 )
@@ -165,40 +166,9 @@ class WorkflowStatusService:
                         why="All agents finished -- call write_project_closeout to record the project closeout.",
                     )
 
-                agent_details: list[AgentWorkflowDetail] = []
-                if executions:
-                    job_ids = [ex.job_id for ex in executions]
-                    todo_map = await ops_repo.get_todo_counts_by_job(session, tenant_key, job_ids)
-
-                    # BE-6200 (Unit F): unread_messages reads the LIVE pending count
-                    # (BE-9012d: same query/semantics the retired bus's receive_messages
-                    # self-heal used) instead of the drift-prone
-                    # AgentExecution.messages_waiting_count denormalized column. One
-                    # GROUP BY across all agents (no N+1).
-                    agent_ids = [ex.agent_id for ex in executions if ex.agent_id]
-                    unread_map = await ops_repo.get_live_unread_counts_by_agent(
-                        session, tenant_key, project_id, agent_ids
-                    )
-
-                    for execution in executions:
-                        counts = todo_map.get(execution.job_id, {})
-                        agent_details.append(
-                            AgentWorkflowDetail(
-                                job_id=execution.job_id,
-                                agent_id=execution.agent_id,
-                                agent_name=execution.agent_name or "",
-                                display_name=execution.agent_display_name or "",
-                                status=execution.status or "",
-                                job_type=job_type_map.get(execution.job_id, ""),
-                                unread_messages=unread_map.get(execution.agent_id, 0),
-                                todos=AgentTodoCounts(
-                                    completed=counts.get("completed", 0),
-                                    in_progress=counts.get("in_progress", 0),
-                                    pending=counts.get("pending", 0),
-                                    skipped=counts.get("skipped", 0),
-                                ),
-                            )
-                        )
+                agent_details = await self._build_agent_details(
+                    session, tenant_key, project_id, executions, job_type_map, ops_repo
+                )
 
                 return WorkflowStatus(
                     active_agents=active_count,
@@ -246,3 +216,69 @@ class WorkflowStatusService:
                 message=f"Failed to get workflow status: {e!s}",
                 context={"project_id": project_id, "tenant_key": tenant_key},
             ) from e
+
+    async def _build_agent_details(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        project_id: str,
+        executions: list[Any],
+        job_type_map: dict[str, str],
+        ops_repo: AgentOperationsRepository,
+    ) -> list[AgentWorkflowDetail]:
+        """Build the per-agent detail list for get_workflow_status (extracted,
+        BE-9242 budget: keeps get_workflow_status under the 200-line cap).
+
+        BE-6200 (Unit F): unread_messages reads the LIVE pending count
+        (BE-9012d: same query/semantics the retired bus's receive_messages
+        self-heal used) instead of the drift-prone
+        AgentExecution.messages_waiting_count denormalized column. One
+        GROUP BY across all agents (no N+1) per aggregation below.
+        """
+        if not executions:
+            return []
+
+        job_ids = [ex.job_id for ex in executions]
+        todo_map = await ops_repo.get_todo_counts_by_job(session, tenant_key, job_ids)
+
+        agent_ids = [ex.agent_id for ex in executions if ex.agent_id]
+        unread_map = await ops_repo.get_live_unread_counts_by_agent(session, tenant_key, project_id, agent_ids)
+        # BE-9242 deliverable #3: the actionable subset of the badge total
+        # above, sourced from the same gate-definition query the closeout
+        # gate uses (requires_action + non-auto_generated).
+        action_required_map = await ops_repo.get_live_action_required_unread_counts_by_agent(
+            session, tenant_key, project_id, agent_ids
+        )
+        # BE-9242 deliverable #2: per-thread breakdown of the badge total.
+        # sum(per-thread) == unread_map[agent_id] by construction (identical
+        # "unread" definition, thread_id added to group-by).
+        thread_breakdown_map = await ops_repo.get_live_unread_counts_by_agent_and_thread(
+            session, tenant_key, project_id, agent_ids
+        )
+
+        agent_details: list[AgentWorkflowDetail] = []
+        for execution in executions:
+            counts = todo_map.get(execution.job_id, {})
+            agent_details.append(
+                AgentWorkflowDetail(
+                    job_id=execution.job_id,
+                    agent_id=execution.agent_id,
+                    agent_name=execution.agent_name or "",
+                    display_name=execution.agent_display_name or "",
+                    status=execution.status or "",
+                    job_type=job_type_map.get(execution.job_id, ""),
+                    unread_messages=unread_map.get(execution.agent_id, 0),
+                    action_required_unread=action_required_map.get(execution.agent_id, 0),
+                    unread_by_thread=[
+                        ThreadUnreadDetail(thread_id=tid, unread_count=cnt)
+                        for tid, cnt in thread_breakdown_map.get(execution.agent_id, {}).items()
+                    ],
+                    todos=AgentTodoCounts(
+                        completed=counts.get("completed", 0),
+                        in_progress=counts.get("in_progress", 0),
+                        pending=counts.get("pending", 0),
+                        skipped=counts.get("skipped", 0),
+                    ),
+                )
+            )
+        return agent_details

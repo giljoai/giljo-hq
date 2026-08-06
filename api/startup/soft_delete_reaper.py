@@ -45,29 +45,33 @@ async def purge_expired_soft_deleted_entities(db_manager: DatabaseManager, tenan
         logger.info("Running startup reaper for expired soft-deleted trash/recover rows (TSK-6132)...")
         cutoff = recover_window_cutoff()
 
-        async def _tenants_with_expired(session, model, *, needs_bypass: bool) -> set[str]:
+        async def _tenants_with_expired(session, model) -> set[str]:
+            """Enumerate every tenant owning an expired soft-deleted row of ``model``.
+
+            BE-9319: this took a caller-supplied ``needs_bypass`` flag — an opinion
+            about registry membership that the caller had to REMEMBER. Three of four
+            call sites remembered right and one remembered wrong, and the wrong one
+            killed the whole sweep. The flag is gone: every model this reaper handles
+            is tenant-scoped, so the cross-tenant enumeration always needs the audited
+            bypass, and ``tenant_isolation_bypass`` validates that itself — hand it a
+            model that is NOT tenant-scoped and it raises naming the model, which is
+            the loud answer a future caller deserves instead of a boolean that can be
+            silently wrong.
+            """
             stmt = select(model.tenant_key).distinct().where(model.deleted_at.isnot(None), model.deleted_at < cutoff)
-            if needs_bypass:
-                with tenant_isolation_bypass(
-                    session,
-                    reason="cross-tenant maintenance scan: enumerate tenants for soft-delete reaper (TSK-6132)",
-                    models=(model,),
-                ):
-                    result = await session.execute(stmt)
-                    return {row[0] for row in result.fetchall()}
-            result = await session.execute(stmt)
-            return {row[0] for row in result.fetchall()}
+            with tenant_isolation_bypass(
+                session,
+                reason="cross-tenant maintenance scan: enumerate tenants for soft-delete reaper (TSK-6132)",
+                models=(model,),
+            ):
+                result = await session.execute(stmt)
+                return {row[0] for row in result.fetchall()}
 
         async with db_manager.get_session_async() as session:
-            # CommThread is intentionally NOT in the tenant-isolation guard
-            # registry (its isolation is enforced by explicit tenant_key
-            # predicates, like Notification), so its cross-tenant enumeration
-            # needs NO bypass — and wrapping it in one would raise. The other
-            # three models ARE registered, so they require the audited bypass.
-            thread_tenants = await _tenants_with_expired(session, CommThread, needs_bypass=False)
-            task_tenants = await _tenants_with_expired(session, Task, needs_bypass=True)
-            doc_tenants = await _tenants_with_expired(session, VisionDocument, needs_bypass=True)
-            template_tenants = await _tenants_with_expired(session, AgentTemplate, needs_bypass=True)
+            thread_tenants = await _tenants_with_expired(session, CommThread)
+            task_tenants = await _tenants_with_expired(session, Task)
+            doc_tenants = await _tenants_with_expired(session, VisionDocument)
+            template_tenants = await _tenants_with_expired(session, AgentTemplate)
 
         totals = {"threads": 0, "tasks": 0, "vision_documents": 0, "templates": 0}
         try:
