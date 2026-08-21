@@ -1,10 +1,10 @@
 # Giljo HQ: Tools Reference
 
-*Last updated: 2026-07-16*
+*Last updated: 2026-08-20*
 
 ## Overview
 
-Giljo HQ, a GiljoAI product, exposes **46 tools** to connected AI coding tools. Every tool requires a
+Giljo HQ, a GiljoAI product, exposes **48 tools** to connected AI coding tools. Every tool requires a
 valid API key passed as a Bearer token. Tenant isolation is enforced server-side;
 agents cannot cross tenant boundaries.
 
@@ -21,10 +21,10 @@ Every tool carries one of three permission scopes:
 
 | Scope | Meaning | Count |
 |-------|---------|-------|
-| `mcp:read` | Read-only — fetches data, never mutates state. | 13 |
+| `mcp:read` | Read-only — fetches data, never mutates state. | 15 |
 | `mcp:write` | Mutating writes performed by a human/dashboard-driven flow. | 10 |
 | `mcp:agent` | Agent-lifecycle operations used by orchestrators and specialist agents. | 23 |
-| **Total** | | **46** |
+| **Total** | | **48** |
 
 Tools are organized by functional category below; each entry lists its scope.
 
@@ -56,19 +56,21 @@ before creating or reading projects and tasks.
 
 ### create_project `mcp:write`
 
-**Purpose:** Create a new project bound to the active product. `project_type` plus
-`series_number` form a taxonomy serial such as `FE-0001`; the `suffix` enables chain
-steps (a/b/c). Unknown `project_type` values are rejected with the list of valid types.
-The project is created inactive; activate it from the dashboard.
+**Purpose:** Create a new project, bound by default to the active product. `project_type`
+plus `series_number` form a taxonomy serial such as `FE-0001`; the `suffix` enables
+chain steps (a/b/c). Unknown `project_type` values are rejected with the list of valid
+types. The project is created inactive; activate it from the dashboard. The response
+names the product the project landed on.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | name | str | Yes | Project name. |
 | description | str | Yes | Human-written project description (user requirements). Must state `**Edition Scope:**`. |
-| project_type | str | No | Taxonomy type abbreviation (e.g. `FE`, `BE`, `INF`). Must match a configured type. |
+| project_type | str | No | Taxonomy type abbreviation (e.g. `FE`, `BE`, `INF`). Must match a configured type; the reserved `TSK` type is task-only and never valid here. |
 | series_number | int | No | Sequential number within the type series (0 = auto-assign). |
 | suffix | str | No | Chain-step suffix (e.g. `a`, `b`, `c`) sharing one `series_number`. |
-| bootstrap_template_vars | dict | No | Optional template variables for project bootstrap. |
+| bootstrap_template_vars | dict | No | Optional template variables for project bootstrap. Consumed only for `CTX` project types; ignored otherwise. |
+| product_id | str | No | Product UUID to bind the project to. Omit to use the active product — but the active product is shared, mutable state, so pass this explicitly when you know your product: another session, or the user switching products in the dashboard, changes the active product mid-session and an omitted `product_id` follows that change. |
 
 ---
 
@@ -82,7 +84,7 @@ positioning). Omitted fields remain unchanged.
 | project_id | str | Yes | ID of the project to update. |
 | name | str | No | New project name. |
 | description | str | No | New description. |
-| status | str | No | New lifecycle status. |
+| status | str | No | New lifecycle status. Setting `completed` on a solo project runs the full archive lifecycle (deactivation, terminal-state selection from early_termination, completed_at stamping, agent closure) — the same sequence as the dashboard's Archive button. |
 | project_type | str | No | New taxonomy type abbreviation. |
 | series_number | int | No | New series number. |
 | suffix | str | No | New chain-step suffix. |
@@ -91,9 +93,10 @@ positioning). Omitted fields remain unchanged.
 
 ### list_projects `mcp:read`
 
-**Purpose:** List projects for the active product with server-side filtering. By default
-returns only active-lifecycle projects (excludes completed/cancelled) in summary form.
-Prefer `mode` (`triage`/`planning`/`audit`/`forensic`) over numeric `depth`.
+**Purpose:** List projects for the active product with server-side filtering, search,
+and pagination. By default returns only active-lifecycle projects (excludes
+completed/cancelled) in summary form. Prefer `mode` (`triage`/`planning`/`audit`/
+`forensic`) over numeric `depth`.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -102,17 +105,29 @@ Prefer `mode` (`triage`/`planning`/`audit`/`forensic`) over numeric `depth`.
 | taxonomy_alias_prefix | str | No | `""` | Prefix-match against taxonomy alias (e.g. `"BE-50"`). |
 | created_after / created_before | str | No | `""` | ISO-8601 bounds on creation time. |
 | completed_after / completed_before | str | No | `""` | ISO-8601 bounds on completion time. |
-| include_completed | bool | No | `false` | Include archived (completed/cancelled) projects. Ignored when `status` is set. |
+| include_completed | bool | No | `false` | Include archived (completed/cancelled/terminated/deleted) projects. Ignored when `status` is set. |
+| include_superseded | bool | No | `false` | Include superseded projects (work replaced by a successor). Hidden by default even under `include_completed=true`; an explicit `status="superseded"` also surfaces them. |
 | hidden | str | No | `""` | Tri-state: `"true"` only hidden, `"false"` exclude hidden, `""` no filter. |
 | mode | str | No | `""` | **Preferred.** `triage` / `planning` / `audit` / `forensic`. Overrides `depth` and `summary_only`. |
 | memory_limit | int | No | `5` | Caps trailing 360-memory entries per project in audit mode (max 50). |
 | summary_only | bool | No | `true` | Back-compat. Ignored when `mode` is supplied. |
 | depth | int | No | `0` | Back-compat numeric detail 0-3. Prefer `mode`. |
-| status_filter | str | No | `""` | Legacy. Prefer `status`. `"all"` implies `include_completed=true`. |
+| status_filter | str | No | `""` | Legacy. Prefer `status`. `"all"` implies `include_completed=true`. A genuine conflict with `status` (different effective meaning) is refused, naming both values. |
+| query | str | No | `""` | Case-insensitive substring search against name, id, description, `project_alias`, and `taxonomy_alias` (e.g. `"oauth"`, `"BE-1042"`). Max 200 characters. Empty = no search. |
+| limit | int | No | `50` | Max rows to return (max `500`). `0` = use the default. A value above the max is **rejected**, not silently clamped. A response cut by this bound sets `truncated=true`; read `counts.matched` for how many rows the filters actually match. |
+| cursor | str | No | `""` | Opaque continuation token from a previous response's `truncation.next_cursor`. Pass it back **with the same filters** to keep walking; a filter change mid-walk is refused rather than silently answered from the wrong set. Keep walking until a response comes back `truncated=false` — every project is then returned exactly once. Changing `limit` or `mode` mid-walk is fine. |
 
 **Modes:** `triage` (id/name/status/type/dates — pick a project) · `planning`
 (+ description, mission, agent counts) · `audit` (+ memory headlines + agent summaries)
 · `forensic` (+ full memory bodies, agent results, message history).
+
+**Response shape:** every response carries a `counts` block — `matched` (rows your
+filters match, board-wide) and, when walking with a cursor, `remaining` (still ahead of
+your cursor). A response cut by `limit` sets `truncated=true` with a `truncation` block
+naming the reason and the fix (raise `limit`, narrow filters, or pass `cursor`). When a
+type/status filter comes back empty because matching projects exist but are hidden by
+the default view, the response says so and names the exact filter to pass to reveal
+them — it never reads as "none exist."
 
 ---
 
@@ -224,6 +239,7 @@ complete/closed/decommissioned first. Triggers a `product_memory_updated` WebSoc
 | decisions_made | list[str] | Yes | Architectural/design decisions made (cite any deferred task/project IDs). |
 | git_commits | list[dict] | No | Commit records associated with the project. |
 | tags | list[str] | No | Classification tags. |
+| force | bool | No | Force-close: auto-decommission remaining agents before closing. Use only when a prior `CLOSEOUT_BLOCKED` response says so (e.g. a leftover "waiting" orchestrator after work ran outside a staged session). Refused while the calling orchestrator itself is still active; a specialist still in flight — including one marked "silent" — is decommissioned (recorded as failed/replaced/abandoned). Do not use it to retire an agent whose work you accepted — `complete_job` then `close_job` that agent instead. Default `false`. |
 
 ---
 
@@ -231,57 +247,67 @@ complete/closed/decommissioned first. Triggers a `product_memory_updated` WebSoc
 
 ### create_task `mcp:write`
 
-**Purpose:** Create a task (a single-step deferral / technical debt item) bound to the
-active product. When `task_type` is set, a `series_number` is auto-assigned from the
-counter shared with projects, yielding a `taxonomy_alias` like `BE-5067`; both are
-inherited on task→project conversion.
+**Purpose:** Create a task (a single-step deferral / technical debt item), bound by
+default to the active product. Every task is tagged `TSK` (a `taxonomy_alias` like
+`TSK-0067`, auto-assigned from the counter shared with projects) — `task_type` is
+accepted for backward compatibility only and has no effect.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | title | str | Yes | Task title. |
 | description | str | Yes | Detailed task description. |
 | priority | str | No | `low` / `medium` / `high` / `critical`. Default `medium`. |
-| task_type | str | No | Taxonomy type abbreviation (e.g. `BE`, `FE`, `INF`). |
+| task_type | str | No | Ignored — kept for backward compatibility. Every task is auto-tagged `TSK`; no other type is ever assigned. |
 | assigned_to | str | No | Agent or user to assign the task to. |
+| product_id | str | No | Product UUID to bind the task to. Omit to use the active product — but the active product is shared, mutable state, so pass this explicitly when you know your product: another session, or the user switching products in the dashboard, changes the active product mid-session and an omitted `product_id` follows that change. A `product_id` that does not belong to your account is rejected outright; it never silently falls back to the active product. |
 
 ---
 
 ### update_task `mcp:write`
 
 **Purpose:** Update task metadata (title, description, status, priority, due date,
-hidden flag). Omitted fields remain unchanged; the task type is immutable. To
-**complete** a task, set `status=completed` (this stamps `completed_at`); pass
-`completion_notes` to append an audit-trail entry as it completes.
+hidden flag), or promote the task to a project. Omitted fields remain unchanged; the
+task type is immutable. To **complete** a task, set `status=completed` (this stamps
+`completed_at`); pass `completion_notes` to append an audit-trail entry as it completes.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | task_id | str | Yes | ID of the task to update. |
-| title | str | No | New title. |
+| title | str | No | New title. Alongside `convert_to_project=true`, names the new project instead. |
 | description | str | No | New description. |
 | status | str | No | `pending` / `in_progress` / `completed` / `blocked` / `cancelled`. |
 | priority | str | No | `low` / `medium` / `high` / `critical`. |
-| task_type | str | No | Taxonomy type abbreviation. |
+| task_type | str | No | Ignored — the task type is immutable (`TSK`). Any value passed is not written. |
 | due_date | str | No | ISO-8601 due date. |
 | hidden | str | No | UI declutter flag. |
 | completion_notes | str | No | Note appended to the audit trail when `status=completed` (folds in the retired `complete_task` tool); a no-op otherwise. |
+| convert_to_project | bool | No | Promote this task to a project in one atomic step — the same conversion the dashboard's task-to-project wizard runs. A project is created from the task, any subtasks and roadmap card re-point to it at the same roadmap position, and **the task row is deleted** (its `task_id` stops resolving). The new project is **inactive and untyped** — tag it afterward with `update_project(project_id, project_type=...)`. It lands on the task's own product, not whichever product is active, and the response names that product. Only `title` may be combined with this flag (to name the new project); any other field combined with it is refused and changes nothing, since the task row is gone before it could apply. Default `false`. |
 
 ---
 
 ### list_tasks `mcp:read`
 
-**Purpose:** List tasks for the active product with projection modes and optional
-filters. Agents see hidden and non-hidden rows alike by default.
+**Purpose:** List tasks for the active product with projection modes, search, and
+pagination. Agents see hidden and non-hidden rows alike by default.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| mode | str | No | `summary` or `full`. |
-| status | str | No | Filter by status. |
-| priority | str | No | Filter by priority. |
-| task_type | str | No | Filter by taxonomy type. |
-| due_before | str | No | ISO-8601 upper bound on due date. |
-| hidden | str | No | Tri-state hidden filter. |
-| summary_only | bool | No | Back-compat projection toggle. |
-| memory_limit | int | No | Caps returned rows. |
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| mode | str | No | `""` | `index` (leanest — the list-and-sort row, typically 35-40% smaller than `summary`, depending on title length) / `summary` / `full`. `""` defaults to `summary` unless `summary_only` says otherwise. When passed explicitly, `mode` wins over `summary_only`. |
+| status | str | No | `""` | Filter by exact status (e.g. `"pending"`); an unrecognized value is refused, naming the valid ones, rather than silently matching nothing. |
+| priority | str | No | `""` | Filter by priority (`low`/`medium`/`high`/`critical`); same refuse-on-typo behavior as `status`. |
+| task_type | str | No | `""` | Only `"TSK"` matches — every task carries that type. Any other value is refused rather than silently returned empty. |
+| due_before | str | No | `""` | ISO-8601 upper bound on due date. |
+| hidden | str | No | `""` | Tri-state: `"true"`/`"false"`/`""`. An unrecognized value is refused, naming the accepted ones. |
+| summary_only | bool | No | `false` | Alias for `mode="summary"`. Ignored when `mode` is also passed explicitly. |
+| memory_limit | int | No | `0` | Truncates description length in `full` mode. |
+| query | str | No | `""` | Case-insensitive substring search against title, description, and `taxonomy_alias` (e.g. `"oauth"`, `"TSK-9438"`). Empty = no search filter. |
+| limit | int | No | `50` | Max tasks to return (max `500`). `0` = use the default. The response always states whether it was cut, independent of this value. |
+| cursor | str | No | `""` | Opaque continuation token from a previous response's `truncation.next_cursor`. Pass it back **with the same filters**; a filter change mid-walk is refused. Keep walking until `truncated=false` — every task is then returned exactly once. Changing `limit` or `mode` mid-walk is fine. |
+
+**Response shape:** every response carries board-wide totals (how many tasks are done,
+how many are still open, and the date range they span) plus `counts.matched` for the
+caller's own filters, so an agent can judge board size before deciding whether to page
+through it.
 
 ---
 
@@ -298,6 +324,7 @@ and can remove items in the same call.
 | items | list[dict] | Yes | Roadmap items to upsert. |
 | summary | str | No | Roadmap narrative summary. |
 | remove | list[dict] | No | Items to drop from the roadmap. |
+| patch_fields | bool | No | Patch only the fields each item carries; omitted fields keep their stored value, explicitly empty ones are cleared. Default false. |
 
 ---
 
@@ -363,8 +390,9 @@ percent and step counts and auto-wakes idle/sleeping/blocked agents to `working`
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | job_id | str | Yes | The agent's job ID. |
-| todo_items | list[dict] | No | Full replacement TODO list (`title`, `done`). |
-| todo_append | list[dict] | No | Items to append without overwriting completed steps. |
+| todo_items | list[dict] | No | Full replacement TODO list. Each item: `{content: str, status: 'pending'\|'in_progress'\|'completed'}`. Include ALL items — completed + in_progress + pending — never a partial list. |
+| todo_append | list[dict] | No | New items to append without replacing the stored list. Same item format as `todo_items`. Use this to add work discovered mid-task without overwriting what is already there. |
+| replace | bool | No | Required (`true`) when `todo_items` is SHORTER than the stored list — otherwise the call is rejected rather than silently dropping items. Default `false`. |
 
 ---
 
@@ -423,7 +451,8 @@ auto-wake when `report_progress()` is called. Cannot produce `awaiting_user` (on
 | job_id | str | Yes | The agent's job ID. |
 | status | str | Yes | `blocked`, `idle`, or `sleeping`. |
 | reason | str | No | Human-readable explanation. |
-| wake_in_minutes | int | No | For `sleeping`: minutes until wake. |
+| wake_in_minutes | int | No | For `sleeping`: minutes until a timed wake. |
+| wake_on_signal | bool | No | For `sleeping`: pass `true` when you are parked on `await_my_turn` rather than a timed sleep, so the dashboard shows "Waiting for wake" instead of a countdown. Mutually exclusive with `wake_in_minutes` (`wake_on_signal` wins). Default `false`. |
 
 ---
 
@@ -494,6 +523,7 @@ The creator is registered as the first participant holding the baton.
 | project_id | str | No | Associated project. |
 | creator_id | str | No | Creator agent id. |
 | creator_display_name | str | No | Creator display name. |
+| sequence_run_id | str | No | Chain conductors only — the run UUID this thread is the coordination hub for. Stamping it is what lets every sub-orchestrator find this hub via `get_context(categories=['chain'])`, with no subject-line convention required. |
 
 ---
 
@@ -517,15 +547,24 @@ Collision-safe — a re-join is a no-op.
 by default, or direct-messages one via `to_participant`. Can optionally `set_status`
 (open/active/resolved/closed).
 
+Every post must declare its author: pass `from_agent` (posting as an agent) **or**
+`as_user=true` (posting in the human user's voice). The two are mutually exclusive, and
+a post that declares neither is refused with `FROM_AGENT_REQUIRED` before anything is
+written — attribution never falls back to the human user.
+
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | thread_id | str | Yes | The thread to post to. |
 | content | str | Yes | Message body. |
-| from_agent | str | No | Sender id. |
+| from_agent | str | Yes* | Your agent role/id. Required unless `as_user=true`. |
+| as_user | bool | Yes* | Post as the authenticated human user. Required unless `from_agent` is set; the two cannot be combined. |
 | to_participant | str | No | Direct-message a single participant. |
 | set_status | str | No | `open` / `active` / `resolved` / `closed`. |
 | requires_action | bool | No | Whether a recipient must act. |
-| loop_directive | bool | No | Loop-control directive. |
+| loop_directive | bool | No | Loop-control directive — recipients loop/sleep on their normal wake interval until the thread is set `resolved`/`closed`. |
+| loop_interval_minutes | int | No | Auto-check-in cadence in minutes for the loop directive (0-1440), surfaced on `get_my_turn`/`get_thread_history` poll responses so the agent self-schedules its wake. `0` = unset (agent uses its own default). Only meaningful with `loop_directive=true`. |
+| pass_baton_to | str | No | Atomically hand the baton with this post: an `agent_id` \| `user_id` \| `all` \| `none`. An explicit value always wins; `none` posts without moving the baton. When omitted, a directed action-request (`requires_action=true` + `to_participant`) auto-passes the baton to that participant; every other post leaves the baton untouched. |
+| my_status | str | No | What you are doing right now, shown on your status dot in the Hub: one of `working` \| `waiting` \| `blocked` \| `idle` \| `sleeping` \| `complete`. Only useful for a headless/external agent that joined via `join_thread` — a platform-run agent already reports status automatically, and that always wins over this. Omit to leave your current status unchanged. |
 
 ---
 
@@ -540,6 +579,35 @@ by default, or direct-messages one via `to_participant`. Can optionally `set_sta
 
 ---
 
+### await_my_turn `mcp:read`
+
+**Purpose:** Block until it is your turn, instead of sleeping and re-polling
+`get_my_turn`. Returns the moment a directed action-request or a baton lands for you,
+or empty when the wait window closes — call it again to keep waiting. Costs nothing
+while it waits and delivers in under a second; prefer it over a `get_my_turn` sleep
+loop on any harness that can hold a tool call open. Chat surfaces that cannot hold a
+call open should keep polling `get_my_turn` instead.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| agent_id | str | Yes | | Your agent id. |
+| timeout_seconds | int | No | Server default | How long to block before returning empty (0-55, clamped by the server). This is the re-call cadence, not the delivery latency — a wake still arrives in under a second either way. |
+
+---
+
+### get_participant_liveness `mcp:read`
+
+**Purpose:** Who on this thread is still there. Returns each participant with when
+they were last seen and a coarse state — active, quiet, gone, or unknown for someone
+who has joined but not yet acted. Use it before deciding whether to keep waiting on an
+agent, reassign its work, or escalate past an orchestrator that has gone quiet.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| thread_id | str | Yes | The thread UUID. |
+
+---
+
 ### pass_baton `mcp:agent`
 
 **Purpose:** Set who acts next on a thread — an `agent_id`, `user_id`, `all`, or `none`.
@@ -548,6 +616,7 @@ by default, or direct-messages one via `to_participant`. Can optionally `set_sta
 |-----------|------|----------|-------------|
 | thread_id | str | Yes | The thread. |
 | to | str | Yes | Next actor (`agent_id` / `user_id` / `all` / `none`). |
+| from_agent | str | No | Your agent id — who is handing over. Pass it so the recipient's alert names you, not only the thread. Omit only when handing over as the human user. |
 
 ---
 
@@ -612,7 +681,9 @@ content. Tenant-scoped, newest first.
 depth control; multiple categories in one call replace nine individual context tools.
 Categories: `product_core`, `vision_documents`, `tech_stack`, `architecture`, `testing`,
 `memory_360`, `git_history`, `agent_templates`, `project`, `self_identity`, `tasks`,
-`todos`.
+`todos`, `chain`, `threads`. `threads` returns the account's recent Hub conversation
+threads (read-only — it never writes or marks anything read) using the same fixed cap
+on every call, not tunable via `depth_config`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -646,13 +717,14 @@ to the product's `sequential_history`.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | project_id | str | Yes | ID of the project being recorded. |
-| summary | str | Yes | Narrative summary of the work done. |
+| summary | str | Yes | Brief 2-3 sentence headline of what was accomplished or handed over. **Send this argument LAST in your call** — anything ordered after a long free-text argument like this one can be silently absorbed into it and never arrive as its own argument. |
 | key_outcomes | list[str] | Yes | Concrete outcomes delivered. |
-| decisions_made | list[str] | Yes | Architectural/design decisions made. |
-| entry_type | str | No | Type of entry. Default `project_completion`. |
-| author_job_id | str | No | Job ID of the agent writing the entry. |
-| git_commits | list[dict] | No | Commit records. |
-| tags | list[str] | No | Classification tags. |
+| decisions_made | list[str] | Yes | Architectural/design decisions made (cite any deferred task/project IDs). |
+| entry_type | str | No | `baseline` (foundation context) / `decision` (a choice with rationale) / `architecture` (structural notes) / `discovery` (surprising finding worth remembering) — any specialist agent may write these. `project_completion` (closeout) and `session_handover` (orchestrator-to-orchestrator across sessions) are **orchestrator-only**; a specialist passing either is refused with `ORCHESTRATOR_ONLY_ENTRY_TYPE`. `handover_closeout` is a legacy alias kept for back-compat. Default `project_completion`. |
+| author_job_id | str | No | Job ID of the authoring agent (usually the orchestrator's `job_id`). |
+| git_commits | list[dict] | No | Commit records. Every entry must carry a non-empty commit title — a titleless entry is refused with `GIT_COMMIT_TITLE_REQUIRED`. Pass `{sha, message, author?, pr_url?}` dicts (preferred), or tab-delimited porcelain strings (`git log --format='%H%x09%s%x09%an' <base>..HEAD`). |
+| tags | list[str] | No | Max 8 tags, each from the server-enforced 16-tag vocabulary: change-type (`feature`/`bug-fix`/`refactor`/`perf`/`security`/`docs`/`test`/`chore`), domain (`frontend`/`backend`/`database`/`api`/`infrastructure`/`ui-ux`/`integration`), operational (`migration`). |
+| acknowledge_closeout_todo | bool | No | Auto-completes your own self-referential closeout TODOs (e.g. "Write series summary") before the closeout-readiness gate evaluates, resolving the chicken-and-egg where the TODO this write satisfies would otherwise block the write. Non-closeout TODOs still block. Default `false`. |
 
 ---
 
@@ -712,7 +784,10 @@ fetch each chunk one at a time. Read all chunks before calling `update_product_c
 
 **Purpose:** Write structured product fields extracted from vision-document analysis.
 Merge-write: only provided fields are updated; child table rows (tech stack,
-architecture, test config) are created on first write.
+architecture, test config) are created on first write. Safe to call in stages — split
+a large analysis across several calls and set `emit_completion=true` on the last one.
+Every response reports `vision_analysis_complete`, `missing_for_completion`, and
+`fields_skipped`, so you never have to infer what landed.
 
 The tech/architecture/quality/testing prose is grouped into four typed dicts
 (BE-9118); unknown sub-keys inside a group are rejected at the tool boundary.
@@ -722,6 +797,7 @@ The tech/architecture/quality/testing prose is grouped into four typed dicts
 | product_id | str | Yes | ID of the product to update. |
 | product_name / product_description | str | No | Product identity fields. |
 | core_features | str | No | Key product features. |
+| project_path | str | No | Absolute path of the user's local codebase folder you are operating from. Omit if you have no filesystem access inside the user's repository — never guess. Like `product_name`, it is user-owned and skipped when already set. |
 | tech_stack | dict | No | Group: `programming_languages`, `frontend_frameworks`, `backend_frameworks`, `databases`, `infrastructure`, `target_platforms` (list from: `windows`, `linux`, `macos`, `android`, `ios`, `web`, `all`). |
 | architecture | dict | No | Group: `architecture_pattern`, `design_patterns`, `api_style`, `architecture_notes`, `coding_conventions`, `brand_guidelines`. |
 | quality | dict | No | Group: `quality_standards`. |
@@ -729,6 +805,7 @@ The tech/architecture/quality/testing prose is grouped into four typed dicts
 | vision_summaries | list[dict] | No | Per-document AI summaries (`doc_id`, `light`, `medium`). |
 | consolidated_vision | dict | No | Product-level aggregate summary (`light`, `medium`). |
 | force | bool | No | Override merge guards. |
+| emit_completion | bool | No | Set `true` on your final staged call. Re-checks the completion state and signals the dashboard even when this call writes no new fields. Default `false`. |
 
 ---
 
@@ -779,8 +856,8 @@ bundled `SKILLS_VERSION`. Run once after connecting.
 | Tasks | 2 write · 1 read | create_task, update_task, list_tasks |
 | Roadmap | 1 write · 1 read | update_roadmap_metadata, get_roadmap |
 | Agent Jobs & Lifecycle | 11× agent | spawn_job, get_job_mission, update_job_mission, report_progress, complete_job, close_job, resolve_reactivation, set_agent_status, get_agent_result, get_workflow_status, request_approval |
-| Agent Message Hub | 4 agent · 4 read | create_thread, join_thread, post_to_thread, pass_baton, get_my_turn, list_threads, get_thread_history, search_threads |
+| Agent Message Hub | 4 agent · 6 read | create_thread, join_thread, post_to_thread, pass_baton, get_my_turn, await_my_turn, get_participant_liveness, list_threads, get_thread_history, search_threads |
 | Context & Memory | 2 read · 1 agent | get_context, search_memory, write_memory_entry |
 | Vision & Product Context | 1 read · 4 write | create_product, create_vision_document, get_vision_doc, update_product_context, apply_context_tuning |
 | Setup | 1 write | giljo_setup |
-| **Total** | **13 read · 10 write · 23 agent** | **46** |
+| **Total** | **15 read · 10 write · 23 agent** | **48** |

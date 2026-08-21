@@ -39,7 +39,6 @@ from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from mcp.types import Implementation
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
@@ -47,6 +46,7 @@ from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -64,7 +64,7 @@ _CLAUDE_CODE_INFO = Implementation(name="claude-code", version="2.1.199")
 
 def _payload(result) -> dict:
     if getattr(result, "structuredContent", None):
-        return result.structuredContent
+        return result.structured_content
     first = result.content[0]
     text = getattr(first, "text", None)
     if text is None:  # pragma: no cover - defensive
@@ -173,7 +173,7 @@ async def _seed_orchestrator(db_session, tenant_key: str, product_id: str, execu
 async def _ch3_for(client, client_info, job_id) -> str:
     async with client(client_info) as session:
         result = await session.call_tool("get_staging_instructions", {"job_id": job_id})
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
     return payload["orchestrator_protocol"]["ch3_agent_spawning_rules"]
 

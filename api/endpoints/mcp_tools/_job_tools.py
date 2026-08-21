@@ -11,10 +11,9 @@ wrapper registers against the shared ``mcp`` instance from ``_base`` as a decora
 side effect at import time. Behavior, signatures, names, and descriptions unchanged.
 """
 
-from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
-from mcp.server.fastmcp import Context
+from mcp.server.mcpserver import Context
 from pydantic import Field
 
 from api.endpoints.mcp_tools._base import (
@@ -29,7 +28,6 @@ from api.endpoints.mcp_tools._base import (
     _resolve_preset_name,
     mcp,
 )
-from api.endpoints.mcp_tools._tasks_prototype import maybe_attach_task_view
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 from giljo_mcp.exceptions import ValidationError
 
@@ -271,6 +269,14 @@ async def set_agent_status(
             description="Sleep interval hint for 'sleeping' status. Agent will auto-check-in after this many minutes."
         ),
     ] = None,
+    wake_on_signal: Annotated[
+        bool,
+        Field(
+            description="For 'sleeping' status: True when you are parked on await_my_turn rather than a "
+            "timed sleep, so the dashboard shows 'Waiting for wake' instead of a countdown. "
+            "Mutually exclusive with wake_in_minutes (wake_on_signal wins)."
+        ),
+    ] = False,
     ctx: Context = None,
 ) -> dict[str, Any]:
     return await _call_tool(
@@ -281,6 +287,7 @@ async def set_agent_status(
             "status": status,
             "reason": reason,
             "wake_in_minutes": wake_in_minutes,
+            "wake_on_signal": wake_on_signal,
         },
     )
 
@@ -473,9 +480,4 @@ async def get_workflow_status(
     kwargs: dict[str, Any] = {"project_id": project_id}
     if exclude_job_id:
         kwargs["exclude_job_id"] = exclude_job_id
-    result = await _call_tool(ctx, "get_workflow_status", kwargs)
-    # BE-6039 (NO-SHIP-UNTIL-GA): opt-in MCP Tasks-shape view. Dormant unless
-    # GILJO_TASKS_PROTOTYPE is set AND the client declares the tasks extension; otherwise
-    # returns ``result`` unchanged. Demonstrates the lifecycle -> MCP Tasks mapping.
-    now = datetime.now(UTC)
-    return maybe_attach_task_view(ctx, result, task_id=project_id, created_at=now, last_updated_at=now)
+    return await _call_tool(ctx, "get_workflow_status", kwargs)

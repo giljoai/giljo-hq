@@ -36,7 +36,6 @@ from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
-from sqlalchemy.sql import func
 
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.domain.project_status import LIFECYCLE_FINISHED_STATUSES, ProjectStatus
@@ -53,10 +52,14 @@ from giljo_mcp.models.roadmaps import (
     RoadmapItem,
 )
 from giljo_mcp.services._session_helpers import optional_tenant_session
+from giljo_mcp.services.roadmap_references import (
+    assert_items_in_product,
+    resolve_refs,
+)
+from giljo_mcp.services.roadmap_upsert import upsert_many
 from giljo_mcp.services.roadmap_validation import (
-    validate_items,
-    validate_remove,
     validate_reorder,
+    validate_upsert_payload,
 )
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
@@ -134,6 +137,7 @@ class RoadmapService:
         items: Any,
         summary: str | None = None,
         remove: Any = None,
+        patch_fields: bool = False,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
         """Bulk upsert roadmap items for the active product's roadmap.
@@ -141,6 +145,13 @@ class RoadmapService:
         Validates every item at the boundary, lazy-creates the roadmap, asserts
         each referenced project/task belongs to the active product + tenant,
         then upserts (de-duping on the uq_roadmap_item constraint).
+
+        ``patch_fields`` (BE-9477) switches the UPDATE half of that upsert from
+        write-every-column to write-only-what-was-sent: an OMITTED metadata key
+        keeps its stored value, a key present but empty CLEARS it. It defaults
+        OFF, and off means the pre-BE-9477 path with nothing added -- which is
+        what makes it safe to land in an already-staged release. Whether it ever
+        becomes the default is a separate decision and is not taken here.
 
         ``remove`` (0006) is an optional list of ``{item_type, project_id |
         task_id}`` refs to drop from the active roadmap IN THE SAME transaction.
@@ -156,8 +167,8 @@ class RoadmapService:
             if not effective_tenant_key:
                 raise ValidationError(message="tenant_key is required", context={"operation": "upsert_roadmap_items"})
 
-            validated = validate_items(items)
-            validated_remove = validate_remove(remove)
+            # BE-9474: one rejection covering both lists, naming every bad row.
+            validated, validated_remove = validate_upsert_payload(items, remove, patch_fields=patch_fields)
 
             product_id = await self._resolve_active_product_id(effective_tenant_key)
             if not product_id:
@@ -168,9 +179,11 @@ class RoadmapService:
 
             async with self._get_session(effective_tenant_key) as session:
                 roadmap = await self._get_or_create_roadmap(session, effective_tenant_key, product_id)
-                await self._assert_items_in_product(session, effective_tenant_key, product_id, validated)
+                # BE-9474: aliases become ids first, so everything below sees ids only.
+                await resolve_refs(session, effective_tenant_key, product_id, validated, validated_remove)
+                await assert_items_in_product(session, effective_tenant_key, product_id, validated)
 
-                await self._upsert_many(session, effective_tenant_key, roadmap.id, validated)
+                await upsert_many(session, effective_tenant_key, roadmap.id, validated, patch_fields=patch_fields)
 
                 # Removal runs AFTER the upsert so a contradictory same-item
                 # (in both lists) ends removed — predictable last-write-wins.
@@ -226,105 +239,6 @@ class RoadmapService:
         except Exception as e:  # Broad catch: service boundary, wraps in BaseGiljoError
             self._logger.exception("Failed to upsert roadmap metadata")
             raise BaseGiljoError(message=str(e), context={"operation": "upsert_roadmap_items"}) from e
-
-    async def _assert_items_in_product(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-        product_id: str,
-        validated: list[dict[str, Any]],
-    ) -> None:
-        """Reject any item whose project/task is not in the active product + tenant."""
-        project_ids = {v["project_id"] for v in validated if v["item_type"] == "project"}
-        task_ids = {v["task_id"] for v in validated if v["item_type"] == "task"}
-
-        if project_ids:
-            rows = await session.execute(
-                select(Project.id).where(
-                    Project.tenant_key == tenant_key,
-                    Project.product_id == product_id,
-                    Project.id.in_(project_ids),
-                )
-            )
-            found = {r[0] for r in rows}
-            missing = project_ids - found
-            if missing:
-                raise ValidationError(
-                    message=f"project(s) not found in the active product: {sorted(missing)}",
-                    context={"operation": "upsert_roadmap_items", "missing_project_ids": sorted(missing)},
-                )
-
-        if task_ids:
-            rows = await session.execute(
-                select(Task.id).where(
-                    Task.tenant_key == tenant_key,
-                    Task.product_id == product_id,
-                    Task.deleted_at.is_(None),  # BE-6130b: can't roadmap a trashed task
-                    Task.id.in_(task_ids),
-                )
-            )
-            found = {r[0] for r in rows}
-            missing = task_ids - found
-            if missing:
-                raise ValidationError(
-                    message=f"task(s) not found in the active product: {sorted(missing)}",
-                    context={"operation": "upsert_roadmap_items", "missing_task_ids": sorted(missing)},
-                )
-
-    async def _upsert_many(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-        roadmap_id: str,
-        items: list[dict[str, Any]],
-    ) -> None:
-        """Batch-upsert roadmap items in ONE multi-row statement (BE-9144).
-
-        Replaces the former per-item insert loop. Items are de-duped on the
-        ``uq_roadmap_item`` key (item_type, project_id, task_id) keeping the
-        LAST occurrence: a single ``ON CONFLICT DO UPDATE`` cannot affect the
-        same conflict target twice (Postgres cardinality violation), so this
-        de-dup reproduces the last-write-wins the per-item loop got for free
-        (first row inserted, later duplicate updated it). ``items_upserted`` in
-        the caller still reports the raw request length, unchanged.
-        """
-        if not items:
-            return
-        from giljo_mcp.models.base import generate_uuid
-
-        deduped: dict[tuple[str, str | None, str | None], dict[str, Any]] = {}
-        for v in items:
-            deduped[(v["item_type"], v["project_id"], v["task_id"])] = v
-
-        values = [
-            {
-                "id": generate_uuid(),
-                "tenant_key": tenant_key,
-                "roadmap_id": roadmap_id,
-                "item_type": v["item_type"],
-                "project_id": v["project_id"],
-                "task_id": v["task_id"],
-                "sort_order": v["sort_order"],
-                "risk": v["risk"],
-                "complexity": v["complexity"],
-                "blocked": v["blocked"],
-                "blocked_reason": v["blocked_reason"],
-            }
-            for v in deduped.values()
-        ]
-        stmt = pg_insert(RoadmapItem).values(values)
-        stmt = stmt.on_conflict_do_update(
-            constraint="uq_roadmap_item",
-            set_={
-                "sort_order": stmt.excluded.sort_order,
-                "risk": stmt.excluded.risk,
-                "complexity": stmt.excluded.complexity,
-                "blocked": stmt.excluded.blocked,
-                "blocked_reason": stmt.excluded.blocked_reason,
-                "updated_at": func.now(),
-            },
-        )
-        await session.execute(stmt)
 
     async def _remove_refs(
         self,

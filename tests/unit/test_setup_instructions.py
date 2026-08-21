@@ -5,6 +5,7 @@
 
 """Tests for setup_instructions module (Sprint 002e extraction)."""
 
+from giljo_mcp.template_renderer import OWNERSHIP_MARKER_TOKEN
 from giljo_mcp.tools.setup_instructions import (
     GILJOAI_MCP_PRIMER,
     build_inline_primer_note,
@@ -69,11 +70,13 @@ def test_setup_instructions_do_not_touch_agents_when_scope_excludes_agents():
     """Skills/commands refreshes must not mutate agent directories or config."""
     url = "https://example.com/download/test"
 
+    # BE-9385b: the target directory is now resolved per harness (repo-level where
+    # supported), so the guarantee is stated once without naming a fixed path.
     claude = build_setup_instructions("claude_code", url)
-    assert "If INSTALL_AGENTS=false, do not touch ~/.claude/agents/." in claude
+    assert "If INSTALL_AGENTS=false, do not touch any agents directory." in claude
 
     gemini = build_setup_instructions("gemini_cli", url)
-    assert "If INSTALL_AGENTS=false, do not touch ~/.gemini/agents/." in gemini
+    assert "If INSTALL_AGENTS=false, do not touch any agents directory." in gemini
     assert "do not touch ~/.gemini/settings.json" in gemini
 
     codex = build_setup_instructions("codex_cli", url)
@@ -124,20 +127,56 @@ def test_codex_cli_instructions_explain_request_user_input_cleanup():
     assert "unless the user explicitly wants to keep" in result
 
 
-def test_agent_overwrite_consent_prompt_present_on_all_platforms():
-    """Bootstrap setup must ask user before overwriting existing agent files.
+def test_agent_install_protects_user_authored_files_on_all_platforms():
+    """Installing agents must never silently destroy a file the user wrote.
 
-    Skills/commands install unconditionally; agents need consent because users may
-    have local edits. Regression guard: the consent prompt + Skip option must be
-    in the instruction text for claude_code, gemini_cli, and codex_cli.
+    BE-9385b REPLACED the old whole-directory "Overwrite (all) / Skip (all)"
+    consent prompt this test used to assert, and the replacement is strictly
+    stronger, which is why the assertions moved rather than relaxed. The old
+    prompt could not tell a GiljoAI export from a hand-written agent, so
+    "Overwrite" destroyed user files and "Skip" left GiljoAI's own agents stale --
+    the user was asked to choose between two bad outcomes because nothing on disk
+    recorded ownership.
+
+    Now every exported file carries an ownership marker, so the guarantee is
+    unconditional instead of a prompt: an unmarked file is the user's and is never
+    touched, under any answer. These assertions pin THAT.
     """
     url = "https://example.com/download/test"
     for platform in ("claude_code", "gemini_cli", "codex_cli"):
         result = build_setup_instructions(platform, url)
-        assert "Overwrite with agent templates from the server?" in result, f"{platform} missing consent prompt"
-        assert "Skip agents" in result, f"{platform} missing Skip option"
-        # INF-6049a: granular agent install/refresh routes through giljo_setup's "Agents only" scope
-        assert "Agents only" in result, f"{platform} missing pointer to the Agents only scope"
+        assert OWNERSHIP_MARKER_TOKEN in result, f"{platform} never mentions the ownership marker"
+        assert "A file with NO marker" in result, f"{platform} missing the user-authored-file rule"
+        assert "DO NOT TOUCH IT" in result, f"{platform} does not forbid touching user files"
+        assert "Rule 4 has no exceptions" in result, f"{platform} leaves the user-file rule negotiable"
+        assert "ONE FILE AT A TIME" in result, f"{platform} still installs by directory"
+
+
+def test_agent_install_flags_a_conflict_for_the_user_instead_of_enforcing_a_rename():
+    """BE-9396: a conflict is the user's to resolve, and the prose says the cost out loud.
+
+    giljo_setup guarantees server -> disk and nothing past it. So on a genuine
+    conflict the installing LLM offers the two answers that install cleanly, and
+    if the user would rather rename a file by hand it tells them the consequence
+    -- the orchestrator spawns by name, so a hand-renamed file is not spawnable
+    until the name matches again -- rather than making the server chase the rename.
+
+    The negative assertion is the load-bearing one: BE-9385b shipped a
+    set_agent_export_alias round-trip here for one day, and this is what keeps the
+    enforcement layer from growing back into the prose unnoticed.
+    """
+    for platform in ("claude_code", "gemini_cli", "codex_cli"):
+        result = build_setup_instructions(platform, "https://example.com/download/test")
+        assert "set_agent_export_alias" not in result, (
+            f"{platform} still tells the installer to round-trip a rename through the server. "
+            "That enforcement layer was retracted in BE-9396."
+        )
+        assert "REPLACE" in result and "SKIP" in result, (
+            f"{platform} does not offer the two answers that install cleanly."
+        )
+        assert "not be\nspawnable" in result or "not be spawnable" in result, (
+            f"{platform} lets the user hand-rename a file without being told it stops being spawnable."
+        )
 
 
 def test_generic_instructions_contain_download_url():

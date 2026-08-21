@@ -22,6 +22,29 @@ import pytest
 from giljo_mcp.services.job_query_service import JobQueryService
 
 
+async def _seed_product(session, tenant_key):
+    """A product for a seeded project to belong to (BE-9437: product_id is NOT NULL).
+
+    ONE PRODUCT PER PROJECT, deliberately. ``idx_project_single_active_per_product``
+    permits a single ACTIVE project per product and these seeds are active, so a
+    shared product would make the second one a unique violation.
+    """
+    import uuid
+
+    from giljo_mcp.models import Product
+
+    product = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Job Query Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    session.add(product)
+    await session.flush()
+    return product
+
+
 @pytest.fixture
 def job_query_service(db_session, test_tenant_key):
     """Create a JobQueryService with a test session."""
@@ -50,6 +73,7 @@ async def test_list_jobs_returns_created_job(db_session, db_manager, test_tenant
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
 
+    product = await _seed_product(db_session, test_tenant_key)
     project = Project(
         id=str(uuid.uuid4()),
         name="Job Query Project",
@@ -57,6 +81,7 @@ async def test_list_jobs_returns_created_job(db_session, db_manager, test_tenant
         mission="Test mission",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=product.id,
         series_number=88001,
     )
     db_session.add(project)
@@ -104,6 +129,10 @@ async def test_list_jobs_filter_by_project_id(db_session, db_manager, test_tenan
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
 
+    # BE-9437: a product EACH -- both projects are active, and one product
+    # holds at most one active project.
+    product_a = await _seed_product(db_session, test_tenant_key)
+    product_b = await _seed_product(db_session, test_tenant_key)
     proj_a = Project(
         id=str(uuid.uuid4()),
         name="Proj A",
@@ -111,6 +140,7 @@ async def test_list_jobs_filter_by_project_id(db_session, db_manager, test_tenan
         mission="Test mission",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=product_a.id,
         series_number=88002,
     )
     proj_b = Project(
@@ -120,6 +150,7 @@ async def test_list_jobs_filter_by_project_id(db_session, db_manager, test_tenan
         mission="Test mission",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=product_b.id,
         series_number=88003,
     )
     db_session.add_all([proj_a, proj_b])
@@ -165,6 +196,7 @@ async def test_list_jobs_filter_by_status(db_session, db_manager, test_tenant_ke
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
 
+    product = await _seed_product(db_session, test_tenant_key)
     project = Project(
         id=str(uuid.uuid4()),
         name="Status Filter",
@@ -172,6 +204,7 @@ async def test_list_jobs_filter_by_status(db_session, db_manager, test_tenant_ke
         mission="Test mission",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=product.id,
         series_number=88004,
     )
     db_session.add(project)
@@ -217,6 +250,7 @@ async def test_list_jobs_pagination(db_session, db_manager, test_tenant_key):
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
 
+    product = await _seed_product(db_session, test_tenant_key)
     project = Project(
         id=str(uuid.uuid4()),
         name="Pagination",
@@ -224,6 +258,7 @@ async def test_list_jobs_pagination(db_session, db_manager, test_tenant_key):
         mission="Test mission",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=product.id,
         series_number=88005,
     )
     db_session.add(project)
@@ -271,6 +306,7 @@ async def test_list_jobs_tenant_isolation(db_session, db_manager, test_tenant_ke
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
 
+    product = await _seed_product(db_session, test_tenant_key)
     project = Project(
         id=str(uuid.uuid4()),
         name="Tenant Iso",
@@ -278,6 +314,7 @@ async def test_list_jobs_tenant_isolation(db_session, db_manager, test_tenant_ke
         mission="Test mission",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=product.id,
         series_number=88006,
     )
     db_session.add(project)

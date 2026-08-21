@@ -102,9 +102,9 @@ class RateLimiter:
         registration at lifespan startup is picked up even though the
         middleware itself is constructed earlier, at app wiring.
 
-        A backend error fails OPEN with a warning: this limiter fronts every
-        request of the app, so a degraded store must cost throttling accuracy,
-        not availability. (The auth limiter's stricter posture guards only the
+        A backend error degrades to availability, logged with a warning: this
+        limiter fronts every request of the app, so a degraded store must cost
+        throttling accuracy, not availability. (The auth limiter's stricter posture guards only the
         credential endpoints.)
         """
         now = time.time()

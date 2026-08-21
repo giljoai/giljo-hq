@@ -87,7 +87,25 @@ def _status_changed_events(mock_ws: MagicMock) -> list[dict[str, Any]]:
 
 
 async def _seed_project(session: AsyncSession, tenant_key: str, *, product_id: str | None = None) -> str:
-    """Minimal project row (FK target for AgentJob.project_id); product_id optional."""
+    """Minimal project row (FK target for AgentJob.project_id).
+
+    BE-9437: ``product_id`` is NOT NULL, so an unsupplied one is no longer left
+    NULL -- a product is seeded for this project alone. Its own, because the row
+    is ACTIVE and ``idx_project_single_active_per_product`` permits one active
+    project per product, and several tests here seed more than one.
+    """
+    if product_id is None:
+        product = Product(
+            id=str(uuid.uuid4()),
+            tenant_key=tenant_key,
+            name=f"BE-9246 product {uuid.uuid4().hex[:8]}",
+            description="Owning product for the BE-9246 project seed.",
+            is_active=False,
+        )
+        session.add(product)
+        await session.flush()
+        product_id = product.id
+
     project = Project(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,

@@ -8,15 +8,9 @@
         :phases="executionOrderPhases"
       />
 
-      <!-- Handover 0904: Auto check-in controls (multi-terminal only, after staging) -->
-      <AutoCheckinControls
-        v-if="showAutoCheckin"
-        :enabled="autoCheckinEnabled"
-        :interval="autoCheckinInterval"
-        :orchestrator-running="true"
-        @update:checkin="onAutoCheckinChange"
-      />
-
+      <!-- FE-9296b: the per-project auto check-in slider is retired. The cadence
+           is an account-level Settings value now (Tools → Notifications); rows
+           with slider-era auto_checkin_* values keep them as overrides. -->
       <table class="agents-table" data-testid="agent-status-table">
         <thead>
           <tr>
@@ -102,14 +96,12 @@ import { isSubagentExecutionMode } from '@/composables/useExecutionMode'
 import { getAgentColor as getAgentColorConfig } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
 import { isOrchestrator } from '@/utils/agentDisplay'
-import { api } from '@/services/api'
 import AgentRow from '@/components/projects/AgentRow.vue'
 import AgentDetailsModal from '@/components/projects/AgentDetailsModal.vue'
 import AgentJobModal from '@/components/projects/AgentJobModal.vue'
 import HandoverModal from '@/components/projects/HandoverModal.vue'
 import MessageComposer from '@/components/projects/MessageComposer.vue'
 import ExecutionOrderBar from '@/components/projects/ExecutionOrderBar.vue'
-import AutoCheckinControls from '@/components/projects/AutoCheckinControls.vue'
 
 /** JobsTab — Handover 0241 + 0243c + 0461d. Pure table layout with inline actions. */
 const props = defineProps({
@@ -177,39 +169,6 @@ const isSubagentMode = computed(() => {
   // legacy CLI tokens).
   return isSubagentExecutionMode(executionMode)
 })
-
-/** Handover 0904: Auto check-in state (multi-terminal only) */
-const autoCheckinEnabled = ref(props.project?.auto_checkin_enabled ?? false)
-const autoCheckinInterval = ref(props.project?.auto_checkin_interval ?? 10)
-
-const showAutoCheckin = computed(() => {
-  if (isSubagentMode.value) return false
-  const state = projectStateStore.getProjectState(projectId.value)
-  return !!state?.stagingComplete
-})
-
-watch(() => props.project?.auto_checkin_enabled, (val) => {
-  if (val !== undefined) autoCheckinEnabled.value = val
-})
-watch(() => props.project?.auto_checkin_interval, (val) => {
-  if (val !== undefined) autoCheckinInterval.value = val
-})
-
-async function onAutoCheckinChange({ enabled, interval }) {
-  if (!projectId.value) return
-  const payload = { auto_checkin_enabled: enabled }
-  if (interval !== undefined) payload.auto_checkin_interval = interval
-  try {
-    await api.projects.update(projectId.value, payload)
-    autoCheckinEnabled.value = enabled
-    if (interval !== undefined) autoCheckinInterval.value = interval
-  } catch (err) {
-    console.error('[JobsTab] Failed to update auto check-in:', err)
-    autoCheckinEnabled.value = props.project?.auto_checkin_enabled ?? false
-    autoCheckinInterval.value = props.project?.auto_checkin_interval ?? 10
-    showToast({ message: 'Failed to update auto check-in setting', type: 'error', timeout: 4000 })
-  }
-}
 
 /** Handover 0411a: Proposed execution order phases for multi-terminal mode. */
 const executionOrderPhases = computed(() => {

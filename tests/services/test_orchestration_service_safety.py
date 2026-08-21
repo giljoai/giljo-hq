@@ -27,7 +27,7 @@ import pytest
 import pytest_asyncio
 
 from giljo_mcp.exceptions import AlreadyExistsError, ValidationError
-from giljo_mcp.models import AgentTemplate, Project
+from giljo_mcp.models import AgentTemplate, Product, Project
 
 
 # ============================================================================
@@ -46,6 +46,16 @@ async def test_project(db_session, test_tenant_key) -> Project:
     """Create test project for agent jobs."""
     from datetime import datetime
 
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=test_tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         id=str(uuid.uuid4()),
         name="Safety Features Test Project",
@@ -53,6 +63,7 @@ async def test_project(db_session, test_tenant_key) -> Project:
         mission="Test mission for safety features",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=_owning_product_project.id,
         execution_mode="multi_terminal",
         # Handover 0709: Set implementation_launched_at to bypass phase gate
         implementation_launched_at=datetime.now(UTC),

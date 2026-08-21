@@ -304,4 +304,48 @@ describe('createAuthGuard — Option A (verify /api/auth/me on every protected n
       })
     })
   })
+
+  describe('public policy documents reachable while logged out', () => {
+    // /privacy and /terms are public by definition -- a visitor must be able to
+    // read them before signing up, and a directory reviewer or privacy
+    // regulator will deep-link straight to them. Both are declared
+    // `requiresAuth: false, layout: 'auth'` in the router, but PRIORITY 1 runs
+    // ahead of the public-layout allowance and its exemption list omitted them,
+    // so on a public_landing deployment an anonymous visitor was bounced to
+    // /landing and never saw the document.
+    beforeEach(() => {
+      setupService.checkEnhancedStatus.mockResolvedValue({
+        is_fresh_install: false,
+        total_users_count: 4,
+        route_signal: 'public_landing',
+        show_public_landing: true,
+        mode: 'saas',
+      })
+      configService.getGiljoMode.mockReturnValue('saas')
+    })
+
+    const policyRoute = (path) =>
+      makeRoute(path, { requiresAuth: false, layout: 'auth', requiresSetup: false })
+
+    it.each(['/privacy', '/terms'])(
+      'renders %s for an anonymous visitor instead of redirecting to /landing',
+      async (path) => {
+        api.auth.me.mockRejectedValue({ response: { status: 401 } })
+
+        await guard(policyRoute(path), makeRoute('/'), next)
+
+        expect(next).toHaveBeenCalledWith()
+      },
+    )
+
+    it('still sends an anonymous visitor to /landing for a non-policy public route', async () => {
+      // The exemption is scoped to the two documents, not a blanket
+      // public_landing bypass.
+      api.auth.me.mockRejectedValue({ response: { status: 401 } })
+
+      await guard(policyRoute('/some-other-public-page'), makeRoute('/'), next)
+
+      expect(next).toHaveBeenCalledWith('/landing')
+    })
+  })
 })

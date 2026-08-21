@@ -20,6 +20,7 @@ from giljo_mcp.services.protocol_sections.orchestrator_body import (
     _build_orchestrator_protocol_body,
     render_capability_ladder,
 )
+from giljo_mcp.services.protocol_sections.thread_refs import apply_thread_reference
 
 
 logger = logging.getLogger(__name__)
@@ -380,6 +381,7 @@ def _generate_orchestrator_protocol(
     tool: str | None = None,
     is_chain_conductor: bool = False,
     preset: Platform | None = None,
+    comm_thread_id: str | None = None,
 ) -> str:
     """
     Generate 3-phase orchestrator coordination protocol (Handover 0830, 0851).
@@ -394,6 +396,13 @@ def _generate_orchestrator_protocol(
     as the only correct path. Suppressed for CLI subagent modes (claude-code/codex/gemini)
     where in-process spawn is the legitimate mechanism. `tool` defaults to `execution_mode`
     when omitted, matching the historical conflation in mission_service.
+
+    TSK-9459: `comm_thread_id` is the project's bound Hub thread, resolved by
+    ``mission_service.get_agent_mission`` on the same session. It replaces the
+    ``<your coordination thread>`` placeholder the body renders, which the
+    orchestrator had no way to resolve — see ``thread_refs`` for why the
+    substitution happens here rather than as a body parameter. None (a project-less
+    conductor, or an unresolvable thread) keeps the placeholder byte-identical.
 
     BE-6205 follow-up: `is_chain_conductor` selects the conductor-autonomy banner variant
     (the project-less chain conductor self-spawns each sub-orch in a fresh terminal and
@@ -414,6 +423,7 @@ def _generate_orchestrator_protocol(
         effective_tool,
         is_chain_conductor=is_chain_conductor,
     )
+    body = apply_thread_reference(body, comm_thread_id)
     # BE-8003f (D3-S3): preset is None -> today's exact bytes (D1). On a preset-active
     # (shell-less) render, prepend the coordination/waiting ladder so it governs over the
     # CLI/terminal asides in the banner + body below.

@@ -19,6 +19,7 @@ import pytest
 from sqlalchemy import select
 
 from giljo_mcp.models import AgentJob
+from tests.helpers.model_factories import make_project
 
 
 # ============================================================================
@@ -143,10 +144,20 @@ class TestSpawnWebSocketBroadcastPhase:
         )
 
         # Mock project lookup
-        mock_project = MagicMock()
-        mock_project.id = str(uuid.uuid4())
-        mock_project.name = "Test Project"
-        mock_project.execution_mode = "multi_terminal"
+        # INF-9399: a real transient Project, not a mock. The mock_execute below
+        # dispatches by CALL ORDER, so a project that is not shaped like a real row
+        # is unusually expensive here: spawn resolves the project's product to scope
+        # the agent allowlist, and a bare mock answered that with a truthy child
+        # mock, running a lookup that shifted every subsequent call index by one.
+        # BE-9437: a project with no product is NO LONGER a real state (product_id
+        # is NOT NULL), so the factory supplies one and that product-scoping lookup
+        # DOES run. It is answered explicitly below rather than dodged -- the
+        # dispatch has to model the real call sequence, not a shorter one.
+        project = make_project(
+            id=str(uuid.uuid4()),
+            name="Test Project",
+            execution_mode="multi_terminal",
+        )
 
         # Mock template lookup (active templates for validation)
         mock_template_row = MagicMock()
@@ -154,7 +165,7 @@ class TestSpawnWebSocketBroadcastPhase:
 
         # Query 1: Project lookup
         project_result = MagicMock()
-        project_result.scalar_one_or_none = MagicMock(return_value=mock_project)
+        project_result.scalar_one_or_none = MagicMock(return_value=project)
 
         # Query 2: Template name validation
         template_validation_result = MagicMock()
@@ -172,6 +183,15 @@ class TestSpawnWebSocketBroadcastPhase:
         template_lookup_result = MagicMock()
         template_lookup_result.scalar_one_or_none = MagicMock(return_value=mock_template)
 
+        # BE-9437: product_agent_selection.template_ids_for_product runs an
+        # existence probe whenever the project HAS a product. .first() is None ->
+        # the junction has "no opinion" and the tenant-wide allowlist is used (the
+        # documented tolerance rule), which is the behaviour these phase-label
+        # tests want and the one the product-less project used to reach by
+        # skipping the query entirely.
+        assignment_probe_result = MagicMock()
+        assignment_probe_result.first = MagicMock(return_value=None)
+
         call_count = 0
 
         async def mock_execute(query):
@@ -180,8 +200,10 @@ class TestSpawnWebSocketBroadcastPhase:
             if call_count == 1:
                 return project_result
             if call_count == 2:
-                return template_validation_result
+                return assignment_probe_result
             if call_count == 3:
+                return template_validation_result
+            if call_count == 4:
                 return duplicate_check_result
             return template_lookup_result
 
@@ -196,7 +218,7 @@ class TestSpawnWebSocketBroadcastPhase:
             agent_display_name="analyzer",
             agent_name="analyzer-1",
             mission="Analyze codebase",
-            project_id=mock_project.id,
+            project_id=project.id,
             tenant_key="tk_test",
             phase=1,
         )
@@ -232,17 +254,27 @@ class TestSpawnWebSocketBroadcastPhase:
             websocket_manager=mock_ws,
         )
 
-        mock_project = MagicMock()
-        mock_project.id = str(uuid.uuid4())
-        mock_project.name = "Test Project"
-        mock_project.execution_mode = "multi_terminal"
+        # INF-9399: a real transient Project, not a mock. The mock_execute below
+        # dispatches by CALL ORDER, so a project that is not shaped like a real row
+        # is unusually expensive here: spawn resolves the project's product to scope
+        # the agent allowlist, and a bare mock answered that with a truthy child
+        # mock, running a lookup that shifted every subsequent call index by one.
+        # BE-9437: a project with no product is NO LONGER a real state (product_id
+        # is NOT NULL), so the factory supplies one and that product-scoping lookup
+        # DOES run. It is answered explicitly below rather than dodged -- the
+        # dispatch has to model the real call sequence, not a shorter one.
+        project = make_project(
+            id=str(uuid.uuid4()),
+            name="Test Project",
+            execution_mode="multi_terminal",
+        )
 
         mock_template_row = MagicMock()
         mock_template_row.__getitem__ = lambda self, idx: "impl-1"
 
         # Query 1: Project lookup
         project_result = MagicMock()
-        project_result.scalar_one_or_none = MagicMock(return_value=mock_project)
+        project_result.scalar_one_or_none = MagicMock(return_value=project)
 
         # Query 2: Template name validation
         template_validation_result = MagicMock()
@@ -260,6 +292,15 @@ class TestSpawnWebSocketBroadcastPhase:
         template_lookup_result = MagicMock()
         template_lookup_result.scalar_one_or_none = MagicMock(return_value=mock_template)
 
+        # BE-9437: product_agent_selection.template_ids_for_product runs an
+        # existence probe whenever the project HAS a product. .first() is None ->
+        # the junction has "no opinion" and the tenant-wide allowlist is used (the
+        # documented tolerance rule), which is the behaviour these phase-label
+        # tests want and the one the product-less project used to reach by
+        # skipping the query entirely.
+        assignment_probe_result = MagicMock()
+        assignment_probe_result.first = MagicMock(return_value=None)
+
         call_count = 0
 
         async def mock_execute(query):
@@ -268,8 +309,10 @@ class TestSpawnWebSocketBroadcastPhase:
             if call_count == 1:
                 return project_result
             if call_count == 2:
-                return template_validation_result
+                return assignment_probe_result
             if call_count == 3:
+                return template_validation_result
+            if call_count == 4:
                 return duplicate_check_result
             return template_lookup_result
 
@@ -279,7 +322,7 @@ class TestSpawnWebSocketBroadcastPhase:
             agent_display_name="implementer",
             agent_name="impl-1",
             mission="Implement feature",
-            project_id=mock_project.id,
+            project_id=project.id,
             tenant_key="tk_test",
             # No phase parameter
         )

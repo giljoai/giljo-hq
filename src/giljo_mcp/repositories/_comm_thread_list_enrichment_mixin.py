@@ -34,10 +34,10 @@ from sqlalchemy import func, or_, select, true
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from giljo_mcp.models.agent_identity import AgentExecution
 from giljo_mcp.models.comm import CommParticipant, CommThread
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.tasks import Message
+from giljo_mcp.repositories._comm_thread_participants_mixin import participant_display_status
 
 
 def _card_title(project_name: str | None, subject: str | None) -> str | None:
@@ -124,8 +124,17 @@ class CommThreadListEnrichmentMixin:
 
         # Newest post per thread, as a LATERAL so it costs one index seek per row
         # (idx_messages_thread_created serves exactly this) instead of a second query.
+        #
+        # FE-9418: ``message_id`` is the ANCHOR — the id of the post this summary
+        # describes. It is labelled, not projected as a bare ``id``, and that is
+        # load-bearing: the outer select already carries ``CommThread.id``, so two
+        # columns named ``id`` would land in one row tuple and attribute access would
+        # resolve to the first. The THREAD id would then be served as the message
+        # anchor, the client would deep-link to a message that does not exist, and any
+        # assertion weaker than "it differs from the thread id" would stay green.
         latest = (
             select(
+                Message.id.label("message_id"),
                 Message.from_display_name.label("author"),
                 Message.from_agent_id.label("author_id"),
                 Message.content.label("excerpt"),
@@ -137,36 +146,27 @@ class CommThreadListEnrichmentMixin:
             .lateral("last_message")
         )
 
-        # The agent's CURRENT execution status, for the card's status dot.
+        # The status this participant is SERVED as, for the card's status dot.
         #
-        # There is no status column on ``comm_participants`` and there should not be —
-        # a participant row records that an agent joined a thread, not what it is doing
-        # now. The truth lives in ``agent_executions``, which is also what the Jobs
-        # board reads, and that shared source is the whole point: the dot's colour
-        # vocabulary has to AGREE with the board the operator already learned it from.
-        # A second, thread-local notion of "status" would drift within a day.
+        # TSK-9457 moved this expression to ``_comm_thread_participants_mixin`` and left
+        # a call here. It is IMPORTED, never re-spelled: the opened thread's directory
+        # read serves the same field, and when the card list owned its own copy the
+        # directory simply had none — the client filled that hole with ``idle``, labelled
+        # "Monitoring", and one agent read "Silent" on the card and "Monitoring" inside
+        # it. Two copies would fix that once and let the two views drift again.
         #
-        # ``started_at DESC LIMIT 1`` matches ``AgentJobRepository.get_latest_execution``
-        # verbatim. One ``agent_id`` accumulates several executions through succession,
-        # and picking a different row than the Jobs board would show two different
-        # statuses for one agent on two screens. Postgres orders NULLs FIRST on DESC, so
-        # a freshly staged successor (no ``started_at`` yet) correctly outranks the
-        # predecessor it replaced instead of showing that predecessor's `complete`.
+        # BE-9475 widened WHAT the shared expression resolves to (execution status, then
+        # a headless participant's own declaration underneath it) without forking it —
+        # this call site changed name and nothing else, which is the whole benefit of
+        # having imported it rather than spelled it.
         #
-        # ``correlate(CommParticipant)`` is explicit for the reason documented on
-        # ``last_read`` above: this sits inside another subquery, and a lost correlation
-        # here degrades into a cross-join over every execution in the tenant.
-        latest_status = (
-            select(AgentExecution.status)
-            .where(
-                AgentExecution.tenant_key == tenant_key,
-                AgentExecution.agent_id == CommParticipant.participant_id,
-            )
-            .order_by(AgentExecution.started_at.desc())
-            .limit(1)
-            .correlate(CommParticipant)
-            .scalar_subquery()
-        )
+        # The precedence rule, the ordering rule, the deliberate NULL, and why
+        # ``correlate`` is explicit are all documented on ``participant_display_status``
+        # and ``latest_execution_status``. That correlation matters here for
+        # exactly the reason documented on ``last_read`` above: this sits inside another
+        # subquery, and losing it degrades into a cross-join over every execution in the
+        # tenant.
+        latest_status = participant_display_status(tenant_key)
 
         participants = (
             select(
@@ -185,8 +185,9 @@ class CommThreadListEnrichmentMixin:
                             CommParticipant.harness,
                             "last_seen_at",
                             CommParticipant.last_seen_at,
-                            # NULL when the agent never registered an execution. The
-                            # client renders that as a hollow ring — "never checked in" —
+                            # NULL when the agent has neither an execution row nor a
+                            # self-declaration (BE-9475). The client renders that as a
+                            # hollow ring — "never checked in" —
                             # and a missing status as slate, never green. Absent data
                             # must not read as healthy, so do NOT coalesce a default here.
                             "status",
@@ -220,6 +221,7 @@ class CommThreadListEnrichmentMixin:
                 participants.label("participants"),
                 unread.label("unread"),
                 CommThread.subject,
+                latest.c.message_id,
                 latest.c.author,
                 latest.c.author_id,
                 latest.c.excerpt,
@@ -239,6 +241,10 @@ class CommThreadListEnrichmentMixin:
                 "unread": bool(row.unread),
                 "last_message": (
                     {
+                        # FE-9418: the anchor a baton notification pins to. Absent
+                        # posts still yield ``last_message: None`` below, so a thread
+                        # nobody has spoken in names nothing to pin.
+                        "id": row.message_id,
                         "author": row.author or row.author_id,
                         "excerpt": row.excerpt,
                         "created_at": row.said_at.isoformat() if row.said_at else None,

@@ -18,17 +18,17 @@ from __future__ import annotations
 import json
 
 import pytest
-from mcp.shared.memory import create_connected_server_and_client_session
 
 # Importing the transport module registers every @mcp.tool on the shared instance.
 from api.endpoints.mcp_sdk_server import mcp
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
 
 
 def _payload(result) -> dict:
-    assert result.isError is False, f"get_giljo_guide errored at the transport boundary: {result}"
+    assert result.is_error is False, f"get_giljo_guide errored at the transport boundary: {result}"
     assert result.content, "get_giljo_guide returned no content"
     return json.loads(result.content[0].text)
 

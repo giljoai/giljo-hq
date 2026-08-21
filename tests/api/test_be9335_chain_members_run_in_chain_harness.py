@@ -26,7 +26,6 @@ Edition scope: CE.
 
 from __future__ import annotations
 
-import os
 import secrets
 import uuid
 from datetime import UTC, datetime
@@ -183,7 +182,14 @@ async def _seed_divergent_chain(
         )
         await session.commit()
 
-        os.environ.setdefault("JWT_SECRET", "test_secret_key")
+        # INF-9417: an `os.environ.setdefault("JWT_SECRET", ...)` stood here. It was
+        # process-global mutation inside a helper ~17 tests call, which the house test
+        # discipline forbids -- and it was also a guaranteed no-op: tests/conftest.py
+        # performs the identical setdefault at MODULE scope, and pytest imports the root
+        # conftest before any test module, so the key is always already set by the time
+        # this runs. Deleted rather than converted to monkeypatch.setenv, because
+        # threading a fixture through 17 call sites to preserve a line that cannot
+        # change anything is cost with no guarantee attached.
         token = JWTManager.create_access_token(
             user_id=user.id,
             username=user.username,
@@ -317,7 +323,7 @@ async def test_ch6_auto_checkin_follows_the_same_mode_as_the_header(
     )
     protocol = mission.full_protocol or ""
 
-    has_ch6 = "CH6: AUTO CHECK-IN PROTOCOL" in protocol
+    has_ch6 = "CH6: CHECK-IN" in protocol  # FE-9296b renamed the chapter
     header_is_multi_terminal = "EXECUTION_MODE: multi_terminal" in protocol
 
     assert has_ch6 is expect_ch6, (

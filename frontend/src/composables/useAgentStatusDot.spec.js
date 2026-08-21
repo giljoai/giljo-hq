@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { agentStatusDot, agentPillTitle } from '@/composables/useAgentStatusDot'
+import { agentStatusDot, agentPillTitle, agentStatusMeaning } from '@/composables/useAgentStatusDot'
 import { getStatusColor, getStatusLabel } from '@/utils/statusConfig'
 
 const IDLE_SLATE = '#7a9bb5'
@@ -72,10 +72,37 @@ describe('agentPillTitle', () => {
       { display_name: 'LANE_A — installer + harness fixes', status: 'working', last_seen_at: 'x' },
       'Claude Code',
     )
-    expect(title).toBe('LANE_A — installer + harness fixes · Claude Code · Working')
+    expect(title).toBe(
+      'LANE_A — installer + harness fixes · Claude Code · Working: actively running in its harness',
+    )
   })
 
   it('falls back to the participant id when there is no display name', () => {
     expect(agentPillTitle({ participant_id: 'lane-b', status: 'idle', last_seen_at: 'x' }, 'Codex')).toContain('lane-b')
+  })
+
+  // FE-9368 deleted the "What the indicators mean" panel, so the tooltip is now the
+  // ONLY place a colour is explained. These pin the meanings the panel used to carry.
+  it('explains what the state means, not just what the enum calls it', () => {
+    const title = agentPillTitle({ participant_id: 'a', status: 'blocked', last_seen_at: 'x' }, 'Codex')
+    expect(title).toContain('Needs Input: stuck on something it cannot decide')
+  })
+
+  it('explains a terse Jobs-board label — "Monitoring" alone does not tell an operator anything', () => {
+    expect(agentStatusMeaning({ status: 'idle', last_seen_at: 'x' })).toBe(
+      'registered, watching, not working',
+    )
+    // A seen-but-status-less agent DISPLAYS as idle, so it must explain itself as idle
+    // too: the dot, the label and the meaning have to describe one state, not two.
+    expect(agentStatusMeaning({ status: null, last_seen_at: 'x' })).toBe(
+      'registered, watching, not working',
+    )
+  })
+
+  it('adds no meaning to a never-registered agent — its label already says all we know', () => {
+    expect(agentStatusMeaning({ status: null, last_seen_at: null })).toBe('')
+    expect(agentPillTitle({ participant_id: 'ghost', last_seen_at: null }, 'Codex')).toBe(
+      'ghost · Codex · Never checked in',
+    )
   })
 })

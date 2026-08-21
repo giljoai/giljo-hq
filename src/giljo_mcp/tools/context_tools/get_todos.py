@@ -33,6 +33,13 @@ logger = logging.getLogger(__name__)
 
 
 def _estimate_tokens(data: Any) -> int:
+    """chars÷4 measured and found SAFE here, unlike get_tasks.py's identifier-dense
+    rows. TODO content is prose (natural-language sentences),
+    not identifier-dense JSON -- measured on the real wire serializer
+    (pydantic_core.to_json) against tiktoken o200k_base across short/long/mixed-50
+    realistic TODO content: 4.10-5.65 chars/token, i.e. ÷4 OVERestimates token cost
+    here (the safe direction) rather than understating it. Left unchanged.
+    """
     import json
 
     return len(json.dumps(data, default=str)) // 4

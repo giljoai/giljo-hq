@@ -1,6 +1,6 @@
 # Giljo HQ: Architecture
 
-*Last updated: 2026-04-24*
+*Last updated: 2026-08-20*
 
 This document describes the technical architecture of Giljo HQ, a GiljoAI product, for developers
 working on or integrating with the platform.
@@ -18,10 +18,10 @@ working on or integrating with the platform.
 | Migrations | Alembic | >= 1.12.0 |
 | Database | PostgreSQL | 16 minimum, 18 recommended |
 | Async DB driver | asyncpg | >= 0.29.0 |
-| Frontend framework | Vue 3 | >= 3.4.0 |
-| UI component library | Vuetify | >= 3.4.0 |
-| Frontend build tool | Vite | >= 7.1.8 |
-| State management | Pinia | >= 3.0.3 |
+| Frontend framework | Vue 3 | >= 3.5.40 |
+| UI component library | Vuetify | >= 4.1.5 |
+| Frontend build tool | Vite | >= 8.1.5 |
+| State management | Pinia | >= 4.0.2 |
 | Python runtime | Python | 3.12+ recommended |
 
 ---

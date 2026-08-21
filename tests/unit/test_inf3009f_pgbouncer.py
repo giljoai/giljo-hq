@@ -15,6 +15,10 @@ Regression tests at the failing layer:
 - P3: a source guard that ``scripts/alembic_cli.py`` still resolves ``DATABASE_URL``
   first, which the railway preDeploy ``DATABASE_URL=$DATABASE_UNPOOLED_URL`` override
   relies on.
+- Deployment prep (this lane): the boot-time two-variable pairing assertion
+  (``GILJO_PGBOUNCER=1`` requires ``GILJO_BROKER_DATABASE_URL``), proven at the layer
+  that could swallow it (``init_websocket_broker``'s single-worker degrade), and the
+  honest connection-budget accounting (broker + reserved + PgBouncer-aware).
 
 These tests touch NO database — SQLAlchemy engines are lazy (no connection until first
 checkout), so constructing a DatabaseManager with a fake URL is safe and parallel-safe.
@@ -145,6 +149,156 @@ class TestP2BrokerDsnSeam:
 
         monkeypatch.setenv("GILJO_BROKER_DATABASE_URL", "")
         assert _resolve_broker_dsn(self._state()) == "postgresql://app:pw@pooler:6432/db"
+
+
+class TestPairingAssertion:
+    """The two-variable pairing is enforced structurally, not by prose (INF-3009f prep).
+
+    GILJO_PGBOUNCER=1 without GILJO_BROKER_DATABASE_URL means the broker's
+    session-pinned LISTEN would run through transaction pooling and die silently
+    (cross-worker realtime + live-session revocation). Boot must refuse instead.
+    """
+
+    def test_noop_when_flag_off(self, monkeypatch):
+        from api.startup.core_services import assert_pgbouncer_broker_pairing
+
+        monkeypatch.delenv("GILJO_PGBOUNCER", raising=False)
+        monkeypatch.delenv("GILJO_BROKER_DATABASE_URL", raising=False)
+        assert_pgbouncer_broker_pairing()  # must not raise
+
+    def test_noop_for_non_one_flag_values(self, monkeypatch):
+        from api.startup.core_services import assert_pgbouncer_broker_pairing
+
+        monkeypatch.delenv("GILJO_BROKER_DATABASE_URL", raising=False)
+        for value in ("0", "true", "yes", ""):
+            monkeypatch.setenv("GILJO_PGBOUNCER", value)
+            assert_pgbouncer_broker_pairing()  # anything but "1" is OFF
+
+    def test_raises_when_flag_on_and_broker_url_missing(self, monkeypatch):
+        from api.startup.core_services import assert_pgbouncer_broker_pairing
+
+        monkeypatch.setenv("GILJO_PGBOUNCER", "1")
+        monkeypatch.delenv("GILJO_BROKER_DATABASE_URL", raising=False)
+        with pytest.raises(RuntimeError, match="GILJO_BROKER_DATABASE_URL"):
+            assert_pgbouncer_broker_pairing()
+
+    def test_empty_broker_url_counts_as_missing(self, monkeypatch):
+        from api.startup.core_services import assert_pgbouncer_broker_pairing
+
+        monkeypatch.setenv("GILJO_PGBOUNCER", "1")
+        monkeypatch.setenv("GILJO_BROKER_DATABASE_URL", "")
+        with pytest.raises(RuntimeError, match="GILJO_BROKER_DATABASE_URL"):
+            assert_pgbouncer_broker_pairing()
+
+    def test_passes_when_paired(self, monkeypatch):
+        from api.startup.core_services import assert_pgbouncer_broker_pairing
+
+        monkeypatch.setenv("GILJO_PGBOUNCER", "1")
+        monkeypatch.setenv("GILJO_BROKER_DATABASE_URL", "postgresql://app:pw@direct:5432/db")
+        assert_pgbouncer_broker_pairing()  # must not raise
+
+    async def test_single_worker_degrade_cannot_swallow_it(self, monkeypatch):
+        """Regression at the failing layer: init_websocket_broker's single-worker
+        degrade path swallows broker exceptions — the pairing assertion must abort
+        boot BEFORE that try block, at ANY worker count."""
+        from api.startup.core_services import init_websocket_broker
+
+        monkeypatch.setenv("GILJO_PGBOUNCER", "1")
+        monkeypatch.delenv("GILJO_BROKER_DATABASE_URL", raising=False)
+        monkeypatch.setenv("WEB_CONCURRENCY", "1")
+        # A bare state object: the assertion must fire before anything touches it.
+        with pytest.raises(RuntimeError, match="GILJO_BROKER_DATABASE_URL"):
+            await init_websocket_broker(SimpleNamespace())
+
+
+class TestConnectionBudgetHonestAccounting:
+    """The budget check counts the broker + declared external services and is
+    PgBouncer-aware — the green 'budget OK' line must stop lying (INF-3009f prep)."""
+
+    def test_prod_shape_now_warns(self, caplog):
+        """e.g. 4 workers x (10+10 pool + 6 broker) = 104 > 90: a multi-worker shape
+        the old math scored as 80 <= 90 'OK'."""
+        from api.startup.database import check_connection_budget
+
+        with caplog.at_level("WARNING"):
+            check_connection_budget(pool_size=10, max_overflow=10, workers=4, slot_budget=90, broker_per_worker=6)
+        assert any("budget EXCEEDED" in r.message for r in caplog.records)
+
+    def test_reserved_slots_counted(self, caplog):
+        from api.startup.database import check_connection_budget
+
+        with caplog.at_level("WARNING"):
+            # 1 x (10+10+0) + 15 reserved = 35 > 30
+            check_connection_budget(pool_size=10, max_overflow=10, workers=1, slot_budget=30, reserved_slots=15)
+        assert any("budget EXCEEDED" in r.message for r in caplog.records)
+
+    def test_legacy_call_shape_unchanged(self, caplog):
+        """The 4-arg call (defaults: broker 0, reserved 0, no pgbouncer) keeps the
+        INF-3009a arithmetic byte-identical."""
+        from api.startup.database import check_connection_budget
+
+        with caplog.at_level("WARNING"):
+            check_connection_budget(pool_size=10, max_overflow=10, workers=1, slot_budget=90)
+        assert not any("budget EXCEEDED" in r.message for r in caplog.records)
+
+    def test_pgbouncer_mode_scores_only_direct_connections(self, caplog):
+        """Behind PgBouncer the SQLAlchemy pool terminates at the pooler: a pool that
+        would blow the budget direct (4 x 100 = 400) must NOT warn when only the
+        direct connections (4 x 6 = 24) face Postgres."""
+        from api.startup.database import check_connection_budget
+
+        with caplog.at_level("INFO"):
+            check_connection_budget(
+                pool_size=50,
+                max_overflow=50,
+                workers=4,
+                slot_budget=90,
+                broker_per_worker=6,
+                pgbouncer=True,
+            )
+        assert not any("budget EXCEEDED" in r.message for r in caplog.records)
+        assert any("PgBouncer mode" in r.message for r in caplog.records)
+
+    def test_pgbouncer_mode_still_warns_on_direct_overrun(self, caplog):
+        from api.startup.database import check_connection_budget
+
+        with caplog.at_level("WARNING"):
+            # direct: 3 x 40 = 120 > 90 — even pooled setups can overrun via direct conns
+            check_connection_budget(
+                pool_size=10,
+                max_overflow=10,
+                workers=3,
+                slot_budget=90,
+                broker_per_worker=40,
+                pgbouncer=True,
+            )
+        assert any("budget EXCEEDED" in r.message for r in caplog.records)
+
+    def test_broker_direct_connections_resolves_from_env(self, monkeypatch):
+        from api.broker.postgres_notify import MAX_DB_CONNECTIONS_PER_PROCESS
+        from api.startup.database import _broker_direct_connections
+
+        monkeypatch.setenv("GILJO_WS_BROKER", "postgres_notify")
+        assert _broker_direct_connections(None) == MAX_DB_CONNECTIONS_PER_PROCESS == 6
+
+        monkeypatch.delenv("GILJO_WS_BROKER", raising=False)
+        monkeypatch.delenv("GILJO_WEBSOCKET_BROKER", raising=False)
+        assert _broker_direct_connections(None) == 0  # in_memory default holds no DB conns
+
+    def test_reserved_slots_env_parsing(self, monkeypatch):
+        from api.startup.database import _reserved_slots
+
+        monkeypatch.delenv("GILJO_DB_RESERVED_SLOTS", raising=False)
+        assert _reserved_slots() == 0
+
+        monkeypatch.setenv("GILJO_DB_RESERVED_SLOTS", "26")
+        assert _reserved_slots() == 26
+
+        monkeypatch.setenv("GILJO_DB_RESERVED_SLOTS", "garbage")
+        assert _reserved_slots() == 0
+
+        monkeypatch.setenv("GILJO_DB_RESERVED_SLOTS", "-5")
+        assert _reserved_slots() == 0
 
 
 class TestP3AlembicHonorsDatabaseUrl:

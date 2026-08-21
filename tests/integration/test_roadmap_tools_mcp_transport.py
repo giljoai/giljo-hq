@@ -23,11 +23,11 @@ import uuid
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from giljo_mcp.models import Product, Project, Task
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -35,7 +35,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(call_tool_result) -> dict:
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -164,7 +164,7 @@ async def test_update_roadmap_metadata_happy_path(roadmap_mcp_client, db_session
             },
         )
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["items_upserted"] == 1
     assert payload["product_id"] == seed["product_id"]
@@ -181,7 +181,7 @@ async def test_update_roadmap_metadata_bad_enum_surfaces_error(roadmap_mcp_clien
             {"items": [{"item_type": "project", "project_id": seed["project_id"], "sort_order": 0, "risk": "nuclear"}]},
         )
 
-    assert result.isError is True
+    assert result.is_error is True
     text = _error_text(result).lower()
     assert "risk" in text or "nuclear" in text
 
@@ -204,7 +204,7 @@ async def test_update_roadmap_metadata_cross_tenant_project_rejected(roadmap_mcp
             {"items": [{"item_type": "project", "project_id": seed_a["project_id"], "sort_order": 0}]},
         )
 
-    assert result.isError is True, "cross-product project_id must be rejected, not silently accepted"
+    assert result.is_error is True, "cross-product project_id must be rejected, not silently accepted"
 
 
 async def test_get_roadmap_reads_back_through_transport(roadmap_mcp_client, db_session):
@@ -233,7 +233,7 @@ async def test_get_roadmap_reads_back_through_transport(roadmap_mcp_client, db_s
         )
         result = await session.call_tool("get_roadmap", {})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["product_id"] == seed["product_id"]
     assert payload["roadmap"] is not None
@@ -272,7 +272,7 @@ async def test_update_roadmap_metadata_blocked_and_sort_order_round_trip(roadmap
         )
         read = await session.call_tool("get_roadmap", {})
 
-    assert write.isError is False, _error_text(write)
+    assert write.is_error is False, _error_text(write)
     item = _payload(read)["items"][0]
     assert item["sort_order"] == 7  # renamed column round-trips through the boundary
     assert item["blocked"] is True
@@ -292,7 +292,7 @@ async def test_update_roadmap_metadata_bad_blocked_type_surfaces_error(roadmap_m
             {"items": [{"item_type": "project", "project_id": seed["project_id"], "sort_order": 0, "blocked": "yes"}]},
         )
 
-    assert result.isError is True
+    assert result.is_error is True
     assert "blocked" in _error_text(result).lower()
 
 
@@ -322,7 +322,7 @@ async def test_update_roadmap_metadata_remove_param_evicts_through_transport(roa
         )
         read = await session.call_tool("get_roadmap", {})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["items_removed"] == 1
     assert payload["items_upserted"] == 0
@@ -343,7 +343,7 @@ async def test_update_roadmap_metadata_remove_bad_shape_surfaces_error(roadmap_m
             {"items": [], "remove": [{"item_type": "epic", "project_id": seed["project_id"]}]},
         )
 
-    assert result.isError is True
+    assert result.is_error is True
     text = _error_text(result).lower()
     assert "item_type" in text or "epic" in text
 
@@ -356,5 +356,5 @@ async def test_get_roadmap_no_active_product_surfaces_error(roadmap_mcp_client, 
     async with new_client() as session:
         result = await session.call_tool("get_roadmap", {})
 
-    assert result.isError is True
+    assert result.is_error is True
     assert "active product" in _error_text(result).lower()

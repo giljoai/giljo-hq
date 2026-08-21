@@ -34,8 +34,10 @@ from api.endpoints.mcp_transport import (
     _MAX_MCP_BODY_BYTES,
     _BodyTooLargeError,
     _not_found_response,
+    _peek_jsonrpc_capabilities,
     _peek_jsonrpc_client_info,
     _peek_jsonrpc_method,
+    _peek_jsonrpc_protocol_version,
     _read_full_body,
     _replay_receive,
     _send_method_not_allowed,
@@ -54,18 +56,17 @@ from giljo_mcp.http.url_resolver import get_canonical_mcp_resource_uri_from_scop
 
 
 # ---------------------------------------------------------------------------
-# BE-6060d: post-auth gate hook (SaaS subscription enforcement extension point).
+# BE-6060d: post-auth gate hook (entitlement-check extension point).
 #
 # CE provides the foundation: a single optional async callable that the MCP auth
 # middleware consults AFTER tenant_key is resolved, BEFORE the inner SDK app runs.
 # CE never imports SaaS — in CE the gate is simply never registered, so the hook
-# is a no-op and the Deletion Test holds. SaaS registers its subscription gate at
-# startup via importlib (see api/app.py + saas/billing/mcp_subscription_gate.py),
-# exactly the same conditional-registration family as the SaaS middleware/router
-# hooks. The gate takes the resolved tenant_key and returns a block message
-# (the request is refused with a JSON-RPC 403 carrying that message) or None to
-# allow. The middleware fails OPEN if the gate raises — a billing read must never
-# lock out a paying customer on a transient error.
+# is a no-op and the Deletion Test holds. Deployment-specific entitlement checks
+# may be registered here via the same conditional-registration family as the
+# other SaaS middleware/router hooks; error handling for those checks is owned
+# by the deployment that registers them. The gate takes the resolved tenant_key
+# and returns a block message (the request is refused with a JSON-RPC 403
+# carrying that message) or None to allow.
 # ---------------------------------------------------------------------------
 
 McpPostAuthGate = Callable[[str], Awaitable[str | None]]
@@ -116,6 +117,25 @@ def _capture_mcp_post_auth_gate_failure(tenant_key: str) -> None:
             sentry_sdk.capture_message("mcp_post_auth_gate_failed — failing open", level="error")
     except Exception:  # noqa: BLE001 - observability must never break fail-open
         logger.debug("mcp_post_auth_gate Sentry capture failed (non-blocking)", exc_info=True)
+
+
+def _initialize_capture(scope: Scope) -> dict[str, Any]:
+    """The initialize-only values peeked pre-auth, shaped as ``create_session`` kwargs.
+
+    Both mint paths — API-key and JWT — pass exactly these, and both read them off the
+    scope state the pre-auth guard stashed them on. That vehicle is INF-9371's
+    (``protocol_version``), extended by BE-9449 (``client_capabilities``); it exists
+    because these are knowable only at ``initialize`` and ``stateless_http`` drops them
+    on every later request.
+
+    Read through one accessor so a fourth captured value is added at ONE site rather
+    than at every mint path, where the two could silently drift apart.
+    """
+    request_state = scope.get("state", {})
+    return {
+        "protocol_version": request_state.get("mcp_protocol_version"),
+        "capabilities": request_state.get("mcp_client_capabilities"),
+    }
 
 
 class MCPAuthMiddleware:
@@ -298,6 +318,7 @@ class MCPAuthMiddleware:
                                 user_id=user.id,
                                 api_key_id=key_record.id,
                                 client_info=client_info,
+                                **_initialize_capture(scope),
                             )
                             mcp_session_id = session.session_id
 
@@ -346,18 +367,18 @@ class MCPAuthMiddleware:
         if token_scopes is not None:
             scope["state"]["scopes"] = token_scopes
 
-        # BE-6060d: post-auth subscription gate (SaaS extension; no-op in CE — the
-        # hook is never registered there). Consulted AFTER tenant_key is resolved
-        # so a lapsed/no-subscription SaaS tenant is refused with a JSON-RPC 403
-        # before the inner SDK app runs. FAIL OPEN — any gate error must never
-        # lock out a paying customer on a transient billing read, so a raise here
-        # falls through to normal service.
+        # BE-6060d: post-auth entitlement gate (no-op in CE — the hook is never
+        # registered there). Consulted AFTER tenant_key is resolved, before the
+        # inner SDK app runs, so a refused tenant gets a JSON-RPC 403 up front.
+        # Deployment-specific entitlement checks may be registered here; error
+        # handling for those checks is owned by the deployment that registers
+        # them.
         gate = _mcp_post_auth_gate
         if gate is not None:
             try:
                 block_message = await gate(tenant_key)
-            except Exception:  # noqa: BLE001 - billing gate must never 5xx / lock out; fail open
-                logger.warning("mcp_post_auth_gate_failed tenant=%s — failing open", tenant_key, exc_info=True)
+            except Exception:  # noqa: BLE001 - entitlement gate must never 5xx / lock out
+                logger.warning("mcp_post_auth_gate_failed tenant=%s", tenant_key, exc_info=True)
                 _capture_mcp_post_auth_gate_failure(tenant_key)
                 block_message = None
             if block_message:
@@ -459,7 +480,16 @@ class MCPAuthMiddleware:
             return None
         receive = _replay_receive(buffered_body, original_receive)
         method = _peek_jsonrpc_method(buffered_body)
-        client_info = _peek_jsonrpc_client_info(buffered_body) if method == _INITIALIZE_METHOD else None
+        is_initialize = method == _INITIALIZE_METHOD
+        client_info = _peek_jsonrpc_client_info(buffered_body) if is_initialize else None
+        # INF-9371: capture the requested revision at the one point a client states it,
+        # and ride the scope state the session-mint paths already read from -- rather than
+        # widening this guard's return tuple and MCPAuthMiddleware.__call__ with it.
+        # BE-9449 rides the same vehicle for the same reason (see the peek's docstring).
+        if is_initialize:
+            state_ = scope.setdefault("state", {})
+            state_["mcp_protocol_version"] = _peek_jsonrpc_protocol_version(buffered_body)
+            state_["mcp_client_capabilities"] = _peek_jsonrpc_capabilities(buffered_body)
 
         request = StarletteRequest(scope, receive)
 
@@ -512,7 +542,11 @@ class MCPAuthMiddleware:
         """
         if method == _INITIALIZE_METHOD:
             session_id = mcp_session_id or await self._ensure_jwt_initialize_session(
-                tenant_key=tenant_key, user_id=user_id, auth_method=auth_method, client_info=client_info
+                tenant_key=tenant_key,
+                user_id=user_id,
+                auth_method=auth_method,
+                client_info=client_info,
+                **_initialize_capture(request.scope),
             )
             if not session_id:
                 return send
@@ -602,6 +636,8 @@ class MCPAuthMiddleware:
         user_id: str | None,
         auth_method: str | None,
         client_info: dict[str, Any] | None = None,
+        protocol_version: str | None = None,
+        capabilities: dict[str, Any] | None = None,
     ) -> str | None:
         """Mint a fresh MCPSession on initialize over a JWT-authenticated request.
 
@@ -620,6 +656,11 @@ class MCPAuthMiddleware:
         async with state.db_manager.get_session_async() as db:
             session_mgr = MCPSessionManager(db)
             session = await session_mgr.create_session(
-                tenant_key=tenant_key, user_id=user_id, client_info=client_info, auth_method="oauth_jwt"
+                tenant_key=tenant_key,
+                user_id=user_id,
+                client_info=client_info,
+                auth_method="oauth_jwt",
+                protocol_version=protocol_version,
+                capabilities=capabilities,
             )
             return session.session_id

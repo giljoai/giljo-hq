@@ -14,7 +14,7 @@ from the MCP context). Mirrors _job_tools / _project_tools exactly.
 
 from typing import Annotated, Any
 
-from mcp.server.fastmcp import Context
+from mcp.server.mcpserver import Context
 from pydantic import Field
 
 from api.endpoints.mcp_tools._base import (

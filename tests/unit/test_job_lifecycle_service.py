@@ -28,6 +28,7 @@ from giljo_mcp.exceptions import (
 )
 from giljo_mcp.services._predecessor_context import build_predecessor_context
 from giljo_mcp.services.job_lifecycle_service import JobLifecycleService
+from tests.helpers.model_factories import make_project
 
 
 _TEST_LOGGER = logging.getLogger(__name__)
@@ -57,22 +58,27 @@ def _make_session():
 
 
 def _make_project(project_id=PROJECT_ID, status="active", execution_mode="multi_terminal"):
-    """Create a mock Project model.
+    """Create a Project stand-in.
 
     ``status`` is coerced to a :class:`ProjectStatus` enum member to mirror
     real DB behavior (SQLAlchemy returns enum members from the typed
     ``project_status`` column). Tests may pass either a raw lifecycle string
     ("active", "completed", ...) or a :class:`ProjectStatus` member.
+
+    INF-9399: a real transient instance, not a mock. Every column nobody sets
+    here reads ``None`` -- which is what an unset nullable column is, and what
+    these tests mean. ``product_id`` is the one BE-9385a had to hand-pin here on
+    2026-08-09: spawn scopes the agent allowlist by the project's product, and a
+    bare mock answered that with a truthy child mock. It needed the pin then; it
+    needs nothing now, and neither will the next nullable column.
     """
-    project = MagicMock()
-    project.id = project_id
-    project.name = "Test Project"
-    project.status = ProjectStatus(status) if isinstance(status, str) else status
-    project.tenant_key = TENANT_KEY
-    project.execution_mode = execution_mode
-    project.staging_status = None
-    project.updated_at = None
-    return project
+    return make_project(
+        id=project_id,
+        name="Test Project",
+        status=ProjectStatus(status) if isinstance(status, str) else status,
+        tenant_key=TENANT_KEY,
+        execution_mode=execution_mode,
+    )
 
 
 def _make_service(session, tenant_key=TENANT_KEY):
@@ -369,7 +375,7 @@ class TestValidateSpawnAgent:
                 agent_display_name="my-agent",
                 agent_name="nonexistent-template",
                 tenant_key=TENANT_KEY,
-                project_id=PROJECT_ID,
+                project=_make_project(),
                 parent_job_id=None,
             )
 
@@ -394,7 +400,7 @@ class TestValidateSpawnAgent:
                 agent_display_name="orchestrator",
                 agent_name="orchestrator",
                 tenant_key=TENANT_KEY,
-                project_id=PROJECT_ID,
+                project=_make_project(),
                 parent_job_id=None,
             )
 
@@ -418,7 +424,7 @@ class TestValidateSpawnAgent:
             agent_display_name="orchestrator",
             agent_name="orchestrator",
             tenant_key=TENANT_KEY,
-            project_id=PROJECT_ID,
+            project=_make_project(),
             parent_job_id="existing-agent-id",
         )
         assert result == "orchestrator"

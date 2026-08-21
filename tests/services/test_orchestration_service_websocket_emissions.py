@@ -117,6 +117,11 @@ async def test_get_agent_mission_emits_ack_and_status_changed(
         _scalar_result(job),
         _scalar_result(execution),
         _scalar_result(project),
+        # TSK-9459: get_agent_mission now resolves the project's bound Hub thread
+        # for the ORCHESTRATOR too, so it is joined structurally instead of being
+        # left off its own thread. This mocked test does not exercise the Hub —
+        # let the resolver take its documented best-effort degradation to None.
+        RuntimeError("TSK-9459: no Hub thread in this mocked session"),
         _rows_result([(execution, job)]),
         # Extra entries to cover additional queries in _resolve_mission_template
         # (project lookup) and other downstream code added since this test was
@@ -178,6 +183,11 @@ async def test_get_agent_mission_is_idempotent_and_does_not_re_emit(
         _scalar_result(job),
         _scalar_result(execution),
         _scalar_result(project),
+        # TSK-9459: get_agent_mission now resolves the project's bound Hub thread
+        # for the ORCHESTRATOR too, so it is joined structurally instead of being
+        # left off its own thread. This mocked test does not exercise the Hub —
+        # let the resolver take its documented best-effort degradation to None.
+        RuntimeError("TSK-9459: no Hub thread in this mocked session"),
         _rows_result([(execution, job)]),
         # Extra entries to cover additional queries in _resolve_mission_template
         # (project lookup) and other downstream code added since this test was

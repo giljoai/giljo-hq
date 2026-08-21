@@ -206,6 +206,12 @@ class TestOrchestratorIdentityPopulated:
                 job_result,
                 exec_result,
                 project_result,
+                # TSK-9459: get_agent_mission now resolves the project's bound Hub
+                # thread for the ORCHESTRATOR too (it used to skip that job type), so
+                # it is joined structurally instead of being left off its own thread.
+                # This mocked test exercises identity composition, not the Hub — let
+                # the resolver take its documented best-effort degradation to None.
+                RuntimeError("TSK-9459: no Hub thread in this mocked session"),
                 all_exec_result,
                 project_again_result,
                 override_result,
@@ -275,6 +281,12 @@ class TestOrchestratorIdentityPopulated:
                 job_result,
                 exec_result,
                 project_result,
+                # TSK-9459: get_agent_mission now resolves the project's bound Hub
+                # thread for the ORCHESTRATOR too (it used to skip that job type), so
+                # it is joined structurally instead of being left off its own thread.
+                # This mocked test exercises identity composition, not the Hub — let
+                # the resolver take its documented best-effort degradation to None.
+                RuntimeError("TSK-9459: no Hub thread in this mocked session"),
                 all_exec_result,
                 project_again_result,
                 override_result,
@@ -347,6 +359,12 @@ class TestOrchestratorIdentityPopulated:
                 job_result,
                 exec_result,
                 project_result,
+                # TSK-9459: get_agent_mission now resolves the project's bound Hub
+                # thread for the ORCHESTRATOR too (it used to skip that job type), so
+                # it is joined structurally instead of being left off its own thread.
+                # This mocked test exercises identity composition, not the Hub — let
+                # the resolver take its documented best-effort degradation to None.
+                RuntimeError("TSK-9459: no Hub thread in this mocked session"),
                 all_exec_result,
                 project_again_result,
                 override_result,

@@ -18,7 +18,7 @@ Pydantic instance with::
 The catastrophic property of this bug is that the server-side write has
 already landed by the time the validator runs — so the orchestrator sees a
 hard error client-side while every state transition has actually been
-persisted. Discovered in production while spawning agents on dogfood; staged
+persisted. Discovered in production while spawning agents on the test install; staged
 agents transitioned waiting→working, progress reports persisted, but every
 client surface showed DictModel errors.
 
@@ -34,10 +34,10 @@ import json
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from pydantic import BaseModel
 
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -46,7 +46,7 @@ pytestmark = pytest.mark.asyncio
 def _payload(call_tool_result) -> dict:
     """Decode a CallToolResult into a dict."""
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -165,7 +165,7 @@ async def test_pydantic_response_is_serialised_to_dict_at_mcp_boundary(wire_cont
             {"job_id": "11111111-1111-1111-1111-111111111111"},
         )
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
 
     payload = _payload(result)
     assert isinstance(payload, dict), f"expected dict, got {type(payload).__name__}: {payload!r}"

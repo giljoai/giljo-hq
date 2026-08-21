@@ -371,3 +371,66 @@ describe('SetupStep2Connect — data-testid hooks preserved under new anatomy (F
     expect(wrapper.find('[data-testid="oauth-cert-note"]').exists()).toBe(true)
   })
 })
+
+// -----------------------------------------------------------------------
+
+/**
+ * FE-9383 — OpenCode's `mcp add` does not share Claude Code's syntax: the server URL
+ * rides on `--url` (a bare URL is an unexpected positional and OpenCode answers with
+ * its help text), and headers are KEY=VALUE (`Authorization=Bearer <key>`, not the
+ * colon form). Both generators emitted the Claude Code shape, so an OpenCode user's
+ * first copy-paste failed twice over. These assertions sit at the rendered-snippet
+ * layer — the exact text the user copies — and pin the Claude Code commands as
+ * unchanged so the fix cannot drift into the tool it was already correct for.
+ */
+describe('SetupStep2Connect — OpenCode snippet syntax + client labels (FE-9383)', () => {
+  /** Run the key flow so the bearer command block renders (it is gated on hasKey). */
+  async function withGeneratedKey(wrapper) {
+    await wrapper.find('[data-testid="generate-key-btn"]').trigger('click')
+    await flushPromises()
+    await nextTick()
+    return wrapper
+  }
+
+  it('sign-in snippet passes the URL with --url, never as a bare positional', async () => {
+    const wrapper = await mountStep(['opencode'], 'saas')
+    const snippet = wrapper.find('[data-testid="oauth-section"] pre').text()
+    expect(snippet).toMatch(/opencode mcp add giljo_hq --url https?:\/\/\S+\/mcp/)
+    expect(snippet).not.toMatch(/mcp add giljo_hq https?:/)
+    expect(snippet).toContain('opencode mcp auth giljo_hq')
+  })
+
+  it('bearer snippet uses --url and the KEY=VALUE header, never the colon form', async () => {
+    const wrapper = await withGeneratedKey(await mountStep(['opencode'], 'ce'))
+    const snippet = wrapper.find('[data-testid="config-command-block"] pre').text()
+    expect(snippet).toMatch(/opencode mcp add giljo_hq --url https?:\/\/\S+\/mcp/)
+    expect(snippet).toContain('Authorization=Bearer gk_test_key_123')
+    expect(snippet).not.toContain('Authorization: Bearer')
+    expect(snippet).not.toMatch(/mcp add giljo_hq https?:/)
+  })
+
+  it('leaves the Claude Code snippets alone — positional URL and colon header stay', async () => {
+    const saas = await mountStep(['claude_code'], 'saas')
+    expect(saas.find('[data-testid="oauth-section"] pre').text()).toMatch(
+      /^claude mcp add --transport http giljo_hq https?:\/\/\S+\/mcp --scope user$/,
+    )
+
+    const ce = await withGeneratedKey(await mountStep(['claude_code'], 'ce'))
+    const snippet = ce.find('[data-testid="config-command-block"] pre').text()
+    expect(snippet).toMatch(
+      /^claude mcp add --scope user --transport http giljo_hq https?:\/\/\S+\/mcp --header "Authorization: Bearer gk_test_key_123"$/,
+    )
+    expect(snippet).not.toContain('--url')
+  })
+
+  it('names the client on every snippet it hands out', async () => {
+    const saas = await mountStep(['opencode'], 'saas')
+    expect(saas.find('[data-testid="oauth-command-label"]').text()).toContain('OpenCode')
+
+    const ceOpencode = await withGeneratedKey(await mountStep(['opencode'], 'ce'))
+    expect(ceOpencode.find('[data-testid="config-block-label"]').text()).toContain('OpenCode')
+
+    const ceClaude = await withGeneratedKey(await mountStep(['claude_code'], 'ce'))
+    expect(ceClaude.find('[data-testid="config-block-label"]').text()).toContain('Claude Code')
+  })
+})

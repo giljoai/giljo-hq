@@ -22,8 +22,10 @@
  *      thread but never checked in gets a hollow ring, not a filled dot. Filling it
  *      would claim we heard from something we never heard from.
  *
- * Every dot carries its label in the pill's tooltip. A colour the operator has to
- * decode from memory is a bug — that is also why the `?` legend exists.
+ * Every dot carries its label AND its meaning in the pill's tooltip. A colour the
+ * operator has to decode from memory is a bug. FE-9368 removed the `?` legend panel as
+ * redundant, which makes the tooltip the only explanation surface there is — so the
+ * legend's one-line meanings moved here rather than being thrown away with it.
  */
 
 import { getStatusColor, getStatusLabel } from '@/utils/statusConfig'
@@ -56,17 +58,30 @@ const NEVER_REGISTERED = Object.freeze({
 const UNMAPPED_TO_IDLE = new Set(['staged'])
 
 /**
+ * The status to DISPLAY for a participant, or null when it has never been heard from.
+ * The single place the two normalisations live, so the dot's colour, its label and its
+ * meaning can never disagree about which state they are describing.
+ *
+ * @param {{status?: string|null, last_seen_at?: string|null}} participant
+ * @returns {string|null}
+ */
+function displayStatus(participant) {
+  if (!participant) return null
+  const raw = participant.status
+  // No status AND no sighting => this agent has never been heard from.
+  if (!raw && !participant.last_seen_at) return null
+  return !raw || UNMAPPED_TO_IDLE.has(raw) ? 'idle' : raw
+}
+
+/**
  * @param {{status?: string|null, last_seen_at?: string|null}} participant
  * @returns {{color: string, ring: string, label: string, status: string|null}}
  */
 export function agentStatusDot(participant) {
-  if (!participant) return NEVER_REGISTERED
+  const status = displayStatus(participant)
+  if (!status) return NEVER_REGISTERED
 
   const raw = participant.status
-  // No status AND no sighting => this agent has never been heard from.
-  if (!raw && !participant.last_seen_at) return NEVER_REGISTERED
-
-  const status = !raw || UNMAPPED_TO_IDLE.has(raw) ? 'idle' : raw
   return {
     color: getStatusColor(status),
     ring: 'none',
@@ -76,14 +91,49 @@ export function agentStatusDot(participant) {
 }
 
 /**
+ * What each state MEANS to the operator, as opposed to what the enum calls it.
+ * "blocked" is a state name; "stuck on something it cannot decide" is the thing the
+ * operator needs in order to act. These lines are the ones the deleted legend carried
+ * (FE-9368) — the panel went, the sentences did not.
+ *
+ * Keyed by the DISPLAYED status, so a state whose shared Jobs-board label is terse
+ * ("Monitoring", "Waiting.") still explains itself. A status with no entry simply
+ * shows its label, which is the honest degrade: no invented meaning.
+ */
+const STATUS_MEANINGS = Object.freeze({
+  waiting: 'posted and expecting a reply',
+  working: 'actively running in its harness',
+  blocked: 'stuck on something it cannot decide',
+  awaiting_user: 'handed the call to you; drives the gold card',
+  complete: 'finished its part of the work',
+  idle: 'registered, watching, not working',
+  sleeping: 'session parked, will resume',
+  handed_over: 'passed its work to a successor',
+  closed: 'accepted by the orchestrator',
+  decommissioned: 'retired after succession',
+})
+
+/**
+ * The one-line meaning for a participant's state, or '' when there is nothing honest
+ * to add (a never-registered agent's label already says everything known about it).
+ */
+export function agentStatusMeaning(participant) {
+  const status = displayStatus(participant)
+  if (!status) return ''
+  return STATUS_MEANINGS[status] || ''
+}
+
+/**
  * The pill's tooltip: everything the badge and dot encode, in words.
- * `{display_name} · {harness} · {status label}`.
+ * `{display_name} · {harness} · {status label}: {what that state means}`.
  */
 export function agentPillTitle(participant, harnessLabel) {
+  const meaning = agentStatusMeaning(participant)
+  const label = agentStatusDot(participant).label
   const parts = [
     participant?.display_name || participant?.participant_id || 'Unnamed agent',
     harnessLabel,
-    agentStatusDot(participant).label,
+    meaning ? `${label}: ${meaning}` : label,
   ]
   return parts.filter(Boolean).join(' · ')
 }

@@ -18,6 +18,7 @@ import pytest
 import pytest_asyncio
 
 from giljo_mcp.exceptions import ProjectStateError
+from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.job_lifecycle_service import JobLifecycleService
 from giljo_mcp.services.project_service import ProjectService
@@ -48,6 +49,16 @@ async def job_lifecycle_service(db_session, db_manager, tenant_manager, test_ten
 @pytest_asyncio.fixture
 async def completed_project(db_session, test_tenant_key):
     """Create a project with status='completed'."""
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid4()),
+        tenant_key=test_tenant_key,
+        name=f"Owning Product {uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         id=str(uuid4()),
         name="Completed Project",
@@ -55,6 +66,7 @@ async def completed_project(db_session, test_tenant_key):
         description="A completed project",
         status="completed",
         tenant_key=test_tenant_key,
+        product_id=_owning_product_project.id,
         series_number=random.randint(1, 9000),
     )
     db_session.add(project)
@@ -66,6 +78,16 @@ async def completed_project(db_session, test_tenant_key):
 @pytest_asyncio.fixture
 async def cancelled_project(db_session, test_tenant_key):
     """Create a project with status='cancelled'."""
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid4()),
+        tenant_key=test_tenant_key,
+        name=f"Owning Product {uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         id=str(uuid4()),
         name="Cancelled Project",
@@ -73,6 +95,7 @@ async def cancelled_project(db_session, test_tenant_key):
         description="A cancelled project",
         status="cancelled",
         tenant_key=test_tenant_key,
+        product_id=_owning_product_project.id,
         series_number=random.randint(1, 9000),
     )
     db_session.add(project)
@@ -84,6 +107,16 @@ async def cancelled_project(db_session, test_tenant_key):
 @pytest_asyncio.fixture
 async def active_project(db_session, test_tenant_key):
     """Create a project with status='active'."""
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid4()),
+        tenant_key=test_tenant_key,
+        name=f"Owning Product {uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         id=str(uuid4()),
         name="Active Project",
@@ -91,6 +124,7 @@ async def active_project(db_session, test_tenant_key):
         description="An active project",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=_owning_product_project.id,
         series_number=random.randint(1, 9000),
     )
     db_session.add(project)
@@ -102,6 +136,16 @@ async def active_project(db_session, test_tenant_key):
 @pytest_asyncio.fixture
 async def inactive_project(db_session, test_tenant_key):
     """Create a project with status='inactive'."""
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid4()),
+        tenant_key=test_tenant_key,
+        name=f"Owning Product {uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         id=str(uuid4()),
         name="Inactive Project",
@@ -109,6 +153,7 @@ async def inactive_project(db_session, test_tenant_key):
         description="An inactive project",
         status="inactive",
         tenant_key=test_tenant_key,
+        product_id=_owning_product_project.id,
         series_number=random.randint(1, 9000),
     )
     db_session.add(project)

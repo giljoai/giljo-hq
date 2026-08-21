@@ -35,9 +35,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -45,7 +45,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(call_tool_result) -> dict:
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -153,7 +153,7 @@ async def test_tech_stack_depth_config_forwarded_as_sections_through_mcp_boundar
                 "depth_config": {"tech_stack": "required"},
             },
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     assert captured_kwargs.get("sections") == "required", (
@@ -201,7 +201,7 @@ async def test_architecture_depth_config_still_not_forwarded_through_mcp_boundar
                 "depth_config": {"architecture": "overview"},
             },
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     assert "depth" not in captured_kwargs, f"depth_architecture must stay unwired -- got kwargs={captured_kwargs!r}"
@@ -242,7 +242,7 @@ async def _capture_category_kwargs(
             "get_context",
             {"product_id": product_id, "categories": [category], "depth_config": {category: depth_value}},
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
 
     return captured
 
@@ -316,7 +316,7 @@ async def test_db_style_depth_key_is_rejected_not_silently_defaulted(depth_mcp_c
             },
         )
 
-    assert result.isError is True, (
+    assert result.is_error is True, (
         "BE-9322 Finding 3: a DB-style depth key was accepted instead of rejected -- "
         "it silently applies the default and nothing names the dropped key."
     )

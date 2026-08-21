@@ -6,13 +6,14 @@
 """Tests for JobCompletionService (Sprint 002e extraction)."""
 
 import random
+import uuid
 from unittest.mock import MagicMock
 
 import pytest
 
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
-from giljo_mcp.models import AgentExecution, AgentJob, Project
+from giljo_mcp.models import AgentExecution, AgentJob, Product, Project
 from giljo_mcp.services.job_completion_service import JobCompletionService
 
 
@@ -31,8 +32,21 @@ def completion_service(db_session, test_tenant_key):
 
 async def _seed_staging_project(session, tenant_key):
     """Seed a project mid-staging (staging_status='staging')."""
+    # BE-9437: a project belongs to a product, and one of its own keeps the
+    # ACTIVE status clear of idx_project_single_active_per_product.
+    product = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Completion Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    session.add(product)
+    await session.flush()
+
     project = Project(
         tenant_key=tenant_key,
+        product_id=product.id,
         name="Staging Project",
         description="seeded",
         mission="seeded mission",

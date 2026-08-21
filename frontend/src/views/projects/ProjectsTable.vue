@@ -11,6 +11,7 @@
         :items-length="total"
         :loading="loading"
         :items-per-page="itemsPerPage"
+        :items-per-page-options="itemsPerPageOptions"
         :page="currentPage"
         :sort-by="sortBy"
         must-sort
@@ -26,7 +27,7 @@
              run) its tickbox is a PASSIVE indicator — force-ticked + DISABLED by
              membership (inChainIds), not just run.locked. Back-out is via the kebab
              (Deactivate Chain), never by unticking. Non-chain rows tick freely. -->
-        <template v-slot:item.select="{ item }">
+        <template #item.select="{ item }">
           <div v-if="normalizeStatus(item.status) === 'inactive'" class="select-cell">
             <v-checkbox-btn
               :model-value="selectedIds.includes(item.id) || inChainIds.includes(item.id)"
@@ -42,7 +43,7 @@
         </template>
 
         <!-- Name Column -->
-        <template v-slot:item.name="{ item }">
+        <template #item.name="{ item }">
           <div class="py-2">
             <span class="project-name-text">{{ item.name }}</span>
             <!-- BE-2002: "Archived" badge on archived (hidden) rows — surfaced so
@@ -65,7 +66,7 @@
 
         <!-- Serial Column (colorized tinted badge) -->
         <!-- FE-5061: badge is the sole click target for opening a project -->
-        <template v-slot:item.series_number="{ item }">
+        <template #item.series_number="{ item }">
           <button
             v-if="item.taxonomy_alias"
             type="button"
@@ -87,7 +88,7 @@
         </template>
 
         <!-- Quick Action Column — play button to activate + launch -->
-        <template v-slot:item.quick_action="{ item }">
+        <template #item.quick_action="{ item }">
           <!-- FE-6178: no solo activate-launch for an in-chain project — it's part of an
                active chain; "Deactivate Chain" in the kebab is its only toggle. -->
           <v-tooltip v-if="normalizeStatus(item.status) === 'inactive' && !inChainIds.includes(item.id)" :text="electionActive ? 'Projects are elected — use Run Sequential to launch them' : (hasActiveProject ? 'Another project is active — complete or deactivate it first' : (isProjectStaged(item) ? 'Activate & resume' : 'Activate & launch'))">
@@ -108,7 +109,7 @@
         </template>
 
         <!-- Staged Column (0870h: tinted style) -->
-        <template v-slot:item.staging_status="{ item }">
+        <template #item.staging_status="{ item }">
           <v-icon
             v-if="isProjectStaged(item)"
             size="18"
@@ -119,7 +120,7 @@
         </template>
 
         <!-- Created Date Column -->
-        <template v-slot:item.created_at="{ item }">
+        <template #item.created_at="{ item }">
           <span class="date-full date-cell">{{ formatDateWithTime(item.created_at) }}</span>
           <span class="date-compact date-cell">{{ formatDateCompactWithTime(item.created_at) }}</span>
         </template>
@@ -133,7 +134,7 @@
              terminal transition and ce_0088 backfilled the historical rows, so the real
              column is the one to show. A terminal row still lacking one gets the same
              em-dash as a running project rather than a borrowed date. -->
-        <template v-slot:item.completed_at="{ item }">
+        <template #item.completed_at="{ item }">
           <div class="text-center">
             <template
               v-if="(item.status === 'completed' || item.status === 'cancelled' || item.status === 'terminated') && item.completed_at"
@@ -153,7 +154,7 @@
              FE-6221b: when a project is in-chain AND active/implementing, show the
              status badge AND an "In chain" pill alongside it — so chain membership
              is always visible regardless of the member's run phase, matching /roadmap. -->
-        <template v-slot:item.status="{ item }">
+        <template #item.status="{ item }">
           <div class="d-flex align-center justify-center gap-1 flex-wrap">
             <!-- FE-6171b: in-chain + inactive → single "In chain" badge using the SAME
                  styling as the inactive StatusBadge (the span reuses .in-chain-pill which
@@ -214,10 +215,10 @@
         </template>
 
         <!-- Actions Column -->
-        <template v-slot:item.menu="{ item }">
+        <template #item.menu="{ item }">
           <div class="d-flex align-center justify-center">
             <v-menu>
-              <template v-slot:activator="{ props }">
+              <template #activator="{ props }">
                 <v-btn
                   icon="mdi-dots-vertical"
                   size="small"
@@ -293,7 +294,7 @@
         </template>
 
         <!-- No data state -->
-        <template v-slot:no-data>
+        <template #no-data>
           <div class="text-center py-8">
             <v-icon size="48" color="medium-emphasis" class="mb-4">mdi-folder-open</v-icon>
             <p class="text-body-medium text-muted-a11y">No projects found</p>
@@ -328,6 +329,7 @@ import StatusBadge from '@/components/StatusBadge.vue'
 import SupersedeProjectModal from '@/components/projects/SupersedeProjectModal.vue'
 import { taxonomyBadgeStyle, resolveTaxonomyColor, isReservedTaskAlias } from '@/utils/taxonomyBadge'
 import { useFormatDate } from '@/composables/useFormatDate'
+import { API_MAX_PAGE_SIZE } from '@/composables/useProjectFilters'
 
 const props = defineProps({
   // BE-6076: server mode — `projects` is the current page (not the full set).
@@ -445,6 +447,17 @@ const { formatDateWithTime, formatDateCompactWithTime } = useFormatDate()
 
 // FE-6050: responsive display breakpoint
 const { smAndDown } = useDisplay()
+
+// BE-9455: this table is SERVER-mode — every page size becomes an HTTP `limit`,
+// so the options may only offer sizes the endpoint will actually serve (max
+// API_MAX_PAGE_SIZE). Vuetify's default list ends in `{ value: -1, title: 'All' }`,
+// and that "All" could never be honoured here: the server caps a page well below
+// this tenant's project count, so the option promised something no single request
+// can return, and shipped a 422 instead of a wider list. Offering the true
+// maximum is the honest version of it — a control that cannot keep its promise is
+// worse than one that is absent. (Plain client-side v-data-table mounts elsewhere
+// keep their "All"; there it is true, because they already hold every row.)
+const itemsPerPageOptions = [10, 25, 50, 100, API_MAX_PAGE_SIZE]
 
 // FE-6176: Two header variants per breakpoint.
 // Normal  → play-button "Actions" column; no checkbox column (de-clutter).

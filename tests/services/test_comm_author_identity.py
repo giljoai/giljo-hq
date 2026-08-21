@@ -105,22 +105,43 @@ async def test_a_uuid_shaped_slug_is_still_an_agent():
     assert identity.agent_id == "277e2ee9-e15d-4339-9730-4ffee559cdcb"
 
 
-async def test_principal_fallback_is_a_user_and_warns():
+async def test_be9379_bare_user_id_no_longer_attributes_to_the_user():
+    """The impersonation surface: the wrapper injects user_id on EVERY call, so a
+    present principal must not imply the human's voice — only as_user does."""
     repo = _FakeRepo()
     identity = await _resolve(repo, _FakeUserRepo(_Row("Operator")), user_id="user-1")
+
+    assert identity.kind == "agent"
+    assert identity.agent_id == "orchestrator"
+    assert "as_user" in identity.warning
+
+
+async def test_as_user_attributes_to_the_principal_without_advisory():
+    repo = _FakeRepo()
+    identity = await _resolve(repo, _FakeUserRepo(_Row("Operator")), user_id="user-1", as_user=True)
 
     assert identity.kind == "user"
     assert identity.agent_id == "user-1"
     assert identity.display_name == "Operator"
-    assert "from_agent omitted" in identity.warning
+    assert identity.warning is None  # deliberate claim, nothing to advise
 
 
-async def test_unknown_principal_still_resolves_to_a_named_user():
+async def test_as_user_with_unknown_principal_still_resolves_to_a_named_user():
     repo = _FakeRepo()
-    identity = await _resolve(repo, _FakeUserRepo(None), user_id="user-ghost")
+    identity = await _resolve(repo, _FakeUserRepo(None), user_id="user-ghost", as_user=True)
 
     assert identity.kind == "user"
     assert identity.display_name == "user"
+
+
+async def test_as_user_without_a_principal_is_refused():
+    """as_user claims the human's voice; with no authenticated principal there is
+    no human to attribute to — a clean 422, never a silent guess."""
+    from giljo_mcp.exceptions import ValidationError
+
+    repo = _FakeRepo()
+    with pytest.raises(ValidationError):
+        await _resolve(repo, _FakeUserRepo(None), as_user=True)
 
 
 async def test_no_agent_and_no_principal_attributes_to_orchestrator():
@@ -149,7 +170,7 @@ async def test_the_author_is_always_registered_with_a_matching_participant_type(
 
 async def test_a_user_post_registers_a_user_participant():
     repo = _FakeRepo()
-    await _resolve(repo, _FakeUserRepo(_Row("Operator")), user_id="user-1")
+    await _resolve(repo, _FakeUserRepo(_Row("Operator")), user_id="user-1", as_user=True)
 
     assert repo.registered["participant_type"] == "user"
 

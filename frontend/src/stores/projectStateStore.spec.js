@@ -147,6 +147,25 @@ describe('projectStateStore — BE-6047 unstage/restage mission clearing (lock-r
   })
 })
 
+describe('projectStateStore — $reset (TSK-9372)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('$reset clears stateByProjectId back to an empty Map', () => {
+    const store = useProjectStateStore()
+    store.setProject({ id: 'proj-1', mission: 'm', status: 'active', staging_status: 'staged' })
+    store.setStagingComplete('proj-2', true)
+    expect(store.stateByProjectId.size).toBe(2)
+
+    store.$reset()
+
+    expect(store.stateByProjectId.size).toBe(0)
+    expect(store.getProjectState('proj-1')).toBeNull()
+    expect(store.getProjectState('proj-2')).toBeNull()
+  })
+})
+
 describe('projectStateStore — FE-9122 isLaunched monotonic guard', () => {
   beforeEach(() => {
     setActivePinia(createPinia())

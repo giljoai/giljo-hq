@@ -205,8 +205,23 @@ class TestConvertToProject:
             await service.convert_to_project(TASK_ID, None, "create_new", include_subtasks=False, user_id=USER_ID)
 
     @pytest.mark.asyncio
-    async def test_convert_no_active_product_raises(self):
-        """Raises ValidationError when no active product exists."""
+    async def test_convert_unresolvable_task_product_raises(self):
+        """Raises ValidationError when the TASK's product does not resolve.
+
+        BE-9415 changed this test's meaning deliberately, and it is called out
+        rather than quietly rebaselined. It previously asserted ``match="No
+        active product"``: conversion resolved its destination from
+        ``get_active_product``, so an empty product lookup meant "nothing is
+        active". Conversion now binds to the task's own ``product_id`` and never
+        consults the active product at all, so the same empty lookup now means
+        "this task's product does not resolve for this tenant" -- a different
+        condition with a different message. The old assertion is not repairable;
+        it described behaviour that no longer exists.
+
+        What the test still guards is the property that matters: an unresolvable
+        product is a LOUD rejection, never a silent fallback to some other
+        product.
+        """
         task = _make_task()
         user = _make_user(role="admin")
 
@@ -232,7 +247,7 @@ class TestConvertToProject:
         session.execute = AsyncMock(side_effect=side_effect)
 
         service = _make_service(session)
-        with pytest.raises(ValidationError, match="No active product"):
+        with pytest.raises(ValidationError, match="was not found for your account"):
             await service.convert_to_project(TASK_ID, None, "create_new", include_subtasks=False, user_id=USER_ID)
 
 

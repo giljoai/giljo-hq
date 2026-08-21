@@ -34,7 +34,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy import text
 
-from tests.helpers.test_db_helper import worker_suffix
+from tests.helpers.test_db_helper import bootstrap_db_base, worker_suffix
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -43,7 +43,7 @@ ALEMBIC_INI = PROJECT_ROOT / "alembic.ini"
 # Per-worker scratch DB (BE-6014): each migration test runs DROP SCHEMA public
 # CASCADE, so under pytest-xdist the workers must not share one bootstrap DB or
 # they wipe each other's schema mid-run. worker_suffix() is "" outside xdist.
-SCRATCH_DB = f"{os.environ.get('GILJO_BOOTSTRAP_TEST_DB', 'giljo_test_bootstrap')}{worker_suffix()}"
+SCRATCH_DB = f"{bootstrap_db_base()}{worker_suffix()}"
 ADMIN_USER = os.environ.get("POSTGRES_OWNER_USER", "giljo_owner")
 ADMIN_PASSWORD = os.environ.get("POSTGRES_OWNER_PASSWORD", "")
 DB_HOST = os.environ.get("POSTGRES_HOST", "localhost")

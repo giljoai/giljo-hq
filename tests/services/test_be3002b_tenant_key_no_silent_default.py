@@ -96,13 +96,17 @@ class TestCreateProjectTenantContext:
 
     @pytest.mark.asyncio
     async def test_create_with_explicit_tenant_key_persists(
-        self, project_service: ProjectService, test_tenant_key: str
+        self, project_service: ProjectService, test_tenant_key: str, test_product
     ):
         """LOAD-BEARING: explicit tenant_key -> succeeds and persists with that exact key."""
+        # BE-9437: a project must name a product. Orthogonal to the tenant
+        # discipline under test -- the product only has to exist for the row to
+        # be writable at all.
         project = await project_service.create_project(
             name="Legit Project",
             mission="Real mission",
             tenant_key=test_tenant_key,
+            product_id=test_product.id,
         )
         assert project.tenant_key == test_tenant_key
 
@@ -115,7 +119,9 @@ class TestCreateProjectTenantContext:
         assert fetched.tenant_key == test_tenant_key
 
     @pytest.mark.asyncio
-    async def test_create_resolves_tenant_from_context(self, db_manager, db_session, test_tenant_key: str):
+    async def test_create_resolves_tenant_from_context(
+        self, db_manager, db_session, test_tenant_key: str, test_product
+    ):
         """LOAD-BEARING: no explicit tenant_key but context set -> uses the context tenant."""
         manager = TenantManager()
         manager.set_current_tenant(test_tenant_key)
@@ -129,6 +135,7 @@ class TestCreateProjectTenantContext:
             project = await service.create_project(
                 name="Context Project",
                 mission="Resolved from context",
+                product_id=test_product.id,  # BE-9437: required, orthogonal to tenant resolution
                 # tenant_key omitted -> resolved from tenant context
             )
             assert project.tenant_key == test_tenant_key

@@ -92,8 +92,13 @@ class WorkflowStatus(BaseModel):
     # BE-6013: live auto check-in slider state so a running multi-terminal
     # orchestrator re-reads the current cadence (and on/off) every cycle
     # instead of using the value baked into its prompt at boot.
+    # FE-9296b: the slider is retired; these two raw-column fields are kept for
+    # in-flight orchestrators whose CH6 prose still reads them (tolerance).
     auto_checkin_enabled: bool = False
     auto_checkin_interval: int | None = None
+    # FE-9296b: the RESOLVED check-in cadence (project override -> tenant
+    # override -> account default). New CH6 prose reads THIS every cycle.
+    checkin_cadence_minutes: int | None = None
 
     # BE-6188: CH_CHAIN_DRIVE polls this field to detect when a sub-orch's project
     # is closed out (the conductor's advance signal). Additive; defaults None for
@@ -232,6 +237,19 @@ class MissionResponse(BaseModel):
             "truncated by your harness."
         ),
     )
+    # FE-9408: where the orchestrator identity in this response came from — the
+    # product rung, the account-wide rung, or the built-in seed. A short scalar, so it
+    # rides HERE (before the multi-KB blocks) and survives the tail truncation that
+    # eats agent_identity: an agent that lost its persona to truncation can still say
+    # which one it was owed. None (and stripped) for every non-orchestrator identity
+    # and for a withheld one.
+    identity_source: str | None = Field(
+        default=None,
+        description=(
+            "Where your orchestrator identity came from: a product override, an "
+            "account-wide override with the date it was saved, or the built-in default."
+        ),
+    )
     # BE-9083a: head truncation sentinel — states the payload size and how to verify
     # the END-OF-PROTOCOL tail marker arrived; names the recovery path. None (and
     # stripped) when full_protocol is absent (blocked / etag-match responses).
@@ -337,6 +355,10 @@ class MissionResponse(BaseModel):
             data.pop("protocol_section", None)
         if self.protocol_section_content is None:
             data.pop("protocol_section_content", None)
+        # FE-9408: absent rather than null when there is no identity to attribute, so
+        # every worker/blocked/withheld response stays byte-identical to before.
+        if self.identity_source is None:
+            data.pop("identity_source", None)
         # BE-9333: identity_status rides the wire ONLY when the identity is DEGRADED.
         # 'resolved' and 'orchestrator_default' are the two healthy, by-design outcomes and
         # say nothing actionable, so omitting them keeps every healthy response

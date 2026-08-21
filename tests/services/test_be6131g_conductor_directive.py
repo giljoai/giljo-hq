@@ -42,7 +42,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import tenant_isolation_bypass
-from giljo_mcp.models import Project
+from giljo_mcp.models import Product, Project
 from giljo_mcp.models.agent_identity import AgentExecution
 from giljo_mcp.models.comm import CommThread
 from giljo_mcp.models.sequence_runs import SequenceRun
@@ -51,6 +51,7 @@ from giljo_mcp.services.job_lifecycle_service import JobLifecycleService
 from giljo_mcp.services.sequence_chain_context import SequenceChainContextResolver
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -71,15 +72,31 @@ async def _wipe_sequence_runs(db_manager):
 
 async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
     project_id = str(uuid.uuid4())
+    # BE-9437: a project belongs to a product. Its own, so an active seed cannot
+    # collide under idx_project_single_active_per_product.
+    _product_id = str(uuid.uuid4())
+    session.add(
+        Product(
+            id=_product_id,
+            tenant_key=tenant_key,
+            name=f"Owning Product {_product_id[:8]}",
+            description="seeded",
+            is_active=False,
+        )
+    )
     session.add(
         Project(
             id=project_id,
+            product_id=_product_id,
             tenant_key=tenant_key,
             name=f"BE-6131g {project_id[:8]}",
             description="conductor directive test",
             mission="Drive sequential run as conductor.",
             status="active",
             execution_mode=_MODE,
+            # BE-9429: uq_project_taxonomy_active is NULLS NOT DISTINCT, so two
+            # all-NULL taxonomy rows collide.
+            series_number=next_series_number(),
         )
     )
     session.info["tenant_key"] = tenant_key

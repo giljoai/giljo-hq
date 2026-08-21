@@ -219,10 +219,10 @@ def configure_middleware(app: FastAPI) -> None:
         logger.info("[Rate Limit] Rate limiting disabled via environment variable")
     else:
         logger.info(f"[Rate Limit] Configured at {rate_limit} requests per minute")
-        # STABILITY (perf-findings #2): bare ``/health`` is Railway's healthcheckPath
-        # AND the frontend liveness probe, but the limiter's DEFAULT exempt list is
+        # STABILITY (perf-findings #2): bare ``/health`` is the platform healthcheck
+        # path AND the frontend liveness probe, but the limiter's DEFAULT exempt list is
         # only ["/api/health", "/api/metrics"] — so under a saturated bucket /health
-        # 429s, Railway marks the app unhealthy and restarts it. (The ["/health", ...]
+        # 429s, and the platform marks the app unhealthy and restarts it. (The ["/health", ...]
         # list a few lines below is wired to CSRFProtectionMiddleware, NOT here.)
         # Pass /health explicitly so it always bypasses rate limiting.
         app.add_middleware(
@@ -293,6 +293,16 @@ def configure_middleware(app: FastAPI) -> None:
             "X-CSRF-Token",
             "MCP-Protocol-Version",
             "Mcp-Session-Id",
+            # INF-9371: the 2026-07-28 era carries the method (and, for tools/call,
+            # the tool name) in headers as well as the body; the SDK rejects a
+            # mismatch with JSON-RPC -32020. Without these a browser preflight
+            # fails before the request reaches the auth middleware.
+            # NOTE: the spec's `Mcp-Param-*` family cannot be expressed here --
+            # CORS allow-lists are exact-match, with no prefix wildcard. Nothing in
+            # our surface needs it today; a browser client that does would need a
+            # deliberate decision, not a silent widening of this list.
+            "Mcp-Method",
+            "Mcp-Name",
         ],
         # BE-6076: the dashboard projects-list reads the filtered total from the
         # X-Total-Count response header (v-data-table :items-length). Expose it so

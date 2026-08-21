@@ -116,8 +116,11 @@ def _build_orchestrator_protocol(
         depth_config: Depth settings per category (Handover 0823)
         product_id: Product UUID for fetch calls (Handover 0823)
         tool: Platform identifier for platform-specific spawning rules (Handover 0838)
-        auto_checkin_enabled: Enable CH6 auto check-in protocol (Handover 0904)
-        auto_checkin_interval: Check-in interval in minutes (Handover 0904/0960)
+        auto_checkin_enabled: Retained for signature stability (FE-9296b) — no
+            longer gates CH6; the chapter renders for every non-CLI orchestrator.
+        auto_checkin_interval: First-cycle seed cadence in minutes. The caller
+            resolves it (project override -> tenant override -> account default);
+            the live value each cycle comes from get_workflow_status (FE-9296b).
         conductor_agent_id: When set, the orchestrator is the conductor of a
             sequential multi-project run (BE-6131c). BE-6215: the addressability +
             user-directive-relay protocol it used to gate (CH_CONDUCTOR) is now folded
@@ -163,7 +166,15 @@ def _build_orchestrator_protocol(
         if include_implementation_reference
         else None
     )
-    ch6 = _build_ch6_auto_checkin(auto_checkin_interval) if (auto_checkin_enabled and not cli_mode) else None
+    # FE-9296b: the auto_checkin_enabled gate is retired — CH6 renders for every
+    # non-CLI orchestrator (the flag now only influences the caller-resolved
+    # seed), matching the get_job_mission path. Phase-gated with CH5: the
+    # check-in loop only exists once agents are dispatched, and the staging
+    # response has a payload budget CH6 would breach for no benefit (the
+    # orchestrator refetches with the reference chapters at implementation).
+    ch6 = (
+        _build_ch6_auto_checkin(auto_checkin_interval) if (include_implementation_reference and not cli_mode) else None
+    )
 
     # BE-6215: CH_CONDUCTOR (addressability + directive relay) is FOLDED into
     # CH_CHAIN_DRIVE — both were already phase-gated to the IMPLEMENTATION phase and

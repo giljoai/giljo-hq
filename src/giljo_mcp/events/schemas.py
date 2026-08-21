@@ -17,6 +17,7 @@ Created: 2025-11-02
 Relocated from api/events/schemas.py: 2026-04-18 (Sprint 003a)
 """
 
+import json
 from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID
@@ -44,6 +45,122 @@ from giljo_mcp.events.models import (
 # ============================================================================
 # Event Factory
 # ============================================================================
+
+
+# BE-9416: bound event payloads to the cross-worker broker's byte cap ----------
+#
+# The cross-worker leg of every tenant broadcast rides pg_notify, whose payload cap
+# is 7999 bytes and is a PostgreSQL protocol limit that cannot be raised. An event
+# carrying unbounded content fails PostgresNotifyWebSocketEventBroker.publish
+# (BE-3008c's guard, working as designed), api/websocket.py swallows it as a WS006
+# warning (also correct -- the local send already happened), and every session on a
+# DIFFERENT uvicorn worker silently never sees it. Measured under production load:
+# a project_update at 12,825 bytes, twice.
+#
+# Applied at the ONE funnel every tenant broadcast passes through
+# (WebSocketManager.broadcast_event_to_tenant) rather than at each emitter. Six
+# emitters produce these three event types across four files; a per-emitter bound is
+# a rule an author has to remember, and the seventh emitter forgets it. Here it
+# cannot be forgotten, and the envelope is already built so the REAL message is
+# measured rather than a reconstruction of it.
+#
+# BE-9414's thread_message bounds itself inside api/endpoints/_comm_ws.py and is
+# deliberately left alone: it is a shipped incident fix with its own pinned
+# invariants, and `content` is not in this registry, so it is never double-bounded.
+#
+# Room left under 7999 for the broker envelope wrapped around this one (tenant_key,
+# exclude_client, origin, control) -- BE-9414 measured that wrapping at 316 bytes at
+# maximal ids. Pinned by test, not asserted here.
+MAX_EVENT_BYTES = 6_500
+
+# event type -> the variable-length data fields that may be trimmed, in no
+# particular order (the bound always cuts the longest first). ONLY these three
+# types are bounded; every other event is passed through untouched, so the impact
+# area is exactly what BE-9416's consumer census covered.
+BOUNDED_EVENT_FIELDS: dict[str, tuple[str, ...]] = {
+    "project_update": ("description", "mission", "name"),
+    "agent:created": ("mission",),
+    "agent:mission_updated": ("mission",),
+}
+
+
+def _event_size(event: dict[str, Any]) -> int:
+    """Serialized size of an envelope, measured the way the broker's guard measures it."""
+    return len(json.dumps(event).encode("utf-8"))
+
+
+def bound_event_message(message: dict[str, Any]) -> dict[str, Any]:
+    """Trim a built envelope's registered fields until it fits the budget; return it.
+
+    Mutates in place AND returns ``message`` so the caller can wrap its existing
+    ``json.dumps(message)`` without a separate statement.
+
+    Every bounded key always gets ``<key>_length`` and ``<key>_truncated``, so a
+    receiver can tell a SHORTENED value from a short one and fetch the rest. "No flag"
+    must never be readable as "not truncated" -- that ambiguity is what makes a silent
+    truncation silent. They are written with ``setdefault`` because this funnel also
+    handles events arriving FROM the broker: those are already bounded, and
+    recomputing ``_length`` there would overwrite the TRUE original length with the
+    excerpt's, telling the client its excerpt is complete.
+
+    Bounded in BYTES, never characters: ``json.dumps`` runs ensure_ascii=True, so a
+    non-ASCII BMP character costs 6 bytes and an ASTRAL one costs 12 (an escaped
+    surrogate pair). A 50,000-character astral mission serializes to ~600 KB, 75x the
+    cap; a character bound that provably fit the worst case would be a headline, not
+    an excerpt.
+
+    The search runs over CHARACTER prefixes measured by ``json.dumps`` itself, so it
+    cannot drift from the encoder the guard measures, and a slice can never land
+    inside a code point. A byte slice is faster and WRONG -- it emits U+FFFD mid-word.
+    """
+    keys = BOUNDED_EVENT_FIELDS.get(message.get("type", ""))
+    if not keys:
+        return message
+
+    data = message.get("data")
+    if not isinstance(data, dict):
+        return message
+
+    originals: dict[str, str] = {}
+    for key in keys:
+        value = data.get(key)
+        if not isinstance(value, str):
+            # An absent field carries no bytes worth trimming, and flagging it would
+            # invent a field the emitter deliberately did not send.
+            continue
+        originals[key] = value
+        data.setdefault(f"{key}_length", len(value))
+        # Written BEFORE the search so the measured envelope carries the same keys
+        # the shipped one does. The value flips below.
+        data.setdefault(f"{key}_truncated", False)
+
+    if _event_size(message) <= MAX_EVENT_BYTES:
+        return message
+
+    # Longest first: a 12 KB description is cut before a 255-byte name is touched.
+    for key in sorted(originals, key=lambda k: len(originals[k]), reverse=True):
+        content = originals[key]
+        low, high = 0, len(content)  # invariant: `low` chars always fit, `high` may not
+        while low < high:
+            mid = (low + high + 1) // 2
+            data[key] = content[:mid]
+            if _event_size(message) <= MAX_EVENT_BYTES:
+                low = mid
+            else:
+                high = mid - 1
+
+        data[key] = content[:low]
+        if low < len(content):
+            # Set AFTER the search on purpose: the search measured the envelope
+            # carrying ``false`` (5 bytes) and this writes ``true`` (4), so the
+            # payload that ships is one byte SMALLER than the one measured against
+            # the budget -- never larger.
+            data[f"{key}_truncated"] = True
+
+        if _event_size(message) <= MAX_EVENT_BYTES:
+            return message
+
+    return message
 
 
 class EventFactory:

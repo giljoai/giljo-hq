@@ -25,13 +25,15 @@ mutable state, each test owns its setup, every query is tenant-scoped.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import update
 
 from giljo_mcp.database import tenant_session_context
-from giljo_mcp.models import Project
+from giljo_mcp.models import Product, Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models.tasks import Message
 from giljo_mcp.repositories._comm_thread_list_enrichment_mixin import CommThreadListEnrichmentMixin
 from giljo_mcp.repositories.comm_thread_repository import CommThreadRepository
 from giljo_mcp.services.comm_thread_service import CommThreadService
@@ -88,8 +90,34 @@ async def _seed_execution(
         await db_session.flush()
 
 
+async def _age_message(db_session, tenant: str, message_id: str, *, seconds: int = 60) -> None:
+    """Push one post backwards in time so a "newest post" read has a real winner.
+
+    Posts made inside one transaction share a ``created_at`` (``server_default=func.now()``
+    and Postgres ``now()`` is the transaction timestamp), which production does not do —
+    there each post commits on its own. Without this the ordering is a tie.
+    """
+    with tenant_session_context(db_session, tenant):
+        await db_session.execute(
+            update(Message)
+            .where(Message.id == message_id, Message.tenant_key == tenant)
+            .values(created_at=datetime.now(UTC) - timedelta(seconds=seconds))
+        )
+        await db_session.flush()
+
+
 async def _seed_project(db_session, tenant: str, name: str) -> str:
     with tenant_session_context(db_session, tenant):
+        # BE-9437: a project belongs to a product. Its own, so an active
+        # seed cannot collide under idx_project_single_active_per_product.
+        _owning_product_project = Product(
+            id=str(uuid.uuid4()),
+            tenant_key=tenant,
+            name=f"Owning Product {uuid.uuid4().hex[:6]}",
+            description="seeded",
+            is_active=False,
+        )
+        db_session.add(_owning_product_project)
         project = Project(
             id=str(uuid.uuid4()),
             name=name,
@@ -97,6 +125,7 @@ async def _seed_project(db_session, tenant: str, name: str) -> str:
             mission="exercise the card facts",
             status="active",
             tenant_key=tenant,
+            product_id=_owning_product_project.id,
             series_number=1,
             execution_mode="claude_code_cli",
             created_at=datetime.now(UTC),
@@ -255,6 +284,76 @@ async def test_unread_is_per_viewer(db_manager, db_session):
 
     assert drained["unread"] is False
     assert fresh["unread"] is True
+
+
+# ---------------------------------------------------------------------------
+# FE-9418 — the message ANCHOR. Without an id the client can only guess the post.
+# ---------------------------------------------------------------------------
+
+
+async def test_last_message_names_the_post_it_describes(db_manager, db_session):
+    """The card's last_message carries the id of the post it summarises.
+
+    FE-9410 landed baton notifications inside the thread but could not point at the
+    POST, because this payload named no message: the Hub had to approximate the target
+    as "newest post at the moment you arrive", which is a different row from "the post
+    that handed you the baton" as soon as anything else lands in between. This id is the
+    anchor that removes the guess, and it is the only reachable source of one — the
+    baton's own WS event (``broadcast_thread_update``) and its durable bell row
+    (``HubBatonHandoverPayload``) both carry a thread id and no message id.
+
+    Two posts are seeded deliberately: with one, an implementation that returned the
+    OLDEST row, or any row, would still pass.
+
+    The older post is explicitly aged, and that is required rather than tidy.
+    ``Message.created_at`` is ``server_default=func.now()``, and Postgres ``now()`` is
+    the TRANSACTION timestamp — so two posts made inside this suite's single
+    rollback-bound transaction carry an IDENTICAL ``created_at`` and the LATERAL's
+    ``ORDER BY created_at DESC LIMIT 1`` is a tie broken arbitrarily. Production does
+    not have that tie (each post commits in its own transaction), so aging the row is
+    what makes this test model production instead of the harness. There is no monotonic
+    key on ``messages`` to tiebreak with, and the tie is harmless where it happens: one
+    LATERAL row supplies the excerpt AND the anchor together, so the operator always
+    lands on exactly the post the card described.
+    """
+    tenant = _tk("anchor")
+    await _seed(db_session, tenant)
+    svc = _service(db_manager, db_session)
+    tid = (await svc.create_thread(subject="hand-off", creator_id="agent-orch", tenant_key=tenant))["thread_id"]
+
+    older = await svc.post_to_thread(thread_id=tid, content="first", from_agent="agent-a", tenant_key=tenant)
+    newest = await svc.post_to_thread(thread_id=tid, content="over to you", from_agent="agent-a", tenant_key=tenant)
+    await _age_message(db_session, tenant, older["message_id"])
+
+    listed = await svc.list_threads(viewer_id="operator-1", tenant_key=tenant)
+    card = next(t for t in listed["threads"] if t["thread_id"] == tid)
+
+    assert card["last_message"]["id"] == newest["message_id"]
+    assert card["last_message"]["id"] != older["message_id"]
+    assert card["last_message"]["excerpt"] == "over to you"
+
+
+async def test_the_message_anchor_is_the_message_id_not_the_thread_id(db_manager, db_session):
+    """The anchor must be Message.id, and this is the assertion that proves it.
+
+    The outer select already carries ``CommThread.id``. Projecting the LATERAL's id
+    WITHOUT a label puts two ``id`` columns in one row tuple, and attribute access
+    resolves to the first — so the THREAD id would be served as the message anchor. The
+    client would then deep-link to a message that does not exist, and every weaker
+    assertion ("an id is present", "it is a string") would stay green. Only comparing it
+    against the thread id catches that.
+    """
+    tenant = _tk("anchorlabel")
+    await _seed(db_session, tenant)
+    svc = _service(db_manager, db_session)
+    tid = (await svc.create_thread(subject="labelled", creator_id="agent-orch", tenant_key=tenant))["thread_id"]
+    await svc.post_to_thread(thread_id=tid, content="a post", from_agent="agent-a", tenant_key=tenant)
+
+    listed = await svc.list_threads(viewer_id="operator-1", tenant_key=tenant)
+    card = next(t for t in listed["threads"] if t["thread_id"] == tid)
+
+    assert card["last_message"]["id"] != tid
+    assert card["last_message"]["id"] != card["thread_id"]
 
 
 # ---------------------------------------------------------------------------

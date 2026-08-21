@@ -36,13 +36,13 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -50,7 +50,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(call_tool_result) -> dict:
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -225,7 +225,7 @@ async def _request_approval_via_transport(new_client, seed):
                 "context": {"deferred_findings": ["finding-1"]},
             },
         )
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     return _payload(result)["approval_id"]
 
 
@@ -257,7 +257,7 @@ async def test_complete_job_blocked_when_agent_is_awaiting_user(gate_mcp_client,
             },
         )
 
-    assert result.isError is True, "GATE LEAK: complete_job returned success while agent was awaiting_user"
+    assert result.is_error is True, "GATE LEAK: complete_job returned success while agent was awaiting_user"
     err = _error_text(result)
     assert "awaiting" in err.lower() or "AWAITING_USER_APPROVAL" in err or approval_id in err, (
         f"expected awaiting_user gate error, got: {err!r}"
@@ -302,7 +302,7 @@ async def test_close_project_blocked_when_any_team_member_awaiting_user(gate_mcp
             },
         )
 
-    assert not result.isError, (
+    assert not result.is_error, (
         f"CLOSEOUT_BLOCKED must be a Tier-2 structured rejection, not isError. got: {_error_text(result)!r}"
     )
     payload = _payload(result)
@@ -353,7 +353,7 @@ async def test_complete_job_gate_blocks_signal_bearing_closeout_under_hitl(gate_
             },
         )
 
-    assert result.isError is True, "GATE LEAK: signal-bearing closeout completed under hitl without approval"
+    assert result.is_error is True, "GATE LEAK: signal-bearing closeout completed under hitl without approval"
     err = _error_text(result)
     assert "CLOSEOUT_APPROVAL_REQUIRED" in err or "approval" in err.lower(), f"unexpected error: {err!r}"
 
@@ -374,6 +374,6 @@ async def test_complete_job_gate_allows_clean_closeout_under_hitl(gate_mcp_clien
             {"job_id": seed["job"].job_id, "result": {"summary": "straightforward, all green"}},
         )
 
-    assert result.isError is False, f"clean closeout must complete under hitl; got error: {_error_text(result)!r}"
+    assert result.is_error is False, f"clean closeout must complete under hitl; got error: {_error_text(result)!r}"
     payload = _payload(result)
     assert payload.get("status") == "success"

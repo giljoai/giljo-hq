@@ -23,6 +23,7 @@ import TasksView from '@/views/TasksView.vue'
 import TaskEditDialog from '@/views/tasks/TaskEditDialog.vue'
 import api from '@/services/api'
 import { useTaskStore } from '@/stores/tasks'
+import { useNotificationStore } from '@/stores/notifications'
 
 // Mock API
 vi.mock('@/services/api', () => ({
@@ -469,5 +470,99 @@ describe('TasksView - FE-5046 task parity', () => {
     expect(spy).toHaveBeenCalledWith('task-99', { hidden: true })
     await wrapper.vm.toggleHidden({ id: 'task-99', title: 'X', hidden: true })
     expect(spy).toHaveBeenLastCalledWith('task-99', { hidden: false })
+  })
+})
+
+// FE-9466: save/mutation failures become persistent notifications instead of a
+// swallowed string. These three bare catch{} wrappers previously only set a
+// hardcoded generic errorMessage + showErrorDialog=true -- the server's own
+// reason (when structured) never reached the user anywhere durable.
+function structuredServerError(message, errorCode = 'TASK_STATE_ERROR', status = 409) {
+  return Object.assign(new Error(`Request failed with status code ${status}`), {
+    response: { status, data: { error_code: errorCode, message, context: {} } },
+  })
+}
+
+describe('TasksView - save/mutation failures become notifications (FE-9466)', () => {
+  let vuetify
+
+  beforeEach(() => {
+    // restoreAllMocks (not just clearAllMocks): the preceding 'toggleHidden'
+    // test spies on a REAL pinia store instance via vi.spyOn(store,
+    // 'updateTask') and never restores it. clearAllMocks resets call
+    // history but leaves a vi.spyOn replacement installed -- and it turns
+    // out to survive into a later test's freshly-mounted TasksView (traced
+    // by execution: the "fresh" store a later test reads back off a new
+    // pinia still carries `_isMockFunction: true` unless this runs first),
+    // silently swallowing the real api.tasks.update path this suite drives.
+    vi.restoreAllMocks()
+    setActivePinia(createPinia())
+    vuetify = createVuetify({ components, directives })
+    vi.clearAllMocks()
+  })
+
+  // The composable's own completeTask() catch ALSO pushes a notification
+  // (useTaskCrud.spec.js covers that in isolation). Both layers catch the
+  // SAME rethrown error for the SAME task -- proving here that only one
+  // notification survives is what makes the dedup-by-id ruling correct
+  // rather than merely convenient.
+  it('completeTask: stacked composable + view catches collapse to ONE notification', async () => {
+    const serverMessage = 'Cannot complete a task with unresolved subtasks.'
+    api.tasks.update.mockRejectedValueOnce(
+      structuredServerError(serverMessage, 'TASK_HAS_OPEN_SUBTASKS'),
+    )
+    const wrapper = mount(TasksView, { global: { plugins: [vuetify] } })
+    await flushPromises()
+
+    await wrapper.vm.completeTask({ id: 'task-77', title: 'x' })
+    await flushPromises()
+
+    const notificationStore = useNotificationStore()
+    const matches = notificationStore.notifications.filter((n) => n.message === serverMessage)
+    expect(matches).toHaveLength(1)
+  })
+
+  it('updateTaskField: surfaces the server reason as a persistent notification', async () => {
+    const serverMessage = 'Status transition not allowed from completed.'
+    api.tasks.update.mockRejectedValueOnce(
+      structuredServerError(serverMessage, 'INVALID_STATUS_TRANSITION'),
+    )
+    const wrapper = mount(TasksView, { global: { plugins: [vuetify] } })
+    await flushPromises()
+
+    await wrapper.vm.updateTaskField({ id: 'task-88', title: 'x' }, 'status', 'pending')
+    await flushPromises()
+
+    const notificationStore = useNotificationStore()
+    expect(notificationStore.notifications.some((n) => n.message === serverMessage)).toBe(true)
+  })
+
+  it('updateTaskDueDate: surfaces the server reason as a persistent notification', async () => {
+    const serverMessage = 'Due date cannot be in the past.'
+    api.tasks.update.mockRejectedValueOnce(
+      structuredServerError(serverMessage, 'INVALID_DUE_DATE', 422),
+    )
+    const wrapper = mount(TasksView, { global: { plugins: [vuetify] } })
+    await flushPromises()
+
+    await wrapper.vm.updateTaskDueDate({ id: 'task-99', title: 'x' }, '2020-01-01')
+    await flushPromises()
+
+    const notificationStore = useNotificationStore()
+    expect(notificationStore.notifications.some((n) => n.message === serverMessage)).toBe(true)
+  })
+
+  it('never surfaces a raw exception/stack trace on an unstructured failure', async () => {
+    api.tasks.update.mockRejectedValueOnce(new Error('ECONNRESET at TCP.onread (net.js:123)'))
+    const wrapper = mount(TasksView, { global: { plugins: [vuetify] } })
+    await flushPromises()
+
+    await wrapper.vm.updateTaskField({ id: 'task-100', title: 'x' }, 'status', 'pending')
+    await flushPromises()
+
+    const notificationStore = useNotificationStore()
+    for (const n of notificationStore.notifications) {
+      expect(n.message ?? '').not.toMatch(/ECONNRESET|net\.js/)
+    }
   })
 })

@@ -14,13 +14,13 @@ Covers two scenarios:
        and Layer 2 (prompt endpoint gate). CE-0026: Layer 5.5 staging_directive
        tests removed alongside the broadcast magic — coverage moved to
        tests/services/test_complete_job_state_machine.py.
-  T3 — Dogfood smoke replay for project 4b57c639 (2026-05-05 00:14:50
+  T3 — Test-install smoke replay for project 4b57c639 (2026-05-05 00:14:50
        broken flow). Asserts that the prompt endpoint returns 200 when
        staging_complete=True AND implementation_launched_at is set,
        regardless of orchestrator AgentExecution.status.
 
-Live-server validation of T3 is explicitly deferred to Patrik's server
-restart (dogfood server runs pre-commit code in memory).
+Live-server validation of T3 is explicitly deferred to the operator's server
+restart (the test-install server runs pre-commit code in memory).
 """
 
 from contextlib import asynccontextmanager
@@ -461,14 +461,14 @@ class TestStagingToImplementationFlow:
 
 
 # ---------------------------------------------------------------------------
-# T3 — Dogfood smoke replay: project 4b57c639 broken flow (2026-05-05 00:14:50)
+# T3 — Test-install smoke replay: project 4b57c639 broken flow (2026-05-05 00:14:50)
 #
-# Live-server validation deferred to Patrik's server restart.
+# Live-server validation deferred to the operator's server restart.
 # pytest validates code-state correctness only.
 # ---------------------------------------------------------------------------
 
 
-class TestDogfoodSmokeReplay4b57c639:
+class TestSmokeReplay4b57c639:
     """Smoke replay for the real broken flow on 2026-05-05.
 
     Project 4b57c639-16b2-4bd5-86cf-b213c953c025 had:
@@ -480,8 +480,9 @@ class TestDogfoodSmokeReplay4b57c639:
     After BE-staging-lock Layer 2, the endpoint gate is on durable project flags,
     not transient AgentExecution.status, so 404 is impossible in this state.
 
-    NOTE: Live-server validation requires Patrik to restart the dogfood server
-    so the in-memory code is replaced with the committed Layer 2 code.
+    NOTE: Live-server validation requires the operator to restart the
+    test-install server so the in-memory code is replaced with the committed
+    Layer 2 code.
     """
 
     @pytest.mark.asyncio
@@ -492,7 +493,7 @@ class TestDogfoodSmokeReplay4b57c639:
 
         project = MagicMock()
         project.id = "4b57c639-16b2-4bd5-86cf-b213c953c025"
-        project.tenant_key = "tenant-dogfood"
+        project.tenant_key = "tenant-test-install"
         project.staging_status = "staging_complete"
         project.implementation_launched_at = datetime(2026, 5, 5, 0, 10, 0, tzinfo=UTC)
         project.execution_mode = "claude_code_cli"
@@ -552,7 +553,7 @@ class TestDogfoodSmokeReplay4b57c639:
         )
 
         user = MagicMock()
-        user.tenant_key = "tenant-dogfood"
+        user.tenant_key = "tenant-test-install"
 
         # Must return 200 — NOT raise HTTPException 404
         response = await prompts.get_implementation_prompt(
@@ -572,7 +573,7 @@ class TestDogfoodSmokeReplay4b57c639:
 
         project = MagicMock()
         project.id = "4b57c639-16b2-4bd5-86cf-b213c953c025"
-        project.tenant_key = "tenant-dogfood"
+        project.tenant_key = "tenant-test-install"
         project.staging_status = "staging_complete"
         project.implementation_launched_at = datetime(2026, 5, 5, 0, 10, 0, tzinfo=UTC)
         project.execution_mode = "claude_code_cli"
@@ -631,7 +632,7 @@ class TestDogfoodSmokeReplay4b57c639:
         )
 
         user = MagicMock()
-        user.tenant_key = "tenant-dogfood"
+        user.tenant_key = "tenant-test-install"
 
         response = await prompts.get_implementation_prompt(
             project_id="4b57c639-16b2-4bd5-86cf-b213c953c025",

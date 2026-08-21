@@ -111,14 +111,30 @@ export const isAwaitingUser = (status) => {
   return status === 'awaiting_user'
 }
 
+// FE-9296b: structured markers set_agent_status stores in block_reason. The
+// service builds these (never free prose), so matching them is mechanism, not
+// string-guessing: `wake_mode=signal` = parked on await_my_turn (BE-9296a wake);
+// `wake_in_minutes=N` = timed sleep of N minutes.
+const WAKE_SIGNAL_MARKER = /\bwake_mode=signal\b/
+const WAKE_TIMER_MARKER = /\bwake_in_minutes=(\d+)\b/
+
 /**
  * Get human-readable label for status.
  * When the agent is awaiting_user, returns "Decision Required" instead of "Needs Input".
+ * FE-9296b: a sleeping agent's block_reason markers split the label three ways —
+ * "Waiting for wake" (parked on the server wake signal), "Sleeping (Nm)" (timed
+ * sleep), plain "Sleeping" (no marker). "Dark" stays the distinct 'silent' status.
  * @param {string} status - Agent status value
+ * @param {string} [blockReason] - The agent's block_reason (carries wake markers)
  * @returns {string} Display label
  */
-export const getStatusLabel = (status) => {
+export const getStatusLabel = (status, blockReason = '') => {
   if (isAwaitingUser(status)) return 'Decision Required'
+  if (status === 'sleeping' && typeof blockReason === 'string') {
+    if (WAKE_SIGNAL_MARKER.test(blockReason)) return 'Waiting for wake'
+    const timer = blockReason.match(WAKE_TIMER_MARKER)
+    if (timer) return `Sleeping (${timer[1]}m)`
+  }
   return statusConfig[status]?.label || 'Unknown'
 }
 

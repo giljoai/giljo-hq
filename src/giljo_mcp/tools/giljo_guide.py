@@ -39,6 +39,18 @@ nothing for you to fix -- changing it is the single most common way these flows
 break.
 
 ## 1. Project vs task -- pick the right create tool
+
+**First, name your product.** Both create tools take an optional `product_id`. Omit it
+and the new task/project binds to whatever product is ACTIVE at that instant -- and the
+active product is shared, mutable state: another session, or the user switching products
+in the dashboard, changes it under you, and your next create silently follows. **If you
+know which product you are working on -- and a staged orchestrator always does, it is in
+your mission -- PASS `product_id`.** Then the binding is yours and no one can move it.
+A `product_id` that is not one of your own products is refused and nothing is created;
+it never quietly falls back to the active product. Either way the create response tells
+you where it landed (`product_id` + `product_name`) -- read it back and you have caught
+a wrong filing for free.
+
 - **Task** (`create_task`): technical debt, a TODO, a bug, a small fix, a scope-creep
   punt. Every task is auto-tagged the reserved **`TSK`** type -- there is no task
   type to choose and `task_type` is accepted-but-ignored. The serial is
@@ -52,6 +64,20 @@ break.
   activates/launches from the dashboard.
 - **Update**: to change an existing project, `list_projects` to find it, then
   `update_project` with the new values.
+- **A task turned out to be a project? PROMOTE it -- never rebuild it.**
+  `update_task(task_id, convert_to_project=true)` runs the same conversion as the
+  dashboard wizard, in one atomic step: the project is created from the task, subtasks
+  and any roadmap card re-point to it (same roadmap position), and **the task row is
+  DELETED** -- that `task_id` stops resolving, so drop it and carry the returned
+  `project_id`. Add `title` to name the project. Do NOT combine it with any other field
+  (`status`, `priority`, ...): the task row is gone, so such a write would be discarded,
+  and the call is refused instead. The promoted project is **inactive and UNTYPED** --
+  tag it with `update_project(project_id, project_type='BE'|'FE'|...)`, then the user
+  activates it. The promoted project lands on **the task's own product**, not on
+  whichever product is currently active, and the response names it (`product_id` +
+  `product_name`) so you can confirm where it went. Do NOT hand-build the equivalent
+  (`create_project` + complete the task): that keeps the task, mints a different
+  serial, and orphans the roadmap card.
 
 ## 2. Chains -- one effort split into ordered, dependent steps
 Use a chain when one effort is genuinely multi-step with hard dependencies (step b
@@ -128,8 +154,14 @@ SaaS = hosted/billing/multi-org; Both = ships identically to each.
 - **Writes:** `create_project`, `create_task`, `update_project`, `update_task`,
   `update_project_mission`. **Reads:** `list_projects`, `list_tasks`, `get_context`.
 - **Never pass `tenant_key`** -- the security layer injects it from auth.
-- **An active product is required** (server-enforced). If you see "No active product",
-  tell the user to activate one in the dashboard rather than retrying.
+- **Creates need a product; updates do not.** `create_project` / `create_task` accept
+  an explicit `product_id` (prefer it -- see section 1), and a create that omits it
+  binds to the ACTIVE product. The update tools (`update_project`, `update_task`,
+  `update_project_mission`) address one row BY ID inside your tenant and do not read
+  the active product at all -- so switching products, or having none selected, never
+  blocks an edit. The LIST reads (`list_projects`, `list_tasks`) do scope to the active
+  product. If a read or a create reports "No active product", tell the user to activate
+  one in the dashboard rather than retrying.
 - On success, the dashboard updates live via WebSocket -- do NOT fabricate a URL.
 
 ## 6. Lifecycle (orchestrated work)
@@ -175,6 +207,12 @@ NOT need to know which phase you are in -- the response tells you via its `phase
   `write_memory_entry` for the completion is REDUNDANT; do NOT add one (it double-writes the
   360). Keep `write_memory_entry` for OTHER, non-closeout 360 records (cross-session
   learnings); the chain conductor's series-summary is one such legitimate call, unaffected.
+  On a SOLO project the closeout writes the 360 entry but deliberately does NOT change the
+  project's own status, so there is a third step: `update_project(status='completed')`. That
+  runs the whole archive lifecycle (deactivate, terminal status with the completion date
+  stamped, spawned agents moved from `complete` to `closed`) -- the same thing the dashboard's
+  Archive button does. A CHAIN MEMBER needs no third step: its closeout already flips the row
+  and the conductor advances the run.
 - **deliverable** (`phase='deliverable'`): a worker agent (implementer/tester/...) recording
   its result. No phase magic -- the orchestrator reviews and closes your job.
 
@@ -187,6 +225,10 @@ Eight tools:
 - **Start a chat:** `create_thread(subject=..., creator_id=<your agent_id>)` -> returns a
   shareable **`CHT-####` chat id**. Share that id so other agents can join. Pass
   `project_id` to anchor the chat to a project, or omit it for a standalone thread.
+  Pass `product_id` to file the chat under a product -- that is the dimension
+  `list_threads(product_id=...)` filters on below, so a chat created without it can
+  never be found that way. Anchor to the product you are working under; omit only for
+  a chat that genuinely belongs to no product.
 - **Join:** `join_thread(thread_id, agent_id)` -- claim your identity on a chat so
   broadcast posts reach you (collision-safe; re-joining is a no-op).
 - **Post:** `post_to_thread(thread_id, content, from_agent=...)` broadcasts to all
@@ -221,6 +263,12 @@ choice (closeout with deferred findings, an ambiguous decision) -- `options` is 
   `report_progress` does not auto-wake from `awaiting_user` -- neither can clear this gate. If
   the user responds verbally, guide them to open CloseoutModal and click the ApprovalCard
   option, or POST to the decide endpoint directly. The MCP server is passive here.
+- **If your client supports it, you may be asked directly:** on a connection that negotiates
+  MCP 2026-07-28 and declares the elicitation capability, `request_approval` ALSO returns the
+  choice inline, and answering it resolves the gate through the same decide path. This never
+  replaces the parked approval -- the row is created and you are flipped to `awaiting_user`
+  first either way, so the dashboard remains able to clear it. On every other client the
+  behaviour above is unchanged and the wait is yours to manage.
 """
 
 

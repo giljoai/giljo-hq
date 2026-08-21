@@ -66,7 +66,7 @@ export function useProjectCloseout({ project, projectId, sortedJobs, onComplete 
     if (!allJobsTerminal.value) return false
     if (!project.value?.product_id) return false
     // TEMP 2026-05-15: suppressed timeout/error UI so spinner stays visible until memory lands.
-    // Patrik prefers infinite spinner over the "Closeout may have failed" warning, since memory
+    // Product decision: infinite spinner is preferred over the "Closeout may have failed" warning, since memory
     // always arrives in practice. Revisit ~2026-05-29 — either restore this line or delete it.
     // if (memoryPollTimedOut.value || memoryPollError.value) return false
     return !memoryWritten.value

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.platform_registry import Platform, is_subagent_render
+from giljo_mcp.prompts.default_agent_ladder import MISSING_AGENT_TEMPLATES_NOTICE
 
 # BE-9292b: CH5's final-acceptance prose (closing a job; accepting a stalled agent)
 # lives in its own module for the 800-line file-size guardrail and _build_ch5_reference's
@@ -66,9 +67,14 @@ Example:
 
 Built-in Codex roles shadow unprefixed names — always use gil- prefix.
 
-NEVER spawn a generic/default worker and instruct it to "act as" a GiljoAI agent.
-NEVER use agent='worker', agent='implementer', agent='tester', or any unprefixed built-in name.
-If a gil-* template is missing or unavailable, STOP and report the error. Do not substitute.
+While the gil-* template EXISTS, always use it: never use agent='worker',
+agent='implementer', agent='tester', or any unprefixed built-in name, and never
+instruct a generic worker to "act as" a GiljoAI agent.
+If a gil-* template is MISSING or unavailable, do NOT stop. Spawn Codex's DEFAULT
+subagent for that job and state once:
+  """
+    + MISSING_AGENT_TEMPLATES_NOTICE
+    + """
 The instructions= parameter should contain ONLY:
   - The job_id
   - The MCP call: get_job_mission(job_id="...")
@@ -666,114 +672,129 @@ END OF IMPLEMENTATION PHASE REFERENCE
 """
 
 
-def _build_ch6_auto_checkin(interval: int = 10) -> str:
-    """Build CH6: AUTO CHECK-IN PROTOCOL for multi-terminal orchestrator self-polling.
+def _build_ch6_auto_checkin(interval: int = 10, *, for_conductor: bool = False) -> str:
+    """Build CH6: CHECK-IN PROTOCOL for the multi-terminal orchestrator's wait loop.
 
-    BE-6013: the rendered loop re-reads the live interval (and on/off state) from
-    get_workflow_status() on EVERY cycle. The slider's DB write is the single source
-    of truth, so a moved slider changes the cadence of an already-running orchestrator
-    at its next wake. The ``interval`` argument is only a first-cycle SEED for the very
-    first sleep before the orchestrator has called get_workflow_status() — it is NOT
-    baked in as the authoritative cadence, and must never be treated as such.
-
-    Args:
-        interval: First-cycle seed interval in minutes (5, 10, 15, 20, 30, 40, or 60).
-            Authoritative cadence each cycle comes from get_workflow_status(), not this.
+    FE-9296b: the per-project cadence slider is retired — the cadence is an
+    account-level Settings value (slider-era per-project values honoured as
+    overrides), and the chapter branches on harness wake capability (BE-9296a):
+    wake-capable harnesses park on ``await_my_turn``; every other harness (chat
+    surfaces can never hold the wake call open) sleeps for the cadence.
+    BE-6013's live-value rule survives: ``interval`` is only the caller-resolved
+    first-cycle SEED; the authoritative value each cycle comes from
+    ``get_workflow_status().checkin_cadence_minutes``. ``for_conductor`` selects
+    the project-less chain conductor variant (no project_id of its own to
+    re-read; the cadence applies to the chain-drive poll loop instead).
     """
-    seed_seconds = interval * 60
+    if for_conductor:
+        return f"""════════════════════════════════════════════════════════════════════════════
+          CH6: CHECK-IN CADENCE — CHAIN CONDUCTOR
+════════════════════════════════════════════════════════════════════════════
+
+You are the project-less conductor: you own no project_id, so your check-in
+cadence is the ACCOUNT-LEVEL default, seeded here as {interval} minutes.
+Every get_workflow_status(project_id=<P_i>) you make on the project you are
+driving also returns checkin_cadence_minutes — treat that as the live value
+(the developer can change it in Settings at any time; the live value wins
+over this seed and over anything you remember from an earlier cycle).
+
+Apply it to the chain-drive wait (STEP B of the AUTO-CONTINUE LOOP):
+
+  ▸ WAKE-CAPABLE HARNESS — you can hold an MCP tool call open for ~45s
+    (verified: Claude Code CLI). Between advance-gate polls, park on
+    await_my_turn(agent_id="<your agent_id>") instead of sleeping — it
+    returns the moment a Hub message or baton lands for you. Still call
+    get_workflow_status(project_id=<P_i>) at least every M minutes:
+    ready_to_advance flips server-side WITHOUT a Hub post, so the wake
+    signal alone will never tell you a project finished.
+  ▸ NOT WAKE-CAPABLE — chat surfaces (claude.ai / chatgpt.com) can NEVER
+    hold the call open; polling is their primary path, permanently. Sleep M
+    minutes between polls, exactly as the chain-drive chapter's
+    background-sleep instructions describe.
+
+Status honesty: set_agent_status(status="sleeping", wake_on_signal=true)
+while parked on the wake call; set_agent_status(status="sleeping",
+wake_in_minutes=M) on a timed sleep. Neither re-invokes you — your own loop
+(the wake call returning, or your sleep completing) is what wakes you.
+
+────────────────────────────────────────────────────────────────────────────
+"""
     return f"""════════════════════════════════════════════════════════════════════════════
-          CH6: AUTO CHECK-IN PROTOCOL — MANDATORY EXECUTION
+          CH6: CHECK-IN PROTOCOL — MANDATORY EXECUTION
 ════════════════════════════════════════════════════════════════════════════
 
 This is your coordination loop for when you have dispatched all specialist
-agents and have no immediate coordination work remaining. Execute the steps
-below IN ORDER, every cycle. Do NOT ask the user for confirmation.
+agents and have no immediate coordination work remaining. Execute it every
+cycle. Do NOT ask the user for confirmation.
+
+FIRST, PICK YOUR WAIT MECHANISM (once per session):
+
+  ▸ WAKE-CAPABLE HARNESS — you can hold an MCP tool call open for ~45s
+    (verified: Claude Code CLI). Use PATH A (await_my_turn). If unsure, try
+    ONE await_my_turn call: a normal return (even wake_reason "timeout")
+    means you are wake-capable; if the harness kills or errors the call,
+    use PATH B from then on.
+  ▸ NOT WAKE-CAPABLE — chat surfaces (claude.ai / chatgpt.com) can NEVER
+    hold the call open; polling is their primary path, permanently. Use
+    PATH B (timed sleep).
 
 ╔══════════════════════════════════════════════════════════════════════════╗
-║ THE LIVE-INTERVAL RULE (READ THIS — IT IS THE WHOLE POINT)                ║
+║ THE LIVE-CADENCE RULE (BOTH PATHS)                                       ║
 ║                                                                          ║
-║ The check-in cadence is controlled by a slider the developer can move    ║
-║ AT ANY TIME while you are running. You MUST re-read the current setting   ║
-║ from get_workflow_status() at the START of EVERY loop, and obey whatever  ║
-║ value it returns THIS cycle.                                             ║
-║                                                                          ║
-║ The interval you used last cycle is NOT authoritative. Any number you    ║
-║ remember from earlier in this conversation (including the first-cycle    ║
-║ seed of {interval} minutes below) is NOT authoritative. The ONLY         ║
-║ authoritative value is whatever get_workflow_status() returns on the     ║
-║ current loop. Never reuse a remembered number — always re-read.          ║
+║ The check-in cadence M is an account-level setting the developer can     ║
+║ change AT ANY TIME (Settings → Notifications), and a per-project value   ║
+║ may override it. Read M fresh from                                       ║
+║ get_workflow_status(project_id=...) → checkin_cadence_minutes at the     ║
+║ START of every cycle. Any number you remember from earlier (including    ║
+║ the first-cycle seed of {interval} minutes) is NOT authoritative — the   ║
+║ ONLY authoritative value is the one you just read.                       ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 
-──────────────────────────────────────────────────────────────────────────
-EVERY LOOP, IN ORDER:
+PATH A — WAKE LOOP (wake-capable harness):
+  1. set_agent_status(status="sleeping", wake_on_signal=true,
+     reason="Waiting for Hub activity") — the dashboard then shows you as
+     waiting for a wake signal rather than on a timed sleep.
+  2. Call await_my_turn(agent_id="<your agent_id>"). It parks server-side
+     (up to ~45s per call, zero tokens while parked) and returns the moment
+     a Hub message or baton lands for you.
+  3. On woken=true: handle the delivered work — get_thread_history() on
+     your coordination thread, resolve "blocked" agents, relay messages,
+     spawn next-phase work — then report_progress() and re-enter step 2.
+  4. On wake_reason="timeout": re-call await_my_turn immediately. Keep
+     count: once ~M minutes of consecutive timeouts have passed, run one
+     full coordination pass anyway — get_workflow_status(project_id=...) +
+     get_thread_history() + report_progress() — because agent STATUS
+     changes (an agent going blocked or silent without posting) do NOT
+     fire the wake signal.
+  5. On wake_reason="waiter_limit": fall back to PATH B for this cycle.
+  6. All agents complete → proceed to Closeout (Phase 3).
 
-STEP 1 — READ THE LIVE CHECK-IN STATE (ALWAYS FIRST):
-  Call get_workflow_status(project_id=...). From the response read the two
-  fields that drive this loop:
-    * auto_checkin_enabled  (bool)  — is auto check-in currently ON?
-    * auto_checkin_interval (int)   — current cadence in minutes, if ON
-  Use ONLY these freshly-read values for this cycle. Do not assume they are
-  the same as last cycle — the developer may have moved the slider while you
-  were asleep.
+PATH B — TIMED SLEEP LOOP (everything else):
+  1. Read M via the LIVE-CADENCE RULE. Compute the sleep duration AT THIS
+     MOMENT: seconds = M * 60 — compute it yourself each cycle; never bake
+     a fixed literal. (e.g. M=10 → 600, M=30 → 1800)
+  2. Call set_agent_status(status="sleeping",
+       wake_in_minutes=M,
+       reason=f"Auto check-in: sleeping for {{M}} minutes")
+  3. EXECUTE THE SLEEP COMMAND (IMMEDIATELY, NO CONFIRMATION):
+     * PowerShell (Windows): Start-Sleep -Seconds <seconds>
+     * Bash/Zsh (macOS/Linux): sleep <seconds>
+     This blocks your terminal for M minutes to prevent unnecessary
+     token consumption while agents work via the passive MCP server.
 
-STEP 2 — BRANCH ON auto_checkin_enabled (the value you JUST read):
-
-  ▸ IF auto_checkin_enabled is FALSE (auto check-in is OFF this cycle):
-      Do NOT sleep. Behave as a normal orchestrator with no auto check-in:
-        a) get_thread_history() on your coordination thread — read all agent reports and developer messages
-        b) Resolve any "blocked" agents, relay messages, spawn next-phase work
-        c) report_progress() — update the project TODO list and status
-        d) If agents are still working, await further developer input / the
-           next event rather than self-sleeping, then go back to STEP 1 to
-           re-check whether the slider has since been switched ON.
-        e) If all agents are complete → proceed to Closeout (Phase 3).
-      Because you loop back to STEP 1, an OFF→ON slider flip is picked up on
-      your next coordination pass.
-
-  ▸ IF auto_checkin_enabled is TRUE (auto check-in is ON this cycle):
-      Let M = auto_checkin_interval (minutes) you read in STEP 1.
-      Compute the sleep duration AT THIS MOMENT from that live value:
-        seconds = M * 60      ← compute this yourself each cycle; never bake
-                                 a fixed literal. (e.g. M=10 → 600, M=30 → 1800)
-
-      STEP 2a — SET STATUS TO SLEEPING:
-        Call set_agent_status(status="sleeping",
-          wake_in_minutes=M,
-          reason=f"Auto check-in: sleeping for {{M}} minutes")
-
-      STEP 2b — EXECUTE SLEEP COMMAND (IMMEDIATELY, NO CONFIRMATION):
-        * PowerShell (Windows): Start-Sleep -Seconds <seconds>
-        * Bash/Zsh (macOS/Linux): sleep <seconds>
-        This blocks your terminal for M minutes to prevent unnecessary
-        token consumption while agents work via the passive MCP server.
-
-        ⚠ CLAUDE CODE NOTE: The Bash tool blocks `sleep N` when N ≥ 2 as the
-        first command in the invocation. Use the `sleep 1 N` workaround —
-        `sleep` sums numeric args, and the harness only inspects the first
-        arg ("1", under threshold). Example: `sleep 1 <seconds> && echo woke`
-        will sleep ~<seconds>s and pass. Applies to bash invocations only;
-        `Start-Sleep -Seconds <seconds>` via PowerShell is unaffected.
-
-      STEP 2c — WAKE UP AND COORDINATE:
-        After the sleep completes (or is interrupted by the developer via
-        Ctrl+C):
-          a) get_thread_history() on your coordination thread — read all agent reports and developer messages
-          b) Resolve any "blocked" agents, relay messages, spawn next-phase work
-          c) report_progress() — update the project TODO list and status
-
-STEP 3 — LOOP OR CLOSE:
-  * Agents still working → go back to STEP 1 (re-read the live state — the
-    cadence and on/off may have changed while you were asleep).
-  * All agents complete → proceed to Closeout (Phase 3).
-
-RULES:
-- ALWAYS re-read get_workflow_status() at STEP 1 before sleeping. The sleep
-  duration and the decision to sleep at all are derived FRESH each cycle.
-- The seed value of {interval} minutes ({seed_seconds} seconds) is only a
-  hint for your very first sleep before you have ever called
-  get_workflow_status(); after that, the live value wins, always.
-- If the sleep command is interrupted or returns early, skip to STEP 2c.
-- NEVER ask "should I sleep now?" — read the live state and act on it.
+     ⚠ CLAUDE CODE NOTE: The Bash tool blocks `sleep N` when N ≥ 2 as the
+     first command in the invocation. Use the `sleep 1 N` workaround —
+     `sleep` sums numeric args, and the harness only inspects the first
+     arg ("1", under threshold). Example: `sleep 1 <seconds> && echo woke`
+     will sleep ~<seconds>s and pass. Applies to bash invocations only;
+     `Start-Sleep -Seconds <seconds>` via PowerShell is unaffected.
+  4. WAKE UP AND COORDINATE (also where an interrupted sleep resumes):
+     a) get_thread_history() on your coordination thread — read all agent
+        reports and developer messages
+     b) Resolve any "blocked" agents, relay messages, spawn next-phase work
+     c) report_progress() — update the project TODO list and status
+  5. Agents still working → back to step 1 (re-read the live cadence).
+     All agents complete → proceed to Closeout (Phase 3).
 
 ────────────────────────────────────────────────────────────────────────────
-"""  # noqa: S608 — prose protocol template, not SQL
+"""

@@ -32,6 +32,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const loading = ref(false)
   const error = ref(null)
   const agentSilenceThresholdMinutes = ref(10)
+  // FE-9296b: account-level agent check-in cadence (replaced the per-project slider)
+  const agentCheckinCadenceMinutes = ref(10)
 
   // Field toggle configuration (Handover 0048, 0820)
   const fieldToggleConfig = ref(null)
@@ -119,6 +121,18 @@ export const useSettingsStore = defineStore('settings', () => {
     return agentSilenceThresholdMinutes.value
   }
 
+  async function loadAgentCheckinCadence() {
+    const response = await api.settings.getAgentCheckinCadence()
+    agentCheckinCadenceMinutes.value = response.data.agent_checkin_cadence_minutes
+    return agentCheckinCadenceMinutes.value
+  }
+
+  async function updateAgentCheckinCadence(minutes) {
+    const response = await api.settings.updateAgentCheckinCadence(minutes)
+    agentCheckinCadenceMinutes.value = response.data.agent_checkin_cadence_minutes
+    return agentCheckinCadenceMinutes.value
+  }
+
   function saveToLocalStorage() {
     localStorage.setItem('giljo_settings', JSON.stringify(settings.value))
   }
@@ -183,6 +197,7 @@ export const useSettingsStore = defineStore('settings', () => {
     error,
     fieldToggleConfig,
     agentSilenceThresholdMinutes,
+    agentCheckinCadenceMinutes,
 
     // Getters
     notificationPosition,
@@ -195,6 +210,8 @@ export const useSettingsStore = defineStore('settings', () => {
     updateSettings,
     loadAgentSilenceThreshold,
     updateAgentSilenceThreshold,
+    loadAgentCheckinCadence,
+    updateAgentCheckinCadence,
     resetSettings,
     clearError,
     fetchFieldToggleConfig,

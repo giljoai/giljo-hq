@@ -19,6 +19,7 @@ import pytest
 
 from giljo_mcp.models import AgentTemplate
 from giljo_mcp.template_renderer import render_claude_agent
+from tests.helpers.model_factories import make_agent_template, strict_result
 
 
 # ---------------------------------------------------------------------------
@@ -280,25 +281,30 @@ class TestGetAgentTemplatesIncludesUserInstructions:
         """Full detail response should include user_instructions field."""
         from giljo_mcp.tools.context_tools.get_agent_templates import get_agent_templates
 
-        # Create mock template with user_instructions
-        mock_template = MagicMock()
-        mock_template.name = "implementer"
-        mock_template.role = "implementer"
-        mock_template.description = "Implementation specialist"
-        mock_template.system_instructions = "Bootstrap content"
-        mock_template.user_instructions = "You are an implementation specialist."
-        mock_template.behavioral_rules = ["Follow standards"]
-        mock_template.success_criteria = ["Tests pass"]
-        mock_template.meta_data = {}
-        mock_template.is_active = True
-        mock_template.created_at = None
-        mock_template.updated_at = None
+        # INF-9399: a real transient AgentTemplate, not a mock. created_at and
+        # updated_at no longer need stating -- unset means None, which is what an
+        # unset column is.
+        mock_template = make_agent_template(
+            name="implementer",
+            role="implementer",
+            description="Implementation specialist",
+            system_instructions="Bootstrap content",
+            user_instructions="You are an implementation specialist.",
+            behavioral_rules=["Follow standards"],
+            success_criteria=["Tests pass"],
+            meta_data={},
+            is_active=True,
+        )
 
-        # Mock the database session
-        mock_scalars = MagicMock()
-        mock_scalars.all.return_value = [mock_template]
-        mock_result = MagicMock()
-        mock_result.scalars.return_value = mock_scalars
+        # INF-9399: this ONE result answers EVERY query the tool makes, so it states
+        # what each one honestly returns. Left bare it reported "an assignment row
+        # exists" (.first() truthy) and then "no template is active" (iteration empty)
+        # -- a product whose junction is fully populated with everything switched OFF,
+        # a state this test never meant to set up and which correctly yields no
+        # templates. This test is about detail="full" carrying user_instructions; the
+        # honest state for a DB with no assignment rows is that none exist, tolerance
+        # applies, and every tenant-active template is returned.
+        mock_result = strict_result(scalars_all=[mock_template], first=None)
 
         mock_session = AsyncMock()
         mock_session.execute.return_value = mock_result

@@ -171,11 +171,37 @@ class TestConversionResult:
     def test_model_dump(self):
         result = ConversionResult(task_id="t", project_id="p", project_name="N")
         dumped = result.model_dump()
+        # BE-9382: project_taxonomy_alias is optional -- the REST convert
+        # endpoint builds its own response and never reads it, so a caller that
+        # omits it still gets an explicit None rather than a missing key.
+        # BE-9415: product_id/product_name join it on the same terms -- the
+        # promotion binds to the task's own product and names it, and a caller
+        # that omits them (the REST convert endpoint) still gets explicit Nones.
         assert dumped == {
             "task_id": "t",
             "project_id": "p",
             "project_name": "N",
+            "project_taxonomy_alias": None,
+            "product_id": None,
+            "product_name": None,
         }
+
+    def test_bound_product_round_trips(self):
+        """BE-9415: the MCP promotion path echoes where the project landed."""
+        result = ConversionResult(
+            task_id="t",
+            project_id="p",
+            project_name="N",
+            product_id="prod-1",
+            product_name="Giljo HQ",
+        )
+        assert result.product_id == "prod-1"
+        assert result.product_name == "Giljo HQ"
+
+    def test_taxonomy_alias_round_trips(self):
+        """BE-9382: the MCP promotion path reads the promoted project's serial back."""
+        result = ConversionResult(task_id="t", project_id="p", project_name="N", project_taxonomy_alias="0017")
+        assert result.project_taxonomy_alias == "0017"
 
     def test_from_attributes_config(self):
         assert ConversionResult.model_config.get("from_attributes") is True

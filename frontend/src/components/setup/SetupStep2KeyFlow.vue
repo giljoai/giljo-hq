@@ -123,7 +123,9 @@
       <!-- Main config command (bearer for CLI tools, JSON server config for generic) -->
       <div class="config-block smooth-border" data-testid="config-command-block">
         <div class="config-block-header">
-          <span class="config-block-label">{{ isGeneric ? 'Server config (key included)' : 'Paste in your terminal (key included)' }}</span>
+          <!-- FE-9383: name the client on the snippet itself — each CLI has its own
+               flag syntax, so an unlabeled command invites pasting it into the wrong tool. -->
+          <span class="config-block-label" data-testid="config-block-label">{{ isGeneric ? `${toolLabel} server config (key included)` : `Paste in your ${toolLabel} terminal (key included)` }}</span>
           <v-btn
             icon="mdi-content-copy"
             size="x-small"
@@ -149,6 +151,10 @@ defineProps({
   hasKey:            { type: Boolean, required: true },
   needsCertTrust:    { type: Boolean, required: true },
   activeNormalizedId: { type: String, required: true },
+  // Display name of the client this snippet targets (FE-9383). Defaulted so an
+  // existing mount that has not been updated degrades to the previous wording
+  // rather than rendering "undefined".
+  toolLabel:         { type: String,  default: 'your tool' },
   platform:          { type: String,  required: true },
   certCommand:       { type: String,  default: '' },
   envVarText:        { type: String,  default: '' },

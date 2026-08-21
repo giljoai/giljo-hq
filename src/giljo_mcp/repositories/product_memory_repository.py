@@ -27,20 +27,23 @@ from giljo_mcp.services.dto import MemoryEntryCreateParams
 logger = logging.getLogger(__name__)
 
 
-# BE-6082: tsvector document expression for 360-memory full-text search. MUST
-# stay byte-identical to ``_FTS_DOCUMENT`` in
-# ``migrations/versions/ce_0052_pme_fts_be6082.py`` so this query's expression
-# matches the ``idx_pme_fts`` GIN index and the planner uses it. Fields mirror
-# the client-side ``_matchesSearch`` haystack in ``memoryStore.js`` for parity.
-# JSONB columns (key_outcomes/decisions_made/tags) are cast with ``::text``
-# (jsonb_out is IMMUTABLE), not array_to_string — they are JSONB, not text[].
+# BE-6082 + BE-9469: tsvector document expression. MUST stay byte-identical to
+# ``_FTS_DOCUMENT`` in ``migrations/versions/ce_0096_pme_fts_git_commits_be9469.py``
+# (the CURRENT index-defining migration, not ce_0052's superseded original) so
+# this matches the ``idx_pme_fts`` GIN index and the planner uses it -- enforced
+# by ``test_be9469_pme_fts_git_commits_parity.py``, not just this comment.
+# Fields mirror the client-side ``_matchesSearch`` haystack in memoryStore.js.
+# JSONB columns (key_outcomes/decisions_made/tags/git_commits) are cast with
+# ``::text`` (jsonb_out is IMMUTABLE), not array_to_string. git_commits entries
+# are ``{"sha", "message", ...}`` dicts, so the cast reaches each commit message.
 _FTS_DOCUMENT_SQL = (
     "to_tsvector('english', "
     "coalesce(summary, '') || ' ' || "
     "coalesce(project_name, '') || ' ' || "
     "coalesce(key_outcomes::text, '') || ' ' || "
     "coalesce(decisions_made::text, '') || ' ' || "
-    "coalesce(tags::text, ''))"
+    "coalesce(tags::text, '') || ' ' || "
+    "coalesce(git_commits::text, ''))"
 )
 
 
@@ -775,10 +778,10 @@ class ProductMemoryRepository:
             limit: Maximum entries to return
             search_query: Optional full-text search term (BE-6082). When present,
                 entries are filtered + relevance-ranked via tsquery over summary,
-                project_name, key_outcomes, decisions_made and tags (the same
-                fields as the client-side browser haystack). If the tsquery
-                matches nothing usable (e.g. partial-word or stop-word terms),
-                falls back to an ILIKE substring scan over those same fields.
+                project_name, key_outcomes, decisions_made, tags, and git_commits
+                (BE-9469 -- commit messages are searchable). Falls back to an
+                ILIKE substring scan over those same fields when the tsquery
+                matches nothing usable (partial-word/stop-word terms).
             tag: Optional exact-tag filter (BE-6225b). When present, restricts the
                 result set to entries whose JSONB ``tags`` array contains this tag
                 (``tags @> '[tag]'``). ANDs with ``search_query`` when both are set.
@@ -888,6 +891,7 @@ class ProductMemoryRepository:
             cast(ProductMemoryEntry.key_outcomes, Text).ilike(pattern, escape="\\"),
             cast(ProductMemoryEntry.decisions_made, Text).ilike(pattern, escape="\\"),
             cast(ProductMemoryEntry.tags, Text).ilike(pattern, escape="\\"),
+            cast(ProductMemoryEntry.git_commits, Text).ilike(pattern, escape="\\"),
         )
         return (
             select(ProductMemoryEntry)

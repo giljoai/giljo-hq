@@ -11,7 +11,7 @@ tenant context exists, so every method takes a caller-controlled ``AsyncSession`
 and the table carries no ``tenant_key`` (the tenant guard skips it — see
 ``models/auth.py::LoginLockout``).
 
-Design (Patrik, SEC-3001a Wave 2 item 6):
+Design (SEC-3001a Wave 2 item 6):
 - Lock the **(identifier, IP)** pair, not the user row — so an attacker spamming
   a victim's email from another IP can never lock the victim out of their own
   (email, IP) pair (no lockout-as-DoS).
@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Patrik's design: 10 failed attempts from one (identifier, IP) pair → a 15-min
+# Design decision: 10 failed attempts from one (identifier, IP) pair → a 15-min
 # lockout that auto-unlocks. Module constants (not env flags) — the values are a
 # deliberate product decision, not a deployment knob.
 MAX_FAILED_ATTEMPTS = 10

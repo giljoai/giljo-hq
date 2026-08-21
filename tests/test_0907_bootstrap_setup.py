@@ -13,38 +13,50 @@ into a single download for first-time setup.
 import tomllib
 import zipfile
 from datetime import UTC
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
 from giljo_mcp.file_staging import FileStaging
+from giljo_mcp.models.templates import AgentTemplate
+from tests.helpers.model_factories import make_agent_template, strict_result
 
 
-def _make_template(name: str, role: str, description: str = "") -> MagicMock:
-    """Create a mock AgentTemplate with required fields."""
+def _make_template(name: str, role: str, description: str = "") -> AgentTemplate:
+    """Create an AgentTemplate stand-in with required fields.
+
+    INF-9399: a real transient instance, not a mock. The values are exactly the
+    ones this file already used; what changes is that every column NOT named
+    here reads None (or the factory's real-row default) instead of a truthy
+    child mock, so a column added to the model later cannot silently steer these
+    tests down a branch they never meant to take.
+    """
     from datetime import datetime
 
-    t = MagicMock()
-    t.name = name
-    t.role = role
-    t.description = description or f"Agent for {role}"
-    t.system_instructions = f"You are the {role} agent."
-    t.user_instructions = f"Handle {role} tasks."
-    t.behavioral_rules = "Follow project conventions."
-    t.success_criteria = "Deliver quality work."
-    t.model = "sonnet"
-    t.background_color = None
-    t.is_active = True
-    t.is_default = False
-    t.tenant_key = "test-tenant"
-    t.cli_tool = None
-    t.tools = None
-    t.updated_at = datetime(2026, 1, 1, tzinfo=UTC)
-    t.last_exported_at = None
-    return t
+    return make_agent_template(
+        name=name,
+        role=role,
+        description=description or f"Agent for {role}",
+        system_instructions=f"You are the {role} agent.",
+        user_instructions=f"Handle {role} tasks.",
+        behavioral_rules="Follow project conventions.",
+        success_criteria="Deliver quality work.",
+        model="sonnet",
+        background_color=None,
+        is_active=True,
+        is_default=False,
+        tenant_key="test-tenant",
+        # BE-9420: cli_tool is NOT NULL with its own default="claude", so an
+        # explicit None here modelled a row the database could never hold. Left
+        # unset, the factory applies that default. ``tools`` IS nullable
+        # ("null = inherit all"), so its None is a real shape and stays.
+        tools=None,
+        updated_at=datetime(2026, 1, 1, tzinfo=UTC),
+        last_exported_at=None,
+    )
 
 
-def _make_template_with_duplicate_bootstrap() -> MagicMock:
+def _make_template_with_duplicate_bootstrap() -> AgentTemplate:
     """Create a template matching legacy rows with duplicated MCP startup prose."""
     bootstrap = """## GiljoAI MCP Agent
 
@@ -73,7 +85,7 @@ Do not begin work until you have received and read your mission and protocols.""
     return template
 
 
-def _make_template_with_compact_duplicate_bootstrap() -> MagicMock:
+def _make_template_with_compact_duplicate_bootstrap() -> AgentTemplate:
     """Create a template matching compact legacy rows from exported Codex agents."""
     template = _make_template("Tester", "tester")
     template.system_instructions = """## GiljoAI MCP Agent
@@ -103,7 +115,7 @@ Do not begin work until you have received and read your mission and protocols.""
     return template
 
 
-def _make_template_with_regex_backslashes() -> MagicMock:
+def _make_template_with_regex_backslashes() -> AgentTemplate:
     """Create a template containing regex backslashes that must survive Codex TOML."""
     template = _make_template("Reviewer", "reviewer")
     template.user_instructions = (
@@ -134,11 +146,56 @@ def mock_session(templates):
     """Mock async DB session that returns templates."""
     session = AsyncMock()
     session.info = {}  # tenant_session_context save/restore target
-    result = MagicMock()
-    result.scalars.return_value.all.return_value = templates
+    # INF-9399: ONE result object answers EVERY query this session serves, so it
+    # states what each of those queries honestly returns for the DB these fixtures
+    # model -- one holding no product rows.
+    #
+    # This block is the case for the convention, written by its own history. Left
+    # bare it answered every query with a truthy child mock, and it had to be
+    # hand-pinned TWICE in two days: BE-9385a for the active-product lookup (the
+    # mock claimed a product existed, then that it had no enabled agents, so the
+    # ZIP shipped zero templates) and BE-9385b for the export-identity select,
+    # which reads .first() DIRECTLY rather than through .scalars(). Each pin fixed
+    # the query that had just landed and left the next one waiting. A query this
+    # result was not told about now names itself instead of inventing an answer.
+    result = strict_result(
+        "the 0907 staging session result",
+        scalars_all=templates,
+        scalars_first=None,
+        first=None,
+    )
     session.execute = AsyncMock(return_value=result)
     session.commit = AsyncMock()
     return session
+
+
+def test_the_fixture_models_a_row_the_database_could_hold():
+    """BE-9420: no NOT NULL column may read None on the fixture instance.
+
+    ``_make_template`` passed ``cli_tool=None`` explicitly, overriding the column's
+    own ``default="claude"`` on a ``nullable=False`` column -- a shape no real row
+    can ever have. Every test built on this fixture was therefore exercising the
+    staging code against a template the database would have refused to store.
+
+    Asserted across the whole NOT NULL set rather than ``cli_tool`` alone, because
+    the instance is the wrong altitude for this: each of those columns is either
+    named by the fixture or carries a Python default the factory applies, so the
+    next override that nulls one out fails HERE instead of quietly reintroducing
+    the same class of impossible row somewhere else in the file.
+    """
+    template = _make_template("Guard", "tester")
+
+    nulled = sorted(
+        column.name
+        for column in AgentTemplate.__table__.columns
+        if not column.nullable and getattr(template, column.name, None) is None
+    )
+
+    assert not nulled, (
+        f"{nulled} are NOT NULL on agent_templates but read None on this fixture, "
+        "so it models a row the database could never hold. Drop the explicit None "
+        "override and let the column's own default apply."
+    )
 
 
 class TestStageCombinedSetup:
@@ -263,8 +320,13 @@ class TestStageCombinedSetup:
         """Codex TOML removes legacy duplicated MCP startup blocks from role prose."""
         session = AsyncMock()
         session.info = {}  # tenant_session_context save/restore target
-        result = MagicMock()
-        result.scalars.return_value.all.return_value = [_make_template_with_duplicate_bootstrap()]
+        # INF-9399: see the mock_session fixture -- same one-result-answers-everything
+        # shape, same DB with no product rows.
+        result = strict_result(
+            scalars_all=[_make_template_with_duplicate_bootstrap()],
+            scalars_first=None,
+            first=None,
+        )
         session.execute = AsyncMock(return_value=result)
         session.commit = AsyncMock()
 
@@ -295,8 +357,13 @@ class TestStageCombinedSetup:
         """Codex TOML removes compact legacy MCP startup blocks from role prose."""
         session = AsyncMock()
         session.info = {}  # tenant_session_context save/restore target
-        result = MagicMock()
-        result.scalars.return_value.all.return_value = [_make_template_with_compact_duplicate_bootstrap()]
+        # INF-9399: see the mock_session fixture -- same one-result-answers-everything
+        # shape, same DB with no product rows.
+        result = strict_result(
+            scalars_all=[_make_template_with_compact_duplicate_bootstrap()],
+            scalars_first=None,
+            first=None,
+        )
         session.execute = AsyncMock(return_value=result)
         session.commit = AsyncMock()
 
@@ -325,8 +392,13 @@ class TestStageCombinedSetup:
         """Codex setup ZIP emits TOML that parses when instructions contain regex backslashes."""
         session = AsyncMock()
         session.info = {}  # tenant_session_context save/restore target
-        result = MagicMock()
-        result.scalars.return_value.all.return_value = [_make_template_with_regex_backslashes()]
+        # INF-9399: see the mock_session fixture -- same one-result-answers-everything
+        # shape, same DB with no product rows.
+        result = strict_result(
+            scalars_all=[_make_template_with_regex_backslashes()],
+            scalars_first=None,
+            first=None,
+        )
         session.execute = AsyncMock(return_value=result)
         session.commit = AsyncMock()
 
@@ -363,8 +435,15 @@ class TestStageCombinedSetup:
         """If no agent templates exist, ZIP still contains slash commands."""
         session = AsyncMock()
         session.info = {}  # tenant_session_context save/restore target
-        result = MagicMock()
-        result.scalars.return_value.all.return_value = []
+        # INF-9399: this block was never hand-pinned by BE-9385a or BE-9385b, and I
+        # assumed that meant the no-templates path short-circuits before the product
+        # lookup. It does not -- file_staging.py:507 calls active_product_template_ids()
+        # unconditionally, which reads .scalars().first(). So this fake HAS been
+        # answering that query with a truthy child mock all along, claiming an active
+        # product exists; the test passed anyway only because an empty template list
+        # makes the outcome the same either way. Silently wrong, accidentally
+        # harmless. The honest state for these fixtures is no active product.
+        result = strict_result(scalars_all=[], scalars_first=None)
         session.execute = AsyncMock(return_value=result)
 
         staging = FileStaging(db_session=session)

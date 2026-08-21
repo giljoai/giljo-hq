@@ -22,7 +22,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
-from giljo_mcp.models import AgentJob, AgentTemplate, Project
+from giljo_mcp.models import AgentJob, AgentTemplate, Product, Project
 
 
 # ============================================================================
@@ -58,6 +58,16 @@ async def test_project(db_session, test_tenant_key, test_agent_templates) -> Pro
     """Create test project with templates pre-seeded."""
     from datetime import datetime
 
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=test_tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         id=str(uuid.uuid4()),
         name="Phase Label Test Project",
@@ -65,6 +75,7 @@ async def test_project(db_session, test_tenant_key, test_agent_templates) -> Pro
         mission="Test mission for phase labels",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=_owning_product_project.id,
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
         series_number=random.randint(1, 9000),
@@ -244,6 +255,16 @@ class TestOrchestratorPhaseInstructions:
         service = OrchestrationService(db_manager=db_manager, tenant_manager=tenant_manager, test_session=db_session)
 
         # Create project in multi_terminal mode (default)
+        # BE-9437: a project belongs to a product. Its own, so an active
+        # seed cannot collide under idx_project_single_active_per_product.
+        _owning_product_project = Product(
+            id=str(uuid.uuid4()),
+            tenant_key=test_tenant_key,
+            name=f"Owning Product {uuid.uuid4().hex[:6]}",
+            description="seeded",
+            is_active=False,
+        )
+        db_session.add(_owning_product_project)
         project = Project(
             id=str(uuid.uuid4()),
             name="Multi-Terminal Phase Test",
@@ -251,6 +272,7 @@ class TestOrchestratorPhaseInstructions:
             mission="Test mission",
             status="active",
             tenant_key=test_tenant_key,
+            product_id=_owning_product_project.id,
             execution_mode="multi_terminal",
             implementation_launched_at=datetime.now(UTC),
             series_number=random.randint(1, 9000),
@@ -303,6 +325,16 @@ class TestOrchestratorPhaseInstructions:
         service = OrchestrationService(db_manager=db_manager, tenant_manager=tenant_manager, test_session=db_session)
 
         # Create project in claude_code_cli mode
+        # BE-9437: a project belongs to a product. Its own, so an active
+        # seed cannot collide under idx_project_single_active_per_product.
+        _owning_product_project = Product(
+            id=str(uuid.uuid4()),
+            tenant_key=test_tenant_key,
+            name=f"Owning Product {uuid.uuid4().hex[:6]}",
+            description="seeded",
+            is_active=False,
+        )
+        db_session.add(_owning_product_project)
         project = Project(
             id=str(uuid.uuid4()),
             name="CLI Mode Phase Test",
@@ -310,6 +342,7 @@ class TestOrchestratorPhaseInstructions:
             mission="Test mission",
             status="active",
             tenant_key=test_tenant_key,
+            product_id=_owning_product_project.id,
             execution_mode="claude_code_cli",
             implementation_launched_at=datetime.now(UTC),
             series_number=random.randint(1, 9000),

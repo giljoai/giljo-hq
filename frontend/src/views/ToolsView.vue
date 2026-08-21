@@ -162,6 +162,25 @@
                 class="mt-2"
                 style="max-width: 400px;"
               />
+              <!-- FE-9296b: the account-level check-in cadence that replaced the
+                   per-project auto check-in slider. -->
+              <v-text-field
+                v-model.number="agentCheckinCadenceMinutes"
+                type="number"
+                label="Agent Check-in Cadence (minutes)"
+                hint="How often waiting agents check in for new work. Agents on a harness with live wake signals use this as a heartbeat; all others sleep this long between checks."
+                persistent-hint
+                variant="outlined"
+                :min="1"
+                :max="1440"
+                :rules="[
+                  v => (v >= 1 && v <= 1440) || 'Must be between 1 and 1440 minutes',
+                  v => Number.isInteger(v) || 'Must be a whole number',
+                ]"
+                data-test="checkin-cadence-input"
+                class="mt-2"
+                style="max-width: 400px;"
+              />
             </div>
           </v-card-text>
           <v-card-actions>
@@ -330,6 +349,8 @@ const showCertModal = ref(false)
 const serenaEnabled = ref(false)
 const toggling = ref(false)
 const agentSilenceThresholdMinutes = ref(10)
+// FE-9296b: account-level agent check-in cadence (replaced the per-project slider)
+const agentCheckinCadenceMinutes = ref(10)
 
 // Git Integration state (system-level like Serena)
 // This state is shared with ContextPriorityConfig via props
@@ -363,6 +384,8 @@ async function saveNotificationSettings() {
     // FE-9241: the silence threshold now saves in both editions (CE writes the
     // deployment-wide default; SaaS writes a per-tenant override) — same API path.
     await settingsStore.updateAgentSilenceThreshold(agentSilenceThresholdMinutes.value)
+    // FE-9296b: same dual-edition hosting for the check-in cadence.
+    await settingsStore.updateAgentCheckinCadence(agentCheckinCadenceMinutes.value)
   } catch (error) {
     console.error('Failed to save notification settings:', error)
     showToast({ message: 'Failed to save notification settings. Please try again.', type: 'error' })
@@ -375,6 +398,7 @@ function resetNotificationSettings() {
     duration: 5,
   }
   agentSilenceThresholdMinutes.value = 10
+  agentCheckinCadenceMinutes.value = 10
 }
 
 async function loadEditionMode() {
@@ -439,6 +463,8 @@ onMounted(async () => {
   }
   // FE-9241: the silence threshold now loads in both editions (see saveNotificationSettings).
   agentSilenceThresholdMinutes.value = await settingsStore.loadAgentSilenceThreshold()
+  // FE-9296b: the check-in cadence loads the same way.
+  agentCheckinCadenceMinutes.value = await settingsStore.loadAgentCheckinCadence()
 
   // Load git integration settings (system-level)
   await loadGitSettings()

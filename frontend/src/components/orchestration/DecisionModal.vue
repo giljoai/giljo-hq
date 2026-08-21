@@ -81,7 +81,7 @@ const liveApproval = computed(() => {
 // POST /decide response does. Without the snapshot, the WS event clears the
 // store row, the v-if below flips false, ApprovalCard unmounts mid-await,
 // and ApprovalCard's 'decided' emit fires into a dead listener — the parent
-// never learns the user clicked. Reproduced in Chrome devtools on dogfood.
+// never learns the user clicked. Reproduced in Chrome devtools on the test install.
 const stickyApproval = ref(null)
 watch(
   liveApproval,

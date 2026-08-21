@@ -43,6 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.models.tasks import Message
 from giljo_mcp.repositories.agent_completion_repository import AgentCompletionRepository
 from giljo_mcp.repositories.comm_thread_repository import CommThreadRepository
+from giljo_mcp.utils.log_sanitizer import sanitize
 
 
 logger = logging.getLogger(__name__)
@@ -198,10 +199,10 @@ async def resolve_terminal_agent_cursors(
                 logger.warning(
                     "BE-9242: no live orchestrator to forward action-required message %s "
                     "(dead agent %s, project %s, status %s) -- leaving cursor unresolved",
-                    message.id,
-                    agent_id,
-                    project_id,
-                    terminal_status,
+                    sanitize(message.id),
+                    sanitize(agent_id),
+                    sanitize(project_id),
+                    sanitize(terminal_status),
                 )
         else:
             ids_to_ack.append(message.id)

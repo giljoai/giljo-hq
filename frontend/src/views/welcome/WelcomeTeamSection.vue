@@ -4,7 +4,7 @@
       <div class="section-label mb-0">Your Team</div>
       <div class="d-flex align-center ga-2">
         <v-tooltip v-if="hasStaleAgents" location="bottom" max-width="300">
-          <template v-slot:activator="{ props }">
+          <template #activator="{ props }">
             <span v-bind="props" class="stale-agents-warning">
               <v-icon size="14">mdi-alert</v-icon> Re-export agents
             </span>

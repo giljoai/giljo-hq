@@ -34,7 +34,7 @@ describe('commHubStore — unread + baton (FE-6054f)', () => {
     // Seed a current user
     userStore.currentUser = {
       id: 'user-001',
-      display_name: 'Patrik',
+      display_name: 'Sam Rivera',
       tenant_key: 'tenant-abc',
     }
     // Seed a thread so handleThreadMessage has context

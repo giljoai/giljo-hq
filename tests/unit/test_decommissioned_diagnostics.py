@@ -22,9 +22,9 @@ from uuid import uuid4
 import pytest
 
 from giljo_mcp.exceptions import ResourceNotFoundError
-from giljo_mcp.models.agent_identity import AgentExecution
 from giljo_mcp.services.orchestration_service import OrchestrationService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.model_factories import make_agent_execution
 
 
 def _make_mock_execution(
@@ -33,14 +33,14 @@ def _make_mock_execution(
     tenant_key: str = "test-tenant",
 ) -> Mock:
     """Create a mock AgentExecution with the given status."""
-    exe = Mock(spec=AgentExecution)
-    exe.status = status
-    exe.job_id = job_id or str(uuid4())
-    exe.tenant_key = tenant_key
-    exe.agent_id = str(uuid4())
-    exe.agent_display_name = "test-agent"
-    exe.started_at = datetime.now(UTC)
-    return exe
+    return make_agent_execution(
+        status=status,
+        job_id=job_id or str(uuid4()),
+        tenant_key=tenant_key,
+        agent_id=str(uuid4()),
+        agent_display_name="test-agent",
+        started_at=datetime.now(UTC),
+    )
 
 
 class TestDecommissionedDiagnostics:

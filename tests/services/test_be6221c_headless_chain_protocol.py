@@ -31,7 +31,6 @@ from __future__ import annotations
 import json
 
 import pytest
-from mcp.shared.memory import create_connected_server_and_client_session
 
 # Importing the transport module registers every @mcp.tool on the shared instance.
 from api.endpoints.mcp_sdk_server import mcp
@@ -42,6 +41,7 @@ from giljo_mcp.services.protocol_sections.chapters_chain import (
 )
 from giljo_mcp.services.protocol_sections.orchestrator_body import trim_embedded_protocol_for_chain
 from giljo_mcp.tools.giljo_guide import build_giljo_guide
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 _MODE = "multi_terminal"
@@ -122,7 +122,7 @@ async def test_guide_headless_chain_recipe_surfaces_over_transport() -> None:
     get_giljo_guide @mcp.tool transport, not merely from the in-process function."""
     async with create_connected_server_and_client_session(mcp) as session:
         result = await session.call_tool("get_giljo_guide", {})
-    assert result.isError is False, f"get_giljo_guide errored at the transport boundary: {result}"
+    assert result.is_error is False, f"get_giljo_guide errored at the transport boundary: {result}"
     guide = json.loads(result.content[0].text)["guide"]
     assert "start_chain_run" in guide
     assert "get_staging_instructions" in guide

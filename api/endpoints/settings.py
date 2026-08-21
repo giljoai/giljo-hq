@@ -23,7 +23,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session, require_admin
 from giljo_mcp.models import User
-from giljo_mcp.services.settings_service import SettingsService, SystemSettingsService
+from giljo_mcp.services.settings_service import (
+    DEFAULT_AGENT_CHECKIN_CADENCE_MINUTES,
+    SettingsService,
+    SystemSettingsService,
+)
 from giljo_mcp.services.silence_detector import DEFAULT_SILENCE_THRESHOLD_MINUTES
 from giljo_mcp.services.tenant_configuration_service import TenantConfigurationService
 from giljo_mcp.utils.log_sanitizer import sanitize
@@ -68,6 +72,24 @@ class AgentSilenceThresholdResponse(BaseModel):
 
 class AgentSilenceThresholdUpdateResponse(AgentSilenceThresholdResponse):
     """Deployment-wide agent silence threshold update response."""
+
+    message: str
+
+
+class AgentCheckinCadenceUpdate(BaseModel):
+    """Update request for the account-level agent check-in cadence (FE-9296b)."""
+
+    agent_checkin_cadence_minutes: int = Field(ge=1)
+
+
+class AgentCheckinCadenceResponse(BaseModel):
+    """Account-level agent check-in cadence response."""
+
+    agent_checkin_cadence_minutes: int
+
+
+class AgentCheckinCadenceUpdateResponse(AgentCheckinCadenceResponse):
+    """Account-level agent check-in cadence update response."""
 
     message: str
 
@@ -176,6 +198,70 @@ async def update_agent_silence_threshold(
 
     return AgentSilenceThresholdUpdateResponse(
         agent_silence_threshold_minutes=threshold,
+        message="Settings updated successfully",
+    )
+
+
+# FE-9296b: the account-level "how often should agents check in" default that
+# replaced the per-project auto check-in slider. Hosted exactly like the silence
+# threshold above: CE reads/writes the server-global value in system_settings;
+# SaaS reads/writes this tenant's own override in `configurations`.
+@router.get(
+    "/system/agent-checkin-cadence",
+    response_model=AgentCheckinCadenceResponse,
+    summary="Get the agent check-in cadence",
+    description="CE: the server-global cadence in minutes. SaaS: this tenant's own "
+    "override if set, else the deployment-wide default.",
+)
+async def get_agent_checkin_cadence(
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> AgentCheckinCadenceResponse:
+    logger.debug("User %s retrieving agent check-in cadence", sanitize(current_user.username))
+
+    from api.app_state import GILJO_MODE, state
+
+    if GILJO_MODE == "saas":
+        tenant_service = TenantConfigurationService(db_manager=state.db_manager, tenant_key=current_user.tenant_key)
+        override = await tenant_service.get_agent_checkin_cadence_minutes()
+        if override is not None:
+            return AgentCheckinCadenceResponse(agent_checkin_cadence_minutes=override)
+
+    # CE always reaches here; SaaS only when no tenant override is set (fallback).
+    deployment_default = await SystemSettingsService(db).get_agent_checkin_cadence_minutes()
+    return AgentCheckinCadenceResponse(
+        agent_checkin_cadence_minutes=deployment_default or DEFAULT_AGENT_CHECKIN_CADENCE_MINUTES
+    )
+
+
+@router.put(
+    "/system/agent-checkin-cadence",
+    response_model=AgentCheckinCadenceUpdateResponse,
+    summary="Update the agent check-in cadence",
+    description="CE: the server-global cadence in minutes (admin only). SaaS: this tenant's own override (admin only).",
+)
+async def update_agent_checkin_cadence(
+    request: AgentCheckinCadenceUpdate,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db_session),
+) -> AgentCheckinCadenceUpdateResponse:
+    logger.info("Admin %s updating agent check-in cadence", sanitize(current_user.username))
+
+    from api.app_state import GILJO_MODE, state
+
+    if GILJO_MODE == "saas":
+        tenant_service = TenantConfigurationService(db_manager=state.db_manager, tenant_key=current_user.tenant_key)
+        cadence = await tenant_service.set_agent_checkin_cadence_minutes(request.agent_checkin_cadence_minutes)
+        return AgentCheckinCadenceUpdateResponse(
+            agent_checkin_cadence_minutes=cadence,
+            message="Settings updated successfully",
+        )
+
+    service = SystemSettingsService(db)
+    cadence = await service.update_agent_checkin_cadence_minutes(request.agent_checkin_cadence_minutes)
+
+    return AgentCheckinCadenceUpdateResponse(
+        agent_checkin_cadence_minutes=cadence,
         message="Settings updated successfully",
     )
 

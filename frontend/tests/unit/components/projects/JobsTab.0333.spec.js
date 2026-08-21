@@ -19,11 +19,23 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createVuetify } from 'vuetify'
+import { createRouter, createMemoryHistory } from 'vue-router'
 import JobsTab from '@/components/projects/JobsTab.vue'
 import { useUserStore } from '@/stores/user'
 import { useProjectStateStore } from '@/stores/projectStateStore'
 
 const vuetify = createVuetify()
+
+// FE-9427: JobsTab reaches useRouter() through useJobActions (openAgentThread
+// pushes the named 'Hub' route). Mounted without a router that returned
+// `undefined`, so the deep-link path was inert.
+const hubRouter = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: '/', name: 'Root', component: { template: '<div />' } },
+    { path: '/hub', name: 'Hub', component: { template: '<div />' } },
+  ],
+})
 
 // Mock API
 vi.mock('@/services/api', () => ({
@@ -100,7 +112,7 @@ describe('JobsTab shouldShowCopyButton behavior (0333 Phase 3)', () => {
           allAgentsComplete: false,
         },
         global: {
-          plugins: [pinia, vuetify],
+          plugins: [pinia, vuetify, hubRouter],
           stubs: {
             'v-tooltip': true,
             'v-dialog': true,
@@ -141,7 +153,7 @@ describe('JobsTab shouldShowCopyButton behavior (0333 Phase 3)', () => {
           allAgentsComplete: false,
         },
         global: {
-          plugins: [pinia, vuetify],
+          plugins: [pinia, vuetify, hubRouter],
           stubs: {
             'v-tooltip': true,
             'v-dialog': true,
@@ -179,7 +191,7 @@ describe('JobsTab shouldShowCopyButton behavior (0333 Phase 3)', () => {
           allAgentsComplete: false,
         },
         global: {
-          plugins: [pinia, vuetify],
+          plugins: [pinia, vuetify, hubRouter],
           stubs: {
             'v-tooltip': true,
             'v-dialog': true,
@@ -217,7 +229,7 @@ describe('JobsTab shouldShowCopyButton behavior (0333 Phase 3)', () => {
           allAgentsComplete: false,
         },
         global: {
-          plugins: [pinia, vuetify],
+          plugins: [pinia, vuetify, hubRouter],
           stubs: {
             'v-tooltip': true,
             'v-dialog': true,
@@ -256,7 +268,7 @@ describe('JobsTab shouldShowCopyButton behavior (0333 Phase 3)', () => {
           allAgentsComplete: false,
         },
         global: {
-          plugins: [pinia, vuetify],
+          plugins: [pinia, vuetify, hubRouter],
           stubs: {
             'v-tooltip': true,
             'v-dialog': true,
@@ -297,7 +309,7 @@ describe('JobsTab shouldShowCopyButton behavior (0333 Phase 3)', () => {
           allAgentsComplete: false,
         },
         global: {
-          plugins: [pinia, vuetify],
+          plugins: [pinia, vuetify, hubRouter],
           stubs: {
             'v-tooltip': true,
             'v-dialog': true,
@@ -335,7 +347,7 @@ describe('JobsTab shouldShowCopyButton behavior (0333 Phase 3)', () => {
           allAgentsComplete: false,
         },
         global: {
-          plugins: [pinia, vuetify],
+          plugins: [pinia, vuetify, hubRouter],
           stubs: {
             'v-tooltip': true,
             'v-dialog': true,
@@ -373,7 +385,7 @@ describe('JobsTab shouldShowCopyButton behavior (0333 Phase 3)', () => {
           allAgentsComplete: false,
         },
         global: {
-          plugins: [pinia, vuetify],
+          plugins: [pinia, vuetify, hubRouter],
           stubs: {
             'v-tooltip': true,
             'v-dialog': true,
@@ -411,7 +423,7 @@ describe('JobsTab shouldShowCopyButton behavior (0333 Phase 3)', () => {
           allAgentsComplete: false,
         },
         global: {
-          plugins: [pinia, vuetify],
+          plugins: [pinia, vuetify, hubRouter],
           stubs: {
             'v-tooltip': true,
             'v-dialog': true,
@@ -451,7 +463,7 @@ describe('JobsTab shouldShowCopyButton behavior (0333 Phase 3)', () => {
           allAgentsComplete: false,
         },
         global: {
-          plugins: [pinia, vuetify],
+          plugins: [pinia, vuetify, hubRouter],
           stubs: {
             'v-tooltip': true,
             'v-dialog': true,

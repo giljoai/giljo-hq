@@ -59,8 +59,21 @@ async def _seed_active_job(session: AsyncSession, tenant_key: str, started_at: d
     an execution past the abandon ceiling (exercises the auto-fail handler).
     """
     suffix = uuid.uuid4().hex[:8]
+    # BE-9437: a project belongs to a product. Its own, so the ACTIVE status here
+    # cannot collide with another seed under idx_project_single_active_per_product.
+    product = Product(
+        id=str(uuid.uuid4()),
+        name=f"BE6004C-5 HealthProd {suffix}",
+        tenant_key=tenant_key,
+        is_active=False,
+        product_memory={},
+    )
+    session.add(product)
+    await session.flush()
+
     project = Project(
         id=str(uuid.uuid4()),
+        product_id=product.id,
         name=f"BE6004C-5 HealthProj {suffix}",
         description="RC-5 health-scan seed.",
         mission="m",
@@ -112,8 +125,13 @@ async def _seed_expired_deleted(session: AsyncSession, tenant_key: str) -> None:
     )
     session.add(product)
 
+    await session.flush()  # the product must exist before the project's FK points at it
+
     project = Project(
         id=str(uuid.uuid4()),
+        # BE-9437: binds to the soft-deleted product seeded just above, which is
+        # the pairing this purge test is actually about.
+        product_id=product.id,
         name=f"BE6004C-5 DeletedProj {suffix}",
         description="RC-5 purge seed.",
         mission="m",

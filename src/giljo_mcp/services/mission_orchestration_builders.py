@@ -28,6 +28,8 @@ from giljo_mcp.services.vision_hash import (
     compute_vision_inputs_hash,
     vision_inputs_hash_matches_consolidated,
 )
+from giljo_mcp.system_prompts.identity_provenance import append_identity_source, format_identity_source
+from giljo_mcp.system_prompts.service import SCOPE_DEFAULT
 
 
 logger = logging.getLogger(__name__)
@@ -253,6 +255,67 @@ def check_staging_redirect(project: Any, job_id: str, *, is_chain_member: bool =
     return None
 
 
+def build_identity_source_line(ctx: dict[str, Any]) -> str:
+    """The FE-9408 provenance line for a staging orchestrator, from gathered context.
+
+    One place, because the staging response states it TWICE and the two must agree:
+    appended to ``orchestrator_identity`` for a normal orchestrator, and carried in the
+    ``identity`` dict so the chain SUB-ORCHESTRATOR keeps it -- that role takes the
+    BE-6212 early return below and never receives the identity text at all, so the dict
+    is the only channel it has. Two statements of one fact that could disagree is worse
+    than one, since it is the disagreement an operator would then have to resolve.
+
+    Pure formatting off ctx: the product row was loaded during context assembly, so
+    naming it costs no query here. A missing/None ``orchestrator_override`` (the read
+    failed, and the caller fell back to the packaged seed) reports the built-in default,
+    which is what that fallback actually served.
+    """
+    override = ctx.get("orchestrator_override")
+    product = ctx.get("product")
+    return format_identity_source(
+        getattr(override, "scope", None) or SCOPE_DEFAULT,
+        updated_at=getattr(override, "updated_at", None),
+        product_name=getattr(product, "name", None) if product is not None else None,
+    )
+
+
+def build_orchestrator_identity_block(ctx: dict[str, Any], *, job_id: str, tenant_key: str) -> dict[str, Any]:
+    """The staging response's ``identity`` block -- who this orchestrator is, and where
+    its persona came from.
+
+    Extracted here (FE-9408) rather than grown in place: ``_build_orchestrator_response``
+    sat at its shrink-only length budget, and a size gate refusing new logic in a
+    full function is a placement signal, not an obstacle to work around. This module is
+    where that file's builders already live (BE-9073).
+
+    ``product_name`` and ``identity_source`` are the additions. The rest is moved
+    verbatim, including CE-0033's hoisted ``product_id`` and the id glossary.
+    """
+    project = ctx["project"]
+    product = ctx.get("product")
+    return {
+        "job_id": job_id,
+        "agent_id": ctx["execution"].agent_id,
+        "project_id": str(project.id),
+        "project_name": project.name,
+        # CE-0033 Task 2: hoist product_id so orchestrators don't have to mine it from a
+        # hardcoded protocol example. get_context requires it; surfacing it here makes
+        # the identity self-sufficient.
+        "product_id": str(product.id) if product is not None else None,
+        # FE-9408: the ~10-token breadcrumb -- a staging orchestrator can cross-check the
+        # product it was handed against the one it believes it is working on.
+        "product_name": getattr(product, "name", None) if product is not None else None,
+        "identity_source": build_identity_source_line(ctx),
+        "tenant_key": tenant_key,
+        "id_glossary": {
+            "job_id": "Use for: report_progress, complete_job, set_agent_status",
+            "agent_id": "Use for: post_to_thread(from_agent), get_thread_history(as_participant)",
+            "project_id": "Use for: update_project_mission, spawn_job, get_workflow_status, write_project_closeout",
+            "product_id": "Use for: get_context (REQUIRED — product-scoped context)",
+        },
+    }
+
+
 def attach_protocol_and_identity(
     response: dict[str, Any],
     *,
@@ -290,4 +353,10 @@ def attach_protocol_and_identity(
 
     response["orchestrator_protocol"] = _build_orchestrator_protocol(**build_kwargs)
     override_content = ctx.get("orchestrator_prompt_override")
-    response["orchestrator_identity"] = compose_orchestrator_identity(override_content, tool=protocol_tool)
+    # FE-9408: the same composition, plus one line naming the rung it came from. The
+    # append is the only change to this text -- everything before it is byte-for-byte
+    # what a staging orchestrator received yesterday.
+    response["orchestrator_identity"] = append_identity_source(
+        compose_orchestrator_identity(override_content, tool=protocol_tool),
+        build_identity_source_line(ctx),
+    )

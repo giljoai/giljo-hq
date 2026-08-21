@@ -15,7 +15,6 @@ All endpoints enforce multi-tenant isolation and authentication.
 """
 
 import logging
-import os
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -39,6 +38,7 @@ from api.schemas.prompt import (
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.exceptions import BaseGiljoError, ProjectStateError, ResourceNotFoundError
+from giljo_mcp.http.url_resolver import get_public_url
 from giljo_mcp.models import Project, User
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.platform_registry import (
@@ -820,11 +820,11 @@ async def _resolve_conductor_job_id(run: dict, tenant_key: str, db: AsyncSession
 def _conductor_mcp_url() -> str:
     """MCP server URL for the conductor bootstrap.
 
-    Same env read the SOLO staging path uses (StagingPromptBuilder.build_thin_prompt /
-    ThinClientPromptGenerator._get_public_base_url) so the chain prompt and the solo
-    prompt point at one source of truth.
-    """
-    return os.environ.get("GILJO_PUBLIC_URL", "http://localhost:7272")
+    Routes through the one accessor the SOLO staging path also uses, so the chain
+    and solo prompts share both the value AND its normalisation. Before BE-9442
+    they shared only the value — this site did not strip a trailing slash and the
+    thin-prompt path did (see url_resolver.get_public_url)."""
+    return get_public_url()
 
 
 def _build_conductor_bootstrap(*, identity: dict, mcp_url: str, phase: str, harness_is_claude: bool) -> str:

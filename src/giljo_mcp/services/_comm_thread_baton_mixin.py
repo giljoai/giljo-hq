@@ -31,7 +31,12 @@ from typing import Any
 from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
 from giljo_mcp.models.comm import CHT_TAXONOMY_ABBR
 from giljo_mcp.schemas.comm_serializers import thread_dict
-from giljo_mcp.services.comm_baton_targets import baton_target_rejection, resolve_operator_alias
+from giljo_mcp.services.comm_baton_targets import (
+    _is_tenant_user,
+    baton_target_rejection,
+    resolve_operator_alias,
+)
+from giljo_mcp.services.comm_handover_notification import notify_baton_handed_to_operator
 from giljo_mcp.utils.taxonomy_alias import format_taxonomy_alias
 
 
@@ -76,8 +81,19 @@ class CommThreadBatonMixin:
             # is waiting rather than talking. It is thread-agnostic, so it stamps every
             # thread this agent belongs to.
             await self._repo.touch_participant_last_seen(session, tk, agent_id)
-            mine = await self._repo.list_threads(session, tk, next_action_owner=agent_id)
-            broadcast = await self._repo.list_threads(session, tk, next_action_owner="all")
+            # BE-9388: both arms are non-terminal, and the 'all' arm requires
+            # PARTICIPATION. Without the first, a resolved thread holds its baton
+            # holder's turn forever; without the second, 'all' matches every agent
+            # in the tenant rather than the thread's own participants — which is
+            # what the write side has always meant by it (_wake_targets fans an
+            # 'all' hand-off out to participant_ids) and what the baton refusal
+            # hint already promises callers. Kept as two queries rather than one
+            # OR'd query so the mine-then-broadcast order external callers
+            # pattern-match is preserved exactly.
+            mine = await self._repo.list_threads(session, tk, next_action_owner=agent_id, exclude_terminal=True)
+            broadcast = await self._repo.list_threads(
+                session, tk, next_action_owner="all", exclude_terminal=True, participant_id=agent_id
+            )
             # Baton-derived entries FIRST, in their existing order (dicts preserve
             # insertion order) — the legacy shape external callers key on.
             threads = {t.id: t for t in [*mine, *broadcast]}
@@ -91,6 +107,16 @@ class CommThreadBatonMixin:
                 if t.id not in threads:
                     threads[t.id] = t
             directives = await self._repo.get_active_loop_directives_for_agent(session, tk, agent_id)
+            # FE-9296b: a directive armed WITHOUT an explicit cadence means "use
+            # the account-level default" — fill it server-side so every harness
+            # reads one concrete number instead of inventing its own. Resolved
+            # lazily (only when a None-interval directive exists — this is a hot
+            # poll path) and never fatal to the read (None on failure).
+            default_cadence: int | None = None
+            if any(d["interval_minutes"] is None for d in directives):
+                from giljo_mcp.services.settings_service import resolve_checkin_cadence_safe
+
+                default_cadence = await resolve_checkin_cadence_safe(session, tk)
             return {
                 "agent_id": agent_id,
                 "count": len(threads),
@@ -100,14 +126,78 @@ class CommThreadBatonMixin:
                     {
                         "thread_id": d["thread_id"],
                         "chat_id": format_taxonomy_alias(CHT_TAXONOMY_ABBR, d["serial"]),
-                        "interval_minutes": d["interval_minutes"],
+                        "interval_minutes": (
+                            d["interval_minutes"] if d["interval_minutes"] is not None else default_cadence
+                        ),
                     }
                     for d in directives
                 ],
             }
 
-    async def pass_baton(self, *, thread_id: str, to: str, tenant_key: str | None = None) -> dict[str, Any]:
-        """Hand the baton: set next_action_owner to an agent_id / user_id / 'all' / 'none'."""
+    async def _handoff_identity(
+        self, session, tenant_key: str, thread_id: str, from_agent: str | None
+    ) -> tuple[str | None, str | None]:
+        """(display_name, kind) of whoever is handing the baton — LOOKUP ONLY.
+
+        Deliberately NOT ``resolve_and_register_author``: that one upserts a
+        participant row and stamps last_seen_at, which is right for a POST (writing a
+        message is participation) and wrong here. A hand-off should not silently mint
+        a directory entry for a caller who never joined, and a caller that HAS joined
+        already has the friendly name we want.
+
+        Returns ``(None, None)`` when the passer is anonymous, which keeps the WS
+        payload byte-identical to its pre-BE-9296a shape rather than inventing a name.
+        """
+        if not from_agent:
+            return None, None
+        participant = await self._repo.get_participant(session, tenant_key, thread_id, from_agent)
+        if participant is None:
+            # An unregistered slug is legitimate (ad-hoc lane ids are real), so fall
+            # back to it rather than refusing — the same tolerance the author resolver
+            # applies. It is a name to show, not a routing key.
+            return from_agent, "agent"
+        return (participant.display_name or from_agent), (participant.participant_type or "agent")
+
+    async def collect_handover_notice(
+        self, session, tenant_key: str, thread, owner: str | None, handed_by: str | None
+    ) -> dict[str, Any] | None:
+        """Kwargs for the operator's durable bell row, or None when it does not apply.
+
+        Split from the emit so the DB reads happen INSIDE the caller's session while
+        the write happens after it commits. Returns None for every hand-off that is
+        not to the human — an agent-to-agent baton is coordination, not something to
+        interrupt the operator about.
+        """
+        if not owner or owner == "none":
+            return None
+        if not await _is_tenant_user(self._user_repo, session, tenant_key, owner):
+            return None
+        return {
+            "db_manager": self._db_manager,
+            "session": self._session,
+            "tenant_key": tenant_key,
+            "user_id": owner,
+            "thread_id": thread.id,
+            # Read here, while the instance is still attached to a live session.
+            "chat_id": thread.taxonomy_alias or thread.id,
+            "handed_by": handed_by,
+        }
+
+    @staticmethod
+    async def emit_handover_notice(notice: dict[str, Any] | None) -> None:
+        """Write the collected bell row. Call only AFTER the baton has committed."""
+        if notice:
+            await notify_baton_handed_to_operator(**notice)
+
+    async def pass_baton(
+        self, *, thread_id: str, to: str, from_agent: str | None = None, tenant_key: str | None = None
+    ) -> dict[str, Any]:
+        """Hand the baton: set next_action_owner to an agent_id / user_id / 'all' / 'none'.
+
+        BE-9296a: ``from_agent`` is optional and names the HANDER, so the operator's
+        bell can say who is waiting on them instead of only which thread. Omitting it
+        preserves the previous behaviour exactly.
+        """
         tk = self._resolve_tenant(tenant_key)
         if not to:
             raise ValidationError("to is required", context={"operation": "comm_thread.pass_baton"})
@@ -130,4 +220,32 @@ class CommThreadBatonMixin:
             if rejection is not None:
                 return rejection
             thread = await self._repo.set_next_action_owner(session, tk, thread_id, owner)
-            return {"thread_id": thread_id, "next_action_owner": thread.next_action_owner}
+            # BE-9296a: the 'all' baton lands in EVERY participant's get_my_turn, so
+            # it wakes every participant; a named baton wakes exactly one. Read here,
+            # inside the session; signalled below, after it commits.
+            participant_ids = (
+                [p.participant_id for p in await self._repo.get_participants(session, tk, thread_id)]
+                if to == "all"
+                else []
+            )
+            wake_targets = self._wake_targets(
+                to_participant=None,
+                requires_action=False,
+                baton_to=to,
+                participant_ids=participant_ids,
+            )
+            hander_name, hander_kind = await self._handoff_identity(session, tk, thread_id, from_agent)
+            notice = await self.collect_handover_notice(session, tk, thread, owner, hander_name)
+            result = {
+                "thread_id": thread_id,
+                "next_action_owner": thread.next_action_owner,
+                # BE-9296a (additive): returned so the WS emit can name the hander
+                # without a second round trip. None when the passer is anonymous.
+                "from_display_name": hander_name,
+                "from_kind": hander_kind,
+            }
+
+        # Committed — see the same note on post_to_thread.
+        self._signal_wake(tk, wake_targets)
+        await self.emit_handover_notice(notice)
+        return result

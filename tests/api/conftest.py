@@ -151,7 +151,6 @@ async def auth_headers(db_manager, api_client) -> dict:
     Returns:
         dict: {"Cookie": "access_token=<token>; csrf_token=<csrf>", "X-CSRF-Token": "<csrf>"}
     """
-    import os
 
     # Create a unique test user for each test run (prevents fixture collisions)
     from uuid import uuid4
@@ -192,9 +191,6 @@ async def auth_headers(db_manager, api_client) -> dict:
         )
         session.add(user)
         await session.commit()
-
-        # Ensure JWT secret available for test token creation
-        os.environ.setdefault("JWT_SECRET", "test_secret_key")
 
         # Generate token for the user
         token = JWTManager.create_access_token(

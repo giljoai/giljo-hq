@@ -527,6 +527,13 @@ export const api = {
       apiClient.put('/api/v1/settings/system/agent-silence-threshold', {
         agent_silence_threshold_minutes: minutes,
       }),
+    // FE-9296b: account-level agent check-in cadence (replaced the per-project slider)
+    getAgentCheckinCadence: () =>
+      apiClient.get('/api/v1/settings/system/agent-checkin-cadence'),
+    updateAgentCheckinCadence: (minutes) =>
+      apiClient.put('/api/v1/settings/system/agent-checkin-cadence', {
+        agent_checkin_cadence_minutes: minutes,
+      }),
 
     // User settings - cookie domain management
     getCookieDomains: () => apiClient.get('/api/v1/user/settings/cookie-domains'),
@@ -701,10 +708,17 @@ export const api = {
   },
 
   system: {
-    getOrchestratorPrompt: () => apiClient.get('/api/v1/system/orchestrator-prompt'),
-    updateOrchestratorPrompt: (content) =>
-      apiClient.put('/api/v1/system/orchestrator-prompt', { content }),
-    resetOrchestratorPrompt: () => apiClient.post('/api/v1/system/orchestrator-prompt/reset'),
+    // BE-9385d: productId picks the rung of the orchestrator override ladder
+    // (product -> tenant -> seed). Null/omitted lands on the tenant-wide rung --
+    // axios drops null params, and the server reads a blank one the same way.
+    getOrchestratorPrompt: (productId = null) =>
+      apiClient.get('/api/v1/system/orchestrator-prompt', { params: { product_id: productId } }),
+    updateOrchestratorPrompt: (content, productId = null) =>
+      apiClient.put('/api/v1/system/orchestrator-prompt', { content, product_id: productId }),
+    resetOrchestratorPrompt: (productId = null) =>
+      apiClient.post('/api/v1/system/orchestrator-prompt/reset', null, {
+        params: { product_id: productId },
+      }),
   },
 
   // User Approvals (FE-5017 Phase C)

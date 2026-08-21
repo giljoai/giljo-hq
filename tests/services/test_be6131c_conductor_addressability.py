@@ -57,7 +57,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import tenant_session_context
-from giljo_mcp.models import Project
+from giljo_mcp.models import Product, Project
 from giljo_mcp.models.agent_identity import AgentExecution
 from giljo_mcp.services.comm_thread_service import CommThreadService
 from giljo_mcp.services.job_lifecycle_service import JobLifecycleService
@@ -91,6 +91,16 @@ _FORBIDDEN_WORKER_CALLS = ("pass_baton", "comm_threads")
 
 async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
     """Seed a project in implementation phase and return its id."""
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    session.add(_owning_product_project)
     project = Project(
         id=str(uuid.uuid4()),
         name=f"BE-6131c test {uuid.uuid4().hex[:6]}",
@@ -98,6 +108,7 @@ async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
         mission="Run sequential projects as conductor.",
         status="active",
         tenant_key=tenant_key,
+        product_id=_owning_product_project.id,
         series_number=1,
         execution_mode="claude_code_cli",
         created_at=datetime.now(UTC),

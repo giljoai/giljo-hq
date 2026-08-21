@@ -29,7 +29,7 @@ from sqlalchemy import select
 
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.exceptions import ValidationError
-from giljo_mcp.models import Message, Project
+from giljo_mcp.models import Message, Product, Project
 from giljo_mcp.models.comm import CommParticipant
 from giljo_mcp.repositories.comm_thread_repository import CommThreadRepository
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
@@ -107,7 +107,11 @@ async def test_null_project_id_message_does_not_break_project_scoped_reader(db_s
     repo = CommThreadRepository()
     with tenant_session_context(db_session, tenant):
         await ensure_default_types_seeded(db_session, tenant)
-        project = Project(tenant_key=tenant, name="P", description="d", mission="m")
+        # BE-9437: a project belongs to a product.
+        product = Product(tenant_key=tenant, name="P product", description="d", is_active=False)
+        db_session.add(product)
+        await db_session.flush()
+        project = Project(tenant_key=tenant, product_id=product.id, name="P", description="d", mission="m")
         db_session.add(project)
         await db_session.flush()
 

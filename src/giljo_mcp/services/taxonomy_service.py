@@ -67,11 +67,19 @@ class TaxonomyService:
             with tenant_session_context(session, tenant_key):
                 return await taxonomy_ops.list_taxonomy_types(session, tenant_key)
 
-    async def validate(self, abbreviation: str, tenant_key: str) -> TaxonomyType:
+    async def validate(self, abbreviation: str, tenant_key: str, *, allow_reserved: bool = False) -> TaxonomyType:
         """Resolve an abbreviation to a TaxonomyType row, or raise.
 
         Lookup is case-sensitive on abbreviation (matching the storage
         convention BE / FE / INF). Callers pre-uppercase agent input.
+
+        ``allow_reserved`` (BE-9470): defaults False, which is the WRITE-safe
+        behaviour every caller had before this parameter existed -- a reserved
+        abbreviation ('TSK'/'CHT') is never selectable for project-create/retag or
+        task-create. Pass True ONLY from a READ filter that has independently
+        decided a reserved value is a harmless no-op match (e.g. ``list_tasks``'s
+        ``task_type`` filter, BE-9470 finding 5) -- it skips ONLY the refusal below;
+        the row lookup that follows is unchanged.
         """
         if not abbreviation or not abbreviation.strip():
             raise ValidationError(
@@ -88,7 +96,7 @@ class TaxonomyService:
         # reserved runtime-only types, never user/agent-selectable. Reject either
         # here so neither the project-create path nor the task update/list-filter
         # path can resolve to one. The valid_types payload below excludes both.
-        if normalized in taxonomy_ops.RESERVED_TYPE_ABBRS:
+        if normalized in taxonomy_ops.RESERVED_TYPE_ABBRS and not allow_reserved:
             valid_types = await self._valid_types_payload(tenant_key)
             valid_abbrevs = sorted(t["abbreviation"] for t in valid_types)
             raise ValidationError(

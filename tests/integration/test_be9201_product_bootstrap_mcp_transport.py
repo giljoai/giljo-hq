@@ -32,12 +32,12 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import select
 
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.models import Product, VisionDocument
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -46,7 +46,7 @@ pytestmark = pytest.mark.asyncio
 def _payload(call_tool_result) -> dict:
     """Decode a CallToolResult into a dict (mirrors the harness helper)."""
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -143,7 +143,7 @@ async def test_create_product_happy_path(bootstrap_mcp_client, db_session, prima
             {"name": name, "description": "created by the onboarding agent"},
         )
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["success"] is True
     assert payload["product_id"]
@@ -180,7 +180,7 @@ async def test_create_product_optional_fields_and_platforms(bootstrap_mcp_client
             },
         )
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["project_path"] == "C:/repos/my-app"
     assert payload["target_platforms"] == ["web", "windows"]
@@ -192,11 +192,11 @@ async def test_create_product_duplicate_name_is_actionable_error(bootstrap_mcp_c
 
     async with new_client() as session:
         first = await session.call_tool("create_product", {"name": name})
-    assert first.isError is False, _error_text(first)
+    assert first.is_error is False, _error_text(first)
 
     async with new_client() as session:
         second = await session.call_tool("create_product", {"name": name})
-    assert second.isError is True
+    assert second.is_error is True
     assert "already exists" in _error_text(second)
 
 
@@ -209,7 +209,7 @@ async def test_create_product_invalid_platform_is_actionable_error(bootstrap_mcp
             {"name": f"Bad Platforms {uuid4().hex[:8]}", "target_platforms": ["web", "vax"]},
         )
 
-    assert result.isError is True
+    assert result.is_error is True
     assert "Invalid platform values" in _error_text(result)
 
 
@@ -220,7 +220,7 @@ async def test_create_product_whitespace_name_rejected(bootstrap_mcp_client):
     async with new_client() as session:
         result = await session.call_tool("create_product", {"name": "   "})
 
-    assert result.isError is True
+    assert result.is_error is True
     assert "name" in _error_text(result).lower()
 
 
@@ -232,7 +232,7 @@ async def test_create_product_whitespace_name_rejected(bootstrap_mcp_client):
 async def _create_product_via_tool(new_client) -> str:
     async with new_client() as session:
         result = await session.call_tool("create_product", {"name": f"Vision Host {uuid4().hex[:8]}"})
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     return _payload(result)["product_id"]
 
 
@@ -247,7 +247,7 @@ async def test_create_vision_document_happy_path(bootstrap_mcp_client, db_sessio
             {"product_id": product_id, "content": content, "document_name": "Product Vision.md"},
         )
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["success"] is True
     assert payload["document_id"]
@@ -286,7 +286,7 @@ async def test_create_vision_document_default_name_and_md_append(bootstrap_mcp_c
             "create_vision_document",
             {"product_id": product_id, "content": "# Vision\n\nBody one."},
         )
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     assert _payload(result)["document_name"] == "Agent Vision.md"
 
     # Extensionless name -> .md appended (UI upload allowlist parity).
@@ -295,7 +295,7 @@ async def test_create_vision_document_default_name_and_md_append(bootstrap_mcp_c
             "create_vision_document",
             {"product_id": product_id, "content": "# Vision\n\nBody two.", "document_name": "roadmap"},
         )
-    assert result2.isError is False, _error_text(result2)
+    assert result2.is_error is False, _error_text(result2)
     assert _payload(result2)["document_name"] == "roadmap.md"
 
 
@@ -310,7 +310,7 @@ async def test_create_vision_document_blank_content_rejected(bootstrap_mcp_clien
             {"product_id": product_id, "content": "   "},
         )
 
-    assert result.isError is True
+    assert result.is_error is True
     assert "content" in _error_text(result).lower()
 
 
@@ -323,7 +323,7 @@ async def test_create_vision_document_unknown_product_not_found(bootstrap_mcp_cl
             {"product_id": str(uuid4()), "content": "# Vision\n\nOrphan."},
         )
 
-    assert result.isError is True
+    assert result.is_error is True
     assert "not found" in _error_text(result).lower()
 
 
@@ -348,7 +348,7 @@ async def test_create_vision_document_is_tenant_scoped(
             {"product_id": product_id, "content": "# Cross-tenant\n\nMust not land."},
         )
 
-    assert result.isError is True
+    assert result.is_error is True
     assert "not found" in _error_text(result).lower(), (
         "TENANT LEAK: tenant B attached a vision document to tenant A's product."
     )
@@ -371,10 +371,10 @@ async def test_create_product_names_are_per_tenant(bootstrap_mcp_client, primary
     switch.value = primary_tenant_key
     async with new_client() as session:
         a = await session.call_tool("create_product", {"name": name})
-    assert a.isError is False, _error_text(a)
+    assert a.is_error is False, _error_text(a)
 
     switch.value = secondary_tenant_key
     async with new_client() as session:
         b = await session.call_tool("create_product", {"name": name})
-    assert b.isError is False, _error_text(b)
+    assert b.is_error is False, _error_text(b)
     assert _payload(a)["product_id"] != _payload(b)["product_id"]

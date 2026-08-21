@@ -69,13 +69,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from giljo_mcp.models import Project
+from giljo_mcp.models import Product, Project
 from giljo_mcp.models.agent_identity import AgentExecution
 from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.services.job_lifecycle_service import JobLifecycleService
 from giljo_mcp.services.mission_orchestration_service import MissionOrchestrationService
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -94,6 +95,16 @@ async def _seed_project(
     closeout_executed_at: datetime | None = None,
 ) -> str:
     """Seed a project in implementation phase and return its id."""
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    session.add(_owning_product_project)
     project = Project(
         id=str(uuid.uuid4()),
         name=f"BE-6165c test {uuid.uuid4().hex[:6]}",
@@ -101,7 +112,10 @@ async def _seed_project(
         mission="Drive sequential run.",
         status="active",
         tenant_key=tenant_key,
-        series_number=1,
+        product_id=_owning_product_project.id,
+        # BE-9429: uq_project_taxonomy_active is NULLS NOT DISTINCT, so these
+        # NULL-product/NULL-type rows collide unless the serial differs.
+        series_number=next_series_number(),
         execution_mode=execution_mode,
         created_at=datetime.now(UTC),
         implementation_launched_at=datetime.now(UTC),

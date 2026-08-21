@@ -45,8 +45,8 @@
               certificate, you're done and can simply continue. <strong>If your
               browser warned you, or if the certificate is private or
               self-signed,</strong> your command-line AI tools (Claude Code, Codex,
-              and Gemini CLI) need to trust it too. The one-time steps below set
-              that up on this machine.
+              Gemini CLI, and OpenCode) need to trust it too. The one-time steps below
+              set that up on this machine.
             </p>
             <p class="cert-hint cert-hint--intro">
               Skip these if your browser shows a padlock with no warning.
@@ -110,7 +110,7 @@
                 <div class="cert-step-number">3</div>
                 <div class="cert-step-content">
                   <div class="cert-step-title">Trust certificate in Node.js</div>
-                  <p class="cert-hint">Required for Claude Code CLI, Codex CLI, and Gemini CLI (all Node versions):</p>
+                  <p class="cert-hint">Required for Claude Code CLI, Codex CLI, Gemini CLI, and OpenCode (all Node versions):</p>
 
                   <div class="cert-command-block smooth-border">
                     <code class="cert-command">{{ nodeCommand }}</code>

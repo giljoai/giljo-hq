@@ -102,8 +102,9 @@ async def test_username_injection_on_user_post(db_manager, db_session):
 
     thread = await svc.create_thread(subject="ops", creator_id="agent-alpha", tenant_key=tenant)
     await svc.join_thread(thread_id=thread["thread_id"], participant_id="agent-alpha", tenant_key=tenant)
+    # BE-9379: the human's voice is claimed explicitly (as_user), never implied by user_id.
     result = await svc.post_to_thread(
-        thread_id=thread["thread_id"], content="operator here", user_id=user.id, tenant_key=tenant
+        thread_id=thread["thread_id"], content="operator here", user_id=user.id, as_user=True, tenant_key=tenant
     )
     assert result["from_display_name"] == "operator_jane"
 
@@ -147,7 +148,7 @@ async def test_from_agent_length_cap_raises_validation(db_manager, db_session):
 async def test_from_agent_resolves_display_name_from_participant(db_manager, db_session):
     """Bug fix: post_to_thread must resolve ``from_display_name`` from the
     poster's OWN comm_participants row (set at join_thread), not echo the raw
-    ``from_agent`` UUID verbatim. Ground truth: a dogfood test-mirror thread showed
+    ``from_agent`` UUID verbatim. Ground truth: a test-install test-mirror thread showed
     every agent message stamped with the raw UUID instead of its friendly role."""
     tenant = _tk("resolve")
     await _seed(db_session, tenant)
@@ -291,11 +292,14 @@ async def test_be9037_all_garbage_from_agent_is_rejected(db_manager, db_session)
         )
 
 
-async def test_be9037_omitted_from_agent_surfaces_attribution_warning(db_manager, db_session):
-    """TSK-0008 surface-don't-stamp: an omitted from_agent still attributes to the
-    authenticated principal (unchanged) but the response carries an advisory. An
-    agent that DID pass from_agent gets no warning."""
-    tenant = _tk("be9037_warn")
+async def test_be9379_user_attribution_is_explicit_never_the_omission_default(db_manager, db_session):
+    """BE-9379 fail-closed attribution at the service layer: a bare user_id with no
+    from_agent NO LONGER attributes to the principal (that implicit fallback let a
+    forgetful agent impersonate the operator) — it lands on the neutral
+    'orchestrator' identity with an advisory. The human's voice is an explicit
+    as_user=True, which attributes to the principal with no advisory; a declared
+    from_agent still wins and carries none; claiming both is refused."""
+    tenant = _tk("be9379_explicit")
     await _seed(db_session, tenant)
     user = User(tenant_key=tenant, username="operator_kim")
     db_session.add(user)
@@ -305,13 +309,31 @@ async def test_be9037_omitted_from_agent_surfaces_attribution_warning(db_manager
 
     omitted = await svc.post_to_thread(thread_id=thread["thread_id"], content="hi", user_id=user.id, tenant_key=tenant)
     assert omitted["attribution_warning"] is not None
-    assert omitted["from_agent_id"] == user.id  # attribution unchanged — surfaced, not blocked
+    assert omitted["from_agent_id"] == "orchestrator"  # never the human by default
+    assert omitted["from_kind"] == "agent"
+
+    as_user = await svc.post_to_thread(
+        thread_id=thread["thread_id"], content="me", user_id=user.id, as_user=True, tenant_key=tenant
+    )
+    assert as_user["attribution_warning"] is None
+    assert as_user["from_agent_id"] == user.id
+    assert as_user["from_kind"] == "user"
 
     supplied = await svc.post_to_thread(
         thread_id=thread["thread_id"], content="yo", from_agent="tester", user_id=user.id, tenant_key=tenant
     )
     assert supplied["attribution_warning"] is None
     assert supplied["from_agent_id"] == "tester"
+
+    with pytest.raises(ValidationError):
+        await svc.post_to_thread(
+            thread_id=thread["thread_id"],
+            content="both",
+            from_agent="tester",
+            user_id=user.id,
+            as_user=True,
+            tenant_key=tenant,
+        )
 
 
 async def test_be9037_ad_hoc_lane_id_posts_and_batons(db_manager, db_session):

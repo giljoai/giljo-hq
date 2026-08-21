@@ -65,7 +65,7 @@ GENERIC_HARNESS = "generic"
 # clientInfo.name (EXACT, case-sensitive) -> harness token. SEEDED from the BE-9035
 # harvest: ``claude-code`` (rich identifier captured in prod), ``codex-mcp-client``
 # (local Codex CLI + desktop app — auth-method-independent), and ``opencode`` (name+
-# version, from the CE dogfood chain trial). TSK-9088 added ``gemini-cli-mcp-client``
+# version, from the CE test-install chain trial). TSK-9088 added ``gemini-cli-mcp-client``
 # (Gemini CLI) and ``antigravity-client`` (Antigravity desktop app AND CLI — one shared
 # string) from a live capture sweep on the SaaS test stack. Matching is EXACT (never
 # substring/prefix): a lookalike name (``"claude-code-proxy"``, ``"claudecode"``,
@@ -159,7 +159,8 @@ def preset_from_client_info(name: str | None, version: str | None = None) -> str
     Exact, case-sensitive matching and conservative by construction, mirroring
     :func:`harness_from_client_info`: a lookalike name resolves to ``None`` rather than
     guessing an environment. ``version`` is accepted for signature symmetry with the
-    harness resolver and for a future tie-break; it does not affect resolution today.
+    harness resolver only; it does not affect resolution, and it cannot -- see
+    :func:`harness_from_client_info` for why no version-based tie-break is available.
     """
     return _PRESET_BY_CLIENT_NAME.get((name or "").strip())
 
@@ -177,8 +178,20 @@ def harness_from_client_info(name: str | None, version: str | None = None) -> st
 
     Pure and conservative: exact (case-sensitive) name match; anything ambiguous
     degrades to ``generic``. Detection drives RENDERING only, never auth.
-    ``version`` is accepted for a future claude-family tie-break (Claude Desktop vs
-    Claude Code) and for the observation log; it does not affect resolution today.
+    ``version`` is accepted for the observation log; it does not affect resolution.
+
+    NO CLAUDE-FAMILY TIE-BREAK IS POSSIBLE -- do not try to build one on ``version``.
+    An earlier revision of this docstring offered that as future work. It cannot be
+    done: measured against production on 2026-08-16, Claude Desktop and claude.ai web
+    send BYTE-IDENTICAL ``initialize`` payloads -- same ``name`` (``Anthropic/ClaudeAI``,
+    already noted at :data:`_KNOWN_GENERIC_CLIENT_NAMES`), same ``version`` (``1.0.0``),
+    same declared capabilities. There is no field that separates them, so there is
+    nothing for a tie-break to read. Anthropic's own connector documentation says the
+    same thing prescriptively: do not gate behaviour on an exact ``name`` or ``version``
+    (both vary across surfaces and releases), and ``clientInfo`` is unauthenticated, so
+    it must never feed an authorization decision. If you need "is this the CLI?", read
+    the OAuth ``client_id`` -- Claude Code registers its own -- and accept that no
+    mechanism separates Desktop from web, because they are one OAuth client by design.
     """
     key = (name or "").strip()
     if not key:

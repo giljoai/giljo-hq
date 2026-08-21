@@ -6,7 +6,7 @@
 """
 Tests for graceful git-unavailable fallback in project closeout.
 
-Wave 1 IMP-0019 Item 5 (code): the demo server has no git binary, so agents
+Wave 1 IMP-0019 Item 5 (code): a hosted test environment has no git binary, so agents
 cannot pass `git_commits` and there is no SaaS GitHub fallback. The closeout
 previously succeeded silently with `git_commits_count: 0` and no marker on the
 response, leaving callers unable to distinguish "git was unavailable" from
@@ -191,7 +191,7 @@ async def test_no_git_unavailable_when_agent_supplies_commits(monkeypatch: pytes
 @pytest.mark.asyncio
 async def test_subprocess_filenotfound_simulated_via_empty_input(monkeypatch: pytest.MonkeyPatch):
     """
-    Mission-described scenario: on the demo server, git is unavailable so the
+    Mission-described scenario: on a hosted test environment, git is unavailable so the
     agent's `git log` subprocess would raise FileNotFoundError. The agent then
     sends git_commits=None to the server. The server must still close the
     project successfully and surface the unavailable marker.

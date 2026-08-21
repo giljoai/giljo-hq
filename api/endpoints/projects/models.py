@@ -29,8 +29,13 @@ class ProjectCreate(BaseModel):
     mission: str = Field(
         default="", description="AI-generated mission statement (initially empty, filled by orchestrator)"
     )
+    # BE-9437: min_length=1 is load-bearing, not decoration. Required-ness alone
+    # admits "", which then satisfies the column's NOT NULL and dies on the
+    # products foreign key as a 500. The constraint belongs at the transport so
+    # the browser gets a 422 naming the field; ProjectService.create_project
+    # backstops it (and catches whitespace-only) for every non-REST caller.
     product_id: str = Field(
-        ..., description="Product ID to associate with (required; projects must belong to a product)"
+        ..., min_length=1, description="Product ID to associate with (required; projects must belong to a product)"
     )
     status: str = Field(default="inactive", description="Project status (Handover 0050b: defaults to inactive)")
     # Handover 0260: Execution mode for Claude Code CLI toggle.

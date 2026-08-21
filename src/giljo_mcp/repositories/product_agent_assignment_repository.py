@@ -13,9 +13,11 @@ Every query filters by tenant_key for multi-tenant isolation.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from sqlalchemy import and_, select
 from sqlalchemy import delete as sql_delete
+from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import contains_eager
 
@@ -256,6 +258,104 @@ class ProductAgentAssignmentRepository:
         with tenant_session_context(session, tenant_key):
             result = await session.execute(stmt)
         return result.rowcount
+
+    async def record_export_for_product(
+        self,
+        session: AsyncSession,
+        product_id: str,
+        template_ids: list[str],
+        tenant_key: str,
+        export_timestamp: datetime,
+    ) -> int:
+        """Stamp ``last_exported_at`` on this product's rows for the exported agents.
+
+        BE-9385e. The tenant-wide ``agent_templates.last_exported_at`` is still
+        written by every export site (it remains the fallback), but only the
+        EXPORTING product's junction rows are stamped here -- which is what stops
+        one product's export from reading as another's.
+
+        UPDATE-ONLY, deliberately: a product with no junction rows is a
+        *tolerated* state, not a broken one (see ``product_agent_selection``), and
+        inserting rows here would flip its tolerance off and curate it as a side
+        effect of exporting. Selection semantics must not change because someone
+        downloaded a ZIP. Such a product keeps reading the tenant-wide value
+        through the fallback, exactly as it did before this project.
+
+        Does NOT commit -- the caller owns the transaction, and every call site
+        already commits the tenant-wide write in the same one, so the two stay
+        atomic with each other.
+
+        Args:
+            session: Active database session
+            product_id: The product that performed the export
+            template_ids: Template UUIDs included in this export
+            tenant_key: Tenant key for isolation
+            export_timestamp: Timestamp to record
+
+        Returns:
+            Number of junction rows stamped.
+        """
+        if not template_ids:
+            return 0
+
+        stmt = (
+            sql_update(ProductAgentAssignment)
+            .where(
+                and_(
+                    ProductAgentAssignment.product_id == product_id,
+                    ProductAgentAssignment.template_id.in_(template_ids),
+                    ProductAgentAssignment.tenant_key == tenant_key,
+                )
+            )
+            .values(last_exported_at=export_timestamp)
+        )
+        with tenant_session_context(session, tenant_key):
+            result = await session.execute(stmt)
+        return result.rowcount
+
+    async def get_export_timestamps_for_product(
+        self,
+        session: AsyncSession,
+        product_id: str,
+        tenant_key: str,
+    ) -> dict[str, datetime | None]:
+        """Per-product ``last_exported_at`` by template id, for one product.
+
+        BE-9385e. EVERY row for this product is returned, including rows whose
+        value is still NULL -- and that is load-bearing, not laziness.
+
+        The caller keys on MEMBERSHIP, not on the value, because "no row" and
+        "row present but never stamped" are different answers and only one of
+        them may fall back:
+
+          * template id ABSENT  -> this product has no opinion; fall back to the
+            template's tenant-wide value.
+          * template id PRESENT with None -> this product has NOT exported this
+            agent. That is an answer. Falling back here would hand the product
+            whatever OTHER product last stamped the shared column, which is the
+            precise defect BE-9385e exists to remove.
+
+        Same existence-keyed shape BE-9385a used for selection, for the same
+        reason: a value-keyed rule silently re-creates the bug it was meant to
+        fix.
+
+        Args:
+            session: Active database session
+            product_id: Product UUID
+            tenant_key: Tenant key for isolation
+
+        Returns:
+            Mapping of template id -> this product's last export time (or None).
+        """
+        stmt = select(ProductAgentAssignment.template_id, ProductAgentAssignment.last_exported_at).where(
+            and_(
+                ProductAgentAssignment.product_id == product_id,
+                ProductAgentAssignment.tenant_key == tenant_key,
+            )
+        )
+        with tenant_session_context(session, tenant_key):
+            result = await session.execute(stmt)
+        return {row[0]: row[1] for row in result.all()}
 
     async def get_active_template_ids_for_product(
         self,

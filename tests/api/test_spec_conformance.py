@@ -33,7 +33,7 @@ from api.endpoints.oauth import MCP_SPEC_VERSIONS_SUPPORTED
 
 # Declared list locked here as well so a refactor that mutates the constant
 # fails this test even if both sides still agree. Update both intentionally.
-EXPECTED_DECLARED_VERSIONS: list[str] = ["2025-03-26", "2025-06-18", "2025-11-25"]
+EXPECTED_DECLARED_VERSIONS: list[str] = ["2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"]
 
 
 class TestSpecVersionsConstant:

@@ -10,11 +10,11 @@ Builds staging-phase prompts and mission regeneration logic.
 """
 
 import logging
-import os
 from typing import Any
 
 from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.config_manager import get_config
+from giljo_mcp.http.url_resolver import get_public_url
 from giljo_mcp.models import Product, Project
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
 
@@ -70,7 +70,9 @@ class StagingPromptBuilder:
         # INF-5012b: prefer GILJO_PUBLIC_URL (set by demo/cloud deploys) over
         # reading the server's bind address from config, which produces ":7272"
         # URLs when the server is fronted by a reverse proxy.
-        mcp_url = os.environ.get("GILJO_PUBLIC_URL", "http://localhost:7272")
+        # BE-9442: via the one accessor, which strips the trailing slash — this
+        # value is interpolated below as "{mcp_url}/health".
+        mcp_url = get_public_url()
 
         api_key_configured = bool(config.server.api_key)
         auth_note = "(authenticated)" if api_key_configured else "(check config.yaml for API key)"

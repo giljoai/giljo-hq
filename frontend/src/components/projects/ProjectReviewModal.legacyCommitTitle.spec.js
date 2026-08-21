@@ -12,10 +12,21 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createVuetify } from 'vuetify'
+import { createRouter, createMemoryHistory } from 'vue-router'
 import ProjectReviewModal from '@/components/projects/ProjectReviewModal.vue'
 import api from '@/services/api'
 
 const vuetify = createVuetify()
+
+// FE-9427: ProjectReviewModal calls useRouter() -- openInHub() pushes the named
+// 'Hub' route. Mounted without a router that returned `undefined`.
+const hubRouter = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: '/', name: 'Root', component: { template: '<div />' } },
+    { path: '/hub', name: 'Hub', component: { template: '<div />' } },
+  ],
+})
 const PROJECT_ID = 'proj-be9256'
 
 function makeReviewResponse(commits) {
@@ -46,7 +57,7 @@ async function mountModal() {
 
   const wrapper = mount(ProjectReviewModal, {
     props: { show: false, projectId: PROJECT_ID },
-    global: { plugins: [pinia, vuetify] },
+    global: { plugins: [pinia, vuetify, hubRouter] },
   })
 
   await wrapper.setProps({ show: true })

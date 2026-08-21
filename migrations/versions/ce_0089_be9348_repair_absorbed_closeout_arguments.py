@@ -28,7 +28,7 @@ What this migration does NOT claim
 It repairs whatever it finds. It does **not** certify how many damaged rows exist. The
 360-memory search that surfaced the known cases returns false negatives on literal
 substrings that provably exist, so the damaged set has a measured FLOOR (8 rows in the
-dogfood database at authoring time) and **no assertable upper bound**. The guard below
+test-install database at authoring time) and **no assertable upper bound**. The guard below
 also only matches residue containing ``</summary>``; a differently-shaped residue is
 simply not seen. Do not read a clean run as proof of a clean database.
 

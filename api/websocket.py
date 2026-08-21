@@ -20,7 +20,7 @@ from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
 from api.auth_utils import check_subscription_permission
 from api.broker.base import WebSocketBrokerMessage, WebSocketEventBroker
-from giljo_mcp.events.schemas import EventFactory
+from giljo_mcp.events.schemas import EventFactory, bound_event_message
 from giljo_mcp.logging import ErrorCode
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -81,6 +81,16 @@ class WebSocketManager:
             # so a peer's fan-out does not re-publish and loop.
             if message.control == "disconnect_tenant":
                 await self.disconnect_tenant(message.tenant_key, publish_to_broker=False)
+                return
+
+            # BE-9296a: a control message is NOT an event — its ``event`` is an empty
+            # envelope by design (see WebSocketBrokerMessage). Falling through would
+            # fan a control frame out to every browser as if it were a real update.
+            # Today ``disconnect_tenant`` is handled above and nothing else sets
+            # ``control``, so this changes no existing behavior; it makes the
+            # channel's own stated contract enforced rather than assumed, which is
+            # what lets a second control type share the channel safely.
+            if message.control:
                 return
 
             await self.broadcast_event_to_tenant(
@@ -192,9 +202,9 @@ class WebSocketManager:
             "data": data,
         }
 
-        # BE-3008b: serialize the envelope ONCE for the whole fan-out (Starlette's
-        # send_json would re-encode the identical payload per recipient).
-        payload = json.dumps(message)
+        # BE-3008b: serialize ONCE for the whole fan-out (send_json would re-encode
+        # per recipient). BE-9416 bounds in place first, so BOTH legs carry one payload.
+        payload = json.dumps(bound_event_message(message))
 
         # BE-3008b: iterate ONLY this tenant's sockets via the tenant index
         # (O(tenant)), not every connection. Snapshot to a list so a concurrent

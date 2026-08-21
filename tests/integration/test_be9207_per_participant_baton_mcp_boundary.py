@@ -38,7 +38,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import delete
 
 from giljo_mcp.database import tenant_session_context
@@ -47,6 +46,7 @@ from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.projects import TaxonomyType
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -54,7 +54,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(res) -> dict:
     if getattr(res, "structuredContent", None):
-        return res.structuredContent
+        return res.structured_content
     block = res.content[0]
     text = getattr(block, "text", None)
     if text is None:
@@ -124,13 +124,13 @@ async def _setup_thread(new_client):
     """A thread created by the EM (holds the baton), with lanes A and B joined."""
     async with new_client() as s:
         res = await s.call_tool("create_thread", {"subject": "multi-lane op", "creator_id": "EM"})
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     thread = _payload(res)
     tid = thread["thread_id"]
     for agent in ("lane-A", "lane-B"):
         async with new_client() as s:
             join = await s.call_tool("join_thread", {"thread_id": tid, "agent_id": agent})
-            assert join.isError is False, _error_text(join)
+            assert join.is_error is False, _error_text(join)
     return tid, thread["chat_id"]
 
 
@@ -147,14 +147,14 @@ async def _direct_action_request(new_client, tid, to_participant):
                 "requires_action": True,
             },
         )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     return _payload(res)
 
 
 async def _get_my_turn(new_client, agent_id):
     async with new_client() as s:
         res = await s.call_tool("get_my_turn", {"agent_id": agent_id})
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     return _payload(res)
 
 
@@ -207,7 +207,7 @@ async def test_mark_read_resolves_the_pending_directive(comm_mcp_client):
         read = await s.call_tool(
             "get_thread_history", {"thread_id": tid, "as_participant": "lane-A", "mark_read": True}
         )
-    assert read.isError is False, _error_text(read)
+    assert read.is_error is False, _error_text(read)
     assert _payload(read).get("marked_read", 0) > 0
 
     a_turn = await _get_my_turn(new_client, "lane-A")
@@ -228,9 +228,9 @@ async def test_delta_read_without_mark_read_does_not_resolve(comm_mcp_client):
     # A plain read, and an incremental after_message_id read — neither may ack.
     async with new_client() as s:
         plain = await s.call_tool("get_thread_history", {"thread_id": tid})
-        assert plain.isError is False, _error_text(plain)
+        assert plain.is_error is False, _error_text(plain)
         delta = await s.call_tool("get_thread_history", {"thread_id": tid, "after_message_id": a_post["message_id"]})
-        assert delta.isError is False, _error_text(delta)
+        assert delta.is_error is False, _error_text(delta)
 
     # Still pending — the directive only resolves on an explicit mark_read.
     assert tid in _directed_ids(await _get_my_turn(new_client, "lane-A"))
@@ -261,7 +261,7 @@ async def test_terminal_status_silences_pending_directive(comm_mcp_client):
             "post_to_thread",
             {"thread_id": tid, "content": "wrapping up", "from_agent": "EM", "set_status": "resolved"},
         )
-    assert close.isError is False, _error_text(close)
+    assert close.is_error is False, _error_text(close)
 
     a_turn = await _get_my_turn(new_client, "lane-A")
     assert tid not in _directed_ids(a_turn)
@@ -280,7 +280,7 @@ async def test_legacy_baton_shape_unchanged_without_directed_action(comm_mcp_cli
 
     async with new_client() as s:
         handoff = await s.call_tool("pass_baton", {"thread_id": tid, "to": "lane-A"})
-        assert handoff.isError is False, _error_text(handoff)
+        assert handoff.is_error is False, _error_text(handoff)
 
     # Baton moved: EM no longer sees it (no directed post keeps it alive), A does.
     em_after = await _get_my_turn(new_client, "EM")
@@ -307,7 +307,7 @@ async def test_broadcast_action_request_does_not_obligate_a_lane(comm_mcp_client
                 "requires_action": True,
             },
         )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     assert _payload(res)["baton_passed"] is False  # broadcast leaves the baton put
 
     for lane in ("lane-A", "lane-B"):

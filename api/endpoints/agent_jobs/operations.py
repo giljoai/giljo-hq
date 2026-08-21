@@ -13,6 +13,12 @@ Sprint 003c: Mission update routed through MissionService (no direct session.com
 
 BE-9143: the registered-but-dead GET /{job_id}/health route was retired
 (no remaining caller — the dashboard reads job health off the WebSocket stream).
+
+BE-9416: the agent:mission_updated broadcast was repaired. It previously raised
+AFTER the write committed, so the mission saved but no session anywhere updated
+live. It now uses the same WebSocketDependency injection as spawn_job in
+lifecycle.py, which degrades to a no-op when WS is unavailable rather than
+500ing a committed write.
 """
 
 import logging
@@ -20,6 +26,7 @@ import logging
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.dependencies.websocket import WebSocketDependency, get_websocket_dependency
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.models import User
 from giljo_mcp.services.job_query_service import JobQueryService
@@ -45,6 +52,7 @@ async def update_agent_mission(
     orchestration_service: OrchestrationService = Depends(get_orchestration_service),
     session: AsyncSession = Depends(get_db_session),
     job_query_service: JobQueryService = Depends(get_job_query_service),
+    ws_dep: WebSocketDependency = Depends(get_websocket_dependency),
 ) -> UpdateMissionResponse:
     """
     Update agent mission with validation and WebSocket broadcast (Handover 0244b).
@@ -93,17 +101,16 @@ async def update_agent_mission(
         session=session,
     )
 
-    from api.websocket_manager import manager as websocket_manager
-
-    await websocket_manager.emit_to_tenant(
-        current_user.tenant_key,
-        "agent:mission_updated",
-        {
+    await ws_dep.broadcast_to_tenant(
+        tenant_key=current_user.tenant_key,
+        event_type="agent:mission_updated",
+        data={
             "job_id": job_id,
             "agent_display_name": current_execution.agent_display_name
             if current_execution
             else (job.job_type if job else "unknown"),
             "agent_name": current_execution.agent_name if current_execution else None,
+            # BE-9416: bounded at the broadcast funnel (events/schemas.bound_event_message)
             "mission": request.mission,
             "project_id": str(job.project_id) if job and job.project_id else None,
         },

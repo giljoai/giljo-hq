@@ -29,7 +29,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from api.endpoints.mcp_sdk_server import mcp
 from giljo_mcp.services.memory_entry_write_validator import (
@@ -37,6 +36,7 @@ from giljo_mcp.services.memory_entry_write_validator import (
     validate_memory_entry_write,
 )
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 def _error_text(result) -> str:
@@ -143,7 +143,7 @@ async def test_mcp_boundary_surfaces_all_failures_for_combined_violation(autospe
             },
         )
 
-    assert result.isError is True
+    assert result.is_error is True
     text = _error_text(result)
     # The primary (first) violation is expected to surface.
     assert "decisions_made" in text
@@ -180,7 +180,7 @@ async def test_mcp_boundary_surfaces_full_vocab_on_first_tag_failure(autospec_mc
             },
         )
 
-    assert result.isError is True
+    assert result.is_error is True
     text = _error_text(result)
     # The full controlled vocabulary must be inline on THIS (first) failure.
     missing = [tag for tag in CONTROLLED_TAG_VOCABULARY if tag not in text]
@@ -301,7 +301,7 @@ async def test_close_job_mcp_boundary_disambiguates_wrong_state(db_backed_client
     async with client() as mcp_session:
         result = await mcp_session.call_tool("close_job", {"job_id": job.job_id})
 
-    assert result.isError is True
+    assert result.is_error is True
     text = _error_text(result)
     assert "working" in text, f"actual status missing from wrong-state text: {text!r}"
     assert "not 'complete'" in text
@@ -318,7 +318,7 @@ async def test_close_job_mcp_boundary_disambiguates_unknown_job_id(db_backed_cli
     async with client() as mcp_session:
         result = await mcp_session.call_tool("close_job", {"job_id": ghost_job_id})
 
-    assert result.isError is True
+    assert result.is_error is True
     text = _error_text(result)
     assert "No job found with ID" in text
     assert "diagnose_project_state" in text

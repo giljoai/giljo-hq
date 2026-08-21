@@ -9,7 +9,7 @@ These tests execute the exact UPDATE statement used in the migration against
 the test database (which already has the first_name / last_name columns),
 verifying the split_part / CASE logic for the documented edge cases:
 
-    - "Patrik Eriksson"      -> first="Patrik",    last="Eriksson"
+    - "Sam Rivera"           -> first="Sam",        last="Rivera"
     - "Cher"                 -> first="Cher",       last=NULL
     - "Jean Claude Van Damme"-> first="Jean",       last="Claude Van Damme"
     - "  Leading spaces  "   -> first="",           last=(remainder) [documents actual SQL behaviour]
@@ -61,7 +61,7 @@ _SELECT_NAMES = sa.text("SELECT first_name, last_name FROM users WHERE id = :id"
 
 @pytest.mark.asyncio
 async def test_backfill_two_part_name(db_session: AsyncSession, test_tenant_key: str):
-    """'Patrik Eriksson' -> first='Patrik', last='Eriksson'."""
+    """'Sam Rivera' -> first='Sam', last='Rivera'."""
     row_id = "backfill-test-two-part"
     await db_session.execute(
         _INSERT_RAW,
@@ -70,14 +70,14 @@ async def test_backfill_two_part_name(db_session: AsyncSession, test_tenant_key:
             "username": "backfill_two",
             "email": "backfill_two@example.com",
             "tenant_key": test_tenant_key,
-            "full_name": "Patrik Eriksson",
+            "full_name": "Sam Rivera",
         },
     )
     await db_session.execute(_BACKFILL_SQL)
     result = await db_session.execute(_SELECT_NAMES, {"id": row_id})
     row = result.one()
-    assert row.first_name == "Patrik"
-    assert row.last_name == "Eriksson"
+    assert row.first_name == "Sam"
+    assert row.last_name == "Rivera"
 
 
 @pytest.mark.asyncio

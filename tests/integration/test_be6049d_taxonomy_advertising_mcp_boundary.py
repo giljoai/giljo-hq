@@ -35,13 +35,13 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import delete
 
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import TaxonomyType
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -55,7 +55,7 @@ pytestmark = pytest.mark.asyncio
 def _payload(call_tool_result) -> dict:
     """Extract structured payload from an MCP CallToolResult."""
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -191,7 +191,7 @@ async def test_create_task_via_mcp_yields_tsk(taxonomy_mcp_client):
             },
         )
 
-    assert result.isError is False, f"BE-6049d: create_task must succeed; got: {_error_text(result)}"
+    assert result.is_error is False, f"BE-6049d: create_task must succeed; got: {_error_text(result)}"
     payload = _payload(result)
     assert payload.get("success") is True
     assert payload.get("task_type") == "TSK", (
@@ -220,7 +220,7 @@ async def test_create_project_via_mcp_rejects_tsk(taxonomy_mcp_client):
             },
         )
 
-    assert result.isError is True, (
+    assert result.is_error is True, (
         "BE-6049d: create_project with project_type='TSK' must be rejected "
         f"(TSK is task-only); got success payload: {_error_text(result)}"
     )
@@ -249,7 +249,7 @@ async def test_create_project_via_mcp_valid_types_excludes_tsk_and_advertises_nu
             },
         )
 
-    assert result.isError is False, f"BE-6049d: create_project (no type) must succeed; got: {_error_text(result)}"
+    assert result.is_error is False, f"BE-6049d: create_project (no type) must succeed; got: {_error_text(result)}"
     payload = _payload(result)
     assert payload.get("success") is True
 

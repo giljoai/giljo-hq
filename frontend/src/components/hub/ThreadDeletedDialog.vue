@@ -11,7 +11,7 @@
     <template #default>
       <v-list v-if="deletedThreads.length > 0" class="smooth-border rounded">
         <v-list-item v-for="(thread, index) in deletedThreads" :key="thread.thread_id">
-          <template v-slot:prepend>
+          <template #prepend>
             <v-icon icon="mdi-forum-outline"></v-icon>
           </template>
 
@@ -22,7 +22,7 @@
             </div>
           </div>
 
-          <template v-slot:append>
+          <template #append>
             <v-btn
               class="restore-btn"
               icon="mdi-restore"

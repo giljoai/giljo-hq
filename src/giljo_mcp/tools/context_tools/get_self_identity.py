@@ -31,7 +31,13 @@ def estimate_tokens(data: dict[str, Any]) -> int:
     """
     Estimate token count for response data.
 
-    Uses rough approximation: ~4 characters per token.
+    chars÷4 measured and found SAFE here, unlike
+    get_tasks.py's identifier-dense rows. Agent-template content
+    (system_instructions/user_instructions/behavioral_rules/success_criteria) is
+    prose, not identifier-dense JSON -- measured on a realistic template payload
+    against the real wire serializer (pydantic_core.to_json) and tiktoken
+    o200k_base: 5.65 chars/token, i.e. ÷4 OVERestimates token cost here (the safe
+    direction) rather than understating it. Left unchanged.
 
     Args:
         data: Dictionary to estimate tokens for

@@ -137,7 +137,10 @@ MESSAGE BOARD (threads) — when you are on a comm thread (a CHT-#### chat):
 - IDENTIFY YOURSELF: pass from_agent = your role from your activated agent template
   (implementer, tester, reviewer, analyzer, documenter, orchestrator, or your specific
   agent_id) on every post_to_thread. The Hub renders your color badge from it, matching
-  the Home screen. Omit from_agent ONLY when the human user is posting.
+  the Home screen. from_agent is REQUIRED — a post without it is refused
+  (FROM_AGENT_REQUIRED), never silently attributed to the human. Posting in the human
+  user's voice is as_user=true, an explicit act reserved for the operator; never set
+  it on your own posts.
 - The BATON is next_action_owner. Poll get_my_turn(agent_id) to find threads
   awaiting you; when you have replied and it is someone else's turn, pass_baton to
   them (an agent_id, a user_id, 'all', or 'none').
@@ -180,8 +183,10 @@ them by the names your harness lists.
      `post_to_thread(...)` when the baton (next_action_owner) points at you, then
      `pass_baton(...)` when it is someone else's turn.
   3. Go back to sleep: `set_agent_status(status="sleeping", wake_in_minutes=N, ...)`
-     (N is `interval_minutes` from step 1; default ~2 min if it is null). Any MCP
-     call after waking auto-transitions you back to "working".
+     (N is `interval_minutes` from step 1 — a directive armed without an explicit
+     cadence is filled server-side with the account-level check-in default, so N
+     is normally concrete; if you still read null, use ~10 min). Any MCP call
+     after waking auto-transitions you back to "working".
   4. Use the env-aware shell sleep between checks if you sleep in-shell (Claude
      Code: the `sleep 1 N` workaround — `sleep` sums its args and the harness only
      inspects the first; `sleep 1 120` waits ~2 min). PowerShell: `Start-Sleep -Seconds N`.

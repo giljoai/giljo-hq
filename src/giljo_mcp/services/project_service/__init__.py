@@ -56,6 +56,7 @@ from giljo_mcp.domain.project_status import (
 )
 from giljo_mcp.repositories.project_repository import ProjectRepository
 from giljo_mcp.services._session_helpers import optional_tenant_session
+from giljo_mcp.services.project_service._archive_mixin import ArchiveMixin
 from giljo_mcp.services.project_service._mcp_adapter_mixin import McpAdapterMixin
 from giljo_mcp.services.project_service._mcp_adapter_query_mixin import McpAdapterQueryMixin
 from giljo_mcp.services.project_service._mutation_mixin import (
@@ -77,7 +78,7 @@ __all__ = [
 ]
 
 
-class ProjectService(QueryMixin, MutationMixin, McpAdapterMixin, McpAdapterQueryMixin):
+class ProjectService(QueryMixin, MutationMixin, ArchiveMixin, McpAdapterMixin, McpAdapterQueryMixin):
     """
     Service for managing project lifecycle and operations.
 

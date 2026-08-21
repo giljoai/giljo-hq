@@ -117,7 +117,8 @@ def _detail_description(exc: HTTPException) -> str:
 # deliberately do NOT emit — so a spec-aware client falls back to the
 # `registration_endpoint` (RFC 7591 DCR) we DO advertise and which is live,
 # exactly as the spec prescribes.
-MCP_SPEC_VERSIONS_SUPPORTED: list[str] = ["2025-03-26", "2025-06-18", "2025-11-25"]
+# INF-9371: every revision here is proven served by tests/integration/test_inf9371_wire_revisions.py.
+MCP_SPEC_VERSIONS_SUPPORTED: list[str] = ["2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"]
 
 
 def _has_forbidden_log_chars(value: str) -> bool:
@@ -396,12 +397,107 @@ def _enforce_oauth_field_caps(**fields: str | None) -> None:
             )
 
 
+async def _refresh_token_grant_response(
+    data: dict, basic_id: str | None, basic_secret: str | None, db
+) -> TokenResponse | JSONResponse:
+    """Execute the RFC 6749 §6 ``refresh_token`` grant.
+
+    Shared by ``POST /refresh`` and ``POST /token`` (BE-9409): the metadata
+    advertises ``refresh_token`` against ``token_endpoint = /api/oauth/token``,
+    so both routes run this ONE body — a second copy of the client-auth and
+    validation rules would drift, and here a drift is a security defect.
+    Callers own their rate-limit check and body parse and pass the parsed values
+    in, so dispatching from /token neither double-consumes the shared per-IP
+    rate-limit slot nor re-reads an exhausted body stream. Serves confidential
+    and public PKCE clients alike (BE-6161).
+    """
+    grant_type = data.get("grant_type")
+    refresh_token = data.get("refresh_token")
+    client_id = basic_id or data.get("client_id")
+    client_secret = basic_secret or data.get("client_secret")
+
+    try:
+        _enforce_oauth_field_caps(
+            client_secret=client_secret,
+            refresh_token=refresh_token,
+        )
+    except HTTPException as exc:
+        return _oauth_error(
+            "invalid_request",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            description=_detail_description(exc),
+        )
+
+    missing = [
+        name
+        for name, val in (
+            ("grant_type", grant_type),
+            ("refresh_token", refresh_token),
+            ("client_id", client_id),
+        )
+        if not val
+    ]
+    if missing:
+        return _oauth_error(
+            "invalid_request",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            description=f"missing required field(s): {', '.join(missing)}",
+        )
+
+    if grant_type != "refresh_token":
+        return _oauth_error(
+            "unsupported_grant_type",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            description="expected grant_type 'refresh_token'",
+        )
+
+    oauth_service = OAuthService(db_session=db)
+    try:
+        result = await oauth_service.refresh_token_grant(
+            refresh_token=refresh_token,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if message.startswith("invalid_client"):
+            logger.warning("OAuth refresh client authentication failed: %s", sanitize(str(exc)))
+            return _oauth_error(
+                "invalid_client",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                www_authenticate='Basic realm="oauth"',
+            )
+        if message.startswith("invalid_grant"):
+            logger.warning("OAuth refresh invalid_grant: %s", sanitize(str(exc)))
+            return _oauth_error(
+                "invalid_grant",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+            )
+        logger.warning("OAuth refresh request invalid: %s", sanitize(str(exc)))
+        return _oauth_error(
+            "invalid_request",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return TokenResponse(
+        access_token=result["access_token"],
+        token_type=result["token_type"],
+        expires_in=result["expires_in"],
+        refresh_token=result.get("refresh_token"),
+        refresh_expires_in=result.get("refresh_expires_in"),
+    )
+
+
 @router.post("/token", response_model=TokenResponse, response_model_exclude_none=True, tags=["oauth"])
 async def token(
     request: Request,
     db=Depends(get_db_session),
 ):
-    """Exchange an authorization code for a JWT access token.
+    """Exchange an authorization code — or a refresh token — for a JWT access token.
+
+    RFC 6749 §6 (BE-9409): serves BOTH advertised grant types —
+    ``grant_type=refresh_token`` dispatches to the shared refresh body that
+    ``POST /refresh`` also runs; that route stays for back-compat.
 
     Public endpoint (no authentication required). Accepts THREE request
     shapes (API-0021e Phase 1.2):
@@ -409,8 +505,8 @@ async def token(
     1. ``application/x-www-form-urlencoded`` body — RFC 6749 §3.2 canonical
        (claude.ai uses this).
     2. ``application/json`` body — pragmatic norm matching Google / GitHub /
-       Auth0 / Okta. ChatGPT connector uses this (live evidence on demo
-       2026-05-10 10:06:12 EDT, Azure CIDR 172.212.159.x).
+       Auth0 / Okta. ChatGPT connector uses this (observed in production,
+       from an Azure egress range, e.g. 203.0.113.0/24).
     3. HTTP Basic Auth header (``Authorization: Basic
        <b64(client_id:client_secret)>``) for ``client_secret_basic`` clients
        — RFC 6749 §2.3.1. Header credentials take precedence over body
@@ -419,8 +515,9 @@ async def token(
     The handler logic (validation, PKCE branching, secret verification) is
     identical regardless of input shape; only parsing differs.
 
-    Body fields (form or JSON):
-        grant_type: Must be "authorization_code".
+    Body fields (form or JSON) — the authorization_code grant:
+        grant_type: "authorization_code", or "refresh_token" to run the
+            refresh grant (its fields are documented on ``POST /refresh``).
         code: The authorization code from the authorize step.
         client_id: OAuth client identifier (optional if Basic Auth header
             supplies it).
@@ -466,15 +563,42 @@ async def token(
     try:
         data = await _parse_oauth_body(request)
         basic_id, basic_secret = _extract_basic_auth(request)
+    except HTTPException as exc:
+        return _oauth_error(
+            "invalid_request",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            description=_detail_description(exc),
+        )
 
-        grant_type = data.get("grant_type")
-        code = data.get("code")
-        code_verifier = data.get("code_verifier")
-        redirect_uri = data.get("redirect_uri")
-        resource = data.get("resource")
-        client_id = basic_id or data.get("client_id")
-        client_secret = basic_secret or data.get("client_secret")
+    grant_type = data.get("grant_type")
 
+    # BE-9409: RFC 6749 §6 — the refresh grant belongs to the SAME token
+    # endpoint the metadata advertises. Dispatch BEFORE per-grant validation:
+    # the missing-field check below is the authorization_code contract, and
+    # running it first rejected valid refreshes for lacking `code`.
+    if grant_type == "refresh_token":
+        return await _refresh_token_grant_response(data, basic_id, basic_secret, db)
+
+    # A present-but-unknown grant_type is unsupported_grant_type. An ABSENT one
+    # deliberately falls through to the missing-field check below: RFC 6749
+    # §5.2 classes a missing required parameter as invalid_request.
+    if grant_type and grant_type != "authorization_code":
+        return _oauth_error(
+            "unsupported_grant_type",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            description="expected grant_type 'authorization_code'",
+        )
+
+    code = data.get("code")
+    code_verifier = data.get("code_verifier")
+    redirect_uri = data.get("redirect_uri")
+    resource = data.get("resource")
+    client_id = basic_id or data.get("client_id")
+    client_secret = basic_secret or data.get("client_secret")
+
+    # Field caps stay AHEAD of the missing-field check: an oversized field
+    # reports as itself, not as whichever field is also absent.
+    try:
         _enforce_oauth_field_caps(
             client_secret=client_secret,
             resource=resource,
@@ -502,13 +626,6 @@ async def token(
             "invalid_request",
             status_code=status.HTTP_400_BAD_REQUEST,
             description=f"missing required field(s): {', '.join(missing)}",
-        )
-
-    if grant_type != "authorization_code":
-        return _oauth_error(
-            "unsupported_grant_type",
-            status_code=status.HTTP_400_BAD_REQUEST,
-            description="expected grant_type 'authorization_code'",
         )
 
     oauth_service = OAuthService(db_session=db)
@@ -610,16 +727,6 @@ async def refresh(
     try:
         data = await _parse_oauth_body(request)
         basic_id, basic_secret = _extract_basic_auth(request)
-
-        grant_type = data.get("grant_type")
-        refresh_token = data.get("refresh_token")
-        client_id = basic_id or data.get("client_id")
-        client_secret = basic_secret or data.get("client_secret")
-
-        _enforce_oauth_field_caps(
-            client_secret=client_secret,
-            refresh_token=refresh_token,
-        )
     except HTTPException as exc:
         return _oauth_error(
             "invalid_request",
@@ -627,64 +734,8 @@ async def refresh(
             description=_detail_description(exc),
         )
 
-    missing = [
-        name
-        for name, val in (
-            ("grant_type", grant_type),
-            ("refresh_token", refresh_token),
-            ("client_id", client_id),
-        )
-        if not val
-    ]
-    if missing:
-        return _oauth_error(
-            "invalid_request",
-            status_code=status.HTTP_400_BAD_REQUEST,
-            description=f"missing required field(s): {', '.join(missing)}",
-        )
-
-    if grant_type != "refresh_token":
-        return _oauth_error(
-            "unsupported_grant_type",
-            status_code=status.HTTP_400_BAD_REQUEST,
-            description="expected grant_type 'refresh_token'",
-        )
-
-    oauth_service = OAuthService(db_session=db)
-    try:
-        result = await oauth_service.refresh_token_grant(
-            refresh_token=refresh_token,
-            client_id=client_id,
-            client_secret=client_secret,
-        )
-    except ValueError as exc:
-        message = str(exc)
-        if message.startswith("invalid_client"):
-            logger.warning("OAuth refresh client authentication failed: %s", sanitize(str(exc)))
-            return _oauth_error(
-                "invalid_client",
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                www_authenticate='Basic realm="oauth"',
-            )
-        if message.startswith("invalid_grant"):
-            logger.warning("OAuth refresh invalid_grant: %s", sanitize(str(exc)))
-            return _oauth_error(
-                "invalid_grant",
-                status_code=status.HTTP_401_UNAUTHORIZED,
-            )
-        logger.warning("OAuth refresh request invalid: %s", sanitize(str(exc)))
-        return _oauth_error(
-            "invalid_request",
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-
-    return TokenResponse(
-        access_token=result["access_token"],
-        token_type=result["token_type"],
-        expires_in=result["expires_in"],
-        refresh_token=result.get("refresh_token"),
-        refresh_expires_in=result.get("refresh_expires_in"),
-    )
+    # BE-9409: body shared with /token. Behavior here is unchanged.
+    return await _refresh_token_grant_response(data, basic_id, basic_secret, db)
 
 
 @router.get(

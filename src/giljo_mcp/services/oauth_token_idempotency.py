@@ -12,14 +12,14 @@ Redis-backed adapter from `giljo_mcp.saas.services.redis_cache_backend`,
 which keeps state coherent across uvicorn workers — that swap is the
 INF-5074 fix.
 
-Why this exists (live evidence):
+Why this exists (observed in production):
 ChatGPT's connector backend issues concurrent POST /token from different
-Azure egress IPs (verified on mcp.example.com 2026-05-10 15:41:48 EDT) using
-the same auth-code. Spec-strict single-use enforcement returned 200 for
-the first and 400 "Authorization code has already been used" for the
-second; the connector UI flashed "Something went wrong" before reading the
-first response. Auth0/Okta/AWS Cognito all implement a short idempotency
-window for confidential clients to absorb honest retries — this is parity.
+Azure egress IPs, on mcp.example.com, using the same auth-code. Spec-strict
+single-use enforcement returned 200 for the first and 400 "Authorization
+code has already been used" for the second; the connector UI flashed
+"Something went wrong" before reading the first response. Auth0/Okta/AWS
+Cognito all implement a short idempotency window for confidential clients
+to absorb honest retries — this is parity.
 """
 
 from __future__ import annotations

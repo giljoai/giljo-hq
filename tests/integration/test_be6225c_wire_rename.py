@@ -33,10 +33,10 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from api.endpoints.mcp_sdk_server import mcp
 from tests.helpers.mcp_dispatch import attach_registry_service_autospecs
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 _RETIRED_TOOL_NAMES = (
@@ -122,7 +122,7 @@ async def test_apply_context_tuning_resolves_over_transport(autospec_mcp):
             "apply_context_tuning",
             {"product_id": str(uuid4()), "proposals": []},
         )
-    assert result.isError is False, f"apply_context_tuning must dispatch: {_error_text(result)}"
+    assert result.is_error is False, f"apply_context_tuning must dispatch: {_error_text(result)}"
 
 
 @pytest.mark.asyncio
@@ -135,8 +135,15 @@ async def test_apply_context_tuning_in_live_tool_surface():
     # resolve_reactivation tool, so the whole surface was 47 (was 48). BE-9012d
     # (bus retirement, phase d) hard-removed send_message / receive_messages /
     # get_messages (-> 44). BE-9201 added create_product + create_vision_document
-    # (agent-side product bootstrap), so the whole surface is 46.
-    assert len(live) == 46
+    # (agent-side product bootstrap), so the whole surface is 46. BE-9296a added
+    # await_my_turn (the server wake signal) -> 47, and get_participant_liveness
+    # (the orchestrator's who-is-still-there read) -> 48.
+    # BE-9385b added set_agent_export_alias (the install-time "keep both" rename,
+    # which must round-trip to the server or spawn-by-name stops resolving) -> 49.
+    # BE-9396 retracted it unreleased: giljo_setup guarantees server -> disk only,
+    # so the install prose now flags a conflict for the LLM and the user to resolve
+    # instead of the server enforcing a rename -> 48.
+    assert len(live) == 48
 
 
 @pytest.mark.asyncio
@@ -151,7 +158,7 @@ async def test_old_name_does_not_resolve_over_transport(autospec_mcp):
                 "propose_product_context_update",
                 {"product_id": str(uuid4()), "proposals": []},
             )
-        failed = result.isError is True
+        failed = result.is_error is True
     except Exception:
         failed = True
     assert failed, "the retired old name must not silently dispatch"
@@ -178,7 +185,7 @@ async def test_giljo_guide_wires_diagnose_and_names_no_retired_tool(autospec_mcp
     for recovery, and names no retired tool (incl. the just-renamed one)."""
     async with autospec_mcp() as session:
         result = await session.call_tool("get_giljo_guide", {})
-    assert result.isError is False, f"get_giljo_guide must dispatch: {_error_text(result)}"
+    assert result.is_error is False, f"get_giljo_guide must dispatch: {_error_text(result)}"
     text = _error_text(result)
 
     assert "diagnose_project_state" in text, "the guide must wire the self-heal diagnostic"

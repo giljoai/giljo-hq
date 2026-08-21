@@ -298,7 +298,7 @@
           <div v-if="cookieDomains.length > 0" class="mb-4">
             <v-list density="compact" class="mb-3">
               <v-list-item v-for="domain in cookieDomains" :key="domain" :title="domain">
-                <template v-slot:append>
+                <template #append>
                   <v-btn
                     icon="mdi-delete"
                     size="small"
@@ -334,7 +334,7 @@
             class="mb-2"
             @keyup.enter="addCookieDomain"
           >
-            <template v-slot:append>
+            <template #append>
               <v-btn
                 icon="mdi-plus"
                 color="primary"

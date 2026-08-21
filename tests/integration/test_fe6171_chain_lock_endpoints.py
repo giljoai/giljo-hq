@@ -16,7 +16,6 @@ seeds its own tenants with unique keys, so per-worker DBs never collide.
 
 from __future__ import annotations
 
-import os
 import secrets
 import uuid
 from datetime import UTC, datetime
@@ -69,7 +68,6 @@ async def _seed_user(db_manager) -> dict:
         )
         session.add(user)
         await session.commit()
-        os.environ.setdefault("JWT_SECRET", "test_secret_key")
         token = JWTManager.create_access_token(
             user_id=user.id, username=user.username, role="developer", tenant_key=tenant_key
         )

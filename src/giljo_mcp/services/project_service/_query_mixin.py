@@ -10,6 +10,8 @@ Holds the project + taxonomy-type lookup and list operations. Composed into
 byte-identical to the pre-split single-file class.
 """
 
+from typing import Any
+
 from sqlalchemy import select
 
 from giljo_mcp.exceptions import (
@@ -186,6 +188,7 @@ class QueryMixin:
         sort_dir: str | None = None,
         limit: int | None = None,
         offset: int | None = None,
+        after_key: tuple[Any, str] | None = None,
     ) -> list[ProjectListItem]:
         """
         List all projects with optional filters.
@@ -197,6 +200,9 @@ class QueryMixin:
                 False=exclude hidden, True=hidden only. Default None preserves the
                 MCP adapter path (which filters hidden in Python).
             search: BE-6076 server-side substring search across name/id/alias.
+            after_key: BE-9469 continuation position -- a ``(sort_value, row_id)`` pair on
+                whichever axis ``sort_key`` selected. None (the default) emits no keyset
+                predicate, so every pre-BE-9469 caller is byte-identical.
             sort_key/sort_dir: BE-6076 server-side sort (whitelisted columns).
             limit/offset: BE-6076 opt-in pagination. All five new args default to
                 None so the MCP adapter + ``/deleted`` callers (which never pass
@@ -231,6 +237,7 @@ class QueryMixin:
                     sort_dir=sort_dir,
                     limit=limit,
                     offset=offset,
+                    after_key=after_key,
                 )
 
                 # For list view, we include basic metrics
@@ -273,6 +280,34 @@ class QueryMixin:
         except Exception as e:  # Broad catch: service boundary, wraps in BaseGiljoError
             self._logger.exception("Failed to list projects")
             raise BaseGiljoError(message=f"Failed to list projects: {e!s}", context={"tenant_key": tenant_key}) from e
+
+    async def board_counts(
+        self,
+        tenant_key: str | None = None,
+        product_id: str | None = None,
+    ) -> list[tuple]:
+        """Board-wide grouped counts for a product (BE-9468). Peer of ``list_projects``.
+
+        Returns the repository's raw ``(status, type_abbreviation, min_created,
+        max_created, min_completed, max_completed, count)`` tuples; the MCP adapter owns
+        the response shape.
+
+        Deliberately a SERVICE method rather than a repository call made from the
+        adapter: ``list_projects_for_mcp`` reaches every other read through this layer
+        (``self.list_projects``), so a read that opened its own session and touched
+        ``self._repo`` directly would be the only one bypassing it -- and would make the
+        adapter untestable without a live database, which the existing filtering suite
+        depends on not being the case.
+
+        Takes NO caller filters by design. See ``ProjectRepository.board_counts``.
+        """
+        if not tenant_key:
+            tenant_key = self.tenant_manager.get_current_tenant()
+        if not tenant_key:
+            raise ValidationError(message="No tenant context available", context={"operation": "board_counts"})
+
+        async with self.db_manager.get_tenant_session_async(tenant_key) as session:
+            return await self._repo.board_counts(session, tenant_key, product_id=product_id)
 
     async def count_projects(
         self,

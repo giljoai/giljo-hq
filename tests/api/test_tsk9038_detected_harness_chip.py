@@ -39,17 +39,29 @@ def _extract_tenant_key(auth_headers: dict) -> str:
 async def _seed_project_with_orchestrator(db_manager, tenant_key: str, *, resolved_harness: str | None) -> str:
     """Create a Project + orchestrator AgentJob/AgentExecution, and (if given) an
     MCPSession stamped with resolved_harness. Returns the project_id."""
-    from giljo_mcp.models import AgentExecution, AgentJob, Project
+    from giljo_mcp.models import AgentExecution, AgentJob, Product, Project
     from giljo_mcp.models.auth import MCPSession
 
     project_id = str(uuid4())
     job_id = str(uuid4())
     agent_id = str(uuid4())
 
+    product_id = str(uuid4())
     async with db_manager.get_session_async() as session:
+        # BE-9437: a project belongs to a product.
+        session.add(
+            Product(
+                id=product_id,
+                tenant_key=tenant_key,
+                name=f"TSK-9038 product {uuid4().hex[:8]}",
+                description="fixture",
+                is_active=False,
+            )
+        )
         session.add(
             Project(
                 id=project_id,
+                product_id=product_id,
                 name="TSK-9038 harness chip fixture",
                 description="fixture",
                 mission="fixture mission",

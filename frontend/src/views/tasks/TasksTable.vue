@@ -10,7 +10,7 @@
       item-value="id"
     >
         <!-- Loading State -->
-        <template v-slot:loading>
+        <template #loading>
           <div class="text-center pa-4">
             <v-progress-circular indeterminate color="primary" size="48" />
             <p class="text-body-medium text-muted-a11y mt-2">Loading tasks...</p>
@@ -18,7 +18,7 @@
         </template>
 
         <!-- Status Column - Inline Dropdown rendering TaskStatusBadge -->
-        <template v-slot:item.status="{ item }">
+        <template #item.status="{ item }">
           <div class="d-flex justify-center">
             <v-select
               :model-value="item.status"
@@ -29,12 +29,12 @@
               class="inline-select inline-select-no-arrow"
               @update:model-value="(newStatus) => $emit('update-field', item, 'status', newStatus)"
             >
-              <template v-slot:selection="{ internalItem: statusItem }">
+              <template #selection="{ internalItem: statusItem }">
                 <TaskStatusBadge :status="statusItem.value" />
               </template>
-              <template v-slot:item="{ props, internalItem: statusItem }">
+              <template #item="{ props, internalItem: statusItem }">
                 <v-list-item v-bind="props">
-                  <template v-slot:prepend>
+                  <template #prepend>
                     <v-icon :color="getStatusColor(statusItem.value)" size="small">
                       {{ getStatusIcon(statusItem.value) }}
                     </v-icon>
@@ -46,7 +46,7 @@
         </template>
 
         <!-- Priority Column - Inline Dropdown (0870h: tinted pills) -->
-        <template v-slot:item.priority="{ item }">
+        <template #item.priority="{ item }">
           <div class="d-flex justify-center">
           <v-select
             :model-value="item.priority"
@@ -57,7 +57,7 @@
             class="inline-select inline-select-no-arrow"
             @update:model-value="(newPriority) => $emit('update-field', item, 'priority', newPriority)"
           >
-            <template v-slot:selection="{ internalItem: priorityItem }">
+            <template #selection="{ internalItem: priorityItem }">
               <span
                 class="priority-pill"
                 :class="'priority-' + priorityItem.value"
@@ -65,9 +65,9 @@
                 {{ priorityItem.value }}
               </span>
             </template>
-            <template v-slot:item="{ props, internalItem: priorityItem }">
+            <template #item="{ props, internalItem: priorityItem }">
               <v-list-item v-bind="props">
-                <template v-slot:prepend>
+                <template #prepend>
                   <span
                     class="priority-pill"
                     :class="'priority-' + priorityItem.value"
@@ -82,7 +82,7 @@
         </template>
 
         <!-- Title Column (0870h: brand-colored title, muted description) -->
-        <template v-slot:item.title="{ item }">
+        <template #item.title="{ item }">
           <div
             class="task-row-content"
             :data-test="`task-row-${item.id}`"
@@ -112,12 +112,12 @@
         </template>
 
         <!-- Created Column -->
-        <template v-slot:item.created_at="{ item }">
+        <template #item.created_at="{ item }">
           <span class="date-cell">{{ formatDateWithTime(item.created_at) }}</span>
         </template>
 
         <!-- Serial Column (FE-5046: tinted taxonomy_alias badge) -->
-        <template v-slot:item.taxonomy_alias="{ item }">
+        <template #item.taxonomy_alias="{ item }">
           <div class="d-flex justify-center">
             <span
               v-if="item.taxonomy_alias"
@@ -135,14 +135,14 @@
         </template>
 
         <!-- Due Date Column - Inline Calendar Picker -->
-        <template v-slot:item.due_date="{ item }">
+        <template #item.due_date="{ item }">
           <v-menu
             :close-on-content-click="false"
             transition="scale-transition"
             :offset="[0, 50]"
             location="bottom"
           >
-            <template v-slot:activator="{ props }">
+            <template #activator="{ props }">
               <div v-bind="props" class="date-text-clickable cursor-pointer">
                 <v-icon
                   v-if="item.due_date && isOverdue(item.due_date)"
@@ -172,7 +172,7 @@
         </template>
 
         <!-- Convert Column (0870h: styled convert action) -->
-        <template v-slot:item.convert="{ item }">
+        <template #item.convert="{ item }">
           <div class="d-flex justify-center">
             <button
               v-if="item.status !== 'completed' && !item.converted_project_id"
@@ -188,28 +188,28 @@
         </template>
 
         <!-- Actions Column -->
-        <template v-slot:item.actions="{ item }">
+        <template #item.actions="{ item }">
           <v-menu>
-            <template v-slot:activator="{ props }">
+            <template #activator="{ props }">
               <v-btn icon="mdi-dots-vertical" size="small" variant="text" v-bind="props" aria-label="Task actions" />
             </template>
             <v-list>
               <v-list-item @click="$emit('edit-task', item)">
-                <template v-slot:prepend>
+                <template #prepend>
                   <v-icon>mdi-pencil</v-icon>
                 </template>
                 <v-list-item-title>Edit</v-list-item-title>
               </v-list-item>
 
               <v-list-item v-if="item.status !== 'completed'" @click="$emit('convert-task', item)">
-                <template v-slot:prepend>
+                <template #prepend>
                   <v-icon>mdi-folder-arrow-up</v-icon>
                 </template>
                 <v-list-item-title>Convert to Project</v-list-item-title>
               </v-list-item>
 
               <v-list-item v-if="item.status !== 'completed'" @click="$emit('complete-task', item)">
-                <template v-slot:prepend>
+                <template #prepend>
                   <v-icon color="success">mdi-check</v-icon>
                 </template>
                 <v-list-item-title>Mark Complete</v-list-item-title>
@@ -218,7 +218,7 @@
               <!-- FE-5046 / BE-2002: Archive/Unarchive toggle (mirrors ProjectsView).
                    Backend field is `hidden`; UI copy says "archived". -->
               <v-list-item data-test="task-hide-action" @click="$emit('toggle-hidden', item)">
-                <template v-slot:prepend>
+                <template #prepend>
                   <v-icon>{{ item.hidden ? 'mdi-archive-arrow-up' : 'mdi-archive' }}</v-icon>
                 </template>
                 <v-list-item-title>{{ item.hidden ? 'Unarchive' : 'Archive' }}</v-list-item-title>
@@ -227,7 +227,7 @@
               <v-divider />
 
               <v-list-item @click="$emit('delete-task', item)">
-                <template v-slot:prepend>
+                <template #prepend>
                   <v-icon color="error">mdi-delete</v-icon>
                 </template>
                 <v-list-item-title>Delete</v-list-item-title>
@@ -237,7 +237,7 @@
         </template>
 
         <!-- No Data -->
-        <template v-slot:no-data>
+        <template #no-data>
           <EmptyState
             icon="mdi-clipboard-text-outline"
             title="No tasks found"

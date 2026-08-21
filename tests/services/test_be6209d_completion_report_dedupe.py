@@ -33,7 +33,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
-from giljo_mcp.models import AgentExecution, AgentTemplate, Message, Project
+from giljo_mcp.models import AgentExecution, AgentTemplate, Message, Product, Project
 from giljo_mcp.services.orchestration_agent_state_service import OrchestrationAgentStateService
 from giljo_mcp.services.orchestration_service import OrchestrationService
 from giljo_mcp.tenant import TenantManager
@@ -81,6 +81,16 @@ async def agent_templates(db_session, tenant_key):
 
 @pytest_asyncio.fixture
 async def project(db_session, tenant_key, agent_templates) -> Project:
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_proj = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_proj)
     proj = Project(
         id=str(uuid.uuid4()),
         name="BE-6209d completion dedupe project",
@@ -88,6 +98,7 @@ async def project(db_session, tenant_key, agent_templates) -> Project:
         mission="Dedupe the two server-side completion-signal copies",
         status="active",
         tenant_key=tenant_key,
+        product_id=_owning_product_proj.id,
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
         series_number=random.randint(1, 9000),

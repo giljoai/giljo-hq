@@ -23,7 +23,6 @@ password service files (all hashing now flows through the shared async helper).
 
 from __future__ import annotations
 
-import os
 import re
 import secrets
 import uuid
@@ -89,7 +88,6 @@ async def _seed_user_with_product(db_manager, *, product_active: bool = True) ->
         session.add(project)
         await session.commit()
 
-        os.environ.setdefault("JWT_SECRET", "test_secret_key")
         token = JWTManager.create_access_token(
             user_id=user.id, username=user.username, role="developer", tenant_key=tenant_key
         )

@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import os
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -75,7 +74,6 @@ async def _admin_headers_and_tenant(db_manager) -> tuple[dict[str, str], str]:
         session.add(user)
         await session.commit()
 
-    os.environ.setdefault("JWT_SECRET", "test_secret_key")
     token = JWTManager.create_access_token(
         user_id=user.id,
         username=user.username,

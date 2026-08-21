@@ -36,7 +36,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import select
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob, AgentTodoItem
@@ -44,6 +43,7 @@ from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -57,7 +57,7 @@ pytestmark = pytest.mark.asyncio
 def _payload(call_tool_result) -> dict:
     """Extract structured payload from an MCP CallToolResult."""
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -301,7 +301,7 @@ async def test_staging_end_via_mcp_returns_stop_directive_and_flips_db(
             },
         )
 
-    assert result.isError is False, f"CE-0026: staging-end complete_job must succeed; got error: {_error_text(result)}"
+    assert result.is_error is False, f"CE-0026: staging-end complete_job must succeed; got error: {_error_text(result)}"
     payload = _payload(result)
 
     assert "staging_directive" in payload, (
@@ -358,7 +358,9 @@ async def test_implementation_end_via_mcp_no_staging_directive(
             },
         )
 
-    assert result.isError is False, f"CE-0026: implementation-end complete_job must succeed; got: {_error_text(result)}"
+    assert result.is_error is False, (
+        f"CE-0026: implementation-end complete_job must succeed; got: {_error_text(result)}"
+    )
     payload = _payload(result)
 
     # staging_directive should either be absent or explicitly null.
@@ -402,7 +404,7 @@ async def test_be6083_staging_end_response_self_explains(phase_mcp_client, db_se
             },
         )
 
-    assert result.isError is False, f"BE-6083 staging-end must succeed; got: {_error_text(result)}"
+    assert result.is_error is False, f"BE-6083 staging-end must succeed; got: {_error_text(result)}"
     payload = _payload(result)
     assert payload.get("phase") == "staging_end", f"expected phase='staging_end', got {payload.get('phase')!r}"
     assert "Staging marked complete" in payload.get("message", ""), f"unexpected message: {payload.get('message')!r}"
@@ -431,7 +433,7 @@ async def test_be6083_closeout_response_self_explains(phase_mcp_client, db_sessi
             },
         )
 
-    assert result.isError is False, f"BE-6083 closeout must succeed; got: {_error_text(result)}"
+    assert result.is_error is False, f"BE-6083 closeout must succeed; got: {_error_text(result)}"
     payload = _payload(result)
     assert payload.get("phase") == "closeout", f"expected phase='closeout', got {payload.get('phase')!r}"
     assert payload.get("staging_directive") is None, "closeout must not carry a staging_directive"
@@ -461,7 +463,7 @@ async def test_be6083_deliverable_response_self_explains(phase_mcp_client, db_se
             },
         )
 
-    assert result.isError is False, f"BE-6083 deliverable must succeed; got: {_error_text(result)}"
+    assert result.is_error is False, f"BE-6083 deliverable must succeed; got: {_error_text(result)}"
     payload = _payload(result)
     assert payload.get("phase") == "deliverable", f"expected phase='deliverable', got {payload.get('phase')!r}"
     assert payload.get("staging_directive") is None, "deliverable must not carry a staging_directive"
@@ -496,7 +498,7 @@ async def test_be6083_closeout_auto_acks_without_flag(phase_mcp_client, db_sessi
             },
         )
 
-    assert result.isError is False, (
+    assert result.is_error is False, (
         f"BE-6083 closeout must auto-ack and succeed without the flag; got: {_error_text(result)}"
     )
     payload = _payload(result)
@@ -543,7 +545,7 @@ async def test_be6083_closeout_back_compat_with_flag(phase_mcp_client, db_sessio
             },
         )
 
-    assert result.isError is False, (
+    assert result.is_error is False, (
         f"BE-6083 back-compat: complete_job with acknowledge_closeout_todo=True must still succeed; "
         f"got: {_error_text(result)}"
     )

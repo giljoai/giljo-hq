@@ -6,7 +6,7 @@
     offset="8"
     max-width="400"
   >
-    <template v-slot:activator="{ props: menuProps }">
+    <template #activator="{ props: menuProps }">
       <!-- Compact: orb style for navbar -->
       <v-badge
         v-if="compact"
@@ -83,7 +83,7 @@
             @click="handleNotificationClick(notification)"
           >
             <!-- Icon -->
-            <template v-slot:prepend>
+            <template #prepend>
               <v-icon
                 :icon="getNotificationIcon(notification.type)"
                 :color="getNotificationColor(notification.type)"
@@ -110,9 +110,11 @@
               {{ isExpanded(notification.id) ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
             </v-icon>
 
-            <!-- Handover 0259: Project context link -->
+            <!-- Handover 0259: Project context link. BE-9436b: reads the name via
+                 getProjectName so server rows (payload) light it, not just legacy
+                 in-memory rows (metadata). -->
             <div
-              v-if="notification.metadata?.project_name"
+              v-if="getProjectName(notification)"
               class="mt-1"
             >
               <v-chip
@@ -121,10 +123,10 @@
                 color="primary"
                 prepend-icon="mdi-folder-outline"
                 class="notification-project-chip"
-                :aria-label="`View project ${notification.metadata.project_name}`"
+                :aria-label="`View project ${getProjectName(notification)}`"
                 @click.stop="navigateToProject(notification)"
               >
-                {{ notification.metadata.project_name }}
+                {{ getProjectName(notification) }}
               </v-chip>
             </div>
 
@@ -142,7 +144,7 @@
             </button>
 
             <!-- Timestamp and Unread Indicator -->
-            <template v-slot:append>
+            <template #append>
               <div class="d-flex flex-column align-end">
                 <span class="text-body-small text-muted-a11y">
                   {{ formatTimestamp(notification) }}
@@ -269,9 +271,16 @@ const formatTimestamp = (notification) => {
 // Return the displayable message body (server sends body; legacy in-memory uses message)
 const getNotificationBody = (notification) => notification.body ?? notification.message ?? ''
 
+// BE-9436b: the project name a notification is about. Server rows carry it in
+// `payload` — `NotificationResponse` has no `metadata` field at all — while the
+// legacy in-memory shape uses `metadata`. Reading `metadata` alone meant the chip
+// and the ARIA branch below never fired for a single server-sourced row.
+const getProjectName = (notification) =>
+  notification.payload?.project_name ?? notification.metadata?.project_name ?? ''
+
 // Build descriptive ARIA label for notification items (Handover 0259)
 const getNotificationAriaLabel = (notification) => {
-  const projectName = notification.metadata?.project_name
+  const projectName = getProjectName(notification)
   const body = getNotificationBody(notification)
   const base = `${notification.title}: ${body}`
   if (projectName) {

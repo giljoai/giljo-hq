@@ -24,7 +24,6 @@ Author: GiljoAI Development Team
 """
 
 import logging
-import os
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -33,6 +32,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from giljo_mcp.http.url_resolver import get_public_url
 from giljo_mcp.models import Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.prompts.claude_prompt_builder import ClaudePromptBuilder
@@ -63,8 +63,10 @@ def build_continuation_prompt(
     """Build a continuation prompt for orchestrator session refresh.
 
     Canonical prompt builder for all handover paths (REST endpoint, slash command,
-    ThinClientPromptGenerator). Reads MCP URL from GILJO_PUBLIC_URL env-var
-    (INF-5012b) with http://localhost:7272 as the CE-localhost fallback.
+    ThinClientPromptGenerator). Reads the MCP URL via
+    giljo_mcp.http.url_resolver.get_public_url (BE-9442) — GILJO_PUBLIC_URL
+    (INF-5012b), trailing slash stripped, with http://localhost:7272 as the
+    CE-localhost fallback.
 
     Args:
         project_id: Project UUID
@@ -79,7 +81,8 @@ def build_continuation_prompt(
     # INF-5012b: prefer GILJO_PUBLIC_URL (demo/cloud deploys) over reading
     # the server's bind address from config, which produces ":7272" URLs
     # when the server is fronted by a reverse proxy.
-    public_base = os.environ.get("GILJO_PUBLIC_URL", "http://localhost:7272").rstrip("/")
+    # BE-9442: normalisation moved into the accessor; behaviour here is unchanged.
+    public_base = get_public_url()
     mcp_url = f"{public_base}/mcp"
 
     project_display = f' "{project_name}"' if project_name else ""
@@ -656,8 +659,10 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
         Request is available; when a Request is in scope, callers should
         use giljo_mcp.http.url_resolver.get_public_base_url(request)
         instead (honors X-Forwarded-* headers per request).
+
+        BE-9442: thin wrapper over the one accessor; behaviour unchanged.
         """
-        return os.environ.get("GILJO_PUBLIC_URL", "http://localhost:7272").rstrip("/")
+        return get_public_url()
 
     async def generate_staging_prompt(
         self,

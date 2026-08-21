@@ -33,11 +33,20 @@ from giljo_mcp.schemas.jsonb_validators import validate_settings_by_category
 logger = logging.getLogger(__name__)
 
 AGENT_SILENCE_THRESHOLD_KEY = "agent_silence_threshold_minutes"
-GLOBAL_GENERAL_SETTING_KEYS = {AGENT_SILENCE_THRESHOLD_KEY}
+# FE-9296b: the account-level agent check-in cadence. Replaces the per-project
+# auto check-in slider as the durable "how often should agents check in" value;
+# hosted exactly like the silence threshold (system_settings for CE, per-tenant
+# configurations override for SaaS), NOT in the settings JSONB bag.
+AGENT_CHECKIN_CADENCE_KEY = "agent_checkin_cadence_minutes"
+GLOBAL_GENERAL_SETTING_KEYS = {AGENT_SILENCE_THRESHOLD_KEY, AGENT_CHECKIN_CADENCE_KEY}
 # FE-9241: shared upper bound for the SaaS per-tenant override (configurations
 # table). CE's deployment-wide system_settings write path is intentionally left
 # unbounded above (Field(ge=1) only) so this constant does NOT touch CE behavior.
 MAX_AGENT_SILENCE_THRESHOLD_MINUTES = 1440
+MAX_AGENT_CHECKIN_CADENCE_MINUTES = 1440
+# Matches the retired per-project slider's default interval, so a deployment that
+# never touches the setting keeps the cadence it always had.
+DEFAULT_AGENT_CHECKIN_CADENCE_MINUTES = 10
 
 # INF-6049a: deployment-wide counter for the first-3-boots CE tool-rename notice
 # (the get_orchestrator_instructions -> get_staging_instructions migration prompt).
@@ -200,10 +209,9 @@ class SystemSettingsService:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_agent_silence_threshold_minutes(self) -> int | None:
-        result = await self.session.execute(
-            select(SystemSetting.value).where(SystemSetting.key == AGENT_SILENCE_THRESHOLD_KEY)
-        )
+    async def _get_minutes_setting(self, key: str) -> int | None:
+        """Read a deployment-wide minutes value, or None if unset/malformed."""
+        result = await self.session.execute(select(SystemSetting.value).where(SystemSetting.key == key))
         value = result.scalar_one_or_none()
 
         if value is None:
@@ -214,24 +222,36 @@ class SystemSettingsService:
         except ValueError:
             return None
 
-    async def update_agent_silence_threshold_minutes(self, minutes: int) -> int:
+    async def _update_minutes_setting(self, key: str, minutes: int) -> int:
+        """Upsert a deployment-wide minutes value (integer >= 1)."""
         if type(minutes) is not int or minutes < 1:
-            raise ValidationError("agent_silence_threshold_minutes must be an integer greater than or equal to 1")
+            raise ValidationError(f"{key} must be an integer greater than or equal to 1")
 
         value = str(minutes)
-        result = await self.session.execute(
-            select(SystemSetting).where(SystemSetting.key == AGENT_SILENCE_THRESHOLD_KEY)
-        )
+        result = await self.session.execute(select(SystemSetting).where(SystemSetting.key == key))
         setting = result.scalar_one_or_none()
 
         if setting is None:
-            setting = SystemSetting(key=AGENT_SILENCE_THRESHOLD_KEY, value=value)
+            setting = SystemSetting(key=key, value=value)
             self.session.add(setting)
         else:
             setting.value = value
 
         await self.session.commit()
         return minutes
+
+    async def get_agent_silence_threshold_minutes(self) -> int | None:
+        return await self._get_minutes_setting(AGENT_SILENCE_THRESHOLD_KEY)
+
+    async def update_agent_silence_threshold_minutes(self, minutes: int) -> int:
+        return await self._update_minutes_setting(AGENT_SILENCE_THRESHOLD_KEY, minutes)
+
+    async def get_agent_checkin_cadence_minutes(self) -> int | None:
+        """FE-9296b: the deployment-wide agent check-in cadence, or None if unset."""
+        return await self._get_minutes_setting(AGENT_CHECKIN_CADENCE_KEY)
+
+    async def update_agent_checkin_cadence_minutes(self, minutes: int) -> int:
+        return await self._update_minutes_setting(AGENT_CHECKIN_CADENCE_KEY, minutes)
 
     async def get_tool_rename_boot_count(self) -> int:
         """Return the deployment-wide tool-rename-notice boot count (0 if unset)."""
@@ -279,6 +299,81 @@ class SystemSettingsService:
 
         await self.session.commit()
         return new_value
+
+
+async def resolve_agent_checkin_cadence_minutes(
+    session: AsyncSession,
+    tenant_key: str | None = None,
+    project: Any = None,
+) -> int:
+    """Resolve the effective agent check-in cadence in minutes (FE-9296b).
+
+    THE single precedence rule, so every consumer (mission render, workflow
+    status, Hub loop directives) agrees on the number:
+
+    1. Per-project override — a row whose slider-era ``auto_checkin_enabled``
+       flag is set keeps its ``auto_checkin_interval`` (tolerance for values
+       users dialed in before the slider was retired; there is no UI to set
+       these anymore).
+    2. Per-tenant override in ``configurations`` — written by the SaaS settings
+       path only; CE never writes this row, so the read is edition-neutral.
+    3. Deployment-wide ``system_settings`` value.
+    4. ``DEFAULT_AGENT_CHECKIN_CADENCE_MINUTES``.
+    """
+    if project is not None and getattr(project, "auto_checkin_enabled", False):
+        interval = getattr(project, "auto_checkin_interval", None)
+        if type(interval) is int and interval >= 1:
+            return interval
+
+    if tenant_key:
+        from giljo_mcp.repositories.configuration_repository import ConfigurationRepository
+
+        # The repo's db_manager is only used by its session-less callers; every
+        # read here passes the caller's session explicitly.
+        raw = await ConfigurationRepository(None).get_value(session, tenant_key, AGENT_CHECKIN_CADENCE_KEY)
+        if raw is not None and not isinstance(raw, bool):
+            try:
+                minutes = int(raw)
+            except (TypeError, ValueError, OverflowError):
+                minutes = None
+            if minutes is not None and 1 <= minutes <= MAX_AGENT_CHECKIN_CADENCE_MINUTES:
+                return minutes
+
+    deployment_default = await SystemSettingsService(session).get_agent_checkin_cadence_minutes()
+    return deployment_default or DEFAULT_AGENT_CHECKIN_CADENCE_MINUTES
+
+
+async def resolve_checkin_cadence_safe(
+    session: AsyncSession,
+    tenant_key: str | None = None,
+    project: Any = None,
+) -> int | None:
+    """Never-raising variant for best-effort callers (mission render, status
+    reads, hot polls) — a settings lookup must not fail those paths. Returns
+    None on any failure; the caller applies its own fallback."""
+    try:
+        return await resolve_agent_checkin_cadence_minutes(session, tenant_key, project)
+    except Exception:  # noqa: BLE001
+        logger.warning("[FE-9296b] check-in cadence resolution failed; caller falls back")
+        return None
+
+
+async def load_integrations_and_cadence(get_session, tenant_key: str, project: Any = None) -> tuple[dict, int | None]:
+    """BE-5008 + FE-9296b: integration toggles + resolved check-in cadence, one session.
+
+    ``get_session`` is the caller's tenant-scoped session-context factory (e.g.
+    MissionService._get_session). Best-effort: a settings failure must never
+    break mission delivery — callers get ({}, None) and apply their fallbacks.
+    """
+    integrations: dict = {}
+    cadence: int | None = None
+    try:
+        async with get_session(tenant_key) as session:
+            integrations = await SettingsService(session, tenant_key).get_settings("integrations")
+            cadence = await resolve_checkin_cadence_safe(session, tenant_key, project)
+    except Exception:  # noqa: BLE001
+        logger.warning("[INTEGRATIONS] Failed to read settings from DB")
+    return integrations, cadence
 
 
 class TenantSkillsAckService:

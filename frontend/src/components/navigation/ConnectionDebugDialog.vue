@@ -61,7 +61,7 @@
                   :key="index"
                   :class="`event-${event.type}`"
                 >
-                  <template v-slot:prepend>
+                  <template #prepend>
                     <v-icon size="small" :color="getEventColor(event.type)">
                       {{ getEventIcon(event.type) }}
                     </v-icon>

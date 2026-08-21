@@ -18,13 +18,12 @@ from uuid import uuid4
 
 import pytest
 
-from giljo_mcp.models.products import Product
-from giljo_mcp.models.projects import Project
 from giljo_mcp.services.memory_entry_write_validator import (
     CONTROLLED_TAG_VOCABULARY,
     MemoryEntryWriteValidationError,
 )
 from giljo_mcp.tools.project_closeout import close_project_and_update_memory
+from tests.helpers.model_factories import make_product, make_project
 
 
 def _build_session_mocks(tenant_key: str):
@@ -32,18 +31,15 @@ def _build_session_mocks(tenant_key: str):
     project_id = str(uuid4())
     product_id = str(uuid4())
 
-    mock_project = MagicMock(spec=Project)
-    mock_project.id = project_id
-    mock_project.tenant_key = tenant_key
-    mock_project.product_id = product_id
-    mock_project.created_at = datetime.now(UTC)
-    mock_project.completed_at = None
-    mock_project.name = "Tags Param Test Project"
+    mock_project = make_project(
+        id=project_id,
+        tenant_key=tenant_key,
+        product_id=product_id,
+        created_at=datetime.now(UTC),
+        name="Tags Param Test Project",
+    )
 
-    mock_product = MagicMock(spec=Product)
-    mock_product.id = product_id
-    mock_product.tenant_key = tenant_key
-    mock_product.product_memory = {}
+    mock_product = make_product(id=product_id, tenant_key=tenant_key, product_memory={})
 
     mock_session = AsyncMock()
     mock_session.info = {}  # tenant_session_context save/restore target

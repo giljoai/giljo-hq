@@ -23,19 +23,33 @@ The five mandated guarantees (DoD):
                                    ``Mcp-Session-Id`` → 401 (a session id must
                                    NEVER become a standalone bearer credential).
 5. ``TestBcryptOffLoopAndCached``— ≤1 sync ``verify_api_key`` per key per TTL
-                                   window under a 100-request burst, and an
-                                   event-loop-lag probe proving bcrypt runs
-                                   off-loop (``asyncio.to_thread``).
+                                   window under a 100-request burst, and a
+                                   thread-identity assertion proving every
+                                   sync verify ran off the event loop
+                                   (``asyncio.to_thread``). See the hash-format
+                                   note below for what the fixture executes.
 
 BE-6061 fold-in (REST dashboard X-API-Key path, ``get_current_user``):
 
 6. ``TestDashboardApiKeyOffLoopAndCached`` — the dashboard X-API-Key dependency
-                                   also verifies off-loop + caches: ≤1 bcrypt
-                                   per key per TTL under a 100-request burst with
-                                   the same loop-lag ceiling.
+                                   also verifies off-loop + caches: ≤1 sync
+                                   verify per key per TTL under a 100-request
+                                   burst with the same thread-identity assertion.
 7. ``TestDashboardRevokedKeyBust`` — a revoked key on the dashboard path 401s
                                    once ``bust_api_key_cache`` fires, proving the
                                    shared cache-bust reaches this path too.
+
+Hash-format note (BE-6060b; recorded by INF-9398 because the old timing
+assertion was sized against the wrong branch). ``_seed_api_key`` stores
+``hash_api_key()``, which since BE-6060b is ``sha256$<hex>``. So the
+``verify_api_key`` these tests exercise takes the ``hmac.compare_digest``
+branch -- microseconds -- NOT the ~250-400ms ``bcrypt.checkpw`` a legacy
+``$2b$`` row would take. Both guarantees here are format-independent and hold
+for either branch: at most one SYNC verify per key per TTL window, and that
+verify never executing on the event loop. The off-loop hop exists so a legacy
+bcrypt row cannot block the loop; since this fixture runs the cheap branch,
+elapsed time proves nothing about it, which is why the tests assert WHERE the
+verify ran rather than how long anything took.
 
 Failing-layer discipline: every case drives the real ASGI middleware, the real
 ``MCPSessionManager.authenticate_api_key``, or the real
@@ -46,8 +60,8 @@ state, no ordering deps.
 
 from __future__ import annotations
 
-import asyncio
 import json
+import threading
 import time
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -405,12 +419,68 @@ class TestRevokedKeyIs401:
 
 
 # ---------------------------------------------------------------------------
+# INF-9478: a manual monotonic clock for the two absorption proofs.
+#
+# The count assertion in both burst tests ("the burst adds ZERO further sync
+# verifies") was correct only while the burst FINISHED INSIDE the verdict
+# cache's real-time TTL window. That dependency was invisible: it reads as a
+# pure count, and nothing in the test mentions time. Measured on an idle box the
+# warm+100 burst takes ~6-7s against a 60s window (_VERIFY_CACHE_TTL_POSITIVE),
+# so it held with ~9x to spare -- until three concurrent -n 6 suites, one more
+# than the two INF-9398 was validated against, stretched it past the window. The
+# entry then expires mid-burst, ONE HONEST extra verify lands, and the assertion
+# fails while the cache is doing exactly what it was built to do.
+#
+# Driving the cache from a clock the test owns removes the elapsed-time term
+# from the proof entirely, without weakening it: the count assertion still says
+# "the cache absorbs every repeat", it just no longer also says "...provided the
+# machine was fast enough". No production code changes -- api_key_utils reads
+# ``time`` as a module global (its only three uses are time.monotonic()), which
+# is the same seam this file already uses to count verify_api_key.
+#
+# NOT an xfail, a retry, a longer sleep or a serial marker: every one of those
+# buys green by making the gate quieter. This one makes it deterministic.
+#
+# THE BOUNDARY OF THIS CLOCK, because the next reader will want to reuse it and
+# it is narrower than it looks. It controls ``time``, which is three of the
+# cache's FOUR clock reads. The fourth is ``datetime.now(UTC)`` in
+# ``_verify_cache_put`` (api_key_utils.py:226), which caps a verdict's deadline
+# at the key's own expiry -- and it reads REAL time regardless of anything here.
+# It is unreachable in these two tests only because ``_seed_api_key`` sets no
+# ``expires_at``, so the ``if expires_at is not None`` branch never runs. That is
+# a property of the fixture, not of the patch. An absorption proof written for an
+# EXPIRING key must handle that second clock, or it will silently depend on
+# elapsed real time again -- the exact defect this comment sits above.
+# ---------------------------------------------------------------------------
+
+
+class _ManualClock:
+    """Stands in for the ``time`` module global inside ``api_key_utils``.
+
+    Only ``monotonic`` is provided because that is the module's entire use of
+    ``time`` -- three calls, all ``time.monotonic()``, in ``_verify_cache_get``
+    and ``_verify_cache_put``. Starts at the real reading so a verdict cached
+    before the patch (by another test in the same worker process) keeps its
+    relative deadline instead of being read as expired.
+    """
+
+    def __init__(self) -> None:
+        self._now = time.monotonic()
+
+    def monotonic(self) -> float:
+        return self._now
+
+    def advance(self, seconds: float) -> None:
+        self._now += seconds
+
+
+# ---------------------------------------------------------------------------
 # 5) bcrypt off-loop + cached: ≤1 sync verify per key per TTL window + lag probe
 # ---------------------------------------------------------------------------
 
 
 class TestBcryptOffLoopAndCached:
-    """A 100-request burst must trigger ≤1 bcrypt verify and keep the loop responsive."""
+    """A 100-request burst must trigger ≤1 bcrypt verify, and every verify runs off-loop."""
 
     @pytest.mark.asyncio
     async def test_one_bcrypt_per_ttl_window_under_burst(self, db_manager, jwt_env, monkeypatch):
@@ -422,17 +492,33 @@ class TestBcryptOffLoopAndCached:
         # Start from a clean verdict cache for this key.
         bust_api_key_cache(key_id)
 
+        # This coroutine body runs ON the event loop, so its thread id IS the
+        # loop thread's. See the off-loop assertion at the end of the test.
+        loop_thread_id = threading.get_ident()
+
         call_count = {"n": 0}
+        verify_thread_ids: list[int] = []
         real_verify = verify_api_key
 
         def _counting_verify(api_key: str, key_hash: str) -> bool:
             call_count["n"] += 1
+            verify_thread_ids.append(threading.get_ident())
             return real_verify(api_key, key_hash)
 
         # Patch the sync verify at its definition module. verify_api_key_cached
         # resolves ``verify_api_key`` as a module global inside the to_thread
-        # call, so patching here counts exactly the bcrypt comparisons.
+        # call, so patching here counts exactly the sync verifies -- and runs on
+        # the thread each one executed on. (Which comparison branch that verify
+        # takes is the hash-format note's business, not this test's.)
         monkeypatch.setattr(api_key_utils, "verify_api_key", _counting_verify)
+
+        # INF-9478: drive the verdict cache's TTL from a clock this test owns,
+        # patched at the same module global api_key_utils reads. Installed
+        # BEFORE the warm auth so the entry's deadline is computed on it. The
+        # burst below therefore cannot outrun the window no matter how loaded
+        # the box is -- the window does not move unless this test moves it.
+        clock = _ManualClock()
+        monkeypatch.setattr(api_key_utils, "time", clock)
 
         async def _one_auth() -> None:
             async with db_manager.get_session_async() as db:
@@ -450,37 +536,49 @@ class TestBcryptOffLoopAndCached:
         warm_count = call_count["n"]
         assert warm_count >= 1, "first auth must run a real bcrypt verify"
 
-        # Event-loop-lag probe: sample loop scheduling latency while the burst
-        # runs. If bcrypt ran ON the loop, a single ~250-400ms checkpw would
-        # spike a sample far above this threshold.
-        max_lag = {"value": 0.0}
-        stop = {"flag": False}
+        for _ in range(100):
+            await _one_auth()
 
-        async def _lag_probe() -> None:
-            while not stop["flag"]:
-                t0 = time.perf_counter()
-                await asyncio.sleep(0)
-                lag = time.perf_counter() - t0
-                max_lag["value"] = max(max_lag["value"], lag)
-                await asyncio.sleep(0.001)
-
-        probe = asyncio.create_task(_lag_probe())
-        try:
-            for _ in range(100):
-                await _one_auth()
-        finally:
-            stop["flag"] = True
-            await probe
-
-        assert call_count["n"] == warm_count, (
+        burst_count = call_count["n"]
+        assert burst_count == warm_count, (
             "a 100-request burst added "
-            f"{call_count['n'] - warm_count} bcrypt verifies on top of the warm cache — "
+            f"{burst_count - warm_count} bcrypt verifies on top of the warm cache — "
             "the verdict cache must absorb every repeat (≤1 bcrypt per key per TTL window)"
         )
-        # 150ms ceiling: comfortably below a single bcrypt cost (~250-400ms),
-        # proving the verify ran via asyncio.to_thread rather than blocking.
-        assert max_lag["value"] < 0.15, (
-            f"event-loop lag {max_lag['value'] * 1000:.0f}ms is too high — bcrypt likely ran ON the loop"
+
+        # INF-9478, second half: prove the WINDOW, and prove the clock above is
+        # actually wired. A patch that silently failed to take would freeze
+        # nothing and let the count assertion pass for the wrong reason -- on a
+        # fast box it would pass either way, which is exactly how the elapsed-
+        # time dependency stayed invisible for so long. Rolling the clock past
+        # the TTL must expire the verdict and cost a fresh sync verify; if it
+        # does not, this test is not driving the cache it claims to be driving.
+        clock.advance(api_key_utils._VERIFY_CACHE_TTL_POSITIVE + 1.0)
+        await _one_auth()
+        assert call_count["n"] > burst_count, (
+            "no further sync verify after the TTL window closed — either the "
+            "verdict cache never expires, or this test's clock is not the one "
+            "the cache reads and the absorption count above proved nothing"
+        )
+        # INF-9398: prove the off-loop guarantee STRUCTURALLY, by where the work
+        # ran, not by how long the loop took to answer. This assertion reads the
+        # same on an idle machine and under two concurrent -n 6 suites; the
+        # event-loop-lag probe it replaces read machine load as if it were an
+        # on-loop bcrypt and crashed xdist workers for it.
+        #
+        # _counting_verify replaces the module global that verify_api_key_cached
+        # resolves INSIDE asyncio.to_thread, so it executes on whatever thread
+        # the verify actually ran on. A regression that drops the to_thread hop
+        # -- or hands it the wrong callable -- lands the sync verify back on the
+        # loop thread and fails here, whichever hash branch it takes.
+        assert verify_thread_ids, (
+            "no sync verify was observed at all — the off-loop assertion below would pass vacuously"
+        )
+        on_loop = [t for t in verify_thread_ids if t == loop_thread_id]
+        assert not on_loop, (
+            f"{len(on_loop)} of {len(verify_thread_ids)} sync verify_api_key calls ran on the "
+            f"event-loop thread ({loop_thread_id}) — the verify must run in a worker thread "
+            "via asyncio.to_thread"
         )
 
     @pytest.mark.asyncio
@@ -559,17 +657,30 @@ class TestDashboardApiKeyOffLoopAndCached:
         raw_key, _tenant_key, key_id = await _seed_api_key(db_manager)
         bust_api_key_cache(key_id)
 
+        # This coroutine body runs ON the event loop, so its thread id IS the
+        # loop thread's. See the off-loop assertion at the end of the test.
+        loop_thread_id = threading.get_ident()
+
         call_count = {"n": 0}
+        verify_thread_ids: list[int] = []
         real_verify = verify_api_key
 
         def _counting_verify(api_key: str, key_hash: str) -> bool:
             call_count["n"] += 1
+            verify_thread_ids.append(threading.get_ident())
             return real_verify(api_key, key_hash)
 
-        # Patch the sync bcrypt at its definition module — verify_api_key_cached
+        # Patch the sync verify at its definition module — verify_api_key_cached
         # resolves it as a module global inside asyncio.to_thread, so this counts
-        # exactly the bcrypt comparisons the dashboard path triggers.
+        # exactly the sync verifies the dashboard path triggers, and records the
+        # thread each one actually ran on.
         monkeypatch.setattr(api_key_utils, "verify_api_key", _counting_verify)
+
+        # INF-9478: same manual clock as the /mcp twin, installed before the
+        # warm auth for the same reason. Kept identical in shape to that one so
+        # the two cannot drift.
+        clock = _ManualClock()
+        monkeypatch.setattr(api_key_utils, "time", clock)
 
         async def _one_auth() -> None:
             async with db_manager.get_session_async() as db:
@@ -586,32 +697,35 @@ class TestDashboardApiKeyOffLoopAndCached:
         warm_count = call_count["n"]
         assert warm_count >= 1, "first dashboard auth must run a real bcrypt verify"
 
-        max_lag = {"value": 0.0}
-        stop = {"flag": False}
+        for _ in range(100):
+            await _one_auth()
 
-        async def _lag_probe() -> None:
-            while not stop["flag"]:
-                t0 = time.perf_counter()
-                await asyncio.sleep(0)
-                max_lag["value"] = max(max_lag["value"], time.perf_counter() - t0)
-                await asyncio.sleep(0.001)
-
-        probe = asyncio.create_task(_lag_probe())
-        try:
-            for _ in range(100):
-                await _one_auth()
-        finally:
-            stop["flag"] = True
-            await probe
-
-        assert call_count["n"] == warm_count, (
+        burst_count = call_count["n"]
+        assert burst_count == warm_count, (
             "a 100-request dashboard burst added "
-            f"{call_count['n'] - warm_count} bcrypt verifies on top of the warm cache — "
+            f"{burst_count - warm_count} bcrypt verifies on top of the warm cache — "
             "the shared verdict cache must absorb every repeat (≤1 bcrypt per key per TTL)"
         )
-        assert max_lag["value"] < 0.15, (
-            f"event-loop lag {max_lag['value'] * 1000:.0f}ms is too high — "
-            "the dashboard X-API-Key bcrypt likely ran ON the loop (not via asyncio.to_thread)"
+
+        # INF-9478: same window proof + same wiring check as the /mcp twin.
+        clock.advance(api_key_utils._VERIFY_CACHE_TTL_POSITIVE + 1.0)
+        await _one_auth()
+        assert call_count["n"] > burst_count, (
+            "no further dashboard sync verify after the TTL window closed — "
+            "either the shared verdict cache never expires, or this test's clock "
+            "is not the one the cache reads and the count above proved nothing"
+        )
+        # INF-9398: same structural proof as the /mcp transport twin above —
+        # assert WHERE each verify ran, never how long the loop took to answer.
+        # Kept identical in shape to that one so the two cannot drift.
+        assert verify_thread_ids, (
+            "no sync verify was observed at all — the off-loop assertion below would pass vacuously"
+        )
+        on_loop = [t for t in verify_thread_ids if t == loop_thread_id]
+        assert not on_loop, (
+            f"{len(on_loop)} of {len(verify_thread_ids)} dashboard X-API-Key sync verify_api_key "
+            f"calls ran on the event-loop thread ({loop_thread_id}) — the verify must run in a "
+            "worker thread via asyncio.to_thread"
         )
 
 

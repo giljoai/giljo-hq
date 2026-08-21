@@ -39,6 +39,7 @@ from giljo_mcp.models.comm import (
     CommParticipant,
     CommThread,
 )
+from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.tasks import (
     Message,
@@ -48,8 +49,14 @@ from giljo_mcp.models.tasks import (
 )
 from giljo_mcp.repositories._comm_thread_chain_hub_mixin import CommThreadChainHubMixin
 from giljo_mcp.repositories._comm_thread_directed_actions_mixin import CommThreadDirectedActionsMixin
+from giljo_mcp.repositories._comm_thread_keyset import (
+    resolve_thread_cursor,
+    thread_keyset_after,
+    thread_list_order_clauses,
+)
 from giljo_mcp.repositories._comm_thread_list_enrichment_mixin import CommThreadListEnrichmentMixin
 from giljo_mcp.repositories._comm_thread_participants_mixin import CommThreadParticipantsMixin
+from giljo_mcp.repositories._comm_thread_tenant_refs_mixin import CommThreadTenantRefsMixin
 from giljo_mcp.repositories.taxonomy_repository import TaxonomyRepository
 from giljo_mcp.schemas.comm_jsonb_validators import validate_comm_thread_resolution
 from giljo_mcp.utils.log_sanitizer import sanitize
@@ -63,6 +70,7 @@ class CommThreadRepository(
     CommThreadDirectedActionsMixin,
     CommThreadListEnrichmentMixin,
     CommThreadParticipantsMixin,
+    CommThreadTenantRefsMixin,
 ):
     """Data access for comm_threads / comm_participants."""
 
@@ -132,6 +140,17 @@ class CommThreadRepository(
             raise ValidationError("tenant_key is required", context={"operation": "comm_thread.create"})
 
         await self._ensure_cht_type(session, tenant_key)
+        # BE-9420: both optional filter dims are caller-supplied and were stored
+        # unvalidated. Checked BEFORE the serial is minted so a refused create
+        # does not burn a CHT number.
+        if product_id:
+            await self._require_owned_reference(
+                session, tenant_key, model=Product, row_id=product_id, field="product_id"
+            )
+        if project_id:
+            await self._require_owned_reference(
+                session, tenant_key, model=Project, row_id=project_id, field="project_id"
+            )
         if sequence_run_id:
             await self._require_sequence_run(session, tenant_key, sequence_run_id)
             await self._require_run_is_unhubbed(session, tenant_key, sequence_run_id)
@@ -197,8 +216,19 @@ class CommThreadRepository(
             return existing
         # None exists -> create the marker thread. product_id mirrors the project
         # (a filter dim), matching what the ce_0072 fold sets for parity.
+        # BE-9420: tenant-filtered. This read had no tenant_key predicate, against
+        # this module's own "every query filters tenant_key -- no exceptions" rule,
+        # and would copy another tenant's product_id onto this tenant's new thread.
+        # No caller reaches it with a foreign project_id today (both pass an id
+        # taken from a row already fetched under the tenant), so this closes a
+        # latent hazard rather than a live path.
         product_id = (
-            await session.execute(select(Project.product_id).where(Project.id == project_id))
+            await session.execute(
+                select(Project.product_id).where(
+                    Project.tenant_key == tenant_key,
+                    Project.id == project_id,
+                )
+            )
         ).scalar_one_or_none()
         return await self.create_thread(
             session, tenant_key, subject=marker, project_id=project_id, product_id=product_id
@@ -312,17 +342,46 @@ class CommThreadRepository(
         project_id: str | None = None,
         limit: int | None = None,
         before_id: str | None = None,
+        exclude_terminal: bool = False,
+        participant_id: str | None = None,
     ) -> list[CommThread]:
         """List threads for a tenant with optional filters (newest first).
 
         BE-6131b: ``limit`` + ``before_id`` keyset pagination mirrors the BE-6071
         bound on the ``/messages`` endpoint. When ``limit`` is supplied the result
         set is capped server-side. ``before_id`` is a keyset cursor: only threads
-        whose ``created_at`` is strictly older than the named thread are returned
-        (for the next page).
+        that sort strictly AFTER the named thread are returned (for the next page).
+
+        BE-9469 -- "sorts after" is a comparison on ``(created_at, id)``, not on
+        ``created_at`` alone, and the ORDER BY carries ``id`` as a unique tiebreak.
+        Rows written in one transaction share a ``created_at``, so the single-column
+        version dropped whole tie groups: measured on real Postgres, five tied rows
+        paged at ``limit=4`` returned four and paged at ``limit=1`` returned one, both
+        reporting completion.
+
+        BE-9469 also makes an UNRESOLVABLE ``before_id`` raise instead of silently
+        restarting the walk from page one. That is a deliberate behavior change on this
+        shipped contract; ``resolve_thread_cursor`` records why, including why the
+        refusal cannot distinguish a foreign-tenant cursor from a nonexistent one.
 
         The MCP tool surface (BE-6054b) extends this with the full filter set;
         link a provides the tenant-isolated foundation + the common dims.
+
+        BE-9388 adds the two predicates the BATON query needs. Both default OFF, so
+        every existing caller is byte-identical:
+
+        * ``exclude_terminal`` drops resolved/closed threads. A terminal thread
+          holds nobody's turn, which the adjacent directed-action query has always
+          enforced and the baton arms never did.
+        * ``participant_id`` restricts to threads the identity actually belongs to.
+          Needed because ``next_action_owner='all'`` means "all PARTICIPANTS" — the
+          meaning the write side already uses when it fans a hand-off out to
+          ``participant_ids`` — and matching it tenant-wide let three abandoned
+          threads hold every agent's turn forever.
+
+        They live here rather than in a dedicated baton query so the predicate set
+        stays in one place; ``uq_comm_participant`` (one row per thread+participant)
+        is what keeps the join from multiplying rows.
         """
         query = select(CommThread).where(
             CommThread.tenant_key == tenant_key,
@@ -330,6 +389,13 @@ class CommThreadRepository(
         )
         if status is not None:
             query = query.where(CommThread.status == status)
+        if exclude_terminal:
+            query = query.where(CommThread.status.notin_(TERMINAL_THREAD_STATUSES))
+        if participant_id is not None:
+            query = query.join(CommParticipant, CommParticipant.thread_id == CommThread.id).where(
+                CommParticipant.tenant_key == tenant_key,
+                CommParticipant.participant_id == participant_id,
+            )
         if next_action_owner is not None:
             query = query.where(CommThread.next_action_owner == next_action_owner)
         if product_id is not None:
@@ -338,17 +404,13 @@ class CommThreadRepository(
             query = query.where(CommThread.project_id == project_id)
 
         if before_id is not None:
-            cursor_result = await session.execute(
-                select(CommThread.created_at).where(
-                    CommThread.tenant_key == tenant_key,
-                    CommThread.id == before_id,
-                )
-            )
-            cursor_ts = cursor_result.scalar_one_or_none()
-            if cursor_ts is not None:
-                query = query.where(CommThread.created_at < cursor_ts)
+            # BE-9469: resolve the cursor row, refuse an unresolvable one, and apply the
+            # COMPOSITE (created_at, id) keyset. All three live together in
+            # _comm_thread_keyset -- see there for the measurements and the reasoning.
+            cursor_ts = await resolve_thread_cursor(session, tenant_key, before_id)
+            query = query.where(thread_keyset_after(cursor_ts, before_id))
 
-        query = query.order_by(CommThread.created_at.desc())
+        query = query.order_by(*thread_list_order_clauses())
         if limit is not None and limit > 0:
             query = query.limit(limit)
         result = await session.execute(query)

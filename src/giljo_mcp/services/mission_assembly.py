@@ -22,8 +22,10 @@ from giljo_mcp.platform_registry import (
     HARNESS_CLI_TOOL_TYPES,
     Platform,
     effective_harness,
+    has_local_agent_file_channel,
 )
 from giljo_mcp.schemas.responses.orchestration import (
+    IDENTITY_RESOLVED,
     IDENTITY_TEMPLATE_UNBOUND,
     IDENTITY_TEMPLATE_UNRESOLVED,
 )
@@ -126,6 +128,114 @@ def compose_unresolved_identity(job: AgentJob, execution: AgentExecution) -> tup
     return _UNRESOLVED_IDENTITY_BLOCK.format(cause=cause, display_name=display_name, remedy=remedy), status
 
 
+def should_serve_identity(identity_status: str, execution_mode: Any) -> bool:
+    """BE-9402: whether ``get_job_mission`` ships the identity block, per the MODE ELECTION.
+
+    ``projects.execution_mode`` is a stored user election -- a signal the server
+    genuinely has, unlike what sits on the client's disk. It answers the only
+    question that matters here: has the agent ALREADY been handed this persona by
+    its harness? :func:`has_local_agent_file_channel` is that question, asked in its
+    own words rather than borrowed from ``is_subagent_mode`` (which answers a
+    TOPOLOGY question and deliberately differs on ``generic_mcp`` -- see its docstring).
+
+    * **subagent** and the four legacy CLI tokens -- yes. The orchestrator spawns each
+      worker through the harness's own subagent mechanism, which loads the installed
+      ``gil-*`` / ``.claude/agents/*`` file. That file is rendered from the SAME template
+      row this identity is composed from, so serving it again is a byte-for-byte
+      duplicate: 1,300-2,400 tokens per agent, ~8-14k across a six-agent run. Omit it.
+    * **multi_terminal** -- no, and this serve is LOAD-BEARING: do not "optimise" it
+      away to match the row above. A launched terminal boots on the ~50-token
+      natural-language prompt from ``launch_command_synth.build_loaded_prompt``
+      ("call get_job_mission and execute it"). Nothing else reaches that process, so
+      the server is its ONLY identity channel. Withholding here strands the agent
+      with no role framing at all.
+    * **generic_mcp** -- no, for the same reason as multi_terminal despite being a
+      subagent TOPOLOGY. It has no CLI, so nothing installs agent files for it; its own
+      protocol prose says templates are "served by the MCP server, not local files".
+    * **unset / unrecognised** -- also no. The direction of the fail-safe is to SERVE:
+      duplicate tokens are a cost, no persona is a broken agent. The predicate is a
+      membership test, so an unknown token answers False and gets served. (A NULL never
+      arrives -- ``check_implementation_gate`` blocks it upstream.)
+
+    ``identity_status`` narrows the omission to the identity the installed file
+    actually duplicates -- a bound template's persona (``resolved``). Two kinds are
+    served in EVERY mode because no file carries them:
+
+    * ``orchestrator_default`` -- the subagent-mode orchestrator is the user's ROOT
+      session, not something spawned via a subagent call, so no file feeds it. It is
+      also composed through ``compose_orchestrator_identity``, which appends the system
+      harness block (MCP tool usage, check-in protocol, harness reminder override) that
+      the installed file is not rendered through. Omitting it would leave a subagent
+      orchestrator with no identity channel whatsoever.
+    * ``template_unresolved`` / ``template_unbound`` -- BE-9333's explicit degradation
+      report. Not a persona, no file equivalent, and roughly four lines: nothing to
+      de-duplicate, and BE-9333's guarantee that this block is never silently null
+      must survive this change.
+    """
+    return not (has_local_agent_file_channel(execution_mode) and identity_status == IDENTITY_RESOLVED)
+
+
+def _apply_identity_serve_gate(
+    logger,
+    job_id: str,
+    agent_identity: str | None,
+    identity_status: str,
+    protocol_exec_mode: Any,
+) -> str | None:
+    """BE-9402: apply :func:`should_serve_identity` and log a withholding.
+
+    THE DEFENCE OF THE SERVE SITE. Withholding happens for exactly ONE combination --
+    a ``subagent`` election carrying a ``resolved`` (bound-template) identity -- because
+    that is the only identity an installed ``gil-*`` / ``.claude/agents/*`` file already
+    carries. Why each of the other four outcomes KEEPS being served, so that none of them
+    is later "optimised" away to match:
+
+    * **multi_terminal** -- its terminal boots on the ~50-token prompt from
+      ``launch_command_synth.build_loaded_prompt``. Nothing else reaches that process; the
+      server is its only identity channel.
+    * **unrecognised / absent election** -- fail SAFE. Duplicate tokens cost tokens; no
+      persona breaks the agent. (A NULL never arrives: ``check_implementation_gate`` blocks
+      it upstream.)
+    * **orchestrator_default** -- composed by ``compose_orchestrator_identity`` off
+      ``resolve_orchestrator_override``, i.e. the BE-9385d product -> tenant -> seeded-default
+      chain plus the system harness block. That is server-side tenant DATA no client file
+      can carry, and a subagent-mode orchestrator is the user's ROOT session that nothing
+      spawns from a file. Withholding it deletes per-product customization outright.
+    * **template_unresolved / template_unbound** -- BE-9333's degradation report, four lines,
+      no file equivalent. Withholding it restores the signal-less null BE-9333 removed.
+
+    ``protocol_exec_mode`` must be the mode the protocol render resolved through
+    ``effective_execution_mode`` (BE-9335), so a chain member can never be rendered
+    for one harness while being gated on another.
+
+    The log line exists because an omission is otherwise invisible: ``agent_identity``
+    simply arrives null. Here it is deliberate, and the line says so.
+
+    Pinned by tests/integration/test_be9402_mode_elected_identity_boundary.py -- the two
+    carve-out rows fail if the ``identity_status`` term is dropped.
+    """
+    if should_serve_identity(identity_status, protocol_exec_mode):
+        return agent_identity
+    if agent_identity:
+        logger.info(
+            "[AGENT_IDENTITY] Withheld by the subagent mode election -- the harness loads it from disk",
+            extra={"job_id": job_id, "identity_status": identity_status},
+        )
+    return None
+
+
+def gate_identity_source(served_identity: str | None, identity_source: str | None) -> str | None:
+    """FE-9408: provenance rides ONLY where the identity it describes rides.
+
+    Lives beside the serve gate because it is the same decision. On a withheld response
+    (BE-9402) the agent reads its persona off an installed ``gil-*`` file; a source line
+    here would attribute text this response did not send, and would name a rung of the
+    override ladder that the file on disk never consulted -- worse than silence, because
+    it reads as an answer.
+    """
+    return identity_source if served_identity else None
+
+
 def compute_protocol_etag(agent_identity: str | None, full_protocol: str | None) -> str:
     """BE-6208g: sha256 of the static identity+protocol block (the cacheable part).
 
@@ -134,6 +244,38 @@ def compute_protocol_etag(agent_identity: str | None, full_protocol: str | None)
     """
     static_block = (agent_identity or "") + "\x00" + (full_protocol or "")
     return hashlib.sha256(static_block.encode("utf-8")).hexdigest()
+
+
+def _maybe_inject_ch6(
+    full_protocol: str,
+    execution: AgentExecution,
+    protocol_exec_mode: str,
+    project: Any,
+    checkin_cadence_minutes: int | None,
+) -> str:
+    """Append CH6 (check-in protocol) for a multi-terminal orchestrator.
+
+    Handover 0960 / BE-6013: CH6 is ALWAYS injected for a multi-terminal
+    orchestrator — the cadence decision lives INSIDE the protocol (re-read live
+    via get_workflow_status() every cycle), so a Settings change reaches an
+    already-running orchestrator without a restart. CLI modes and
+    non-orchestrator agents never receive it.
+    BE-9335: keyed off protocol_exec_mode, the SAME resolved value the header
+    uses, so CH6 and the header cannot disagree for a chain member.
+    FE-9296b: the project-less dedicated conductor now receives CH6 too (it
+    previously had no cadence at all), in its conductor prose variant. The
+    seed is the caller-resolved cadence; the slider-era project columns are
+    the session-free fallback.
+    """
+    if execution.agent_display_name != "orchestrator" or protocol_exec_mode != "multi_terminal":
+        return full_protocol
+    from giljo_mcp.services.protocol_sections.chapters_reference import _build_ch6_auto_checkin
+
+    interval = checkin_cadence_minutes
+    if interval is None:
+        has_override = project is not None and getattr(project, "auto_checkin_enabled", False)
+        interval = getattr(project, "auto_checkin_interval", 10) if has_override else 10
+    return full_protocol + "\n" + _build_ch6_auto_checkin(interval, for_conductor=project is None)
 
 
 def assemble_mission_context(
@@ -151,8 +293,15 @@ def assemble_mission_context(
     preset: Platform | None = None,
     comm_thread_id: str | None = None,
     detected_harness: str | None = None,
+    checkin_cadence_minutes: int | None = None,
+    identity_status: str = IDENTITY_RESOLVED,
+    identity_source: str | None = None,
 ) -> MissionResponse:
     """Build the full mission text, protocol, and MissionResponse.
+
+    FE-9296b: ``checkin_cadence_minutes`` is the caller-resolved check-in
+    cadence (this module opens no sessions); None falls back to the project
+    columns — see _maybe_inject_ch6.
 
     Combines team context header, Serena integration, and the 5-phase
     lifecycle protocol into the final response object.
@@ -270,23 +419,8 @@ def assemble_mission_context(
         comm_thread_id=comm_thread_id,
     )
 
-    # Handover 0960 / BE-6013: Always inject the CH6 auto check-in scaffold for a
-    # multi-terminal orchestrator, regardless of the current auto_checkin_enabled
-    # value. The on/off decision now lives INSIDE the protocol — every cycle the
-    # orchestrator re-reads the live state via get_workflow_status() — so an
-    # orchestrator that booted with check-in OFF can be switched ON mid-run via the
-    # slider (and vice versa) without a restart. Keep the multi_terminal-only and
-    # orchestrator-only guards: do NOT inject for CLI/Codex/Gemini modes or
-    # non-orchestrator agents.
-    # BE-9335: keyed off protocol_exec_mode, the SAME resolved value the header uses.
-    # Reading the raw column here made CH6 disagree with the header in both
-    # directions for a chain member: a multi_terminal chain lost its check-in loop,
-    # and a subagent chain was shipped a multi_terminal loop it must not run.
-    if execution.agent_display_name == "orchestrator" and protocol_exec_mode == "multi_terminal" and project:
-        from giljo_mcp.services.protocol_sections.chapters_reference import _build_ch6_auto_checkin
-
-        auto_checkin_interval = getattr(project, "auto_checkin_interval", 10)
-        full_protocol += "\n" + _build_ch6_auto_checkin(auto_checkin_interval)
+    # CH6 check-in protocol — see _maybe_inject_ch6 for the gate + seed rules.
+    full_protocol = _maybe_inject_ch6(full_protocol, execution, protocol_exec_mode, project, checkin_cadence_minutes)
 
     # BE-6008: multi_terminal SPECIALISTS (not the orchestrator, which gets its
     # own roster + authority rule via its orchestrator protocol) receive a
@@ -330,12 +464,20 @@ def assemble_mission_context(
         is_chain_member=bool(chain_execution_mode) and bool(job.project_id),
         is_chain_conductor=is_chain_conductor,
     )
+    # BE-9402 SERVE SITE. Withheld ONLY for `subagent` + `resolved` -- that one pair is what
+    # the installed agent file already duplicates. multi_terminal, an unrecognised/absent
+    # election, `orchestrator_default` and `template_unresolved`/`template_unbound` are all
+    # STILL SERVED, each for a reason that is load-bearing rather than an oversight to
+    # "optimise" away -- read _apply_identity_serve_gate before touching any of them.
+    served_identity = _apply_identity_serve_gate(logger, job_id, agent_identity, identity_status, protocol_exec_mode)
     return MissionResponse(
         job_id=job.job_id,
         agent_id=execution.agent_id,
         agent_name=execution.agent_display_name,
         agent_display_name=execution.agent_display_name,
-        agent_identity=agent_identity,
+        agent_identity=served_identity,
+        identity_status=identity_status,  # BE-9333: rides the wire only when degraded
+        identity_source=gate_identity_source(served_identity, identity_source),  # FE-9408
         mission=full_mission,
         project_id=str(job.project_id) if job.project_id else None,  # BE-6184: project-less conductor -> None
         parent_job_id=str(execution.spawned_by) if execution.spawned_by else None,

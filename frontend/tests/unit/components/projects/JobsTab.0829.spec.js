@@ -12,11 +12,23 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createVuetify } from 'vuetify'
+import { createRouter, createMemoryHistory } from 'vue-router'
 import JobsTab from '@/components/projects/JobsTab.vue'
 import { useAgentJobsStore } from '@/stores/agentJobsStore'
 import { useUserStore } from '@/stores/user'
 
 const vuetify = createVuetify()
+
+// FE-9427: JobsTab reaches useRouter() through useJobActions (openAgentThread
+// pushes the named 'Hub' route). Mounted without a router that returned
+// `undefined`, so the deep-link path was inert.
+const hubRouter = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: '/', name: 'Root', component: { template: '<div />' } },
+    { path: '/hub', name: 'Hub', component: { template: '<div />' } },
+  ],
+})
 
 vi.mock('@/services/api', () => {
   const api = {
@@ -71,7 +83,7 @@ describe('JobsTab Phase Column (0829)', () => {
   it('renders phase badges and sorts rows by phase order', async () => {
     const wrapper = mount(JobsTab, {
       props: { project: mockProject },
-      global: { plugins: [pinia, vuetify], stubs },
+      global: { plugins: [pinia, vuetify, hubRouter], stubs },
     })
     await wrapper.vm.$nextTick()
 

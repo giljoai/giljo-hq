@@ -113,7 +113,7 @@ def register_event_handlers(app: FastAPI) -> None:
         # BE-9053: degraded_services was write-only — startup failures of the
         # backup scheduler / reapers were appended to a list nothing ever read,
         # so SaaS could run indefinitely with those services silently OFF.
-        # Surface it here so any health poller (Railway, operator curl) sees it.
+        # Surface it here so any health poller (the platform, operator curl) sees it.
         if state.degraded_services:
             checks["degraded_services"] = list(state.degraded_services)
             status = "degraded"

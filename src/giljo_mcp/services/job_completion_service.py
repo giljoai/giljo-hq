@@ -542,7 +542,7 @@ class JobCompletionService:
         # not yet done; the plan is what survives into implementation.
         # Blocking the staging-end complete_job on these would force the
         # agent to lie about completion status to get past the gate (the
-        # dogfood billing test). Skip the TODOs gate entirely for staging-
+        # test-install billing test). Skip the TODOs gate entirely for staging-
         # phase orchestrators. The unread-messages gate still applies —
         # orchestrators should not abandon their inbox at staging-end.
         #

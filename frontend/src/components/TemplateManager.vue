@@ -39,45 +39,8 @@
       You need to update the agent templates, please run the <strong>giljo_setup</strong> tool (choose "Agents only") in your CLI tool.
     </v-alert>
 
-    <!-- HITL Closeout Toggle -->
-    <div class="hitl-toggle-bar">
-      <v-switch
-        v-model="closeoutModeHitl"
-        color="primary"
-        density="compact"
-        hide-details
-        aria-label="Require user approval before project closeout"
-        data-testid="closeout-mode-toggle"
-        @update:model-value="toggleCloseoutMode"
-      />
-      <span class="hitl-toggle-label">Require approval before closeout</span>
-      <v-tooltip location="bottom" max-width="340">
-        <template #activator="{ props }">
-          <v-icon v-bind="props" size="16" class="hitl-toggle-info">mdi-information-outline</v-icon>
-        </template>
-        When enabled, the orchestrator pauses for your review before closing a project — but only if there are deferred findings to review. Clean closeouts proceed automatically.
-      </v-tooltip>
-    </div>
-
-    <!-- BE-9084: Headless vs HITL launch toggle (account-wide, default HITL) -->
-    <div class="hitl-toggle-bar">
-      <v-switch
-        v-model="allowHeadless"
-        color="primary"
-        density="compact"
-        hide-details
-        aria-label="Allow a headless CLI agent to self-advance from staging to implementation"
-        data-testid="headless-launch-toggle"
-        @update:model-value="toggleHeadless"
-      />
-      <span class="hitl-toggle-label">Allow headless CLI self-advance (skip the Implement click)</span>
-      <v-tooltip location="bottom" max-width="360">
-        <template #activator="{ props }">
-          <v-icon v-bind="props" size="16" class="hitl-toggle-info">mdi-information-outline</v-icon>
-        </template>
-        This governs in-application, server-mediated launches only — the MCP launch_implementation tool that OAuth agent sessions use to advance a project from staging to building. Off (the default) keeps a human in the loop: the server will not authorize that launch until you press Implement. On lets a trusted CLI/OAuth agent self-advance without a click; only enable it for autonomous workflows you trust. It does not gate direct CLI interaction — an agent that reads a project and simply runs it locally never asks the server, so this toggle cannot reach it. Note: HITL guarantees the server will not authorize implementation early, but it cannot stop a non-compliant local orchestrator from inlining its own mission into an in-process subagent and working off the books (an accepted residual of local execution).
-      </v-tooltip>
-    </div>
+    <!-- Account-wide orchestration policy switches (closeout HITL, headless launch) -->
+    <OrchestrationToggles />
 
     <!-- Filter bar with New Template button right-aligned -->
     <div class="filter-bar">
@@ -237,22 +200,23 @@
 </template>
 
 <script setup>
-import { ref, computed, inject, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import api from '@/services/api'
-import { useUserStore } from '@/stores/user'
 import { useToast } from '@/composables/useToast'
-import { getAgentColor as getAgentColorConfig } from '@/config/agentColors'
 import { useTemplateData } from '@/composables/useTemplateData'
+import { useProductAgentAssignments } from '@/composables/useProductAgentAssignments'
+import { useTemplateEditDialog } from '@/composables/useTemplateEditDialog'
+import { useTemplateRealtime } from '@/composables/useTemplateRealtime'
 import TemplatesTable from './templates/TemplatesTable.vue'
 import TemplateEditDialog from './templates/TemplateEditDialog.vue'
+import OrchestrationToggles from './templates/OrchestrationToggles.vue'
+import {
+  TEMPLATE_TABLE_HEADERS,
+  TEMPLATE_ROLE_OPTIONS,
+  TEMPLATE_STATUS_OPTIONS,
+} from './templates/templateTableConfig'
 
-// Handover 0335: WebSocket setup for real-time export status updates
-const userStore = useUserStore()
 const { showToast } = useToast()
-const currentTenantKey = computed(() => userStore.currentUser?.tenant_key)
-
-// Handover 0335: Inject template export event from parent (UserSettings.vue)
-const templateExportEvent = inject('templateExportEvent', ref(null))
 
 // Search and filters (owned here, passed into composable)
 const search = ref('')
@@ -278,24 +242,21 @@ const {
   importDefaults,
 } = useTemplateData(search, filterRole, filterStatus)
 
-// HITL closeout mode
-const closeoutModeHitl = ref(true)
+const { loadProductAssignments, toggleAgent } = useProductAgentAssignments(templates, loadActiveCount)
 
-// BE-9084: account-wide Headless-vs-HITL launch toggle (default false = HITL)
-const allowHeadless = ref(false)
-
-// Dirty tracking: snapshot original state on dialog open
-const originalSnapshot = ref(null)
-const TRACKED_FIELDS = ['role', 'custom_suffix', 'description', 'user_instructions', 'model', 'tools', 'cli_tool']
-const hasChanges = computed(() => {
-  if (!originalSnapshot.value) {
-    // Create mode: require at least a role
-    return !!editingTemplate.value.role
-  }
-  return TRACKED_FIELDS.some(
-    (f) => (editingTemplate.value[f] ?? '') !== (originalSnapshot.value[f] ?? ''),
-  )
-})
+// BE-9394: the dialog's own state machine (open/close, dirty tracking, field updates)
+// lives in its own composable -- see useTemplateEditDialog for why.
+const {
+  editDialog,
+  hasChanges,
+  retireChanged,
+  openCreateDialog,
+  editTemplate,
+  duplicateTemplate,
+  closeEditDialog,
+  onRoleChange,
+  onUpdateTemplate,
+} = useTemplateEditDialog(editingTemplate, resetEditingTemplate)
 
 const hasStaleTemplates = computed(() => templates.value.some((t) => t.may_be_stale && !t.user_managed_export))
 
@@ -304,8 +265,7 @@ const saving = ref(false)
 const deleting = ref(false)
 const resetting = ref(false)
 
-// Dialogs
-const editDialog = ref(false)
+// Dialogs (editDialog is owned by useTemplateEditDialog)
 const deleteDialog = ref(false)
 const resetDialog = ref(false)
 
@@ -313,64 +273,23 @@ const resetDialog = ref(false)
 const deletingTemplate = ref(null)
 const resettingTemplate = ref(null)
 
-// FE-9203: Export Status column sort — needs-export first (stale or never
-// exported), then exported (oldest export first), then user-managed dismissals,
-// system-managed rows last. Uses the real export signals on the API payload
-// (may_be_stale, last_exported_at, user_managed_export).
-const exportStatusRank = (t) => {
-  if (t._system) return 3
-  if (t.user_managed_export) return 2
-  if (t.may_be_stale || !t.last_exported_at) return 0
-  return 1
-}
-const sortExportStatus = (a, b) =>
-  exportStatusRank(a) - exportStatusRank(b) ||
-  new Date(a.last_exported_at || 0) - new Date(b.last_exported_at || 0)
+// Table/filter configuration lives in templateTableConfig.js. Re-bound locally
+// because the template and the characterization spec both read these names.
+const headers = TEMPLATE_TABLE_HEADERS
+const roleOptions = TEMPLATE_ROLE_OPTIONS
+const statusOptions = TEMPLATE_STATUS_OPTIONS
 
-// Table configuration
-const headers = [
-  { title: 'Agent Name', key: 'name', align: 'start' },
-  { title: 'Role', key: 'role', align: 'start' },
-  { title: 'Active', key: 'is_active', align: 'center' },
-  { title: 'Export Status', key: 'export_status', align: 'center', sortRaw: sortExportStatus },
-  { title: 'Updated', key: 'updated_at', align: 'start' },
-  { title: 'Actions', key: 'actions', sortable: false, width: '4%', align: 'center' },
-]
-
-const roleOptions = [
-  'analyzer',
-  'designer',
-  'frontend',
-  'backend',
-  'implementer',
-  'tester',
-  'reviewer',
-  'documenter',
-]
-
-// FE-9203: agent templates have exactly two lifecycle states — is_active
-// true/false. There is no archived/draft state on the model; do not add
-// options here that the API cannot satisfy.
-const statusOptions = [
-  { title: 'Active', value: 'active' },
-  { title: 'Inactive', value: 'inactive' },
-]
-
-// Handover 0075: Handle active toggle with validation
+// Handover 0075 + BE-9385a: the switch writes the PER-PRODUCT junction (see
+// useProductAgentAssignments); tenant `is_active` is the retire switch in the dialog.
 const handleToggleActive = async (template, newValue) => {
   try {
-    await api.templates.update(template.id, { is_active: newValue })
-    template.is_active = newValue
-    await reloadActiveCount()
-    if (newValue) {
-      showToast({ message: 'Agent activated - re-export required', type: 'warning' })
-    } else {
-      showToast({ message: 'Agent deactivated', type: 'info' })
-    }
+    const at = (await toggleAgent(template, newValue)) ? ' for this product' : ''
+    showToast({
+      message: newValue ? `Agent enabled${at} - re-export required` : `Agent disabled${at}`,
+      type: newValue ? 'warning' : 'info' })
     localStorage.setItem('agent_export_stale', 'true')
   } catch (error) {
-    const errorMsg = error.response?.data?.detail || 'Failed to update agent'
-    showToast({ message: errorMsg, type: 'error' })
+    showToast({ message: error.response?.data?.detail || 'Failed to update agent', type: 'error' })
     await reloadTemplates()
   }
 }
@@ -388,68 +307,6 @@ const importDefaultAgents = async () => {
   } catch (error) {
     showToast({ message: error.response?.data?.detail || 'Failed to add default agents', type: 'error' })
   }
-}
-
-const openCreateDialog = () => {
-  resetEditingTemplate()
-  originalSnapshot.value = null
-  editDialog.value = true
-}
-
-const editTemplate = (template) => {
-  // Extract suffix from name: "implementer-backend" with role "implementer" → suffix "backend"
-  const role = template.role || ''
-  const name = template.name || ''
-  const extractedSuffix = name.startsWith(`${role}-`) ? name.slice(role.length + 1) : ''
-
-  const normalized = {
-    ...template,
-    user_instructions: template.user_instructions || '',
-    cli_tool: template.cli_tool || 'claude',
-    custom_suffix: extractedSuffix,
-    background_color: template.background_color || '',
-    model: template.model || 'sonnet',
-    tools: template.tools || null,
-  }
-  editingTemplate.value = { ...normalized }
-  originalSnapshot.value = { ...normalized }
-  editDialog.value = true
-}
-
-const duplicateTemplate = (template) => {
-  editingTemplate.value = {
-    ...template,
-    id: null,
-    name: `${template.name} (Copy)`,
-    user_instructions: template.user_instructions || '',
-    cli_tool: template.cli_tool || 'claude',
-    custom_suffix: '',
-    background_color: template.background_color || '',
-    model: template.model || 'sonnet',
-    tools: template.tools || null,
-  }
-  originalSnapshot.value = null
-  editDialog.value = true
-}
-
-const closeEditDialog = () => {
-  editDialog.value = false
-  originalSnapshot.value = null
-  resetEditingTemplate()
-}
-
-// Handover 0103: Handle role change (auto-set background_color + write role back to editingTemplate)
-// Called by TemplateEditDialog @role-change. Must mutate in-place so downstream
-// spread in onUpdateTemplate does not clobber the role assignment.
-const onRoleChange = (newRole) => {
-  editingTemplate.value.role = newRole
-  editingTemplate.value.background_color = getCategoryColor(newRole)
-}
-
-// Handle field updates emitted by TemplateEditDialog via @update:template.
-// Merges the spread update into editingTemplate while preserving any concurrent mutations.
-const onUpdateTemplate = (updated) => {
-  editingTemplate.value = { ...editingTemplate.value, ...updated }
 }
 
 const saveTemplate = async () => {
@@ -470,6 +327,7 @@ const saveTemplate = async () => {
       success_criteria: editingTemplate.value.success_criteria || [],
       tags: editingTemplate.value.tags || [],
       is_default: editingTemplate.value.is_default || false,
+      is_active: true, // BE-9391: born active — create is the only path that assumes it.
     }
 
     if (editingTemplate.value.id) {
@@ -486,6 +344,9 @@ const saveTemplate = async () => {
         success_criteria: data.success_criteria,
         tags: data.tags,
         is_default: data.is_default,
+        // BE-9394: the tenant-wide retire switch, sent ONLY when the user moved it.
+        // An ordinary edit must never carry this field -- see retireChanged.
+        ...(retireChanged.value ? { is_active: editingTemplate.value.is_active } : {}),
       })
     } else {
       await api.templates.create(data)
@@ -529,8 +390,6 @@ const deleteTemplate = async () => {
   }
 }
 
-const getCategoryColor = (role) => getAgentColorConfig(role).hex
-
 const confirmReset = (template) => {
   resettingTemplate.value = template
   resetDialog.value = true
@@ -550,33 +409,6 @@ const resetTemplate = async () => {
   }
 }
 
-// Handover 0335: Handle template export WebSocket event
-const handleTemplateExported = (data) => {
-  const { tenant_key: tenantKey, template_ids: templateIds, exported_at: exportedAt } = data
-  if (!tenantKey || !templateIds || !exportedAt) return
-  if (tenantKey !== currentTenantKey.value) return
-
-  const templateIdSet = new Set(templateIds)
-  templates.value.forEach((template) => {
-    if (templateIdSet.has(template.id)) {
-      template.last_exported_at = exportedAt
-      template.may_be_stale = false
-    }
-  })
-}
-
-// Handle real-time template updates via WebSocket (enable/disable, field changes)
-const handleTemplateUpdated = (data) => {
-  if (!data?.template_id) return
-  const template = templates.value.find((t) => t.id === data.template_id)
-  if (template) {
-    if (data.is_active !== undefined) template.is_active = data.is_active
-    if (data.may_be_stale !== undefined) template.may_be_stale = data.may_be_stale
-    // Refresh active count when is_active changes
-    if (data.updated_fields?.includes('is_active')) reloadActiveCount()
-  }
-}
-
 const markUserManaged = async (template) => {
   try {
     await api.templates.update(template.id, { user_managed_export: true })
@@ -589,138 +421,23 @@ const markUserManaged = async (template) => {
   }
 }
 
-// Handle agent template downloads via MCP (giljo_setup, "Agents only") — clear staleness flags
-const handleAgentsDownloaded = () => {
-  const now = new Date().toISOString()
-  templates.value.forEach((template) => {
-    template.last_exported_at = now
-    template.may_be_stale = false
-    template.user_managed_export = false
-  })
-}
-
-// HITL closeout mode toggle
-async function toggleCloseoutMode(enabled) {
-  const newMode = enabled ? 'hitl' : 'autonomous'
-  const previousValue = closeoutModeHitl.value
-  closeoutModeHitl.value = enabled
-  try {
-    await api.settings.updateGeneral({ closeout_mode: newMode })
-    showToast({
-      message: enabled
-        ? 'User approval required before project closeout'
-        : 'Orchestrator will close projects autonomously',
-      type: 'success',
-    })
-  } catch {
-    closeoutModeHitl.value = previousValue
-    showToast({ message: 'Failed to save closeout setting.', type: 'error' })
-  }
-}
-
-async function loadCloseoutMode() {
-  try {
-    const generalRes = await api.settings.getGeneral()
-    const generalSettings = generalRes.data?.settings || {}
-    if (generalSettings.closeout_mode) {
-      closeoutModeHitl.value = generalSettings.closeout_mode === 'hitl'
-    }
-  } catch {
-    // Default stays true (hitl)
-  }
-}
-
-// BE-9084: Headless-vs-HITL launch toggle (account-wide). Optimistic update with
-// revert-on-error, mirroring the closeout toggle above.
-async function toggleHeadless(enabled) {
-  const previousValue = allowHeadless.value
-  allowHeadless.value = enabled
-  try {
-    await api.settings.updateHeadlessLaunch(enabled)
-    showToast({
-      message: enabled
-        ? 'Headless mode on — a trusted CLI agent may self-advance to implementation'
-        : 'HITL mode — the human Implement step is enforced',
-      type: 'success',
-    })
-  } catch {
-    allowHeadless.value = previousValue
-    showToast({ message: 'Failed to save headless setting.', type: 'error' })
-  }
-}
-
-async function loadHeadlessLaunch() {
-  try {
-    const res = await api.settings.getHeadlessLaunch()
-    allowHeadless.value = !!res.data?.allow_headless_launch
-  } catch {
-    // Default stays false (HITL)
-  }
-}
-
-// Tenant-scoped template queries (no product_id)
-const reloadTemplates = () => loadTemplates()
+// Tenant-scoped template queries; BE-9385a overlays the per-product state on top.
+const reloadTemplates = async () => (await loadTemplates(), loadProductAssignments())
 const reloadActiveCount = () => loadActiveCount()
 
-// Window event wrappers (event router dispatches as CustomEvent, not WS store)
-const onAgentsDownloaded = (e) => handleAgentsDownloaded(e.detail)
-const onTemplateExported = (e) => handleTemplateExported(e.detail)
-const onTemplateUpdated = (e) => handleTemplateUpdated(e.detail)
+// Export/update/download signals from the event router and the parent view.
+// Self-wiring: registers and tears down its own window listeners.
+useTemplateRealtime(templates, reloadActiveCount)
 
 // Lifecycle
 onMounted(() => {
   reloadTemplates()
   reloadActiveCount()
-  loadCloseoutMode()
-  loadHeadlessLaunch()
-  window.addEventListener('template:exported', onTemplateExported)
-  window.addEventListener('setup:agents_downloaded', onAgentsDownloaded)
-  window.addEventListener('template:updated', onTemplateUpdated)
 })
-
-onUnmounted(() => {
-  window.removeEventListener('template:exported', onTemplateExported)
-  window.removeEventListener('setup:agents_downloaded', onAgentsDownloaded)
-  window.removeEventListener('template:updated', onTemplateUpdated)
-})
-
-// Handover 0335: Watch for export events from parent (UserSettings.vue)
-watch(
-  templateExportEvent,
-  (newEvent) => {
-    if (!newEvent) return
-    if (newEvent.tenant_key !== currentTenantKey.value) return
-    handleTemplateExported(newEvent)
-  },
-  { deep: true }
-)
 </script>
 
 <style scoped lang="scss">
 @use '../styles/design-tokens' as *;
-
-/* HITL closeout toggle */
-.hitl-toggle-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  padding-left: 4px;
-}
-
-.hitl-toggle-label {
-  font-size: 0.875rem;
-  color: var(--text-muted);
-}
-
-.hitl-toggle-info {
-  color: var(--text-muted);
-  cursor: help;
-}
-
-.hitl-toggle-bar :deep(.v-switch .v-selection-control) {
-  min-height: auto;
-}
 
 /* 0873: filter bar layout (matches TasksView pattern) */
 .filter-bar {
@@ -773,27 +490,5 @@ watch(
   border-radius: $border-radius-rounded !important;
   overflow: hidden;
   background: $elevation-raised;
-}
-
-// Custom toggle colors for HITL v-switch in this container: green when ON, faded blue when OFF
-// Duplicated into TemplatesTable.vue for the row-level template toggles (scoped CSS boundary)
-.v-switch {
-  :deep(.v-switch__thumb) {
-    background-color: rgba(33, 150, 243, 0.4); // Faded blue when OFF
-  }
-
-  :deep(.v-switch__track) {
-    background-color: rgba(33, 150, 243, 0.2); // Faded blue track when OFF
-  }
-}
-
-.v-switch :deep(.v-selection-control--dirty) {
-  .v-switch__thumb {
-    background-color: rgb(var(--v-theme-success));
-  }
-
-  .v-switch__track {
-    background-color: rgba(76, 175, 80, 0.3); // Green track when ON
-  }
 }
 </style>

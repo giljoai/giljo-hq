@@ -103,9 +103,11 @@ class Project(Base):
     # resolve and supply a real tenant_key (or raise); a forgotten key must fail
     # loudly, never auto-fill. (PK id keeps its default — PKs must auto-generate.)
     tenant_key = Column(String(36), nullable=False)
-    product_id = Column(
-        String(36), ForeignKey("products.id", ondelete="CASCADE"), nullable=True
-    )  # Projects belong to Products
+    # BE-9437: a project MUST belong to a product (operator ruling, 2026-08-15).
+    # NOT NULL is the floor under BE-9411 (creates bind to an explicit product)
+    # and BE-9415 (conversions bind to the task's own product): those closed the
+    # paths that CHOSE a product, this closes the possibility of having none.
+    product_id = Column(String(36), ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(255), nullable=False)
     alias = Column(
         String(6),
@@ -293,6 +295,19 @@ class Project(Base):
     __table_args__ = (
         # Partial unique index: only enforces uniqueness on active (non-deleted) rows.
         # Allows re-use of taxonomy combinations after soft-deleting a project.
+        #
+        # BE-9429: postgresql_nulls_not_distinct is LOAD-BEARING, not decoration.
+        # project_type_id and subseries are NULL on ordinary rows, and under
+        # Postgres' default (NULLS DISTINCT) a NULL anywhere in the tuple makes
+        # the row unique by construction -- so without this flag the index does
+        # not constrain the common case at all. Every migration that creates it
+        # ships NULLS NOT DISTINCT (baseline_v38_unified.py, baseline_v37_unified.py,
+        # and the historical fix_taxonomy_nulls_not_distinct), but the flag was
+        # missing HERE -- and since the pytest schema is built by
+        # Base.metadata.create_all(), that made every test database weaker than
+        # every migrated one. No migration accompanies this fix: the migrated
+        # shape was already correct and it is the model that was catching up.
+        # Pinned by tests/integration/migrations/test_be9429_index_parity.py.
         Index(
             "uq_project_taxonomy_active",
             "tenant_key",
@@ -301,6 +316,7 @@ class Project(Base):
             "series_number",
             "subseries",
             unique=True,
+            postgresql_nulls_not_distinct=True,
             postgresql_where=text("deleted_at IS NULL"),
         ),
         Index("idx_project_tenant", "tenant_key"),

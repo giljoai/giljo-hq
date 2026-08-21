@@ -28,6 +28,7 @@ from giljo_mcp.schemas.service_responses import (
 )
 from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.services.project_helpers import compute_completion_percent
+from giljo_mcp.services.settings_service import resolve_checkin_cadence_safe
 from giljo_mcp.tenant import TenantManager
 
 
@@ -170,6 +171,12 @@ class WorkflowStatusService:
                     session, tenant_key, project_id, executions, job_type_map, ops_repo
                 )
 
+                # FE-9296b: the resolved check-in cadence (project override ->
+                # tenant override -> account default) — the live value a running
+                # orchestrator's CH6 loop re-reads every cycle, so a Settings
+                # change reaches it at its next wake. Never raises (None on failure).
+                checkin_cadence_minutes = await resolve_checkin_cadence_safe(session, tenant_key, project)
+
                 return WorkflowStatus(
                     active_agents=active_count,
                     completed_agents=completed_count,
@@ -188,6 +195,7 @@ class WorkflowStatusService:
                     # orchestrator re-reads each check-in cycle.
                     auto_checkin_enabled=bool(getattr(project, "auto_checkin_enabled", False)),
                     auto_checkin_interval=getattr(project, "auto_checkin_interval", None),
+                    checkin_cadence_minutes=checkin_cadence_minutes,
                     # BE-6188: expose the project's closeout timestamp so the chain
                     # conductor can poll via get_workflow_status instead of raw HTTP.
                     project_closeout_at=(

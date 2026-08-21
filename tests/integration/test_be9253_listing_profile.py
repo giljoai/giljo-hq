@@ -152,7 +152,7 @@ class TestListingOutOfProfileDispatchRejected:
                 "spawn_job", {"project_id": str(uuid4()), "agent_name": "implementer", "mission": "probe"}
             )
 
-        assert result.isError is True
+        assert result.is_error is True
         joined = "\n".join(getattr(b, "text", "") for b in result.content)
         assert "not available in this session's tool profile" in joined
 

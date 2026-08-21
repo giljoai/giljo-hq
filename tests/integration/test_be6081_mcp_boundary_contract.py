@@ -56,7 +56,6 @@ from unittest.mock import create_autospec
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy.exc import ProgrammingError
 
 from api.endpoints.mcp_sdk_server import mcp
@@ -67,6 +66,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.models.settings import Settings
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools.tool_accessor import ToolAccessor
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +264,7 @@ async def test_tier2_git_commits_required_is_content_not_error(memory_tool_clien
         gates, both of which only fire when author_job_id is non-empty)
 
     Expected wire result:
-      - result.isError is False (or absent / falsy) — NOT an error path
+      - result.is_error is False (or absent / falsy) — NOT an error path
       - content parses to dict with success==False and error=="GIT_COMMITS_REQUIRED"
     """
     client, tenant_key, session = memory_tool_client
@@ -287,7 +287,7 @@ async def test_tier2_git_commits_required_is_content_not_error(memory_tool_clien
         )
 
     # Tier 2 contract: NOT an isError — the deliberate rejection flows as content.
-    assert not result.isError, (
+    assert not result.is_error, (
         "GIT_COMMITS_REQUIRED must be returned as normal content (Tier 2), "
         f"not raised as isError. content: {_content_text(result)!r}"
     )
@@ -374,7 +374,7 @@ async def test_bare_sha_git_commits_rejected_at_boundary(memory_tool_client):
         f"bare-SHA git_commits was rejected by Pydantic at the @mcp.tool boundary "
         f"(BE-6208a boundary-type widening regressed): {wire_text!r}"
     )
-    assert not result.isError, f"GIT_COMMIT_TITLE_REQUIRED must be Tier 2 (normal content), not isError: {wire_text!r}"
+    assert not result.is_error, f"GIT_COMMIT_TITLE_REQUIRED must be Tier 2 (normal content), not isError: {wire_text!r}"
 
     parsed = _parse_content_dict(result)
     assert parsed.get("success") is False, f"expected success==False, got: {parsed!r}"
@@ -403,7 +403,7 @@ async def test_titled_git_commits_accepted_at_boundary(memory_tool_client):
             },
         )
 
-    assert not result.isError, f"titled closeout must not error at the boundary: {_content_text(result)!r}"
+    assert not result.is_error, f"titled closeout must not error at the boundary: {_content_text(result)!r}"
     parsed = _parse_content_dict(result)
     assert parsed.get("entry_id"), f"titled closeout should write an entry, got: {parsed!r}"
     assert parsed.get("git_commits_count") == 1, f"got: {parsed!r}"
@@ -431,7 +431,7 @@ async def test_porcelain_git_commits_accepted_at_boundary(memory_tool_client):
             },
         )
 
-    assert not result.isError, f"porcelain closeout must not error at the boundary: {_content_text(result)!r}"
+    assert not result.is_error, f"porcelain closeout must not error at the boundary: {_content_text(result)!r}"
     parsed = _parse_content_dict(result)
     assert parsed.get("entry_id"), f"porcelain closeout should write an entry, got: {parsed!r}"
     assert parsed.get("git_commits_count") == 1, f"got: {parsed!r}"
@@ -461,7 +461,7 @@ async def test_bare_sha_git_commits_rejected_at_closeout_boundary(memory_tool_cl
         )
 
     wire_text = _content_text(result)
-    assert not result.isError, f"GIT_COMMIT_TITLE_REQUIRED must be Tier 2 (normal content), not isError: {wire_text!r}"
+    assert not result.is_error, f"GIT_COMMIT_TITLE_REQUIRED must be Tier 2 (normal content), not isError: {wire_text!r}"
 
     parsed = _parse_content_dict(result)
     assert parsed.get("success") is False, f"expected success==False, got: {parsed!r}"
@@ -489,7 +489,7 @@ async def test_titled_git_commits_accepted_at_closeout_boundary(memory_tool_clie
             },
         )
 
-    assert not result.isError, f"titled closeout must not error at the boundary: {_content_text(result)!r}"
+    assert not result.is_error, f"titled closeout must not error at the boundary: {_content_text(result)!r}"
     parsed = _parse_content_dict(result)
     assert parsed.get("entry_id"), f"titled closeout should write an entry, got: {parsed!r}"
     assert parsed.get("git_commits_count") == 1, f"got: {parsed!r}"
@@ -564,7 +564,7 @@ async def test_tier1_planted_accessor_error_is_sanitized_iserror(db_manager, db_
         state.db_manager = prior_db_manager
 
     # Tier 1 contract: unexpected error MUST surface as isError.
-    assert result.isError is True, (
+    assert result.is_error is True, (
         f"A planted unexpected DB error must produce isError=True. Got: {_content_text(result)!r}"
     )
 

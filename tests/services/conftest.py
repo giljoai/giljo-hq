@@ -30,6 +30,26 @@ from giljo_mcp.services.task_service import TaskService
 from giljo_mcp.tenant import TenantManager
 
 
+async def _seed_owning_product(session, tenant_key, label):
+    """A product for a fixture-seeded project to belong to (BE-9437: NOT NULL).
+
+    ONE PRODUCT PER PROJECT, deliberately. These fixtures seed ACTIVE projects and
+    ``idx_project_single_active_per_product`` permits one active project per
+    product, so sharing a product between two of them would be a unique violation
+    that has nothing to do with the test pulling them in.
+    """
+    product = Product(
+        id=str(uuid4()),
+        name=f"{label} Product {uuid4().hex[:6]}",
+        description="Owning product for a project fixture",
+        tenant_key=tenant_key,
+        is_active=False,
+    )
+    session.add(product)
+    await session.flush()
+    return product
+
+
 @pytest_asyncio.fixture
 async def user_service(db_manager, db_session, test_tenant_key):
     """Create UserService instance for testing with shared session (Handover 0324)"""
@@ -208,6 +228,7 @@ async def test_project(db_session, test_tenant_key, test_agent_templates) -> Pro
     (it always produced a multi_terminal project via the old column default).
     Tests that need an unset mode use ``test_project_null_mode`` instead.
     """
+    _owning_product_project = await _seed_owning_product(db_session, test_tenant_key, "Phase")
     project = Project(
         id=str(uuid4()),
         name="Phase Labels Test Project",
@@ -215,6 +236,7 @@ async def test_project(db_session, test_tenant_key, test_agent_templates) -> Pro
         mission="Test mission for phase labels",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=_owning_product_project.id,
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
         series_number=random.randint(1, 9000),
@@ -228,6 +250,7 @@ async def test_project(db_session, test_tenant_key, test_agent_templates) -> Pro
 @pytest_asyncio.fixture
 async def test_project_multi_terminal(db_session, test_tenant_key, test_agent_templates) -> Project:
     """Create test project with multi_terminal execution_mode."""
+    _owning_product_project = await _seed_owning_product(db_session, test_tenant_key, "Multi")
     project = Project(
         id=str(uuid4()),
         name="Multi Terminal Phase Test",
@@ -235,6 +258,7 @@ async def test_project_multi_terminal(db_session, test_tenant_key, test_agent_te
         mission="Test mission for multi-terminal",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=_owning_product_project.id,
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
         series_number=random.randint(1, 9000),
@@ -248,6 +272,7 @@ async def test_project_multi_terminal(db_session, test_tenant_key, test_agent_te
 @pytest_asyncio.fixture
 async def test_project_cli_mode(db_session, test_tenant_key, test_agent_templates) -> Project:
     """Create test project with claude_code_cli execution_mode."""
+    _owning_product_project = await _seed_owning_product(db_session, test_tenant_key, "CLI")
     project = Project(
         id=str(uuid4()),
         name="CLI Mode Phase Test",
@@ -255,6 +280,7 @@ async def test_project_cli_mode(db_session, test_tenant_key, test_agent_template
         mission="Test mission for CLI mode",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=_owning_product_project.id,
         execution_mode="claude_code_cli",
         implementation_launched_at=datetime.now(UTC),
         series_number=random.randint(1, 9000),
@@ -761,6 +787,7 @@ async def other_tenant_templates(db_session, other_tenant_key):
 @pytest_asyncio.fixture
 async def project(db_session, tenant_key, agent_templates) -> Project:
     """Create a test project for successor spawning tests."""
+    _owning_product_proj = await _seed_owning_product(db_session, tenant_key, "Successor")
     proj = Project(
         id=str(uuid4()),
         name="Successor Test Project",
@@ -768,6 +795,7 @@ async def project(db_session, tenant_key, agent_templates) -> Project:
         mission="Test recovery flow",
         status="active",
         tenant_key=tenant_key,
+        product_id=_owning_product_proj.id,
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
         series_number=random.randint(1, 9000),
@@ -781,6 +809,7 @@ async def project(db_session, tenant_key, agent_templates) -> Project:
 @pytest_asyncio.fixture
 async def other_project(db_session, other_tenant_key, other_tenant_templates) -> Project:
     """Create a project in a different tenant."""
+    _owning_product_proj = await _seed_owning_product(db_session, other_tenant_key, "Other")
     proj = Project(
         id=str(uuid4()),
         name="Other Tenant Project",
@@ -788,6 +817,7 @@ async def other_project(db_session, other_tenant_key, other_tenant_templates) ->
         mission="Other tenant work",
         status="active",
         tenant_key=other_tenant_key,
+        product_id=_owning_product_proj.id,
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
         series_number=random.randint(1, 9000),

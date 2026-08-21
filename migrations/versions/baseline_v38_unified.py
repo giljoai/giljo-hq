@@ -450,6 +450,20 @@ def upgrade() -> None:
                 nullable=True,
                 comment="BE-9289a: last post/read/poll on this thread; drives the live-idle indicator",
             ),
+            # BE-9475 parity (ce_0097 appends these; declared last, after the BE-9289a
+            # pair, for the same INF-5060 column-ORDER invariant noted above).
+            sa.Column(
+                "self_reported_status",
+                sa.String(length=20),
+                nullable=True,
+                comment="BE-9475: participant's own status claim; FALLBACK only -- agent_executions wins",
+            ),
+            sa.Column(
+                "self_reported_status_at",
+                sa.DateTime(timezone=True),
+                nullable=True,
+                comment="BE-9475: when that claim was made; recorded for forensics, never aged out",
+            ),
             sa.PrimaryKeyConstraint("id", name="comm_participants_pkey"),
             sa.UniqueConstraint("thread_id", "participant_id", name="uq_comm_participant"),
         )
@@ -853,6 +867,18 @@ def upgrade() -> None:
             sa.Column("tenant_key", sa.String(length=36), nullable=False),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+            # BE-9396 removed export_alias here, paired with ce_0093's drop: ce_0092
+            # still adds it on an existing DB and ce_0093 takes it away again, so both
+            # paths converge on it being absent (the INF-5060 parity invariant).
+            # BE-9385e: paired with ce_0094, which adds this column (and the same
+            # comment) on an existing DB. Declared last so no other column's ordinal
+            # moves between the fast path and a chain replay.
+            sa.Column(
+                "last_exported_at",
+                sa.DateTime(timezone=True),
+                nullable=True,
+                comment="BE-9385e: when THIS product last exported this agent (NULL falls back to the template)",
+            ),
             sa.PrimaryKeyConstraint("id", name="product_agent_assignments_pkey"),
             sa.UniqueConstraint("product_id", "template_id", name="uq_product_template_assignment"),
         )
@@ -1157,6 +1183,24 @@ def upgrade() -> None:
             sa.CheckConstraint(
                 "((target_platforms <@ ARRAY['windows'::character varying, 'linux'::character varying, 'macos'::character varying, 'android'::character varying, 'ios'::character varying, 'web'::character varying, 'all'::character varying]))",
                 name="ck_product_target_platforms_valid",
+            ),
+            # BE-9385b parity (ce_0092 adds this on an existing DB). DECLARED LAST,
+            # like BE-9291's sequence_run_id above, so fresh-install and chain-replay
+            # column ORDER stay byte-identical -- the INF-5060 invariant, which
+            # test_parity_fast_path_vs_chain_replay compares by ordinal position.
+            # ALTER TABLE ADD COLUMN appends, so anywhere but last is a parity break.
+            #
+            # Its unique index deliberately does NOT go in the module-level _INDEXES
+            # list either: that list runs unconditionally, including against a
+            # mid-chain ce_0077 database where products already exists and this
+            # create_table is SKIPPED, so referencing slug there fails with "column
+            # does not exist". ce_0092 creates the index, existence-guarded, for both
+            # paths. Both halves of this note were learned the hard way.
+            sa.Column(
+                "slug",
+                sa.String(length=64),
+                nullable=True,
+                comment="BE-9385b: stable URL-safe short name qualifying exported agent filenames",
             ),
             sa.PrimaryKeyConstraint("id", name="products_pkey"),
         )
@@ -1932,7 +1976,7 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_org_tenant ON public.organizations USING btree (tenant_key)",
     "CREATE INDEX IF NOT EXISTS idx_organizations_tenant_updated ON public.organizations USING btree (tenant_key, updated_at)",
     "CREATE INDEX IF NOT EXISTS idx_pme_deleted ON public.product_memory_entries USING btree (deleted_by_user) WHERE (deleted_by_user = true)",
-    "CREATE INDEX IF NOT EXISTS idx_pme_fts ON public.product_memory_entries USING gin (to_tsvector('english'::regconfig, ((((((((COALESCE(summary, ''::text) || ' '::text) || (COALESCE(project_name, ''::character varying))::text) || ' '::text) || COALESCE((key_outcomes)::text, ''::text)) || ' '::text) || COALESCE((decisions_made)::text, ''::text)) || ' '::text) || COALESCE((tags)::text, ''::text))))",
+    "CREATE INDEX IF NOT EXISTS idx_pme_fts ON public.product_memory_entries USING gin (to_tsvector('english'::regconfig, ((((((((((COALESCE(summary, ''::text) || ' '::text) || (COALESCE(project_name, ''::character varying))::text) || ' '::text) || COALESCE((key_outcomes)::text, ''::text)) || ' '::text) || COALESCE((decisions_made)::text, ''::text)) || ' '::text) || COALESCE((tags)::text, ''::text)) || ' '::text) || COALESCE((git_commits)::text, ''::text))))",
     "CREATE INDEX IF NOT EXISTS idx_pme_project ON public.product_memory_entries USING btree (project_id) WHERE (project_id IS NOT NULL)",
     "CREATE INDEX IF NOT EXISTS idx_pme_tenant_product ON public.product_memory_entries USING btree (tenant_key, product_id)",
     'CREATE INDEX IF NOT EXISTS idx_pme_tenant_timestamp ON public.product_memory_entries USING btree (tenant_key, "timestamp" DESC)',
@@ -2025,7 +2069,13 @@ _INDEXES = [
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_username ON public.users USING btree (username)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_notifications_tenant_dedupe_open ON public.notifications USING btree (tenant_key, dedupe_key) WHERE (resolved_at IS NULL)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_project_taxonomy_active ON public.projects USING btree (tenant_key, product_id, project_type_id, series_number, subseries) NULLS NOT DISTINCT WHERE (deleted_at IS NULL)",
-    "CREATE UNIQUE INDEX IF NOT EXISTS uq_task_taxonomy_active ON public.tasks USING btree (tenant_key, product_id, task_type_id, series_number, subseries) WHERE ((series_number IS NOT NULL) AND (deleted_at IS NULL))",
+    # BE-9431 parity edit -- NOT what a pg_dump at ce_0077 renders, and that is
+    # deliberate: ce_0059 had silently dropped NULLS NOT DISTINCT from this index
+    # and this file inherited the weakened shape. ce_0095 restores it (healing) on
+    # every existing database, so a fresh install must build it strict here or the
+    # two paths would converge only after ce_0095 re-created the index. If this
+    # baseline is ever re-derived from a dump, keep this flag.
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_task_taxonomy_active ON public.tasks USING btree (tenant_key, product_id, task_type_id, series_number, subseries) NULLS NOT DISTINCT WHERE ((series_number IS NOT NULL) AND (deleted_at IS NULL))",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_template_tenant_name_version ON public.agent_templates USING btree (tenant_key, name, version) WHERE (deleted_at IS NULL)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_vision_doc_product_name ON public.vision_documents USING btree (product_id, document_name) WHERE (deleted_at IS NULL)",
 ]

@@ -20,7 +20,6 @@ schema + endpoint wiring (same failing-layer rule as BE-5056).
 
 from __future__ import annotations
 
-import os
 import secrets
 import uuid
 
@@ -78,7 +77,6 @@ async def _seed_user_with_product(db_manager) -> dict:
         await session.commit()
         await session.refresh(product)
 
-        os.environ.setdefault("JWT_SECRET", "test_secret_key")
         token = JWTManager.create_access_token(
             user_id=user.id,
             username=user.username,

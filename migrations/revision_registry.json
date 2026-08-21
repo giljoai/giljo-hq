@@ -144,6 +144,13 @@
     "ce_0088_backfill_project_completed_at",
     "ce_0089_be9348_repair_absorbed_closeout_arguments",
     "ce_0090_heal_giljo_hq_orchestrator_identity",
-    "baseline_v38"
+    "ce_0091_backfill_product_agent_assignments",
+    "baseline_v38",
+    "ce_0092_product_slug_and_export_alias",
+    "ce_0093_drop_export_alias",
+    "ce_0094_per_product_export_staleness",
+    "ce_0095_be9431_task_index_nnd",
+    "ce_0096_pme_fts_git_commits_be9469",
+    "ce_0097_be9475_participant_self_reported_status"
   ]
 }

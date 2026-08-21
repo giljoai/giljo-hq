@@ -13,7 +13,7 @@ Root cause (regressed in BE-9012a/b): the gate
 drain (``get_thread_history(mark_read=true)`` ->
 ``comm_thread_repository.ack_messages_for_participant``) writes
 ``message_acknowledgments``. The two never met, so every directed ``requires_action``
-post permanently blocked complete_job (the live 2026-07-10 dogfood deadlock).
+post permanently blocked complete_job (the live 2026-07-10 test-install deadlock).
 
 The fix re-keys the gate onto the ack drain. These tests drive BOTH real services
 through the shared ``message_acknowledgments`` table — the layer the bug lived at —

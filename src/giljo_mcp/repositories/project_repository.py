@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from sqlalchemy import String, and_, asc, cast, delete, desc, func, or_, select, text, true
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +31,11 @@ from giljo_mcp.models.roadmaps import RoadmapItem
 from giljo_mcp.models.tasks import Message, Task
 from giljo_mcp.models.user_approval import UserApproval
 from giljo_mcp.repositories._project_enrichment_reads_mixin import ProjectEnrichmentReadsMixin
+from giljo_mcp.repositories._project_keyset import (
+    completion_recency_order_clauses,
+    keyset_axis_for_sort_key,
+    project_keyset_after,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -302,6 +307,12 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
     # ``list_projects`` (see ``_roadmap_order_clauses``).
     ROADMAP_SORT_KEY: ClassVar[str] = "roadmap"
 
+    # BE-9455 Symptom A: completion recency, with unfinished work FIRST. Also not a
+    # plain column sort -- ``_SORT_COLUMNS`` orders NULLS LAST for every key, and this
+    # ordering needs NULLS FIRST, so it lives outside that map and is handled
+    # explicitly in ``list_projects`` (see ``_project_keyset``).
+    COMPLETION_RECENCY_SORT_KEY: ClassVar[str] = "completion_recency"
+
     _SORT_COLUMNS: ClassVar[dict] = {
         "series_number": Project.series_number,
         "name": Project.name,
@@ -372,12 +383,21 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
             # (IMP-1002 trimmed row): case-insensitive substring across name, the
             # raw id, and the computed taxonomy_alias (e.g. "BE-50"). ``id`` is
             # cast to text so a UUID column still matches a substring query.
-            term = f"%{search}%"
+            #
+            # BE-9469: also description and alias (project_alias), matching
+            # list_tasks (title/description/taxonomy_alias) -- U8-F1/F2.
+            # BE-9468 QA followup: ``%``/``_`` are SQL LIKE metacharacters, escaped
+            # below (backslash first) so they act as literals, not live wildcards.
+            # New fields share this SAME escaped needle.
+            needle = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            term = f"%{needle}%"
             conditions.append(
                 or_(
-                    Project.name.ilike(term),
-                    cast(Project.id, String).ilike(term),
-                    Project.taxonomy_alias.ilike(term),
+                    Project.name.ilike(term, escape="\\"),
+                    cast(Project.id, String).ilike(term, escape="\\"),
+                    Project.taxonomy_alias.ilike(term, escape="\\"),
+                    Project.description.ilike(term, escape="\\"),
+                    Project.alias.ilike(term, escape="\\"),
                 )
             )
 
@@ -439,6 +459,7 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
         sort_dir: str | None = None,
         limit: int | None = None,
         offset: int | None = None,
+        after_key: tuple[Any, str] | None = None,
     ) -> list[Project]:
         """List projects for a tenant with optional filters.
 
@@ -463,6 +484,16 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
         only emitted when ``sort_key`` is given OR pagination is requested (a
         deterministic ``created_at DESC`` fallback so paged boundaries are
         stable).
+
+        BE-9469 added ``after_key``: a ``(sort_value, row_id)`` continuation position on
+        whichever axis ``sort_key`` chose. ``None`` (the default) emits no extra predicate,
+        so every existing caller is byte-identical.
+
+        BE-9455 Symptom A added ``sort_key="completion_recency"``
+        (``COMPLETION_RECENCY_SORT_KEY``) for a completion-oriented read: it is the
+        only ordering here with NULLS FIRST, so it cannot come from
+        ``_SORT_COLUMNS``. Purely additive -- every existing key, and the fallback,
+        behave exactly as before.
         """
         conditions = self._build_list_conditions(tenant_key, status, include_cancelled, product_id, hidden, search)
         query = select(Project).options(selectinload(Project.project_type)).where(*conditions)
@@ -471,6 +502,9 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
             # FE-6179: order by roadmap position (correlated subquery on
             # roadmap_items.sort_order) -- the same ordering /roadmap uses.
             query = query.order_by(*self._roadmap_order_clauses(tenant_key, sort_dir))
+        elif sort_key == self.COMPLETION_RECENCY_SORT_KEY:
+            # BE-9455 Symptom A: completion recency, unfinished first (NULLS FIRST).
+            query = query.order_by(*completion_recency_order_clauses())
         elif order_clauses := self._resolve_order(sort_key, sort_dir):
             query = query.order_by(*order_clauses)
         elif limit is not None or offset is not None:
@@ -478,6 +512,13 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
             # the page boundary is stable. (The unpaginated default path stays
             # unordered — byte-compatible with pre-BE-6076.)
             query = query.order_by(Project.created_at.desc(), Project.id.asc())
+
+        if after_key is not None:
+            # BE-9469: the continuation keyset, applied BEFORE the limit so each page
+            # fetches the next window FROM the cursor instead of re-fetching the first
+            # one. Why that distinction matters, and why a POSITION filter is safe where
+            # a SQL LIMIT is not, is recorded in _project_keyset.
+            query = query.where(project_keyset_after(keyset_axis_for_sort_key(sort_key), *after_key))
 
         if offset is not None:
             query = query.offset(offset)
@@ -507,6 +548,58 @@ class ProjectRepository(ProjectEnrichmentReadsMixin):
         query = select(func.count()).select_from(Project).where(*conditions)
         result = await session.execute(query)
         return int(result.scalar() or 0)
+
+    async def board_counts(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        product_id: str | None = None,
+    ) -> list[tuple[str | None, str | None, datetime | None, datetime | None, int]]:
+        """Board-wide counts for the agent-facing list (BE-9468). ONE grouped round trip.
+
+        Returns raw ``(status, type_abbreviation, min_created, max_created, row_count)``
+        tuples plus completion bounds -- deliberately unfolded, so the caller owns the
+        response shape and this stays a pure read.
+
+        **It takes NO caller filters, and that is the whole point.** ``list_projects``
+        defaults to active-lifecycle rows only, so a counts block scoped to what was
+        returned would report the two inactive projects and never mention the thousand
+        completed ones. That is derivable from the rows the caller is already holding,
+        which makes it an echo rather than a signal. The agent needs to know the archive
+        is there BEFORE it decides what to ask for -- so this describes the whole board
+        and the response carries ``returned`` separately.
+
+        Scope is **tenant + product**, matching the surface it describes: ``tenant_key``
+        because every query filters by it without exception (ADR-009), and ``product_id``
+        because ``list_projects`` is active-product-scoped, not tenant-wide.
+
+        Soft-deleted rows are excluded (``deleted_at IS NULL``) -- they are the trash,
+        not the board, and the list's own visibility base excludes them before any
+        caller filter is applied. Counting them in ``total`` would describe a population
+        no query on this surface can return.
+
+        One statement, not three: grouping by ``(status, abbreviation)`` while
+        aggregating the date bounds in the same pass, folded by the caller.
+        """
+        query = (
+            select(
+                Project.status,
+                TaxonomyType.abbreviation,
+                func.min(Project.created_at),
+                func.max(Project.created_at),
+                func.min(Project.completed_at),
+                func.max(Project.completed_at),
+                func.count(),
+            )
+            .select_from(Project)
+            .outerjoin(TaxonomyType, Project.project_type_id == TaxonomyType.id)
+            .where(Project.tenant_key == tenant_key, Project.deleted_at.is_(None))
+            .group_by(Project.status, TaxonomyType.abbreviation)
+        )
+        if product_id:
+            query = query.where(Project.product_id == product_id)
+        result = await session.execute(query)
+        return list(result.all())
 
     # ============================================================================
     # Write Operations — ProjectDeletionService

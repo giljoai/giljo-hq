@@ -16,6 +16,12 @@
  * row-level testids (template-toggle-*, action menu items) are reachable in
  * jsdom. This stub shape also works once the table moves into TemplatesTable.
  *
+ * FE-9385c: this is the SINGLE spec file for TemplateManager.vue. A second
+ * TemplateManager.spec.js under frontend/tests/components/ used to duplicate
+ * groups 13 and 14 verbatim; both runners collected it, so those nine tests ran
+ * twice for no added coverage. It has been deleted — put new TemplateManager
+ * cases here, not in a parallel file.
+ *
  * Edition scope: CE
  */
 
@@ -489,6 +495,41 @@ describe('TemplateManager — row action: duplicate', () => {
     expect(wrapper.vm.editDialog).toBe(true)
     expect(wrapper.vm.editingTemplate.id).toBeNull()
   })
+
+  // FE-9386: the duplicate action used to spread the source row wholesale, so a
+  // seeded template's is_default=true rode along into the create payload. The
+  // service clears sibling defaults on create (template_service.py:292-295),
+  // which flipped the ORIGINAL's flag and — via onupdate=func.now() — stamped
+  // its updated_at, moving it in the list and in the export-packaging order.
+  it('sends is_default=false when saving a duplicate of a default template', async () => {
+    mockShowToast = vi.fn()
+    const api = (await import('@/services/api')).default
+    vi.clearAllMocks()
+    mockShowToast = vi.fn()
+    const source = makeTemplate({
+      id: 11,
+      role: 'implementer',
+      name: 'implementer-backend',
+      is_default: true,
+      updated_at: '2024-01-01T12:00:00Z',
+    })
+    api.templates.list.mockResolvedValue({ data: [source] })
+    const wrapper = mountTemplateManager()
+    await flushPromises()
+
+    await wrapper.find('[title="Duplicate"]').trigger('click')
+    expect(wrapper.vm.editingTemplate.is_default).toBe(false)
+
+    await wrapper.vm.saveTemplate()
+    await flushPromises()
+
+    expect(api.templates.create).toHaveBeenCalledWith(
+      expect.objectContaining({ is_default: false })
+    )
+    // The source row must also survive the duplicate untouched client-side.
+    expect(source.is_default).toBe(true)
+    expect(source.updated_at).toBe('2024-01-01T12:00:00Z')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -670,7 +711,7 @@ describe('TemplateManager — reset confirm flow', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Group 13 — saveTemplate() error handling (from existing tests/components spec)
+// Group 13 — saveTemplate() error handling (consolidated from the former tests/components spec)
 // ---------------------------------------------------------------------------
 
 describe('TemplateManager — saveTemplate() error handling', () => {
@@ -738,7 +779,7 @@ describe('TemplateManager — saveTemplate() error handling', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Group 14 — duplicateTemplate() (from existing tests/components spec)
+// Group 14 — duplicateTemplate() (consolidated from the former tests/components spec)
 // ---------------------------------------------------------------------------
 
 describe('TemplateManager — duplicateTemplate()', () => {
@@ -749,16 +790,22 @@ describe('TemplateManager — duplicateTemplate()', () => {
     wrapper = mountTemplateManager()
   })
 
-  it('sets custom_suffix to empty string', () => {
+  // BE-9394: these two assertions previously pinned `custom_suffix: ''` and a display
+  // name of "<original name> (Copy)". Both described a name the server never used --
+  // it regenerates from slugify_name(role, custom_suffix) and consults the supplied
+  // name only when role is falsy -- so "(Copy)" was discarded and the copy landed as
+  // "<role>-2". Updated to the ruled behaviour: the copy carries a real suffix so the
+  // name shown, saved, exported and resolved by spawn are one string.
+  it('sets custom_suffix to "copy" so the server derives the name', () => {
     const tpl = makeTemplate({ custom_suffix: 'old-suffix' })
     wrapper.vm.duplicateTemplate(tpl)
-    expect(wrapper.vm.editingTemplate.custom_suffix).toBe('')
+    expect(wrapper.vm.editingTemplate.custom_suffix).toBe('copy')
   })
 
-  it('sets display name to "<original name> (Copy)"', () => {
+  it('does not fabricate a "(Copy)" display name the server would discard', () => {
     const tpl = makeTemplate({ name: 'My Analyzer' })
     wrapper.vm.duplicateTemplate(tpl)
-    expect(wrapper.vm.editingTemplate.name).toBe('My Analyzer (Copy)')
+    expect(wrapper.vm.editingTemplate.name).not.toContain('(Copy)')
   })
 
   it('sets id to null', () => {

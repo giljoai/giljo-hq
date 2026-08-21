@@ -20,19 +20,19 @@
             <v-list density="compact" class="mb-4">
               <v-list-subheader>Possible causes:</v-list-subheader>
               <v-list-item>
-                <template v-slot:prepend>
+                <template #prepend>
                   <v-icon size="small">mdi-circle-small</v-icon>
                 </template>
                 <v-list-item-title>Server is stopped or restarting</v-list-item-title>
               </v-list-item>
               <v-list-item>
-                <template v-slot:prepend>
+                <template #prepend>
                   <v-icon size="small">mdi-circle-small</v-icon>
                 </template>
                 <v-list-item-title>Network connectivity issues</v-list-item-title>
               </v-list-item>
               <v-list-item>
-                <template v-slot:prepend>
+                <template #prepend>
                   <v-icon size="small">mdi-circle-small</v-icon>
                 </template>
                 <v-list-item-title>Firewall blocking access</v-list-item-title>

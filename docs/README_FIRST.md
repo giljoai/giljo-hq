@@ -1,6 +1,6 @@
 # Giljo HQ Documentation
 
-*Last updated: 2026-04-06*
+*Last updated: 2026-08-20*
 
 ## Getting Started
 
@@ -10,13 +10,14 @@
 ## Using Giljo HQ
 
 - [User Guide](USER_GUIDE.md): Every page explained: Home, Dashboard, Products, Projects, Jobs, Tasks, and Settings.
-- [Agent Templates Guide](AGENT_TEMPLATES_GUIDE.md): Where agent templates live, monorepo conventions, and git commit guidance.
 
 ## Reference
 
-- [MCP Tools Reference](MCP_TOOLS_REFERENCE.md): All 29 MCP tools with parameters, descriptions, and examples.
+- [MCP Tools Reference](MCP_TOOLS_REFERENCE.md): All 48 MCP tools with parameters, descriptions, and examples.
 - [Architecture](ARCHITECTURE.md): Tech stack, system diagram, and developer-facing technical overview.
+- [MCP Spec Conformance](CONFORMANCE.md): Which Model Context Protocol versions the server supports and how that is verified.
+- [Security Posture](SECURITY_POSTURE.md): A plain-English summary of what the server does and does not do with your content.
 
 ## Release History
 
-- [Changelog](CHANGELOG.md): Release history.
+- [Changelog](../CHANGELOG.md): Release history.

@@ -259,6 +259,7 @@ import { useWebSocketStore } from '@/stores/websocket'
 import { useSequenceRunStore } from '@/stores/sequenceRunStore'
 import { registerReconnectResync } from '@/stores/websocketEventRouter'
 import api from '@/services/api'
+import { agentSavedAfter, waitIsSuperseded } from '@/utils/roadmapWaitReconcile'
 import { useToast } from '@/composables/useToast'
 import { useTaskCrud } from '@/composables/useTaskCrud'
 import draggable from 'vuedraggable'
@@ -382,6 +383,11 @@ function rehydrateWaitingFromStorage() {
   }
   if (raw === null) return
   const stampedAt = Number(raw)
+  // FE-9407: the agent already answered this wait while we were away.
+  if (agentSavedAfter(roadmap.value, items.value, stampedAt)) {
+    clearPersistedAgentActive()
+    return
+  }
   const elapsed = Date.now() - stampedAt
   if (Number.isFinite(stampedAt) && elapsed >= 0 && elapsed < WAITING_TIMEOUT_MS) {
     startWaiting(WAITING_TIMEOUT_MS - elapsed)
@@ -800,7 +806,11 @@ onMounted(async () => {
   // FE-6165f: hydrate the active-chain set so "In chain" state is available at
   // mount. Re-hydrate on WS reconnect so a run that finished while disconnected
   // unlocks immediately instead of waiting for the next WS event.
-  unsubResync = registerReconnectResync(() => sequenceRunStore.hydrate())
+  // FE-9407: a roadmap:updated dropped by a dead socket never replays.
+  unsubResync = registerReconnectResync(async () => {
+    await Promise.allSettled([sequenceRunStore.hydrate(), fetchRoadmap()])
+    if (waitIsSuperseded(roadmap.value, items.value, agentActiveStorageKey())) dismissWaiting()
+  })
   try {
     await Promise.all([productStore.fetchActiveProduct(), fetchRoadmap(), sequenceRunStore.hydrate()])
     // TSK-6243: product id is known now — re-show the spinner if an agent was

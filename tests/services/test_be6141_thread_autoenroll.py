@@ -36,7 +36,7 @@ import pytest
 from sqlalchemy import func, select
 
 from giljo_mcp.database import tenant_session_context
-from giljo_mcp.models import Project
+from giljo_mcp.models import Product, Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.comm import CommParticipant
 from giljo_mcp.models.tasks import MessageRecipient
@@ -68,6 +68,16 @@ async def _seed_project_with_agents(db_session, tenant: str, agents: list[tuple[
     so the test controls exactly which agents are "active" vs terminal.
     """
     with tenant_session_context(db_session, tenant):
+        # BE-9437: a project belongs to a product. Its own, so an active
+        # seed cannot collide under idx_project_single_active_per_product.
+        _owning_product_project = Product(
+            id=str(uuid.uuid4()),
+            tenant_key=tenant,
+            name=f"Owning Product {uuid.uuid4().hex[:6]}",
+            description="seeded",
+            is_active=False,
+        )
+        db_session.add(_owning_product_project)
         project = Project(
             id=str(uuid.uuid4()),
             name=f"BE-6141 {uuid.uuid4().hex[:6]}",
@@ -75,6 +85,7 @@ async def _seed_project_with_agents(db_session, tenant: str, agents: list[tuple[
             mission="exercise broadcast auto-enroll",
             status="active",
             tenant_key=tenant,
+            product_id=_owning_product_project.id,
             series_number=1,
             execution_mode="claude_code_cli",
             created_at=datetime.now(UTC),

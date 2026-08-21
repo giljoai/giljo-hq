@@ -29,11 +29,11 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.tools._memory_helpers import refuse_if_superseded
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 _PRODUCT_SERVICE_PATH = "giljo_mcp.services.product_service.ProductService"
@@ -125,6 +125,7 @@ async def _run_list(accessor, repo_rows, **kwargs):
 
     with (
         patch.object(svc, "list_projects", new=AsyncMock(side_effect=_fake_list_projects)),
+        patch.object(svc, "board_counts", new=AsyncMock(return_value=[])),
         patch.object(svc, "_build_mcp_project_list", new=AsyncMock(side_effect=_fake_build)),
         patch.object(svc, "_get_valid_project_types", new=AsyncMock(return_value=[])),
         patch(_PRODUCT_SERVICE_PATH) as mock_ps,
@@ -394,7 +395,7 @@ async def test_mcp_boundary_write_to_superseded_is_tier2_rejection(superseded_to
             },
         )
 
-    assert not result.isError, f"PROJECT_SUPERSEDED must be Tier-2 content, not isError: {_content_text(result)!r}"
+    assert not result.is_error, f"PROJECT_SUPERSEDED must be Tier-2 content, not isError: {_content_text(result)!r}"
     parsed = json.loads(_content_text(result))
     assert parsed.get("success") is False
     assert parsed.get("error") == "PROJECT_SUPERSEDED", f"got: {parsed!r}"

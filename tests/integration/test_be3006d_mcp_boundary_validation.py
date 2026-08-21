@@ -46,7 +46,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy.exc import ProgrammingError
 
 from api.endpoints.mcp_sdk_server import mcp
@@ -63,6 +62,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_dispatch import attach_registry_service_autospecs
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 # Substrings that would prove a raw DB/driver leak reached the agent.
@@ -148,7 +148,7 @@ async def test_invalid_thread_status_enum_is_clean_422(autospec_mcp):
                 "set_status": "not-a-real-status",  # not in the Literal
             },
         )
-    assert result.isError is True
+    assert result.is_error is True
     _assert_no_leak(_error_text(result))
 
 
@@ -160,7 +160,7 @@ async def test_invalid_task_status_enum_is_clean_422(autospec_mcp):
             "update_task",
             {"task_id": str(uuid4()), "status": "doing-stuff"},  # not in the Literal
         )
-    assert result.isError is True
+    assert result.is_error is True
     _assert_no_leak(_error_text(result))
 
 
@@ -177,7 +177,7 @@ async def test_over_length_message_content_is_clean_422(autospec_mcp):
                 "content": "x" * (MCP_MESSAGE_MAX + 1),  # over the cap
             },
         )
-    assert result.isError is True
+    assert result.is_error is True
     _assert_no_leak(_error_text(result))
 
 
@@ -189,7 +189,7 @@ async def test_over_length_task_title_is_clean_422(autospec_mcp):
             "create_task",
             {"title": "t" * (MCP_NAME_MAX + 1), "description": "d"},
         )
-    assert result.isError is True
+    assert result.is_error is True
     _assert_no_leak(_error_text(result))
 
 
@@ -213,7 +213,7 @@ async def test_planted_db_error_is_sanitized(autospec_mcp):
     async with client() as session:
         result = await session.call_tool("create_task", {"title": "ok", "description": "d"})
 
-    assert result.isError is True
+    assert result.is_error is True
     text = _error_text(result)
     _assert_no_leak(text)
     # The agent gets the generic sanitized guidance, not the driver detail.
@@ -234,7 +234,7 @@ async def test_curated_client_error_surfaces_verbatim(autospec_mcp):
     async with client() as session:
         result = await session.call_tool("create_task", {"title": "ok", "description": "d"})
 
-    assert result.isError is True
+    assert result.is_error is True
     text = _error_text(result)
     assert "title must be a short actionable phrase" in text
     assert _SANITIZED_TOOL_ERROR[:40] not in text
@@ -281,7 +281,7 @@ async def test_valid_hardened_calls_still_dispatch(tool_name, autospec_mcp):
     client, _accessor = autospec_mcp
     async with client() as session:
         result = await session.call_tool(tool_name, _VALID_CALLS[tool_name])
-    assert result.isError is False, f"{tool_name} valid call failed: {_error_text(result)}"
+    assert result.is_error is False, f"{tool_name} valid call failed: {_error_text(result)}"
 
 
 # --- BE-6209e (BE-9118 regroup): api_style / architecture_pattern are PROSE(20k).
@@ -310,7 +310,7 @@ async def test_update_product_context_long_api_arch_now_dispatches(autospec_mcp)
                 "architecture": {"api_style": long_value, "architecture_pattern": long_value},
             },
         )
-    assert result.isError is False, f"widened grouped call must dispatch: {_error_text(result)}"
+    assert result.is_error is False, f"widened grouped call must dispatch: {_error_text(result)}"
 
 
 @pytest.mark.asyncio
@@ -326,7 +326,7 @@ async def test_update_product_context_legacy_short_values_still_dispatch(autospe
                 "architecture": {"api_style": "REST", "architecture_pattern": "layered"},
             },
         )
-    assert result.isError is False, f"legacy short grouped call must dispatch: {_error_text(result)}"
+    assert result.is_error is False, f"legacy short grouped call must dispatch: {_error_text(result)}"
 
 
 @pytest.mark.asyncio
@@ -339,7 +339,7 @@ async def test_update_product_context_over_prose_cap_still_rejected(autospec_mcp
             "update_product_context",
             {"product_id": str(uuid4()), "architecture": {"api_style": "x" * (MCP_DESCRIPTION_MAX + 1)}},
         )
-    assert result.isError is True
+    assert result.is_error is True
     _assert_no_leak(_error_text(result))
 
 
@@ -463,7 +463,7 @@ async def test_complete_job_valid_result_succeeds(complete_job_client):
                 },
             },
         )
-    assert result.isError is False, f"valid complete_job must succeed: {_error_text(result)}"
+    assert result.is_error is False, f"valid complete_job must succeed: {_error_text(result)}"
 
 
 @pytest.mark.asyncio
@@ -478,7 +478,7 @@ async def test_complete_job_wrong_typed_result_is_clean_422(complete_job_client)
             "complete_job",
             {"job_id": job.job_id, "result": {"summary": 12345}},  # summary must be str
         )
-    assert result.isError is True
+    assert result.is_error is True
     text = _error_text(result)
     _assert_no_leak(text)
     # Actionable, not the generic sanitized message.

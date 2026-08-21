@@ -36,6 +36,16 @@ stale-comment churn. These interact (relaxing product_id to NULL collides
 projectless rows under NULLS NOT DISTINCT) and touch an ADR-009 Teams-readiness
 table, so they are intentionally left for a follow-up and remain as known drift.
 
+  RESOLVED — both of the deferrals above are closed; neither is known drift any
+  more. ``uq_project_taxonomy_active`` was settled by BE-9429 (the model gained
+  ``postgresql_nulls_not_distinct=True``, with a general per-index parity guard
+  behind it). ``projects.product_id`` was settled on 2026-08-15 by BE-9437: the
+  operator ruled that a project MUST belong to a product, so the decision went
+  the DATABASE's way and the model moved to ``nullable=False`` rather than the
+  column being relaxed. The drift gate's benign tally lost its
+  ``modify_nullable`` entry accordingly, and a column-nullability axis was added
+  to the BE-9429 parity guard so the next one fails instead of accumulating.
+
 Idempotent: every DROP is ``DROP INDEX IF EXISTS``; the FK is added only if
 absent; each NOT NULL alter runs only while the column is still nullable. The CE
 installer reruns ``alembic upgrade head`` on every boot, so a second run is a

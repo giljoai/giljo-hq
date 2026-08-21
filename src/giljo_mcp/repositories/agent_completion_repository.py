@@ -23,6 +23,7 @@ from giljo_mcp.models import AgentTodoItem, Message
 from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES, AgentExecution, AgentJob
 from giljo_mcp.models.tasks import MessageAcknowledgment, MessageRecipient
 from giljo_mcp.models.templates import AgentTemplate
+from giljo_mcp.repositories.product_agent_selection import template_ids_for_product
 
 
 class AgentCompletionRepository:
@@ -426,12 +427,21 @@ class AgentCompletionRepository:
         self,
         session: AsyncSession,
         tenant_key: str,
+        *,
+        product_id: str | None = None,
     ) -> list[str]:
         """Get active agent template names.
 
         Args:
             session: Async database session
             tenant_key: Tenant key for isolation
+            product_id: BE-9385a -- when supplied, narrows the allowlist to the
+                agents that product has enabled in ``product_agent_assignments``.
+                ``None``, and a product with no junction rows, both keep the
+                tenant-wide list (the tolerance rule in ``product_agent_selection``).
+                Without this the orchestrator could spawn an agent the active
+                product had switched off, which is the same "two views of what is
+                active" defect BE-9385a exists to close.
 
         Returns:
             List of active template name strings
@@ -453,15 +463,19 @@ class AgentCompletionRepository:
         were already hardened against it (``get_template_by_name`` below,
         ``find_active_orchestrator_in_project`` by BE-9242).
         """
-        result = await session.execute(
-            select(AgentTemplate.name).where(
-                and_(
-                    AgentTemplate.tenant_key == tenant_key,
-                    AgentTemplate.is_active,
-                    AgentTemplate.deleted_at.is_(None),
-                )
+        template_ids = await template_ids_for_product(session, product_id, tenant_key)
+
+        stmt = select(AgentTemplate.name).where(
+            and_(
+                AgentTemplate.tenant_key == tenant_key,
+                AgentTemplate.is_active,
+                AgentTemplate.deleted_at.is_(None),
             )
         )
+        if template_ids is not None:
+            stmt = stmt.where(AgentTemplate.id.in_(template_ids))
+
+        result = await session.execute(stmt)
         return [row[0] for row in result.fetchall()]
 
     async def find_active_orchestrator_in_project(
@@ -514,6 +528,8 @@ class AgentCompletionRepository:
         session: AsyncSession,
         tenant_key: str,
         agent_name: str,
+        *,
+        product_id: str | None = None,
     ) -> AgentTemplate | None:
         """Get an active agent template by name.
 
@@ -521,6 +537,13 @@ class AgentCompletionRepository:
             session: Async database session
             tenant_key: Tenant key for isolation
             agent_name: Template name to look up
+            product_id: BE-9385a -- when supplied, the name must also be enabled
+                for that product. This is the same predicate the spawn allowlist
+                applies one step earlier, repeated here rather than trusted:
+                ``job_lifecycle_service`` is not the only caller of this method,
+                and a name that resolves to a template the product disabled would
+                bind that agent's identity to the job. Tolerance is unchanged --
+                ``None``, or a product with no junction rows, resolves tenant-wide.
 
         Returns:
             AgentTemplate or None
@@ -546,17 +569,18 @@ class AgentCompletionRepository:
         which was hardened against this exact trap while this method was
         missed): newest-created wins, deterministically, instead of raising.
         """
-        result = await session.execute(
-            select(AgentTemplate)
-            .where(
-                and_(
-                    AgentTemplate.name == agent_name,
-                    AgentTemplate.tenant_key == tenant_key,
-                    AgentTemplate.is_active,
-                    AgentTemplate.deleted_at.is_(None),
-                )
+        template_ids = await template_ids_for_product(session, product_id, tenant_key)
+
+        stmt = select(AgentTemplate).where(
+            and_(
+                AgentTemplate.name == agent_name,
+                AgentTemplate.tenant_key == tenant_key,
+                AgentTemplate.is_active,
+                AgentTemplate.deleted_at.is_(None),
             )
-            .order_by(AgentTemplate.created_at.desc())
-            .limit(1)
         )
+        if template_ids is not None:
+            stmt = stmt.where(AgentTemplate.id.in_(template_ids))
+
+        result = await session.execute(stmt.order_by(AgentTemplate.created_at.desc()).limit(1))
         return result.scalars().first()

@@ -296,9 +296,18 @@ class OrchestrationService:
         async with self._get_session(tenant_key) as session:
             return await repo.get_completed_execution_result(session, tenant_key, job_id)
 
-    async def set_agent_status(self, job_id, status, reason="", wake_in_minutes=None, tenant_key=None):
+    async def set_agent_status(
+        self, job_id, status, reason="", wake_in_minutes=None, tenant_key=None, wake_on_signal=False
+    ):
         """Facade: delegates to OrchestrationAgentStateService."""
-        return await self._agent_state.set_agent_status(job_id, status, reason, wake_in_minutes, tenant_key)
+        return await self._agent_state.set_agent_status(
+            job_id,
+            status,
+            reason=reason,
+            wake_in_minutes=wake_in_minutes,
+            tenant_key=tenant_key,
+            wake_on_signal=wake_on_signal,
+        )
 
     async def list_jobs(
         self,

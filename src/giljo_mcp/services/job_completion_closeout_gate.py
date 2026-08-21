@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 
 from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.models.projects import Project
 from giljo_mcp.models.user_approval import UserApproval
 from giljo_mcp.schemas.service_responses import build_next_action
 
@@ -49,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 # The two recognized values. Anything else (missing key, legacy/garbage) is
 # tolerated by falling back to the default (data-facing DoD — code tolerates the
-# old shape). Default = 'hitl': Patrik's 2026-07-12 "default on" call — the toggle
+# old shape). Default = 'hitl': the 2026-07-12 "default on" call — the toggle
 # is honest on a fresh install (the UI already displays hitl), and the impact is
 # bounded because a CLEAN closeout never gates.
 CLOSEOUT_MODE_HITL = "hitl"
@@ -236,15 +237,54 @@ async def _find_active_run(svc: JobCompletionService, session: AsyncSession, pro
         return None
 
 
+async def _resolve_project_name(session: AsyncSession, tenant_key: str, project_id: Any) -> str | None:
+    """Tenant-scoped read of a project's name, or None if it cannot be resolved.
+
+    BE-9436b. Fail-open on its own, separately from the caller's try/except: an
+    unnamed bell row is a degraded row, but a lost bell row is a lost row. The
+    operator must never be told nothing because a name lookup went wrong.
+    """
+    try:
+        stmt = select(Project.name).where(
+            Project.tenant_key == tenant_key,
+            Project.id == str(project_id),
+        )
+        return (await session.execute(stmt)).scalar_one_or_none()
+    except Exception:  # noqa: BLE001 — the name is an enrichment; the bell is not
+        logger.warning("[BE-9436b] project-name lookup for the approval bell failed", exc_info=True)
+        return None
+
+
 async def _emit_approval_bell(
-    svc: JobCompletionService, *, tenant_key: str, approval: UserApproval, reasons: list[str]
+    svc: JobCompletionService,
+    *,
+    session: AsyncSession,
+    tenant_key: str,
+    approval: UserApproval,
+    reasons: list[str],
 ) -> None:
     """Best-effort bell+banner notification when the gate creates an approval (design item 3).
 
     Non-fatal: a notification failure must never break the closeout gate.
+
+    BE-9436b: the row NAMES its project. The title is a constant and the payload
+    carried only ids, so an operator with two closeouts in flight could not tell
+    which one was waiting on them. The name leads BOTH the title and the body, as
+    ``_prelaunch_workproduct_detector`` already does: the title is the prominent
+    line in ``NotificationDropdown`` and the body is rendered generically for
+    every type, so a payload key alone would leave the row as anonymous as before.
+
+    Both strings fall back to today's exact text when the name does not resolve.
     """
     try:
         from giljo_mcp.services.notification_service import NotificationService
+
+        project_name = await _resolve_project_name(session, tenant_key, approval.project_id)
+        detail = "; ".join(reasons) if reasons else "A closeout is awaiting your review."
+        body = f"{project_name}: {detail}" if project_name else detail
+        # Notification.title is String(255); project_name is capped at 255 on its
+        # own, so the composed title has to be bounded or a long name overflows it.
+        title = f"{project_name}: closeout requires approval" if project_name else "Closeout requires approval"
 
         # Thread the test session when present so tests don't persist a stray row on
         # a real session; production (test_session None) opens its own session.
@@ -257,8 +297,8 @@ async def _emit_approval_bell(
             tenant_key=tenant_key,
             notification_type="closeout.approval_required",
             severity="warning",
-            title="Closeout requires approval",
-            body="; ".join(reasons)[:500] if reasons else "A closeout is awaiting your review.",
+            title=title[:255],
+            body=body[:500],
             dedupe_key=f"closeout.approval_required:{approval.id}",
             surface="both",
             cta_label="Review",
@@ -268,6 +308,7 @@ async def _emit_approval_bell(
                 "project_id": str(approval.project_id),
                 "approval_id": str(approval.id),
                 "reason_count": len(reasons),
+                "project_name": project_name,
             },
         )
     except Exception:  # noqa: BLE001 — the approval is the load-bearing part; the bell is a nicety
@@ -442,7 +483,7 @@ async def enforce_closeout_approval_mode(
                 },
                 park_execution=False,
             )
-            await _emit_approval_bell(svc, tenant_key=tenant_key, approval=approval, reasons=reasons)
+            await _emit_approval_bell(svc, session=session, tenant_key=tenant_key, approval=approval, reasons=reasons)
         return mode
 
     # Solo closeout.
@@ -468,7 +509,7 @@ async def enforce_closeout_approval_mode(
         context={_CTX_GATE: True, _CTX_REASONS: reasons},
         park_execution=True,
     )
-    await _emit_approval_bell(svc, tenant_key=tenant_key, approval=approval, reasons=reasons)
+    await _emit_approval_bell(svc, session=session, tenant_key=tenant_key, approval=approval, reasons=reasons)
     raise _block_error(execution.job_id, approval.id, reasons)
 
 

@@ -8,7 +8,7 @@
 FE-9202 shipped ``_resolve_active_user_id`` running a raw
 ``select(User.id).where(User.tenant_key == ...)`` inside a plain
 ``get_session_async()`` session with NO tenant session context. The fail-closed
-tenant guard rejects predicate-only scoping, so on the dogfood box the 6-hourly
+tenant guard rejects predicate-only scoping, so on the test-install box the 6-hourly
 banner refresh logged ``TenantIsolationError`` every tick and the 14-day
 context-tuning banner silently never fired for any tenant.
 

@@ -14,8 +14,8 @@ Class of bug this catches:
 
     Original incident (2026-05-28): line 18 `downloads/` (Python boilerplate)
     silently stripped src/giljo_mcp/downloads/__init__.py and token_manager.py
-    from every LAN export since the directory was added. Dogfood server couldn't
-    import giljo_mcp.downloads.token_manager -> giljo_setup MCP call timed out.
+    from every LAN export since the directory was added. The test-install server
+    couldn't import giljo_mcp.downloads.token_manager -> giljo_setup MCP call timed out.
 
 Mechanism:
     Build a sandbox repo with our .gitignore and `git init`, then run

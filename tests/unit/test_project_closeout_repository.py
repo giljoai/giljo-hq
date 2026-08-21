@@ -20,9 +20,11 @@ from uuid import uuid4
 
 import pytest
 
-from giljo_mcp.models.product_memory_entry import ProductMemoryEntry
-from giljo_mcp.models.products import Product
-from giljo_mcp.models.projects import Project
+from tests.helpers.model_factories import (
+    make_product,
+    make_product_memory_entry,
+    make_project,
+)
 
 
 def create_mock_db_session(project_mock, product_mock):
@@ -84,48 +86,48 @@ def tenant_key():
 @pytest.fixture
 def mock_product(sample_product_id, tenant_key):
     """Mock Product instance with initialized product_memory"""
-    product = MagicMock(spec=Product)
-    product.id = sample_product_id
-    product.tenant_key = tenant_key
-    product.name = "Test Product"
-    product.product_memory = {
-        "git_integration": {
-            "enabled": False,
+    product = make_product(
+        id=sample_product_id,
+        tenant_key=tenant_key,
+        name="Test Product",
+        updated_at=datetime.now(UTC),
+        product_memory={
+            "git_integration": {
+                "enabled": False,
+            },
+            "sequential_history": [],  # Should NOT be mutated
+            "context": {},
         },
-        "sequential_history": [],  # Should NOT be mutated
-        "context": {},
-    }
-    product.updated_at = datetime.now(UTC)
+    )
     return product
 
 
 @pytest.fixture
 def mock_project(sample_project_id, sample_product_id, tenant_key):
     """Mock Project instance"""
-    project = MagicMock(spec=Project)
-    project.id = sample_project_id
-    project.product_id = sample_product_id
-    project.tenant_key = tenant_key
-    project.name = "Test Project Alpha"
-    project.mission = "Test mission"
-    project.status = "completed"
-    project.created_at = datetime(2025, 11, 1, 10, 0, 0, tzinfo=UTC)
-    project.completed_at = datetime(2025, 11, 16, 10, 0, 0, tzinfo=UTC)
-    project.updated_at = datetime(2025, 11, 16, 10, 0, 0, tzinfo=UTC)
-    project.cancellation_reason = None
-    project.early_termination = False
-    return project
+    return make_project(
+        id=sample_project_id,
+        product_id=sample_product_id,
+        tenant_key=tenant_key,
+        name="Test Project Alpha",
+        mission="Test mission",
+        status="completed",
+        created_at=datetime(2025, 11, 1, 10, 0, 0, tzinfo=UTC),
+        completed_at=datetime(2025, 11, 16, 10, 0, 0, tzinfo=UTC),
+        updated_at=datetime(2025, 11, 16, 10, 0, 0, tzinfo=UTC),
+        early_termination=False,
+    )
 
 
 @pytest.fixture
 def mock_memory_entry():
     """Mock ProductMemoryEntry returned from repository"""
-    entry = MagicMock(spec=ProductMemoryEntry)
-    entry.id = uuid4()
-    entry.sequence = 1
-    entry.entry_type = "project_closeout"
-    entry.source = "closeout_v1"
-    return entry
+    return make_product_memory_entry(
+        id=uuid4(),
+        sequence=1,
+        entry_type="project_closeout",
+        source="closeout_v1",
+    )
 
 
 class TestRepositoryIntegration:
@@ -272,9 +274,7 @@ class TestRepositoryIntegration:
         _mock_session, mock_db_manager = create_mock_db_session(mock_project, mock_product)
 
         entry_id = uuid4()
-        mock_entry = MagicMock(spec=ProductMemoryEntry)
-        mock_entry.id = entry_id
-        mock_entry.sequence = 1
+        mock_entry = make_product_memory_entry(id=entry_id, sequence=1)
 
         # BE-5022b: project_closeout now routes through ProductMemoryService
         with patch("giljo_mcp.tools.project_closeout.ProductMemoryService") as mock_svc_class:

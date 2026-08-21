@@ -6,6 +6,7 @@
  *
  * Edition scope: Both.
  */
+import { hubThreadRoute, MENTION_FOCUS, APPROVAL_FOCUS } from '@/components/hub/hubThreadRoute'
 
 /**
  * IMP-5037a: client-side type → named route mapping. The server does NOT
@@ -22,10 +23,39 @@ export const TYPE_ROUTE_MAP = {
   // needs — and keeps the banner and the bell on one routing source of truth.
   'system.context_tuning_due': (n) => ({ name: 'Products', query: { tune: productIdOf(n) } }),
   // FE-9289c: a Message Hub handover ("It's your call") lands on its thread. The
-  // client-local _local row carries the thread id in metadata; Answer routes here, the
-  // same ?thread= deep link the browser notification uses, so both open the thread and
-  // HubView selects it on arrival (works from a cold page).
-  handover: (n) => ({ path: '/hub', query: { thread: threadIdOf(n) } }),
+  // client-local _local row carries the thread id in metadata; Answer routes here and
+  // HubView selects the thread on arrival (works from a cold page).
+  //
+  // FE-9418: built by hubThreadRoute() rather than by hand. These two rows and the two
+  // surfaces that already used the helper — the app-wide banner and the Hub's attention
+  // strip — are FOUR notifications raised by ONE hand-off, and until this change the
+  // bell pair arrived without the baton context the other pair carried: same event,
+  // same thread, one landing that marked the post and one that marked nothing. A
+  // hand-built literal is how that happens, so there is no longer one here.
+  //
+  // Neither row can name a message: the client-local row stores only `{ thread_id }`
+  // and the server row's payload schema is thread_id/chat_id/handed_by under
+  // extra="forbid". The helper therefore omits the anchor and the Hub falls back to the
+  // thread's newest post — the pre-FE-9418 behaviour, unchanged and still correct.
+  handover: (n) => hubThreadRoute(threadIdOf(n)),
+  // BE-9296a: the SERVER row for the same event. FE-9289c's `handover` above is
+  // client-local (localStorage), so it does not exist after a reload or on a second
+  // device; this type is the durable one the server writes. Same destination on
+  // purpose — the two rows describe one hand-off and must land in the same place, and
+  // sharing the helper is now what guarantees it instead of two literals agreeing.
+  // threadIdOf already falls back to payload.thread_id, which is where the server
+  // row carries it.
+  'hub.baton_handover': (n) => hubThreadRoute(threadIdOf(n)),
+  // FE-9436: the other two things that need the operator. Same helper, same landing
+  // mechanism, and the reason is the only argument that differs — which is the operator
+  // ruling expressed as code rather than as a comment.
+  //
+  // Unlike the two rows above, these CAN name a post: they are written from a
+  // `thread_message` event, which carries message_id where the baton's `thread_update`
+  // does not. So the row that could always have been exact finally is, and the row that
+  // structurally cannot still lands on the thread tail. One rule, two honest outcomes.
+  'hub.mention': (n) => hubThreadRoute(threadIdOf(n), { reason: MENTION_FOCUS, messageId: messageIdOf(n) }),
+  'hub.approval': (n) => hubThreadRoute(threadIdOf(n), { reason: APPROVAL_FOCUS, messageId: messageIdOf(n) }),
 }
 
 /**
@@ -67,6 +97,13 @@ const productIdOf = (n) => n?.payload?.product_id ?? n?.metadata?.product_id
  * route factory consumes it.
  */
 const threadIdOf = (n) => n?.metadata?.thread_id ?? n?.payload?.thread_id
+
+/**
+ * FE-9436: the post a Hub notification points at, read from either shape for the same
+ * reason threadIdOf is. Null when the row names none — the hand-off rows never do, and
+ * the helper omits the anchor rather than emitting an empty one.
+ */
+const messageIdOf = (n) => n?.metadata?.message_id ?? n?.payload?.message_id ?? null
 
 /**
  * Project deep-link for a notification, closeout-family-aware.

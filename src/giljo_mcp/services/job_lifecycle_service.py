@@ -217,7 +217,7 @@ class JobLifecycleService:
 
                 # Agent name validation + display name collision resolution
                 agent_display_name = await self._validate_spawn_agent(
-                    session, agent_display_name, agent_name, tenant_key, project_id, parent_job_id
+                    session, agent_display_name, agent_name, tenant_key, project, parent_job_id
                 )
 
                 # Generate UUIDs for both job and execution
@@ -505,7 +505,7 @@ class JobLifecycleService:
         agent_display_name: str,
         agent_name: str,
         tenant_key: str,
-        project_id: str,
+        project: Any,
         parent_job_id: str | None,
     ) -> str:
         """
@@ -523,7 +523,7 @@ class JobLifecycleService:
             agent_display_name: Display name of agent (UI label)
             agent_name: Agent name/identifier (template lookup key)
             tenant_key: Tenant key for isolation
-            project_id: Project UUID
+            project: Project model (BE-9385a reads product_id off it to scope the allowlist)
             parent_job_id: Optional parent agent_id for succession check
 
         Returns:
@@ -535,6 +535,7 @@ class JobLifecycleService:
         """
         repo = AgentCompletionRepository()
         is_orchestrator = agent_display_name == "orchestrator"
+        project_id = project.id
 
         # Agent name validation against active templates (backported from tools layer).
         # BE-9333: the orchestrator door used to skip this ENTIRELY, so a name that
@@ -544,7 +545,7 @@ class JobLifecycleService:
         # a generic orchestrator. Only the ORCHESTRATOR_AGENT_NAME sentinel legitimately
         # binds no template (no such row is ever seeded); every other name is checked here.
         if not (is_orchestrator and agent_name == ORCHESTRATOR_AGENT_NAME):
-            valid_agent_names = await repo.get_active_template_names(session, tenant_key)
+            valid_agent_names = await repo.get_active_template_names(session, tenant_key, product_id=project.product_id)
 
             if agent_name not in valid_agent_names:
                 raise ValidationError(
@@ -614,7 +615,8 @@ class JobLifecycleService:
         """
         resolved_template_id = None
         repo = AgentCompletionRepository()
-        template = await repo.get_template_by_name(session, tenant_key, agent_name)
+        # BE-9385a: resolve within the project's product (the allowlist's predicate).
+        template = await repo.get_template_by_name(session, tenant_key, agent_name, product_id=project.product_id)
 
         if template:
             resolved_template_id = template.id

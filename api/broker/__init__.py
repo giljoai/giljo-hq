@@ -21,15 +21,15 @@ def _normalize_dsn(database_url: str) -> str:
     )
 
 
-def create_websocket_event_broker(
-    *,
-    config: object | None = None,
-    database_url: str | None = None,
-) -> WebSocketEventBroker:
-    """
-    Factory for WebSocket event brokers.
+# Aliases accepted for the Postgres LISTEN/NOTIFY broker (INF-3009f: exported so the
+# startup connection-budget check can count the broker's direct connections).
+POSTGRES_BROKER_TYPES = frozenset({"postgres_notify", "postgres", "pg_notify", "listen_notify"})
 
-    Broker selection priority:
+
+def resolve_broker_type(config: object | None = None) -> str:
+    """Resolve the configured broker type without constructing a broker.
+
+    Selection priority (shared with the factory below):
     1) Env var `GILJO_WS_BROKER` / `GILJO_WEBSOCKET_BROKER`
     2) Config path `server.websocket.broker` (if ConfigManager provided)
     3) Default: `in_memory`
@@ -41,12 +41,25 @@ def create_websocket_event_broker(
         if callable(get):
             broker_type = get("server.websocket.broker", None) or get("websocket.broker", None)
 
-    broker_type = (broker_type or "in_memory").strip().lower()
+    return (broker_type or "in_memory").strip().lower()
+
+
+def create_websocket_event_broker(
+    *,
+    config: object | None = None,
+    database_url: str | None = None,
+) -> WebSocketEventBroker:
+    """
+    Factory for WebSocket event brokers.
+
+    Broker selection priority: see ``resolve_broker_type``.
+    """
+    broker_type = resolve_broker_type(config)
 
     if broker_type in {"in_memory", "memory"}:
         return InMemoryWebSocketEventBroker()
 
-    if broker_type in {"postgres_notify", "postgres", "pg_notify", "listen_notify"}:
+    if broker_type in POSTGRES_BROKER_TYPES:
         if not database_url:
             raise ValueError("database_url is required for postgres_notify broker")
         return PostgresNotifyWebSocketEventBroker(dsn=_normalize_dsn(database_url))

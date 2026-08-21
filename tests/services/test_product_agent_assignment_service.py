@@ -326,8 +326,18 @@ class TestProductAgentAssignmentService:
         assert count == 3
 
     @pytest.mark.asyncio
-    async def test_assign_all_skips_existing(self, service_a, product_a, templates_a):
-        await service_a.toggle_assignment(product_a.id, templates_a[0].id, is_active=True)
+    async def test_assign_all_skips_existing(self, db_session, service_a, product_a, templates_a, tenant_a_key):
+        # BE-9385a: the single pre-existing row is now written through the
+        # REPOSITORY rather than through service.toggle_assignment. The service
+        # toggle deliberately materialises the product's whole junction before
+        # flipping one row (otherwise the first toggle on an uncurated product
+        # switches selection tolerance off and blanks every other agent), so it
+        # is no longer a way to create exactly one row. The behaviour under test
+        # -- assign_all creates only the MISSING pairs -- is unchanged, and this
+        # setup states it directly instead of relying on a side effect.
+        await ProductAgentAssignmentRepository().upsert_assignment(
+            db_session, product_a.id, templates_a[0].id, tenant_a_key, True
+        )
         count = await service_a.assign_all_templates(product_a.id)
         assert count == 2  # Only 2 new ones
 

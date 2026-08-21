@@ -91,13 +91,18 @@ const { copy } = useClipboard()
 const { isSaasMode } = useGiljoMode()
 
 const meta = computed(() => PROMPT_META[props.path])
-const productId = ref('')
+// FE-9430: named apart from the `productId` PROP on purpose. When a ref shares
+// a prop's name, `<script setup>` exposes the ref to the template and the prop
+// becomes unreachable from it — the same silent-shadowing failure FE-9419 hit
+// from the other direction. This ref is the run's WORKING id: seeded from
+// props.productId when the run threads one, otherwise adopted or created here.
+const activeProductId = ref('')
 const agentDone = ref(false)
 const copied = ref(false)
 
 const promptText = computed(() =>
   props.path === 'D'
-    ? buildPromptD({ productId: productId.value, saas: isSaasMode() })
+    ? buildPromptD({ productId: activeProductId.value, saas: isSaasMode() })
     : buildPromptB({ saas: isSaasMode() }),
 )
 
@@ -117,7 +122,7 @@ async function copyPrompt() {
 // complete" — every signal (WS event AND poll tick AND mount check) funnels
 // a freshly fetched product row through it.
 //
-// PROGRESSIVE-FILL contract (design ruling, Patrik-ratified): Prompt-D writes
+// PROGRESSIVE-FILL contract (design ruling): Prompt-D writes
 // the card section by section (Info → Tech → Arch → Testing) and the
 // consolidated vision LAST. Intermediate writes only refresh the card display
 // (each WS event/poll tick re-fetches the row into the store) — ONLY the
@@ -162,10 +167,10 @@ function stopPolling() {
 function startPolling() {
   stopPolling()
   pollTimer = setInterval(async () => {
-    if (pollInFlight || !productId.value) return
+    if (pollInFlight || !activeProductId.value) return
     pollInFlight = true
     try {
-      const updated = await productStore.fetchProductById(productId.value)
+      const updated = await productStore.fetchProductById(activeProductId.value)
       if (agentReportsDone(updated)) markAgentDone()
     } catch {
       // Transient poll failures are fine — next tick retries.
@@ -176,11 +181,11 @@ function startPolling() {
 }
 
 async function onVisionComplete(event) {
-  if (!event.detail?.product_id || event.detail.product_id !== productId.value) return
+  if (!event.detail?.product_id || event.detail.product_id !== activeProductId.value) return
   // The event only says "a write landed" — the seam decides whether the pass
   // is COMPLETE (guards progressive fill's intermediate writes).
   try {
-    const updated = await productStore.fetchProductById(productId.value)
+    const updated = await productStore.fetchProductById(activeProductId.value)
     if (agentReportsDone(updated)) markAgentDone()
   } catch {
     // Poll fallback keeps running.
@@ -200,7 +205,7 @@ async function onVisionComplete(event) {
 // would present it as "proposed" and let Activate deactivate it.
 async function ensureProduct() {
   if (props.productId) {
-    productId.value = props.productId
+    activeProductId.value = props.productId
     try {
       const row = await productStore.fetchProductById(props.productId)
       if (agentReportsDone(row)) markAgentDone()
@@ -212,25 +217,25 @@ async function ensureProduct() {
 
   const draft = productStore.products.find((p) => !p.is_active && !(p.name || '').trim())
   if (draft) {
-    productId.value = draft.id
+    activeProductId.value = draft.id
     emit('product-created', draft.id)
     return
   }
 
   try {
     const product = await productStore.createProduct({ name: '' })
-    productId.value = product?.id || ''
+    activeProductId.value = product?.id || ''
   } catch {
     // Fall back to a named draft if the backend rejects an empty name; the
     // user can rename it from the product form afterwards.
     try {
       const product = await productStore.createProduct({ name: 'My product' })
-      productId.value = product?.id || ''
+      activeProductId.value = product?.id || ''
     } catch {
-      productId.value = ''
+      activeProductId.value = ''
     }
   }
-  if (productId.value) emit('product-created', productId.value)
+  if (activeProductId.value) emit('product-created', activeProductId.value)
 }
 
 onMounted(async () => {

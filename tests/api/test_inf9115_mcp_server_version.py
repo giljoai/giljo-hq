@@ -30,21 +30,28 @@ from giljo_mcp import branding
 
 
 def test_mcp_server_version_is_giljo_version():
-    """The regression guard the WO mandates: mcp._mcp_server.version == giljo_mcp.__version__."""
-    assert mcp._mcp_server.version == giljo_version
+    """The regression guard the WO mandates: the server's version is the PRODUCT version.
+
+    INF-9371 re-point: 1.x had no ``version=`` constructor kwarg, so the value was
+    patched on afterwards and read back off ``mcp._mcp_server.version``. SDK 2.0
+    declares the kwarg and exposes ``MCPServer.version`` (read-only), so the same
+    guarantee is now asserted through the public property. The assertion is unchanged
+    -- what moved is where the SDK keeps the value.
+    """
+    assert mcp.version == giljo_version
 
 
 def test_mcp_server_version_is_not_the_sdk_package_fallback():
-    """Before the fix: unset version -> SDK falls back to its own package version."""
+    """Without the explicit version the SDK falls back to its own package version."""
     sdk_fallback = _pkg_version("mcp")
     if sdk_fallback == giljo_version:
-        return  # coincidental version match; the assignment still holds (prior assertion)
-    assert mcp._mcp_server.version != sdk_fallback
+        return  # coincidental version match; the declaration still holds (prior assertion)
+    assert mcp.version != sdk_fallback
 
 
 def test_live_initialize_handshake_reports_giljo_version():
     """Live handshake proof: the same call StreamableHTTPSessionManager makes
     per-connection to build the initialize response's serverInfo."""
-    init_options = mcp._mcp_server.create_initialization_options()
+    init_options = mcp._lowlevel_server.create_initialization_options()
     assert init_options.server_version == giljo_version
     assert init_options.server_name == branding.MCP_ALIAS

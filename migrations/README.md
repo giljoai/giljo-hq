@@ -55,7 +55,7 @@ Is the table SaaS-only (defined under saas/ models)?
     ├── YES → migrations/versions/  (incremental migration, MUST be idempotent)
     └── NO — it's a brand-new table for an unreleased feature
         │
-        Has the feature shipped to ANY environment (dogfood, demo prod, public)?
+        Has the feature shipped to ANY environment (test install, demo prod, public)?
         ├── YES → migrations/versions/  (incremental — existing DBs need ALTER)
         └── NO  → modify the baseline (baseline_v38_unified.py)
 ```

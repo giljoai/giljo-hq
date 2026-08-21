@@ -2,6 +2,9 @@ import { config } from '@vue/test-utils'
 import { vi } from 'vitest'
 import { createVuetify } from 'vuetify'
 import { createPinia } from 'pinia'
+import { unresolvedAssetGuard } from './helpers/unresolvedAssetGuard.js'
+import { routerInjectionGuard } from './helpers/routerInjectionGuard.js'
+import { draggable } from '@/directives/draggable'
 
 // Define global Vuetify component mocks (PascalCase for vi.mock)
 const VuetifyMock = {
@@ -136,6 +139,14 @@ vi.mock('vuetify', () => ({
 // below, use `withRealVuetify()` from tests/helpers/realVuetify.js instead of
 // asserting through this flat stub — see that file's header comment for why
 // `stubs: { VSelect: false }` alone does not work as an escape hatch.
+//
+// FE-9397: this map is not a convenience — it IS component resolution for this
+// tier. Nothing registers Vuetify's real components (the `vuetify` module is
+// mocked above), so a tag absent from this map does not resolve at all and
+// renders as an inert unknown element instead. That used to be a console
+// warning nobody read; it is now a test failure, enforced by the guard wired at
+// the bottom of this file. Adding a Vuetify tag to a template means adding it
+// here too.
 config.global.stubs = {
   'v-app': { template: '<div class="v-app"><slot /></div>' },
   'v-main': { template: '<div class="v-main"><slot /></div>' },
@@ -147,7 +158,9 @@ config.global.stubs = {
   'v-card-title': { template: '<div><slot /></div>' },
   'v-card-text': { template: '<div><slot /></div>' },
   'v-card-actions': { template: '<div><slot /></div>' },
+  'v-sheet': { template: '<div class="v-sheet"><slot /></div>' },
   'v-btn': { template: '<button class="v-btn" v-bind="$attrs"><slot /></button>' },
+  'v-btn-toggle': { template: '<div class="v-btn-toggle" v-bind="$attrs"><slot /></div>' },
   'v-icon': { template: '<span class="v-icon"><slot /></span>' },
   'v-img': { template: '<div class="v-img"><slot /></div>' },
   'v-avatar': { template: '<div class="v-avatar"><slot /></div>' },
@@ -157,6 +170,8 @@ config.global.stubs = {
   'v-list': { template: '<div class="v-list"><slot /></div>' },
   'v-list-item': { template: '<div class="v-list-item"><slot /></div>' },
   'v-list-item-title': { template: '<div class="v-list-item-title"><slot /></div>' },
+  'v-list-item-subtitle': { template: '<div class="v-list-item-subtitle"><slot /></div>' },
+  'v-list-subheader': { template: '<div class="v-list-subheader"><slot /></div>' },
   'v-expansion-panels': { template: '<div class="v-expansion-panels"><slot /></div>' },
   'v-expansion-panel': { template: '<div class="v-expansion-panel"><slot /></div>' },
   'v-expansion-panel-title': { template: '<div class="v-expansion-panel-title"><slot /></div>' },
@@ -175,12 +190,18 @@ config.global.stubs = {
   'v-range-slider': { template: '<div class="v-range-slider" v-bind="$attrs"><slot /></div>' },
   'v-file-input': { template: '<input type="file" class="v-file-input" v-bind="$attrs" />' },
   'v-color-picker': { template: '<div class="v-color-picker" v-bind="$attrs"><slot /></div>' },
+  // Real VDatePicker builds its calendar entirely from props and has no default
+  // slot, so this flat stub renders no dates. It is the one component in this
+  // map where the stub genuinely shows nothing a user would see -- assert on
+  // the emitted `update:model-value`, not on rendered days.
+  'v-date-picker': { template: '<div class="v-date-picker" v-bind="$attrs"></div>' },
   'v-form': { template: '<form class="v-form"><slot /></form>' },
   'v-tabs': { template: '<div class="v-tabs"><slot /></div>' },
   'v-tab': { template: '<div class="v-tab"><slot /></div>' },
   'v-tab-item': { template: '<div class="v-tab-item"><slot /></div>' },
   'v-window': { template: '<div class="v-window"><slot /></div>' },
   'v-window-item': { template: '<div class="v-window-item"><slot /></div>' },
+  'v-expand-transition': { template: '<div class="v-expand-transition"><slot /></div>' },
   'v-navigation-drawer': { template: '<div class="v-navigation-drawer"><slot /></div>' },
   'v-toolbar': { template: '<div class="v-toolbar"><slot /></div>' },
   'v-toolbar-title': { template: '<div class="v-toolbar-title"><slot /></div>' },
@@ -207,6 +228,38 @@ config.global.stubs = {
   'v-breadcrumbs': { template: '<div class="v-breadcrumbs"><slot /></div>' },
   'v-breadcrumbs-item': { template: '<div class="v-breadcrumbs-item"><slot /></div>' },
   'v-pagination': { template: '<div class="v-pagination"><slot /></div>' },
+  // Not Vuetify, but resolved the same way and previously just as silent
+  // (FE-9397 measured 51 unresolved `router-link` renders across 3 specs).
+  // Specs here mock the `vue-router` MODULE rather than installing a router, so
+  // nothing registers this component. Rendering a real anchor with an href
+  // keeps link-target assertions meaningful; reading `to` off a dead unknown
+  // element, which is what they were doing, does not.
+  'router-link': {
+    props: ['to'],
+    template:
+      '<a class="router-link" :href="typeof to === \'string\' ? to : (to && to.path) || undefined"><slot /></a>',
+  },
+}
+
+// Globally register the app's custom directives.
+//
+// FE-9403: `v-draggable` is a real product directive — src/main.js:105 registers
+// it and it makes every dialog draggable. Nothing registered it in this tier, so
+// it failed to resolve in 56 spec files and simply never ran, reported only as a
+// console warning. Unlike an unresolved component (FE-9397), an unresolved
+// directive leaves no residue at all: no inert element, no surviving class, no
+// slot children. There is nothing in the DOM for an assertion to catch, which is
+// what made it the quieter half of the same hole.
+//
+// The REAL directive is registered here, not a stub of it, so this tier cannot
+// drift from what main.js installs. Measured on the way in: it now mounts and
+// runs to completion 1314 times across the suite, every time via the `.dlg-header`
+// handle that BaseDialog supplies (never the `.v-card-title` fallback, which the
+// flat stub above renders without its class). Adding a directive to main.js means
+// adding it here too.
+config.global.directives = {
+  ...config.global.directives,
+  draggable,
 }
 
 // Create a minimal Vuetify mock plugin
@@ -614,4 +667,54 @@ vi.mock('@/composables/useToast', () => ({
 // Reset mocks before each test
 beforeEach(() => {
   vi.clearAllMocks()
+})
+
+// FE-9397 (components) + FE-9403 (directives): an unresolved asset fails the
+// test instead of hiding behind a green suite. `warnHandler` only records -- Vue
+// runs it through `callWithErrorHandling`, so throwing there would be swallowed
+// and the guard would silently not work. The throw happens here, where vitest
+// reports it. Read tests/helpers/unresolvedAssetGuard.js before changing or
+// removing any of this; if it fires on your spec, register the missing thing
+// (stub map above for a component, `config.global.directives` for a directive)
+// rather than deleting the guard.
+//
+// Scope is deliberate and was decided on measurement, not taste: resolution
+// failures only, NOT every Vue warning. The reasoning -- including why a
+// blanket policy would have been blind to the largest warning category in this
+// suite -- is in the guard file's header.
+//
+// Deliberately NOT cleared in `beforeEach`: an asset resolved during
+// `beforeAll` or at module scope warns before any test starts, and clearing up
+// front would drop exactly those. Draining only here attributes them to the
+// first test in the file instead of losing them.
+// FE-9427: the router-injection guard is a sibling of the above, not a widening
+// of it. `useRouter()` with no router installed returns `undefined` -- absence,
+// not degradation -- so by the asset guard's OWN stated line it belongs on the
+// fatal side. Scope is exactly two keys (see routerInjectionGuard.js); every
+// other `injection not found` keeps its existing behaviour, because mounting a
+// child without its provider stays a legitimate unit-testing move.
+//
+// One warnHandler, two recorders: the router guard gets first refusal and
+// returns true when the warning was its own, so nothing is double-reported and
+// nothing reaches console.warn twice.
+config.global.config = {
+  ...config.global.config,
+  warnHandler(msg, instance, trace) {
+    if (routerInjectionGuard.record(msg)) return
+    unresolvedAssetGuard.warnHandler(msg, instance, trace)
+  },
+}
+
+afterEach(() => {
+  // Drain the router guard FIRST and unconditionally. If the asset guard throws,
+  // anything the router guard recorded during this test must not survive into
+  // the next one and be reported against a spec that did not cause it.
+  const routerFailure = routerInjectionGuard.drainMessage()
+  try {
+    unresolvedAssetGuard.assertNone()
+  } catch (assetFailure) {
+    if (routerFailure) assetFailure.message += `\n\n${routerFailure}`
+    throw assetFailure
+  }
+  if (routerFailure) throw new Error(routerFailure)
 })

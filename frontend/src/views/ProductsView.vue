@@ -644,24 +644,23 @@ onMounted(async () => {
   // FE-9200: the onboarding tutorial's "I'll fill it in myself" door lands
   // here with ?create=true — open the classic ProductForm straight away
   // (same idiom as WelcomeView's openSetup/openGuide query triggers).
-  // Optional chaining: component tests mount this view without a router.
-  if (route?.query?.create === 'true') {
+  if (route.query.create === 'true') {
     openNewProductDialog()
-    router?.replace({ path: route.path })
+    router.replace({ path: route.path })
   }
 
   // FE-9222: the context-tuning banner deep-links here with ?tune=<product_id>
   // to open the tuning dialog for that product. Captured before loadProducts so
   // a concurrent ?create strip cannot swallow it; the lookup runs after the list
   // loads, and an unknown/missing id fails soft (no dialog, param still stripped).
-  const tuneProductId = route?.query?.tune
+  const tuneProductId = route.query.tune
 
   await loadProducts()
 
   if (tuneProductId) {
     const target = productStore.products.find((product) => product.id === tuneProductId)
     if (target) showProductTuning(target)
-    router?.replace({ path: route.path })
+    router.replace({ path: route.path })
   }
   // Load field toggle configuration (Handover 0049, 0820)
   try {

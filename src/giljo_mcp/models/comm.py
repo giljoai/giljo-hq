@@ -67,6 +67,20 @@ LOOP_DIRECTIVE_MESSAGE_TYPE = "loop_directive"
 # Participant directory types.
 VALID_PARTICIPANT_TYPES = ("agent", "user")
 
+# BE-9475: what a participant may declare about ITSELF via post_to_thread(my_status=...).
+#
+# LOCKED to the dot vocabulary the operator already knows — frontend/src/utils/
+# statusConfig.js maps exactly these six, and the Jobs board renders them with the same
+# colours. A seventh value would reach getStatusColor with no entry and render #666666
+# "Unknown", which is a worse answer than the NULL it replaced. So this is a closed set,
+# not a starting set: adding to it means adding a colour, and that is a design decision
+# about the whole dashboard rather than about this table.
+#
+# Deliberately NARROWER than agent_executions.status, which also carries closed / silent /
+# decommissioned / awaiting_user / staged. Those are lifecycle facts the PLATFORM
+# establishes about an agent it is running; an agent may not award them to itself.
+VALID_SELF_REPORTED_STATUSES = ("working", "waiting", "blocked", "idle", "sleeping", "complete")
+
 # BE-9012d (D8/D9): the subject stamped on a project-bound thread that the system
 # auto-creates when a project has no bound thread yet. The shared resolver
 # (CommThreadService.resolve_or_create_bound_thread), the ce_0072 fold migration,
@@ -206,6 +220,28 @@ class CommParticipant(Base):
     # deleted message leaves a harmless stale id, never a broken constraint).
     last_read_message_id = Column(String(36), nullable=True)
     last_read_at = Column(DateTime(timezone=True), nullable=True)
+    # BE-9475: what this participant says it is DOING, self-declared on post_to_thread.
+    #
+    # Exists for one reason: a headless agent has no agent_executions row, so the Hub's
+    # execution-status subquery serves it NULL forever and the client renders that as
+    # idle / "Monitoring" — a lane looks like it is watching a screen the whole time it
+    # is saturating a core, and nothing it can do changes that. This column is the only
+    # channel such a participant has.
+    #
+    # STRICTLY A FALLBACK. agent_executions wins whenever a row exists (see
+    # participant_display_status). A self-declaration must never be able to contradict
+    # the Jobs board about an agent the platform is actually running.
+    #
+    # Constrained by VALID_SELF_REPORTED_STATUSES at the write boundary rather than by a
+    # DB CHECK: a constraint violation surfaces as a 500, and this value arrives from an
+    # AI agent, which is exactly the input class that must get a 422-shaped refusal
+    # naming the valid set so it can self-correct.
+    self_reported_status = Column(String(20), nullable=True)
+    # When that declaration was made. Recorded, not read by the dot — a status with no
+    # age cannot later be aged out, and reintroducing a time window here would resurrect
+    # the isAgentLive liveness green FE-9365c deliberately removed. Kept for operator
+    # forensics ("it said working, but when?"), which is why it is stamped and not read.
+    self_reported_status_at = Column(DateTime(timezone=True), nullable=True)
 
     thread = relationship("CommThread", back_populates="participants")
 

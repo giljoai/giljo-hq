@@ -39,7 +39,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from giljo_mcp.models import AgentExecution, AgentJob, Message, Project
+from giljo_mcp.models import AgentExecution, AgentJob, Message, Product, Project
 from giljo_mcp.models.tasks import MessageAcknowledgment, MessageRecipient
 from giljo_mcp.services.orchestration_agent_state_service import (
     OrchestrationAgentStateService,
@@ -55,6 +55,16 @@ def _state_service(session: AsyncSession) -> OrchestrationAgentStateService:
 
 
 async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_proj = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    session.add(_owning_product_proj)
     proj = Project(
         id=str(uuid.uuid4()),
         name="BE-9242 dead cursor project",
@@ -62,6 +72,7 @@ async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
         mission="dead cursor resolution mission",
         status="active",
         tenant_key=tenant_key,
+        product_id=_owning_product_proj.id,
         execution_mode="multi_terminal",
         series_number=random.randint(1, 9000),
         created_at=datetime.now(UTC),
@@ -260,6 +271,52 @@ async def test_close_job_with_no_live_orchestrator_leaves_action_required_cursor
         "with no live orchestrator to forward to, the action-required cursor must be "
         "left unresolved, never silently acked away"
     )
+
+
+async def test_close_job_no_orchestrator_warning_sanitizes_agent_supplied_agent_id(
+    db_session: AsyncSession,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """TSK-9369 -- CodeQL py/log-injection (public alert 349) hardening.
+
+    The "no live orchestrator to forward to" warning
+    (agent_terminal_cursor_service.py) interpolates ``agent_id``, which can
+    originate from agent-supplied input. A value carrying a newline must not
+    be able to forge an extra line in the operator log. Drives the exact
+    no-live-orchestrator path (see the unresolved-cursor test above) with a
+    malicious agent_id and asserts the emitted record renders as ONE line
+    with the newline neutralized.
+    """
+    tenant = TenantManager.generate_tenant_key()
+    project_id = await _seed_project(db_session, tenant)
+    implementer = await _seed_execution(db_session, tenant, project_id, display_name="implementer", status="complete")
+    malicious_agent_id = "evil\nFORGED LINE"
+    implementer.agent_id = malicious_agent_id
+    await db_session.commit()
+    await db_session.refresh(implementer)
+
+    await _post(
+        db_session,
+        tenant,
+        project_id,
+        from_agent=implementer,
+        to_agent=implementer,
+        content="Orphaned action item -- no orchestrator alive to catch it.",
+        requires_action=True,
+    )
+
+    with caplog.at_level("WARNING", logger="giljo_mcp.services.agent_terminal_cursor_service"):
+        await _state_service(db_session).close_job(job_id=implementer.job_id, tenant_key=tenant)
+
+    rendered = [r.getMessage() for r in caplog.records if "no live orchestrator to forward" in r.getMessage()]
+    assert len(rendered) == 1, "expected exactly one no-live-orchestrator warning"
+    message = rendered[0]
+
+    # The rendered message must be a single line -- no forged extra line --
+    # and must not contain the raw, unsanitized newline-bearing agent_id.
+    assert "\n" not in message
+    assert malicious_agent_id not in message
+    assert "evilFORGED LINE" in message
 
 
 async def test_close_job_forwards_to_successor_when_two_orchestrators_active_during_handover(

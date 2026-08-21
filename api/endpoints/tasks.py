@@ -344,6 +344,16 @@ async def update_task(
     # service-layer field allowlist stays focused on FK ids only.
     update_data = task_update.dict(exclude_unset=True)
     completion_notes = update_data.pop("completion_notes", None)
+    # TSK-9458: the edit dialog seeds its form from the fetched task and sends
+    # the whole object back, so the ``task_type`` the API itself just emitted
+    # rides along unchanged. Every task is TSK (BE-6049c) and ``validate()``
+    # rejects TSK as reserved -- which killed the whole request and discarded
+    # the user's edited title/description. An unchanged type is nothing to do:
+    # drop it before resolution. A type the caller genuinely CHANGED still goes
+    # through validate() and is still rejected if bogus or reserved.
+    current_type_abbr = task.task_type.abbreviation if task.task_type else None
+    if "task_type" in update_data and update_data["task_type"] == current_type_abbr:
+        update_data.pop("task_type")
     if "task_type" in update_data:
         from api.app_state import state as _app_state
         from giljo_mcp.auth.dependencies import get_db_session  # noqa: F401  (typing only)
@@ -356,6 +366,31 @@ async def update_task(
             update_data["task_type_id"] = resolved.id
         else:
             update_data["task_type_id"] = None
+
+    # BE-9460: product_id is fixed at task creation and never reassignable --
+    # task.product_id anchors project-reassignment validation, series
+    # numbering, and convert_to_project's product binding, and no write path
+    # anywhere moves a task between products. It is deliberately
+    # absent from _ALLOWED_TASK_UPDATE_FIELDS, so passing it through used to
+    # be accepted with 200 and silently dropped -- the caller was told the
+    # write succeeded when it did not. Same mechanism as the task_type guard
+    # above (TSK-9458): the edit dialog seeds its form from the fetched task
+    # and echoes product_id back unchanged on every save, so an unchanged
+    # value is nothing to do and must not error; a genuinely changed value is
+    # rejected honestly instead of silently discarded.
+    if "product_id" in update_data:
+        if update_data["product_id"] == task.product_id:
+            update_data.pop("product_id")
+        else:
+            raise ValidationError(
+                message="A task's product is fixed at creation and cannot be reassigned.",
+                context={
+                    "task_id": task_id,
+                    "current_product_id": task.product_id,
+                    "requested_product_id": update_data["product_id"],
+                },
+            )
+
     await task_service.update_task(task_id, **update_data)
 
     if completion_notes and update_data.get("status") == "completed":

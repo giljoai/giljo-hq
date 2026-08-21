@@ -134,9 +134,9 @@ def _reconcile_giljo_mode_after_dotenv() -> None:
 async def _warm_up(state) -> None:
     """Pre-warm cold-start hot paths so the first real request isn't slow.
 
-    Runs during startup BEFORE the app reports ready, so Railway's healthcheck
-    only goes green once warm and the first user is never the one paying the
-    cold-start cost. Two dominant costs are addressed:
+    Runs during startup BEFORE the app reports ready, so the platform
+    healthcheck only goes green once warm and the first user is never the one
+    paying the cold-start cost. Two dominant costs are addressed:
 
       1. Empty DB connection pool — the first query otherwise pays a fresh
          TCP + TLS + auth handshake to Postgres. A raw ``SELECT 1`` establishes
@@ -149,7 +149,7 @@ async def _warm_up(state) -> None:
     BE-6029: warms SEVERAL pooled connections, not one. The first user after a
     deploy (e.g. launching a job) fires multiple concurrent queries; on a cold
     pool each otherwise pays its own TCP+TLS+auth handshake, and that latency
-    spike around connect time is what let Railway's edge reap the still-idle
+    spike around connect time is what let the hosting edge reap the still-idle
     WebSocket before the heartbeat established it. Pre-establishing a handful of
     connections removes that first-burst stall.
 

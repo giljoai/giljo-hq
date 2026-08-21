@@ -11,7 +11,7 @@ shipped ZERO user-created templates — directly contradicting the function's ow
 docstring ("users control which templates are enabled via UI toggle").
 
 Fix: user-created templates outrank the seeded defaults (is_default is a low-priority
-tiebreak only); the cap is 16 (raised from 8, Patrik BE-9208); the omitted set is
+tiebreak only); the cap is 16 (raised from 8, BE-9208); the omitted set is
 logged at WARNING so nothing is silently starved.
 
 These tests assert the CORRECT post-fix behavior and were RED on the pre-fix picker.
@@ -50,7 +50,7 @@ def _names(selected: list[AgentTemplate]) -> set[str]:
 
 
 def test_cap_is_sixteen():
-    """Contract lock: the packaging cap is 16 (Patrik raised it from 8)."""
+    """Contract lock: the packaging cap is 16 (raised from 8)."""
     assert MAX_PACKAGED_TEMPLATES == 16
 
 

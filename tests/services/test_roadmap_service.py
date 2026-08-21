@@ -32,6 +32,7 @@ from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.roadmaps import Roadmap, RoadmapItem
 from giljo_mcp.services.roadmap_service import RoadmapService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -63,6 +64,9 @@ async def _seed(db_session, *, active: bool = True) -> dict:
         name=f"Project {suffix}",
         description="desc",
         mission="mission",
+        # BE-9429: uq_project_taxonomy_active is NULLS NOT DISTINCT, so two
+        # untyped projects in one product collide unless the serial differs.
+        series_number=next_series_number(),
     )
     task = Task(
         id=str(uuid.uuid4()),
@@ -266,6 +270,9 @@ async def test_get_roadmap_items_sorted_by_sort_order(db_manager, db_session):
         name="Second project",
         description="desc",
         mission="mission",
+        # BE-9429: shares a product with the seeded project, so it needs its own
+        # serial under the NULLS NOT DISTINCT index.
+        series_number=next_series_number(),
     )
     db_session.add(second_project)
     await db_session.commit()
@@ -499,6 +506,104 @@ async def test_cross_product_project_id_rejected(db_manager, db_session):
             tenant_key=seed["tenant_key"],
         )
     assert await _count_items(db_session, seed["tenant_key"]) == 0
+
+
+async def test_a_sibling_product_item_is_told_it_is_in_another_product_not_that_it_is_missing(db_manager, db_session):
+    """BE-9420: the refusal has to be TRUE, not just loud.
+
+    Both rejection reasons used to render as "not found in the active product".
+    After a product flip -- an ordinary action -- the common case is an id that
+    exists perfectly well one product over, and telling that user their project
+    was "not found" is a false statement, not merely an unhelpful one. That is
+    what made a correct boundary read as a bug.
+
+    The existing cross-product test seeds a whole other TENANT, so it cannot
+    exercise this branch: a foreign-tenant id is deliberately reported as
+    nonexistent. This one keeps both products inside one tenant.
+    """
+    seed = await _seed(db_session)
+    sibling_product = Product(
+        id=str(uuid.uuid4()),
+        name="Sibling Product",
+        description="same tenant, different product",
+        tenant_key=seed["tenant_key"],
+        is_active=False,
+    )
+    db_session.add(sibling_product)
+    await db_session.flush()
+    # No next_series_number() here, deliberately, even though BE-9429 made it this
+    # file's idiom: that counter exists because rows sharing a (tenant, product)
+    # slot collide under the now-strict uq_project_taxonomy_active. This project
+    # gets a product of its very own, minted per test run, so its slot cannot be
+    # shared and a NULL serial cannot collide with anything.
+    sibling_project = Project(
+        id=str(uuid.uuid4()),
+        tenant_key=seed["tenant_key"],
+        product_id=sibling_product.id,
+        name="Sibling Project",
+        description="desc",
+        mission="mission",
+    )
+    db_session.add(sibling_project)
+    await db_session.commit()
+
+    svc = _svc(db_manager, db_session)
+    with pytest.raises(ValidationError) as excinfo:
+        await svc.upsert_metadata(
+            items=[{"item_type": "project", "project_id": sibling_project.id, "sort_order": 0}],
+            tenant_key=seed["tenant_key"],
+        )
+
+    message = str(excinfo.value)
+    assert "belong to a different product" in message, message
+    assert "do not exist" not in message, f"a real project must not be reported as nonexistent: {message}"
+    assert seed["product_id"] in message, f"the refusal must name the active product: {message}"
+    # The refusal still refuses -- nothing was written.
+    assert await _count_items(db_session, seed["tenant_key"]) == 0
+
+
+async def test_a_genuinely_unknown_id_is_still_reported_as_nonexistent(db_manager, db_session):
+    """The other branch, so the disambiguation is proven to discriminate.
+
+    Without this, the test above would pass against an implementation that simply
+    said "belongs to a different product" for everything -- which would be exactly
+    as false as the message it replaced, in the other direction.
+    """
+    seed = await _seed(db_session)
+    svc = _svc(db_manager, db_session)
+
+    with pytest.raises(ValidationError) as excinfo:
+        await svc.upsert_metadata(
+            items=[{"item_type": "project", "project_id": str(uuid.uuid4()), "sort_order": 0}],
+            tenant_key=seed["tenant_key"],
+        )
+
+    message = str(excinfo.value)
+    assert "do not exist" in message, message
+    assert "belong to a different product" not in message, message
+
+
+async def test_another_tenants_project_is_reported_as_nonexistent(db_manager, db_session):
+    """Deliberate: the disambiguation stays inside the tenant.
+
+    Confirming that an id exists somewhere would answer a question the caller is
+    not entitled to ask, so a foreign-tenant id gets the nonexistent branch even
+    though the row is real. Pinned so a later "helpful" widening of the lookup
+    has to argue with a test.
+    """
+    seed = await _seed(db_session)
+    other = await _seed(db_session)  # different tenant entirely
+    svc = _svc(db_manager, db_session)
+
+    with pytest.raises(ValidationError) as excinfo:
+        await svc.upsert_metadata(
+            items=[{"item_type": "project", "project_id": other["project_id"], "sort_order": 0}],
+            tenant_key=seed["tenant_key"],
+        )
+
+    message = str(excinfo.value)
+    assert "do not exist" in message, message
+    assert "belong to a different product" not in message, message
 
 
 # ---------------------------------------------------------------------------

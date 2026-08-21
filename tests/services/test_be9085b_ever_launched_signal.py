@@ -34,6 +34,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.project_lifecycle_service import ProjectLifecycleService
 from giljo_mcp.services.project_staging_service import ProjectStagingService
@@ -51,6 +52,16 @@ async def _seed_project(
     launched: bool = False,
     ever_launched: bool = False,
 ) -> str:
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    session.add(_owning_product_project)
     project = Project(
         id=str(uuid.uuid4()),
         name=f"BE-9085b {uuid.uuid4().hex[:6]}",
@@ -58,6 +69,7 @@ async def _seed_project(
         mission="Test.",
         status="active",
         tenant_key=tenant_key,
+        product_id=_owning_product_project.id,
         series_number=1,
         execution_mode="claude_code_cli",
         staging_status=staging_status,

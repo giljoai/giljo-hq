@@ -9,7 +9,7 @@
       class="mb-4"
       @click:close="dismissSetupBanner"
     >
-      <template v-slot:title>
+      <template #title>
         <v-icon left>mdi-database-alert</v-icon>
         Database Setup Required
       </template>
@@ -31,7 +31,7 @@
       class="mb-4"
       @click:close="dismissLanWelcome"
     >
-      <template v-slot:title>
+      <template #title>
         <v-icon left>mdi-check-circle</v-icon>
         Application Now Configured for LAN Access
       </template>

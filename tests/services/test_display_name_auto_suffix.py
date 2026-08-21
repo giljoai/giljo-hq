@@ -25,7 +25,7 @@ import pytest
 import pytest_asyncio
 
 from giljo_mcp.exceptions import AlreadyExistsError, ValidationError
-from giljo_mcp.models import AgentExecution, AgentJob, AgentTemplate, Project
+from giljo_mcp.models import AgentExecution, AgentJob, AgentTemplate, Product, Project
 from giljo_mcp.services.orchestration_service import OrchestrationService
 from giljo_mcp.tenant import TenantManager
 
@@ -62,6 +62,16 @@ async def suffix_project(db_session, suffix_tenant_key, suffix_templates) -> Pro
     """Create test project for display name suffix tests."""
     from datetime import datetime
 
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=suffix_tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         id=str(uuid.uuid4()),
         name="Display Name Suffix Test Project",
@@ -69,6 +79,7 @@ async def suffix_project(db_session, suffix_tenant_key, suffix_templates) -> Pro
         mission="Test auto-suffix logic",
         status="active",
         tenant_key=suffix_tenant_key,
+        product_id=_owning_product_project.id,
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
         series_number=random.randint(1, 9000),

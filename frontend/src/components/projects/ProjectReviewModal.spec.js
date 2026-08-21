@@ -16,11 +16,23 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createVuetify } from 'vuetify'
+import { createRouter, createMemoryHistory } from 'vue-router'
 import ProjectReviewModal from '@/components/projects/ProjectReviewModal.vue'
 import { useProjectStateStore } from '@/stores/projectStateStore'
 import api from '@/services/api'
 
 const vuetify = createVuetify()
+
+// FE-9427: ProjectReviewModal calls useRouter() -- openInHub() pushes the named
+// 'Hub' route. Mounted without a router that returned `undefined`, so the
+// deep-link path was inert.
+const hubRouter = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: '/', name: 'Root', component: { template: '<div />' } },
+    { path: '/hub', name: 'Hub', component: { template: '<div />' } },
+  ],
+})
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -65,7 +77,7 @@ async function mountModal() {
       projectId: PROJECT_ID,
     },
     global: {
-      plugins: [pinia, vuetify],
+      plugins: [pinia, vuetify, hubRouter],
     },
   })
 
@@ -138,7 +150,7 @@ describe('ProjectReviewModal.vue — execution_mode store-first (FE-6021)', () =
 
     const wrapper = mount(ProjectReviewModal, {
       props: { show: false, projectId: PROJECT_ID },
-      global: { plugins: [pinia, vuetify] },
+      global: { plugins: [pinia, vuetify, hubRouter] },
     })
 
     await wrapper.setProps({ show: true })
@@ -199,5 +211,35 @@ describe('ProjectReviewModal.vue — Project Comms pane (Phase 5 / D1(a))', () =
     expect(wrapper.find('[data-testid="project-comms-empty"]').exists()).toBe(false)
     // the embedded read-only timeline shows the bound thread's message
     expect(wrapper.find('[data-testid="timeline-message-m1"]').exists()).toBe(true)
+  })
+
+  // FE-9427: the test above proves the deep link is RENDERED. Nothing proved
+  // where it goes -- this spec mounted the modal with no router at all, so
+  // useRouter() returned `undefined` and openInHub()'s push was unreachable.
+  // With a real router installed the destination is assertable, so assert it:
+  // a button that exists and navigates nowhere is the failure this pane would
+  // actually have.
+  it('deep-links to the Hub on the bound thread when Open-in-Hub is clicked', async () => {
+    api.threads = {
+      list: vi.fn().mockResolvedValue({ data: { threads: [BOUND] } }),
+      history: vi.fn().mockResolvedValue({
+        data: { thread: BOUND, messages: [] },
+      }),
+      create: vi.fn(),
+    }
+    const { wrapper } = await mountModal()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="project-comms-open-hub"]').trigger('click')
+    await flushPromises()
+
+    expect(hubRouter.currentRoute.value.name).toBe('Hub')
+    expect(hubRouter.currentRoute.value.query).toEqual({
+      thread: 'thr-bound',
+      tab: 'project',
+    })
+    // The modal closes behind the navigation -- one without the other would
+    // leave the operator on the Hub with a dialog still open over it.
+    expect(wrapper.emitted('close')).toBeTruthy()
   })
 })

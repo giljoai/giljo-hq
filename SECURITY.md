@@ -37,14 +37,13 @@ If you discover a security vulnerability, please report it responsibly:
 
 ### Secrets and Source-Code Defense
 
-A four-layer defense prevents secrets from reaching the public repo:
+Multi-layer secret scanning gates every release. Scanning runs at multiple
+independent points between a developer's commit and the public repo, so no
+single layer is the only line of defense, and the public repo also carries
+its own defensive scan.
 
-1. **Pre-commit (private repo)** — `gitleaks` runs on staged content via `.pre-commit-config.yaml`. Blocks at staging time.
-2. **Push CI (private repo)** — Backend CI / Secret scan job re-runs `gitleaks` on every push and PR. Catches anything that bypassed pre-commit (e.g., `--no-verify`).
-3. **Boundary gate (export scripts)** — The CE export script `scripts/export_ce.sh` runs `gitleaks detect --no-git` against the SaaS-stripped tree **after strip and before push to public**. Last-chance scan.
-4. **Public CI (public repo)** — Defensive `gitleaks` working-tree scan on the public repo. Should never trigger if layers 1-3 hold; if it does, fix upstream.
-
-If any layer triggers in production, treat as a layer-1-3 gap and harden upstream.
+If a secret is ever discovered in production, treat it as a gap in that
+defense and harden upstream.
 
 ### Dependency Security
 
@@ -61,6 +60,6 @@ If any layer triggers in production, treat as a layer-1-3 gap and harden upstrea
 
 ## CI Architecture
 
-- **Private repo** is the primary CI gate (9 required checks via branch-protection ruleset)
-- **Public repo** runs a slimmed 6-check smoke set (defense-in-depth)
+- **Private repo** is the primary CI gate, with required status checks enforced via branch-protection
+- **Public repo** runs its own smoke-test suite (defense-in-depth)
 - All exports require private CI green before propagation to public

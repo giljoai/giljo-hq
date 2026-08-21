@@ -14,7 +14,7 @@ BE-5107 (ce_0030 re-adds the column with simple start-on-working /
 stop-on-complete-or-closed semantics, no backfill).
 
 This migration drops the column wherever it exists so the chain stays
-coherent on dogfood (which already ran ce_0028) and on fresh installs
+coherent on the test install (which already ran ce_0028) and on fresh installs
 (where the column was removed from baseline_v37_unified).
 
 Idempotency: existence-checked DROP COLUMN.

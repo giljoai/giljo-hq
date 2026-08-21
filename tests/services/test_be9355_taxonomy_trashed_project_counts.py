@@ -34,6 +34,7 @@ import pytest_asyncio
 from sqlalchemy import select
 
 from giljo_mcp.database import tenant_session_context
+from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project, TaxonomyType
 from giljo_mcp.services.taxonomy_ops import (
     delete_taxonomy_type,
@@ -42,7 +43,7 @@ from giljo_mcp.services.taxonomy_ops import (
 )
 
 
-def _typed_project(tenant_key: str, type_id: str, *, series: int, trashed: bool = False) -> Project:
+def _typed_project(tenant_key: str, type_id: str, *, series: int, product_id: str, trashed: bool = False) -> Project:
     """A project classified under ``type_id``, optionally already in the trash.
 
     ``status='deleted'`` alongside ``deleted_at`` is not a contrivance -- it is
@@ -50,15 +51,22 @@ def _typed_project(tenant_key: str, type_id: str, *, series: int, trashed: bool 
     ``product_id`` stays NULL so the single-active-project index does not reject
     the seeded mix.
 
-    ``series`` must come from a per-fixture counter, never a random draw: the
-    SHIPPED ``uq_project_taxonomy_active`` is NULLS NOT DISTINCT
-    (``baseline_v38_unified.py:2022``), so the NULL ``product_id`` and ``subseries``
+    ``series`` must come from a per-fixture counter, never a random draw:
+    ``uq_project_taxonomy_active`` is NULLS NOT DISTINCT
+    (``baseline_v38_unified.py:2052``), so the NULL ``product_id`` and ``subseries``
     compare EQUAL and two live rows of the same type that drew the same number
-    would collide with an IntegrityError.
+    collide with an IntegrityError.
+
+    BE-9429: this was true of the SHIPPED index but not of the schema these tests
+    actually ran against -- ``models/projects.py`` omitted
+    ``postgresql_nulls_not_distinct`` and the pytest schema is built from the
+    models, so the collision described above could not occur in CI. The model now
+    carries the flag, so the reason this fixture counts is now the reason it says.
     """
     now = datetime.now(UTC)
     return Project(
         tenant_key=tenant_key,
+        product_id=product_id,
         name="be9355 project",
         description="seeded for the taxonomy count tests",
         mission="seeded mission",
@@ -105,12 +113,21 @@ async def taxonomy_with_trashed_projects(db_session, test_tenant_key):
         db_session.add_all([trash_only, mixed, empty])
         await db_session.flush()
 
+        # BE-9437: product_id is NOT NULL. The two LIVE rows get a product each --
+        # idx_project_single_active_per_product allows one active project per
+        # product. The trashed rows carry status='deleted' and sit outside that
+        # index, so they can share.
+        product_one = Product(tenant_key=tenant, name=f"be9355 P1 {suffix}", description="d", is_active=False)
+        product_two = Product(tenant_key=tenant, name=f"be9355 P2 {suffix}", description="d", is_active=False)
+        db_session.add_all([product_one, product_two])
+        await db_session.flush()
+
         db_session.add_all(
             [
-                _typed_project(tenant, trash_only.id, series=next(series), trashed=True),
-                _typed_project(tenant, mixed.id, series=next(series)),
-                _typed_project(tenant, mixed.id, series=next(series)),
-                _typed_project(tenant, mixed.id, series=next(series), trashed=True),
+                _typed_project(tenant, trash_only.id, series=next(series), product_id=product_one.id, trashed=True),
+                _typed_project(tenant, mixed.id, series=next(series), product_id=product_one.id),
+                _typed_project(tenant, mixed.id, series=next(series), product_id=product_two.id),
+                _typed_project(tenant, mixed.id, series=next(series), product_id=product_two.id, trashed=True),
             ]
         )
         await db_session.flush()

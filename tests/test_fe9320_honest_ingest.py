@@ -497,7 +497,7 @@ async def test_per_write_websocket_emit_survives_for_progressive_fill(
     fe9320_product: Product,
 ):
     """Do NOT narrow the emit to completion only. TutorialPromptScreen.vue documents
-    a Patrik-ratified PROGRESSIVE-FILL contract that uses vision:analysis_complete as
+    a ratified PROGRESSIVE-FILL contract that uses vision:analysis_complete as
     a per-write refresh tick -- a section write with the flag still false must emit."""
     from unittest.mock import AsyncMock
 

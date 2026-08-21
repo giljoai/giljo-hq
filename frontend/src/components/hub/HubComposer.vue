@@ -26,22 +26,25 @@
         <v-icon size="12" class="mr-1">mdi-hand-back-right-outline</v-icon>
         Your turn
       </span>
-      <!-- FE-9365g: the release valve. Until now the ONLY way to clear "waiting on
-           you" was to post a message — so a thread that needed nothing from the
-           operator stayed gold forever, and a signal that cannot be dismissed
-           becomes noise. This clears the baton server-side; the thread stays open
-           and nothing is posted. -->
-      <button
-        type="button"
-        class="hub-composer__handled"
-        title="Clears 'waiting on you' — the thread stays open, nothing is posted"
+      <!-- FE-9365g: the release valve. Until it existed the ONLY way to clear "waiting
+           on you" was to post a message — so a thread that needed nothing from the
+           operator stayed gold forever, and a signal that cannot be dismissed becomes
+           noise. This clears the baton server-side; the thread stays open and nothing
+           is posted.
+
+           FE-9439: it was a small text button here and the operator could not find it —
+           "it exists at the bottom by the chat bar but is not very distinct". Now the
+           shared hand toggle, standard size, PULSING while the turn is theirs so the eye
+           lands on it. The testid is unchanged deliberately: the same control in better
+           clothes, and the regression spec that pins the route fix reads it on both
+           sides of this change. -->
+      <MarkHandledToggle
+        :active="isYourTurn"
+        :disabled="clearing"
+        pulse
         data-testid="composer-mark-handled"
-        :disabled="clearingBaton"
-        @click="onMarkHandled"
-      >
-        <v-icon size="12" class="mr-1">mdi-check</v-icon>
-        Mark handled
-      </button>
+        @click="markHandled"
+      />
     </div>
 
     <div class="hub-composer__controls">
@@ -167,21 +170,20 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { useCommHubStore } from '@/stores/commHubStore'
-import { useUserStore } from '@/stores/user'
 import { useToast } from '@/composables/useToast'
 import { getAgentColor } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
 import { agentStatusDot } from '@/composables/useAgentStatusDot'
+import MarkHandledToggle from '@/components/hub/MarkHandledToggle.vue'
+import { useMarkHandled } from '@/components/hub/useMarkHandled'
 
 const commHub = useCommHubStore()
-const userStore = useUserStore()
 const { showToast } = useToast()
 
-/** True when the selected thread's baton points at the current user */
-const isYourTurn = computed(() => {
-  const thread = commHub.selectedThread
-  return thread?.next_action_owner != null && thread.next_action_owner === userStore.currentUser?.id
-})
+// FE-9439: `isYourTurn` and the clear itself moved to useMarkHandled, because the search
+// bar now offers the same action and two copies of it would drift. This component keeps
+// the badge and the composer; it no longer owns what the toggle does.
+const { isYourTurn, clearing, markHandled } = useMarkHandled()
 
 function yourTurnBadgeStyle() {
   const hex = getAgentColor('orchestrator')?.hex
@@ -234,26 +236,6 @@ function harnessLabel(harness) {
 // ---- state ----
 const content = ref('')
 const sending = ref(false)
-
-// ---- releasing the turn (FE-9365g) ----
-const clearingBaton = ref(false)
-
-async function onMarkHandled() {
-  const threadId = commHub.selectedThreadId
-  if (!threadId) return
-  clearingBaton.value = true
-  try {
-    // 'none' is the reserved no-owner target: next_action_owner clears, the gold
-    // frame and hand go out, and no agent is told to act.
-    await commHub.passBaton(threadId, 'none')
-    showToast({ type: 'success', message: 'Handled — the turn is cleared.' })
-  } catch (err) {
-    const msg = err?.response?.data?.detail || err?.message || 'Could not clear the turn.'
-    showToast({ type: 'error', message: msg })
-  } finally {
-    clearingBaton.value = false
-  }
-}
 
 // ---- the To selector ----
 // A sentinel value rather than null, so the DEFAULT is a visible choice in the list
@@ -389,22 +371,6 @@ async function onSend() {
     display: flex;
     align-items: center;
     gap: v.$spacing-sm;
-  }
-
-  &__handled {
-    display: inline-flex;
-    align-items: center;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    font-size: 0.75rem; // 12
-    padding: 2px 8px;
-    border-radius: $border-radius-default; // 8
-    cursor: pointer;
-    transition: color $transition-fast, background $transition-fast;
-
-    &:hover { color: $color-text-primary; background: rgba(255, 255, 255, 0.06); }
-    &:disabled { opacity: 0.5; cursor: default; }
   }
 
   &__your-turn-badge {

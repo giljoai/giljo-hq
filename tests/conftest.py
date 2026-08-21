@@ -56,6 +56,8 @@ from giljo_mcp.tenant import TenantManager  # noqa: E402
 from tests.fixtures.base_fixtures import (  # noqa: E402
     db_manager,
     db_session,
+    restored_global_client_resolver,
+    restored_global_wake_relay,
     test_project,
 )
 
@@ -305,6 +307,42 @@ def _auth_rate_limit_test_bypass(request):
         set_test_bypass(False)
 
 
+@pytest.fixture(autouse=True)
+def _restore_global_wake_relay():
+    """Restore the PROCESS-GLOBAL agent-wake relay after every test (TSK-9381).
+
+    ``install_wake_relay`` prefers to be handed a registry, and every test that
+    calls it directly obliges — so the global is untouched by them. The leak comes
+    from the layer above: ``init_websocket_broker`` calls it with no ``registry``
+    (api/startup/core_services.py), so a startup test exercising the multi-worker
+    path installs a relay on ``agent_wake_registry._registry`` and cannot pass one
+    of its own. Left installed, it fails the next test in that worker process which
+    asserts the default single-worker posture — under xdist ``--dist load`` that is
+    a different, unlucky test every run, which is what made this read as "ambient".
+
+    The snapshot/restore itself lives in ``restored_global_wake_relay`` so this
+    fixture and its regression test exercise the same code.
+    """
+    with restored_global_wake_relay():
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _restore_global_client_resolver():
+    """Restore the PROCESS-GLOBAL OAuth client resolver after every test (TSK-9381).
+
+    Same class of defect as the wake relay above, same containment. SaaS startup
+    installs an async DB-backed resolver process-wide and never uninstalls it —
+    correct in production, a leak in a test process. The victim was
+    ``test_oauth_resolver_seam.py`` failing with
+    ``AttributeError: 'coroutine' object has no attribute 'client_id'`` roughly one
+    run in five, depending on whether xdist happened to put an app-building test
+    and the seam file in the same worker.
+    """
+    with restored_global_client_resolver():
+        yield
+
+
 # Note: db_session fixture is imported from base_fixtures.py
 # and provides transaction-based test isolation
 
@@ -340,14 +378,34 @@ async def test_tenant_key():
 
 @pytest_asyncio.fixture(scope="function")
 async def test_project_id(db_session, test_tenant_key):
-    """Create a test project and return its ID"""
+    """Create a test project and return its ID.
+
+    BE-9437: ``projects.product_id`` is NOT NULL, so this seeds a product of its
+    own first. Its OWN, rather than reusing the ``test_product`` fixture: this
+    project is ACTIVE, ``idx_project_single_active_per_product`` allows one
+    active project per product, and a test that pulled in both fixtures and then
+    activated a second project would collide for a reason that has nothing to do
+    with what it was testing.
+    """
     import random
     import uuid
 
-    from giljo_mcp.models import Project
+    from giljo_mcp.models import Product, Project
+
+    product = Product(
+        id=str(uuid.uuid4()),
+        name=f"Test Project's Product {uuid.uuid4().hex[:6]}",
+        description="Owning product for the test project fixture",
+        tenant_key=test_tenant_key,
+        is_active=False,
+        product_memory={},
+    )
+    db_session.add(product)
+    await db_session.flush()
 
     project = Project(
         id=str(uuid.uuid4()),
+        product_id=product.id,
         name="Test Project",
         description="Test project description for integration testing",
         mission="Test mission for integration testing",

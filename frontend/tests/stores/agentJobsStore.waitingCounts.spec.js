@@ -134,6 +134,36 @@ describe('agentJobsStore — FE-9184 refreshMessagesWaitingCounts', () => {
     expect(api.agentJobs.list).not.toHaveBeenCalled()
   })
 
+  // FE-9380: the count refresh is a second module-closure debounce. A refresh
+  // queued before logout must not fire its /jobs fetch for the session that
+  // just ended.
+  it('$reset cancels a pending count refresh before it fetches', async () => {
+    seedJobs(store)
+    api.agentJobs.list.mockResolvedValue({ data: { jobs: [] } })
+
+    store.refreshMessagesWaitingCounts('project-1')
+    store.$reset()
+
+    await vi.advanceTimersByTimeAsync(5000)
+
+    expect(api.agentJobs.list).not.toHaveBeenCalled()
+    expect(store.jobCount).toBe(0)
+  })
+
+  it('count refreshes still work after a $reset', async () => {
+    store.$reset()
+    seedJobs(store)
+    api.agentJobs.list.mockResolvedValue({
+      data: { jobs: [{ job_id: 'job-1', agent_id: 'agent-1', messages_waiting_count: 4 }] },
+    })
+
+    store.refreshMessagesWaitingCounts('project-1')
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(api.agentJobs.list).toHaveBeenCalledTimes(1)
+    expect(store.getJob('agent-1').messages_waiting_count).toBe(4)
+  })
+
   it('swallows a failed fetch without touching the store', async () => {
     seedJobs(store)
     api.agentJobs.list.mockRejectedValue(new Error('network down'))

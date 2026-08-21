@@ -58,7 +58,19 @@ vi.mock('@/composables/useProductSoftDelete', () => ({
   }),
 }))
 
+import { createRouter, createMemoryHistory } from 'vue-router'
 import ProductsView from '@/views/ProductsView.vue'
+
+// FE-9427: ProductsView calls useRoute() and useRouter() -- onMounted reads
+// ?create / ?tune and then router.replace()s them off the URL. Both returned
+// `undefined` without a router installed, so that deep-link path was inert.
+const productsRouter = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: '/', name: 'Root', component: { template: '<div />' } },
+    { path: '/products', name: 'Products', component: { template: '<div />' } },
+  ],
+})
 
 // Distinctive values so a match cannot come from unrelated chrome (page counts,
 // the literal "10 days", ids).
@@ -82,7 +94,7 @@ describe('ProductsView — stale cascade impact between two deletes', () => {
   async function mountView() {
     wrapper = mount(ProductsView, {
       global: {
-        plugins: [createTestingPinia({ createSpy: vi.fn, stubActions: false })],
+        plugins: [createTestingPinia({ createSpy: vi.fn, stubActions: false }), productsRouter],
         stubs: {
           'v-container': { template: '<div><slot /></div>' },
           'v-dialog': { template: '<div><slot /></div>' },

@@ -36,7 +36,7 @@ VALID_PROJECT_STATUSES: frozenset[str] = frozenset(
 
 # BE-9000k: the ONE terminal-status set for a chain member — a project that has
 # reached a terminal state releases the conductor's complete_job guard. WIDE set
-# (Patrik, 2026-07-02): failed / cancelled DO release, so a member ending
+# (2026-07-02): failed / cancelled DO release, so a member ending
 # failed/cancelled never wedges the conductor forever. Single source of truth
 # imported by job_completion_service, sequence_run_service, and project_helpers.
 # Home: models (the sequence-run domain), beside the other status frozensets —

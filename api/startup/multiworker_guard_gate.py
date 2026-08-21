@@ -73,12 +73,13 @@ def log_deploy_posture() -> None:
 
     Incident 2026-07-16: a platform SIGTERM after a healthy deploy left the prod
     service down for ~51 min, and diagnosing it required reconstructing the
-    restart policy and worker posture from Railway state after the fact. This one
-    INFO line puts both in every boot log. ``GILJO_RESTART_POLICY`` is exported by
-    railway.toml's startCommand (the single source of truth for the start
-    command), so ``restart_policy=unset`` is itself a signal: this process was NOT
-    launched by the config-as-code startCommand (CE, local dev, or a dashboard
-    start-command override drifting from the repo).
+    restart policy and worker posture from platform state after the fact. This
+    one INFO line puts both in every boot log. ``GILJO_RESTART_POLICY`` is
+    exported by the platform's start-command config (the single source of
+    truth for the start command), so ``restart_policy=unset`` is itself a
+    signal: this process was NOT launched by the config-as-code start command
+    (CE, local dev, or a dashboard start-command override drifting from the
+    repo).
     """
     policy = os.getenv("GILJO_RESTART_POLICY", "").strip() or "unset"
     logger.info(

@@ -218,9 +218,14 @@ export function generateGeminiOAuthConfig(serverUrl) {
 /**
  * Generate OpenCode MCP add command for the OAuth flow (no bearer header) (FE-9204).
  * OpenCode registers the server, then runs its own browser sign-in via `mcp auth`.
+ *
+ * FE-9383: the URL is passed with `--url`, NOT positionally. OpenCode's `mcp add`
+ * takes only the server NAME as a positional; a bare URL after it is an unexpected
+ * extra positional and OpenCode answers with its help text instead of connecting.
+ * Verified against a live OpenCode connect, 2026-08-08.
  */
 export function generateOpenCodeOAuthConfig(serverUrl) {
-  return `opencode mcp add ${MCP_ALIAS} ${serverUrl}/mcp && opencode mcp auth ${MCP_ALIAS}`
+  return `opencode mcp add ${MCP_ALIAS} --url ${serverUrl}/mcp && opencode mcp auth ${MCP_ALIAS}`
 }
 
 /**
@@ -245,9 +250,15 @@ export function generateGeminiConfig(serverUrl, apiKey) {
  * Generate OpenCode MCP add command for the bearer (API-key) flow (FE-9204).
  * Same `mcp add` as the OAuth variant plus an Authorization header — no separate
  * `mcp auth` browser step is needed when a key is supplied.
+ *
+ * FE-9383: OpenCode's flag syntax differs from Claude Code's in TWO ways, and this
+ * generator previously got both wrong — an OpenCode user's very first command failed
+ * twice over. (1) The URL rides on `--url`, never positionally. (2) Headers are
+ * `KEY=VALUE`, so it is `Authorization=Bearer <key>`; the colon form Claude Code
+ * uses does not parse. Verified against a live OpenCode connect, 2026-08-08.
  */
 export function generateOpenCodeConfig(serverUrl, apiKey) {
-  return `opencode mcp add ${MCP_ALIAS} ${serverUrl}/mcp --header "Authorization: Bearer ${apiKey}"`
+  return `opencode mcp add ${MCP_ALIAS} --url ${serverUrl}/mcp --header "Authorization=Bearer ${apiKey}"`
 }
 
 /**

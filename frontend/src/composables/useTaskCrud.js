@@ -19,7 +19,13 @@ import { ref } from 'vue'
 import { format } from 'date-fns'
 import { useTaskStore } from '@/stores/tasks'
 import { useProductStore } from '@/stores/products'
+import { useNotificationStore } from '@/stores/notifications'
 import { useToast } from '@/composables/useToast'
+import { parseErrorResponse } from '@/utils/errorMessages'
+import { notifyFailure } from '@/utils/notifyFailure'
+
+const GENERIC_SAVE_FAILURE = 'Failed to save task. Please try again.'
+const GENERIC_COMPLETE_FAILURE = 'Failed to complete task. Please try again.'
 
 const DEFAULT_TASK = () => ({
   title: '',
@@ -34,6 +40,7 @@ const DEFAULT_TASK = () => ({
 export function useTaskCrud() {
   const taskStore = useTaskStore()
   const productStore = useProductStore()
+  const notificationStore = useNotificationStore()
   const { showToast } = useToast()
 
   const showTaskDialog = ref(false)
@@ -100,7 +107,19 @@ export function useTaskCrud() {
       return await taskStore.updateTask(taskId, fields)
     } catch (error) {
       console.error('Failed to complete task:', error)
-      showToast({ message: 'Failed to complete task. Please try again.', type: 'error' })
+      showToast({ message: GENERIC_COMPLETE_FAILURE, type: 'error' })
+      // FE-9466: also drop a persistent notification carrying the server's
+      // own reason, so it survives past the toast. TasksView's row-level
+      // wrapper catches this same rethrown error too -- both compute the
+      // same deterministic id, so the store's dedup-by-id collapses the
+      // two pushes into one bell row.
+      notifyFailure(notificationStore, {
+        operation: 'task.complete',
+        entityId: taskId,
+        error,
+        fallbackMessage: GENERIC_COMPLETE_FAILURE,
+        title: 'Task not completed',
+      })
       throw error
     }
   }
@@ -174,7 +193,13 @@ export function useTaskCrud() {
       }
     } catch (error) {
       console.error('Failed to save task:', error)
-      showToast({ message: 'Failed to save task. Please try again.', type: 'error' })
+      // FE-9461: show the server's own reason when it gave us one in our
+      // structured error shape (it is written to be read by a human) --
+      // fall back to the generic text for anything unstructured, so we
+      // never render a raw exception string or stack trace to the user.
+      const parsed = parseErrorResponse(error)
+      const message = parsed.isStructured ? parsed.message : GENERIC_SAVE_FAILURE
+      showToast({ message, type: 'error' })
     } finally {
       saving.value = false
     }

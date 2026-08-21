@@ -11,6 +11,14 @@ Test Coverage:
 - Raises ValidationError when no active product exists
 - Uses tenant_manager fallback when tenant_key not provided
 - Returns serializable dict (not ORM object)
+
+BE-9411: product resolution moved behind ``ProductService.resolve_binding_product``,
+which validates an explicitly supplied product_id against the tenant instead of
+trusting it. The default (omitted) path is unchanged and these tests now exercise
+the REAL resolver over a stubbed ``get_active_product``. Explicit-id tests stub the
+resolver itself -- their subject is mission/status/return-dict forwarding, and the
+validation behavior they used to (wrongly) pin is covered for real against a live DB
+in ``tests/integration/test_be9411_explicit_product_id_on_creates.py``.
 """
 
 from unittest.mock import AsyncMock, Mock, patch
@@ -18,8 +26,17 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.services.product_service import ProductService
 from giljo_mcp.services.project_service import ProjectService
 from giljo_mcp.tools.tool_accessor import ToolAccessor
+
+
+def _stub_product(product_id: str, name: str) -> Mock:
+    """A resolved product stand-in (BE-9411): only id + name are read."""
+    product = Mock()
+    product.id = product_id
+    product.name = name
+    return product
 
 
 @pytest.fixture(autouse=True)
@@ -56,9 +73,15 @@ class TestCreateProjectActiveProductResolution:
             test_session=None,
         )
 
-        # Mock ProductService with active product
+        # BE-9411: stub only the active-product lookup and let the REAL
+        # resolve_binding_product run, so the default path is genuinely covered
+        # rather than mocked away.
         with (
-            patch("giljo_mcp.services.product_service.ProductService") as mock_product_service_cls,
+            patch.object(
+                ProductService,
+                "get_active_product",
+                new_callable=AsyncMock,
+            ) as mock_get_active,
             patch.object(
                 tool_accessor._project_service,
                 "create_project",
@@ -67,10 +90,8 @@ class TestCreateProjectActiveProductResolution:
         ):
             mock_product = Mock()
             mock_product.id = "prod-123"
-
-            mock_ps_instance = AsyncMock()
-            mock_ps_instance.get_active_product = AsyncMock(return_value=mock_product)
-            mock_product_service_cls.return_value = mock_ps_instance
+            mock_product.name = "Product 123"
+            mock_get_active.return_value = mock_product
 
             mock_project = Mock()
             mock_project.id = "proj-456"
@@ -83,23 +104,32 @@ class TestCreateProjectActiveProductResolution:
             mock_project.created_at = None
             mock_create.return_value = mock_project
 
-            await tool_accessor._project_service.create_project_for_mcp(
+            result = await tool_accessor._project_service.create_project_for_mcp(
                 name="Test Project",
                 tenant_key="tenant-abc",
             )
 
-            # Verify ProductService was instantiated for active product lookup
-            mock_product_service_cls.assert_called_once()
-            mock_ps_instance.get_active_product.assert_awaited_once()
+            # The active product was consulted (omitted product_id -> ambient).
+            mock_get_active.assert_awaited_once()
 
             # Verify create_project was called with resolved product_id
             mock_create.assert_awaited_once()
             call_kwargs = mock_create.call_args[1]
             assert call_kwargs["product_id"] == "prod-123"
 
+            # BE-9411: the response names the landing on the default path too.
+            assert result["product_name"] == "Product 123"
+
     @pytest.mark.asyncio
-    async def test_skips_resolution_when_product_id_provided(self):
-        """Test that active product lookup is skipped when product_id is given."""
+    async def test_explicit_product_id_is_validated_not_trusted(self):
+        """BE-9411: an explicit product_id goes THROUGH resolution, not around it.
+
+        This test used to assert the opposite -- that supplying product_id skipped
+        the ProductService entirely (``assert_not_called``). That skip was the
+        vulnerability: the id came from an agent and reached the write with no
+        tenant-membership check at all. The parameter is now resolved and validated
+        like any other untrusted input, so the assertion is inverted deliberately.
+        """
         db_manager = Mock()
         tenant_manager = Mock()
         tenant_manager.get_current_tenant = Mock(return_value="tenant-abc")
@@ -112,13 +142,22 @@ class TestCreateProjectActiveProductResolution:
         )
 
         with (
-            patch("giljo_mcp.services.product_service.ProductService") as mock_product_service_cls,
+            patch.object(
+                ProductService,
+                "resolve_binding_product",
+                new_callable=AsyncMock,
+            ) as mock_resolve,
             patch.object(
                 tool_accessor._project_service,
                 "create_project",
                 new_callable=AsyncMock,
             ) as mock_create,
         ):
+            mock_product = Mock()
+            mock_product.id = "explicit-prod-id"
+            mock_product.name = "Explicitly Named Product"
+            mock_resolve.return_value = mock_product
+
             mock_project = Mock()
             mock_project.id = "proj-789"
             mock_project.alias = "PRJ-002"
@@ -136,10 +175,11 @@ class TestCreateProjectActiveProductResolution:
                 tenant_key="tenant-abc",
             )
 
-            # ProductService should NOT be instantiated when product_id is given
-            mock_product_service_cls.assert_not_called()
+            # The supplied id is handed to the validator, not straight to the write.
+            mock_resolve.assert_awaited_once()
+            assert mock_resolve.await_args[0][0] == "explicit-prod-id"
 
-            # Verify create_project used the explicit product_id
+            # Verify create_project used the validated product_id
             call_kwargs = mock_create.call_args[1]
             assert call_kwargs["product_id"] == "explicit-prod-id"
 
@@ -157,11 +197,13 @@ class TestCreateProjectActiveProductResolution:
             test_session=None,
         )
 
-        with patch("giljo_mcp.services.product_service.ProductService") as mock_product_service_cls:
-            mock_ps_instance = AsyncMock()
-            mock_ps_instance.get_active_product = AsyncMock(return_value=None)
-            mock_product_service_cls.return_value = mock_ps_instance
-
+        # Real resolver, no active product to find -> the real 422 it raises.
+        with patch.object(
+            ProductService,
+            "get_active_product",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
             with pytest.raises(ValidationError) as exc_info:
                 await tool_accessor._project_service.create_project_for_mcp(
                     name="Should Fail Project",
@@ -195,9 +237,10 @@ class TestCreateProjectActiveProductResolution:
         ):
             mock_product = Mock()
             mock_product.id = "prod-999"
+            mock_product.name = "Product 999"
 
             mock_ps_instance = AsyncMock()
-            mock_ps_instance.get_active_product = AsyncMock(return_value=mock_product)
+            mock_ps_instance.resolve_binding_product = AsyncMock(return_value=mock_product)
             mock_product_service_cls.return_value = mock_ps_instance
 
             mock_project = Mock()
@@ -241,11 +284,19 @@ class TestCreateProjectReturnValue:
             test_session=None,
         )
 
-        with patch.object(
-            tool_accessor._project_service,
-            "create_project",
-            new_callable=AsyncMock,
-        ) as mock_create:
+        with (
+            patch.object(
+                ProductService,
+                "resolve_binding_product",
+                new_callable=AsyncMock,
+                return_value=_stub_product("prod-bbb", "Product BBB"),
+            ),
+            patch.object(
+                tool_accessor._project_service,
+                "create_project",
+                new_callable=AsyncMock,
+            ) as mock_create,
+        ):
             mock_project = Mock()
             mock_project.id = "proj-aaa"
             mock_project.alias = "PRJ-010"
@@ -287,11 +338,19 @@ class TestCreateProjectReturnValue:
             test_session=None,
         )
 
-        with patch.object(
-            tool_accessor._project_service,
-            "create_project",
-            new_callable=AsyncMock,
-        ) as mock_create:
+        with (
+            patch.object(
+                ProductService,
+                "resolve_binding_product",
+                new_callable=AsyncMock,
+                return_value=_stub_product("prod-xyz", "Product XYZ"),
+            ),
+            patch.object(
+                tool_accessor._project_service,
+                "create_project",
+                new_callable=AsyncMock,
+            ) as mock_create,
+        ):
             mock_project = Mock()
             mock_project.id = "proj-xyz"
             mock_project.alias = "PRJ-099"
@@ -319,6 +378,8 @@ class TestCreateProjectReturnValue:
                 "mission",
                 "status",
                 "product_id",
+                # BE-9411: the create response names its landing, not just its id.
+                "product_name",
                 "created_at",
                 "message",
                 "project_type",

@@ -20,7 +20,7 @@ Operations
    canonical six is coalesced to a canonical replacement so the
    subsequent ``ALTER COLUMN ... TYPE project_status`` cannot fail on a
    bad cast. Each step logs a ``RAISE NOTICE`` with the affected row
-   count so the migration output is auditable in CI / dogfood.
+   count so the migration output is auditable in CI / test installs.
 
 2. **Create the ENUM type** ``project_status`` guarded by ``IF NOT EXISTS``
    (Postgres does not support ``CREATE TYPE ... IF NOT EXISTS`` natively
@@ -92,7 +92,7 @@ def upgrade() -> None:
     # ------------------------------------------------------------------
     # Step 1: Pre-flight orphan remap. Each UPDATE is idempotent (no-op
     # if no rows match). RAISE NOTICE makes the remap auditable in CI /
-    # dogfood logs.
+    # test-install logs.
     # ------------------------------------------------------------------
     op.execute(
         """

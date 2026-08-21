@@ -247,6 +247,18 @@ class ProductAgentAssignmentService:
                         context={"product_id": product_id, "tenant_key": self._tenant_key},
                     )
 
+                # BE-9385a (load-bearing -- do not "simplify" this away).
+                # Selection tolerance keys on ROW EXISTENCE: a product with no
+                # junction rows falls back to the tenant-active set. So the first
+                # toggle on such a product must not leave it holding exactly one
+                # row -- that would switch tolerance off and collapse its active
+                # set to a single agent (or to none, if the toggle was an OFF).
+                # Materialising the currently-active set first makes the implicit
+                # "all of them" explicit, so flipping one row changes exactly one
+                # agent. Skip-existing, so an already-curated product is untouched
+                # and a deliberate is_active=False row is never resurrected.
+                await self._repo.bulk_assign_all_templates(session, product_id, self._tenant_key)
+
                 assignment = await self._repo.upsert_assignment(
                     session, product_id, template_id, self._tenant_key, is_active
                 )
@@ -319,6 +331,131 @@ class ProductAgentAssignmentService:
                 message=f"Failed to assign all templates: {e!s}",
                 context={"product_id": product_id, "tenant_key": self._tenant_key},
             ) from e
+
+    async def include_in_active_product(self, session: AsyncSession, template_name: str) -> None:
+        """Place a newly-usable agent in the tenant's ACTIVE product (BE-9391).
+
+        BE-9385a made this junction authoritative for spawn, roster and export, and
+        ``ce_0091`` backfilled a row for every (product, active template) pair -- so
+        every pre-existing product is now "curated", and anything without a row is
+        excluded from all three. Neither creating an agent nor switching it on
+        tenant-wide was a junction writer, so an agent the user had just made was
+        silently unspawnable, missing from the orchestrator's roster and never
+        exported. This is the missing writer, and it lives here because this service
+        owns the junction.
+
+        MATERIALISE-then-include, NOT a single-row insert. Selection tolerance keys
+        on row EXISTENCE (see ``product_agent_selection``): writing one row into a
+        product that has none would flip tolerance OFF and collapse that product's
+        active set to this one agent, removing every other agent from all three
+        surfaces. :meth:`assign_all_templates` is skip-existing, so it makes the
+        implicit "all of them" explicit and picks this agent up in the same pass,
+        while never resurrecting a deliberate ``is_active=False`` row -- the same
+        materialisation :meth:`toggle_assignment` performs, for the same reason.
+
+        NO ACTIVE PRODUCT: deliberately does nothing (EM ruling, BE-9391). Both
+        selection helpers return ``None`` when no product is active, so tolerance
+        engages and the tenant-active set -- this agent included -- passes through
+        every site unchanged. Writing rows for the tenant's INACTIVE products
+        instead would curate products the user never touched, which is the "product
+        goes dark" failure this feature exists to avoid. The gap self-heals:
+        activation runs this same skip-existing pass.
+
+        Call this ONLY for a user-initiated tenant-wide ACTIVATE. BE-9400 took the
+        create path off this method -- creation now calls
+        :meth:`place_in_active_product_switched_off` instead, because activation is
+        an explicit user act and never a side effect of creating an agent.
+
+        It must NOT be wired into ``TemplateService.add_and_commit_template`` to
+        "cover more paths": ``template_import`` seeds through there, and ruling R2
+        requires that a CE boot re-seed never auto-activate a seeded agent in an
+        existing product.
+
+        Best-effort by design, mirroring activation-time assignment
+        (``product_lifecycle_service.py:202-207``): the caller has already committed
+        the template, so raising here would fail the request for an agent that
+        exists. A failure is logged at WARNING and healed by the next activation.
+
+        Args:
+            session: Caller-owned session, used only to read the active product.
+            template_name: Name of the agent, for the warning log.
+        """
+        from giljo_mcp.repositories.product_repository import ProductRepository
+
+        try:
+            # eager_load=False: only the id is read, never the detail relations.
+            product = await ProductRepository().get_active_product(session, self._tenant_key, eager_load=False)
+            if product is None:
+                return
+            await self.assign_all_templates(product.id)
+        except (BaseGiljoError, OSError, RuntimeError, ValueError, TypeError, AttributeError) as exc:
+            self._logger.warning(
+                "Could not assign agent '%s' to the active product (tenant=%s): %s. "
+                "The agent exists; the next product activation picks it up.",
+                sanitize(template_name),
+                sanitize(self._tenant_key),
+                exc,
+            )
+
+    async def place_in_active_product_switched_off(
+        self, session: AsyncSession, template_id: str, template_name: str
+    ) -> None:
+        """Place a newly CREATED agent in the active product, switched OFF (BE-9400).
+
+        The operator's ruling: activation is always an explicit user act, never a
+        side effect of creation. A new agent is raw material to configure, so it
+        arrives **available** (tenant ``is_active`` ON -- visible, editable) but
+        **not live** in the product the user is working in.
+
+        This replaces :meth:`include_in_active_product` on the CREATE path only.
+        The tenant-wide switch-ON path still calls that one: flipping "Available in
+        all products" back on is itself an explicit act, and BE-9391's
+        create-then-activate guarantee rests on it.
+
+        WHY THIS WRITES A ROW instead of simply not writing one. Selection
+        tolerates a product with NO junction rows by falling back to the
+        tenant-active set -- so on such a product, writing nothing would leave the
+        new agent live anyway, through tolerance, and the ruling would hold only on
+        already-curated products. Delegating to :meth:`toggle_assignment` gets the
+        materialise-then-flip pass that makes "off" true in BOTH cases, and it is
+        the same pass, with the same skip-existing guarantee, that the user's own
+        toggle performs.
+
+        It ACTIVATES NOTHING. The rows materialisation adds are ``is_active=True``
+        for agents that were already live via tolerance -- the implicit set made
+        explicit, no agent changing observable state -- and skip-existing means a
+        deliberate ``is_active=False`` row is never resurrected (R2).
+
+        NO ACTIVE PRODUCT: deliberately does nothing, exactly as
+        :meth:`include_in_active_product` does. Writing rows for the tenant's
+        INACTIVE products would curate products the user never touched, which is
+        the "product goes dark" failure this feature exists to avoid.
+
+        Best-effort by design, mirroring the include path: the caller has already
+        committed the template, so raising here would fail the request for an agent
+        that exists.
+
+        Args:
+            session: Caller-owned session, used only to read the active product.
+            template_id: The newly created template's id.
+            template_name: Name of the agent, for the warning log.
+        """
+        from giljo_mcp.repositories.product_repository import ProductRepository
+
+        try:
+            # eager_load=False: only the id is read, never the detail relations.
+            product = await ProductRepository().get_active_product(session, self._tenant_key, eager_load=False)
+            if product is None:
+                return
+            await self.toggle_assignment(product.id, template_id, is_active=False)
+        except (BaseGiljoError, OSError, RuntimeError, ValueError, TypeError, AttributeError) as exc:
+            self._logger.warning(
+                "Could not place agent '%s' in the active product switched off (tenant=%s): %s. "
+                "The agent exists; the user can switch it on for this product.",
+                sanitize(template_name),
+                sanitize(self._tenant_key),
+                exc,
+            )
 
     async def remove_assignments(self, product_id: str) -> int:
         """

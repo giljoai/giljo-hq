@@ -31,7 +31,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import delete, select
 from sqlalchemy import update as sa_update
 
@@ -48,6 +47,7 @@ from giljo_mcp.models.tasks import (
 )
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -55,7 +55,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(call_tool_result) -> dict:
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -126,7 +126,7 @@ async def comm_mcp_client(db_manager, db_session, monkeypatch):
 async def _create_thread(client, **kwargs):
     async with client() as s:
         res = await s.call_tool("create_thread", kwargs)
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     return _payload(res)
 
 
@@ -181,18 +181,18 @@ async def test_post_broadcast_and_read_history(comm_mcp_client):
 
     async with new_client() as s:
         join = await s.call_tool("join_thread", {"thread_id": tid, "agent_id": "agent-beta"})
-        assert join.isError is False, _error_text(join)
+        assert join.is_error is False, _error_text(join)
         post = await s.call_tool(
             "post_to_thread", {"thread_id": tid, "content": "hello board", "from_agent": "agent-alpha"}
         )
-        assert post.isError is False, _error_text(post)
+        assert post.is_error is False, _error_text(post)
         post_payload = _payload(post)
         # broadcast reached the other participant (beta), not the sender (alpha)
         assert "agent-beta" in post_payload["recipients"]
         assert "agent-alpha" not in post_payload["recipients"]
 
         hist = await s.call_tool("get_thread_history", {"thread_id": tid})
-        assert hist.isError is False, _error_text(hist)
+        assert hist.is_error is False, _error_text(hist)
         hist_payload = _payload(hist)
     assert hist_payload["count"] == 1
     msg = hist_payload["messages"][0]
@@ -212,14 +212,14 @@ async def test_get_my_turn_and_pass_baton(comm_mcp_client):
         # it. What this test guards is unchanged — the baton moves and get_my_turn
         # follows it from alpha to beta.
         joined = await s.call_tool("join_thread", {"thread_id": tid, "agent_id": "agent-beta"})
-        assert joined.isError is False, _error_text(joined)
+        assert joined.is_error is False, _error_text(joined)
 
         mine = await s.call_tool("get_my_turn", {"agent_id": "agent-alpha"})
-        assert mine.isError is False, _error_text(mine)
+        assert mine.is_error is False, _error_text(mine)
         assert tid in {t["thread_id"] for t in _payload(mine)["threads"]}
 
         handoff = await s.call_tool("pass_baton", {"thread_id": tid, "to": "agent-beta"})
-        assert handoff.isError is False, _error_text(handoff)
+        assert handoff.is_error is False, _error_text(handoff)
         assert _payload(handoff)["next_action_owner"] == "agent-beta"
 
         # Now it's beta's turn, not alpha's.
@@ -234,11 +234,12 @@ async def test_username_injection_on_user_post(comm_mcp_client):
     thread = await _create_thread(new_client, subject="user chat", creator_id="agent-alpha")
     tid = thread["thread_id"]
 
-    # Simulate an authenticated USER (not an agent) posting.
+    # Simulate an authenticated USER (not an agent) posting. BE-9379: the human's
+    # voice is claimed explicitly (as_user) — it is no longer the omission default.
     monkeypatch.setattr(_base, "_resolve_user_id", lambda ctx: user_id)
     async with new_client() as s:
-        post = await s.call_tool("post_to_thread", {"thread_id": tid, "content": "from the operator"})
-        assert post.isError is False, _error_text(post)
+        post = await s.call_tool("post_to_thread", {"thread_id": tid, "content": "from the operator", "as_user": True})
+        assert post.is_error is False, _error_text(post)
         hist = await s.call_tool("get_thread_history", {"thread_id": tid})
     msg = _payload(hist)["messages"][0]
     # The user's username/display_name is stamped, not an agent id.
@@ -265,7 +266,7 @@ async def test_agent_attribution_wins_over_authenticated_user(comm_mcp_client):
         post = await s.call_tool(
             "post_to_thread", {"thread_id": tid, "content": "building it", "from_agent": "implementer"}
         )
-        assert post.isError is False, _error_text(post)
+        assert post.is_error is False, _error_text(post)
         hist = await s.call_tool("get_thread_history", {"thread_id": tid})
     msg = _payload(hist)["messages"][0]
     # Attributed to the agent role — NOT collapsed to the user principal.
@@ -287,9 +288,9 @@ async def test_post_resolves_display_name_from_participant_directory(comm_mcp_cl
         join = await s.call_tool(
             "join_thread", {"thread_id": tid, "agent_id": agent_uuid, "display_name": "orchestrator"}
         )
-        assert join.isError is False, _error_text(join)
+        assert join.is_error is False, _error_text(join)
         post = await s.call_tool("post_to_thread", {"thread_id": tid, "content": "status", "from_agent": agent_uuid})
-        assert post.isError is False, _error_text(post)
+        assert post.is_error is False, _error_text(post)
         post_payload = _payload(post)
         hist = await s.call_tool("get_thread_history", {"thread_id": tid})
     assert post_payload["from_display_name"] == "orchestrator"
@@ -309,7 +310,7 @@ async def test_from_agent_over_id_max_is_rejected(comm_mcp_client):
             "post_to_thread",
             {"thread_id": thread["thread_id"], "content": "x", "from_agent": "a" * 65},
         )
-    assert res.isError is True
+    assert res.is_error is True
 
 
 async def test_post_empty_content_is_rejected(comm_mcp_client):
@@ -319,7 +320,7 @@ async def test_post_empty_content_is_rejected(comm_mcp_client):
         res = await s.call_tool(
             "post_to_thread", {"thread_id": thread["thread_id"], "content": "   ", "from_agent": "agent-alpha"}
         )
-    assert res.isError is True
+    assert res.is_error is True
     assert "content" in _error_text(res).lower()
 
 
@@ -327,7 +328,7 @@ async def test_unknown_thread_is_not_found(comm_mcp_client):
     new_client, _tk, _uid, _base, _mp = comm_mcp_client
     async with new_client() as s:
         res = await s.call_tool("get_thread_history", {"thread_id": str(uuid4())})
-    assert res.isError is True
+    assert res.is_error is True
     assert "not found" in _error_text(res).lower()
 
 
@@ -336,7 +337,7 @@ async def test_search_threads_by_subject(comm_mcp_client):
     await _create_thread(new_client, subject="migration rollout plan", creator_id="agent-alpha")
     async with new_client() as s:
         res = await s.call_tool("search_threads", {"query": "rollout"})
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     payload = _payload(res)
     assert payload["count"] >= 1
     assert any("rollout" in (t["subject"] or "") for t in payload["threads"])
@@ -355,7 +356,7 @@ async def test_loop_directive_interval_round_trips_over_mcp(comm_mcp_client):
 
     async with new_client() as s:
         join = await s.call_tool("join_thread", {"thread_id": tid, "agent_id": "worker-1"})
-        assert join.isError is False, _error_text(join)
+        assert join.is_error is False, _error_text(join)
         post = await s.call_tool(
             "post_to_thread",
             {
@@ -366,14 +367,14 @@ async def test_loop_directive_interval_round_trips_over_mcp(comm_mcp_client):
                 "loop_interval_minutes": 15,
             },
         )
-        assert post.isError is False, _error_text(post)
+        assert post.is_error is False, _error_text(post)
         assert _payload(post)["loop_interval_minutes"] == 15
 
         hist = await s.call_tool("get_thread_history", {"thread_id": tid})
-        assert hist.isError is False, _error_text(hist)
+        assert hist.is_error is False, _error_text(hist)
         # worker-1 does NOT hold the baton (orchestrator created the thread).
         mine = await s.call_tool("get_my_turn", {"agent_id": "worker-1"})
-        assert mine.isError is False, _error_text(mine)
+        assert mine.is_error is False, _error_text(mine)
 
     assert _payload(hist)["loop_directive"] == {"active": True, "interval_minutes": 15}
     directives = _payload(mine)["loop_directives"]
@@ -419,7 +420,7 @@ async def test_set_status_closes_thread(comm_mcp_client):
             "post_to_thread",
             {"thread_id": tid, "content": "wrapping up", "from_agent": "agent-alpha", "set_status": "closed"},
         )
-        assert post.isError is False, _error_text(post)
+        assert post.is_error is False, _error_text(post)
         listed = await s.call_tool("list_threads", {"status": "closed"})
     assert tid in {t["thread_id"] for t in _payload(listed)["threads"]}
 
@@ -453,7 +454,7 @@ async def _seed_three_messages(new_client, db_session, tenant_key):
             post = await s.call_tool(
                 "post_to_thread", {"thread_id": tid, "content": f"m{n}", "from_agent": "agent-alpha"}
             )
-            assert post.isError is False, _error_text(post)
+            assert post.is_error is False, _error_text(post)
             ids.append(_payload(post)["message_id"])
     with tenant_session_context(db_session, tenant_key):
         for mid, ts in zip(ids, (_T1, _T2, _T3), strict=True):
@@ -470,7 +471,7 @@ async def test_history_omitted_params_returns_full_timeline(comm_mcp_client, db_
     async with new_client() as s:
         hist = await s.call_tool("get_thread_history", {"thread_id": tid})
     payload = _payload(hist)
-    assert hist.isError is False, _error_text(hist)
+    assert hist.is_error is False, _error_text(hist)
     # Response shape unchanged (thread + count + messages + loop_directive); the MCP
     # transport adds its own _meta envelope key, so assert the payload keys are present.
     assert {"thread", "count", "messages", "loop_directive"} <= set(payload)
@@ -485,7 +486,7 @@ async def test_history_after_message_id_returns_only_newer(comm_mcp_client, db_s
     async with new_client() as s:
         hist = await s.call_tool("get_thread_history", {"thread_id": tid, "after_message_id": ids[0]})
     payload = _payload(hist)
-    assert hist.isError is False, _error_text(hist)
+    assert hist.is_error is False, _error_text(hist)
     assert payload["count"] == 2
     assert [m["content"] for m in payload["messages"]] == ["m2", "m3"]
 
@@ -497,7 +498,7 @@ async def test_history_after_unknown_id_returns_empty(comm_mcp_client, db_sessio
     async with new_client() as s:
         hist = await s.call_tool("get_thread_history", {"thread_id": tid, "after_message_id": str(uuid4())})
     payload = _payload(hist)
-    assert hist.isError is False, _error_text(hist)
+    assert hist.is_error is False, _error_text(hist)
     assert payload["count"] == 0
     assert payload["messages"] == []
 
@@ -509,7 +510,7 @@ async def test_history_tail_returns_last_n(comm_mcp_client, db_session):
     async with new_client() as s:
         hist = await s.call_tool("get_thread_history", {"thread_id": tid, "tail": 2})
     payload = _payload(hist)
-    assert hist.isError is False, _error_text(hist)
+    assert hist.is_error is False, _error_text(hist)
     assert payload["count"] == 2
     assert [m["content"] for m in payload["messages"]] == ["m2", "m3"]
 
@@ -521,7 +522,7 @@ async def test_history_since_returns_only_after_timestamp(comm_mcp_client, db_se
     async with new_client() as s:
         hist = await s.call_tool("get_thread_history", {"thread_id": tid, "since": _T1.isoformat()})
     payload = _payload(hist)
-    assert hist.isError is False, _error_text(hist)
+    assert hist.is_error is False, _error_text(hist)
     assert payload["count"] == 2
     assert [m["content"] for m in payload["messages"]] == ["m2", "m3"]
 
@@ -535,7 +536,7 @@ async def test_history_after_and_since_mutually_exclusive(comm_mcp_client, db_se
             "get_thread_history",
             {"thread_id": tid, "after_message_id": ids[0], "since": _T1.isoformat()},
         )
-    assert res.isError is True
+    assert res.is_error is True
     assert "at most one" in _error_text(res).lower()
 
 
@@ -545,7 +546,7 @@ async def test_history_bad_since_rejected(comm_mcp_client, db_session):
     tid, _ids = await _seed_three_messages(new_client, db_session, tenant_key)
     async with new_client() as s:
         res = await s.call_tool("get_thread_history", {"thread_id": tid, "since": "not-a-timestamp"})
-    assert res.isError is True
+    assert res.is_error is True
     assert "iso" in _error_text(res).lower()
 
 
@@ -554,8 +555,9 @@ async def test_history_bad_since_rejected(comm_mcp_client, db_session):
 # The failing layer is the @mcp.tool wrapper + dispatch + service. These prove:
 # an ad-hoc lane id (not a registered template) is sanitized + accepted + slug-
 # attributed (the live-coordination-thread guarantee), all-garbage is a clean
-# error (never a 500 / blank identity), and an omitted from_agent surfaces an
-# advisory instead of silently stamping the owner.
+# error (never a 500 / blank identity), and a declared from_agent carries no
+# advisory. (Omission semantics changed in BE-9379 — an omitted from_agent is now
+# a structured rejection, pinned in test_be9379_from_agent_required_mcp_boundary.)
 
 
 async def test_be9037_ad_hoc_lane_id_sanitized_and_attributed_over_transport(comm_mcp_client):
@@ -567,11 +569,11 @@ async def test_be9037_ad_hoc_lane_id_sanitized_and_attributed_over_transport(com
     tid = thread["thread_id"]
     async with new_client() as s:
         join = await s.call_tool("join_thread", {"thread_id": tid, "agent_id": "SEC-3001b"})
-        assert join.isError is False, _error_text(join)
+        assert join.is_error is False, _error_text(join)
         post = await s.call_tool(
             "post_to_thread", {"thread_id": tid, "content": "status", "from_agent": "BE-9037\u200b"}
         )
-        assert post.isError is False, _error_text(post)
+        assert post.is_error is False, _error_text(post)
         pp = _payload(post)
     assert pp["from_agent_id"] == "BE-9037"  # zero-width stripped, slug preserved (not a UUID)
     assert "SEC-3001b" in pp["recipients"]
@@ -587,23 +589,25 @@ async def test_be9037_all_garbage_from_agent_is_clean_error_over_transport(comm_
         res = await s.call_tool(
             "post_to_thread", {"thread_id": thread["thread_id"], "content": "x", "from_agent": "\u200b\ufeff"}
         )
-    assert res.isError is True
+    assert res.is_error is True
 
 
-async def test_be9037_omitted_from_agent_surfaces_attribution_warning_over_transport(comm_mcp_client):
-    """TSK-0008 over the wire: an omitted from_agent returns an advisory in the
-    response (surface-don't-stamp); a from_agent-bearing post returns none."""
+async def test_be9037_omitted_from_agent_is_refused_over_transport(comm_mcp_client):
+    """BE-9379 superseded TSK-0008's surface-don't-stamp: an omitted from_agent is
+    now a structured domain rejection (fail-closed), while a from_agent-bearing
+    post still carries no advisory. The full omission matrix lives in
+    test_be9379_from_agent_required_mcp_boundary.py."""
     new_client, _tk, _uid, _base, _mp = comm_mcp_client
     thread = await _create_thread(new_client, subject="warn", creator_id="agent-alpha")
     tid = thread["thread_id"]
     async with new_client() as s:
         omitted = await s.call_tool("post_to_thread", {"thread_id": tid, "content": "no id"})
-        assert omitted.isError is False, _error_text(omitted)
+        assert omitted.is_error is False, _error_text(omitted)
         supplied = await s.call_tool(
             "post_to_thread", {"thread_id": tid, "content": "with id", "from_agent": "implementer"}
         )
-        assert supplied.isError is False, _error_text(supplied)
-    assert _payload(omitted)["attribution_warning"]  # non-empty advisory surfaced
+        assert supplied.is_error is False, _error_text(supplied)
+    assert _payload(omitted)["error"] == "FROM_AGENT_REQUIRED"
     assert _payload(supplied)["attribution_warning"] is None
 
 
@@ -632,13 +636,13 @@ async def test_be9214_broadcast_and_directed_post_to_64char_agent(comm_mcp_clien
 
     async with new_client() as s:
         join = await s.call_tool("join_thread", {"thread_id": tid, "agent_id": _BE9214_LONG_ID})
-        assert join.isError is False, _error_text(join)
+        assert join.is_error is False, _error_text(join)
 
         # (a) POST FROM the 64-char agent -> exercises messages.from_agent_id at 64.
         from_long = await s.call_tool(
             "post_to_thread", {"thread_id": tid, "content": "from the long id", "from_agent": _BE9214_LONG_ID}
         )
-        assert from_long.isError is False, _error_text(from_long)
+        assert from_long.is_error is False, _error_text(from_long)
         assert _payload(from_long)["from_agent_id"] == _BE9214_LONG_ID
 
         # (b) BROADCAST from the short creator -> the 64-char participant lands in
@@ -646,7 +650,7 @@ async def test_be9214_broadcast_and_directed_post_to_64char_agent(comm_mcp_clien
         broadcast = await s.call_tool(
             "post_to_thread", {"thread_id": tid, "content": "hello board", "from_agent": "orchestrator"}
         )
-        assert broadcast.isError is False, _error_text(broadcast)
+        assert broadcast.is_error is False, _error_text(broadcast)
         assert _BE9214_LONG_ID in _payload(broadcast)["recipients"]
 
         # (c) DIRECTED post to the 64-char agent -> single recipient row at 64.
@@ -659,16 +663,16 @@ async def test_be9214_broadcast_and_directed_post_to_64char_agent(comm_mcp_clien
                 "to_participant": _BE9214_LONG_ID,
             },
         )
-        assert directed.isError is False, _error_text(directed)
+        assert directed.is_error is False, _error_text(directed)
         assert _payload(directed)["recipients"] == [_BE9214_LONG_ID]
 
         # (d) pass_baton to the 64-char id -> baton column holds it.
         handoff = await s.call_tool("pass_baton", {"thread_id": tid, "to": _BE9214_LONG_ID})
-        assert handoff.isError is False, _error_text(handoff)
+        assert handoff.is_error is False, _error_text(handoff)
         assert _payload(handoff)["next_action_owner"] == _BE9214_LONG_ID
 
         mine = await s.call_tool("get_my_turn", {"agent_id": _BE9214_LONG_ID})
-        assert mine.isError is False, _error_text(mine)
+        assert mine.is_error is False, _error_text(mine)
     assert tid in {t["thread_id"] for t in _payload(mine)["threads"]}
 
 

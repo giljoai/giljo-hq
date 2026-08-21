@@ -7,7 +7,7 @@
 
 A chain CONDUCTOR (the head project's orchestrator) must NOT be able to
 complete_job while its sequence run still has incomplete projects — that would
-orphan the chain mid-drive (Patrik's "a project cannot close without its
+orphan the chain mid-drive (the invariant: "a project cannot close without its
 orchestrator closing too"). The guard is server-enforced, not prose-dependent.
 
 Crucially it is a NO-OP for every non-conductor (a different agent, a worker job

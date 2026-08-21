@@ -36,13 +36,13 @@ from giljo_mcp.platform_registry import VALID_PRESETS, select_effective_preset
 
 
 def _make_ctx(*, client_name: str | None, scope_state: dict | None):
-    """Fake FastMCP ctx: a live clientInfo axis + an ASGI scope-state axis.
+    """Fake SDK ctx: a live clientInfo axis + an ASGI scope-state axis.
 
     ``client_name=None`` models the stateless_http drop (no live clientInfo);
     ``scope_state=None`` models the in-memory transport (no HTTP request at all).
     """
     client_info = SimpleNamespace(name=client_name, version="1.0.0") if client_name is not None else None
-    session = SimpleNamespace(client_params=SimpleNamespace(clientInfo=client_info))
+    session = SimpleNamespace(client_params=SimpleNamespace(client_info=client_info))
     session.check_client_capability = lambda cap: False
     request = SimpleNamespace(scope={"state": scope_state}) if scope_state is not None else None
     return SimpleNamespace(session=session, request_context=SimpleNamespace(request=request))

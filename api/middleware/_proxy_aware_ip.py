@@ -7,7 +7,7 @@
 
 Both the auth rate limiter (``auth_rate_limiter.py``) and the generic rate
 limiter (``rate_limiter.py``) need to derive a per-IP rate-limit key from a
-request. Behind a reverse proxy (Railway, nginx) the TCP peer
+request. Behind a reverse proxy (the hosted platform, nginx) the TCP peer
 (``request.client.host``) is the proxy's shared IP, so naive per-IP keying
 collapses every caller into one bucket. The fix is to honor the FIRST-HOP
 ``X-Forwarded-For`` entry ONLY when the immediate peer is in the
@@ -136,7 +136,7 @@ class ProxyAwareIpResolver:
         from the forwarding headers, preferring Cloudflare's authoritative
         ``CF-Connecting-IP`` (a single, unambiguous value) and falling back to
         the first ``X-Forwarded-For`` hop (left-most entry, the original
-        client) for non-Cloudflare proxies (e.g. nginx, Railway-only paths).
+        client) for non-Cloudflare proxies (e.g. nginx, platform-only paths).
 
         When the peer is NOT a trusted proxy, ALL forwarding headers are
         ignored — they are spoofable client-supplied headers and the
@@ -144,8 +144,8 @@ class ProxyAwareIpResolver:
         is used.
 
         Why ``CF-Connecting-IP`` matters (perf-findings 2026-06-11): behind
-        Cloudflare → Railway, the XFF first hop the app sees is a *Cloudflare*
-        edge IP, not the real client, so XFF-only keying collapses every user
+        the CDN in front of the app, the XFF first hop the app sees is a
+        *Cloudflare* edge IP, not the real client, so XFF-only keying collapses every user
         into a handful of shared Cloudflare-IP buckets → platform-wide 429
         storms. ``CF-Connecting-IP`` carries the true client, so per-user
         buckets are restored. It is only honored once ``peer_is_trusted_proxy``

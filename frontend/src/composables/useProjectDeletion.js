@@ -21,6 +21,13 @@ import { ref } from 'vue'
 import { useProjectStore } from '@/stores/projects'
 import { useNotificationStore } from '@/stores/notifications'
 import { useToast } from '@/composables/useToast'
+import { notifyFailure } from '@/utils/notifyFailure'
+
+const GENERIC_DELETE_FAILURE = 'Failed to delete project. Please try again.'
+const GENERIC_CANCEL_FAILURE = 'Failed to cancel project. Please try again.'
+const GENERIC_RESTORE_FAILURE = 'Failed to restore project. Please try again.'
+const GENERIC_PURGE_ONE_FAILURE = 'Failed to permanently delete the project. Please try again.'
+const GENERIC_PURGE_ALL_FAILURE = 'Failed to purge deleted projects. Please try again.'
 
 export function useProjectDeletion({ showDeletedDialog, reloadProjects }) {
   const projectStore = useProjectStore()
@@ -53,7 +60,14 @@ export function useProjectDeletion({ showDeletedDialog, reloadProjects }) {
         projectToDelete.value = null
       } catch (error) {
         console.error('Failed to delete project:', error)
-        showToast({ message: 'Failed to delete project. Please try again.', type: 'error' })
+        showToast({ message: GENERIC_DELETE_FAILURE, type: 'error' })
+        notifyFailure(notificationStore, {
+          operation: 'project.delete',
+          entityId: projectToDelete.value.id,
+          error,
+          fallbackMessage: GENERIC_DELETE_FAILURE,
+          title: 'Project not deleted',
+        })
       }
     }
   }
@@ -68,7 +82,14 @@ export function useProjectDeletion({ showDeletedDialog, reloadProjects }) {
         await reloadProjects()
       } catch (error) {
         console.error('Failed to cancel project:', error)
-        showToast({ message: 'Failed to cancel project. Please try again.', type: 'error' })
+        showToast({ message: GENERIC_CANCEL_FAILURE, type: 'error' })
+        notifyFailure(notificationStore, {
+          operation: 'project.cancel',
+          entityId: projectToCancel.value.id,
+          error,
+          fallbackMessage: GENERIC_CANCEL_FAILURE,
+          title: 'Project not cancelled',
+        })
       }
     }
   }
@@ -79,7 +100,14 @@ export function useProjectDeletion({ showDeletedDialog, reloadProjects }) {
       showDeletedDialog.value = false
     } catch (error) {
       console.error('Failed to restore project:', error)
-      showToast({ message: 'Failed to restore project. Please try again.', type: 'error' })
+      showToast({ message: GENERIC_RESTORE_FAILURE, type: 'error' })
+      notifyFailure(notificationStore, {
+        operation: 'project.restore',
+        entityId: project.id,
+        error,
+        fallbackMessage: GENERIC_RESTORE_FAILURE,
+        title: 'Project not restored',
+      })
     }
   }
 
@@ -100,7 +128,14 @@ export function useProjectDeletion({ showDeletedDialog, reloadProjects }) {
       }
     } catch (error) {
       console.error('Failed to purge deleted project:', error)
-      showToast({ message: 'Failed to permanently delete the project. Please try again.', type: 'error' })
+      showToast({ message: GENERIC_PURGE_ONE_FAILURE, type: 'error' })
+      notifyFailure(notificationStore, {
+        operation: 'project.purgeOne',
+        entityId: project.id,
+        error,
+        fallbackMessage: GENERIC_PURGE_ONE_FAILURE,
+        title: 'Project not purged',
+      })
     } finally {
       purgingProjectId.value = null
     }
@@ -119,7 +154,13 @@ export function useProjectDeletion({ showDeletedDialog, reloadProjects }) {
       showDeletedDialog.value = false
     } catch (error) {
       console.error('Failed to purge all deleted projects:', error)
-      showToast({ message: 'Failed to purge deleted projects. Please try again.', type: 'error' })
+      showToast({ message: GENERIC_PURGE_ALL_FAILURE, type: 'error' })
+      notifyFailure(notificationStore, {
+        operation: 'project.purgeAll',
+        error,
+        fallbackMessage: GENERIC_PURGE_ALL_FAILURE,
+        title: 'Projects not purged',
+      })
     } finally {
       purgingAllDeleted.value = false
       purgingProjectId.value = null

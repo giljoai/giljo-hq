@@ -466,7 +466,7 @@ class AuthService:
     ) -> ApiKeyCreateResult:
         """Implementation that uses provided session."""
         # BE-6147: the previous hard cap of 5 active API keys per user was removed
-        # (Patrik's directive — unlimited). Natural sprawl control remains: keys
+        # (product directive — unlimited). Natural sprawl control remains: keys
         # are 90-day-expiring (``expires_at`` below) and individually revocable.
         # Teams-readiness (ADR-009): keys stay scoped by tenant_key + user_id.
 

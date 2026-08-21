@@ -17,7 +17,6 @@ HTTP boundary (api_client) with tenant + active-product isolation:
 
 from __future__ import annotations
 
-import os
 import secrets
 import uuid
 
@@ -78,7 +77,6 @@ async def _seed(db_manager, *, active: bool = True) -> dict:
         session.add(project)
         await session.commit()
 
-        os.environ.setdefault("JWT_SECRET", "test_secret_key")
         token = JWTManager.create_access_token(
             user_id=user.id, username=user.username, role="developer", tenant_key=tenant_key
         )

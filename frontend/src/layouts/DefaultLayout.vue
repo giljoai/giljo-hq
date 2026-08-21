@@ -55,6 +55,7 @@ import { useWebSocketStore } from '@/stores/websocket'
 import { useProjectStore } from '@/stores/projects'
 import { initWebsocketEventRouter, registerReconnectResync } from '@/stores/websocketEventRouter'
 import { useHubNotifications } from '@/composables/useHubNotifications'
+import { useActiveProductReconciliation } from '@/composables/useActiveProductReconciliation'
 import StarField from '@/components/StarField.vue'
 import NavigationDrawer from '@/components/navigation/NavigationDrawer.vue'
 import ToastManager from '@/components/ToastManager.vue'
@@ -277,6 +278,12 @@ onMounted(async () => {
         // on reconnect would clobber a filtered view with the active-lifecycle default.
         registerReconnectResync(() => projectStore.refreshList()),
       )
+
+      // FE-9412: the active product must survive a socket that missed the
+      // activation event — re-validate it on tab focus/visibility and on
+      // reconnect. Torn down with the resync registrations below (this runs
+      // in onMounted, so the composable's own scope-dispose cannot fire).
+      resyncUnregisters.push(useActiveProductReconciliation().stop)
     } catch (error) {
       console.error('[DefaultLayout] Failed to initialize WebSocket:', error)
     }

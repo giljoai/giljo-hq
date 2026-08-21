@@ -21,6 +21,10 @@ const apiMock = vi.hoisted(() => ({
       Promise.resolve({ data: { agent_silence_threshold_minutes: 10 } }),
     ),
     updateAgentSilenceThreshold: vi.fn(() => Promise.resolve({ data: {} })),
+    getAgentCheckinCadence: vi.fn(() =>
+      Promise.resolve({ data: { agent_checkin_cadence_minutes: 10 } }),
+    ),
+    updateAgentCheckinCadence: vi.fn(() => Promise.resolve({ data: {} })),
   },
 }))
 

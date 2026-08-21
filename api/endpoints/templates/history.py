@@ -110,9 +110,9 @@ async def restore_template(
 
     await template_service.commit_and_refresh_template(session, template)
 
-    from .crud import _convert_to_response  # local import to avoid cycles
+    from .crud import _convert_in_product_context  # local import to avoid cycles
 
-    return _convert_to_response(template)
+    return await _convert_in_product_context(session, current_user.tenant_key, template)
 
 
 @router.post("/{template_id}/reset", response_model=TemplateResponse)
@@ -142,9 +142,9 @@ async def reset_template(
 
     await template_service.commit_and_refresh_template(session, template)
 
-    from .crud import _convert_to_response  # local import to avoid cycles
+    from .crud import _convert_in_product_context  # local import to avoid cycles
 
-    return _convert_to_response(template)
+    return await _convert_in_product_context(session, current_user.tenant_key, template)
 
 
 @router.post("/{template_id}/reset-system", response_model=TemplateResponse)
@@ -180,6 +180,6 @@ async def reset_system_instructions(
 
     await template_service.commit_and_refresh_template(session, template)
 
-    from .crud import _convert_to_response  # local import to avoid cycles
+    from .crud import _convert_in_product_context  # local import to avoid cycles
 
-    return _convert_to_response(template)
+    return await _convert_in_product_context(session, current_user.tenant_key, template)

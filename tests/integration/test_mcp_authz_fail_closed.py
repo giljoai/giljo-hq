@@ -30,7 +30,8 @@ from __future__ import annotations
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
+
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 # A distinctive name so a leak is unmistakable and the RuntimeError match is exact.
@@ -96,7 +97,7 @@ class TestLayerAUnmappedToolUnreachable:
         async with new_client() as session:
             result = await session.call_tool(_SYNTHETIC_TOOL_NAME, {})
 
-        assert result.isError, "unmapped tool executed on the API-key bypass path (F1 fail-open)"
+        assert result.is_error, "unmapped tool executed on the API-key bypass path (F1 fail-open)"
         joined = "\n".join(getattr(b, "text", "") for b in result.content)
         assert "no authorization scope mapping" in joined
 
@@ -126,7 +127,7 @@ class TestLayerAUnmappedToolUnreachable:
         async with new_client() as session:
             result = await session.call_tool("sec9126_never_registered_zzz", {})
 
-        assert result.isError
+        assert result.is_error
         joined = "\n".join(getattr(b, "text", "") for b in result.content)
         assert "no authorization scope mapping" not in joined
 

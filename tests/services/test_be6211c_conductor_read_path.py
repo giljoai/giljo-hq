@@ -153,8 +153,8 @@ async def _resolve_orchestrator_identity(*, is_chain_conductor: bool) -> str:
 
     with patch("giljo_mcp.system_prompts.service.SystemPromptService") as sp_cls:
         sp_cls.return_value.get_orchestrator_prompt = AsyncMock(return_value=prompt_record)
-        # BE-9333: _resolve_mission_template now returns (identity, identity_status).
-        identity, _status = await svc._resolve_mission_template(
+        # BE-9333 / FE-9408: returns (identity, identity_status, identity_source).
+        identity, _status, _source = await svc._resolve_mission_template(
             MagicMock(), job, execution, "tk_6211g", is_chain_conductor=is_chain_conductor
         )
         return identity
@@ -175,11 +175,19 @@ async def test_projectless_conductor_mission_identity_is_trimmed_end_to_end() ->
 @pytest.mark.asyncio
 async def test_non_conductor_orchestrator_identity_is_byte_identical_to_solo() -> None:
     """is_chain_conductor=False (solo / sub-orch) yields role=None -> the resolved
-    identity is byte-identical to today's default composed solo identity."""
+    identity is byte-identical to today's default composed solo identity.
+
+    FE-9408 appends one provenance line to the served text, so the equality is stated
+    against the composition and that delta. Splitting on the delta keeps this exactly
+    as strict about the composed BYTES as it was -- which is the whole point of the
+    test -- rather than relaxing it to a substring check.
+    """
     from giljo_mcp.template_seeder import compose_orchestrator_identity
 
     resolved = await _resolve_orchestrator_identity(is_chain_conductor=False)
-    assert resolved == compose_orchestrator_identity(None, tool="multi_terminal")
+    composed, _, source_line = resolved.rpartition("\n\n")
+    assert composed == compose_orchestrator_identity(None, tool="multi_terminal")
+    assert source_line == "identity source: built-in default"
     assert "## Before Closeout" in resolved, "the full solo seed must be retained for a non-conductor"
 
 

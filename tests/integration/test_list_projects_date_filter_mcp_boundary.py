@@ -37,11 +37,11 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.schemas.responses.project import ProjectListItem, ProjectTypeInfo
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -102,7 +102,7 @@ class TestParseIsoDatetimeParam:
 def _payload(call_tool_result) -> dict:
     """Extract structured payload from an MCP CallToolResult."""
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -269,7 +269,7 @@ class TestListProjectsDateFiltersMCPBoundary:
                 {"created_after": "2026-04-17", "include_completed": True},
             )
 
-        assert result.isError is False, (
+        assert result.is_error is False, (
             f"CE-0034: list_projects with date-only created_after must NOT raise; got: {_error_text(result)}"
         )
         payload = _payload(result)
@@ -288,7 +288,7 @@ class TestListProjectsDateFiltersMCPBoundary:
                 {"created_before": "2026-04-17", "include_completed": True},
             )
 
-        assert result.isError is False, (
+        assert result.is_error is False, (
             f"CE-0034: list_projects with date-only created_before must NOT raise; got: {_error_text(result)}"
         )
         payload = _payload(result)
@@ -307,7 +307,7 @@ class TestListProjectsDateFiltersMCPBoundary:
                 {"completed_after": "2026-04-17", "include_completed": True},
             )
 
-        assert result.isError is False, (
+        assert result.is_error is False, (
             f"CE-0034: list_projects with date-only completed_after must NOT raise; got: {_error_text(result)}"
         )
         payload = _payload(result)
@@ -325,7 +325,7 @@ class TestListProjectsDateFiltersMCPBoundary:
                 {"completed_before": "2026-04-17", "include_completed": True},
             )
 
-        assert result.isError is False, (
+        assert result.is_error is False, (
             f"CE-0034: list_projects with date-only completed_before must NOT raise; got: {_error_text(result)}"
         )
         payload = _payload(result)
@@ -351,7 +351,7 @@ class TestListProjectsDateFiltersMCPBoundary:
                 },
             )
 
-        assert result.isError is False, (
+        assert result.is_error is False, (
             f"CE-0034: list_projects with all four date-only filters must NOT raise; got: {_error_text(result)}"
         )
         payload = _payload(result)

@@ -186,7 +186,7 @@ class TestGetSessionCapabilities:
         ctx.session.check_client_capability.return_value = supports
         # BE-9035b: no captured clientInfo → the "harness" axis resolves to "generic"
         # (the fail-safe floor) without touching the boolean probes under test.
-        ctx.session.client_params.clientInfo = None
+        ctx.session.client_params.client_info = None
         return ctx
 
     def test_both_capabilities_true_when_client_declares_them(self):
@@ -209,7 +209,7 @@ class TestGetSessionCapabilities:
 
         ctx = MagicMock()
         ctx.session.check_client_capability.side_effect = RuntimeError("no session")
-        ctx.session.client_params.clientInfo = None
+        ctx.session.client_params.client_info = None
         caps = get_session_capabilities(ctx)
         assert caps == {"elicitation": False, "tasks": False, "harness": "generic", "preset": None}
 
@@ -221,6 +221,6 @@ class TestGetSessionCapabilities:
 
         ctx = MagicMock()
         ctx.session.check_client_capability.return_value = False
-        ctx.session.client_params.clientInfo = SimpleNamespace(name="claude-code", version="2.1.199")
+        ctx.session.client_params.client_info = SimpleNamespace(name="claude-code", version="2.1.199")
         caps = get_session_capabilities(ctx)
         assert caps["harness"] == "claude-code"

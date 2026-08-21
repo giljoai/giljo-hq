@@ -83,6 +83,7 @@
       :has-key="hasKey"
       :needs-cert-trust="needsCertTrust"
       :active-normalized-id="normalizedId"
+      :tool-label="toolLabel"
       :platform="platform"
       :cert-command="certCommand"
       :env-var-text="envVarText"
@@ -101,6 +102,14 @@
          on a certificate error, and the walkthrough used to be reachable only from
          Tools > Startup. Same modal, no navigation. Hidden on plain HTTP (nothing to
          trust) and on SaaS (a hosted tenant has no server certificate of its own). -->
+    <!-- FE-9383: name the failure before it happens. A CE self-hoster on a private or
+         self-signed certificate gets a TLS verification error from Node-based CLIs, which
+         reads as "the command is wrong" rather than "the certificate is untrusted". The
+         fix is the trust store (the walkthrough below) — never disabling verification. -->
+    <p v-if="showCertTrustLink" class="connect-subline" data-testid="node-tls-note">
+      Node-based clients such as OpenCode, Claude Code, and Codex reject a private or
+      self-signed certificate until it is in your trust store.
+    </p>
     <div v-if="showCertTrustLink" class="fallback-row">
       <span
         class="fallback-link"
@@ -118,7 +127,10 @@
     <div v-if="method === 'oauth'" class="command-card" data-testid="oauth-section">
       <div class="command-card-head">
         <span class="command-step">1.</span>
-        <span class="command-label">Paste in your terminal</span>
+        <!-- FE-9383: the snippet names the client it targets. Each client's CLI has its
+             own flag syntax, so a command that does not say which tool it is for invites
+             pasting it into the wrong one. -->
+        <span class="command-label" data-testid="oauth-command-label">Paste in your {{ toolLabel }} terminal</span>
         <button class="copy-pill" data-testid="oauth-copy-btn" @click="copyText(oauthCommand)">
           <v-icon size="11">mdi-content-copy</v-icon>COPY
         </button>

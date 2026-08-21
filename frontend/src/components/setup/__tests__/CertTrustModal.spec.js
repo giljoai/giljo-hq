@@ -18,7 +18,12 @@ vi.mock('@/composables/useToast', () => ({
 // Stub Vuetify components used inside the modal
 const globalStubs = {
   Teleport: true,
-  Transition: { template: '<slot />' },
+  // FE-9419: use Vue Test Utils' built-in transition stub rather than a
+  // hand-written `<slot />` one. A bare slot renders a fragment and declares no
+  // props, so <Transition name="overlay-fade"> in CertTrustModal fell through
+  // as an extraneous attribute on every mount. The built-in stub is a real
+  // element and absorbs it.
+  Transition: true,
   'v-btn': { template: '<button @click="$emit(\'click\', $event)"><slot /></button>', emits: ['click'] },
   'v-icon': { template: '<i><slot /></i>' },
   'v-spacer': { template: '<div />' },

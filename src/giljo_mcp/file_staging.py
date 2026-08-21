@@ -138,14 +138,25 @@ def _codex_agents_to_toml(agents: list[dict]) -> list[tuple[str, str]]:
     """
     entries = []
     for agent in agents:
-        name = agent["agent_name"]
-        slug = name.lower().replace(" ", "-").replace("_", "-")
+        # BE-9385b: the assembler supplies ``export_stem`` -- the agent's name
+        # already qualified by the product slug. Falling back to agent_name keeps
+        # the anonymous system-default bundle, which has no export context, on its
+        # old naming.
+        stem = agent.get("export_stem") or agent["agent_name"]
+        slug = stem.lower().replace(" ", "-").replace("_", "-")
         if not slug.startswith("gil-"):
             slug = f"gil-{slug}"
 
         instructions = agent.get("developer_instructions", "")
 
+        # The ownership marker leads the file as a TOML comment. Deliberately NOT
+        # folded into developer_instructions: that text is the agent's operating
+        # identity, and installer bookkeeping does not belong in a persona.
+        marker = agent.get("giljo_marker")
+        header = f"# {marker}\n" if marker else ""
+
         toml_content = (
+            f"{header}"
             f"name = {_toml_string(slug)}\n"
             f"description = {_toml_string(agent.get('description', ''))}\n"
             f"nickname_candidates = [{_toml_string(slug)}]\n"
@@ -344,14 +355,29 @@ class FileStaging:
                 return (None, msg)
 
             # Apply packaging selection (cap lives in select_templates_for_packaging)
+            from .repositories.product_agent_selection import (
+                active_product_template_ids,
+                build_export_context,
+                filter_templates_by_ids,
+                record_product_export,
+            )
             from .template_renderer import select_templates_for_packaging
             from .tools.agent_template_assembler import AgentTemplateAssembler
+
+            # BE-9385a: the exported set follows the ACTIVE PRODUCT's junction.
+            all_active = filter_templates_by_ids(all_active, await active_product_template_ids(session, tenant_key))
+
+            if not all_active:
+                msg = "No agents are enabled for the active product"
+                logger.warning("%s (tenant: %s)", msg, tenant_key)
+                return (None, msg)
 
             selected = select_templates_for_packaging(all_active)
 
             # Assemble templates for the target platform (Handover 0836a)
+            export_context = await build_export_context(session, tenant_key)
             assembler = AgentTemplateAssembler()
-            export_data = assembler.assemble(selected, platform)
+            export_data = assembler.assemble(selected, platform, export_context=export_context)
 
             # Create ZIP file with platform-appropriate content
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -374,6 +400,16 @@ class FileStaging:
 
             for template in selected:
                 template.last_exported_at = export_timestamp
+
+            # BE-9385e: record it for the product that exported, so this staging
+            # does not read as a fresh export in every other product.
+            await record_product_export(
+                session,
+                export_context.product_id if export_context else None,
+                tenant_key,
+                [t.id for t in selected],
+                export_timestamp,
+            )
 
             await session.commit()
 
@@ -440,10 +476,17 @@ class FileStaging:
             agent_entries: list[tuple[str, str]] = []
             selected_templates: list = []
             export_data: dict | None = None
+            export_context = None  # BE-9385e: read by the export-timestamp write below.
 
             if session:
                 from datetime import datetime
 
+                from .repositories.product_agent_selection import (
+                    active_product_template_ids,
+                    build_export_context,
+                    filter_templates_by_ids,
+                    record_product_export,
+                )
                 from .template_renderer import select_templates_for_packaging
                 from .tools.agent_template_assembler import AgentTemplateAssembler
 
@@ -456,12 +499,19 @@ class FileStaging:
                         AgentTemplate.deleted_at.is_(None),
                     )
                 )
-                all_active = result.scalars().all()
+                # BE-9385a: the exported set follows the ACTIVE PRODUCT's junction.
+                # An empty result here is not an error on this path -- the combined
+                # ZIP still ships the slash commands, exactly as it already does for
+                # a tenant with no active templates at all.
+                all_active = filter_templates_by_ids(
+                    result.scalars().all(), await active_product_template_ids(session, tenant_key)
+                )
 
                 if all_active:
                     selected_templates = select_templates_for_packaging(all_active)
+                    export_context = await build_export_context(session, tenant_key)
                     assembler = AgentTemplateAssembler()
-                    export_data = assembler.assemble(selected_templates, platform)
+                    export_data = assembler.assemble(selected_templates, platform, export_context=export_context)
 
                     if platform == EXPORT_CODEX_CLI:
                         agent_entries = _codex_agents_to_toml(export_data["agents"])
@@ -500,6 +550,14 @@ class FileStaging:
                 export_timestamp = datetime.now(UTC)
                 for t in selected_templates:
                     t.last_exported_at = export_timestamp
+                # BE-9385e: and against the product that exported them.
+                await record_product_export(
+                    session,
+                    export_context.product_id if export_context else None,
+                    tenant_key,
+                    [t.id for t in selected_templates],
+                    export_timestamp,
+                )
                 await session.commit()
 
             total = len(slash_templates) + len(agent_entries)

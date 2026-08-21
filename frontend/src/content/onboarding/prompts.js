@@ -8,7 +8,7 @@
 // isSaasMode() per the design handoff §5: CE wording references the API-key
 // connection, SaaS references browser sign-in.
 //
-// PROGRESSIVE FILL (design ruling, Patrik-ratified): Prompt-D instructs
+// PROGRESSIVE FILL (design ruling): Prompt-D instructs
 // section-by-section update_product_context calls in the card's own order,
 // consolidated_vision STRICTLY LAST — that final write is the tutorial's
 // done-signal (agentReportsDone seam in TutorialPromptScreen.vue).

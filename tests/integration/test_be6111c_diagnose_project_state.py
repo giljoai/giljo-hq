@@ -22,13 +22,13 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -107,7 +107,7 @@ async def test_diagnose_project_state_dispatches_through_transport(diagnose_clie
     async with new_client() as session:
         result = await session.call_tool("diagnose_project_state", {"project_id": project_id})
 
-    assert result.isError is False, f"diagnose_project_state failed at transport: {result}"
+    assert result.is_error is False, f"diagnose_project_state failed at transport: {result}"
     payload = _payload(result)
     assert payload["project_id"] == project_id
     assert payload["status"] == "active"
@@ -132,7 +132,7 @@ async def test_diagnose_flags_missing_execution_mode(diagnose_client, db_session
     async with new_client() as session:
         result = await session.call_tool("diagnose_project_state", {"project_id": project_id})
 
-    assert result.isError is False, result
+    assert result.is_error is False, result
     payload = _payload(result)
     assert payload["execution_mode"] is None
     assert "execution_mode_not_selected" in payload["stuck_conditions"]

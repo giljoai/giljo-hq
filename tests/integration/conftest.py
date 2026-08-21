@@ -11,11 +11,11 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models import User
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 @pytest_asyncio.fixture

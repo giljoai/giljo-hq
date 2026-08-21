@@ -24,6 +24,13 @@ const apiMock = vi.hoisted(() => ({
     updateAgentSilenceThreshold: vi.fn(() =>
       Promise.resolve({ data: { agent_silence_threshold_minutes: 22 } }),
     ),
+    // FE-9296b: account-level check-in cadence, hosted like the threshold above.
+    getAgentCheckinCadence: vi.fn(() =>
+      Promise.resolve({ data: { agent_checkin_cadence_minutes: 15 } }),
+    ),
+    updateAgentCheckinCadence: vi.fn(() =>
+      Promise.resolve({ data: { agent_checkin_cadence_minutes: 15 } }),
+    ),
   },
 }))
 
@@ -103,6 +110,20 @@ describe('ToolsView agent silence threshold settings', () => {
     expect(apiMock.settings.updateAgentSilenceThreshold).toHaveBeenCalledWith(17)
     // load-sensitive: the dynamic import + mount in mountView() can exceed vitest's 5s
     // default when this spec runs alongside the two -n6 pytest jobs on a busy CI runner.
+  }, 15000)
+
+  it('loads and saves the check-in cadence beside the threshold (FE-9296b)', async () => {
+    modeState.value = 'ce'
+    const wrapper = await mountView()
+
+    expect(apiMock.settings.getAgentCheckinCadence).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-test="checkin-cadence-input"]').exists()).toBe(true)
+    expect(wrapper.vm.agentCheckinCadenceMinutes).toBe(15)
+
+    wrapper.vm.agentCheckinCadenceMinutes = 25
+    await wrapper.vm.saveNotificationSettings()
+
+    expect(apiMock.settings.updateAgentCheckinCadence).toHaveBeenCalledWith(25)
   }, 15000)
 
   it('hosted (SaaS) mode shows the threshold and saves it as a per-tenant override (FE-9241)', async () => {

@@ -17,8 +17,8 @@ All endpoints enforce multi-tenant isolation via get_tenant_key() dependency.
 Handover 0246b: Simplified storage - complete documents stored in vision_document TEXT column.
 
 BE-5115: storage_type collapsed to 'inline'. Uploaded files are decoded and persisted
-to the vision_document column; nothing is written to disk. The Railway ephemeral
-filesystem made the old file path unsafe across deploys.
+to the vision_document column; nothing is written to disk. The hosted platform's
+ephemeral filesystem made the old file path unsafe across deploys.
 
 Per-document and aggregate summaries are written exclusively by the AI
 agent via the ``update_product_context`` MCP tool. Endpoints still trigger

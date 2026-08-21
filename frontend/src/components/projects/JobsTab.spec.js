@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createVuetify } from 'vuetify'
+import { createRouter, createMemoryHistory } from 'vue-router'
 import JobsTab from '@/components/projects/JobsTab.vue'
 import api from '@/services/api'
 import { useAgentJobsStore } from '@/stores/agentJobsStore'
@@ -19,6 +20,17 @@ import { useProjectStore } from '@/stores/projects'
 import { useUserStore } from '@/stores/user'
 
 const vuetify = createVuetify()
+
+// FE-9427: JobsTab reaches useRouter() through useJobActions (openAgentThread
+// pushes the named 'Hub' route). Mounted without a router that returned
+// `undefined`, so the deep-link path was inert.
+const hubRouter = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: '/', name: 'Root', component: { template: '<div />' } },
+    { path: '/hub', name: 'Hub', component: { template: '<div />' } },
+  ],
+})
 
 // tests/setup.js already mocks @/services/api and @/composables/useToast
 // globally — no duplication needed.
@@ -65,7 +77,6 @@ const stubs = {
   HandoverModal: true,
   MessageComposer: true,
   ExecutionOrderBar: true,
-  AutoCheckinControls: true,
 }
 
 // ---------------------------------------------------------------------------
@@ -113,7 +124,7 @@ async function mountWithAgent(agentOverrides = {}) {
   const wrapper = mount(JobsTab, {
     props: { project: mockProject },
     global: {
-      plugins: [pinia, vuetify],
+      plugins: [pinia, vuetify, hubRouter],
       stubs,
     },
   })
@@ -234,7 +245,7 @@ describe('JobsTab.vue — FE-6019 execution_mode store-first', () => {
     const wrapper = mount(JobsTab, {
       props: { project: projectProp },
       global: {
-        plugins: [pinia, vuetify],
+        plugins: [pinia, vuetify, hubRouter],
         stubs,
       },
     })
@@ -336,7 +347,7 @@ describe('JobsTab.vue — FE-9122 execution_mode stays fresh via projectStore.up
       props: {
         project: { project_id: projectId, id: projectId, name: 'FE-9122 Test Project', execution_mode: 'multi_terminal' },
       },
-      global: { plugins: [pinia, vuetify], stubs },
+      global: { plugins: [pinia, vuetify, hubRouter], stubs },
     })
     await wrapper.vm.$nextTick()
 
@@ -402,7 +413,7 @@ describe('JobsTab.vue — BE-6200 chain conductor excluded from project lane', (
 
     const wrapper = mount(JobsTab, {
       props: { project: mockProject },
-      global: { plugins: [pinia, vuetify], stubs },
+      global: { plugins: [pinia, vuetify, hubRouter], stubs },
     })
     await wrapper.vm.$nextTick()
 
@@ -468,7 +479,7 @@ describe('JobsTab.vue — BE-6229 conductor excluded on the live WS store path',
 
     const wrapper = mount(JobsTab, {
       props: { project: mockProject },
-      global: { plugins: [pinia, vuetify], stubs },
+      global: { plugins: [pinia, vuetify, hubRouter], stubs },
     })
     await wrapper.vm.$nextTick()
 

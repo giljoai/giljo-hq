@@ -26,7 +26,7 @@ Measured, not assumed:
 * The server has no truncation boundary. Driven through this same real MCP transport,
   every parameter arrives byte-identical at 10 chars and at 2,000,000 chars alike.
   Nothing server-side drops or truncates anything; the loss is in the CALLER.
-* At least 8 rows in the dogfood 360 memory already carry the residue, e.g. a summary
+* At least 8 rows in the test-install 360 memory already carry the residue, e.g. a summary
   ending ``...markdown-only commits, filed as INF-9293.</summary>\\n<parameter
   name="tags">["docs", "chore", "infrastructure"]`` with the row's own ``tags`` empty.
 
@@ -53,7 +53,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import func, select
 
 from api.endpoints.mcp_sdk_server import mcp
@@ -63,6 +62,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools.tool_accessor import ToolAccessor
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 def _content_text(result) -> str:
@@ -237,7 +237,7 @@ async def test_absorbed_optional_argument_is_rejected_and_writes_nothing(
         )
 
     text = _content_text(result)
-    assert result.isError, f"[{label}] an absorbed optional argument must be rejected, got: {text!r}"
+    assert result.is_error, f"[{label}] an absorbed optional argument must be rejected, got: {text!r}"
 
     lowered = text.lower()
     assert absorbed_name in text, (
@@ -289,7 +289,7 @@ async def test_legitimate_json_list_tail_still_succeeds(closeout_mcp_client):
         )
 
     text = _content_text(result)
-    assert not result.isError, f"a summary legitimately ending in a JSON list must still succeed, got: {text!r}"
+    assert not result.is_error, f"a summary legitimately ending in a JSON list must still succeed, got: {text!r}"
     parsed = json.loads(text)
     assert parsed.get("entry_id"), f"the 360 entry must still be written, got: {parsed!r}"
 
@@ -330,7 +330,7 @@ async def test_prose_quoting_tool_call_markup_still_succeeds(closeout_mcp_client
         )
 
     text = _content_text(result)
-    assert not result.isError, f"prose that merely quotes tool-call markup must still succeed, got: {text!r}"
+    assert not result.is_error, f"prose that merely quotes tool-call markup must still succeed, got: {text!r}"
     parsed = json.loads(text)
     assert parsed.get("entry_id"), f"the 360 entry must still be written, got: {parsed!r}"
 
@@ -396,7 +396,7 @@ async def test_angle_bracket_placeholder_in_prose_still_succeeds(closeout_mcp_cl
         )
 
     text = _content_text(result)
-    assert not result.isError, (
+    assert not result.is_error, (
         f"[{label}] an angle-bracket placeholder in ordinary prose must NOT be read as absorption "
         f"-- master accepts this call; got: {text!r}"
     )
@@ -450,7 +450,7 @@ async def test_absorbed_bare_scalar_argument_is_rejected(closeout_mcp_client, la
         )
 
     text = _content_text(result)
-    assert result.isError, f"[{label}] an absorbed bare scalar must be rejected, got: {text!r}"
+    assert result.is_error, f"[{label}] an absorbed bare scalar must be rejected, got: {text!r}"
     assert "force" in text, f"[{label}] the rejection must name the absorbed argument: {text!r}"
 
     after = await _memory_entry_count(session, tenant_key)
@@ -487,7 +487,7 @@ async def test_confirmed_be9348_prod_shape_still_names_absorption(closeout_mcp_c
         )
 
     text = _content_text(result)
-    assert result.isError, f"expected rejection, got: {text!r}"
+    assert result.is_error, f"expected rejection, got: {text!r}"
     assert "key_outcomes" in text, f"the rejection must name the absorbed required field: {text!r}"
     assert "absorb" in text.lower(), f"the rejection must name absorption as the cause: {text!r}"
 
@@ -509,7 +509,7 @@ async def test_genuine_omission_still_gets_the_plain_validation_error(closeout_m
         )
 
     text = _content_text(result)
-    assert result.isError, f"a missing required field must still be rejected, got: {text!r}"
+    assert result.is_error, f"a missing required field must still be rejected, got: {text!r}"
     assert "key_outcomes" in text, f"the rejection must name the missing field, got: {text!r}"
     assert "absorb" not in text.lower(), f"a genuine omission must NOT be reported as absorption: {text!r}"
 
@@ -555,7 +555,7 @@ async def test_large_payload_arrives_whole_at_the_server(closeout_mcp_client):
         )
 
     text = _content_text(result)
-    assert result.isError, f"a 180 KB summary is over the documented cap and must be rejected, got: {text!r}"
+    assert result.is_error, f"a 180 KB summary is over the documented cap and must be rejected, got: {text!r}"
     assert "180000" in text, (
         "the cap rejection must report the length the server actually received -- "
         f"if the transport truncated, this number would be smaller; got: {text!r}"

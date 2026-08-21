@@ -97,8 +97,13 @@ def _tool_hints(name: str, *, destructive: bool = False, open_world: bool = Fals
     """
     scope = TOOL_SCOPES[name]  # fail loud for an unmapped name -- checked unconditionally, override or not
     read_only = name not in _READ_SCOPED_BUT_MUTATING and scope == SCOPE_READ
+    # INF-9371: SDK 2.0 renamed these model fields to snake_case. The camelCase
+    # spellings still work HERE, as construction aliases -- this call was not
+    # broken by the upgrade. They are spelled as fields anyway, so the one place
+    # that builds annotations does not depend on an alias the SDK is free to drop,
+    # and matches how every reader now accesses them.
     return ToolAnnotations(
-        readOnlyHint=read_only,
-        destructiveHint=None if read_only else destructive,
-        openWorldHint=open_world,
+        read_only_hint=read_only,
+        destructive_hint=None if read_only else destructive,
+        open_world_hint=open_world,
     )

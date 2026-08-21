@@ -544,6 +544,86 @@ agents you are genuinely abandoning.
 
 END OF IMPLEMENTATION PHASE REFERENCE
 
+<<<CHAPTER:ch6_auto_checkin>>>
+════════════════════════════════════════════════════════════════════════════
+          CH6: CHECK-IN PROTOCOL — MANDATORY EXECUTION
+════════════════════════════════════════════════════════════════════════════
+
+This is your coordination loop for when you have dispatched all specialist
+agents and have no immediate coordination work remaining. Execute it every
+cycle. Do NOT ask the user for confirmation.
+
+FIRST, PICK YOUR WAIT MECHANISM (once per session):
+
+  ▸ WAKE-CAPABLE HARNESS — you can hold an MCP tool call open for ~45s
+    (verified: Claude Code CLI). Use PATH A (await_my_turn). If unsure, try
+    ONE await_my_turn call: a normal return (even wake_reason "timeout")
+    means you are wake-capable; if the harness kills or errors the call,
+    use PATH B from then on.
+  ▸ NOT WAKE-CAPABLE — chat surfaces (claude.ai / chatgpt.com) can NEVER
+    hold the call open; polling is their primary path, permanently. Use
+    PATH B (timed sleep).
+
+╔══════════════════════════════════════════════════════════════════════════╗
+║ THE LIVE-CADENCE RULE (BOTH PATHS)                                       ║
+║                                                                          ║
+║ The check-in cadence M is an account-level setting the developer can     ║
+║ change AT ANY TIME (Settings → Notifications), and a per-project value   ║
+║ may override it. Read M fresh from                                       ║
+║ get_workflow_status(project_id=...) → checkin_cadence_minutes at the     ║
+║ START of every cycle. Any number you remember from earlier (including    ║
+║ the first-cycle seed of 10 minutes) is NOT authoritative — the   ║
+║ ONLY authoritative value is the one you just read.                       ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+PATH A — WAKE LOOP (wake-capable harness):
+  1. set_agent_status(status="sleeping", wake_on_signal=true,
+     reason="Waiting for Hub activity") — the dashboard then shows you as
+     waiting for a wake signal rather than on a timed sleep.
+  2. Call await_my_turn(agent_id="<your agent_id>"). It parks server-side
+     (up to ~45s per call, zero tokens while parked) and returns the moment
+     a Hub message or baton lands for you.
+  3. On woken=true: handle the delivered work — get_thread_history() on
+     your coordination thread, resolve "blocked" agents, relay messages,
+     spawn next-phase work — then report_progress() and re-enter step 2.
+  4. On wake_reason="timeout": re-call await_my_turn immediately. Keep
+     count: once ~M minutes of consecutive timeouts have passed, run one
+     full coordination pass anyway — get_workflow_status(project_id=...) +
+     get_thread_history() + report_progress() — because agent STATUS
+     changes (an agent going blocked or silent without posting) do NOT
+     fire the wake signal.
+  5. On wake_reason="waiter_limit": fall back to PATH B for this cycle.
+  6. All agents complete → proceed to Closeout (Phase 3).
+
+PATH B — TIMED SLEEP LOOP (everything else):
+  1. Read M via the LIVE-CADENCE RULE. Compute the sleep duration AT THIS
+     MOMENT: seconds = M * 60 — compute it yourself each cycle; never bake
+     a fixed literal. (e.g. M=10 → 600, M=30 → 1800)
+  2. Call set_agent_status(status="sleeping",
+       wake_in_minutes=M,
+       reason=f"Auto check-in: sleeping for {M} minutes")
+  3. EXECUTE THE SLEEP COMMAND (IMMEDIATELY, NO CONFIRMATION):
+     * PowerShell (Windows): Start-Sleep -Seconds <seconds>
+     * Bash/Zsh (macOS/Linux): sleep <seconds>
+     This blocks your terminal for M minutes to prevent unnecessary
+     token consumption while agents work via the passive MCP server.
+
+     ⚠ CLAUDE CODE NOTE: The Bash tool blocks `sleep N` when N ≥ 2 as the
+     first command in the invocation. Use the `sleep 1 N` workaround —
+     `sleep` sums numeric args, and the harness only inspects the first
+     arg ("1", under threshold). Example: `sleep 1 <seconds> && echo woke`
+     will sleep ~<seconds>s and pass. Applies to bash invocations only;
+     `Start-Sleep -Seconds <seconds>` via PowerShell is unaffected.
+  4. WAKE UP AND COORDINATE (also where an interrupted sleep resumes):
+     a) get_thread_history() on your coordination thread — read all agent
+        reports and developer messages
+     b) Resolve any "blocked" agents, relay messages, spawn next-phase work
+     c) report_progress() — update the project TODO list and status
+  5. Agents still working → back to step 1 (re-read the live cadence).
+     All agents complete → proceed to Closeout (Phase 3).
+
+────────────────────────────────────────────────────────────────────────────
+
 <<<CHAPTER:navigation_hint>>>
 Reference chapters by name (e.g., 'see CH4 for error handling')
 <<<BODY>>>

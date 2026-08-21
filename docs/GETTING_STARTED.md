@@ -1,6 +1,6 @@
 # Getting Started
 
-*For users already signed in to the Giljo HQ (a GiljoAI product) dashboard. Last updated: 2026-07-17.*
+*For users already signed in to the Giljo HQ (a GiljoAI product) dashboard. Last updated: 2026-08-20.*
 
 This guide walks through five steps to run your first project: set up your tools, create your first product, create and stage a project, run it in your AI coding tool, and monitor it to completion.
 
@@ -128,7 +128,7 @@ Your next project starts with this accumulated 360 Memory automatically.
 - Run `giljo_setup` in your AI coding tool to refresh your skills and agent templates. If a setup download reports itself stale, re-run `giljo_setup` for a fresh copy.
 
 **An agent shows "Silent" status:**
-- Turn on **Auto Check-In** on the project's Implementation tab to send periodic check-in nudges; pick an interval (5–60 minutes) that matches your pace.
+- Raise the **Agent Check-in Cadence** in **Tools → Notifications** so waiting agents check in more often; agents on a harness with live wake support respond instantly instead of waiting for the next cycle.
 
 **The Implementation tab is not updating:**
 - Check the connection indicator in the navigation. A red icon means the live connection dropped — click it and use **Force Reconnect**.

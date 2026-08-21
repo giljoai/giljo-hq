@@ -18,7 +18,6 @@ no module-level mutable state, no test ordering dependencies.
 
 from __future__ import annotations
 
-import os
 import secrets
 import uuid
 from unittest.mock import AsyncMock
@@ -79,7 +78,6 @@ async def _seed_tenant(db_manager) -> dict:
 
         await session.commit()
 
-        os.environ.setdefault("JWT_SECRET", "test_secret_key")
         token = JWTManager.create_access_token(
             user_id=user.id,
             username=user.username,
@@ -133,6 +131,38 @@ async def test_list_threads_shows_created(api_client: AsyncClient, db_manager) -
     assert body["count"] >= 1
     subjects = [t["subject"] for t in body["threads"]]
     assert "ListMe" in subjects
+
+
+@pytest.mark.asyncio
+async def test_list_threads_carries_the_last_message_anchor(api_client: AsyncClient, db_manager) -> None:
+    """FE-9418: the listed card names the POST it summarises, not just the thread.
+
+    Asserted at the HTTP boundary and not only at the repository, because the enrichment
+    is OPT-IN on ``viewer_id`` and this endpoint is where that opt-in is made
+    (``comm_threads.py`` passes ``current_user.id``). A repository-only test would stay
+    green if the anchor never reached a client.
+
+    The anchor is compared against the thread id: an unlabelled projection would collide
+    with ``CommThread.id`` in the row tuple and serve the thread id here, which every
+    weaker check ("present", "a string", "a UUID") would accept.
+    """
+    seed = await _seed_tenant(db_manager)
+    thread = await _create_thread(api_client, seed["headers"], subject="AnchorMe")
+    thread_id = thread["thread_id"]
+    posted = await api_client.post(
+        f"/api/v1/threads/{thread_id}/post",
+        headers=seed["headers"],
+        json={"content": "over to you"},
+    )
+    assert posted.status_code == 200, posted.text
+
+    resp = await api_client.get("/api/v1/threads", headers=seed["headers"])
+    assert resp.status_code == 200, resp.text
+    card = next(t for t in resp.json()["threads"] if t["thread_id"] == thread_id)
+
+    assert card["last_message"]["excerpt"] == "over to you"
+    assert card["last_message"]["id"] == posted.json()["message_id"]
+    assert card["last_message"]["id"] != thread_id
 
 
 @pytest.mark.asyncio

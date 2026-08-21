@@ -35,8 +35,8 @@ from starlette.requests import Request as StarletteRequest
 #                  default auth → parity with an API key), guarded by the
 #                  localhost-only redirect-URI allowlist + user consent, NOT by
 #                  withholding the scope. Every state-mutating orchestration tool
-#                  MUST map here — a mis-map to read/write fails OPEN (an OAuth
-#                  read-only token could then mutate). See the BE-6168 guard test.
+#                  MUST map here — a mis-map to read/write degrades enforcement
+#                  (an OAuth read-only token could then mutate). See the BE-6168 guard test.
 #                  SEC-9126: a tool with NO entry at all now fails CLOSED (hidden
 #                  from tools/list AND rejected at dispatch), and the startup
 #                  assert _assert_tool_scope_completeness() (mcp_sdk_server) aborts
@@ -87,6 +87,12 @@ TOOL_SCOPES: dict[str, str] = {
     "post_to_thread": SCOPE_AGENT,
     "pass_baton": SCOPE_AGENT,
     "get_my_turn": SCOPE_READ,
+    # BE-9296a: the blocking form of get_my_turn. Same scope for the same reason —
+    # it reads the same baton state and stamps the same liveness column.
+    "await_my_turn": SCOPE_READ,
+    # BE-9296a: read-only view over the participant directory a conductor already
+    # has REST access to; the derived band is computed, never stored.
+    "get_participant_liveness": SCOPE_READ,
     "list_threads": SCOPE_READ,
     "get_thread_history": SCOPE_READ,
     "search_threads": SCOPE_READ,
@@ -230,6 +236,16 @@ _CORE_PROFILE_TOOLS: frozenset[str] = frozenset(
 # vision, and the read-only project-state diagnostic. Deliberately EXCLUDES the
 # orchestration/lifecycle privilege tools (spawn/stage/implement/chains/
 # reactivation/mission edits) — those are full-only.
+#
+# BE-9452 — READ THIS BEFORE REMOVING A NAME FROM ``_CORE_PROFILE_TOOLS``:
+# ``standard`` is DERIVED from ``core``, so a core removal is ALSO a standard
+# removal, and ``standard`` is the auth-derived default for a JWT/OAuth session
+# without ``mcp:agent`` (see _profile_toolset_from_state) — a live client tier.
+# A ``core <= standard`` subset assertion cannot see that: a smaller set is still
+# a subset. If a name must leave ``core`` but stay in ``standard``, add it to the
+# additions block below in the SAME change. The name-list lock in
+# tests/integration/test_be9452_standard_profile_roster_lock.py is what makes
+# forgetting that fail loudly instead of silently narrowing a shipped tier.
 _STANDARD_PROFILE_TOOLS: frozenset[str] = _CORE_PROFILE_TOOLS | frozenset(
     {
         # Hub / BBS thread suite (post_to_thread is already in core)
@@ -237,6 +253,8 @@ _STANDARD_PROFILE_TOOLS: frozenset[str] = _CORE_PROFILE_TOOLS | frozenset(
         "join_thread",
         "pass_baton",
         "get_my_turn",
+        "await_my_turn",
+        "get_participant_liveness",
         "list_threads",
         "get_thread_history",
         "search_threads",

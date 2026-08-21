@@ -14,7 +14,7 @@ persists the result here; the server only validates + stores.
 
 from typing import Annotated, Any
 
-from mcp.server.fastmcp import Context
+from mcp.server.mcpserver import Context
 from pydantic import Field
 
 from api.endpoints.mcp_tools._base import (
@@ -45,9 +45,12 @@ async def update_roadmap_metadata(
                 "project_id OR task_id, sort_order (int 0..100000), risk?: 'low'|'med'|'high', "
                 "complexity?: 'light'|'med'|'heavy', blocked?: bool (default false), "
                 "blocked_reason?: str (<=500 chars, the red BLOCKED-row note; dropped when "
-                "blocked is false)}. Must reference a project/task of the active product; "
-                "invalid enums/lengths/ids are rejected with a ValidationError (422), never a "
-                "DB 500."
+                "blocked is false)}. project_id / task_id take EITHER the row's id or its "
+                "taxonomy_alias -- the handle already shown everywhere else ('BE-0001', "
+                "'IMP-0086') -- so no list_projects/list_tasks lookup is needed. Must "
+                "reference a project/task of the active product; invalid "
+                "enums/lengths/ids are rejected with a ValidationError (422), never a DB 500, "
+                "and a rejection names EVERY bad row at once, not just the first."
             )
         ),
     ],
@@ -68,6 +71,23 @@ async def update_roadmap_metadata(
             )
         ),
     ] = None,
+    patch_fields: Annotated[
+        bool,
+        Field(
+            description=(
+                "Partial update. Default false, which keeps the original behaviour: every "
+                "metadata field is written from the item you send, so a field you leave out "
+                "is reset. Set true and each item patches only what it carries -- a field you "
+                "OMIT keeps its stored value, and a field you send as null or an empty string "
+                "is CLEARed. Use it to move one item without resending its risk, complexity and "
+                "blocked note. Omitting a field and sending it empty are DIFFERENT instructions. "
+                "Two details worth knowing: 'blocked' and 'blocked_reason' patch together -- send "
+                "both or neither, because an unblocked item never keeps a note; and 'sort_order' is "
+                "always a number, so its empty value is 0 and null is still refused. A row that "
+                "does not exist yet is inserted with the usual defaults either way."
+            )
+        ),
+    ] = False,
     ctx: Context = None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {"items": items}
@@ -75,6 +95,8 @@ async def update_roadmap_metadata(
         kwargs["summary"] = summary
     if remove:
         kwargs["remove"] = remove
+    if patch_fields:
+        kwargs["patch_fields"] = True
     return await _call_tool(ctx, "update_roadmap_metadata", kwargs)
 
 

@@ -61,9 +61,10 @@ def _generate_agent_protocol(
         agent_id: Optional executor UUID (defaults to job_id for backwards compat)
         comm_thread_id: BE-9012d. The project's bound Hub thread id, resolved by the
             caller (mission_service.get_agent_mission) on the SAME session as the
-            render. Threaded ONLY into the worker protocol body (the orchestrator
-            protocol branch below does not consume it); None renders the worker's
-            "no coordination thread bound" degradation.
+            render. None renders the worker's "no coordination thread bound"
+            degradation. TSK-9459: the ORCHESTRATOR branch now consumes it too --
+            it used to be worker-only, which left the orchestrator reading its own
+            protocol's ``<your coordination thread>`` as a literal placeholder.
 
     Returns:
         Multi-line protocol string with 5 phases and MCP tool references
@@ -83,6 +84,7 @@ def _generate_agent_protocol(
             tool=tool,
             is_chain_conductor=is_chain_conductor,
             preset=preset,
+            comm_thread_id=comm_thread_id,
         )
 
     git_commit_block, giljo_block = _build_conditional_blocks(git_integration_enabled, execution_mode, tool)

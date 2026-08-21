@@ -316,7 +316,10 @@ class TestPropertyCRuntimeInjection:
         response = service._build_orchestrator_response(ctx, job_id="job-B", tenant_key="tk_tenant_B")
 
         # Multi_terminal default tool — no HARNESS REMINDER, but harness markers present.
-        expected = compose_orchestrator_identity(None, tool="multi_terminal")
+        # FE-9408: the composed bytes are unchanged; the provenance line is appended to
+        # them. Stating the delta literally is what makes this a content pin rather than
+        # a test that would accept any edit to the composition.
+        expected = compose_orchestrator_identity(None, tool="multi_terminal") + "\n\nidentity source: built-in default"
         assert response["orchestrator_identity"] == expected
         assert "MCP Tool Usage" in response["orchestrator_identity"]
         assert "CHECK-IN PROTOCOL" in response["orchestrator_identity"]
@@ -343,8 +346,12 @@ class TestPropertyCRuntimeInjection:
         assert "CHECK-IN PROTOCOL" in response_a["orchestrator_identity"]
         # Critical invariant: tenant B's response must not leak tenant A's custom content.
         assert "SECRET A" not in response_b["orchestrator_identity"]
-        # Tenant B: seed stacked with harness (default multi_terminal tool).
-        assert response_b["orchestrator_identity"] == compose_orchestrator_identity(None, tool="multi_terminal")
+        # Tenant B: seed stacked with harness (default multi_terminal tool), plus the
+        # FE-9408 provenance line -- which must say "built-in default" here, because
+        # tenant B has no override and must not be told it is wearing one.
+        assert response_b["orchestrator_identity"] == (
+            compose_orchestrator_identity(None, tool="multi_terminal") + "\n\nidentity source: built-in default"
+        )
 
 
 # ---------------------------------------------------------------------------

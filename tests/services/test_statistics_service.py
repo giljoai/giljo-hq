@@ -40,22 +40,30 @@ async def stats_service(db_manager, db_session):
     )
 
 
-def _project(tenant_key, status, *, series, **extra):
+def _project(tenant_key, status, *, series, product_id, **extra):
     # product_id intentionally left NULL: an "only one active project per product"
     # partial unique index (idx_project_single_active_per_product) would otherwise
     # reject multiple active projects sharing a product. NULLs are distinct there, so
     # the seeded mix of active projects is allowed without coupling each to its own
     # product.
     #
-    # ``series`` is REQUIRED and must come from a per-fixture counter. It used to be
-    # random.randint(1, 9000), which was a latent flake: the SHIPPED
-    # uq_project_taxonomy_active is NULLS NOT DISTINCT (baseline_v38_unified.py:2022 --
-    # the plain Index() in models/projects.py does not carry the flag, so the model
-    # file alone reads as safe and is not the authority). Under NULLS NOT DISTINCT the
-    # NULL product_id/project_type_id/subseries columns compare EQUAL, so two live rows
-    # that happened to draw the same number collided with an IntegrityError.
+    # ``series`` is REQUIRED and must come from a per-fixture counter, never a
+    # random draw: uq_project_taxonomy_active is NULLS NOT DISTINCT, so the NULL
+    # product_id/project_type_id/subseries columns compare EQUAL and two live rows
+    # that drew the same number collide with an IntegrityError.
+    #
+    # BE-9429 corrects the second half of what this comment used to say. It read
+    # "the plain Index() in models/projects.py does not carry the flag, so the
+    # model file alone reads as safe and is not the authority" -- and concluded the
+    # MIGRATION governs. For this suite it does not: the pytest schema is built by
+    # Base.metadata.create_all(), so the MODEL is the authority here, and while it
+    # omitted the flag this index could not reject anything in CI (measured: all
+    # seven giljo_mcp_test* databases carried indnullsnotdistinct = false). The
+    # model now declares it and the two layers agree, which is what makes the
+    # constraint described above real in the test schema as well as in production.
     return Project(
         tenant_key=tenant_key,
+        product_id=product_id,
         name="Stats Project",
         description="seeded for statistics tests",
         mission="seeded mission",
@@ -82,11 +90,28 @@ async def seeded_stats(db_session, test_tenant_key):
         db_session.add(product_a)
         await db_session.flush()
 
+        # BE-9437: product_id is NOT NULL, so every row names a product. The four
+        # ACTIVE ones get one EACH -- idx_project_single_active_per_product allows a
+        # single active project per product, which is what the old "product_id
+        # intentionally left NULL" note was dodging. completed/cancelled rows fall
+        # outside that index's predicate and can share product_a.
+        active_products = [
+            Product(tenant_key=tenant_a, name=f"Product A{i}", description="d", is_active=False) for i in range(3)
+        ]
+        db_session.add_all(active_products)
+        await db_session.flush()
+
         projects = [
-            *[_project(tenant_a, "active", series=next(series)) for _ in range(3)],
-            _project(tenant_a, "active", series=next(series), staging_status="staging_complete"),
-            *[_project(tenant_a, "completed", series=next(series)) for _ in range(2)],
-            _project(tenant_a, "cancelled", series=next(series)),
+            *[_project(tenant_a, "active", series=next(series), product_id=ap.id) for ap in active_products],
+            _project(
+                tenant_a,
+                "active",
+                series=next(series),
+                staging_status="staging_complete",
+                product_id=product_a.id,
+            ),
+            *[_project(tenant_a, "completed", series=next(series), product_id=product_a.id) for _ in range(2)],
+            _project(tenant_a, "cancelled", series=next(series), product_id=product_a.id),
         ]
         db_session.add_all(projects)
         await db_session.flush()
@@ -131,7 +156,12 @@ async def seeded_stats(db_session, test_tenant_key):
         product_b = Product(tenant_key=tenant_b, name="Product B", description="d", is_active=True)
         db_session.add(product_b)
         await db_session.flush()
-        db_session.add_all([_project(tenant_b, "active", series=next(series)) for _ in range(2)])
+        product_b2 = Product(tenant_key=tenant_b, name="Product B2", description="d", is_active=False)
+        db_session.add(product_b2)
+        await db_session.flush()
+        db_session.add_all(
+            [_project(tenant_b, "active", series=next(series), product_id=pid) for pid in (product_b.id, product_b2.id)]
+        )
         await db_session.flush()
 
     return {"tenant_a": tenant_a, "tenant_b": tenant_b}
@@ -304,7 +334,10 @@ async def test_agent_role_distribution_ticker_and_folding(db_session, test_tenan
         db_session.add_all([impl, tester, reviewer])
         await db_session.flush()
 
-        project = _project(tenant, "active", series=1)
+        role_product = Product(tenant_key=tenant, name="Role Dist Product", description="d", is_active=False)
+        db_session.add(role_product)
+        await db_session.flush()
+        project = _project(tenant, "active", series=1, product_id=role_product.id)
         db_session.add(project)
         await db_session.flush()
 
@@ -500,9 +533,10 @@ async def trashed_product_dashboard(db_session, test_tenant_key):
                 # deactivated product is NOT a trashed one, and its name must keep
                 # rendering. Without this row both predicates pass every test here.
                 _project(tenant, "completed", series=next(series), product_id=deactivated.id, completed_at=now),
-                # No product at all. projects.product_id is nullable and
-                # product-less projects are real rows, not a test contrivance.
-                _project(tenant, "completed", series=next(series), completed_at=now),
+                # BE-9437 removed the "no product at all" row that sat here.
+                # projects.product_id is NOT NULL now, so a product-less project is
+                # not a real row any more and seeding one would pin a state the
+                # database cannot hold. Its test was deleted with it.
             ]
         )
         await db_session.flush()
@@ -682,25 +716,16 @@ async def test_recent_projects_still_name_a_deactivated_parent_product(stats_ser
     )
 
 
-@pytest.mark.asyncio
-async def test_recent_projects_still_include_a_project_with_no_product(stats_service, trashed_product_dashboard):
-    """Outer-join guard: the liveness predicate belongs in the ON clause.
-
-    ``projects.product_id`` is nullable, so a completed project may legitimately
-    have no product row to join to. Any predicate that turns this LEFT JOIN into
-    an effective INNER JOIN -- a Product-column test that is false for the
-    all-NULL non-matching row -- erases these projects from the dashboard
-    entirely.
-    """
-    stats = await stats_service.get_dashboard_stats(trashed_product_dashboard["tenant"])
-
-    orphans = _recent_by_product(stats, None)
-    assert len(orphans) == 1, (
-        f"a completed project with no product was dropped from the dashboard, got={stats['recent_projects']}"
-    )
-    assert orphans[0]["product_name"] is None, (
-        f"a project with no product cannot carry a product name, got={orphans[0]['product_name']!r}"
-    )
+# BE-9437 DELETED test_recent_projects_still_include_a_project_with_no_product.
+# It seeded a completed project with product_id NULL and asserted the dashboard
+# still returned it -- an outer-join guard resting on "projects.product_id is
+# nullable". That premise is gone: the column is NOT NULL and the FK cascades, so
+# there is no way to reach a projects row whose product row is absent, and the
+# test could only ever have failed by seeding a state the database now rejects.
+# The LEFT JOIN it protected is still covered, by the two tests above it: a
+# TRASHED parent product must null the name rather than drop the row, and a
+# DEACTIVATED one must keep rendering it. Those exercise the same ON-clause
+# mistake through a state that still exists.
 
 
 # ============================================================================
@@ -742,6 +767,12 @@ async def trashed_projects_stats(db_session, test_tenant_key):
     series = count(1)
 
     with tenant_session_context(db_session, tenant):
+        # BE-9437: one product suffices -- exactly one row here is active, and
+        # idx_project_single_active_per_product constrains nothing else.
+        mix_product = Product(tenant_key=tenant, name="Status Mix Product", description="d", is_active=False)
+        db_session.add(mix_product)
+        await db_session.flush()
+
         db_session.add_all(
             [
                 _project(
@@ -750,9 +781,14 @@ async def trashed_projects_stats(db_session, test_tenant_key):
                     series=next(series),
                     staging_status="staged",
                     execution_mode=MODE_MULTI_TERMINAL,
+                    product_id=mix_product.id,
                 ),
-                _project(tenant, "completed", series=next(series), execution_mode=MODE_SUBAGENT),
-                _project(tenant, "cancelled", series=next(series), execution_mode=MODE_SUBAGENT),
+                _project(
+                    tenant, "completed", series=next(series), execution_mode=MODE_SUBAGENT, product_id=mix_product.id
+                ),
+                _project(
+                    tenant, "cancelled", series=next(series), execution_mode=MODE_SUBAGENT, product_id=mix_product.id
+                ),
                 # Trashed rows carry status='deleted' because that is what the
                 # single writer stamps alongside deleted_at...
                 _project(
@@ -762,15 +798,30 @@ async def trashed_projects_stats(db_session, test_tenant_key):
                     deleted_at=now,
                     staging_status="staging_complete",
                     execution_mode=MODE_MULTI_TERMINAL,
+                    product_id=mix_product.id,
                 ),
-                _project(tenant, "deleted", series=next(series), deleted_at=now, staging_status="staged"),
-                _project(tenant, "deleted", series=next(series), deleted_at=now, execution_mode=MODE_SUBAGENT),
+                _project(
+                    tenant,
+                    "deleted",
+                    series=next(series),
+                    deleted_at=now,
+                    staging_status="staged",
+                    product_id=mix_product.id,
+                ),
+                _project(
+                    tenant,
+                    "deleted",
+                    series=next(series),
+                    deleted_at=now,
+                    execution_mode=MODE_SUBAGENT,
+                    product_id=mix_product.id,
+                ),
                 # ...except these two. A trashed project whose status is something
                 # a caller DOES query is the only shape that can catch a missing
                 # predicate in count_projects_by_status. Reachable in practice from
                 # any future writer that stamps deleted_at without rewriting status.
-                _project(tenant, "cancelled", series=next(series), deleted_at=now),
-                _project(tenant, "cancelled", series=next(series), deleted_at=now),
+                _project(tenant, "cancelled", series=next(series), deleted_at=now, product_id=mix_product.id),
+                _project(tenant, "cancelled", series=next(series), deleted_at=now, product_id=mix_product.id),
             ]
         )
         await db_session.flush()

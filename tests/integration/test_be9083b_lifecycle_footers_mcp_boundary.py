@@ -36,7 +36,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.organizations import Organization
@@ -45,6 +44,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.models.templates import AgentTemplate
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -57,7 +57,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(result) -> dict:
     if getattr(result, "structuredContent", None):
-        return result.structuredContent
+        return result.structured_content
     first = result.content[0]
     text = getattr(first, "text", None)
     if text is None:  # pragma: no cover - defensive
@@ -231,7 +231,7 @@ async def test_spawn_job_staging_footer(mcp_client):
                 "mission": "Implement the thing.",
             },
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     footer = payload["lifecycle_footer"]
@@ -257,7 +257,7 @@ async def test_spawn_job_implementation_footer(mcp_client):
                 "mission": "Test the thing.",
             },
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     footer = payload["lifecycle_footer"]
@@ -280,7 +280,7 @@ async def test_update_project_mission_staging_footer(mcp_client):
             "update_project_mission",
             {"project_id": project_id, "mission": "The refined project mission."},
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     footer = payload["lifecycle_footer"]
@@ -308,7 +308,7 @@ async def test_complete_job_staging_end_solo_footer(mcp_client):
             "complete_job",
             {"job_id": orch_job, "result": {"summary": "staging done"}},
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     assert payload["phase"] == "staging_end"
@@ -333,7 +333,7 @@ async def test_complete_job_staging_end_chain_suborch_footer(mcp_client):
             "complete_job",
             {"job_id": orch_job, "result": {"summary": "chain staging done"}},
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     assert payload["phase"] == "staging_end"
@@ -358,7 +358,7 @@ async def test_complete_job_closeout_footer(mcp_client):
             "complete_job",
             {"job_id": orch_job, "result": {"summary": "impl done"}},
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     assert payload["phase"] == "closeout"
@@ -381,7 +381,7 @@ async def test_complete_job_deliverable_footer(mcp_client):
             "complete_job",
             {"job_id": worker_job, "result": {"summary": "deliverable done"}},
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     assert payload["phase"] == "deliverable"

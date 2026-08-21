@@ -8,10 +8,10 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.http.url_resolver import get_public_url
 from giljo_mcp.schemas.service_responses import build_next_action
 from giljo_mcp.tools.setup_instructions import build_setup_instructions
 
@@ -33,6 +33,7 @@ class SetupMiscMixin:
         tenant_key: str,
         platform: str = "claude_code",
         user_id: str | None = None,
+        harness: str | None = None,
     ) -> dict[str, Any]:
         """
         Stage combined slash commands + agent templates ZIP for first-time setup (Handover 0907).
@@ -74,11 +75,14 @@ class SetupMiscMixin:
                 # MCP tool context has no FastAPI request, so we can't use
                 # request.base_url here. Fall back to GILJO_PUBLIC_URL env var
                 # (set in .env.demo / SaaS deploys). CE default covers localhost.
-                server_url = os.environ.get("GILJO_PUBLIC_URL", "http://localhost:7272")
+                # BE-9442: via the one accessor, which strips the trailing slash —
+                # this value has a path appended to it on the next line.
+                server_url = get_public_url()
                 download_url = f"{server_url}/api/download/temp/{token}/{filename}"
 
                 # Build natural-language install prompt the LLM will execute
-                instructions = build_setup_instructions(platform, download_url)
+                # BE-9385b: the harness decides repo-level vs user-level targeting.
+                instructions = build_setup_instructions(platform, download_url, harness)
 
                 return {
                     "status": "ready",
@@ -99,7 +103,10 @@ class SetupMiscMixin:
         Returns pre-assembled files (Claude Code, Gemini CLI) or structured
         data (Codex CLI) ready for the calling agent to install locally.
 
-        Templates are tenant-scoped: all active templates for the tenant are included.
+        Templates are tenant-scoped rows, but the exported SET follows the active
+        product (BE-9385a): the ``product_agent_assignments`` junction decides which
+        of the tenant's active templates ship. A product with no junction rows falls
+        back to the full tenant-active set.
 
         Handover 0836a: Multi-platform agent template export.
 
@@ -113,6 +120,11 @@ class SetupMiscMixin:
         from sqlalchemy import select
 
         from giljo_mcp.models import AgentTemplate
+        from giljo_mcp.repositories.product_agent_selection import (
+            active_product_template_ids,
+            build_export_context,
+            filter_templates_by_ids,
+        )
         from giljo_mcp.template_renderer import select_templates_for_packaging
         from giljo_mcp.tools.agent_template_assembler import AgentTemplateAssembler
 
@@ -135,10 +147,24 @@ class SetupMiscMixin:
                 if not all_active:
                     raise ValidationError("No active templates found for this tenant")
 
+                # BE-9385a: narrow to the ACTIVE PRODUCT's agents. None = the
+                # junction has no opinion for this product, so the tenant-active
+                # set ships unchanged (see product_agent_selection's TOLERANCE note).
+                all_active = filter_templates_by_ids(all_active, await active_product_template_ids(session, tenant_key))
+
+                if not all_active:
+                    raise ValidationError(
+                        "No agents are enabled for the active product. Enable at least one "
+                        "agent for this product, or switch to a product that has agents enabled."
+                    )
+
                 selected = select_templates_for_packaging(all_active)
 
+                # BE-9385b: product-qualified names + ownership markers, so two
+                # products' copies of one agent coexist on disk instead of racing.
+                export_context = await build_export_context(session, tenant_key)
                 assembler = AgentTemplateAssembler()
-                response = assembler.assemble(selected, platform)
+                response = assembler.assemble(selected, platform, export_context=export_context)
 
                 # Update last_exported_at via TemplateService (write discipline)
                 from giljo_mcp.services.template_service import TemplateService
@@ -148,7 +174,13 @@ class SetupMiscMixin:
                     tenant_manager=self.tenant_manager,
                 )
                 template_ids = [str(t.id) for t in selected]
-                await template_svc.mark_templates_exported(template_ids, tenant_key)
+                # BE-9385e: product_id records the export against the product that
+                # performed it, alongside the tenant-wide stamp, in one transaction.
+                await template_svc.mark_templates_exported(
+                    template_ids,
+                    tenant_key,
+                    product_id=export_context.product_id if export_context else None,
+                )
 
                 return response
         except ValidationError:

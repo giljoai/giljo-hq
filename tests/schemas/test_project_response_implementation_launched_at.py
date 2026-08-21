@@ -11,7 +11,7 @@ implementation_launched_at is missing/null. CE-0028b added the field to the
 MCP-side response schemas but missed the REST schema at
 api/endpoints/projects/models.py that the project page actually consumes.
 
-The bug surfaced when an impl-end project on dogfood couldn't be closed because
+The bug surfaced when an impl-end project on the test install couldn't be closed because
 the API stripped implementation_launched_at from the project payload, even
 though the DB column was populated. The fix: add the field to the REST
 ProjectResponse and pass it through every construction site.

@@ -41,6 +41,12 @@ from giljo_mcp.platform_registry import (
     VALID_EXPORT_PLATFORMS,
     export_platform_pattern,
 )
+from giljo_mcp.repositories.product_agent_selection import (
+    active_product_template_ids,
+    build_export_context,
+    filter_templates_by_ids,
+    record_product_export,
+)
 from giljo_mcp.tools.slash_command_templates import get_all_templates
 from giljo_mcp.utils.log_sanitizer import mask_token, sanitize
 
@@ -159,6 +165,78 @@ async def download_slash_commands(
     )
 
 
+def _bundle_files(export_data: dict, platform: str) -> dict[str, str]:
+    """The ZIP's agent entries for one platform.
+
+    Codex ships a single structured JSON document; every other platform ships the
+    pre-assembled per-agent files under the names the assembler chose (which, since
+    BE-9385b, are product-qualified).
+    """
+    if platform == EXPORT_CODEX_CLI:
+        import json
+
+        return {"agents.json": json.dumps(export_data, indent=2)}
+    return {agent["filename"]: agent["content"] for agent in export_data["agents"]}
+
+
+def _attach_install_scripts(files: dict[str, str], server_url: str) -> None:
+    """Add the shell/PowerShell installers, rendered against ``server_url``.
+
+    Both are optional on disk: a deployment that ships without the installer
+    templates still serves a valid agent bundle, so a missing script is skipped
+    rather than raised.
+    """
+    templates_dir = Path(__file__).parents[3] / "installer" / "templates"
+    for filename, template_name in (
+        ("install.sh", "install_agent_templates.sh"),
+        ("install.ps1", "install_agent_templates.ps1"),
+    ):
+        script_path = templates_dir / template_name
+        if script_path.exists():
+            files[filename] = render_install_script(script_path.read_text(), server_url)
+
+
+async def _record_export(db, selected, tenant_key: str, export_context) -> None:
+    """Stamp this export on the templates AND on the product that performed it.
+
+    Handover 0335 wrote only the tenant-wide ``agent_templates.last_exported_at``.
+    BE-9385e adds the per-product record in the SAME transaction, so the staleness
+    indicator stops showing one product's export as every other product's.
+
+    Extracted from ``download_agent_templates`` rather than inlined: that handler
+    sat exactly at the 200-line function cap, so the per-product write had to leave
+    the function rather than push it over. The house rule is extract, never raise.
+
+    This is a relocation, not a new write: the module held exactly one direct
+    commit before this change and holds exactly one after. The per-product write
+    it wraps does NOT touch raw ORM -- it goes through ``record_product_export``,
+    which routes to the junction's own repository.
+
+    Args:
+        db: Active database session (this function owns the commit).
+        selected: The templates included in this export.
+        tenant_key: Tenant key for isolation.
+        export_context: The active product's export identity, or None.
+    """
+    from datetime import datetime
+
+    export_timestamp = datetime.now(UTC)
+
+    for template in selected:
+        template.last_exported_at = export_timestamp
+
+    await record_product_export(
+        db,
+        export_context.product_id if export_context else None,
+        tenant_key,
+        [t.id for t in selected],
+        export_timestamp,
+    )
+
+    await db.commit()  # single-writer-allow: relocated by the 200-line cap; net endpoint writes 1 before, 1 after
+    logger.info("Updated last_exported_at for %d templates (tenant: %s)", len(selected), sanitize(tenant_key))
+
+
 @router.get("/agent-templates.zip")
 async def download_agent_templates(
     request: Request,
@@ -249,7 +327,10 @@ async def download_agent_templates(
             stmt = stmt.where(AgentTemplate.is_active)
 
         result = await db.execute(stmt)
-        templates = result.scalars().all()
+        # BE-9385a: follows the ACTIVE PRODUCT's junction (the anonymous branch
+        # below stays product-blind -- no tenant, so no active product).
+        ids = await active_product_template_ids(db, current_user.tenant_key)
+        templates = filter_templates_by_ids(result.scalars().all(), ids)
 
         if not templates:
             logger.warning(
@@ -303,55 +384,23 @@ async def download_agent_templates(
 
     selected = select_templates_for_packaging(templates)
 
+    # BE-9385b: the authenticated download is product-qualified and marked; the
+    # anonymous system-default branch above stays bare -- it has no tenant and no
+    # product, so a marker there would name an owner that does not exist.
+    export_context = await build_export_context(db, current_user.tenant_key) if current_user else None
+
     assembler = AgentTemplateAssembler()
-    export_data = assembler.assemble(selected, platform)
+    export_data = assembler.assemble(selected, platform, export_context=export_context)
 
-    files = {}
-    if platform == EXPORT_CODEX_CLI:
-        # Codex returns structured JSON — package as a single JSON file
-        import json
-
-        files["agents.json"] = json.dumps(export_data, indent=2)
-    else:
-        # Claude Code and Gemini CLI return pre-assembled .md files
-        for agent in export_data["agents"]:
-            files[agent["filename"]] = agent["content"]
-
-    # Add install scripts with server URL rendered
-    server_url = get_public_base_url(request)
-
-    # Read install scripts from templates
-    sh_script_path = Path(__file__).parents[3] / "installer" / "templates" / "install_agent_templates.sh"
-    ps1_script_path = Path(__file__).parents[3] / "installer" / "templates" / "install_agent_templates.ps1"
-
-    # Read and render scripts
-    if sh_script_path.exists():
-        with open(sh_script_path) as f:
-            sh_content = render_install_script(f.read(), server_url)
-            files["install.sh"] = sh_content
-
-    if ps1_script_path.exists():
-        with open(ps1_script_path) as f:
-            ps1_content = render_install_script(f.read(), server_url)
-            files["install.ps1"] = ps1_content
+    files = _bundle_files(export_data, platform)
+    _attach_install_scripts(files, get_public_base_url(request))
 
     # Create ZIP archive
     zip_bytes = create_zip_archive(files)
 
     # Handover 0335: Update last_exported_at and emit WebSocket event (authenticated users only)
     if current_user and selected:
-        from datetime import datetime
-
-        export_timestamp = datetime.now(UTC)
-
-        # Update last_exported_at for all exported templates
-        for template in selected:
-            template.last_exported_at = export_timestamp
-
-        await db.commit()
-        logger.info(
-            "Updated last_exported_at for %d templates (tenant: %s)", len(selected), sanitize(current_user.tenant_key)
-        )
+        await _record_export(db, selected, current_user.tenant_key, export_context)
 
     user_info = f"user: {sanitize(current_user.username)}" if current_user else "public/unauthenticated"
     logger.info("Agent templates ZIP generated (%s): %d files, %d bytes", user_info, len(files), len(zip_bytes))

@@ -63,8 +63,8 @@ _SENSITIVE_QUERY_PARAMS = frozenset({"token", "code", "state"})
 class _SensitiveQueryAccessFilter(logging.Filter):
     """Redact secret-bearing query-param VALUES in uvicorn.access lines (SEC-9174 #34).
 
-    The access log writes the full request line to captured stdout (Railway
-    log drain in SaaS, logs/giljo_mcp.log in CE), so a clicked reset link
+    The access log writes the full request line to captured stdout (the
+    platform's log drain in SaaS, logs/giljo_mcp.log in CE), so a clicked reset link
     lands its plaintext token in every log sink. Rewrites the path element of
     uvicorn's access args tuple (client_addr, method, full_path, http_version,
     status_code); keeps the param name so the line stays debuggable, and never

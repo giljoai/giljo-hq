@@ -1,20 +1,31 @@
 /**
- * Terms.vue regression spec.
+ * Terms.vue regression spec (CE render).
  *
  * Locks in:
- *   - CE-shipped legal copy avoids naming SaaS billing vendors.
+ *   - Vendor-neutral CE copy: the billing provider is described by role
+ *     (Merchant of Record), never by name. The vendor-naming copy lives in
+ *     saas/ components and is asserted by
+ *     frontend/tests/unit/saas/views/policyPagesSaas.spec.js, which the CE
+ *     export strips (FE-9374b; the export gate greps CE-shipped source,
+ *     this spec included, for provider names).
  *   - Dedicated Billing/Refunds section (§7) references the Merchant of
  *     Record, statutory withdrawal rights, and the default non-refundable stance.
- *   - Team SKU advertising softened (Team is post-Solo per
- *     SAAS_COMMERCIALIZATION.md — must not promise an SKU that doesn't
- *     exist).
+ *   - No Team SKU advertising (the tier was cancelled per ADR-009; see
+ *     also the FE-9374 guard spec, which bans any capital-T "Team").
  *
  * Edition: ships in CE.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import Terms from '@/views/Terms.vue'
+
+vi.mock('@/services/configService', () => ({
+  default: {
+    fetchConfig: async () => ({}),
+    getGiljoMode: () => 'ce',
+  },
+}))
 
 function mountTerms() {
   return mount(Terms, {
@@ -29,11 +40,10 @@ function mountTerms() {
 }
 
 describe('Terms.vue', () => {
-  it('keeps billing provider copy generic in CE-shipped legal text', () => {
+  it('describes the billing provider by role, vendor-neutral in CE (FE-9374b)', () => {
     const wrapper = mountTerms()
-    expect(wrapper.text()).toContain('billing provider')
     expect(wrapper.text()).toContain('Merchant of Record')
-    expect(wrapper.text()).not.toMatch(/specific billing vendor/i)
+    expect(wrapper.text().toLowerCase()).toContain('billing provider')
   })
 
   it('has a dedicated Billing and refunds section', () => {
@@ -57,8 +67,9 @@ describe('Terms.vue', () => {
 
   it('does not advertise a Team SKU as if it exists today', () => {
     const wrapper = mountTerms()
-    // Historical copy: "Solo / Team (SaaS)". Current copy: "Solo (SaaS)"
-    // with "Additional tiers (e.g. Team) may be offered in the future".
+    // Historical copy: "Solo / Team (SaaS)", later "Additional tiers
+    // (e.g. Team) may be offered in the future". Current copy: "Solo
+    // (SaaS)" with no future-tier promise at all (ADR-009 cancellation).
     expect(wrapper.text()).not.toMatch(/Solo \/ Team/i)
     expect(wrapper.text()).toMatch(/Solo \(SaaS\)/i)
   })

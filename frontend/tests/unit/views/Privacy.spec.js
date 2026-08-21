@@ -1,18 +1,29 @@
 /**
- * Privacy.vue regression spec.
+ * Privacy.vue regression spec (CE render).
  *
  * Locks in:
- *   - CE-shipped legal copy avoids naming SaaS billing vendors.
+ *   - Vendor-neutral CE copy: the billing provider is described by role
+ *     (Merchant of Record), never by name. The vendor-naming copy lives in
+ *     saas/ components and is asserted by
+ *     frontend/tests/unit/saas/views/policyPagesSaas.spec.js, which the CE
+ *     export strips (FE-9374b; the export gate greps CE-shipped source,
+ *     this spec included, for provider names).
  *   - Billing data class enumerated (joint-controller framing).
- *   - 37-day deletion window matches the engineering doc (was 30 — promise
- *     mismatch identified in the verbiage review).
+ *   - Auto-cancel deletion rule (BE-9040d prod flip).
  *
  * Edition: ships in CE.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import Privacy from '@/views/Privacy.vue'
+
+vi.mock('@/services/configService', () => ({
+  default: {
+    fetchConfig: async () => ({}),
+    getGiljoMode: () => 'ce',
+  },
+}))
 
 function mountPrivacy() {
   return mount(Privacy, {
@@ -27,11 +38,10 @@ function mountPrivacy() {
 }
 
 describe('Privacy.vue', () => {
-  it('keeps billing provider copy generic in CE-shipped legal text', () => {
+  it('describes the billing provider by role, vendor-neutral in CE (FE-9374b)', () => {
     const wrapper = mountPrivacy()
-    expect(wrapper.text()).toContain('Billing provider')
     expect(wrapper.text()).toContain('Merchant of Record')
-    expect(wrapper.text()).not.toMatch(/specific billing vendor/i)
+    expect(wrapper.text().toLowerCase()).toContain('billing provider')
   })
 
   it('enumerates the billing-data class collected by the provider', () => {

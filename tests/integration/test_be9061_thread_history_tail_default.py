@@ -29,7 +29,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import delete
 
 from api.endpoints.mcp_tools._comm_tools import DEFAULT_HISTORY_TAIL
@@ -39,6 +38,7 @@ from giljo_mcp.models.projects import TaxonomyType
 from giljo_mcp.models.tasks import Message
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -46,7 +46,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(res) -> dict:
     if getattr(res, "structuredContent", None):
-        return res.structuredContent
+        return res.structured_content
     return json.loads(res.content[0].text)
 
 
@@ -101,7 +101,7 @@ async def hist_client(db_manager, db_session, monkeypatch):
 async def _seed_thread_with_messages(new_client, db_session, tenant_key, count):
     async with new_client() as s:
         res = await s.call_tool("create_thread", {"subject": "growth", "creator_id": "agent-alpha"})
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     tid = _payload(res)["thread_id"]
 
     base = datetime(2026, 1, 1, tzinfo=UTC)
@@ -130,7 +130,7 @@ async def test_plain_read_defaults_to_bounded_tail(hist_client, db_session):
 
     async with new_client() as s:
         res = await s.call_tool("get_thread_history", {"thread_id": tid})
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     payload = _payload(res)
 
     # Only the most recent DEFAULT_HISTORY_TAIL come back, oldest-first.
@@ -147,7 +147,7 @@ async def test_tail_zero_returns_full_timeline(hist_client, db_session):
 
     async with new_client() as s:
         res = await s.call_tool("get_thread_history", {"thread_id": tid, "tail": 0})
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     payload = _payload(res)
 
     assert payload["count"] == total  # explicit full read still available
@@ -162,7 +162,7 @@ async def test_explicit_tail_n_honored(hist_client, db_session):
 
     async with new_client() as s:
         res = await s.call_tool("get_thread_history", {"thread_id": tid, "tail": 50})
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     payload = _payload(res)
 
     assert payload["count"] == 50
@@ -176,14 +176,14 @@ async def test_mark_read_read_not_truncated_by_default(hist_client, db_session):
 
     async with new_client() as s:
         join = await s.call_tool("join_thread", {"thread_id": tid, "agent_id": "agent-gamma"})
-        assert join.isError is False, _error_text(join)
+        assert join.is_error is False, _error_text(join)
         # A plain mark_read read (no unread_only) advances the participant's read
         # cursor over what it returns. The default tail must NOT cap it, or the
         # cursor would jump PAST unseen older posts on the next unread drain.
         res = await s.call_tool(
             "get_thread_history", {"thread_id": tid, "as_participant": "agent-gamma", "mark_read": True}
         )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     payload = _payload(res)
     assert payload["count"] == total
 
@@ -195,12 +195,12 @@ async def test_unread_only_read_not_truncated_by_default(hist_client, db_session
 
     async with new_client() as s:
         join = await s.call_tool("join_thread", {"thread_id": tid, "agent_id": "agent-beta"})
-        assert join.isError is False, _error_text(join)
+        assert join.is_error is False, _error_text(join)
         # A fresh participant has no read cursor -> unread is the whole timeline.
         # The default tail must NOT cap it (a truncated drain would stall mark_read).
         res = await s.call_tool(
             "get_thread_history", {"thread_id": tid, "as_participant": "agent-beta", "unread_only": True}
         )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     payload = _payload(res)
     assert payload["count"] == total

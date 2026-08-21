@@ -54,6 +54,19 @@ class ProductAgentAssignment(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     tenant_key = Column(String(36), nullable=False)
 
+    # BE-9385e: when THIS product last exported this agent.
+    #
+    # ``agent_templates.last_exported_at`` is tenant-wide, so exporting product A
+    # stamped a column product B then read as its own -- the staleness indicator
+    # reported another product's action as this product's state. This column is
+    # the per-product truth; the tenant-wide one stays as the fallback for rows
+    # this project's backfill did not reach and as pre-existing information.
+    #
+    # NULL means "no per-product record yet", NOT "never exported" -- the read
+    # falls back to the template's value. Only an export writes it here, and only
+    # for the product that did the exporting.
+    last_exported_at = Column(DateTime(timezone=True), nullable=True)
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
