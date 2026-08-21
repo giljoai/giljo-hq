@@ -4,7 +4,7 @@
       <header class="mb-6">
         <h1 class="text-headline-large font-weight-bold mb-2">Terms of Service</h1>
         <p class="legal-meta mb-0">
-          Last updated: 2026-05-24 — GiljoAI LLC
+          Last updated: 2026-08-07 · GiljoAI LLC
         </p>
       </header>
 
@@ -23,9 +23,9 @@
       <section class="mb-6">
         <h2 class="text-title-large mb-2">2. License framing per edition</h2>
         <ul class="legal-list">
-          <li><strong>Community Edition (CE)</strong> — self-hosted. Free under the {{ licenseName }}. Run it yourself, run it for your team, run it inside your company. The license restricts only: providing the software to third parties as a hosted/managed service, tampering with license-key functionality, and removing or altering license/copyright notices.</li>
-          <li><strong>Demo</strong> — hosted by GiljoAI LLC. Read-mostly, may be reset or rate-limited at any time. Intended for evaluation only.</li>
-          <li><strong>Solo (SaaS)</strong> — hosted commercial subscriptions provided by GiljoAI LLC. These Terms of Service and the <router-link class="legal-link" to="/privacy">Privacy Policy</router-link> govern your subscription. Additional tiers (e.g. Team) may be offered in the future.</li>
+          <li><strong>Community Edition (CE)</strong>: self-hosted. Free under the {{ licenseName }}. Run it yourself, run it for your team, run it inside your company. The license restricts only: providing the software to third parties as a hosted/managed service, tampering with license-key functionality, and removing or altering license/copyright notices.</li>
+          <li><strong>Demo</strong>: hosted by GiljoAI LLC. Read-mostly, may be reset or rate-limited at any time. Intended for evaluation only.</li>
+          <li><strong>Solo (SaaS)</strong>: hosted commercial subscriptions provided by GiljoAI LLC. These Terms of Service and the <router-link class="legal-link" to="/privacy">Privacy Policy</router-link> govern your subscription.</li>
         </ul>
       </section>
 
@@ -61,37 +61,48 @@
 
       <section class="mb-6">
         <h2 class="text-title-large mb-2">6. Sub-processors</h2>
-        <p class="legal-body">
-          We use a <strong>billing provider</strong> as Merchant of Record
-          for paid subscriptions, <strong>Resend</strong> for transactional
-          email, <strong>Cloudflare</strong> for DNS / CDN / DDoS protection,
-          and <strong>PostgreSQL</strong> as the data store. See the
+        <component :is="saasSubprocessorSummary" v-if="saasSubprocessorSummary" />
+        <p v-else class="legal-body">
+          We use a <strong>billing provider</strong> as payment processor and
+          Merchant of Record for paid subscriptions, together with third-party
+          providers for transactional email, error monitoring, DNS / CDN /
+          reverse proxy, application and database hosting, and encrypted
+          backup storage. See the
           <router-link class="legal-link" to="/privacy">Privacy Policy</router-link>
-          for more detail.
+          for what each one receives.
         </p>
       </section>
 
       <section class="mb-6">
         <h2 class="text-title-large mb-2">7. Billing and refunds</h2>
-        <p class="legal-body">
+        <component :is="saasBillingTerms" v-if="saasBillingTerms" />
+        <p v-else class="legal-body">
           Paid subscriptions are billed by our billing provider as Merchant
-          of Record. The provider handles payment
-          collection, invoicing, applicable taxes, payment methods, and
-          refunds, subject to the provider's refund policy. EU/UK customers retain
-          statutory withdrawal rights where applicable. Outside of statutory
-          rights, past charges are generally non-refundable; exceptional
-          cases are handled on a per-request basis through
+          of Record. The provider handles payment collection, invoicing,
+          applicable taxes, payment methods, and refunds, subject to the
+          provider's refund policy. EU/UK customers retain statutory
+          withdrawal rights where applicable. Outside of statutory rights,
+          past charges are generally non-refundable; exceptional cases are
+          handled on a per-request basis through
           <a class="legal-link" href="mailto:support@giljo.ai">support@giljo.ai</a>.
         </p>
       </section>
 
       <section class="mb-6">
-        <h2 class="text-title-large mb-2">8. Termination</h2>
+        <h2 class="text-title-large mb-2">8. Termination and data retention</h2>
+        <p class="legal-body">
+          If you cancel or your subscription lapses, your account becomes
+          read-only: you can sign in to view and export your data, or
+          resubscribe, at any time. Your data, including your backup archives,
+          is permanently deleted one year after your paid access ended, with a
+          reminder email sent about 30 days beforehand, as described in the
+          <router-link class="legal-link" to="/privacy">Privacy Policy</router-link>.
+        </p>
         <p class="legal-body">
           You may delete your account at any time from <em>Account → Danger
           Zone</em>. Deletion requires email confirmation; at confirmation you
           choose immediate deletion or an optional 30-day grace period. If you
-          have an active paid subscription, confirming deletion cancels it —
+          have an active paid subscription, confirming deletion cancels it;
           your access ends with deletion and no further charges occur, and any
           remaining paid time is forfeited and is not refunded. We may suspend
           or terminate access in the event of material breach of these Terms
@@ -102,9 +113,13 @@
       <section class="mb-6">
         <h2 class="text-title-large mb-2">9. Governing law</h2>
         <p class="legal-body">
-          These Terms are governed by the laws of the jurisdiction in which
-          GiljoAI LLC is registered. Disputes will be resolved in that
-          jurisdiction unless otherwise required by mandatory consumer law.
+          These Terms are governed by the laws of the State of New Hampshire,
+          USA, without regard to conflict of law provisions. Venue for
+          disputes is the state courts sitting in Hillsborough County, New
+          Hampshire, or the United States District Court for the District of
+          New Hampshire. If you are a consumer residing in a jurisdiction
+          whose law grants you non-waivable rights or a different mandatory
+          venue, nothing in this section deprives you of those protections.
         </p>
       </section>
 
@@ -112,7 +127,7 @@
         <h2 class="text-title-large mb-2">10. Changes</h2>
         <p class="legal-body">
           We may update these Terms. Material changes will be announced in-app
-          and / or by email to the address on file at least 14 days before they
+          and / or by email to the address on file at least 30 days before they
           take effect.
         </p>
       </section>
@@ -135,9 +150,46 @@
 </template>
 
 <script setup>
+import { onMounted, shallowRef } from 'vue'
 import { LICENSE_NAME_FULL } from '@/i18n/licenseCopy'
+import configService from '@/services/configService'
+import { isNonCeModeValue } from '@/composables/useGiljoMode'
 
 const licenseName = LICENSE_NAME_FULL
+
+// FE-9374b: the hosted editions name their billing and infrastructure
+// vendors in these sections, but the CE export gate bans provider names in
+// CE-shipped source (comments and tests included). The vendor-naming copy
+// lives under saas/ (stripped from every CE export) and loads via the
+// ADR-004 import.meta.glob pattern; CE renders the vendor-neutral fallback
+// copy inline above.
+const saasSubprocessorSummary = shallowRef(null)
+const saasBillingTerms = shallowRef(null)
+
+onMounted(async () => {
+  let mode = 'ce'
+  try {
+    await configService.fetchConfig()
+    mode = configService.getGiljoMode()
+  } catch {
+    // Config unavailable: keep the CE fallback copy.
+  }
+  if (!isNonCeModeValue(mode)) return
+  const sections = [
+    [import.meta.glob('@/saas/components/policy/SaasSubprocessorSummary.vue'), saasSubprocessorSummary],
+    [import.meta.glob('@/saas/components/policy/SaasBillingTerms.vue'), saasBillingTerms],
+  ]
+  for (const [loaders, target] of sections) {
+    const [loader] = Object.values(loaders)
+    if (!loader) continue
+    try {
+      const mod = await loader()
+      target.value = mod.default
+    } catch (error) {
+      console.warn('[Terms] SaaS policy section failed to load:', error)
+    }
+  }
+})
 </script>
 
 <style lang="scss" scoped>

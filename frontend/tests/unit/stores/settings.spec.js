@@ -1,7 +1,7 @@
 /**
  * FE-9000d: settings store -- browser-only persistence regression test.
  *
- * DECIDED scope (Patrik, 2026-07-02): notification prefs live in localStorage
+ * DECIDED scope (2026-07-02): notification prefs live in localStorage
  * only, no server round-trip. The old `api.settings.update` PUT (services/api.js)
  * was triply broken (verb mismatch, body-shape mismatch, no-op backend handler)
  * and is deleted along with both silently-swallowed call sites in this store.
@@ -23,6 +23,12 @@ vi.mock('@/services/api', () => ({
       ),
       updateAgentSilenceThreshold: vi.fn(() =>
         Promise.resolve({ data: { agent_silence_threshold_minutes: 10 } }),
+      ),
+      getAgentCheckinCadence: vi.fn(() =>
+        Promise.resolve({ data: { agent_checkin_cadence_minutes: 20 } }),
+      ),
+      updateAgentCheckinCadence: vi.fn(() =>
+        Promise.resolve({ data: { agent_checkin_cadence_minutes: 25 } }),
       ),
     },
     users: {
@@ -92,5 +98,15 @@ describe('settings store (FE-9000d)', () => {
     await reloadedStore.loadSettings()
 
     expect(reloadedStore.settings.notifications).toEqual({ position: 'top-center', duration: 12 })
+  })
+
+  it('round-trips the account-level check-in cadence through the system settings API (FE-9296b)', async () => {
+    const store = useSettingsStore()
+
+    expect(await store.loadAgentCheckinCadence()).toBe(20)
+    expect(store.agentCheckinCadenceMinutes).toBe(20)
+
+    expect(await store.updateAgentCheckinCadence(25)).toBe(25)
+    expect(store.agentCheckinCadenceMinutes).toBe(25)
   })
 })

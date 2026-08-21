@@ -15,8 +15,9 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
 
 // ── hoisted spies ────────────────────────────────────────────────────────────
-const { mockGet, mockReorder, mockRemoveItem, wsHandlers, mockWsOn } = vi.hoisted(() => {
+const { mockGet, mockReorder, mockRemoveItem, wsHandlers, mockWsOn, resyncCallbacks, mockRegisterResync } = vi.hoisted(() => {
   const handlers = {}
+  const resyncs = []
   return {
     mockGet: vi.fn(),
     mockReorder: vi.fn().mockResolvedValue({ data: {} }),
@@ -26,6 +27,17 @@ const { mockGet, mockReorder, mockRemoveItem, wsHandlers, mockWsOn } = vi.hoiste
       handlers[type] = cb
       return () => {
         delete handlers[type]
+      }
+    }),
+    // FE-9407: capture the reconnect-resync callback so a WS reconnect can be
+    // driven directly. The real router only fires it from its own connection
+    // listener, which this spec does not stand up.
+    resyncCallbacks: resyncs,
+    mockRegisterResync: vi.fn((cb) => {
+      resyncs.push(cb)
+      return () => {
+        const i = resyncs.indexOf(cb)
+        if (i !== -1) resyncs.splice(i, 1)
       }
     }),
   }
@@ -69,6 +81,11 @@ vi.mock('@/stores/projects', () => ({
 
 vi.mock('@/stores/websocket', () => ({
   useWebSocketStore: () => ({ on: mockWsOn }),
+}))
+
+// RoadmapView imports only registerReconnectResync from this module.
+vi.mock('@/stores/websocketEventRouter', () => ({
+  registerReconnectResync: mockRegisterResync,
 }))
 
 vi.mock('@/composables/useToast', () => ({
@@ -684,5 +701,119 @@ describe('RoadmapView.vue — project status-sync from external deactivation', (
 
     // fetchRoadmap called once more after explicit deactivate (pre-existing behaviour, unchanged).
     expect(mockGet.mock.calls.length).toBeGreaterThan(callsBefore)
+  })
+})
+
+// FE-9407: the waiting spinner must not survive its own success.
+// The RAISE is durable (a localStorage stamp, re-raised on remount) but the
+// CLEAR was a one-shot WS event consumed only while mounted — so a save that
+// landed while RoadmapView was unmounted, or behind a dead socket, left the
+// spinner re-raising over freshly rendered rows until the safety timeout.
+// roadmap.last_generated_at is the durable record of that save; these cases pin
+// the reconciliation against it, in BOTH directions (it must clear a spinner
+// the agent already answered, and must NOT clear one still legitimately up).
+const STAMP_KEY = 'giljo.roadmap.agentActiveAt.prod-1'
+
+function roadmapResponse(lastGeneratedAt, items = ITEMS) {
+  return {
+    data: {
+      product_id: 'prod-1',
+      roadmap: { summary: null, last_generated_at: lastGeneratedAt },
+      items: items.map((i) => ({ ...i })),
+    },
+  }
+}
+
+describe('RoadmapView.vue — waiting-spinner reconciliation (FE-9407)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resyncCallbacks.length = 0
+    mockGet.mockResolvedValue(roadmapResponse(null))
+  })
+
+  it('does NOT re-raise the spinner on mount when the agent saved after the stamp', async () => {
+    // The agent connected 60s ago (stamp well inside the 150s window) and saved
+    // 10s ago while the view was unmounted, so the single clear broadcast was
+    // lost. The mount re-fetch renders those saved rows.
+    localStorage.setItem(STAMP_KEY, String(Date.now() - 60000))
+    mockGet.mockResolvedValue(roadmapResponse(new Date(Date.now() - 10000).toISOString()))
+
+    const w = await mountView()
+
+    expect(w.vm.waiting).toBe(false) // the wait is over — the roadmap is on screen
+    expect(localStorage.getItem(STAMP_KEY)).toBeNull() // superseded stamp dropped
+  })
+
+  it('STILL re-raises the spinner when the last save predates the stamp (TSK-6243 mid-build reload)', async () => {
+    // The roadmap was last saved long before this build started, so the agent is
+    // still working: reload continuity must survive the reconciliation.
+    localStorage.setItem(STAMP_KEY, String(Date.now() - 60000))
+    mockGet.mockResolvedValue(roadmapResponse(new Date(Date.now() - 600000).toISOString()))
+
+    const w = await mountView()
+
+    expect(w.vm.waiting).toBe(true)
+    expect(localStorage.getItem(STAMP_KEY)).not.toBeNull()
+  })
+
+  it('does NOT clear on a save that beats the stamp by less than the clock-skew margin', async () => {
+    // The stamp is a client Date.now() and the save is server UTC, so a
+    // sub-margin difference is skew, not a save, and must not take the
+    // spinner down.
+    const stampedAt = Date.now() - 60000
+    localStorage.setItem(STAMP_KEY, String(stampedAt))
+    mockGet.mockResolvedValue(roadmapResponse(new Date(stampedAt + 2000).toISOString()))
+
+    const w = await mountView()
+
+    expect(w.vm.waiting).toBe(true)
+  })
+
+  it('does NOT clear on a newer save when the roadmap came back empty', async () => {
+    localStorage.setItem(STAMP_KEY, String(Date.now() - 60000))
+    mockGet.mockResolvedValue(roadmapResponse(new Date(Date.now() - 10000).toISOString(), []))
+
+    const w = await mountView()
+
+    expect(w.vm.waiting).toBe(true) // nothing delivered yet — still genuinely waiting
+  })
+
+  it('a WS reconnect clears a spinner whose clear was lost behind a dead socket', async () => {
+    // Mid-build reload: stamp inside the window, last save predates it, so the
+    // spinner is legitimately up.
+    localStorage.setItem(STAMP_KEY, String(Date.now() - 60000))
+    mockGet.mockResolvedValue(roadmapResponse(new Date(Date.now() - 600000).toISOString()))
+    const w = await mountView()
+    expect(w.vm.waiting).toBe(true)
+    expect(resyncCallbacks).toHaveLength(1)
+
+    // The agent saved while the socket was dead, so no roadmap:updated ever
+    // arrived. The reconnect resync re-reads the roadmap and reconciles —
+    // note the spinner is ALREADY up here, which is why this path needs the
+    // reconciliation itself and not the mount-time rehydrate.
+    mockGet.mockResolvedValue(roadmapResponse(new Date(Date.now() - 5000).toISOString()))
+    await resyncCallbacks[0]()
+    await flushPromises()
+
+    expect(w.vm.waiting).toBe(false)
+    expect(localStorage.getItem(STAMP_KEY)).toBeNull()
+  })
+
+  it('a WS reconnect mid-build re-fetches but LEAVES the spinner up', async () => {
+    // The discriminating case: a reconnect that dismissed unconditionally would
+    // satisfy the test above too. Here the agent is still working (the last save
+    // predates the stamp), so the reconnect must re-read and change nothing.
+    localStorage.setItem(STAMP_KEY, String(Date.now() - 60000))
+    mockGet.mockResolvedValue(roadmapResponse(new Date(Date.now() - 600000).toISOString()))
+    const w = await mountView()
+    expect(w.vm.waiting).toBe(true)
+
+    mockGet.mockClear()
+    await resyncCallbacks[0]()
+    await flushPromises()
+
+    expect(mockGet).toHaveBeenCalled() // the roadmap IS re-read on reconnect
+    expect(w.vm.waiting).toBe(true) // ...and the agent is still working
+    expect(localStorage.getItem(STAMP_KEY)).not.toBeNull()
   })
 })

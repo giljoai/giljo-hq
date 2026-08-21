@@ -25,7 +25,7 @@ from giljo_mcp.database import DatabaseManager
 from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
 from giljo_mcp.tenant_guard import TenantIsolationError
 from giljo_mcp.tools._unknown_keys import split_known
-from giljo_mcp.tools.context_tools._response_ceiling import _apply_response_ceiling
+from giljo_mcp.tools.context_tools._response_assembly import assemble_fetch_context_response
 from giljo_mcp.tools.context_tools.get_360_memory import get_360_memory
 from giljo_mcp.tools.context_tools.get_agent_templates import get_agent_templates
 from giljo_mcp.tools.context_tools.get_architecture import get_architecture
@@ -144,9 +144,9 @@ async def _is_category_enabled(
             enabled = prio_result.scalar_one_or_none()
             # No row means default enabled
             return enabled if enabled is not None else True
-    except Exception as _exc:  # Broad catch: fail-open for category toggle, non-critical path
+    except Exception as _exc:  # Broad catch: degrades to enabled for category toggle, non-critical path
         logger.error("category_toggle_check_failed category=%s tenant_key=%s", category, tenant_key, exc_info=True)
-        return True  # Fail open — don't block context on toggle errors
+        return True  # Degrades to enabled — don't block context on toggle errors
 
 
 async def _build_last_modified_map(
@@ -407,9 +407,11 @@ async def fetch_context(
                 "tech_stack": {...}
             },
             "metadata": {
-                "estimated_tokens": 300,
                 "format": "structured",
-                "depth_config_applied": {...}
+                "depth_config_applied": {...},
+                # BE-9467: verbatim forward of each category's own metadata
+                # dict, when it has one -- e.g. get_threads' more_available.
+                "categories": {"threads": {"more_available": True, ...}}
             }
         }
 
@@ -531,6 +533,13 @@ async def fetch_context(
     all_errors: list[dict[str, str]] = []
     categories_returned: list[str] = []
     categories_empty: list[str] = []
+    # BE-9467: per-category metadata pass-through. A category can compute a
+    # truncation signal (get_threads' more_available/limit_applied/count) that
+    # previously never reached a get_context caller because only "data" and
+    # "directive" were read off each category's result here. Forwarded
+    # verbatim -- no new vocabulary invented, just carrying what each category
+    # already computes.
+    all_category_metadata: dict[str, Any] = {}
 
     for category in categories:
         # Enforce user field priority toggles -- skip disabled categories silently
@@ -554,8 +563,12 @@ async def fetch_context(
             # Use sentinel to distinguish "key absent" from "key present but empty"
             cat_data = result.get("data", {})
             directive = result.get("directive")
+            cat_metadata = result.get("metadata")
 
             categories_returned.append(category)
+
+            if cat_metadata:
+                all_category_metadata[category] = cat_metadata
 
             if directive:
                 all_directives[category] = directive
@@ -581,20 +594,6 @@ async def fetch_context(
             logger.error("category_fetch_error category=%s error=%s", category, e, exc_info=True)
             all_errors.append({"category": category, "error": str(e)})
 
-    # Build response
-    depth_applied = {c: effective_depths.get(c) for c in categories}
-
-    if output_format == "structured":
-        response_data = all_data
-    else:
-        # Flat format: merge all category data into a single dict
-        response_data = {}
-        for cat_data in all_data.values():
-            if isinstance(cat_data, dict):
-                response_data.update(cat_data)
-            else:
-                response_data[str(type(cat_data))] = cat_data
-
     # CE-0031 Task 4: per-category last_modified timestamps so warm orchestrators
     # can detect a stale cache without re-pulling the get_staging_instructions
     # catalog. Best-effort; omits a category when no authoritative server-side
@@ -604,29 +603,18 @@ async def fetch_context(
         full_map = await _build_last_modified_map(product_id, tenant_key, db_manager)
         last_modified = {c: ts for c, ts in full_map.items() if c in categories_returned}
 
-    response: dict[str, Any] = {
-        "source": "fetch_context",
-        "categories_requested": list(categories),
-        "categories_returned": categories_returned,
-        # Wave 1 IMP-0019 Item 2: surface the empty-payload categories so
-        # callers can distinguish "fetched with data" from "fetched but empty".
-        "categories_empty": categories_empty,
-        "data": response_data,
-        "last_modified": last_modified,
-        "metadata": {
-            "format": output_format,
-            "depth_config_applied": depth_applied,
-        },
-    }
-
-    if all_directives:
-        response["directive"] = all_directives
-
-    if all_errors:
-        response["errors"] = all_errors
-
-    # INF-WriteShape: 30K-char hard ceiling with graceful field-drop.
-    response = _apply_response_ceiling(response)
+    response = assemble_fetch_context_response(
+        categories=categories,
+        all_data=all_data,
+        all_directives=all_directives,
+        all_errors=all_errors,
+        categories_returned=categories_returned,
+        categories_empty=categories_empty,
+        all_category_metadata=all_category_metadata,
+        effective_depths=effective_depths,
+        output_format=output_format,
+        last_modified=last_modified,
+    )
 
     logger.info(
         "fetch_context_completed requested=%s returned=%s error_count=%d",

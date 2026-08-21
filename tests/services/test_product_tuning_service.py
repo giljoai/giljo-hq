@@ -959,6 +959,42 @@ class TestApplyTuningUpdates:
         # get_next_sequence patched to return 7 → current_sequence = 7 - 1 = 6
         assert sample_product.tuning_state.get("last_tuned_at_sequence") == 6
 
+    @pytest.mark.asyncio
+    async def test_all_drift_sections_unresolved_declines_instead_of_success(
+        self, mock_db_manager, mock_websocket_manager
+    ):
+        """BE-9473 F3 regression: a submission that ASKED for a write
+        (drift_detected=True) but resolved to zero real product-field writes must
+        return a BE-6081 Tier-2 declined-request ({success: False, error:
+        "NO_SECTIONS_APPLIED"}), never success:true/applied_count:0 -- that shape
+        is indistinguishable from a completed no-op review and violates the
+        post-0480 raise-rule's spirit (a failed write must not look like success).
+
+        Distinct from test_no_drift_submission_stamps_tuning_state above: that
+        proposal never claimed drift (drift_detected=False everywhere), so
+        success:true/applied_count:0 there is the DOCUMENTED "review recorded,
+        nothing to change" outcome, not this bug.
+        """
+        from giljo_mcp.services.product_tuning_service import ProductTuningService
+
+        db_manager, session = mock_db_manager
+        service = ProductTuningService(db_manager, TENANT_KEY, websocket_manager=mock_websocket_manager)
+
+        unresolved = [
+            {"section": "not_a_real_section", "drift_detected": True, "proposed_value": "x"},
+        ]
+
+        with patch("giljo_mcp.services.product_service.ProductService") as mock_ps_cls:
+            result = await service.apply_tuning_updates(product_id=PRODUCT_ID, proposals=unresolved)
+
+        mock_ps_cls.return_value.update_product.assert_not_called()
+        assert result["success"] is False
+        assert result["error"] == "NO_SECTIONS_APPLIED"
+        assert result["sections_skipped"] == ["not_a_real_section"]
+        # No tuning_state stamp on a declined write -- a failed write must not
+        # advance last_tuned_at and silently suppress the next staleness reminder.
+        session.commit.assert_not_called()
+
 
 # ============================================================================
 # TEST CLASS 5b: check_tuning_staleness — user preferences (IMP-5037 bug 2)
@@ -1055,7 +1091,7 @@ class TestCheckTuningStaleness:
 
 
 class TestBE9218BannerCadence:
-    """The count-based banner cadence Patrik ratified (BE-9218).
+    """The count-based banner cadence ratified for BE-9218.
 
     The banner now fires on tuning_reminder_threshold (count-based staleness), and
     a manual tune resets the countdown via the EXISTING last_tuned_at_sequence

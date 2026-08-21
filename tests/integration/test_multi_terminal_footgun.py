@@ -38,7 +38,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.products import Product
@@ -46,12 +45,13 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.models.templates import AgentTemplate
 from giljo_mcp.services.protocol_sections.agent_lifecycle import _generate_orchestrator_protocol
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 def _payload(call_tool_result) -> dict:
     """Extract structured payload from an MCP CallToolResult."""
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -205,7 +205,7 @@ async def test_spawn_job_multi_terminal_returns_pointer_not_bootstrap(
             },
         )
 
-    assert result.isError is False, f"BE-5103: spawn_job must succeed; got error: {_error_text(result)}"
+    assert result.is_error is False, f"BE-5103: spawn_job must succeed; got error: {_error_text(result)}"
     payload = _payload(result)
 
     assert "agent_prompt" in payload, f"BE-5103: response missing 'agent_prompt'; keys: {list(payload)}"
@@ -336,7 +336,7 @@ async def test_spawn_job_subagent_mode_returns_inline_bootstrap(
             },
         )
 
-    assert result.isError is False, f"BE-5103: subagent-mode spawn_job must succeed; got: {_error_text(result)}"
+    assert result.is_error is False, f"BE-5103: subagent-mode spawn_job must succeed; got: {_error_text(result)}"
     payload = _payload(result)
 
     agent_prompt = payload["agent_prompt"]

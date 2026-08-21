@@ -11,7 +11,7 @@
     <template #default>
       <v-list v-if="deletedDocuments.length > 0" class="smooth-border rounded">
         <v-list-item v-for="(doc, index) in deletedDocuments" :key="doc.id">
-          <template v-slot:prepend>
+          <template #prepend>
             <v-icon icon="mdi-file-document-outline"></v-icon>
           </template>
 
@@ -22,7 +22,7 @@
             </div>
           </div>
 
-          <template v-slot:append>
+          <template #append>
             <v-btn
               class="restore-btn"
               icon="mdi-restore"

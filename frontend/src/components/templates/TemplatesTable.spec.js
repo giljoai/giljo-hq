@@ -314,3 +314,87 @@ describe('TemplatesTable — search prop', () => {
     expect(table.props('search')).toBe('hello')
   })
 })
+
+// ---------------------------------------------------------------------------
+// FE-9385c — the Updated column renders STATE, not a raw date
+// ---------------------------------------------------------------------------
+// The derivation itself is pinned in templateTableConfig.spec.js. These assert
+// the part that only exists in the DOM: which string the user actually reads,
+// and that the accent lands on the one state they should act on.
+
+describe('TemplatesTable — FE-9385c Updated state column', () => {
+  const cell = (wrapper, id) => wrapper.find(`[data-testid="updated-state-${id}"]`)
+
+  it('shows "Never edited" for a stock agent whose updated_at is NULL', () => {
+    const wrapper = mountTable({
+      templates: [makeTemplate({ id: 11, updated_at: null, created_at: '2026-07-01T10:00:00Z' })],
+    })
+
+    expect(cell(wrapper, 11).text()).toBe('Never edited')
+    // Muted, not accented: an untouched stock agent is not something to act on.
+    expect(cell(wrapper, 11).classes()).toContain('text-muted-a11y')
+    expect(cell(wrapper, 11).classes()).not.toContain('updated-new')
+  })
+
+  it('shows a formatted date once the agent has been edited', () => {
+    const wrapper = mountTable({
+      templates: [makeTemplate({ id: 12, updated_at: '2026-08-05T10:00:00Z' })],
+    })
+
+    const text = cell(wrapper, 12).text()
+    expect(text).not.toBe('Never edited')
+    expect(text).not.toBe('Added today')
+    expect(text).toMatch(/Aug 05, 2026/)
+  })
+
+  it('shows "Added today" with the accent for an agent added today', () => {
+    const wrapper = mountTable({
+      templates: [makeTemplate({ id: 13, updated_at: null, created_at: new Date().toISOString() })],
+    })
+
+    expect(cell(wrapper, 13).text()).toBe('Added today')
+    // This is the one state carrying brand accent — it is the unfinished business.
+    expect(cell(wrapper, 13).classes()).toContain('updated-new')
+  })
+
+
+  it('renders a system-managed row as a dash', () => {
+    const wrapper = mountTable({
+      templates: [makeTemplate({ id: 15, _system: true, updated_at: null })],
+    })
+
+    expect(cell(wrapper, 15).text()).toBe('—')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// FE-9385c — vocabulary lock on user-visible copy
+// ---------------------------------------------------------------------------
+
+describe('TemplatesTable — FE-9385c vocabulary', () => {
+  it('directs the user to "Available in all products", not to a control that no longer exists', () => {
+    // This tooltip told the user to go to "Edit -> Availability". That heading
+    // is gone, so the instruction named a control they could not find. Pinned
+    // because a mutation check showed NOTHING failed when the old wording was
+    // restored — the fix was real but unprotected.
+    const wrapper = mountTable({
+      templates: [makeTemplate({ id: 21, is_active: false })],
+      remainingUserSlots: 5,
+    })
+
+    const html = wrapper.html()
+    expect(html).toContain('Available in all products')
+    expect(html).not.toMatch(/Edit\s*(&rarr;|→)\s*Availability/)
+  })
+
+  it('never shows the internal name for the account-wide switch', () => {
+    // "retire switch" is an internal phrase that has already confused the
+    // operator once. It must not reach any user-visible string here.
+    const wrapper = mountTable({
+      templates: [makeTemplate({ id: 22, is_active: false })],
+      remainingUserSlots: 5,
+    })
+
+    expect(wrapper.text()).not.toMatch(/retire/i)
+  })
+})

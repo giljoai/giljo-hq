@@ -36,7 +36,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import select
 
 from giljo_mcp import platform_registry
@@ -52,6 +51,7 @@ from giljo_mcp.tools.tool_accessor._project_tools import (
     _STAGING_CHAIN_CONTINUE_INSTRUCTION,
     _STAGING_STOP_INSTRUCTION,
 )
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -64,7 +64,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(call_tool_result) -> dict:
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -294,7 +294,7 @@ async def test_stage_project_through_transport_returns_prompt_and_stops(
     async with new_client() as session:
         result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["status"] == "staged"
     assert payload["mode"] == "claude"
@@ -338,7 +338,7 @@ async def test_stage_project_mode_matrix_all_non_empty(
     async with new_client() as session:
         result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": mode})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["prompt"], f"mode {mode} produced an empty prompt"
     assert payload["execution_mode"] == expected_execution_mode
@@ -352,7 +352,7 @@ async def test_stage_project_invalid_mode_rejected_at_boundary(lifecycle_mcp_cli
     async with new_client() as session:
         result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "bogus"})
 
-    assert result.isError is True, "invalid mode must be rejected (Literal boundary validation)"
+    assert result.is_error is True, "invalid mode must be rejected (Literal boundary validation)"
 
 
 # ---------------------------------------------------------------------------
@@ -386,7 +386,7 @@ async def test_stage_project_calls_owning_service_not_a_raw_write(lifecycle_mcp_
         async with new_client() as session:
             result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     spy.assert_called_once()
     _self, called_project_id, called_execution_mode = spy.call_args.args
     called_kwargs = spy.call_args.kwargs
@@ -436,7 +436,7 @@ async def test_stage_project_solo_next_action_is_stop_byte_identical(
     async with new_client() as session:
         result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     why = _payload(result)["next_action"]["why"]
     assert why == _STAGING_STOP_INSTRUCTION, "solo next_action must be byte-identical to the STOP instruction"
 
@@ -454,7 +454,7 @@ async def test_stage_project_chain_member_continues_not_stop(lifecycle_mcp_clien
     async with new_client() as session:
         result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     why = payload["next_action"]["why"]
     # Chain member -> the continue instruction, byte-identical to the new constant...
@@ -481,7 +481,7 @@ async def test_implement_project_gate_staging_incomplete(lifecycle_mcp_client, d
     async with new_client() as session:
         result = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["status"] == "gate_not_passed"
     assert payload["reason"] == "staging_incomplete"
@@ -500,7 +500,7 @@ async def test_implement_project_gate_not_launched_names_dashboard_action(
     async with new_client() as session:
         result = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["status"] == "gate_not_passed"
     assert payload["reason"] == "not_launched"
@@ -530,7 +530,7 @@ async def test_implement_project_happy_path_returns_prompt_with_agent_seed(
     async with new_client() as session:
         result = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["status"] == "ready"
     assert payload["prompt"], "implementation prompt must be non-empty"
@@ -572,7 +572,7 @@ async def test_implement_project_subagent_election_never_renders_multi_terminal_
     async with new_client() as session:
         result = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["status"] == "ready"
     prompt = payload["prompt"]
@@ -607,7 +607,7 @@ async def test_implement_project_mode_matrix_every_registry_mode_accepted(
     async with new_client() as session:
         result = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
 
-    assert result.isError is False, f"execution_mode={execution_mode!r}: {_error_text(result)}"
+    assert result.is_error is False, f"execution_mode={execution_mode!r}: {_error_text(result)}"
     payload = _payload(result)
     assert payload["status"] == "ready"
     assert payload["prompt"], f"execution_mode={execution_mode!r} produced an empty prompt"
@@ -629,7 +629,7 @@ async def test_implement_project_cross_tenant_not_found(
     async with new_client() as session:
         result = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
 
-    assert result.isError is True, "TENANT LEAK: tenant B must not reach tenant A's project"
+    assert result.is_error is True, "TENANT LEAK: tenant B must not reach tenant A's project"
     err = _error_text(result).lower()
     # Tenant B is blocked: production returns a clean not-found (tenant-scoped query
     # sees no row); the shared-test-session path trips the ORM tenant-context guard.
@@ -664,7 +664,7 @@ async def test_implement_project_cross_tenant_returns_clean_not_found_no_guard_l
     async with new_client() as session:
         result = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
 
-    assert result.isError is True, "TENANT LEAK: tenant B must not reach tenant A's project"
+    assert result.is_error is True, "TENANT LEAK: tenant B must not reach tenant A's project"
     err = _error_text(result)
     err_lower = err.lower()
 
@@ -743,7 +743,7 @@ async def test_stage_project_equivalent_to_rest_staging(lifecycle_mcp_client, db
 
     async with new_client() as session:
         tool_result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
-    assert tool_result.isError is False, _error_text(tool_result)
+    assert tool_result.is_error is False, _error_text(tool_result)
     tool_payload = _payload(tool_result)
 
     assert tool_payload["prompt"] == rest_response.prompt, (
@@ -821,7 +821,7 @@ async def test_be9332_mcp_stage_project_emits_orchestrator_prompt_generated(
     async with new_client() as session:
         result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     assert _payload(result)["status"] == "staged"
 
     emitted = ws_spy.events(_PROMPT_EVENT)
@@ -867,7 +867,7 @@ async def test_be9332_rest_and_mcp_prompt_payloads_agree(lifecycle_mcp_client, w
 
     async with new_client() as session:
         tool_result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
-    assert tool_result.isError is False, _error_text(tool_result)
+    assert tool_result.is_error is False, _error_text(tool_result)
 
     rest_events = rest_ws.events(_PROMPT_EVENT)
     mcp_events = ws_spy.events(_PROMPT_EVENT)
@@ -971,7 +971,7 @@ async def test_be9332_stage_project_without_websocket_manager_still_stages(
         async with create_connected_server_and_client_session(mcp_sdk_server.mcp) as session:
             result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
 
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
         assert payload["status"] == "staged"
         assert payload["prompt"]
@@ -1003,7 +1003,7 @@ async def test_be9332_broadcast_failure_does_not_fail_staging(
     async with new_client() as session:
         result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["status"] == "staged"
     assert payload["prompt"]
@@ -1030,7 +1030,7 @@ async def test_be9332_stage_returns_execution_id_for_frontend_map_key(
     async with new_client() as session:
         result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload.get("execution_id"), f"stage_project payload must carry execution_id: {payload.keys()}"
     # It is the AgentExecution row id, distinct from the orchestrator JOB id.

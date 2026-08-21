@@ -21,7 +21,7 @@
 
       <v-list v-if="deletedProducts.length > 0" class="border rounded">
         <v-list-item v-for="(product, index) in deletedProducts" :key="product.id">
-          <template v-slot:prepend>
+          <template #prepend>
             <v-icon icon="mdi-package-variant-closed"></v-icon>
           </template>
 
@@ -32,7 +32,7 @@
             </div>
           </div>
 
-          <template v-slot:append>
+          <template #append>
             <div class="d-flex align-center ga-1">
               <v-btn
                 icon="mdi-delete-restore"

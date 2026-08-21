@@ -23,9 +23,9 @@ from __future__ import annotations
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -69,7 +69,7 @@ async def test_get_job_mission_no_context_raises_via_mcp(mission_mcp_client, pla
     async with mission_mcp_client() as mcp_session:
         result = await mcp_session.call_tool("get_job_mission", {"job_id": placeholder})
 
-    assert result.isError is True, (
+    assert result.is_error is True, (
         f"BE-6003: placeholder job_id {placeholder!r} must raise (isError:true), not return a no_job_context dict"
     )
     # Old contract leaked this key in a success payload — it must not appear now.

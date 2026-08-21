@@ -21,8 +21,8 @@ Idempotency: ``DROP TABLE IF EXISTS`` and existence checks on the
 
 Downgrade: rebuilds the original table shape (mirrors the baseline at
 v37 / pre-BE-5117b). The data is NOT restored on downgrade -- rows were
-already throwaway on dogfood and Railway prod's vision_document_summaries
-table was empty at the time of the rollout.
+already throwaway on the test install, and the hosted prod
+vision_document_summaries table was empty at the time of the rollout.
 
 Edition Scope: Both -- the ``vision_documents`` / ``vision_document_summaries``
 tables are CE models shared by SaaS via the CE chain.

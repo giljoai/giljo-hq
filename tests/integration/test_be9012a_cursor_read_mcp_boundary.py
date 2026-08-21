@@ -34,7 +34,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import delete, func, select
 from sqlalchemy import update as sa_update
 
@@ -45,6 +44,7 @@ from giljo_mcp.models.projects import TaxonomyType
 from giljo_mcp.models.tasks import Message, MessageAcknowledgment
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -68,7 +68,7 @@ async def _stamp(db_session, tenant_key, ids_ts):
 
 def _payload(res) -> dict:
     if getattr(res, "structuredContent", None):
-        return res.structuredContent
+        return res.structured_content
     block = res.content[0]
     text = getattr(block, "text", None)
     if text is None:
@@ -136,7 +136,7 @@ async def comm_mcp_client(db_manager, db_session, monkeypatch):
 async def _create_thread(client, **kwargs):
     async with client() as s:
         res = await s.call_tool("create_thread", kwargs)
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     return _payload(res)
 
 
@@ -146,7 +146,7 @@ async def _setup_thread_with_beta(new_client):
     tid = thread["thread_id"]
     async with new_client() as s:
         join = await s.call_tool("join_thread", {"thread_id": tid, "agent_id": "beta"})
-        assert join.isError is False, _error_text(join)
+        assert join.is_error is False, _error_text(join)
     return tid
 
 
@@ -155,7 +155,7 @@ async def _post(new_client, tid, content, **kwargs):
         res = await s.call_tool(
             "post_to_thread", {"thread_id": tid, "content": content, "from_agent": "alpha", **kwargs}
         )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     return _payload(res)
 
 
@@ -173,7 +173,7 @@ async def test_unread_drain_is_on_delivered_once_and_cursor_advances_once(comm_m
             "get_thread_history",
             {"thread_id": tid, "as_participant": "beta", "unread_only": True, "mark_read": True},
         )
-        assert first.isError is False, _error_text(first)
+        assert first.is_error is False, _error_text(first)
     first_p = _payload(first)
     assert first_p["count"] == 3
     assert first_p["marked_read"] == 3
@@ -184,7 +184,7 @@ async def test_unread_drain_is_on_delivered_once_and_cursor_advances_once(comm_m
             "get_thread_history",
             {"thread_id": tid, "as_participant": "beta", "unread_only": True, "mark_read": True},
         )
-        assert second.isError is False, _error_text(second)
+        assert second.is_error is False, _error_text(second)
     second_p = _payload(second)
     assert second_p["count"] == 0
     assert second_p["marked_read"] == 0
@@ -237,7 +237,7 @@ async def test_cursor_params_require_as_participant(comm_mcp_client):
     for param in ("unread_only", "mark_read", "directed_only", "action_required_only"):
         async with new_client() as s:
             res = await s.call_tool("get_thread_history", {"thread_id": tid, param: True})
-        assert res.isError is True, f"{param} without as_participant should 422"
+        assert res.is_error is True, f"{param} without as_participant should 422"
         assert "as_participant" in _error_text(res)
 
 
@@ -253,7 +253,7 @@ async def test_mark_read_on_non_participant_is_structured_rejection(comm_mcp_cli
             "get_thread_history",
             {"thread_id": tid, "as_participant": "ghost", "mark_read": True},
         )
-    assert res.isError is False, _error_text(res)  # domain rejection, not an error
+    assert res.is_error is False, _error_text(res)  # domain rejection, not an error
     p = _payload(res)
     assert p["success"] is False
     assert p["error"] == "NOT_A_PARTICIPANT"
@@ -273,7 +273,7 @@ async def test_unread_only_for_never_joined_reader_is_honest_full_timeline(comm_
             "get_thread_history",
             {"thread_id": tid, "as_participant": "ghost", "unread_only": True},
         )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     assert _payload(res)["count"] == 2
 
 
@@ -286,7 +286,7 @@ async def test_directed_only_returns_posts_delivered_to_reader(comm_mcp_client):
     tid = await _setup_thread_with_beta(new_client)
     async with new_client() as s:
         join = await s.call_tool("join_thread", {"thread_id": tid, "agent_id": "gamma"})
-        assert join.isError is False, _error_text(join)
+        assert join.is_error is False, _error_text(join)
     await _post(new_client, tid, "broadcast to all")  # alpha broadcast -> beta is a recipient
     await _post(new_client, tid, "dm to beta", to_participant="beta")
     await _post(new_client, tid, "dm to gamma", to_participant="gamma")
@@ -296,7 +296,7 @@ async def test_directed_only_returns_posts_delivered_to_reader(comm_mcp_client):
             "get_thread_history",
             {"thread_id": tid, "as_participant": "beta", "directed_only": True},
         )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     contents = [m["content"] for m in _payload(res)["messages"]]
     assert "broadcast to all" in contents  # delivered to beta -> included
     assert "dm to beta" in contents
@@ -315,6 +315,6 @@ async def test_action_required_only_filters_to_action_posts(comm_mcp_client):
             "get_thread_history",
             {"thread_id": tid, "as_participant": "beta", "action_required_only": True},
         )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     contents = [m["content"] for m in _payload(res)["messages"]]
     assert contents == ["please act"]

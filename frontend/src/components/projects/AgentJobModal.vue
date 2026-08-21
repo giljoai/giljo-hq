@@ -180,6 +180,24 @@ watch(
   },
 )
 
+// BE-9416: the snapshot above is deliberate -- it disconnects the open modal from
+// live WS churn. But a mission arriving over agent:created / agent:mission_updated
+// is now BOUNDED (it has to clear the cross-worker broker's byte cap), so a modal
+// opened in the window before the store's top-up lands would freeze an EXCERPT and
+// render it as the whole mission, with nothing to say otherwise.
+//
+// Narrowest possible fix: adopt the full text when it arrives, and ONLY then --
+// this watch fires only on the truncated -> whole transition, so ordinary status
+// churn still cannot reach the snapshot and the disconnect keeps doing its job.
+watch(
+  () => props.agent?.mission_truncated,
+  (isTruncated, wasTruncated) => {
+    if (wasTruncated && !isTruncated && agentSnapshot.value && props.agent?.mission) {
+      agentSnapshot.value = { ...agentSnapshot.value, mission: props.agent.mission, mission_truncated: false }
+    }
+  },
+)
+
 // Methods
 function handleClose() {
   emit('close')

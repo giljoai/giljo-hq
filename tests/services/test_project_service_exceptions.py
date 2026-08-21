@@ -23,6 +23,7 @@ from giljo_mcp.exceptions import (
     ResourceNotFoundError,
     ValidationError,
 )
+from giljo_mcp.models.products import Product
 from giljo_mcp.schemas.service_responses import (
     OperationResult,
     ProjectData,
@@ -183,9 +184,21 @@ class TestProjectServiceTypedReturns:
         """Test cancel_staging returns ProjectData typed model"""
         from giljo_mcp.models.projects import Project as ProjectModel
 
+        # BE-9437: a project belongs to a product.
+        staging_product = Product(
+            id=str(uuid4()),
+            tenant_key=test_tenant_key,
+            name=f"Staging Product {uuid4().hex[:6]}",
+            description="seeded",
+            is_active=False,
+        )
+        db_session.add(staging_product)
+        await db_session.flush()
+
         # Create a project in staging status for cancel_staging to work
         project = ProjectModel(
             id=str(uuid4()),
+            product_id=staging_product.id,
             name="Staging Project",
             mission="Test mission",
             description="Test description",
@@ -218,15 +231,27 @@ class TestProjectServiceTypedReturns:
         self, project_service: ProjectService, test_tenant_key: str, db_session
     ):
         """Test restore_project returns OperationResult typed model"""
+        from giljo_mcp.models.products import Product
         from giljo_mcp.models.projects import Project
 
         # Create a completed project to restore
+        # BE-9437: a project belongs to a product. Its own, so an active
+        # seed cannot collide under idx_project_single_active_per_product.
+        _owning_product_project = Product(
+            id=str(uuid4()),
+            tenant_key=test_tenant_key,
+            name=f"Owning Product {uuid4().hex[:6]}",
+            description="seeded",
+            is_active=False,
+        )
+        db_session.add(_owning_product_project)
         project = Project(
             id=str(uuid4()),
             name="Completed Project",
             mission="Test mission",
             description="Test description",
             tenant_key=test_tenant_key,
+            product_id=_owning_product_project.id,
             status="completed",
             series_number=random.randint(1, 9000),
         )
@@ -260,12 +285,23 @@ async def active_project(db_session, test_tenant_key):
     """Create an active project for testing"""
     from giljo_mcp.models.projects import Project
 
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid4()),
+        tenant_key=test_tenant_key,
+        name=f"Owning Product {uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         id=str(uuid4()),
         name="Active Test Project",
         mission="Test mission",
         description="Test description",
         tenant_key=test_tenant_key,
+        product_id=_owning_product_project.id,
         status="active",
         series_number=random.randint(1, 9000),
     )
@@ -280,12 +316,23 @@ async def inactive_project(db_session, test_tenant_key):
     """Create an inactive project for testing"""
     from giljo_mcp.models.projects import Project
 
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid4()),
+        tenant_key=test_tenant_key,
+        name=f"Owning Product {uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         id=str(uuid4()),
         name="Inactive Test Project",
         mission="Test mission",
         description="Test description",
         tenant_key=test_tenant_key,
+        product_id=_owning_product_project.id,
         status="inactive",
         series_number=random.randint(1, 9000),
     )
@@ -300,12 +347,23 @@ async def staged_project(db_session, test_tenant_key):
     """Create a staged project for testing"""
     from giljo_mcp.models.projects import Project
 
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid4()),
+        tenant_key=test_tenant_key,
+        name=f"Owning Product {uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         id=str(uuid4()),
         name="Staged Test Project",
         mission="Staged mission",
         description="Test description",
         tenant_key=test_tenant_key,
+        product_id=_owning_product_project.id,
         status="inactive",
         staging_status="staged",
         series_number=random.randint(1, 9000),

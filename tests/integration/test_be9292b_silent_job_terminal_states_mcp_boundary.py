@@ -47,7 +47,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from api.endpoints.mcp_sdk_server import mcp
 from giljo_mcp.models import AgentTodoItem
@@ -57,6 +56,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools.tool_accessor import ToolAccessor
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +271,7 @@ async def test_close_job_on_silent_execution_names_the_complete_job_recovery(ter
         result = await mcp_session.call_tool("close_job", {"job_id": job.job_id})
 
     text = _content_text(result)
-    assert result.isError, f"close_job on a 'silent' execution must still refuse (gate kept), got: {text!r}"
+    assert result.is_error, f"close_job on a 'silent' execution must still refuse (gate kept), got: {text!r}"
     assert "silent" in text, f"the refusal must name the actual status, got: {text!r}"
     assert "complete_job" in text, (
         "close_job's wrong-state refusal must NAME the complete_job recovery for a "
@@ -312,13 +312,13 @@ async def test_silent_job_with_verified_deliverable_reaches_closed_not_decommiss
             {"job_id": job.job_id, "result": _VERIFIED_RESULT},
         )
         complete_text = _content_text(complete_result)
-        assert not complete_result.isError, (
+        assert not complete_result.is_error, (
             f"complete_job must accept a 'silent' execution ('silent' is not terminal), got: {complete_text!r}"
         )
 
         close_result = await mcp_session.call_tool("close_job", {"job_id": job.job_id})
         close_text = _content_text(close_result)
-        assert not close_result.isError, f"close_job must accept the now-complete execution, got: {close_text!r}"
+        assert not close_result.is_error, f"close_job must accept the now-complete execution, got: {close_text!r}"
 
     await session.refresh(execution)
     assert execution.status == "closed", (
@@ -352,7 +352,7 @@ async def test_close_job_on_decommissioned_execution_does_not_offer_complete_job
         result = await mcp_session.call_tool("close_job", {"job_id": job.job_id})
 
     text = _content_text(result)
-    assert result.isError, f"close_job on a decommissioned execution must refuse, got: {text!r}"
+    assert result.is_error, f"close_job on a decommissioned execution must refuse, got: {text!r}"
     assert "complete_job" not in text, (
         "a decommissioned execution cannot be recovered by complete_job — offering it "
         f"would be a second dead end. Got: {text!r}"
@@ -382,7 +382,7 @@ async def test_close_job_on_working_execution_does_not_offer_complete_job_recove
         result = await mcp_session.call_tool("close_job", {"job_id": job.job_id})
 
     text = _content_text(result)
-    assert result.isError, f"close_job on a 'working' execution must refuse, got: {text!r}"
+    assert result.is_error, f"close_job on a 'working' execution must refuse, got: {text!r}"
     assert "complete_job" not in text, (
         f"a live 'working' agent must NOT be offered the complete-it-yourself recovery, got: {text!r}"
     )
@@ -418,7 +418,7 @@ async def test_silent_job_with_stranded_todos_is_completion_blocked_naming_the_t
         )
 
     text = _content_text(result)
-    assert result.isError, f"an incomplete TODO must still block complete_job on a silent job, got: {text!r}"
+    assert result.is_error, f"an incomplete TODO must still block complete_job on a silent job, got: {text!r}"
     assert "COMPLETION_BLOCKED" in text, f"the rejection must carry the COMPLETION_BLOCKED code, got: {text!r}"
     assert "Wire the guard into the service layer" in text, (
         f"the rejection must name the stranded TODO so the orchestrator can settle it, got: {text!r}"
@@ -463,7 +463,7 @@ async def test_completion_blocked_names_report_progress_and_speaks_to_the_orches
         )
 
     text = _content_text(result)
-    assert result.isError, f"an incomplete TODO must still block complete_job, got: {text!r}"
+    assert result.is_error, f"an incomplete TODO must still block complete_job, got: {text!r}"
     assert "report_progress" in text, f"COMPLETION_BLOCKED must name the tool that settles the ledger, got: {text!r}"
     assert "replace" in text, (
         "replace=true is the load-bearing argument — without it the orchestrator cannot "

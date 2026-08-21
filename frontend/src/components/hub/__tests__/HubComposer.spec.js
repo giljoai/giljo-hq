@@ -31,6 +31,26 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ showToast: showToastMock }),
 }))
 
+// FE-9439: the composer's mark-handled control now runs through `useMarkHandled`, which
+// reaches for `useRoute()`/`useRouter()` — it clears the stale `?focus=baton` the flag is
+// rendered from, and that is a route concern by nature. `routerInjectionGuard` (FE-9427)
+// makes a router-less mount a hard failure, correctly: `useRouter()` returns `undefined`
+// there, so every navigation path would be silently inert.
+//
+// Mocking the MODULE is the second answer that guard's header names as legitimate, and
+// it is the one the sibling HubView specs already use. Preferred here over installing a
+// memory router because it makes the navigation ASSERTABLE — see the mark-handled test,
+// which now pins the route rewrite instead of only the server call.
+const routerMock = vi.hoisted(() => ({
+  push: vi.fn(),
+  replace: vi.fn(),
+  route: { path: '/hub', query: {} },
+}))
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: routerMock.push, replace: routerMock.replace }),
+  useRoute: () => routerMock.route,
+}))
+
 vi.mock('@/services/api', () => ({
   default: {
     threads: {
@@ -42,7 +62,6 @@ vi.mock('@/services/api', () => ({
 }))
 
 import HubComposer from '@/components/hub/HubComposer.vue'
-import AutoCheckinControls from '@/components/projects/AutoCheckinControls.vue'
 import { useCommHubStore } from '@/stores/commHubStore'
 
 const vuetify = createVuetify()
@@ -106,6 +125,11 @@ describe('HubComposer', () => {
     showToastMock.mockClear()
     participantsMock.mockReset()
     participantsMock.mockResolvedValue({ data: { participants: [] } })
+    // The route mock is module-level, so it is reset per test rather than left to carry
+    // one test's query into the next.
+    routerMock.push.mockClear()
+    routerMock.replace.mockClear()
+    routerMock.route.query = {}
   })
 
   afterEach(() => {
@@ -311,6 +335,12 @@ describe('HubComposer', () => {
     // FE-9365g: the release valve. Until this existed the only way to clear
     // "waiting on you" was to post a message, so a thread needing nothing stayed
     // gold forever. 'none' is the reserved no-owner target.
+    //
+    // FE-9439 re-homed the handler: the same behaviour now lives in `useMarkHandled`,
+    // shared with the search-bar instance of the control, so the composer no longer
+    // defines `onMarkHandled` itself. The name is the only thing that changed — the
+    // contract asserted below is FE-9365g's, unaltered, and it is still asserted here
+    // rather than moved out.
     store.selectedThreadId = 'thr-001'
     store.currentUserId = undefined
     const passBatonSpy = vi.spyOn(store, 'passBaton').mockResolvedValue({ thread_id: 'thr-001', next_action_owner: null })
@@ -320,10 +350,45 @@ describe('HubComposer', () => {
     wrapper.vm.$.setupState // touch
     // Drive the handler directly — the badge row is v-if'd on isYourTurn, which
     // depends on the user store; the CONTRACT under test is what the button does.
-    await wrapper.vm.onMarkHandled()
+    await wrapper.vm.markHandled()
 
     expect(passBatonSpy).toHaveBeenCalledWith('thr-001', 'none')
     expect(postMessageMock).not.toHaveBeenCalled()
+  })
+
+  /**
+   * FE-9439 item 3 — and the reason this spec now mocks vue-router.
+   *
+   * Clearing the baton server-side was never the bug. The gold "Waiting on you" pin is
+   * rendered from the ROUTE (`?focus=baton&message=<id>`), and nothing rewrote it, so
+   * the flag outlived the thing it described. Pinned here at the composer, and end to
+   * end for both instances in HubView.markHandled.fe9439.spec.js.
+   */
+  it('Mark handled drops the stale focus params from the route', async () => {
+    store.selectedThreadId = 'thr-001'
+    vi.spyOn(store, 'passBaton').mockResolvedValue({ thread_id: 'thr-001', next_action_owner: null })
+    routerMock.route.query = { thread: 'thr-001', focus: 'baton', message: 'msg-1' }
+
+    const wrapper = mountComposer(pinia)
+    await wrapper.vm.markHandled()
+
+    expect(routerMock.replace).toHaveBeenCalledTimes(1)
+    expect(routerMock.replace).toHaveBeenCalledWith({ path: '/hub', query: { thread: 'thr-001' } })
+    // `replace`, not `push`: Back must not restore the stale flag.
+    expect(routerMock.push).not.toHaveBeenCalled()
+  })
+
+  it('Mark handled leaves an ordinary arrival route untouched', async () => {
+    // No notification brought them here, so there is nothing to strip and no reason to
+    // hand the router a no-op navigation.
+    store.selectedThreadId = 'thr-001'
+    vi.spyOn(store, 'passBaton').mockResolvedValue({ thread_id: 'thr-001', next_action_owner: null })
+    routerMock.route.query = { thread: 'thr-001' }
+
+    const wrapper = mountComposer(pinia)
+    await wrapper.vm.markHandled()
+
+    expect(routerMock.replace).not.toHaveBeenCalled()
   })
 
   it('a recipient picked on one thread does not leak onto the next', async () => {
@@ -471,7 +536,9 @@ describe('HubComposer', () => {
     store.selectedThreadId = 'thr-001'
     const wrapper = mountComposer(pinia)
 
-    expect(wrapper.findComponent(AutoCheckinControls).exists()).toBe(false)
+    // FE-9296b deleted AutoCheckinControls.vue outright, so absence is asserted
+    // by the control's stable testids rather than by the component export.
+    expect(wrapper.find('[data-testid="auto-checkin"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="composer-cadence-toggle"]').exists()).toBe(false)
   })
 
@@ -536,7 +603,7 @@ describe('HubComposer', () => {
   it('the human user is never offered as a recipient', async () => {
     store.selectedThreadId = 'thr-001'
     store.participantsByThreadId.set('thr-001', [
-      { participant_id: 'p-user', display_name: 'Patrik', participant_type: 'user' },
+      { participant_id: 'p-user', display_name: 'Sam Rivera', participant_type: 'user' },
       { participant_id: 'p-agent', display_name: 'CI2_lane', participant_type: 'agent' },
     ])
     const wrapper = mountComposer(pinia)

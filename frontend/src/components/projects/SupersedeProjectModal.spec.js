@@ -56,6 +56,18 @@ describe('SupersedeProjectModal.vue', () => {
     })
   })
 
+  // FE-9485: GET /api/v1/projects/ 422s if `limit` exceeds the REST bound
+  // (le=200, BE-6076's deliberate page-size cap). The mocked api.projects.list
+  // above accepts any params, so this asserts the store's OUTGOING request
+  // actually respects the real endpoint's bound rather than just proving the
+  // mock is permissive.
+  it('requests successor candidates within the projects endpoint limit bound', async () => {
+    await mountModal()
+
+    const params = api.projects.list.mock.calls.at(-1)[0]
+    expect(params.limit === undefined || params.limit <= 200).toBe(true)
+  })
+
   it('excludes the project being superseded from the successor candidates', async () => {
     const { wrapper } = await mountModal()
 

@@ -110,10 +110,12 @@ class TaskConversionService:
             user_id: User performing conversion
 
         Returns:
-            ConversionResult with task_id, project_id, and project_name (0731c typed return)
+            ConversionResult with task_id, project_id, project_name, and the
+            bound product (product_id + product_name, BE-9415) (0731c typed return)
 
         Raises:
-            ValidationError: No tenant context, already converted, no active product
+            ValidationError: No tenant context, already converted, or the task's
+                own product does not resolve for this tenant (BE-9415)
             ResourceNotFoundError: Task or user not found
             AuthorizationError: User not authorized
             DatabaseError: Database operation failed
@@ -155,7 +157,8 @@ class TaskConversionService:
             ConversionResult with task_id, project_id, and project_name
 
         Raises:
-            ValidationError: No tenant context, already converted, no active product
+            ValidationError: No tenant context, already converted, or the task's
+                own product does not resolve for this tenant (BE-9415)
             ResourceNotFoundError: Task or user not found
             AuthorizationError: User not authorized
         """
@@ -193,13 +196,36 @@ class TaskConversionService:
                 context={"task_id": task_id, "user_id": user_id},
             )
 
-        # Get active product (required for project creation per Handover 0050)
-        active_product = await self._repo.get_active_product(session, tenant_key)
+        # BE-9415: the promoted project binds to the TASK's OWN product, never to
+        # whichever product happens to be active. The active product is mutable
+        # shared state -- another session, or the operator switching products in
+        # the dashboard, changes it under a running conversion -- so resolving it
+        # here filed the project wherever the server pointed at that instant.
+        # ``tasks.product_id`` is NOT NULL (Handover 0433), so the task always
+        # names exactly one product and no fallback is needed or wanted.
+        #
+        # Deliberately NOT copying the ``is_active`` check that the sibling
+        # caller of this lookup applies (``task_service/_mutation_mixin`` on
+        # create): binding to a product other than the active one is the entire
+        # point here, so requiring active would reinstate this defect.
+        bound_product = await self._repo.get_product_by_id(session, task.product_id, tenant_key)
 
-        if not active_product:
+        if not bound_product:
+            # Mirrors BE-9411's contract: name the id, say nothing was created,
+            # and NEVER fall back to the active product -- a silent fallback
+            # would recreate the misfile while reporting success.
             raise ValidationError(
-                message="No active product. Please activate a product before converting tasks to projects.",
-                context={"operation": "convert_to_project", "tenant_key": tenant_key},
+                message=(
+                    f"Product '{task.product_id}' for this task was not found for your account, so "
+                    "nothing was created. The task's product may have been deleted; restore it, or "
+                    "move the task to a product you own before converting it."
+                ),
+                context={
+                    "operation": "convert_to_project",
+                    "task_id": task_id,
+                    "product_id": task.product_id,
+                    "tenant_key": tenant_key,
+                },
             )
 
         # NOTE: The new project is created INACTIVE (see below), so promoting a
@@ -221,9 +247,9 @@ class TaskConversionService:
         project_type_id: str | None = None
         project_series_number: int | None = task.series_number
         if project_series_number is None:
-            await self._project_repo.lock_rows_for_series_shared(session, tenant_key, active_product.id)
+            await self._project_repo.lock_rows_for_series_shared(session, tenant_key, bound_product.id)
             project_series_number = await self._project_repo.get_next_series_number_shared(
-                session, tenant_key, active_product.id
+                session, tenant_key, bound_product.id
             )
 
         # Create project
@@ -232,7 +258,7 @@ class TaskConversionService:
             name=final_project_name,
             description=task.description or f"Project created from task: {task.title}",
             mission="",  # Leave empty - orchestrator will generate mission during staging
-            product_id=active_product.id,
+            product_id=bound_product.id,
             tenant_key=tenant_key,
             status=ProjectStatus.INACTIVE,  # Projects start inactive, user activates when ready
             project_type_id=project_type_id,
@@ -292,6 +318,14 @@ class TaskConversionService:
             task_id=str(task_id),
             project_id=str(new_project.id),
             project_name=new_project.name,
+            # BE-9382: the refresh above loaded the ``taxonomy_alias``
+            # column_property (deferred=False), so the promoted project's rendered
+            # serial comes straight from the DB expression the dashboard reads.
+            project_taxonomy_alias=new_project.taxonomy_alias or "",
+            # BE-9415: echo the binding so the caller can see WHERE the promotion
+            # landed without a second read.
+            product_id=bound_product.id,
+            product_name=bound_product.name,
         )
 
     # ============================================================================

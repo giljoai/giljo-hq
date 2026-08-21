@@ -3,7 +3,7 @@
     <span class="mode-label">Execution Mode:</span>
     <div class="mode-pill-group">
       <v-tooltip location="bottom">
-        <template v-slot:activator="{ props: tooltipProps }">
+        <template #activator="{ props: tooltipProps }">
           <button
             v-bind="tooltipProps"
             class="pill-btn pill-sm smooth-border"
@@ -18,7 +18,7 @@
         <span>One terminal per agent — you watch the fleet.</span>
       </v-tooltip>
       <v-tooltip location="bottom">
-        <template v-slot:activator="{ props: tooltipProps }">
+        <template #activator="{ props: tooltipProps }">
           <button
             v-bind="tooltipProps"
             class="pill-btn pill-sm smooth-border"
@@ -36,7 +36,7 @@
       </v-tooltip>
     </div>
     <v-tooltip location="bottom">
-      <template v-slot:activator="{ props: tooltipProps }">
+      <template #activator="{ props: tooltipProps }">
         <v-icon v-bind="tooltipProps" size="small" class="help-icon" aria-label="Execution mode help">mdi-help-circle-outline</v-icon>
       </template>
       <span>Multi-Terminal: manual, one terminal per agent. Subagent: automatic, one orchestrator session runs the whole team.</span>

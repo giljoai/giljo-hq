@@ -114,6 +114,12 @@ class ProductResponse(BaseModel):
 
     id: str
     name: str
+    # BE-9385b: the stable short name that qualifies exported agent filenames
+    # (``<agent>--<slug>.md``). Exposed because it is user-visible -- it is literally
+    # in the names of the files they install -- and because it never changes, so the
+    # UI can show what an export will be called without guessing. Optional: rows
+    # predating ce_0092 have none, and the render path derives one for them.
+    slug: str | None = None
     description: str | None
     vision_path: str | None
     created_at: datetime

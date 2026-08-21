@@ -34,13 +34,13 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -53,7 +53,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(call_tool_result) -> dict:
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -80,9 +80,20 @@ async def _seed_project(
 ) -> str:
     """Create a single tenant-scoped Project; return its id."""
     suffix = uuid.uuid4().hex[:8]
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
+        product_id=_owning_product_project.id,
         name=f"BE-6221a {suffix}",
         description="chain member",
         mission="build it",
@@ -211,7 +222,7 @@ async def test_start_chain_run_happy_path_returns_conductor_and_staging_bootstra
             "start_chain_run",
             {"project_ids": [p1, p2], "execution_mode": "claude_code_cli"},
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     assert payload["success"] is True
@@ -249,7 +260,7 @@ async def test_start_chain_run_persists_chain_mission(chain_mcp_client, db_sessi
                 "chain_mission": "Ship the linked feature across both projects.",
             },
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     assert payload["success"] is True
@@ -273,7 +284,7 @@ async def test_rejects_nonexistent_project(chain_mcp_client, db_session, primary
             "start_chain_run",
             {"project_ids": [p1, ghost], "execution_mode": "claude_code_cli"},
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     assert payload["success"] is False
@@ -293,7 +304,7 @@ async def test_rejects_terminal_project(chain_mcp_client, db_session, primary_te
             "start_chain_run",
             {"project_ids": [live, done], "execution_mode": "claude_code_cli"},
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     assert payload["success"] is False
@@ -323,7 +334,7 @@ async def test_rejects_already_enrolled_project(chain_mcp_client, db_session, pr
             "start_chain_run",
             {"project_ids": [p1, p3], "execution_mode": "claude_code_cli"},
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     assert payload["success"] is False
@@ -348,7 +359,7 @@ async def test_rejects_member_awaiting_solo_implement(chain_mcp_client, db_sessi
             "start_chain_run",
             {"project_ids": [live, parked], "execution_mode": "claude_code_cli"},
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     assert payload["success"] is False
@@ -378,7 +389,7 @@ async def test_rejects_launched_member(chain_mcp_client, db_session, primary_ten
             "start_chain_run",
             {"project_ids": [live, launched], "execution_mode": "claude_code_cli"},
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     assert payload["success"] is False
@@ -398,7 +409,7 @@ async def test_rejects_one_member_chain(chain_mcp_client, db_session, primary_te
             "start_chain_run",
             {"project_ids": [p1], "execution_mode": "claude_code_cli"},
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     assert payload["success"] is False
@@ -418,7 +429,7 @@ async def test_rejects_non_permutation_resolved_order(chain_mcp_client, db_sessi
             "start_chain_run",
             {"project_ids": [p1, p2], "resolved_order": [p1, stranger], "execution_mode": "claude_code_cli"},
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     assert payload["success"] is False

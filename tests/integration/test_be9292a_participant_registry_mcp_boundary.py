@@ -43,7 +43,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import delete, func, select
 
 from giljo_mcp.database import tenant_session_context
@@ -55,6 +54,7 @@ from giljo_mcp.models.tasks import Message
 from giljo_mcp.services.comm_baton_targets import TARGET_IS_A_DISPLAY_NAME
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -62,7 +62,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(res) -> dict:
     if getattr(res, "structuredContent", None):
-        return res.structuredContent
+        return res.structured_content
     block = res.content[0]
     text = getattr(block, "text", None)
     if text is None:
@@ -136,13 +136,13 @@ async def _call(new_client, tool: str, args: dict):
 async def _thread_with_em(new_client) -> str:
     """A thread whose creator 'em' holds the baton. Nobody else is enrolled."""
     res = await _call(new_client, "create_thread", {"subject": "registry", "creator_id": "em"})
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     return _payload(res)["thread_id"]
 
 
 async def _baton_owner(new_client, thread_id: str) -> str | None:
     res = await _call(new_client, "get_thread_history", {"thread_id": thread_id})
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     return _payload(res)["thread"]["next_action_owner"]
 
 
@@ -172,7 +172,7 @@ async def test_directed_action_recipient_can_drain_without_ever_posting(comm_mcp
             "requires_action": True,
         },
     )
-    assert posted.isError is False, _error_text(posted)
+    assert posted.is_error is False, _error_text(posted)
     assert _payload(posted)["recipients"] == ["lane-x"]
 
     drained = await _call(
@@ -180,7 +180,7 @@ async def test_directed_action_recipient_can_drain_without_ever_posting(comm_mcp
         "get_thread_history",
         {"thread_id": tid, "as_participant": "lane-x", "unread_only": True, "mark_read": True},
     )
-    assert drained.isError is False, _error_text(drained)
+    assert drained.is_error is False, _error_text(drained)
     body = _payload(drained)
     assert body.get("success") is not False, f"reader was refused its own directed post: {body}"
     assert body["marked_read"] >= 1
@@ -198,7 +198,7 @@ async def test_directed_recipient_is_enrolled_in_the_directory(comm_mcp_client):
         "post_to_thread",
         {"thread_id": tid, "content": "for you only", "from_agent": "em", "to_participant": "lane-y"},
     )
-    assert posted.isError is False, _error_text(posted)
+    assert posted.is_error is False, _error_text(posted)
 
     with tenant_session_context(db_session, tenant_key):
         row = (
@@ -222,12 +222,12 @@ async def test_reader_with_nothing_delivered_is_still_refused(comm_mcp_client):
     new_client, _tk, _sess = comm_mcp_client
     tid = await _thread_with_em(new_client)
     posted = await _call(new_client, "post_to_thread", {"thread_id": tid, "content": "town square", "from_agent": "em"})
-    assert posted.isError is False, _error_text(posted)
+    assert posted.is_error is False, _error_text(posted)
 
     res = await _call(
         new_client, "get_thread_history", {"thread_id": tid, "as_participant": "ghost", "mark_read": True}
     )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     body = _payload(res)
     assert body["success"] is False
     assert body["error"] == "NOT_A_PARTICIPANT"
@@ -248,7 +248,7 @@ async def test_undeliverable_baton_target_is_rejected_not_silently_accepted(comm
     new_client, tenant_key, db_session = comm_mcp_client
     tid = await _thread_with_em(new_client)
     joined = await _call(new_client, "join_thread", {"thread_id": tid, "agent_id": "lane-a"})
-    assert joined.isError is False, _error_text(joined)
+    assert joined.is_error is False, _error_text(joined)
 
     res = await _call(
         new_client,
@@ -260,7 +260,7 @@ async def test_undeliverable_baton_target_is_rejected_not_silently_accepted(comm
             "pass_baton_to": "Ledger Zero Conductor",
         },
     )
-    assert res.isError is False, _error_text(res)  # BE-6081 domain rejection, not an error
+    assert res.is_error is False, _error_text(res)  # BE-6081 domain rejection, not an error
     body = _payload(res)
     assert body["success"] is False
     assert body["error"] == "BATON_TARGET_NOT_A_PARTICIPANT"
@@ -283,7 +283,7 @@ async def test_pass_baton_tool_refuses_the_same_undeliverable_target(comm_mcp_cl
     tid = await _thread_with_em(new_client)
 
     res = await _call(new_client, "pass_baton", {"thread_id": tid, "to": "ghost-conductor"})
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     body = _payload(res)
     assert body["success"] is False
     assert body["error"] == "BATON_TARGET_NOT_A_PARTICIPANT"
@@ -300,14 +300,14 @@ async def test_reserved_baton_targets_and_registered_participants_still_work(com
     new_client, _tk, _sess = comm_mcp_client
     tid = await _thread_with_em(new_client)
     joined = await _call(new_client, "join_thread", {"thread_id": tid, "agent_id": "lane-a"})
-    assert joined.isError is False, _error_text(joined)
+    assert joined.is_error is False, _error_text(joined)
 
     to_participant = await _call(
         new_client,
         "post_to_thread",
         {"thread_id": tid, "content": "over to you", "from_agent": "em", "pass_baton_to": "lane-a"},
     )
-    assert to_participant.isError is False, _error_text(to_participant)
+    assert to_participant.is_error is False, _error_text(to_participant)
     assert _payload(to_participant)["baton_passed"] is True
     assert await _baton_owner(new_client, tid) == "lane-a"
 
@@ -316,7 +316,7 @@ async def test_reserved_baton_targets_and_registered_participants_still_work(com
         "post_to_thread",
         {"thread_id": tid, "content": "ACCEPTED", "from_agent": "lane-a", "pass_baton_to": "all"},
     )
-    assert to_all.isError is False, _error_text(to_all)
+    assert to_all.is_error is False, _error_text(to_all)
     assert await _baton_owner(new_client, tid) == "all"
 
     to_none = await _call(
@@ -324,7 +324,7 @@ async def test_reserved_baton_targets_and_registered_participants_still_work(com
         "post_to_thread",
         {"thread_id": tid, "content": "fyi", "from_agent": "lane-a", "pass_baton_to": "none"},
     )
-    assert to_none.isError is False, _error_text(to_none)
+    assert to_none.is_error is False, _error_text(to_none)
     assert _payload(to_none)["baton_passed"] is False
     assert await _baton_owner(new_client, tid) == "all"
 
@@ -347,14 +347,14 @@ async def test_directed_auto_pass_to_first_contact_recipient_still_works(comm_mc
             "requires_action": True,
         },
     )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     body = _payload(res)
     assert body.get("success") is not False, f"first-contact directed hand-off was refused: {body}"
     assert body["baton_passed"] is True
     assert await _baton_owner(new_client, tid) == "lane-z"
 
     turn = await _call(new_client, "get_my_turn", {"agent_id": "lane-z"})
-    assert turn.isError is False, _error_text(turn)
+    assert turn.is_error is False, _error_text(turn)
     assert tid in {t["thread_id"] for t in _payload(turn)["threads"]}
 
 
@@ -370,7 +370,7 @@ async def test_first_post_by_an_unjoined_author_can_still_hand_off_to_itself(com
         "post_to_thread",
         {"thread_id": tid, "content": "picking this up", "from_agent": "lane-new", "pass_baton_to": "lane-new"},
     )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     assert _payload(res).get("success") is not False
     assert await _baton_owner(new_client, tid) == "lane-new"
 
@@ -392,7 +392,7 @@ async def _thread_with_labelled_conductor(new_client) -> str:
         "join_thread",
         {"thread_id": tid, "agent_id": _CONDUCTOR_UUID, "display_name": _CONDUCTOR_LABEL},
     )
-    assert joined.isError is False, _error_text(joined)
+    assert joined.is_error is False, _error_text(joined)
     return tid
 
 
@@ -425,7 +425,7 @@ async def test_auto_pass_to_a_display_label_cannot_strand_the_conductor(comm_mcp
             "requires_action": True,
         },
     )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     body = _payload(res)
 
     # The property that matters, stated as the outcome rather than the mechanism:
@@ -434,7 +434,7 @@ async def test_auto_pass_to_a_display_label_cannot_strand_the_conductor(comm_mcp
     owner = await _baton_owner(new_client, tid)
     assert owner != _CONDUCTOR_LABEL, "the baton was handed to a display label — the conductor is stranded"
     turn = await _call(new_client, "get_my_turn", {"agent_id": _CONDUCTOR_UUID})
-    assert turn.isError is False, _error_text(turn)
+    assert turn.is_error is False, _error_text(turn)
     reachable = tid in {t["thread_id"] for t in _payload(turn)["threads"]}
     assert reachable or owner == "em", "baton neither reachable by the conductor nor left where it was"
 
@@ -518,7 +518,7 @@ async def test_a_minted_label_cannot_launder_a_later_explicit_hand_off(comm_mcp_
             "pass_baton_to": _CONDUCTOR_LABEL,
         },
     )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     body = _payload(res)
     assert body["success"] is False, "a minted label laundered a later explicit hand-off past the validator"
     assert body["error"] == TARGET_IS_A_DISPLAY_NAME
@@ -543,7 +543,7 @@ async def test_a_label_that_shadows_nobody_is_still_a_legitimate_addressee(comm_
             "requires_action": True,
         },
     )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     assert _payload(res).get("success") is not False, "a plain first-contact addressee was refused"
     assert await _baton_owner(new_client, tid) == "lane-z-never-seen"
 
@@ -590,7 +590,7 @@ async def test_an_agent_can_hand_the_baton_to_the_operator_by_the_name_user(comm
             "requires_action": True,
         },
     )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     assert _payload(res).get("success") is not False, "the operator alias was refused"
 
     # Resolved to the real id — NOT left as the literal "user", which no get_my_turn
@@ -606,7 +606,7 @@ async def test_pass_baton_accepts_the_operator_alias_too(comm_mcp_client):
     tid = await _thread_with_em(new_client)
 
     res = await _call(new_client, "pass_baton", {"thread_id": tid, "to": "user"})
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
 
     operator_id = await _the_operator(db_session, tenant_key)
     assert await _baton_owner(new_client, tid) == operator_id
@@ -626,7 +626,7 @@ async def test_the_operator_alias_enrols_the_operator_as_a_user_not_an_agent(com
         "post_to_thread",
         {"thread_id": tid, "content": "your call", "from_agent": "em", "to_participant": "user"},
     )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
 
     operator_id = await _the_operator(db_session, tenant_key)
     rows = await db_session.execute(

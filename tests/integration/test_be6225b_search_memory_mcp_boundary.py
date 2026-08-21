@@ -31,13 +31,13 @@ from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from api.endpoints.mcp_tools._base import MCP_SHORT_TEXT_MAX
 from giljo_mcp.models import Product, Project
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.product_memory_entry import ProductMemoryEntry
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -45,7 +45,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(call_tool_result) -> dict:
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -200,7 +200,7 @@ async def test_search_memory_matching_query_returns_tenant_scoped_headlines(sear
     async with new_client() as session:
         result = await session.call_tool("search_memory", {"query": "quantumwidget"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["count"] == 1
     assert payload["product_id"] == product_id
@@ -242,7 +242,7 @@ async def test_search_memory_tag_filter_narrows_results(search_memory_mcp_client
     async with new_client() as session:
         result = await session.call_tool("search_memory", {"query": "quantumwidget", "tag": "security"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["count"] == 1
     assert payload["results"][0]["sequence"] == 1
@@ -267,7 +267,7 @@ async def test_search_memory_empty_query_returns_clean_empty(search_memory_mcp_c
     async with new_client() as session:
         result = await session.call_tool("search_memory", {"query": ""})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["count"] == 0
     assert payload["results"] == []
@@ -291,7 +291,7 @@ async def test_search_memory_no_match_returns_clean_empty(search_memory_mcp_clie
     async with new_client() as session:
         result = await session.call_tool("search_memory", {"query": "zzznevermatchesxyz"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["count"] == 0
     assert payload["results"] == []
@@ -308,7 +308,7 @@ async def test_search_memory_over_length_query_is_422(search_memory_mcp_client, 
 
     # Over-length is rejected at the FastMCP arg-validation boundary (a 422-class
     # ToolError), never a 500 and never an unvalidated value reaching the DB.
-    assert result.isError is True
+    assert result.is_error is True
     text = _error_text(result).lower()
     assert "query" in text or "length" in text or "2000" in text
 
@@ -338,7 +338,7 @@ async def test_search_memory_no_cross_tenant_leak(search_memory_mcp_client, db_s
     async with new_client() as session:
         result = await session.call_tool("search_memory", {"query": "quantumwidget"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["count"] == 0, "tenant B must not see tenant A's memory entry"
 
@@ -351,5 +351,5 @@ async def test_search_memory_no_active_product_surfaces_error(search_memory_mcp_
     async with new_client() as session:
         result = await session.call_tool("search_memory", {"query": "anything"})
 
-    assert result.isError is True
+    assert result.is_error is True
     assert "active product" in _error_text(result).lower()

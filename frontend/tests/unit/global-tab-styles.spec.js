@@ -16,14 +16,24 @@
  *
  * Note on testing strategy:
  * The global test setup (tests/setup.js) mocks Vuetify components with
- * simple HTML stubs. v-btn-toggle is NOT in the global stubs, so it
- * renders as an unresolved custom element <v-btn-toggle>. We use
- * wrapper.find('v-btn-toggle') to locate it in the rendered HTML.
- * Similarly, v-window renders as a <div class="v-window"> stub that
- * does not preserve parent-template classes. For the global-tabs-window
- * class test, we verify the class appears in the raw HTML output since
- * the stub's v-bind="$attrs" can propagate it in some cases, or we
- * read the source file statically.
+ * simple HTML stubs, so v-window renders as a <div class="v-window"> stub
+ * that does not preserve parent-template classes. For the global-tabs-window
+ * class test we read the source file statically instead.
+ *
+ * FE-9397 corrected this header. It previously instructed the next author to
+ * rely on v-btn-toggle being ABSENT from the global stubs and rendering as an
+ * unresolved custom element. That was the defect, written down as strategy: an
+ * unresolved component still renders its tag, its class and its default slot,
+ * so `expect(html).toContain('v-btn-toggle')` was true whether the toggle
+ * worked, was inert, or was stubbed — an assertion that could not fail. The
+ * component is registered now and unresolved components fail the run, so
+ * assert on structure that can actually break.
+ *
+ * Caution while reading below: the `createVuetify({ components, directives })`
+ * this file builds registers NOTHING. tests/setup.js mocks the `vuetify`
+ * module, so that import returns a no-op `install`. It is retained only
+ * because the mounts pass it as a plugin; do not read it as evidence that
+ * these tests run against real Vuetify.
  */
 
 import { describe, it, expect, vi } from 'vitest'
@@ -103,6 +113,10 @@ describe('Global Tab Styles', () => {
           project: {
             id: 'test-project',
             name: 'Test Project',
+            // FE-9419: ProjectTabs binds :product-id="localProject.product_id"
+            // to CloseoutModal, where productId is a required String. A project
+            // without one cannot exist, so a fixture without one is unrealistic.
+            product_id: 'test-product',
           },
         },
         global: {
@@ -164,8 +178,13 @@ describe('Global Tab Styles', () => {
 
       await wrapper.vm.$nextTick()
 
-      const html = wrapper.html()
-      expect(html).toContain('v-btn-toggle')
+      // FE-9397: assert the tabs live INSIDE the toggle. The old
+      // `expect(html).toContain('v-btn-toggle')` held even when the toggle was
+      // an inert unresolved element, so it proved nothing.
+      const toggle = wrapper.find('.v-btn-toggle')
+      expect(toggle.exists()).toBe(true)
+      expect(toggle.find('[data-testid="product-form-tab-setup"]').exists()).toBe(true)
+      expect(toggle.find('[data-testid="product-form-tab-info"]').exists()).toBe(true)
     })
 
     it('does not use global-tabs-window on ProductForm (dialog-based)', () => {
@@ -191,15 +210,18 @@ describe('Global Tab Styles', () => {
 
       await wrapper.vm.$nextTick()
 
-      const html = wrapper.html()
-      expect(html).toContain('v-btn-toggle')
+      // FE-9397: see the sibling assertion above — a raw string match on the
+      // rendered HTML could not distinguish a working toggle from a missing one.
+      const toggle = wrapper.find('.v-btn-toggle')
+      expect(toggle.exists()).toBe(true)
+      expect(toggle.findAll('[data-testid^="product-form-tab-"]').length).toBeGreaterThanOrEqual(2)
     })
 
     it('ProjectTabs uses pill-button toggles', async () => {
       const pinia = createPinia()
 
       const wrapper = mount(ProjectTabs, {
-        props: { project: { id: 'test', name: 'Test' } },
+        props: { project: { id: 'test', name: 'Test', product_id: 'test-product' } },
         global: {
           plugins: [pinia, vuetify],
           stubs: globalStubs,

@@ -36,7 +36,7 @@ async def test_tools_list_includes_health_check(mcp_client):
     assert "health_check" in tool_names, f"health_check missing from registered tools: {sorted(tool_names)}"
 
     health_check_tool = next(tool for tool in result.tools if tool.name == "health_check")
-    schema = health_check_tool.inputSchema
+    schema = health_check_tool.input_schema
     assert isinstance(schema, dict), "inputSchema must be a dict"
     assert "properties" in schema, f"inputSchema missing 'properties' key: {schema}"
     assert isinstance(schema["properties"], dict), "inputSchema.properties must be a dict"
@@ -50,7 +50,7 @@ async def test_health_check_round_trip(mcp_client):
     async with mcp_client as session:
         result = await session.call_tool("health_check", {})
 
-    assert result.isError is False, f"health_check returned an error result: {result}"
+    assert result.is_error is False, f"health_check returned an error result: {result}"
     assert result.content, "health_check returned empty content"
 
     payload = _extract_payload(result)
@@ -61,7 +61,7 @@ async def test_health_check_round_trip(mcp_client):
 def _extract_payload(call_tool_result) -> dict:
     """Decode the first text content block from a CallToolResult into a dict."""
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
 
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)

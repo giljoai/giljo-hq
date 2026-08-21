@@ -25,7 +25,6 @@ authenticated tenant_key and the endpoint filters by it.
 
 from __future__ import annotations
 
-import os
 import secrets
 import uuid
 from datetime import UTC, datetime
@@ -97,7 +96,6 @@ async def _seed_user_product_and_tasks(db_manager) -> dict:
             )
         await session.commit()
 
-        os.environ.setdefault("JWT_SECRET", "test_secret_key")
         token = JWTManager.create_access_token(
             user_id=user.id, username=user.username, role="developer", tenant_key=tenant_key
         )

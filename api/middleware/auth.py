@@ -239,7 +239,13 @@ class AuthMiddleware:
 
     def _is_public_endpoint(self, path: str) -> bool:
         """Check if endpoint is public (no authentication required)"""
-        if path in {"/", "/index.html", "/favicon.ico"} or path.startswith("/assets/"):
+        # BE-9420: /robots.txt joins the root files a crawler fetches unauthenticated.
+        # It answered 401 because ".txt" is absent from the static-extension list
+        # below -- so the one file whose entire job is to be read before anything
+        # else was the one file that required a session. Carved out by LITERAL PATH,
+        # never by extension: admitting ".txt" would make every future text file
+        # under the SPA root world-readable, which is a far wider change than this.
+        if path in {"/", "/index.html", "/favicon.ico", "/robots.txt"} or path.startswith("/assets/"):
             return True
         # Static files served from frontend/public (logos, icons, mascot)
         static_extensions = (".svg", ".png", ".jpg", ".ico", ".woff", ".woff2", ".ttf", ".eot", ".css")
@@ -254,6 +260,8 @@ class AuthMiddleware:
             "/landing",
             "/register",
             "/reset-password",
+            "/privacy",
+            "/terms",
         }:
             return True
         # Setup wizard routes must be accessible before any user exists

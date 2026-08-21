@@ -40,7 +40,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import tenant_session_context
-from giljo_mcp.models import Project
+from giljo_mcp.models import Product, Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.sequence_runs import CHAIN_TERMINAL_PROJECT_STATUSES
 from giljo_mcp.monitoring.agent_health_monitor import AgentHealthMonitor
@@ -66,8 +66,21 @@ async def _seed_execution(
     suffix = uuid.uuid4().hex[:8]
     then = datetime.now(UTC) - timedelta(minutes=last_progress_minutes_ago)
 
+    # BE-9437: a project belongs to a product. Its own, so an ACTIVE seed cannot
+    # collide with another under idx_project_single_active_per_product.
+    product = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"BE-9101 HealthProd {suffix}",
+        description="BE-9101 abandon-monitor seed.",
+        is_active=False,
+    )
+    session.add(product)
+    await session.flush()
+
     project = Project(
         id=str(uuid.uuid4()),
+        product_id=product.id,
         name=f"BE-9101 HealthProj {suffix}",
         description="BE-9101 abandon-monitor seed.",
         mission="m",

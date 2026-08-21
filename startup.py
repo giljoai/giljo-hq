@@ -612,7 +612,7 @@ def start_frontend_server(verbose: bool = False) -> subprocess.Popen | None:
         # the install marker (deps were updated since the last install). `npm ci`
         # is read-only against package-lock.json: it installs exactly what's locked
         # and refuses to mutate the lockfile, so a `git pull` of new deps never
-        # leaves a dirty working tree on machines like dogfood. If package.json
+        # leaves a dirty working tree on a shared clone. If package.json
         # and the lockfile drift apart, `npm ci` errors out -- that's the desired
         # signal to fix upstream, not a silent local mutation.
         node_modules_marker = frontend_dir / "node_modules" / ".package-lock.json"
@@ -800,7 +800,7 @@ def resolve_ssl_decision(no_ssl: bool = False) -> bool:
 #
 # After a fresh install or an upgrade, refuse to start the server if the install
 # is in a half-finished / drifted state that would serve a broken product. Each
-# check fails OPEN (any internal error → "no problem reported") so the gate can
+# check degrades to "no problem reported" on any internal error, so the gate can
 # only ever ADD a clear refusal on a genuinely-detected inconsistency, never wedge
 # an otherwise-healthy boot. The wording targets a non-developer customer.
 # ---------------------------------------------------------------------------
@@ -850,14 +850,14 @@ def _frontend_consistency_problem(frontend_dir: Path) -> str | None:
         if index_html.stat().st_mtime < package_json.stat().st_mtime:
             return "the web interface is out of date (it was built before the latest update)"
     except OSError:
-        return None  # cannot stat — fail open
+        return None  # cannot stat — degrades to no-issue-reported
     return None
 
 
 def _alembic_revision_drift() -> tuple[str | None, list[str]] | None:
     """Return (current_revision, [code_head(s)]) if the DB revision != code head, else None.
 
-    Fails OPEN: returns None (no drift reported) on any error or when the comparison
+    Degrades to no-drift-reported: returns None on any error or when the comparison
     cannot be made safely (no DB URL, SaaS mode handled by the caller, etc.). Reads the
     CE migration head from the static alembic.ini (version_locations = migrations/versions)
     so it never runs env.py and never picks up a SaaS-only chain.

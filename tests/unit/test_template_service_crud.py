@@ -21,9 +21,9 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from giljo_mcp.models import AgentTemplate
 from giljo_mcp.schemas.service_responses import TemplateGetResult
 from giljo_mcp.services.template_service import TemplateService
+from tests.helpers.model_factories import make_agent_template
 from tests.unit.conftest import make_mock_db_manager, make_mock_session
 
 
@@ -34,16 +34,15 @@ class TestTemplateServiceGet:
     async def test_get_template_by_id_success(self):
         """Test successful template retrieval by ID"""
         # Arrange
-        mock_template = Mock(spec=AgentTemplate)
-        mock_template.id = "test-id"
-        mock_template.name = "orchestrator"
-        mock_template.system_instructions = "You are an orchestrator..."
-        mock_template.role = "orchestrator"
-        mock_template.category = "role"
-        mock_template.cli_tool = None
-        mock_template.background_color = "#FF5733"
-        mock_template.tenant_key = "test-tenant"
-        mock_template.product_id = None
+        mock_template = make_agent_template(
+            id="test-id",
+            name="orchestrator",
+            system_instructions="You are an orchestrator...",
+            role="orchestrator",
+            category="role",
+            background_color="#FF5733",
+            tenant_key="test-tenant",
+        )
 
         mock_result = Mock()
         mock_result.scalar_one_or_none = Mock(return_value=mock_template)
@@ -68,16 +67,15 @@ class TestTemplateServiceGet:
     async def test_get_template_by_name_success(self):
         """Test successful template retrieval by name"""
         # Arrange
-        mock_template = Mock(spec=AgentTemplate)
-        mock_template.id = "test-id"
-        mock_template.name = "analyzer"
-        mock_template.system_instructions = "You are an analyzer..."
-        mock_template.role = "analyzer"
-        mock_template.category = "role"
-        mock_template.cli_tool = None
-        mock_template.background_color = "#00FF00"
-        mock_template.tenant_key = "test-tenant"
-        mock_template.product_id = None
+        mock_template = make_agent_template(
+            id="test-id",
+            name="analyzer",
+            system_instructions="You are an analyzer...",
+            role="analyzer",
+            category="role",
+            background_color="#00FF00",
+            tenant_key="test-tenant",
+        )
 
         mock_result = Mock()
         mock_result.scalar_one_or_none = Mock(return_value=mock_template)

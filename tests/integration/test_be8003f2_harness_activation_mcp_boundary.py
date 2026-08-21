@@ -34,13 +34,13 @@ from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -57,7 +57,7 @@ _S1_GATED = ("wt -w 0", "gnome-terminal", "osascript", "$DISPLAY", "$WAYLAND_DIS
 
 def _payload(result) -> dict:
     if getattr(result, "structuredContent", None):
-        return result.structuredContent
+        return result.structured_content
     first = result.content[0]
     text = getattr(first, "text", None)
     if text is None:  # pragma: no cover - defensive
@@ -139,9 +139,20 @@ async def _seed_chain_project(db_session, tenant_key: str) -> str:
     product_id is left NULL: the partial unique index idx_project_single_active_per_product
     forbids two ACTIVE projects sharing one product, and a chain needs two active members.
     """
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
+        product_id=_owning_product_project.id,
         name=f"BE-8003f2 {uuid.uuid4().hex[:8]}",
         description="chain member",
         mission="build it",
@@ -217,7 +228,7 @@ async def test_get_job_mission_chat_harness_renders_shell_less_worker(mcp_client
 
     async with mcp_client() as session:
         result = await session.call_tool("get_job_mission", {"job_id": job_id, "harness": "chat"})
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     protocol = payload["full_protocol"]
@@ -238,7 +249,7 @@ async def test_get_job_mission_default_and_garbage_harness_degrade_to_cli(mcp_cl
 
     async with mcp_client() as session:
         result = await session.call_tool("get_job_mission", {"job_id": job_id, "harness": harness})
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     protocol = payload["full_protocol"]
@@ -254,7 +265,7 @@ async def test_get_job_mission_default_and_garbage_harness_degrade_to_cli(mcp_cl
 async def _start_chain_and_get_conductor(session, p1: str, p2: str) -> str:
     """Mint a project-less chain conductor via start_chain_run; return its job_id."""
     result = await session.call_tool("start_chain_run", {"project_ids": [p1, p2], "execution_mode": "claude_code_cli"})
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["success"] is True
     return payload["conductor_job_id"]
@@ -274,7 +285,7 @@ async def test_get_staging_instructions_web_sandbox_renders_inline_conducting(mc
         result = await session.call_tool(
             "get_staging_instructions", {"job_id": conductor_job_id, "harness": "web_sandbox"}
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     assert payload["status"] == "CHAIN_CONDUCTOR_STAGING"
@@ -298,7 +309,7 @@ async def test_get_staging_instructions_default_and_garbage_degrade_to_cli(mcp_c
     async with mcp_client() as session:
         conductor_job_id = await _start_chain_and_get_conductor(session, p1, p2)
         result = await session.call_tool("get_staging_instructions", {"job_id": conductor_job_id, "harness": harness})
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     assert payload["status"] == "CHAIN_CONDUCTOR_STAGING"

@@ -13,14 +13,15 @@ baton (``get_my_turn`` finds threads awaiting you); set a terminal status
 
 Each wrapper validates input at the boundary (length caps -> clean 422) and
 delegates via ``_call_tool``. ``post_to_thread`` injects the authenticated user's
-identity from ``_base._resolve_user_id(ctx)`` so user posts are attributed to the
-person, not an agent.
+identity from ``_base._resolve_user_id(ctx)`` so an explicit ``as_user=true`` post
+is attributed to the person; authorship itself is fail-closed (BE-9379): every post
+must claim ``from_agent`` XOR ``as_user``, and omission is refused, never defaulted.
 """
 
 import logging
 from typing import Annotated, Any, Literal
 
-from mcp.server.fastmcp import Context
+from mcp.server.mcpserver import Context
 from pydantic import Field
 
 from api.endpoints._comm_ws import broadcast_thread_message, broadcast_thread_update
@@ -37,6 +38,8 @@ from api.endpoints.mcp_tools._base import (
 )
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 from giljo_mcp import branding
+from giljo_mcp.models.comm import VALID_SELF_REPORTED_STATUSES
+from giljo_mcp.services._comm_thread_wake_mixin import MAX_WAIT_SECONDS
 
 
 logger = logging.getLogger(__name__)
@@ -70,6 +73,55 @@ def _resolve_pass_baton_to(pass_baton_to: str, requires_action: bool, to_partici
     return "" if resolved == "none" else resolved
 
 
+def _post_refusal(from_agent: str, as_user: bool, my_status: str) -> dict[str, Any] | None:
+    """What makes a post refusable BEFORE any write — or None when it is acceptable.
+
+    Three BE-6081 Tier-2 domain rejections (a declined request the caller can
+    self-correct, NOT isError) share one property that is the reason they live together
+    here rather than inline: each must be decided before ``_call_tool`` runs, because a
+    post that is going to be refused must persist nothing at all. Grouping them also
+    keeps ``post_to_thread`` inside the 200-line rule as its parameter surface grows.
+
+    - BE-9379, both directions: authorship is fail-closed. Every post claims
+      ``from_agent`` (an agent's own voice) XOR ``as_user`` (the human's). An omitted
+      from_agent used to fall back to the authenticated principal, so one forgotten field
+      rendered an agent's post as the human operator in the durable record (CHT-0483).
+    - BE-9475: ``my_status`` is membership-checked against the locked vocabulary here, at
+      the boundary, ahead of the service layer. This value arrives from an AI agent, so
+      the failure has to name the valid set — a DB CHECK would produce a 500 and a Sentry
+      row for what is really a caller typo. Refusing the whole post rather than dropping
+      the bad field is deliberate: a silently-ignored status is the exact defect the
+      parameter exists to remove, and an agent that mistyped it would otherwise get a
+      success response and still show "Monitoring".
+    """
+    if from_agent and as_user:
+        return {
+            "success": False,
+            "error": "FROM_AGENT_AS_USER_EXCLUSIVE",
+            "message": "Pass either from_agent (posting as an agent) or as_user=true (posting "
+            "as the human user), never both. Nothing was posted.",
+        }
+    if not from_agent and not as_user:
+        return {
+            "success": False,
+            "error": "FROM_AGENT_REQUIRED",
+            "message": "post_to_thread requires from_agent — your agent role/lane id (e.g. "
+            "'implementer', 'lane2-be9379'). To post deliberately in the human user's voice, "
+            "pass as_user=true instead. Nothing was posted.",
+        }
+    if my_status and my_status not in VALID_SELF_REPORTED_STATUSES:
+        return {
+            "success": False,
+            "error": "INVALID_MY_STATUS",
+            "message": (
+                f"my_status must be one of {', '.join(VALID_SELF_REPORTED_STATUSES)} — got "
+                f"'{my_status}'. These are the only statuses the dashboard has a colour for. "
+                "Nothing was posted; re-send with a valid status, or omit my_status entirely."
+            ),
+        }
+    return None
+
+
 @mcp.tool(
     title="Create Thread",
     description=(
@@ -86,7 +138,18 @@ async def create_thread(
     severity: Annotated[
         str, Field(max_length=MCP_ID_MAX, description="Optional severity label (info|warn|critical|...).")
     ] = "",
-    product_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Optional product UUID filter dim.")] = "",
+    product_id: Annotated[
+        str,
+        Field(
+            max_length=MCP_ID_MAX,
+            description=(
+                "Optional product UUID to file the thread under -- pass the product you are "
+                "working under. This is what list_threads(product_id=...) filters on, so a "
+                "thread created without it can never be found that way. Omit for a thread "
+                "that belongs to no product."
+            ),
+        ),
+    ] = "",
     project_id: Annotated[
         str,
         Field(max_length=MCP_ID_MAX, description="Optional project UUID to anchor the thread. Omit for standalone."),
@@ -185,8 +248,9 @@ async def join_thread(
     title="Post to Thread",
     description=(
         "Post a message to a thread (append-only) -- the canonical agent-to-agent messaging "
-        "tool. Broadcasts by default; see to_participant, set_status, from_agent, and "
-        "pass_baton_to for DM, status, attribution, and atomic baton hand-off. "
+        "tool. Requires from_agent (or an explicit as_user=true for a post in the human "
+        "user's voice). Broadcasts by default; see to_participant, set_status, and "
+        "pass_baton_to for DM, status, and atomic baton hand-off. "
         f"{branding.TWO_HUB_DISAMBIGUATION}"
     ),
     annotations=_tool_hints("post_to_thread"),
@@ -199,9 +263,19 @@ async def post_to_thread(
         Field(
             max_length=MCP_ID_MAX,
             description="Your agent role/id from your activated template (e.g. implementer, tester, "
-            "reviewer). Drives the Hub author badge. Omit ONLY if posting as the human user.",
+            "reviewer). Drives the Hub author badge. REQUIRED — an omitted from_agent is refused "
+            "(FROM_AGENT_REQUIRED), never silently attributed to the human user. To post "
+            "deliberately in the human user's voice, pass as_user=true instead.",
         ),
     ] = "",
+    as_user: Annotated[
+        bool,
+        Field(
+            description="Post in the HUMAN USER's voice: attributes the post to the authenticated "
+            "person, not an agent. Deliberate and explicit — mutually exclusive with from_agent. "
+            "An agent posting on its own behalf never sets this."
+        ),
+    ] = False,
     to_participant: Annotated[
         str, Field(max_length=MCP_ID_MAX, description="Direct-message this participant_id. Omit to broadcast.")
     ] = "",
@@ -240,8 +314,25 @@ async def post_to_thread(
             "the baton untouched.",
         ),
     ] = "",
+    my_status: Annotated[
+        str,
+        Field(
+            max_length=MCP_ID_MAX,
+            description="What YOU are doing right now, shown on your dot in the Hub: one of "
+            "working | waiting | blocked | idle | sleeping | complete. Pass it on your status "
+            "posts — especially working when you start a unit and sleeping when you go into a "
+            "poll loop. Only useful if you are a headless/external agent that joined with "
+            "join_thread: agents the platform runs already report status automatically and that "
+            "always wins over this. Omit to leave your current status unchanged.",
+        ),
+    ] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
+    # Every pre-write refusal lives in _post_refusal (module top): nothing is persisted
+    # for a post that is going to be declined.
+    refusal = _post_refusal(from_agent, as_user, my_status)
+    if refusal is not None:
+        return refusal
     kwargs: dict[str, Any] = {
         "thread_id": thread_id,
         "content": content,
@@ -253,12 +344,16 @@ async def post_to_thread(
     }
     if from_agent:
         kwargs["from_agent"] = from_agent
+    if as_user:
+        kwargs["as_user"] = True
     if to_participant:
         kwargs["to_participant"] = to_participant
     if set_status:
         kwargs["set_status"] = set_status
     if loop_interval_minutes:
         kwargs["loop_interval_minutes"] = loop_interval_minutes
+    if my_status:
+        kwargs["self_reported_status"] = my_status
     # BE-9197: the auto-pass rule lives in _resolve_pass_baton_to (module top).
     effective_baton_to = _resolve_pass_baton_to(pass_baton_to, requires_action, to_participant)
     if effective_baton_to:
@@ -345,6 +440,10 @@ async def post_to_thread(
                     status=t["status"],
                     next_action_owner=result.get("next_action_owner"),
                     update_type="baton",
+                    # BE-9296a: the post already resolved its author server-side, so the
+                    # hand-off names the same identity the message itself carries.
+                    from_display_name=result.get("from_display_name"),
+                    from_kind=result.get("from_kind"),
                 )
         except Exception:  # noqa: BLE001 - WS failure is non-fatal; result is already committed
             logger.debug("MCP post_to_thread baton WS broadcast failed (non-fatal)", exc_info=True)
@@ -368,6 +467,59 @@ async def get_my_turn(
 
 
 @mcp.tool(
+    title="Await My Turn",
+    description=(
+        "BLOCK until it is your turn, instead of sleeping and re-polling. Returns the "
+        "moment a directed action-request or a baton lands for you, or empty when the "
+        "wait window closes -- just call it again to keep waiting. Costs no tokens while "
+        "waiting and delivers in under a second, so prefer it over a get_my_turn sleep "
+        "loop on any harness that can hold a tool call open. Chat surfaces that end the "
+        "turn cannot; there, keep polling get_my_turn. "
+        f"{branding.TWO_HUB_DISAMBIGUATION}"
+    ),
+    annotations=_tool_hints("await_my_turn"),
+)
+async def await_my_turn(
+    agent_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Your agent_id.")],
+    timeout_seconds: Annotated[
+        int,
+        Field(
+            ge=0,
+            le=MAX_WAIT_SECONDS,
+            description=(
+                "How long to block before returning empty. Omit for the default; the "
+                "server clamps it. This is the re-call cadence, not the delivery "
+                "latency -- a wake still arrives in under a second either way."
+            ),
+        ),
+    ] = 0,
+    ctx: Context = None,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {"agent_id": agent_id}
+    if timeout_seconds:
+        kwargs["timeout_seconds"] = timeout_seconds
+    return await _call_tool(ctx, "await_my_turn", kwargs)
+
+
+@mcp.tool(
+    title="Get Participant Liveness",
+    description=(
+        "Who on this thread is still there. Returns each participant with when they were "
+        "last seen and a coarse state -- active, quiet, gone, or unknown for someone who "
+        "has joined but not yet acted. Use it before deciding whether to keep waiting on "
+        "an agent, reassign its work, or escalate past an orchestrator that has gone dark. "
+        f"{branding.TWO_HUB_DISAMBIGUATION}"
+    ),
+    annotations=_tool_hints("get_participant_liveness"),
+)
+async def get_participant_liveness(
+    thread_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="The thread UUID.")],
+    ctx: Context = None,
+) -> dict[str, Any]:
+    return await _call_tool(ctx, "get_participant_liveness", {"thread_id": thread_id})
+
+
+@mcp.tool(
     title="Pass Baton",
     description=(
         "Pass the baton: set who acts next on a thread. 'to' is an agent_id, a user_id, "
@@ -379,9 +531,20 @@ async def get_my_turn(
 async def pass_baton(
     thread_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="The thread UUID.")],
     to: Annotated[str, Field(max_length=MCP_ID_MAX, description="Next owner: an agent_id | user_id | 'all' | 'none'.")],
+    from_agent: Annotated[
+        str,
+        Field(
+            max_length=MCP_ID_MAX,
+            description="Your agent_id — who is handing over. Pass it so the recipient's "
+            "alert names YOU rather than only the thread. Omit only if handing over as the human user.",
+        ),
+    ] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
-    result = await _call_tool(ctx, "pass_baton", {"thread_id": thread_id, "to": to})
+    kwargs: dict[str, Any] = {"thread_id": thread_id, "to": to}
+    if from_agent:
+        kwargs["from_agent"] = from_agent
+    result = await _call_tool(ctx, "pass_baton", kwargs)
     # BE-9292a: a refused hand-off moved no baton — broadcasting would tell the Hub the
     # owner had been cleared when it is unchanged.
     if result.get("success") is False:
@@ -408,6 +571,9 @@ async def pass_baton(
                 status=t["status"],
                 next_action_owner=result.get("next_action_owner"),
                 update_type="baton",
+                # BE-9296a: resolved by the service from the passer's participant row.
+                from_display_name=result.get("from_display_name"),
+                from_kind=result.get("from_kind"),
             )
     except Exception:  # noqa: BLE001 - WS failure is non-fatal; result is already committed
         logger.debug("MCP pass_baton WS broadcast failed (non-fatal)", exc_info=True)

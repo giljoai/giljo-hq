@@ -83,19 +83,19 @@
       <!-- Actions column -->
       <template #item.actions="{ item }">
         <v-menu>
-          <template v-slot:activator="{ props }">
+          <template #activator="{ props }">
             <v-btn icon="mdi-dots-vertical" size="small" variant="text" v-bind="props" />
           </template>
           <v-list density="compact">
             <v-list-item @click="openEditDialog(item)">
-              <template v-slot:prepend>
+              <template #prepend>
                 <v-icon>mdi-pencil</v-icon>
               </template>
               <v-list-item-title>Edit User</v-list-item-title>
             </v-list-item>
             <!-- CE-only: local credential management (self-hosted) -->
             <v-list-item v-if="showPasswordPinAction" @click="openPasswordDialog(item)">
-              <template v-slot:prepend>
+              <template #prepend>
                 <v-icon>mdi-key-variant</v-icon>
               </template>
               <v-list-item-title>Change Password &amp; PIN</v-list-item-title>
@@ -106,7 +106,7 @@
               :disabled="sendingReset"
               @click="triggerSaasResetAction(item)"
             >
-              <template v-slot:prepend>
+              <template #prepend>
                 <v-icon>{{ saasResetAction.icon }}</v-icon>
               </template>
               <v-list-item-title>{{ saasResetAction.label }}</v-list-item-title>
@@ -117,7 +117,7 @@
               <template #activator="{ props: tooltipProps }">
                 <div v-bind="tooltipProps" data-test="deactivate-self-tooltip-anchor">
                   <v-list-item disabled>
-                    <template v-slot:prepend>
+                    <template #prepend>
                       <v-icon>{{
                         item.is_active ? 'mdi-account-off' : 'mdi-account-check'
                       }}</v-icon>
@@ -131,7 +131,7 @@
               <span> To delete your own account, use Settings → Account → Danger Zone. </span>
             </v-tooltip>
             <v-list-item v-else @click="toggleUserStatus(item)">
-              <template v-slot:prepend>
+              <template #prepend>
                 <v-icon>{{ item.is_active ? 'mdi-account-off' : 'mdi-account-check' }}</v-icon>
               </template>
               <v-list-item-title>

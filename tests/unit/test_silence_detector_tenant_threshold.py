@@ -23,9 +23,10 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import text
+import pytest_asyncio
+from sqlalchemy import text, update
 
-from giljo_mcp.database import DatabaseManager
+from giljo_mcp.database import DatabaseManager, tenant_isolation_bypass
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.services.settings_service import AGENT_SILENCE_THRESHOLD_KEY
 from giljo_mcp.services.silence_detector import SilenceDetector, _coerce_threshold_overrides
@@ -40,6 +41,37 @@ def _ws_manager() -> AsyncMock:
 
 def _detector() -> SilenceDetector:
     return SilenceDetector(db_manager=Mock(spec=DatabaseManager), ws_manager=_ws_manager())
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _retire_stale_working_residue(db_manager):
+    """Retire foreign ``status='working'`` residue before each test (BE-9373).
+
+    The threshold tests below assert EXACT counts from
+    ``SilenceDetector._detect_silent_agents``, whose scan is deliberately
+    tenant-blind (system-wide reaper — out of scope to change). The per-worker
+    test DBs are REUSED both across runs and across the suites of one run, and
+    suites that commit ``status='working'`` AgentExecution rows through real
+    ``db_manager`` sessions without deleting them (observed: the BE-9330 API
+    suite seeds ``started_at = now-5min`` executions with no teardown) leave
+    rows the scan counts — immediately within the same run, and forever after
+    it. Any such row inflates this module's counts. Residue is retired to the
+    terminal status ``decommissioned`` (UPDATE, not DELETE — no FK risk with
+    child tables) under the same audited bypass the detector itself uses. Safe
+    by construction: tests in this worker's DB run serially, so every
+    ``working`` row present before a test starts is by definition residue, not
+    a live test's data.
+    """
+    async with db_manager.get_session_async() as session:
+        stmt = update(AgentExecution).where(AgentExecution.status == "working").values(status="decommissioned")
+        with tenant_isolation_bypass(
+            session,
+            reason="BE-9373 test isolation: retire stale cross-run residue before exact-count assertions",
+            models=(AgentExecution,),
+        ):
+            await session.execute(stmt)
+        await session.commit()
+    yield
 
 
 async def _seed_working_agent(session, tenant_key: str, last_progress_at: datetime) -> AgentExecution:
@@ -65,7 +97,14 @@ async def _seed_working_agent(session, tenant_key: str, last_progress_at: dateti
         last_progress_at=last_progress_at,
     )
     session.add(agent)
-    await session.commit()
+    # flush, NOT commit (BE-9373): the detector scans through this same session,
+    # so a flush is all it needs to see the rows. Under db_session
+    # (TransactionalTestContext) even a commit() here is savepoint-contained and
+    # rolled back — but flush() makes the no-globally-visible-writes intent
+    # structural rather than an accident of the fixture. Under a real
+    # db_manager session (the detection-cycle test below) the context manager
+    # commits on exit, so persistence there is unchanged.
+    await session.flush()
     return agent
 
 
@@ -85,6 +124,9 @@ async def test_tenant_override_flags_silent_before_deployment_default_would(db_s
         tenant_overrides={tenant_override: 2},  # this tenant's own override: 5 min DOES trip 2 min
     )
 
+    # Exact count over a tenant-blind scan: only valid because
+    # _retire_stale_working_residue cleared foreign 'working' rows (BE-9373 —
+    # cross-run DB residue, not test order, made this ambient-red at -n 6).
     assert count == 1
     assert agent.status == "silent"
 
@@ -104,6 +146,8 @@ async def test_unset_tenant_falls_back_to_deployment_default(db_session):
         tenant_overrides={},  # no override for this (or any) tenant
     )
 
+    # Exact count over a tenant-blind scan — depends on
+    # _retire_stale_working_residue (BE-9373 cross-run DB residue).
     assert count == 1
     assert agent.status == "silent"
 
@@ -124,6 +168,9 @@ async def test_tenant_within_its_own_override_window_is_not_flagged(db_session):
         tenant_overrides={tenant_loose_override: 30},  # this tenant's own override: 7 min does NOT trip 30 min
     )
 
+    # count == 0 is the strictest global assertion in the file: ANY foreign
+    # stale 'working' row fails it — hence _retire_stale_working_residue
+    # (BE-9373 cross-run DB residue).
     assert count == 0
     assert agent.status == "working"
 
@@ -140,6 +187,8 @@ async def test_no_overrides_matches_pre_fe9241_single_threshold_behavior(db_sess
     # tenant_overrides omitted entirely (defaults to None -> {} internally).
     count = await _detector()._detect_silent_agents(db_session, threshold_minutes=10)
 
+    # Exact count over a tenant-blind scan — depends on
+    # _retire_stale_working_residue (BE-9373 cross-run DB residue).
     assert count == 1
     assert agent.status == "silent"
 

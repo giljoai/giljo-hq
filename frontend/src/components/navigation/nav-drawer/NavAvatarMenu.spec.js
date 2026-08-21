@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { markRaw } from 'vue'
 import NavAvatarMenu from './NavAvatarMenu.vue'
 
 vi.mock('@/i18n/licenseCopy', () => ({
@@ -64,7 +65,7 @@ describe('NavAvatarMenu', () => {
     accountStatusTitle: '',
     accountStatusSubtitle: '',
     cancellingDeletion: false,
-    AccountStatusBadgeComponent: null,
+    accountStatusBadgeComponent: null,
     isAdmin: true,
   }
 
@@ -133,5 +134,58 @@ describe('NavAvatarMenu', () => {
     const logoutItem = wrapper.findAll('.v-list-item').find(el => el.text().includes('Logout'))
     await logoutItem.trigger('click')
     expect(wrapper.emitted('logout')).toBeTruthy()
+  })
+
+  // FE-9419: the account-status badge reaches this component from
+  // NavigationDrawer.vue as a KEBAB-CASE TEMPLATE ATTRIBUTE, and that is the
+  // layer the bug lived at — the prop was declared `AccountStatusBadgeComponent`
+  // with a leading capital, which `camelize('account-status-badge-component')`
+  // can never produce, so the binding fell through to $attrs and the badge was
+  // never rendered in SaaS. Every test above passes props as an OBJECT, whose
+  // keys Vue Test Utils maps straight through, so none of them could see it.
+  // Mount through a real parent template or this stays invisible.
+  describe('account-status badge arrives through a template binding (FE-9419)', () => {
+    const Badge = {
+      name: 'StubAccountStatusBadge',
+      template: '<span data-test="account-status-badge-stub" />',
+    }
+
+    // markRaw: VTU wraps `props` in reactive(), and a reactive component
+    // definition makes Vue warn ("received a Component that was made a
+    // reactive object"). Production uses shallowRef for the same reason.
+    const Parent = {
+      components: { NavAvatarMenu },
+      props: { badge: { type: Object, default: null } },
+      setup: () => ({ user: baseProps.currentUser }),
+      template:
+        '<NavAvatarMenu :current-user="user" user-initials="PA" giljo-mode="saas"' +
+        ' :account-status-badge-component="badge" />',
+    }
+
+    function mountViaTemplate(badge) {
+      return mount(Parent, {
+        props: { badge: badge ? markRaw(badge) : null },
+        global: { stubs: globalStubs },
+      })
+    }
+
+    it('renders the badge in the avatar orb when a parent binds it', () => {
+      const wrapper = mountViaTemplate(Badge)
+      expect(wrapper.find('[data-test="account-status-badge-stub"]').exists()).toBe(true)
+    })
+
+    it('binds it as a prop, not as a fallthrough attribute', () => {
+      const wrapper = mountViaTemplate(Badge)
+      const menu = wrapper.findComponent(NavAvatarMenu)
+      expect(menu.props('accountStatusBadgeComponent')).toBe(Badge)
+      // The failure mode was the component object being stringified into a DOM
+      // attribute — `<div account-status-badge-component="[object Object]">`.
+      expect(wrapper.html()).not.toContain('account-status-badge-component=')
+    })
+
+    it('renders no badge when the parent binds nothing', () => {
+      const wrapper = mountViaTemplate(null)
+      expect(wrapper.find('[data-test="account-status-badge-stub"]').exists()).toBe(false)
+    })
   })
 })

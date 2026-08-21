@@ -18,6 +18,7 @@ from src.giljo_mcp.services.project_service._mcp_adapter_query_mixin import (
     _MCP_LIST_PROJECT_CEILING,
     McpAdapterQueryMixin,
 )
+from src.giljo_mcp.services.project_service._mcp_list_diagnostics import log_payload_size_breakdown
 
 
 class TestMcpAdapterQueryMixinModule:
@@ -38,7 +39,17 @@ class TestMcpAdapterQueryMixinModule:
         """The relocated methods must be directly defined on McpAdapterQueryMixin."""
         assert hasattr(McpAdapterQueryMixin, "list_projects_for_mcp")
         assert hasattr(McpAdapterQueryMixin, "_build_mcp_project_list")
-        assert hasattr(McpAdapterQueryMixin, "_log_payload_size_breakdown")
+
+    def test_log_payload_size_breakdown_now_lives_off_the_mixin(self):
+        """BE-9471: extracted to a plain function (no `self`) to free 800-line headroom.
+
+        Was a BE-6005 method on this mixin; BE-9471 moved it to
+        ``_mcp_list_diagnostics`` (same pattern BE-9468 already used for
+        ``_mcp_list_bounds``) rather than growing a module already at cap.
+        Behavior-neutral -- same log line, same call, one module over.
+        """
+        assert not hasattr(McpAdapterQueryMixin, "_log_payload_size_breakdown")
+        assert callable(log_payload_size_breakdown)
 
 
 class TestProjectServiceMroAfterSplit:
@@ -84,7 +95,6 @@ class TestProjectServiceMroAfterSplit:
         relocated = [
             "list_projects_for_mcp",
             "_build_mcp_project_list",
-            "_log_payload_size_breakdown",
         ]
         for method_name in relocated:
             owners = [cls for cls in ProjectService.__mro__ if method_name in cls.__dict__]

@@ -30,14 +30,14 @@ from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from giljo_mcp.models import Project
+from giljo_mcp.models import Product, Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.templates import AgentTemplate
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -45,6 +45,16 @@ pytestmark = pytest.mark.asyncio
 
 async def _seed_project_and_template(session: AsyncSession, tenant_key: str) -> str:
     suffix = uuid.uuid4().hex[:8]
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    session.add(_owning_product_project)
     project = Project(
         id=str(uuid.uuid4()),
         name=f"BE-6008 Boundary {suffix}",
@@ -52,6 +62,7 @@ async def _seed_project_and_template(session: AsyncSession, tenant_key: str) -> 
         mission="Stage then write.",
         status="active",
         tenant_key=tenant_key,
+        product_id=_owning_product_project.id,
         series_number=1,
         execution_mode="multi_terminal",
         created_at=datetime.now(UTC),
@@ -118,7 +129,7 @@ async def spawn_boundary_client(monkeypatch, db_manager, db_session):
 
 def _payload(call_tool_result) -> dict:
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     return json.loads(call_tool_result.content[0].text)
 
 
@@ -142,7 +153,7 @@ async def test_spawn_job_without_mission_through_mcp_boundary_is_staged(spawn_bo
             },
         )
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     job_id = _payload(result)["job_id"]
 
     exec_row = await db_session.execute(

@@ -42,7 +42,6 @@ Project: BE6004C-4 (RC-4).
 from __future__ import annotations
 
 import contextlib
-import os
 import secrets
 import uuid
 
@@ -52,7 +51,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete
 
 from giljo_mcp.auth.jwt_manager import JWTManager
-from giljo_mcp.models import Project, User
+from giljo_mcp.models import Product, Project, User
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.test_db_helper import PostgreSQLTestHelper
@@ -106,6 +105,16 @@ async def _seed_tenant_with_project(db_manager) -> dict:
         session.add(user)
         await session.flush()
 
+        # BE-9437: a project belongs to a product. Its own, so an active
+        # seed cannot collide under idx_project_single_active_per_product.
+        _owning_product_project = Product(
+            id=str(uuid.uuid4()),
+            tenant_key=tenant_key,
+            name=f"Owning Product {uuid.uuid4().hex[:6]}",
+            description="seeded",
+            is_active=False,
+        )
+        session.add(_owning_product_project)
         project = Project(
             id=str(uuid.uuid4()),
             name=f"WS Project {suffix}",
@@ -113,12 +122,12 @@ async def _seed_tenant_with_project(db_manager) -> dict:
             mission="WS regression",
             status="active",
             tenant_key=tenant_key,
+            product_id=_owning_product_project.id,
             series_number=int(uuid.uuid4().int % 900000) + 100000,
         )
         session.add(project)
         await session.commit()
 
-    os.environ.setdefault("JWT_SECRET", "test_secret_key")
     token = JWTManager.create_access_token(
         user_id=user.id,
         username=user.username,
@@ -223,7 +232,7 @@ def _install_ws_app_state(db_manager):
 
 
 @pytest.mark.tenant_isolation
-def test_authenticated_ws_handshake_succeeds_and_subscribe_delivers_event():
+def test_authenticated_ws_handshake_succeeds_and_subscribe_delivers_event(monkeypatch):
     """RC-4: authenticated WS connects (no 1008), pings, and subscribe delivers.
 
     Before BE6004C-4 the pre-auth ``SetupState`` probe ran on a bare session and
@@ -233,8 +242,7 @@ def test_authenticated_ws_handshake_succeeds_and_subscribe_delivers_event():
     """
     from api.app import app
 
-    os.environ.setdefault("JWT_SECRET", "test_secret_key")
-    os.environ.setdefault("GILJO_TENANT_GUARD_MODE", "enforce")
+    monkeypatch.setenv("GILJO_TENANT_GUARD_MODE", "enforce")
 
     with _no_op_lifespan(app), TestClient(app) as client:
         db_manager = client.portal.call(_build_portal_db_manager)
@@ -262,7 +270,7 @@ def test_authenticated_ws_handshake_succeeds_and_subscribe_delivers_event():
 
 
 @pytest.mark.tenant_isolation
-def test_ws_subscribe_blocks_cross_tenant_project():
+def test_ws_subscribe_blocks_cross_tenant_project(monkeypatch):
     """A client cannot subscribe to a project owned by a different tenant.
 
     The post-auth entity-resolution read is scoped to the connection's tenant, so
@@ -271,8 +279,7 @@ def test_ws_subscribe_blocks_cross_tenant_project():
     """
     from api.app import app
 
-    os.environ.setdefault("JWT_SECRET", "test_secret_key")
-    os.environ.setdefault("GILJO_TENANT_GUARD_MODE", "enforce")
+    monkeypatch.setenv("GILJO_TENANT_GUARD_MODE", "enforce")
 
     with _no_op_lifespan(app), TestClient(app) as client:
         db_manager = client.portal.call(_build_portal_db_manager)

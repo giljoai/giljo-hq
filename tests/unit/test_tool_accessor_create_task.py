@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.services.product_service import ProductService
 from giljo_mcp.tools.tool_accessor import ToolAccessor
 
 
@@ -53,10 +54,16 @@ def _make_tool_accessor(tenant_key="tenant-abc"):
 
 
 def _patch_active_product(product_id="prod-456"):
-    """Helper: patch ProductService so create_task sees an active product."""
+    """Helper: patch ProductService so create_task binds to a product.
+
+    BE-9411: the create path now resolves through ``resolve_binding_product``
+    (which validates an explicitly supplied product_id against the tenant and
+    falls through to the active product when none is supplied), so that is the
+    method stubbed here.
+    """
     return patch(
         "giljo_mcp.services.product_service.ProductService",
-        return_value=AsyncMock(get_active_product=AsyncMock(return_value=_make_mock_product(product_id))),
+        return_value=AsyncMock(resolve_binding_product=AsyncMock(return_value=_make_mock_product(product_id))),
     )
 
 
@@ -81,8 +88,8 @@ class TestToolAccessorCreateTaskValidation:
     @pytest.mark.asyncio
     async def test_raises_validation_error_when_no_active_product(self):
         tool_accessor = _make_tool_accessor()
-        with patch("giljo_mcp.services.product_service.ProductService") as cls:
-            cls.return_value = AsyncMock(get_active_product=AsyncMock(return_value=None))
+        # BE-9411: real resolver, nothing active to find -> the real 422 it raises.
+        with patch.object(ProductService, "get_active_product", new_callable=AsyncMock, return_value=None):
             with pytest.raises(ValidationError) as exc_info:
                 await tool_accessor._task_service.create_task_for_mcp(
                     title="Test Task",

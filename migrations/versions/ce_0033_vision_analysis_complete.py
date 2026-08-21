@@ -15,7 +15,7 @@ summaries are now written exclusively by the AI agent via the
 (BE-5118) — TRUE only when every active vision document and the product
 aggregate both have light + medium summaries populated.
 
-Backfill rule (Patrik's decision): legacy products with non-NULL Sumy-era
+Backfill rule (design decision): legacy products with non-NULL Sumy-era
 consolidated summaries are marked TRUE. New uploads start FALSE until the
 agent writes the summaries.
 

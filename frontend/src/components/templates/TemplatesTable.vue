@@ -7,13 +7,14 @@
     class="elevation-0 templates-table"
     item-key="id"
     :items-per-page="10"
+    :sort-by="TEMPLATE_TABLE_DEFAULT_SORT"
     :item-class="(item) => (item.is_active ? '' : 'inactive-template')"
   >
-    <template v-slot:item.name="{ item }">
+    <template #item.name="{ item }">
       <div class="font-weight-medium">{{ item.name }}</div>
     </template>
 
-    <template v-slot:item.role="{ item }">
+    <template #item.role="{ item }">
       <span
         class="template-role-badge"
         :style="{
@@ -26,11 +27,32 @@
       </span>
     </template>
 
-    <template v-slot:item.updated_at="{ item }">
-      <span class="text-body-small">{{ item._system ? '—' : formatDate(item.updated_at) }}</span>
+    <template #item.updated_at="{ item }">
+      <v-tooltip location="top" max-width="300" :disabled="!updatedState(item).exact">
+        <template #activator="{ props }">
+          <span
+            v-bind="props"
+            class="text-body-small"
+            :class="{
+              'text-muted-a11y': updatedState(item).kind === 'never-edited',
+              'updated-new': updatedState(item).kind === 'added-today',
+            }"
+            :data-testid="`updated-state-${item.id}`"
+          >
+            {{ updatedState(item).label ?? formatDate(item.updated_at) }}
+          </span>
+        </template>
+        <span v-if="updatedState(item).kind === 'added-today'">
+          Added {{ formatDate(item.created_at) }}, and not edited since.
+        </span>
+        <span v-else-if="updatedState(item).kind === 'never-edited'">
+          This agent has never been edited. Created {{ formatDate(item.created_at) }}.
+        </span>
+        <span v-else>Last edited: {{ formatDate(item.updated_at) }}</span>
+      </v-tooltip>
     </template>
 
-    <template v-slot:item.export_status="{ item }">
+    <template #item.export_status="{ item }">
       <div class="d-flex flex-column align-center">
         <template v-if="item._system">
           <span class="text-body-small text-muted-a11y">System managed</span>
@@ -52,7 +74,7 @@
             May be outdated
           </v-chip>
           <v-tooltip location="top" max-width="300">
-            <template v-slot:activator="{ props }">
+            <template #activator="{ props }">
               <span
                 v-bind="props"
                 class="text-body-small text-muted-a11y"
@@ -75,42 +97,57 @@
       </div>
     </template>
 
-    <template v-slot:item.is_active="{ item }">
+    <template #item.is_active="{ item }">
       <div class="d-flex align-center justify-center">
         <template v-if="item._system">
           <v-icon color="grey" size="small">mdi-lock</v-icon>
         </template>
         <template v-else>
+          <!-- BE-9385a: this switch is the PER-PRODUCT enable, written to the
+               product_agent_assignments junction. ``product_active`` is undefined
+               until the parent has loaded the active product's assignments, and
+               until then it falls back to the tenant flag -- the same tolerance
+               the server applies to a product with no junction rows. The
+               tenant-wide switch is a SEPARATE control -- the edit dialog's
+               "Available in all products" (BE-9394); this one never writes it. -->
           <v-switch
-            :model-value="item.is_active"
-            :disabled="!item.is_active && remainingUserSlots === 0"
+            :model-value="item.product_active ?? item.is_active"
+            :disabled="!item.is_active"
             color="primary"
             hide-details
             density="compact"
-            :aria-label="item.is_active ? 'Deactivate agent' : 'Activate agent'"
+            :aria-label="
+              (item.product_active ?? item.is_active)
+                ? 'Disable agent for this product'
+                : 'Enable agent for this product'
+            "
             :data-testid="`template-toggle-${item.role}`"
             @update:model-value="$emit('toggle-active', item, $event)"
           />
-          <v-tooltip v-if="!item.is_active && remainingUserSlots === 0" location="top">
-            <template v-slot:activator="{ props }">
+          <v-tooltip v-if="!item.is_active" location="top">
+            <template #activator="{ props }">
               <v-icon v-bind="props" size="small" class="ml-1">
                 mdi-help-circle-outline
               </v-icon>
             </template>
-            <span>
+            <span v-if="remainingUserSlots === 0">
               Maximum {{ userAgentLimit }} user-managed agents allowed (context budget limit).
               Deactivate another agent first.
+            </span>
+            <span v-else>
+              This agent is switched off for your whole account, so it cannot be enabled for
+              a single product. Turn on &ldquo;Available in all products&rdquo; under Edit first.
             </span>
           </v-tooltip>
         </template>
       </div>
     </template>
 
-    <template v-slot:item.actions="{ item }">
+    <template #item.actions="{ item }">
       <div v-if="item._system" />
       <div v-else class="d-flex align-center justify-center">
         <v-menu>
-          <template v-slot:activator="{ props }">
+          <template #activator="{ props }">
             <v-btn
               icon="mdi-dots-vertical"
               size="small"
@@ -170,6 +207,7 @@
 import { format } from 'date-fns'
 import { getAgentColor as getAgentColorConfig } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
+import { templateUpdatedState, TEMPLATE_TABLE_DEFAULT_SORT } from './templateTableConfig'
 
 /**
  * @type {Object} props
@@ -231,10 +269,20 @@ const formatDate = (date) => {
   if (!date) return 'N/A'
   return format(new Date(date), 'MMM dd, yyyy HH:mm')
 }
+
+const updatedState = (item) => templateUpdatedState(item)
 </script>
 
 <style scoped lang="scss">
 @use '../../styles/design-tokens' as *;
+
+/* FE-9385c: "Added today" is the one state the user should act on, so it is the
+   one that carries brand accent. The other two states stay quiet — a screen
+   where everything is highlighted highlights nothing. */
+.updated-new {
+  color: $color-brand-yellow;
+  font-weight: 600;
+}
 
 .template-role-badge {
   display: inline-block;

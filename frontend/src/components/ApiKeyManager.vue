@@ -75,7 +75,7 @@
         <!-- Actions Column -->
         <template #item.actions="{ item }">
           <v-tooltip text="Revoke this API key">
-            <template v-slot:activator="{ props }">
+            <template #activator="{ props }">
               <v-btn
                 icon="mdi-delete"
                 size="small"

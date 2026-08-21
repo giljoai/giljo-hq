@@ -567,7 +567,7 @@ async def test_staging_orchestrator_response_has_no_closeout_checklist(
     """CE-0027 (g): staging-phase orchestrator's complete_job response must
     NOT include closeout_checklist. The checklist content (request_approval,
     deferred findings) is impl-phase guidance and confused the staging agent
-    on the dogfood billing test.
+    on the test-install billing test.
     """
     project = await _seed_project(db_session, test_tenant_key, test_product.id, staging_status="staging")
     job, _ = await _seed_orchestrator_job(db_session, test_tenant_key, project.id, project_phase="staging")

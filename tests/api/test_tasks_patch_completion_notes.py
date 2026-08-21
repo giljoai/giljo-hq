@@ -20,7 +20,6 @@ into ``update_task`` per BE-6225a).
 
 from __future__ import annotations
 
-import os
 import secrets
 import uuid
 
@@ -89,7 +88,6 @@ async def _seed_user_with_task(db_manager, *, title: str = "Patch target") -> di
         await session.commit()
         await session.refresh(task)
 
-        os.environ.setdefault("JWT_SECRET", "test_secret_key")
         token = JWTManager.create_access_token(
             user_id=user.id,
             username=user.username,
@@ -132,7 +130,7 @@ async def test_patch_completed_with_notes_appends_audit_trail(
     resp = await api_client.patch(
         f"/api/v1/tasks/{seeded['task_id']}",
         headers=seeded["headers"],
-        json={"status": "completed", "completion_notes": "shipped to dogfood"},
+        json={"status": "completed", "completion_notes": "shipped to test install"},
     )
     assert resp.status_code == 200, resp.text
 
@@ -140,7 +138,7 @@ async def test_patch_completed_with_notes_appends_audit_trail(
     assert description is not None
     assert description.startswith(seeded["initial_description"])
     assert "[completed " in description
-    assert "shipped to dogfood" in description
+    assert "shipped to test install" in description
 
 
 @pytest.mark.asyncio

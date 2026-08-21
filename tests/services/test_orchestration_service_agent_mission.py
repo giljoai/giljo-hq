@@ -191,7 +191,9 @@ def setup_get_agent_mission_mocks_with_project(session, job, execution, project_
     session.execute = AsyncMock(side_effect=_next_result)
 
 
-CH6_MARKER = "CH6: AUTO CHECK-IN PROTOCOL"
+# FE-9296b renamed the chapter (slider retired; cadence is account-level now).
+# Both variants — project orchestrator and chain conductor — share this prefix.
+CH6_MARKER = "CH6: CHECK-IN"
 
 
 class TestGetAgentMissionCh6Injection:

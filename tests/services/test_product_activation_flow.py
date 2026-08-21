@@ -15,12 +15,12 @@ causing SQLAlchemy async lazy loading errors when accessing primary_vision_path 
 
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, PropertyMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from giljo_mcp.exceptions import BaseGiljoError
-from giljo_mcp.models.products import Product, VisionDocument
+from tests.helpers.model_factories import make_product, make_vision_document
 
 
 @pytest.fixture
@@ -56,29 +56,30 @@ async def test_get_active_product_returns_vision_path_without_lazy_load_error(mo
 
     db_manager, session = mock_db_manager
 
-    # Create mock product with vision_documents already loaded (eager loading simulation)
-    mock_product = MagicMock(spec=Product)
-    mock_product.id = "test-product-id"
-    mock_product.name = "Test Product"
-    mock_product.description = "A test product"
-    mock_product.tenant_key = "test-tenant"
-    mock_product.is_active = True
-    mock_product.deleted_at = None
-    mock_product.project_path = "/path/to/project"
-    # Use datetime objects that have .isoformat() method
-    mock_product.created_at = datetime(2025, 1, 1, tzinfo=UTC)
-    mock_product.updated_at = datetime(2025, 1, 1, tzinfo=UTC)
-    mock_product.config_data = {}
-
-    # Mock vision_documents as already loaded (eager loading)
-    mock_vision_doc = MagicMock(spec=VisionDocument)
-    mock_vision_doc.is_active = True
-    mock_vision_doc.vision_path = "/path/to/vision.md"
-    mock_vision_doc.vision_document = None
-    mock_product.vision_documents = [mock_vision_doc]
-
-    # Mock primary_vision_path property to return the path
-    type(mock_product).primary_vision_path = PropertyMock(return_value="/path/to/vision.md")
+    # INF-9417 deleted two lines here; both would be restored by a reader who did not
+    # know why they went.
+    #   `type(mock_product).primary_vision_path = PropertyMock(...)` -- on a real
+    #   instance `type()` IS `Product`, so that patches the model CLASS for the rest of
+    #   the worker process. Unnecessary anyway: the property is real and derives the
+    #   path from a real vision document.
+    #   `mock_product.config_data = {}` -- not a Product column since Handover 0840c.
+    #   `spec=` guards attribute reads, not writes, so the mock accepted it silently.
+    mock_vision_doc = make_vision_document(
+        is_active=True,
+        vision_path="/path/to/vision.md",
+        vision_document=None,
+    )
+    mock_product = make_product(
+        id="test-product-id",
+        name="Test Product",
+        description="A test product",
+        tenant_key="test-tenant",
+        is_active=True,
+        project_path="/path/to/project",
+        created_at=datetime(2025, 1, 1, tzinfo=UTC),
+        updated_at=datetime(2025, 1, 1, tzinfo=UTC),
+        vision_documents=[mock_vision_doc],
+    )
 
     # Mock the session.execute result
     mock_result = MagicMock()
@@ -185,23 +186,18 @@ async def test_get_active_product_with_empty_vision_documents(mock_db_manager):
 
     db_manager, session = mock_db_manager
 
-    # Create mock product with empty vision_documents
-    mock_product = MagicMock(spec=Product)
-    mock_product.id = "test-product-id"
-    mock_product.name = "Test Product"
-    mock_product.description = "A test product"
-    mock_product.tenant_key = "test-tenant"
-    mock_product.is_active = True
-    mock_product.deleted_at = None
-    mock_product.project_path = "/path/to/project"
-    # Use datetime objects that have .isoformat() method
-    mock_product.created_at = datetime(2025, 1, 1, tzinfo=UTC)
-    mock_product.updated_at = datetime(2025, 1, 1, tzinfo=UTC)
-    mock_product.config_data = {}
-    mock_product.vision_documents = []  # Empty
-
-    # Mock primary_vision_path to return empty string (no docs)
-    type(mock_product).primary_vision_path = PropertyMock(return_value="")
+    # No documents, so the real `primary_vision_path` property derives "" by itself.
+    mock_product = make_product(
+        id="test-product-id",
+        name="Test Product",
+        description="A test product",
+        tenant_key="test-tenant",
+        is_active=True,
+        project_path="/path/to/project",
+        created_at=datetime(2025, 1, 1, tzinfo=UTC),
+        updated_at=datetime(2025, 1, 1, tzinfo=UTC),
+        vision_documents=[],
+    )
 
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = mock_product

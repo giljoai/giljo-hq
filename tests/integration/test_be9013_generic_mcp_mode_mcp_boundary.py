@@ -40,13 +40,13 @@ from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -87,7 +87,7 @@ _DEFAULT_LABEL = "[YOUR PATH — Generic MCP]"
 
 def _payload(result) -> dict:
     if getattr(result, "structuredContent", None):
-        return result.structuredContent
+        return result.structured_content
     first = result.content[0]
     text = getattr(first, "text", None)
     if text is None:  # pragma: no cover - defensive
@@ -248,7 +248,7 @@ async def test_generic_mcp_staging_renders_spawn_block_and_self_adopt_rung(mcp_c
 
     async with client() as session:
         result = await session.call_tool("get_staging_instructions", {"job_id": job_id})
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     ch3 = payload["orchestrator_protocol"]["ch3_agent_spawning_rules"]
@@ -290,7 +290,7 @@ async def test_generic_mcp_chat_harness_tunes_self_adopt_to_planning_only(mcp_cl
 
     async with client() as session:
         result = await session.call_tool("get_staging_instructions", {"job_id": job_id, "harness": "chat"})
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     ch3 = payload["orchestrator_protocol"]["ch3_agent_spawning_rules"]
@@ -318,7 +318,7 @@ async def test_generic_mcp_default_and_garbage_harness_render_capable_self_adopt
 
     async with client() as session:
         result = await session.call_tool("get_staging_instructions", {"job_id": job_id, "harness": harness})
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     ch3 = payload["orchestrator_protocol"]["ch3_agent_spawning_rules"]
@@ -365,7 +365,7 @@ async def test_generic_mcp_two_job_self_adopt_sequence_closes_out(mcp_client):
     async with client() as session:
         # Adopt job 1: load its mission, then complete it.
         m1 = await session.call_tool("get_job_mission", {"job_id": job1})
-        assert m1.isError is False, _error_text(m1)
+        assert m1.is_error is False, _error_text(m1)
         assert _payload(m1).get("blocked") in (False, None), _payload(m1)
 
         c1 = await session.call_tool(
@@ -376,11 +376,11 @@ async def test_generic_mcp_two_job_self_adopt_sequence_closes_out(mcp_client):
                 "acknowledge_messages_on_complete": True,
             },
         )
-        assert c1.isError is False, _error_text(c1)
+        assert c1.is_error is False, _error_text(c1)
 
         # Immediately adopt job 2 in the SAME session — no external seed-paste, no gate.
         m2 = await session.call_tool("get_job_mission", {"job_id": job2})
-        assert m2.isError is False, _error_text(m2)
+        assert m2.is_error is False, _error_text(m2)
         assert _payload(m2).get("blocked") in (False, None), _payload(m2)
 
         c2 = await session.call_tool(
@@ -391,7 +391,7 @@ async def test_generic_mcp_two_job_self_adopt_sequence_closes_out(mcp_client):
                 "acknowledge_messages_on_complete": True,
             },
         )
-        assert c2.isError is False, _error_text(c2)
+        assert c2.is_error is False, _error_text(c2)
 
     # Both worker jobs reached a completed execution state.
     from sqlalchemy import select

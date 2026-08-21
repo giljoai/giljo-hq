@@ -14,12 +14,34 @@ Expanded from 1-function smoke test to meaningful coverage:
 - Progress percent calculation
 """
 
+import uuid
 from unittest.mock import MagicMock
 
 import pytest
 
 from giljo_mcp.exceptions import ResourceNotFoundError
 from giljo_mcp.services.workflow_status_service import WorkflowStatusService
+
+
+async def _seed_product(session, tenant_key):
+    """A product for a seeded project to belong to (BE-9437: product_id is NOT NULL).
+
+    ONE PRODUCT PER PROJECT, deliberately. ``idx_project_single_active_per_product``
+    permits a single ACTIVE project per product, and these tests seed active
+    projects; a shared product would make the second seed a unique violation.
+    """
+    from giljo_mcp.models import Product
+
+    product = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"WF Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    session.add(product)
+    await session.flush()
+    return product
 
 
 @pytest.fixture
@@ -58,6 +80,7 @@ async def test_get_workflow_status_todo_counts_are_fresh_after_direct_write(db_s
     from giljo_mcp.models import AgentExecution, AgentJob, Project
     from giljo_mcp.models.agent_identity import AgentTodoItem
 
+    product = await _seed_product(db_session, test_tenant_key)
     project = Project(
         id=str(uuid.uuid4()),
         name="Stale TODOs WF",
@@ -65,6 +88,7 @@ async def test_get_workflow_status_todo_counts_are_fresh_after_direct_write(db_s
         mission="Test mission",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=product.id,
         series_number=99124,
     )
     db_session.add(project)
@@ -153,6 +177,7 @@ async def test_get_workflow_status_surfaces_live_auto_checkin(db_session, db_man
 
     from giljo_mcp.models import Project
 
+    product = await _seed_product(db_session, test_tenant_key)
     project = Project(
         id=str(uuid.uuid4()),
         name="Auto-checkin WF",
@@ -160,6 +185,7 @@ async def test_get_workflow_status_surfaces_live_auto_checkin(db_session, db_man
         mission="Test mission",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=product.id,
         series_number=99613,
         auto_checkin_enabled=True,
         auto_checkin_interval=10,
@@ -194,6 +220,7 @@ async def test_get_workflow_status_empty_project(db_session, db_manager, test_te
 
     from giljo_mcp.models import Project
 
+    product = await _seed_product(db_session, test_tenant_key)
     project = Project(
         id=str(uuid.uuid4()),
         name="Empty WF Project",
@@ -201,6 +228,7 @@ async def test_get_workflow_status_empty_project(db_session, db_manager, test_te
         mission="Test mission",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=product.id,
         series_number=99001,
     )
     db_session.add(project)
@@ -230,6 +258,7 @@ async def test_get_workflow_status_with_working_agents(db_session, db_manager, t
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
 
+    product = await _seed_product(db_session, test_tenant_key)
     project = Project(
         id=str(uuid.uuid4()),
         name="Working WF",
@@ -237,6 +266,7 @@ async def test_get_workflow_status_with_working_agents(db_session, db_manager, t
         mission="Test mission",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=product.id,
         series_number=99002,
     )
     db_session.add(project)
@@ -286,6 +316,7 @@ async def test_get_workflow_status_all_complete(db_session, db_manager, test_ten
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
 
+    product = await _seed_product(db_session, test_tenant_key)
     project = Project(
         id=str(uuid.uuid4()),
         name="Done WF",
@@ -293,6 +324,7 @@ async def test_get_workflow_status_all_complete(db_session, db_manager, test_ten
         mission="Test mission",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=product.id,
         series_number=99003,
     )
     db_session.add(project)
@@ -341,6 +373,7 @@ async def test_get_workflow_status_blocked_stage(db_session, db_manager, test_te
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
 
+    product = await _seed_product(db_session, test_tenant_key)
     project = Project(
         id=str(uuid.uuid4()),
         name="Blocked WF",
@@ -348,6 +381,7 @@ async def test_get_workflow_status_blocked_stage(db_session, db_manager, test_te
         mission="Test mission",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=product.id,
         series_number=99004,
     )
     db_session.add(project)
@@ -394,6 +428,7 @@ async def test_get_workflow_status_exclude_job_id(db_session, db_manager, test_t
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
 
+    product = await _seed_product(db_session, test_tenant_key)
     project = Project(
         id=str(uuid.uuid4()),
         name="Exclude WF",
@@ -401,6 +436,7 @@ async def test_get_workflow_status_exclude_job_id(db_session, db_manager, test_t
         mission="Test mission",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=product.id,
         series_number=99005,
     )
     db_session.add(project)
@@ -449,6 +485,7 @@ async def test_get_workflow_status_tenant_isolation(db_session, db_manager, test
 
     from giljo_mcp.models import Project
 
+    product = await _seed_product(db_session, test_tenant_key)
     project = Project(
         id=str(uuid.uuid4()),
         name="Isolated WF",
@@ -456,6 +493,7 @@ async def test_get_workflow_status_tenant_isolation(db_session, db_manager, test
         mission="Test mission",
         status="active",
         tenant_key=test_tenant_key,
+        product_id=product.id,
         series_number=99006,
     )
     db_session.add(project)

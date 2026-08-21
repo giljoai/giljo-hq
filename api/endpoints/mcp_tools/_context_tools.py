@@ -13,7 +13,7 @@ side effect at import time. Behavior, signatures, names, and descriptions unchan
 
 from typing import Annotated, Any
 
-from mcp.server.fastmcp import Context
+from mcp.server.mcpserver import Context
 from pydantic import BaseModel, Field
 
 from api.endpoints.mcp_tools._base import (
@@ -204,7 +204,8 @@ async def get_context(
     title="Search Memory",
     description=(
         "Search the 360 memory (closeouts/handovers) by keyword to answer 'have we solved X "
-        "before?'. Matches summary, key_outcomes, decisions_made, project_name, and tags; "
+        "before?'. Matches summary, key_outcomes, decisions_made, project_name, tags, and "
+        "git_commits (a closeout's commit messages -- e.g. 'when did we fix the redirect bug'); "
         "optional tag narrows to one controlled-vocabulary value. Tenant + active-product scoped "
         "(never pass tenant_key). Returns relevance-ranked headlines, capped at limit. Distinct "
         "from get_context(memory_360) (recency, not search) and search_threads (Hub chat, not "

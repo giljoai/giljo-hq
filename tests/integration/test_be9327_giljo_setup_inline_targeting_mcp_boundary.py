@@ -37,10 +37,10 @@ import json
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from mcp.types import Implementation
 
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -57,7 +57,7 @@ _CLAUDE_CODE_INFO = Implementation(name="claude-code", version="2.1.199")
 
 def _payload(result) -> dict:
     if getattr(result, "structuredContent", None):
-        return result.structuredContent
+        return result.structured_content
     first = result.content[0]
     text = getattr(first, "text", None)
     if text is None:  # pragma: no cover - defensive
@@ -94,7 +94,11 @@ async def setup_client(monkeypatch, db_manager):
     requested: dict[str, str] = {}
 
     class _StubAccessor:
-        async def bootstrap_setup(self, platform: str, user_id=None):
+        # BE-9385b: giljo_setup forwards the resolved harness so the install
+        # prose can target the repository. **_kwargs rather than a named
+        # parameter so this stub stops breaking every time the real
+        # accessor gains an argument it does not care about.
+        async def bootstrap_setup(self, platform: str, user_id=None, **_kwargs):
             requested["bootstrap_platform"] = platform
             return {
                 "status": "ready",
@@ -160,7 +164,7 @@ async def test_openai_hosted_session_gets_inline_setup_without_declaring_a_harne
     async with new_client(client_info) as session:
         result = await session.call_tool("giljo_setup", {"platform": "claude_code"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
 
     assert payload.get("mode") == "inline", (
@@ -182,7 +186,7 @@ async def test_inline_setup_renders_platform_neutral_templates(setup_client):
     async with new_client(_CHATGPT_INFO) as session:
         result = await session.call_tool("giljo_setup", {"platform": "claude_code"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
 
     assert requested.get("templates_platform") == "generic", (
@@ -207,7 +211,7 @@ async def test_anthropic_family_is_not_auto_targeted(setup_client):
     async with new_client(_ANTHROPIC_INFO) as session:
         result = await session.call_tool("giljo_setup", {"platform": "claude_code"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
 
     assert "mode" not in payload, "Anthropic/ClaudeAI must NOT be auto-targeted to the inline branch"
@@ -221,7 +225,7 @@ async def test_terminal_cli_session_is_unaffected(setup_client):
     async with new_client(_CLAUDE_CODE_INFO) as session:
         result = await session.call_tool("giljo_setup", {"platform": "claude_code"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
 
     assert "mode" not in payload, "a terminal CLI must reach bootstrap_setup, not the inline branch"
@@ -235,7 +239,7 @@ async def test_declared_desktop_app_harness_still_keeps_filesystem_path(setup_cl
     async with new_client(_CHATGPT_INFO) as session:
         result = await session.call_tool("giljo_setup", {"platform": "claude_code", "harness": "desktop_app"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
 
     assert "mode" not in payload, "declared desktop_app must beat the detected preset"
@@ -278,7 +282,7 @@ async def test_filename_is_stripped_only_when_the_session_has_no_filesystem(
     async with new_client(client_info) as session:
         result = await session.call_tool("giljo_setup", args)
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
 
     assert payload.get("mode") == "inline", "both presets must still take the inline branch"

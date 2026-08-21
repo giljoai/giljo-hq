@@ -31,6 +31,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.models.roadmaps import RoadmapItem
 from giljo_mcp.services.roadmap_service import RoadmapService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -78,6 +79,9 @@ async def seeded(db_session, test_tenant_key):
             name=f"P{idx}",
             description="d",
             mission="m",
+            # BE-9429: five untyped projects in ONE product -- under the NULLS
+            # NOT DISTINCT index they need distinct serials to coexist.
+            series_number=next_series_number(),
             status="inactive",
         )
         db_session.add(project)

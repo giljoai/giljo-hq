@@ -30,7 +30,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import delete, func, select
 
 from giljo_mcp.database import tenant_session_context
@@ -42,6 +41,7 @@ from giljo_mcp.models.projects import TaxonomyType
 from giljo_mcp.models.tasks import MessageAcknowledgment
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -51,7 +51,7 @@ SENDER = "sender-orch"  # distinct author so the post never self-excludes the re
 
 def _payload(res) -> dict:
     if getattr(res, "structuredContent", None):
-        return res.structuredContent
+        return res.structured_content
     block = res.content[0]
     text = getattr(block, "text", None)
     if text is None:
@@ -178,7 +178,7 @@ async def test_complete_job_clears_after_mark_read_over_the_wire(gate_mcp_client
     )
     tid = thread["thread_id"]
     join = await _call(new_client, "join_thread", {"thread_id": tid, "agent_id": agent_id})
-    assert join.isError is False, _error_text(join)
+    assert join.is_error is False, _error_text(join)
 
     # Directed, action-required post to the recipient.
     post = await _call(
@@ -192,12 +192,12 @@ async def test_complete_job_clears_after_mark_read_over_the_wire(gate_mcp_client
             "requires_action": True,
         },
     )
-    assert post.isError is False, _error_text(post)
+    assert post.is_error is False, _error_text(post)
     message_id = _payload(post)["message_id"]
 
     # (1) complete_job is BLOCKED over the wire.
     blocked = await _call(new_client, "complete_job", {"job_id": job_id, "result": {"summary": "should block"}})
-    assert blocked.isError is True, "an undrained action-required post must block complete_job"
+    assert blocked.is_error is True, "an undrained action-required post must block complete_job"
     assert "COMPLETION_BLOCKED" in _error_text(blocked)
 
     # (2) Drain via the hint's remedy: read + ack as the recipient participant.
@@ -206,7 +206,7 @@ async def test_complete_job_clears_after_mark_read_over_the_wire(gate_mcp_client
         "get_thread_history",
         {"thread_id": tid, "as_participant": agent_id, "mark_read": True},
     )
-    assert drained.isError is False, _error_text(drained)
+    assert drained.is_error is False, _error_text(drained)
     assert _payload(drained)["marked_read"] >= 1
 
     # The ack the gate reads now exists for (message_id, recipient).
@@ -226,5 +226,5 @@ async def test_complete_job_clears_after_mark_read_over_the_wire(gate_mcp_client
 
     # (3) complete_job now SUCCEEDS over the wire — the deadlock is gone.
     done = await _call(new_client, "complete_job", {"job_id": job_id, "result": {"summary": "drained and closed"}})
-    assert done.isError is False, _error_text(done)
+    assert done.is_error is False, _error_text(done)
     assert _payload(done).get("status") == "success"

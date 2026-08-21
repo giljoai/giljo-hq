@@ -8,6 +8,10 @@
 import { ref, computed } from 'vue'
 import { useToast } from '@/composables/useToast'
 import { useProjectStore } from '@/stores/projects'
+import { useNotificationStore } from '@/stores/notifications'
+import { notifyFailure } from '@/utils/notifyFailure'
+
+const GENERIC_EXECUTION_MODE_FAILURE = 'Failed to save execution mode. Please try again.'
 
 /**
  * The tolerated PRE-collapse per-CLI execution_mode tokens (BE-9035a). BE-9035c
@@ -30,6 +34,7 @@ export const SUBAGENT_EXECUTION_MODES = ['claude_code_cli', 'codex_cli', 'gemini
 export function useExecutionMode({ projectId, missionText, isProjectStaged, isProjectStaging, initialMode = null }) {
   const { showToast } = useToast()
   const projectStore = useProjectStore()
+  const notificationStore = useNotificationStore()
 
   // Radio selection (null = user hasn't chosen yet this session)
   const executionPlatform = ref(null)
@@ -108,9 +113,17 @@ export function useExecutionMode({ projectId, missionText, isProjectStaged, isPr
       executionPlatform.value = previousValue
       console.error('Failed to update execution mode:', error)
       showToast({
-        message: 'Failed to save execution mode. Please try again.',
+        message: GENERIC_EXECUTION_MODE_FAILURE,
         type: 'error',
         timeout: 3000,
+      })
+      // FE-9466: persist the server's own reason past the toast.
+      notifyFailure(notificationStore, {
+        operation: 'project.executionMode',
+        entityId: projectId.value,
+        error,
+        fallbackMessage: GENERIC_EXECUTION_MODE_FAILURE,
+        title: 'Execution mode not saved',
       })
     }
   }

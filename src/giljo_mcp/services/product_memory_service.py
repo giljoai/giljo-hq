@@ -514,8 +514,10 @@ class ProductMemoryService:
         Answers "have we solved X before?" against accumulated project history.
         REUSES the existing BE-6082 search read path
         (``ProductMemoryRepository.get_memory_entries_paginated`` — FTS over
-        summary/project_name/key_outcomes/decisions_made/tags with an ILIKE
-        substring fallback); no parallel store, no new table.
+        summary/project_name/key_outcomes/decisions_made/tags/git_commits with
+        an ILIKE substring fallback); no parallel store, no new table. BE-9469
+        added git_commits -- a closeout's commit messages are searchable too
+        (e.g. "when did we fix the redirect bug").
 
         Tenant + product scoped (the caller resolves the active product, same
         contract as list_projects). An empty query and a no-match query both

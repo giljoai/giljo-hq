@@ -27,7 +27,7 @@ import pytest
 
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.exceptions import ValidationError
-from giljo_mcp.models import Project
+from giljo_mcp.models import Product, Project
 from giljo_mcp.services.comm_thread_service import CommThreadService
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
@@ -51,6 +51,16 @@ async def _seed(db_session, tenant: str) -> None:
 
 async def _seed_project(db_session, tenant: str) -> str:
     with tenant_session_context(db_session, tenant):
+        # BE-9437: a project belongs to a product. Its own, so an active
+        # seed cannot collide under idx_project_single_active_per_product.
+        _owning_product_project = Product(
+            id=str(uuid.uuid4()),
+            tenant_key=tenant,
+            name=f"Owning Product {uuid.uuid4().hex[:6]}",
+            description="seeded",
+            is_active=False,
+        )
+        db_session.add(_owning_product_project)
         project = Project(
             id=str(uuid.uuid4()),
             name=f"BE-9289b {uuid.uuid4().hex[:6]}",
@@ -58,6 +68,7 @@ async def _seed_project(db_session, tenant: str) -> str:
             mission="exercise thread edit",
             status="active",
             tenant_key=tenant,
+            product_id=_owning_product_project.id,
             series_number=1,
             execution_mode="claude_code_cli",
             created_at=datetime.now(UTC),

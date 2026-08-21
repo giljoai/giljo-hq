@@ -19,7 +19,8 @@ and is unaffected.
 
 from typing import Annotated, Any
 
-from mcp.server.fastmcp import Context
+from mcp.server.mcpserver import Context
+from mcp_types import InputRequiredResult
 from pydantic import Field
 
 from api.endpoints.mcp_tools._base import (
@@ -27,7 +28,10 @@ from api.endpoints.mcp_tools._base import (
     _call_tool,
     mcp,
 )
-from api.endpoints.mcp_tools._inline_approval import maybe_elicit_approval_inline
+from api.endpoints.mcp_tools._inline_approval import (
+    maybe_offer_approval_inline,
+    resolve_pending_inline_approval,
+)
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 
 
@@ -61,7 +65,16 @@ async def request_approval(
         Field(description="Optional structured payload (deferred findings, etc). <= 16 KB serialized."),
     ] = None,
     ctx: Context = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | InputRequiredResult:
+    # BE-8003l ROUND 2 -- this MUST come before dispatch. A client answering an
+    # inline offer retries `tools/call` with BYTE-IDENTICAL arguments (the sealed
+    # requestState binds an args digest, so it cannot differ), so dispatching first
+    # would mint a SECOND parked approval row for one gate. Returns None on an
+    # ordinary first-round call.
+    settled = await resolve_pending_inline_approval(ctx, options)
+    if settled is not None:
+        return settled
+
     kwargs: dict[str, Any] = {
         "job_id": job_id,
         "project_id": project_id,
@@ -70,7 +83,8 @@ async def request_approval(
         "context": context,
     }
     result = await _call_tool(ctx, "request_approval", kwargs)
-    # BE-6038 (NO-SHIP-UNTIL-GA): opt-in inline approval-card overlay. Dormant unless
-    # GILJO_INLINE_APPROVAL_ELICIT is set AND the client supports elicitation; otherwise
-    # returns ``result`` unchanged (today's async awaiting_user behavior). Never raises.
-    return await maybe_elicit_approval_inline(ctx, result, reason=reason, options=options)
+    # BE-8003l ROUND 1: the row is now created and the agent parked -- today's
+    # behaviour, unconditionally. On a connection that can carry the round-trip
+    # (2026-07-28+ AND declared elicitation) we ADDITIONALLY offer the choice
+    # inline; every other client gets ``result`` unchanged. Never raises.
+    return maybe_offer_approval_inline(ctx, result, reason=reason, options=options)

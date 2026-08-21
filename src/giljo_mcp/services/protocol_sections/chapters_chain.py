@@ -175,6 +175,7 @@ def _build_ch_chain_staging(
     execution_mode: str | None,
     job_id: str,
     product_id: str | None = None,
+    agent_id: str | None = None,
 ) -> str:
     """Build CH_CHAIN_STAGING: the AUTHORITATIVE staging-phase conductor script.
 
@@ -203,6 +204,16 @@ def _build_ch_chain_staging(
     conductor from self-unlocking implementation. It is NOT a per-call
     launch_implementation permission prompt: the drive loop no longer makes one,
     and per-project launch_implementation is auto-approved plumbing (§14).
+
+    BE-9462: ``agent_id`` (the conductor's own agent_id, already resolved by the
+    caller into its identity block) is threaded through so Step 0's create_thread
+    call can pass ``creator_id`` -- create_thread structurally registers a passed
+    creator_id as the first participant and hands it the baton
+    (CommThreadService.create_thread), so the conductor lands on its own thread
+    in ONE call instead of needing a second join_thread to undo the omission.
+    None (the rare legacy self-registration-fallback caller in protocol_builder.py,
+    which has no clean agent_id in scope) renders the prior two-call script
+    byte-identically -- additive, not a behavior change for that path.
     """
     n = len(resolved_order)
     # BE-6177 (A2): emit the stage_project SHORT `mode` token (claude / codex /
@@ -214,6 +225,38 @@ def _build_ch_chain_staging(
     # is gone; the conductor then degrades to list_projects (still gets descriptions).
     product_token = product_id or "<your product_id from the identity block>"
     head_pid = resolved_order[0] if resolved_order else "<P_1>"
+
+    if agent_id:
+        step0_hub_thread = f"""0. STAND UP THE HUB THREAD (your VERY FIRST action, before writing anything):
+   create_thread(subject="Chain: <a few words naming what this chain delivers>",
+                 sequence_run_id="{run_id}", creator_id="{agent_id}")
+   sequence_run_id is the ONLY thing marking this thread as this run's hub. Pass it,
+   then CHECK it came back set - if null you passed it wrong, and a hub with no link is
+   one no sub-orchestrator finds. That failure is SILENT: no error, they never join and
+   the chain loses its coordination channel with nobody told.
+   The subject is now purely human-readable: the run id does NOT belong in it and
+   discovery never reads it. A few words, not a sentence - the operator sees this in a
+   card list that truncates from the end, so the front is all they read.
+   creator_id="{agent_id}" (your own agent_id) registers YOU as the thread's first
+   participant and hands you the baton in this SAME call - there is no separate join
+   step. Record the returned thread_id. Every sub-orchestrator resolves it from the
+   link via get_context(categories=["chain"]) -> hub_thread_id.
+   Then proceed to STEP 0.5."""
+    else:
+        step0_hub_thread = f"""0. STAND UP THE HUB THREAD (your VERY FIRST action, before writing anything):
+   create_thread(subject="Chain: <a few words naming what this chain delivers>",
+                 sequence_run_id="{run_id}")
+   sequence_run_id is the ONLY thing marking this thread as this run's hub. Pass it,
+   then CHECK it came back set - if null you passed it wrong, and a hub with no link is
+   one no sub-orchestrator finds. That failure is SILENT: no error, they never join and
+   the chain loses its coordination channel with nobody told.
+   The subject is now purely human-readable: the run id does NOT belong in it and
+   discovery never reads it. A few words, not a sentence - the operator sees this in a
+   card list that truncates from the end, so the front is all they read.
+   Record the returned thread_id. Every sub-orchestrator resolves it from the link via
+   get_context(categories=["chain"]) -> hub_thread_id.
+   Join it yourself as the conductor: join_thread(thread_id=<the returned id>).
+   Then proceed to STEP 0.5."""
 
     return f"""════════════════════════════════════════════════════════════════════════════
        CH_CHAIN_STAGING: SEQUENTIAL CHAIN, STAGING PHASE (AUTHORITATIVE)
@@ -234,20 +277,7 @@ CH1/CH2 finale below, THIS wins.
 
 ── ORDER OF OPERATIONS (in this order; complete_job is LAST) ────────────────
 
-0. STAND UP THE HUB THREAD (your VERY FIRST action, before writing anything):
-   create_thread(subject="Chain: <a few words naming what this chain delivers>",
-                 sequence_run_id="{run_id}")
-   sequence_run_id is the ONLY thing marking this thread as this run's hub. Pass it,
-   then CHECK it came back set - if null you passed it wrong, and a hub with no link is
-   one no sub-orchestrator finds. That failure is SILENT: no error, they never join and
-   the chain loses its coordination channel with nobody told.
-   The subject is now purely human-readable: the run id does NOT belong in it and
-   discovery never reads it. A few words, not a sentence - the operator sees this in a
-   card list that truncates from the end, so the front is all they read.
-   Record the returned thread_id. Every sub-orchestrator resolves it from the link via
-   get_context(categories=["chain"]) -> hub_thread_id.
-   Join it yourself as the conductor: join_thread(thread_id=<the returned id>).
-   Then proceed to STEP 0.5.
+{step0_hub_thread}
 
 0.5 READ DEEP BEFORE YOU PLAN (this is what makes your contracts concrete):
    You cannot write a useful cross-project contract from project titles alone. Read

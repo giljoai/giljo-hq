@@ -30,7 +30,7 @@ const USER_MSG = {
   message_id: 'msg-user',
   from_agent_id: USER_UUID,
   from_kind: 'user',
-  from_display_name: 'Patrik Pettersson',
+  from_display_name: 'Sam Rivera',
   content: 'operator speaking',
   message_type: 'broadcast',
   created_at: '2026-06-18T10:00:00Z',
@@ -76,7 +76,7 @@ describe('ThreadTimeline author rendering (FE-6122)', () => {
     const avatar = row.find('.timeline-msg__avatar')
     expect(avatar.classes()).toContain('timeline-msg__avatar--user')
     // initials from the real display name, not an agent abbrev
-    expect(avatar.text()).toBe('PP')
+    expect(avatar.text()).toBe('SR')
     // no inline agent color style applied to the user avatar
     expect(avatar.attributes('style') || '').not.toContain('background-color')
   })
@@ -153,11 +153,11 @@ describe('ThreadTimeline server-resolved author kind (BE-9289a)', () => {
   })
 
   it('renders a genuine USER post with the user treatment', () => {
-    seedResolveMessage(store, { from_kind: 'user', from_display_name: 'Patrik' })
+    seedResolveMessage(store, { from_kind: 'user', from_display_name: 'Sam' })
     const wrapper = mountTimeline(pinia)
     const row = wrapper.find('[data-testid="timeline-message-msg-uuid-agent"]')
     expect(row.classes()).toContain('timeline-msg--user')
-    expect(row.find('.timeline-msg__sender').text()).toBe('Patrik')
+    expect(row.find('.timeline-msg__sender').text()).toBe('Sam')
   })
 
   it('a stale directory entry cannot override the server on the author kind', () => {
@@ -165,7 +165,7 @@ describe('ThreadTimeline server-resolved author kind (BE-9289a)', () => {
     // treatment — the server is the authority, the directory is a name lookup.
     seedResolveMessage(store)
     store.participantsByThreadId = new Map([
-      [RESOLVE_THREAD, [{ participant_id: AGENT_UUID, participant_type: 'user', display_name: 'Patrik' }]],
+      [RESOLVE_THREAD, [{ participant_id: AGENT_UUID, participant_type: 'user', display_name: 'Sam' }]],
     ])
     const wrapper = mountTimeline(pinia)
     const row = wrapper.find('[data-testid="timeline-message-msg-uuid-agent"]')

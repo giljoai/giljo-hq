@@ -28,7 +28,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import select
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
@@ -37,6 +36,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.user_approval import UserApproval
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -50,7 +50,7 @@ pytestmark = pytest.mark.asyncio
 def _payload(call_tool_result) -> dict:
     """Decode a CallToolResult into a dict (mirrors the harness helper)."""
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -264,7 +264,7 @@ async def test_request_approval_happy_path_through_wrapper(approval_mcp_client, 
             },
         )
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     # IMP-6038: the FastMCP server echoes `_meta:{skills_version}` on every MCP
     # response (per-device skills nudge), so require the contract keys as a subset
@@ -318,7 +318,7 @@ async def test_request_approval_is_tenant_scoped_at_transport_boundary(
                 "context": None,
             },
         )
-    assert a_result.isError is False, _error_text(a_result)
+    assert a_result.is_error is False, _error_text(a_result)
     a_approval_id = _payload(a_result)["approval_id"]
 
     # Tenant B: seed independent context so tenant B has its own job/project.
@@ -341,7 +341,7 @@ async def test_request_approval_is_tenant_scoped_at_transport_boundary(
             },
         )
 
-    assert cross_tenant_result.isError is True, (
+    assert cross_tenant_result.is_error is True, (
         "TENANT LEAK: tenant B must not be able to create an approval against tenant A's job_id through the transport"
     )
     err = _error_text(cross_tenant_result)
@@ -390,7 +390,7 @@ async def test_request_approval_worker_rejected_at_mcp_boundary(approval_mcp_cli
             },
         )
 
-    assert result.isError is False, (
+    assert result.is_error is False, (
         "BE-6081 Tier-2 contract: the worker rejection is a structured RESPONSE, not isError. " + _error_text(result)
     )
     payload = _payload(result)

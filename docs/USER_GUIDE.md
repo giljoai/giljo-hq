@@ -1,6 +1,6 @@
 # Giljo HQ: User Guide
 
-*Last updated: 2026-07-17*
+*Last updated: 2026-08-20*
 
 This guide covers every page and UI element in Giljo HQ, a GiljoAI product. Read from top to bottom on first use, or jump to the section you need.
 
@@ -364,9 +364,11 @@ When an agent needs a decision from you mid-work, the project's Implementation t
 
 1. Read the agent's full reasoning in your AI chat.
 2. Click the banner to open the **decision dialog**, which shows the request and the available options (e.g. Approve / Reject / Defer).
-3. Pick an option. **This is the only place a decision is made** — there is no global approvals page, and picking an option here is what unlocks the orchestrator. Your choice is delivered to the orchestrator's inbox.
+3. Pick an option. **The dashboard is the one place a decision can always be made** — there is no global approvals page, and picking an option here is what unlocks the orchestrator. Your choice is delivered to the orchestrator's inbox.
 
 The banner then confirms *"Orchestrator unlocked — Tell the orchestrator to read its message and proceed."* Nudge the orchestrator in your AI chat to check its inbox; the banner clears on its own once it does.
+
+On an AI client that supports the newest MCP connection standard, you may instead be asked to decide right there in your chat — answering resolves the request the same way clicking the dashboard option does, so the orchestrator still unlocks and the dashboard still reflects it. Nothing changes for other clients: the request waits on your dashboard exactly as described above.
 
 ### Closing Out a Project
 
@@ -380,11 +382,9 @@ To look back at a finished project, its banner shows a green **"Project Complete
 
 If a closeout ever looks stuck because the orchestrator was never staged, you can **force-close** it to free the project. A project where everything already finished always routes cleanly to the closeout summary.
 
-### Auto Check-In
+### Agent Check-in Cadence
 
-In multi-terminal execution mode, an Auto Check-In slider appears after staging. Drag the slider to set an interval (Off, 5, 10, 15, 20, 30, 40, or 60 minutes). When set to any interval other than Off, the orchestrator automatically checks in on sleeping agents at that cadence.
-
-You can change the interval while the orchestrator is already running — the new value takes effect at the next check-in cycle. A hint ("Applies at next check-in.") appears below the slider in that case. Auto check-in does not appear in subagent mode, where the orchestrator manages agent communication directly.
+How often a waiting agent checks in for new work is now one account-level setting, not a per-project slider. Set it in **Tools → Notifications** under **Agent Monitoring**, next to the Agent Silence Threshold (see **Notification Settings** below). Agents on a harness with live wake support respond to new work instantly instead of sleeping on a timer; every other agent sleeps for the cadence you set between checks. A project staged before this change that still carries its own saved interval keeps honoring that value as an override.
 
 ---
 
@@ -416,6 +416,8 @@ Threads are grouped under two tabs, each with its own unread badge:
 - **General threads** — standalone conversations not tied to a project.
 
 Each thread row shows a `CHT-####` id (click to copy the full id), a status pill, the subject, and the time. Click a row to read its timeline on the right. Every message shows who sent it (you appear in brand yellow, agents in their role color), the time, a **Broadcast** or **Direct** chip, and an **"action required"** flag when a post needs a response.
+
+Once a thread is open, a search box above its timeline narrows it to the messages you are looking for, matching both what was said and who said it. Clear the box to get the full conversation back.
 
 ### Reading and Replying
 
@@ -471,7 +473,7 @@ Status badges use brand colors from the server's canonical status registry.
 
 The Create Task dialog includes an optional **Serial** number field (placeholder "auto"); leave it blank to have the next number assigned automatically. In the Edit dialog, the Serial field shows just the number (e.g. `42`), not the full alias.
 
-Promoting a task to a project (Convert to Project) creates a new **inactive** project and does **not** deactivate the product's currently-active project — you activate the new project yourself when you are ready.
+Promoting a task to a project (Convert to Project) creates a new **inactive** project and does **not** deactivate the product's currently-active project — you activate the new project yourself when you are ready. A connected agent can run the same conversion itself in one step, without leaving the task's roadmap card orphaned; the new project always lands under the task's own product and arrives inactive and untyped.
 
 ### Filtering
 
@@ -490,7 +492,7 @@ Navigate to **Tools** via the left navigation. Five tabs are available:
 | **Connect** | Your directory of connected AI tools, API keys, and integrations (git, Serena MCP) |
 | **Agents** | Agent Template Manager: browse, create, edit, and activate agent templates |
 | **Context** | Context configuration: choose what grounding context agents receive and how much |
-| **Notifications** | Notification position and duration, and (Community Edition) the agent silence threshold |
+| **Notifications** | Notification position and duration, plus the agent silence threshold and check-in cadence |
 | **Startup** | Cards to reopen the **Setup Wizard**, open this **guide** (the "Learning" card), and — in Community Edition — the **Certificate Trust** helper |
 
 ### Connecting Your AI Tools (Connect)
@@ -523,7 +525,9 @@ The **Agents** tab is where you shape your agent crew. You have **16 active slot
 
 **Add Default Agents.** The **"Add Default Agents"** button safely re-imports the starter set at any time. It is purely additive: your edited templates are never touched. A fresh default whose name you have already customized lands as a separate `-duplicate` copy, and defaults you already have are skipped.
 
-**Finding templates.** Filter by free-text **Search**, by **Role**, and by **Status** (Active / Inactive). The **Export Status** column is sortable, so out-of-date templates are easy to find.
+**Agents follow the product you are working in.** Every agent's active state is tracked per product. A newly added agent — whether from **Add Default Agents** or created by hand — arrives ready to configure but **switched off**: it will not appear on your orchestrator's roster or install to your tool until you turn it on for the product you are working in. The **Active here** column/switch in the templates list controls exactly that — the product you currently have open — and a product you have never customized keeps every agent it already had.
+
+**Finding templates.** Filter by free-text **Search**, by **Role**, and by **Status** (Active / Inactive). The **Export Status** column is sortable, so out-of-date templates are easy to find. The **Updated** column reads "Added today" for an agent you just added and have not switched on yet, "Never edited" for an untouched stock agent, and the real date (with the exact time on hover) once you have changed something — newest first, so agents needing your attention sit at the top.
 
 **Editing a template.** The editor has these fields:
 
@@ -532,6 +536,7 @@ The **Agents** tab is where you shape your agent crew. You have **16 active slot
 - **Coding tool** — the tool this agent runs in (Claude, Codex, Gemini, or Antigravity).
 - **Description** — a short summary.
 - **Role & Expertise** — describe the agent's specialization, expertise, and personality. This is the field that shapes how the agent behaves.
+- **Available in all products** (existing templates only) — a separate, tenant-wide switch that retires the agent everywhere at once, distinct from the per-product **Active here** switch in the templates list. Turning an agent off for one product cannot retire it everywhere, and turning off **Available in all products** cannot be undone by switching it on for just one product.
 
 ### Installing Skills and Agents (`giljo_setup`)
 
@@ -555,14 +560,18 @@ Beyond each agent's **Role & Expertise**, two tenant-level controls shape what a
 
 **Tune Context (per product).** Each product card has a **"Tune Context"** button. Pick the sections to refresh and it generates a prompt for you to run in your agent; the agent checks the stored context against the real codebase, and changes are applied **only after it confirms drift** — nothing is overwritten blindly.
 
-**System Orchestrator Prompt (advanced).** For the whole account, an admin can override the orchestrator's core instructions under **Account → Danger Zone → System Orchestrator Prompt**. This is an advanced, tenant-wide setting — editing it can break orchestrator coordination, so a warning is shown and a **"Restore Default"** button is always available. Most users never need to touch it.
+**System Orchestrator Prompt (advanced).** An admin can override the orchestrator's core instructions under **Account → Danger Zone → System Orchestrator Prompt**. You can customize this **per product**, or once for **all products** — a product-specific override wins for that product, anything without one falls back to your all-products prompt, and anything without either falls back to the packaged default. While a product is selected, a line above the editor names which of the three is actually governing it and, for a saved prompt, the date it was saved; the all-products tab gives the same detail about itself. Editing either can break orchestrator coordination, so a warning is shown and a **"Restore Default"** button is always available for each. Most users never need to touch either.
 
 ### Notification Settings
 
 The **Notifications** tab sets where notifications appear (**Position** — six corner/edge options) and how long they stay (**Display duration**, 2–10 seconds).
 
-> [!CE]
-> Community Edition also shows an **Agent Silence Threshold (minutes)** setting (1–60) here, controlling how long an agent can go quiet before it is marked "Silent." It is saved to the database and persists across sessions. This setting is hidden in hosted (SaaS) mode.
+An **Agent Monitoring** section below that holds two account-level settings, saved to the database and persisted across sessions, in both editions:
+
+- **Agent Silence Threshold (minutes)** — how long an agent can go quiet before it is marked "Silent." Raise it for a slower-inference model so it is not falsely flagged.
+- **Agent Check-in Cadence (minutes)** — how often a waiting agent checks in for new work (see **Agent Check-in Cadence** under Jobs, above).
+
+Both accept any whole number from 1 to 1440 minutes and default to 10.
 
 ---
 
@@ -698,6 +707,7 @@ Notification types include:
 | `project_update` | A project was updated or completed |
 | `system_alert` | A system-level error or warning |
 | `message_received` | An agent sent a message requiring attention |
+| `hub.baton_handover` | An agent handed the conversation turn to you. Persisted server-side, so it survives a reload and follows you to a second device; repeated hand-offs on the same thread leave one entry, not a pile. Clicking it opens the thread with the handing-over post marked and scrolled into view. |
 | `connection_lost` / `connection_restored` | WebSocket connection was lost or restored |
 | `context_tuning` | Context fields were updated after a tuning pass |
 | `vision_analysis` | A vision document was processed |

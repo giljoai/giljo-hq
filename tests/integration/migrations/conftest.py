@@ -21,7 +21,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy import text
 
-from tests.helpers.test_db_helper import worker_suffix
+from tests.helpers.test_db_helper import bootstrap_db_base, create_database_lock, worker_suffix
 
 
 @pytest.fixture
@@ -40,9 +40,11 @@ def set_tenant_context():
 # xdist worker). Each migration test file derives its own SCRATCH_DB with the
 # same ``{base}{worker_suffix()}`` rule, so the names line up.
 _SCRATCH_READY: set[str] = set()
-# Same serialization key family as the main test-DB bootstrap: concurrent
-# CREATE DATABASE copies of template1 across workers otherwise collide.
-_SCRATCH_CREATE_LOCK_KEY = 7281643
+# Serialization for the CREATE below is THE shared ``create_database_lock`` from
+# tests/helpers/test_db_helper.py, not a key of this module's own. It used to be
+# 7281643 while the main bootstrap held 7281642 — different keys on the one
+# resource both paths contend for (the ``template1`` copy), so the lock excluded
+# nothing and a scratch create could race a per-worker create. TSK-9381.
 
 
 def _ensure_scratch_db_as_superuser(scratch_db: str) -> None:
@@ -75,22 +77,28 @@ def _ensure_scratch_db_as_superuser(scratch_db: str) -> None:
     eng = sa.create_engine(admin_url, poolclass=sa.pool.NullPool, isolation_level="AUTOCOMMIT")
     try:
         with eng.connect() as conn:
+            # Terminate any stragglers, then drop, BEFORE taking the lock
+            # (INF-9406). `DROP DATABASE` forces a CLUSTER-WIDE immediate
+            # checkpoint and waits for it, so its cost is a function of every
+            # other worker's dirty buffers -- measured at 6.31s inside this very
+            # lock during a concurrent two-tree `-n 6` pair. The scratch name is
+            # per-worker AND per-clone unique (bootstrap_db_base + worker_suffix),
+            # so the drop touches nothing shared and needs no serialization; the
+            # `template1` copy below is the only thing that does. Serializing the
+            # drop as well made this critical section as long as the rest of the
+            # box's write volume, twelve times per pair.
+            conn.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :name AND pid <> pg_backend_pid()"
+                ),
+                {"name": scratch_db},
+            )
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{scratch_db}"'))
             # Serialize: concurrent template1 copies across workers otherwise
             # collide with "source database is being accessed by other users".
-            conn.execute(text("SELECT pg_advisory_lock(:k)"), {"k": _SCRATCH_CREATE_LOCK_KEY})
-            try:
-                # Terminate any stragglers, then drop+recreate for a clean slate.
-                conn.execute(
-                    text(
-                        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                        "WHERE datname = :name AND pid <> pg_backend_pid()"
-                    ),
-                    {"name": scratch_db},
-                )
-                conn.execute(text(f'DROP DATABASE IF EXISTS "{scratch_db}"'))
+            with create_database_lock(conn):
                 conn.execute(text(f'CREATE DATABASE "{scratch_db}" OWNER "{owner}"'))
-            finally:
-                conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _SCRATCH_CREATE_LOCK_KEY})
     finally:
         eng.dispose()
     _SCRATCH_READY.add(scratch_db)
@@ -103,5 +111,4 @@ def _provision_worker_scratch_db():
     Session-scoped + autouse so it runs before the module-scoped
     ``scratch_engine`` fixtures in the individual migration test files.
     """
-    base = os.environ.get("GILJO_BOOTSTRAP_TEST_DB", "giljo_test_bootstrap")
-    _ensure_scratch_db_as_superuser(f"{base}{worker_suffix()}")
+    _ensure_scratch_db_as_superuser(f"{bootstrap_db_base()}{worker_suffix()}")

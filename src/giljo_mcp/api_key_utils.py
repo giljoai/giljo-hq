@@ -166,7 +166,7 @@ def verify_api_key(api_key: str, key_hash: str) -> bool:
 # BE-6060a: async cached verify — keep bcrypt OFF the event loop.
 #
 # verify_api_key() runs a synchronous bcrypt.checkpw (~250-400ms). On the MCP
-# transport hot path (api-key-as-bearer) this blocked the single Railway worker
+# transport hot path (api-key-as-bearer) this blocked the single hosted worker
 # and was re-run on every poll. verify_api_key_cached() moves the bcrypt call to
 # a worker thread (asyncio.to_thread) and memoizes the verdict in a short-lived
 # in-process TTL cache, mirroring oauth_revocation_service.py's pattern.

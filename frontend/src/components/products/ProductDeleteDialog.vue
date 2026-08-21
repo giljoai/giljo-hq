@@ -34,7 +34,7 @@
 
         <v-list density="compact">
           <v-list-item>
-            <template v-slot:prepend>
+            <template #prepend>
               <v-icon color="warning">mdi-folder-multiple</v-icon>
             </template>
             <v-list-item-title>
@@ -43,7 +43,7 @@
           </v-list-item>
 
           <v-list-item>
-            <template v-slot:prepend>
+            <template #prepend>
               <v-icon color="warning">mdi-checkbox-marked-circle</v-icon>
             </template>
             <v-list-item-title>
@@ -52,7 +52,7 @@
           </v-list-item>
 
           <v-list-item>
-            <template v-slot:prepend>
+            <template #prepend>
               <v-icon color="warning">mdi-file-document-multiple</v-icon>
             </template>
             <v-list-item-title>

@@ -36,6 +36,13 @@ from giljo_mcp.services.product_field_map import assemble_update_kwargs
 
 logger = logging.getLogger(__name__)
 
+# BE-9473 (F2/F4): single source of truth for the per-value char cap. Previously
+# redefined at the wire (api/endpoints/mcp_tools/_setup_tools.py) as a private
+# copy; the wire now imports this constant so the wire description and the
+# enforced limit cannot drift apart. Applies PER STRING -- a structured section's
+# dict value is capped per sub-key, not on the dict as a whole.
+TUNING_PROPOSED_VALUE_MAX = 10_000
+
 # Maps tuning section keys to product fields for applying proposals.
 # Handover 0840c: Rewritten for normalized tables.
 # BE-6225d: this map only translates the tuning INPUT vocabulary (section keys) into
@@ -104,6 +111,16 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
     "quality_standards": {"type": "relation_field", "relation": "test_config", "field": "quality_standards"},
     "target_platforms": {"type": "direct", "field": "target_platforms"},
 }
+
+# BE-9473 (F2/F4): the bare section keys whose SECTION_FIELD_MAP entry is a
+# multi-field relation ("tech_stack", "architecture") -- these cannot take a
+# single flat string; the caller must address one field via a dotted sub-key
+# (e.g. "tech_stack.infrastructure") or pass proposed_value as a dict keyed by
+# field name. Every other section key (including the dotted sub-keys) is FLAT:
+# one string (or list[str] for target_platforms) is the whole value.
+STRUCTURED_TUNING_SECTIONS: frozenset[str] = frozenset(
+    key for key, mapping in SECTION_FIELD_MAP.items() if mapping["type"] == "relation"
+)
 
 TUNING_PROMPT_TEMPLATE = """You are reviewing a product's stored context after recent development work.
 
@@ -558,7 +575,11 @@ class ProductTuningService:
             overall_summary: Optional high-level drift assessment (informational)
 
         Returns:
-            Dict with success, applied_count, sections_applied
+            Dict with success, applied_count, sections_applied. A DELIBERATE
+            domain rejection (BE-6081 Tier-2: no exception, agent-actionable) when
+            every drift-flagged proposal failed to resolve to a real field --
+            {success: False, error: "NO_SECTIONS_APPLIED", ...} instead of a
+            silent success (BE-9473 F2).
 
         Raises:
             ResourceNotFoundError: If product not found
@@ -566,6 +587,31 @@ class ProductTuningService:
         from giljo_mcp.services.product_service import ProductService
 
         update_kwargs, sections_applied = self._build_update_kwargs(proposals)
+
+        # BE-9473 (F3): every proposal that asked for a write (drift_detected=True)
+        # resolved to NOTHING -- distinct from the documented "nothing needed
+        # updating, record the review" no-op (that path never sets drift_detected
+        # =True on any item). Reporting success:true/applied_count:0 here was the
+        # self-contradicting response class the post-0480 raise-rule and the
+        # BE-6081 boundary contract both forbid. Reject before touching the DB --
+        # no tuning_state stamp, no websocket emit -- so a failed write cannot be
+        # mistaken for a completed review.
+        intended_sections = [p.get("section") for p in proposals if p.get("drift_detected")]
+        if intended_sections and not sections_applied:
+            return {
+                "success": False,
+                "error": "NO_SECTIONS_APPLIED",
+                "product_id": product_id,
+                "sections_skipped": intended_sections,
+                "hint": (
+                    "None of the drift-flagged proposals resolved to a real product field. "
+                    "For a structured section (tech_stack, architecture), address it by "
+                    "dotted sub-key (e.g. 'tech_stack.infrastructure') or pass proposed_value "
+                    "as a dict keyed by its field names -- a plain string is rejected for "
+                    "these sections. Check the section name against the allowed list if this "
+                    "keeps happening."
+                ),
+            }
 
         if update_kwargs:
             product_service = ProductService(self.db_manager, self.tenant_key)

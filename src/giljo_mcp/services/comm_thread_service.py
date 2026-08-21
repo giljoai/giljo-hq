@@ -45,35 +45,24 @@ from giljo_mcp.services._comm_thread_baton_mixin import CommThreadBatonMixin
 from giljo_mcp.services._comm_thread_chain_hub_mixin import CommThreadChainHubMixin
 from giljo_mcp.services._comm_thread_edit_mixin import CommThreadEditMixin
 from giljo_mcp.services._comm_thread_softdelete_mixin import CommThreadSoftDeleteMixin
+from giljo_mcp.services._comm_thread_wake_mixin import CommThreadWakeMixin
 from giljo_mcp.services.comm_author_identity import resolve_and_register_author
 from giljo_mcp.services.comm_baton_targets import (
     enrol_addressee,
     post_target_rejection,
     resolve_operator_alias,
 )
+from giljo_mcp.services.comm_post_validation import resolve_loop_interval, validate_post_vocabularies
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.identity import validate_from_agent
 
 
 logger = logging.getLogger(__name__)
 
-# Loose status set the tool surface accepts on a status-setting post. The column
-# itself tolerates freeform labels (BE-6054a), but the tool boundary constrains
-# agent input to the known lifecycle to keep the board legible.
-_SETTABLE_STATUSES = ("open", "active", "resolved", "closed")
-
 # Length cap for an agent-supplied author identity (FE-6122). Mirrors MCP_ID_MAX
 # at the tool boundary; enforced here too so the owning service validates the
 # input itself ("no unvalidated agent input to DB"), not only the MCP wrapper.
 _FROM_AGENT_MAX = 64
-
-# FE-6140: bounds for the auto-check-in interval (minutes) carried on a
-# loop_directive post. Validated here at the owning service so the column never
-# receives unbounded agent/operator input ("no unvalidated agent input to DB").
-# 1 min floor; 24h ceiling — a wider net than the FE slider (5..60) but a hard
-# sanity bound for the MCP path.
-_LOOP_INTERVAL_MIN_MINUTES = 1
-_LOOP_INTERVAL_MAX_MINUTES = 1440
 
 # BE-6226: bounds for the get_thread_history incremental-fetch ``tail`` (last N).
 # Validated at the owning service so the repo never receives unbounded agent input.
@@ -81,7 +70,13 @@ _TAIL_MIN = 1
 _TAIL_MAX = 500
 
 
-class CommThreadService(CommThreadChainHubMixin, CommThreadSoftDeleteMixin, CommThreadEditMixin, CommThreadBatonMixin):
+class CommThreadService(
+    CommThreadChainHubMixin,
+    CommThreadSoftDeleteMixin,
+    CommThreadEditMixin,
+    CommThreadBatonMixin,
+    CommThreadWakeMixin,
+):
     """Service surface for comm_threads / comm_participants + thread messaging."""
 
     def __init__(
@@ -241,7 +236,9 @@ class CommThreadService(CommThreadChainHubMixin, CommThreadSoftDeleteMixin, Comm
         loop_interval_minutes: int | None = None,
         pass_baton_to: str | None = None,
         user_id: str | None = None,
+        as_user: bool = False,
         detected_harness: str | None = None,
+        self_reported_status: str | None = None,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
         """Post a message to a thread (broadcast to all participants, or direct to
@@ -262,47 +259,39 @@ class CommThreadService(CommThreadChainHubMixin, CommThreadSoftDeleteMixin, Comm
         cadence. It is persisted on the loop_directive message and surfaced on the
         get_my_turn / get_thread_history poll responses (the harness-neutral inject)
         so a running agent re-reads it and self-schedules its wake. Ignored unless
-        ``loop_directive`` is True (a non-directive message never carries a cadence)."""
+        ``loop_directive`` is True (a non-directive message never carries a cadence).
+
+        BE-9475: ``self_reported_status`` is the poster's own claim about what it is
+        doing, stored on its participant row and served only where ``agent_executions``
+        has nothing to say (validated by comm_post_validation.validate_post_vocabularies)."""
         tk = self._resolve_tenant(tenant_key)
         if not content or not content.strip():
             raise ValidationError("content is required", context={"operation": "comm_thread.post"})
-        if set_status is not None and set_status not in _SETTABLE_STATUSES:
-            raise ValidationError(
-                f"set_status must be one of {_SETTABLE_STATUSES}, got '{set_status}'.",
-                context={"operation": "comm_thread.post", "set_status": set_status},
-            )
+        validate_post_vocabularies(set_status, self_reported_status)
+        interval_to_persist = resolve_loop_interval(loop_directive, loop_interval_minutes)
 
-        # FE-6140: validate the cadence before it reaches the DB. Only a
-        # loop_directive post carries one — drop a stray interval on a normal post
-        # rather than persisting a meaningless cadence.
-        interval_to_persist: int | None = None
-        if loop_directive and loop_interval_minutes is not None:
-            if not isinstance(loop_interval_minutes, int) or isinstance(loop_interval_minutes, bool):
-                raise ValidationError(
-                    "loop_interval_minutes must be an integer number of minutes.",
-                    context={"operation": "comm_thread.post"},
-                )
-            if not (_LOOP_INTERVAL_MIN_MINUTES <= loop_interval_minutes <= _LOOP_INTERVAL_MAX_MINUTES):
-                raise ValidationError(
-                    f"loop_interval_minutes must be between {_LOOP_INTERVAL_MIN_MINUTES} and "
-                    f"{_LOOP_INTERVAL_MAX_MINUTES}.",
-                    context={"operation": "comm_thread.post", "loop_interval_minutes": loop_interval_minutes},
-                )
-            interval_to_persist = loop_interval_minutes
-
-        # (A) Author attribution (FE-6122 / BE-9037). An agent self-declares its
-        # identity (its role/lane id) via ``from_agent`` (WINS when present); a USER
-        # post falls back to the authenticated principal. The value feeds the
-        # FUNCTIONAL identity field (from_agent_id: recipient self-exclusion, baton/
-        # get_my_turn matching, read cursors), so it is hardened at the write boundary
-        # (validate_from_agent: type-check + length-cap + control/zero-width strip +
-        # reject-empty -> clean 422). The Hub keys on the SLUG — from_agent_id is never
-        # rewritten to a UUID (breaks self-exclusion/baton); unknown-but-sane slugs OK.
+        # (A) Author attribution (FE-6122 / BE-9037 / BE-9379). An agent self-declares
+        # its identity (its role/lane id) via ``from_agent`` (WINS when present); a
+        # USER post claims the human's voice EXPLICITLY via ``as_user`` — an omitted
+        # from_agent no longer falls back to the authenticated principal (that implicit
+        # fallback let a forgetful agent impersonate the operator, CHT-0483). The value
+        # feeds the FUNCTIONAL identity field (from_agent_id: recipient self-exclusion,
+        # baton/get_my_turn matching, read cursors), so it is hardened at the write
+        # boundary (validate_from_agent: type-check + length-cap + control/zero-width
+        # strip + reject-empty -> clean 422). The Hub keys on the SLUG — from_agent_id
+        # is never rewritten to a UUID (breaks self-exclusion/baton); unknown-but-sane
+        # slugs OK.
         # RESIDUAL LIMITATION (NOT fixed here — see PR): identity is self-declared; a
         # caller can still claim any slug because the session carries only tenant_key +
         # user_id. Impersonation-proofing needs auth-bound agent identity, a separate
         # effort. This guard stops garbage/corruption, not role impersonation.
         from_agent = validate_from_agent(from_agent, max_len=_FROM_AGENT_MAX)
+        if as_user and from_agent:
+            raise ValidationError(
+                "from_agent and as_user are mutually exclusive: a post is authored by an "
+                "agent or by the human user, never both.",
+                context={"operation": "comm_thread.post"},
+            )
 
         async with self._scoped_session(tk) as session:
             thread = await self._require_thread(session, tk, thread_id)
@@ -351,28 +340,15 @@ class CommThreadService(CommThreadChainHubMixin, CommThreadSoftDeleteMixin, Comm
                 from_agent=from_agent,
                 user_id=user_id,
                 detected_harness=detected_harness,
+                as_user=as_user,
+                self_reported_status=self_reported_status,
             )
             from_agent_id, from_kind = author.agent_id, author.kind
             from_display_name, attribution_warning = author.display_name, author.warning
 
-            # Recipients: a direct target, else broadcast to all OTHER participants.
-            if to_participant:
-                recipient_ids = [to_participant]
-                # BE-9292a: delivering to someone enrols them. A broadcast cannot
-                # diverge (it fans out FROM the directory), but a directed post used to
-                # write a recipient row and no participant row — leaving its addressee
-                # obliged to reply and unable to acknowledge. See enrol_addressee.
-                await enrol_addressee(self._repo, self._user_repo, session, tk, thread_id, to_participant)
-            else:
-                # BE-6141: a broadcast on a PROJECT-ANCHORED thread auto-enrolls the
-                # project's active agents as participants first, so the broadcast
-                # reaches agents that never manually join_thread'd. Standalone
-                # threads (NULL project_id) are unaffected — they still broadcast to
-                # exactly the participants who joined.
-                if thread.project_id:
-                    await self._auto_enroll_project_roster(session, tk, thread_id, thread.project_id)
-                participants = await self._repo.get_participants(session, tk, thread_id)
-                recipient_ids = [p.participant_id for p in participants if p.participant_id != from_agent_id]
+            recipient_ids = await self._resolve_recipients(
+                session, tk, thread, to_participant=to_participant, from_agent_id=from_agent_id
+            )
 
             # A loop-directive post is marked with the reserved message_type so the
             # mission composer can detect it; otherwise broadcast vs direct as usual.
@@ -400,7 +376,11 @@ class CommThreadService(CommThreadChainHubMixin, CommThreadSoftDeleteMixin, Comm
             )
             if set_status is not None:
                 await self._repo.set_status(session, tk, thread_id, set_status)
-            return {
+            # BE-9296a: read inside the session, written after it commits (below).
+            notice = await self.collect_handover_notice(
+                session, tk, thread, pass_baton_to if baton_passed else None, from_display_name
+            )
+            result = {
                 "message_id": message.id,
                 "thread_id": thread_id,
                 "recipients": recipient_ids,
@@ -417,7 +397,44 @@ class CommThreadService(CommThreadChainHubMixin, CommThreadSoftDeleteMixin, Comm
                 # BE-9197 (additive): did THIS post move the baton + owner after.
                 "baton_passed": baton_passed,
                 "next_action_owner": thread.next_action_owner,
+                # Stay-on-the-line (1CZA1D): see _post_advice_entry / POST_ADVICE.
+                **self._post_advice_entry(set_status),
             }
+
+        # BE-9296a: COMMITTED here, and not one line earlier — see the mixin.
+        self._signal_post_wake(tk, to_participant, requires_action, pass_baton_to, baton_passed, recipient_ids)
+        await self.emit_handover_notice(notice)
+        return result
+
+    async def _resolve_recipients(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        thread: CommThread,
+        *,
+        to_participant: str | None,
+        from_agent_id: str,
+    ) -> list[str]:
+        """Who this post is delivered to: a direct target, else every OTHER participant.
+
+        Both branches also REGISTER, which is why they belong together and are lifted
+        out as one unit — delivery and the directory move in lockstep here.
+        """
+        if to_participant:
+            # BE-9292a: delivering to someone enrols them. A broadcast cannot diverge
+            # (it fans out FROM the directory), but a directed post used to write a
+            # recipient row and no participant row — leaving its addressee obliged to
+            # reply and unable to acknowledge. See enrol_addressee.
+            await enrol_addressee(self._repo, self._user_repo, session, tenant_key, thread.id, to_participant)
+            return [to_participant]
+        # BE-6141: a broadcast on a PROJECT-ANCHORED thread auto-enrolls the project's
+        # active agents as participants first, so the broadcast reaches agents that
+        # never manually join_thread'd. Standalone threads (NULL project_id) are
+        # unaffected — they still broadcast to exactly the participants who joined.
+        if thread.project_id:
+            await self._auto_enroll_project_roster(session, tenant_key, thread.id, thread.project_id)
+        participants = await self._repo.get_participants(session, tenant_key, thread.id)
+        return [p.participant_id for p in participants if p.participant_id != from_agent_id]
 
     async def _auto_enroll_project_roster(
         self, session: AsyncSession, tenant_key: str, thread_id: str, project_id: str
@@ -697,11 +714,22 @@ class CommThreadService(CommThreadChainHubMixin, CommThreadSoftDeleteMixin, Comm
             return {"query": query, "count": len(threads), "threads": [thread_dict(t) for t in threads]}
 
     async def list_participants(self, *, thread_id: str, tenant_key: str | None = None) -> dict[str, Any]:
-        """Return the participant directory for a thread (BE-6054ef REST adapter)."""
+        """Return the participant directory for a thread (BE-6054ef REST adapter).
+
+        TSK-9457: this carries ``status`` — the SAME ``latest_execution_status``
+        expression the Hub's thread-card list serves — and it must be present even when
+        NULL. Absent is not null here, and that difference WAS the bug: the client reads a
+        missing status with a present ``last_seen_at`` as ``idle``, labelled "Monitoring",
+        so a ``silent`` agent read "Silent" on the card and "Monitoring" once you clicked
+        into it. That second label was not a competing judgement — it was a default the
+        client invented because this read handed it nothing, and the one that reads
+        HEALTHY for an agent we had lost contact with. NULL stays NULL for the reason
+        documented on ``latest_execution_status``.
+        """
         tk = self._resolve_tenant(tenant_key)
         async with self._scoped_session(tk) as session:
             await self._require_thread(session, tk, thread_id)
-            parts = await self._repo.get_participants(session, tk, thread_id)
+            parts = await self._repo.get_participants_with_status(session, tk, thread_id)
             return {
                 "thread_id": thread_id,
                 "count": len(parts),
@@ -715,8 +743,10 @@ class CommThreadService(CommThreadChainHubMixin, CommThreadSoftDeleteMixin, Comm
                         "harness": p.harness,
                         "last_seen_at": p.last_seen_at.isoformat() if p.last_seen_at else None,
                         "joined_at": p.joined_at.isoformat() if p.joined_at else None,
+                        # TSK-9457: one source of truth with the card list — agent_executions.
+                        "status": status,
                     }
-                    for p in parts
+                    for p, status in parts
                 ],
             }
 

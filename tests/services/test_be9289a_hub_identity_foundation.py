@@ -41,7 +41,7 @@ import pytest
 from sqlalchemy import select
 
 from giljo_mcp.database import tenant_session_context
-from giljo_mcp.models import Project
+from giljo_mcp.models import Product, Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.comm import CommParticipant
 from giljo_mcp.models.tasks import Message
@@ -89,6 +89,16 @@ async def _message(db_session, tenant: str, message_id: str) -> Message:
 async def _seed_project_with_agent(db_session, tenant: str, agent_id: str) -> str:
     """A project carrying one ACTIVE agent, so the auto-enroll roster path has a subject."""
     with tenant_session_context(db_session, tenant):
+        # BE-9437: a project belongs to a product. Its own, so an active
+        # seed cannot collide under idx_project_single_active_per_product.
+        _owning_product_project = Product(
+            id=str(uuid.uuid4()),
+            tenant_key=tenant,
+            name=f"Owning Product {uuid.uuid4().hex[:6]}",
+            description="seeded",
+            is_active=False,
+        )
+        db_session.add(_owning_product_project)
         project = Project(
             id=str(uuid.uuid4()),
             name=f"BE-9289a {uuid.uuid4().hex[:6]}",
@@ -96,6 +106,7 @@ async def _seed_project_with_agent(db_session, tenant: str, agent_id: str) -> st
             mission="exercise participant registration",
             status="active",
             tenant_key=tenant,
+            product_id=_owning_product_project.id,
             series_number=1,
             execution_mode="claude_code_cli",
             created_at=datetime.now(UTC),
@@ -334,8 +345,9 @@ async def test_agent_post_is_stamped_from_kind_agent(db_manager, db_session):
     assert msg.from_agent_id == uuid_shaped_agent
 
 
-async def test_principal_fallback_post_is_stamped_from_kind_user(db_manager, db_session):
-    """A post with no from_agent falls back to the principal and is stamped 'user'."""
+async def test_as_user_post_is_stamped_from_kind_user(db_manager, db_session):
+    """An explicit as_user post attributes to the principal and is stamped 'user'.
+    (BE-9379: the human's voice is claimed, never the omission default anymore.)"""
     tenant = _tk("kinduser")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -343,7 +355,9 @@ async def test_principal_fallback_post_is_stamped_from_kind_user(db_manager, db_
     thread = await svc.create_thread(subject="kind", creator_id="agent-orch", tenant_key=tenant)
     tid = thread["thread_id"]
 
-    result = await svc.post_to_thread(thread_id=tid, content="I am the operator", user_id="user-123", tenant_key=tenant)
+    result = await svc.post_to_thread(
+        thread_id=tid, content="I am the operator", user_id="user-123", as_user=True, tenant_key=tenant
+    )
 
     msg = await _message(db_session, tenant, result["message_id"])
     assert msg.from_kind == "user"

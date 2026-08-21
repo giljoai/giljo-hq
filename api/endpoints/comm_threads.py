@@ -281,6 +281,9 @@ async def post_to_thread(
         loop_interval_minutes=body.loop_interval_minutes,
         priority=body.priority,
         user_id=current_user.id,
+        # BE-9379: the dashboard poster IS the authenticated human — say so explicitly.
+        # The service no longer infers user attribution from a bare user_id.
+        as_user=True,
         tenant_key=current_user.tenant_key,
     )
     # BE-9292a-F1: this route forwards no baton, so before the addressee was screened
@@ -453,6 +456,9 @@ async def pass_baton(
     result = await service.pass_baton(
         thread_id=thread_id,
         to=body.to,
+        # BE-9296a: on this path the hander is the authenticated operator, so their
+        # identity comes from the session rather than being declared.
+        from_agent=current_user.id,
         tenant_key=current_user.tenant_key,
     )
     # BE-9292a: an undeliverable target is refused and the owner is unchanged —
@@ -472,5 +478,8 @@ async def pass_baton(
             status=t["status"],
             next_action_owner=result.get("next_action_owner"),
             update_type="baton",
+            # BE-9296a: name the hander so the recipient's alert says who is waiting.
+            from_display_name=result.get("from_display_name") or current_user.display_name,
+            from_kind=result.get("from_kind") or "user",
         )
     return result

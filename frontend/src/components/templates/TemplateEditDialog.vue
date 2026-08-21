@@ -23,9 +23,9 @@
                 aria-label="Select agent role"
                 @update:model-value="$emit('role-change', $event)"
               >
-                <template v-slot:append-inner>
+                <template #append-inner>
                   <v-tooltip location="top">
-                    <template v-slot:activator="{ props }">
+                    <template #activator="{ props }">
                       <v-icon v-bind="props" size="small" color="primary">mdi-help-circle</v-icon>
                     </template>
                     <span>Required field - Select the agent role</span>
@@ -42,9 +42,9 @@
                 aria-label="Custom agent name suffix"
                 @update:model-value="update('custom_suffix', $event)"
               >
-                <template v-slot:append-inner>
+                <template #append-inner>
                   <v-tooltip location="top">
-                    <template v-slot:activator="{ props }">
+                    <template #activator="{ props }">
                       <v-icon v-bind="props" size="small" color="primary">mdi-help-circle</v-icon>
                     </template>
                     <span>Add a suffix to customize the agent name (e.g., 'implementer-fastapi')</span>
@@ -68,9 +68,9 @@
                 aria-label="Select coding CLI tool for this agent"
                 @update:model-value="update('cli_tool', $event)"
               >
-                <template v-slot:append-inner>
+                <template #append-inner>
                   <v-tooltip location="top">
-                    <template v-slot:activator="{ props }">
+                    <template #activator="{ props }">
                       <v-icon v-bind="props" size="small" color="primary">mdi-help-circle</v-icon>
                     </template>
                     <span
@@ -80,6 +80,46 @@
                   </v-tooltip>
                 </template>
               </v-select>
+            </v-col>
+
+            <!-- BE-9394: the tenant-wide RETIRE switch, and the only writer for it.
+                 Deliberately distinct from the Active switch in the agents list, which
+                 writes just this product's junction row (useProductAgentAssignments).
+                 Two controls, two meanings: that one is "active in the product I am
+                 working in", this one is "available at all, anywhere". Edit-only --
+                 a new agent is created available (BE-9391), so offering the choice on
+                 create would imply a decision nothing acts on. -->
+            <!-- FE-9385c: the heading is gone and the control is one line. The
+                 switch plus its own label already said what the heading said, and
+                 the label no longer rewrites itself when you toggle it -- a caption
+                 that changes as you flip the switch is harder to read at a glance,
+                 not easier, and the switch position already carries the state. -->
+            <v-col v-if="template.id" cols="6">
+              <div class="d-flex align-center">
+                <v-switch
+                  :model-value="!!template.is_active"
+                  label="Available in all products"
+                  color="primary"
+                  density="compact"
+                  hide-details
+                  inset
+                  data-testid="retire-switch"
+                  aria-label="Available in all products"
+                  @update:model-value="update('is_active', $event)"
+                />
+                <v-tooltip location="top" max-width="340">
+                  <template #activator="{ props }">
+                    <v-icon v-bind="props" size="small" color="primary" class="ml-2"
+                      >mdi-help-circle</v-icon
+                    >
+                  </template>
+                  <span
+                    >Covers every product. Turn it off to stop offering this agent
+                    anywhere. The <strong>Active here</strong> switch in the agents list
+                    is separate — it only affects the product you are working in.</span
+                  >
+                </v-tooltip>
+              </div>
             </v-col>
 
             <!-- Description -->
@@ -93,9 +133,9 @@
                 aria-label="Agent description"
                 @update:model-value="update('description', $event)"
               >
-                <template v-slot:append-inner>
+                <template #append-inner>
                   <v-tooltip location="top">
-                    <template v-slot:activator="{ props }">
+                    <template #activator="{ props }">
                       <v-icon v-bind="props" size="small" color="primary">mdi-help-circle</v-icon>
                     </template>
                     <span>Brief description of what this agent does</span>
@@ -109,7 +149,7 @@
               <div class="d-flex align-center mb-2">
                 <span class="text-title-small">Role & Expertise</span>
                 <v-tooltip location="top">
-                  <template v-slot:activator="{ props }">
+                  <template #activator="{ props }">
                     <v-icon v-bind="props" size="small" color="primary" class="ml-2"
                       >mdi-help-circle</v-icon
                     >

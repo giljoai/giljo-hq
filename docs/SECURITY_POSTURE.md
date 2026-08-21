@@ -43,7 +43,7 @@ This property is formally audited and grep-verified as of 2026-04-23.
   other tenant's data. This is enforced in code and covered by a regression
   test suite.
 - **Single-IP spam is rate-limited.** A misbehaving client from one IP is
-  capped at 300 requests per minute (per-IP, per-process). Per-tenant and
+  capped at a per-IP request rate. Per-tenant and
   per-org rate quotas are a feature of the hosted (SaaS) edition; the
   self-hosted (CE) edition relies on this per-IP limiter plus any edge
   (reverse-proxy / CDN) controls you put in front of it. Distributed
@@ -95,10 +95,9 @@ that sanctions only the four audited render sites; every `v-html` line carries
 its own justification comment. The result is that introducing a new raw-HTML
 sink is a deliberate, reviewed act — not an accidental one.
 
-The operator ops panel is Flask + Jinja2 and relies on Jinja2's default
-auto-escape for all tenant-sourced content; a grep sanity check of
-`| safe`, `Markup(`, and `autoescape false` returned zero tenant-controlled
-findings as of 2026-04-24.
+The operator ops panel relies on auto-escaping by default for all
+tenant-sourced content; a grep sanity check for unsafe-render patterns
+returned zero tenant-controlled findings as of 2026-04-24.
 
 ## See also
 
@@ -106,10 +105,3 @@ findings as of 2026-04-24.
   — the engineering-depth Trust Model section with the Server
   DOES / DOES NOT lists, rate-limit threat model, and blast-radius
   implications.
-- [`docs/security/SEC-0001_upload_guardrails.md`](security/SEC-0001_upload_guardrails.md)
-  — defence-in-depth reference for the vision-document upload boundary
-  (TXT/MD allowlist, 5 MB cap, filename sanitizer, strict UTF-8, error
-  contract).
-- [`docs/architecture/tenant_scoping_rules.md`](architecture/tenant_scoping_rules.md)
-  — the tenant-isolation rules that keep a compromised client inside its
-  own tenant.

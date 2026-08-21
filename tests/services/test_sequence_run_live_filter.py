@@ -23,6 +23,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.services.sequence_run_live_filter import filter_runs_with_live_members
 from giljo_mcp.tenant import TenantManager
@@ -32,9 +33,22 @@ pytestmark = pytest.mark.asyncio
 
 
 async def _project(session: AsyncSession, tenant: str, pid: str, *, status: str, deleted_at=None) -> None:
+    # BE-9437: a project belongs to a product. Its own, so an active seed cannot
+    # collide under idx_project_single_active_per_product.
+    _product_id = str(uuid.uuid4())
+    session.add(
+        Product(
+            id=_product_id,
+            tenant_key=tenant,
+            name=f"Owning Product {_product_id[:8]}",
+            description="seeded",
+            is_active=False,
+        )
+    )
     session.add(
         Project(
             id=pid,
+            product_id=_product_id,
             name="filter-test",
             description="BE-6200 live filter",
             mission="m",

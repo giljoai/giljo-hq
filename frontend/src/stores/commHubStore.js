@@ -99,6 +99,11 @@ export const useCommHubStore = defineStore('commHub', () => {
   })
   const loading = ref(false)
   const error = ref(null)
+  // BE-9414: thread_ids with a message-hydration read in flight, and thread_ids
+  // that asked for one WHILE a read was in flight (so the coalesced follow-up pass
+  // still serves them). Deliberately plain Sets, not refs — nothing renders them.
+  const _hydratingThreadIds = new Set()
+  const _rehydrateWantedThreadIds = new Set()
 
   // ----- getters -----
 
@@ -405,7 +410,7 @@ export const useCommHubStore = defineStore('commHub', () => {
    * Store-first: upsert into messagesByThreadId; deduplicate by message_id.
    * Increments unread count for threads that are not currently open.
    */
-  function handleThreadMessage(payload) {
+  async function handleThreadMessage(payload) {
     const threadId = payload?.thread_id
     if (!threadId) return
     _upsertMessage(threadId, payload)
@@ -422,6 +427,61 @@ export const useCommHubStore = defineStore('commHub', () => {
     if (threadId !== selectedThreadId.value) {
       const prev = unreadByThreadId.value.get(threadId) || 0
       unreadByThreadId.value = immutableMapSet(unreadByThreadId.value, threadId, prev + 1)
+    }
+
+    // BE-9414: a long post travels as an excerpt (the cross-worker broker rides
+    // pg_notify, capped at 7999 bytes), so the body has to be fetched.
+    //
+    // For EVERY thread, not only the one on screen. Scoping this to the open
+    // thread looked like a saving and was a defect: useHubNotifications tests
+    // `content` for the operator's display name, on every thread, so a mention
+    // past the cut-off would silently stop raising the bell — a missed "you were
+    // named" is worse than the extra read.
+    if (payload.content_truncated) {
+      await hydrateThreadMessages(threadId)
+    }
+  }
+
+  /**
+   * Re-read a thread's messages and merge them, WITHOUT the side effects of
+   * loadThread (BE-9414).
+   *
+   * loadThread owns `loading` and writes `error`, which is right for an operator
+   * opening a thread and wrong for a background top-up nobody asked for: it would
+   * flicker the timeline into its loading state on every long post, and turn a
+   * failed top-up into a Hub-wide error banner over a message the operator can
+   * already partly read. Merging through _upsertMessage instead also patches the
+   * in-flight excerpt into the full body in place, rather than swapping the whole
+   * list out from under the renderer.
+   *
+   * Concurrent requests COALESCE rather than drop. A burst of long posts must not
+   * become a burst of identical GETs — but it must not lose the tail either: a read
+   * already in flight may have queried before the newer message was committed, so
+   * merely skipping would leave that one stuck on its excerpt. One follow-up pass
+   * serves everything that arrived during the first, so the last request is always
+   * answered by a read that started after it. N posts cost at most 2 reads.
+   */
+  async function hydrateThreadMessages(threadId) {
+    if (!threadId) return
+    if (_hydratingThreadIds.has(threadId)) {
+      _rehydrateWantedThreadIds.add(threadId)
+      return
+    }
+    _hydratingThreadIds.add(threadId)
+    try {
+      do {
+        _rehydrateWantedThreadIds.delete(threadId)
+        const res = await api.threads.history(threadId)
+        const messages = res.data?.messages || []
+        messages.forEach((m) => _upsertMessage(threadId, m))
+      } while (_rehydrateWantedThreadIds.has(threadId))
+    } catch {
+      // Best-effort: the excerpt stays on screen and the next open re-reads the
+      // thread in full. A failed top-up must never blank a message the operator
+      // can already partly read.
+    } finally {
+      _hydratingThreadIds.delete(threadId)
+      _rehydrateWantedThreadIds.delete(threadId)
     }
   }
 
@@ -478,6 +538,8 @@ export const useCommHubStore = defineStore('commHub', () => {
     filters.value = { status: null, owner: null, product_id: null, project_id: null }
     loading.value = false
     error.value = null
+    _hydratingThreadIds.clear()
+    _rehydrateWantedThreadIds.clear()
   }
 
   /**
@@ -530,6 +592,7 @@ export const useCommHubStore = defineStore('commHub', () => {
     // ws handlers
     handleThreadMessage,
     handleThreadUpdate,
+    hydrateThreadMessages,
 
     // lifecycle
     $reset,

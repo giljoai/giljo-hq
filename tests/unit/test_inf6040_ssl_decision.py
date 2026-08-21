@@ -182,7 +182,9 @@ class TestGiljoForceHttpPropagation:
         assert os.environ.get("GILJO_FORCE_HTTP") == "1", (
             "--no-ssl must cause resolve_ssl_decision() to set GILJO_FORCE_HTTP=1 (MISMATCH-1)"
         )
-        os.environ.pop("GILJO_FORCE_HTTP", None)  # cleanup direct mutation
+        # No manual cleanup: the monkeypatch.delenv above already recorded this key's
+        # prior state, so monkeypatch restores it at teardown even though the value
+        # was written by production code rather than by the test (INF-9432).
 
     def test_ssl_disabled_in_config_sets_force_http(self, monkeypatch):
         """ssl_enabled=False in config -> resolve_ssl_decision() sets GILJO_FORCE_HTTP=1."""
@@ -195,12 +197,11 @@ class TestGiljoForceHttpPropagation:
         assert os.environ.get("GILJO_FORCE_HTTP") == "1", (
             "ssl_enabled=False must cause resolve_ssl_decision() to set GILJO_FORCE_HTTP=1"
         )
-        os.environ.pop("GILJO_FORCE_HTTP", None)
 
     def test_ssl_enabled_clears_force_http(self, monkeypatch):
         """ssl_enabled=True and no --no-ssl -> resolve_ssl_decision() clears GILJO_FORCE_HTTP."""
         # Pre-set a stale value to confirm it gets cleared.
-        os.environ["GILJO_FORCE_HTTP"] = "1"
+        monkeypatch.setenv("GILJO_FORCE_HTTP", "1")
 
         with patch.object(startup, "get_ssl_enabled", return_value=True):
             result = startup.resolve_ssl_decision(no_ssl=False)
@@ -237,7 +238,6 @@ class TestGiljoForceHttpPropagation:
         assert os.environ.get("GILJO_FORCE_HTTP") == "1", (
             "missing certs -> ssl_enabled=False -> GILJO_FORCE_HTTP must be set"
         )
-        os.environ.pop("GILJO_FORCE_HTTP", None)
 
 
 # ---------------------------------------------------------------------------

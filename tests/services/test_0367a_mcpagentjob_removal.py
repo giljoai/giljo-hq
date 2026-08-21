@@ -29,6 +29,7 @@ import pytest
 import pytest_asyncio
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 
 
@@ -46,6 +47,16 @@ async def test_tenant_0367a() -> str:
 @pytest_asyncio.fixture
 async def test_project_0367a(db_session, test_tenant_0367a) -> Project:
     """Create test project for 0367a tests."""
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=test_tenant_0367a,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         id=str(uuid.uuid4()),
         name="0367a MCPAgentJob Removal Test",
@@ -53,6 +64,7 @@ async def test_project_0367a(db_session, test_tenant_0367a) -> Project:
         mission="Test the removal of MCPAgentJob from service layer",
         status="active",
         tenant_key=test_tenant_0367a,
+        product_id=_owning_product_project.id,
         series_number=random.randint(1, 9000),
     )
     db_session.add(project)

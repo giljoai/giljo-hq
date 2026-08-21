@@ -185,7 +185,7 @@ def _build_cookie_params(request: Request, db_cookie_domains: list[str] | None =
     # Secure cookie would be silently dropped by the browser over plain http.
     # Mirror the CSRF cookie (api/middleware/csrf.py): derive Secure from the
     # effective connection scheme, which uvicorn resolves from X-Forwarded-Proto
-    # behind a reverse proxy / Railway. INF-6236: the effective scheme is now
+    # behind a reverse proxy / the hosted platform. INF-6236: the effective scheme is now
     # AUTHORITATIVE over config -- https forces Secure on, http forces it off --
     # so a stale config security.cookies.secure=True can never brick http login.
     # config.security.cookies.secure only takes effect when there is no request

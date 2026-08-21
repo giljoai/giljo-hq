@@ -38,6 +38,32 @@ def _resolve_broker_dsn(state: APIState) -> str | None:
     return os.getenv("GILJO_BROKER_DATABASE_URL") or getattr(state.db_manager, "database_url", None)
 
 
+def assert_pgbouncer_broker_pairing() -> None:
+    """Fail boot when ``GILJO_PGBOUNCER=1`` is set without ``GILJO_BROKER_DATABASE_URL`` (INF-3009f).
+
+    The two variables are a pair: ``GILJO_PGBOUNCER=1`` declares that the app's
+    ``DATABASE_URL`` sits behind PgBouncer transaction pooling, and transaction
+    pooling cannot serve the broker's session-pinned ``LISTEN`` — without a direct
+    DSN, cross-worker realtime AND live-session revocation (TSK-9006) die with no
+    error anywhere. Nothing else enforces the pairing (the vars live in the
+    platform's dashboards, not code), so this converts the worst failure mode from silent to
+    structural, same fail-loud posture as ``ensure_broker_supports_worker_count``.
+
+    The flag gate matches P1's idiom: only the exact value ``"1"`` is ON.
+    """
+    if os.getenv("GILJO_PGBOUNCER") != "1":
+        return
+    if not os.getenv("GILJO_BROKER_DATABASE_URL"):
+        raise RuntimeError(
+            "GILJO_PGBOUNCER=1 but GILJO_BROKER_DATABASE_URL is not set. With the app "
+            "database URL behind PgBouncer transaction pooling, the realtime broker's "
+            "session-pinned LISTEN cannot survive — cross-worker realtime updates AND "
+            "live-session revocation would fail silently. Set GILJO_BROKER_DATABASE_URL "
+            "to the DIRECT (unpooled) database URL (on the hosted platform: the Postgres "
+            "service's unpooled connection string), or unset GILJO_PGBOUNCER."
+        )
+
+
 async def init_websocket_broker(state: APIState) -> None:
     """Create, guard, and attach the cross-worker WebSocket event broker.
 
@@ -48,6 +74,11 @@ async def init_websocket_broker(state: APIState) -> None:
     worker keeps the graceful local-only degrade: its local delivery is complete.
     """
     from api.startup.database import _worker_count
+
+    # INF-3009f: MUST run before (and outside) the try below — the single-worker
+    # degrade path swallows broker exceptions, and this misconfig must abort boot
+    # at ANY worker count.
+    assert_pgbouncer_broker_pairing()
 
     worker_count = _worker_count()
     try:
@@ -62,6 +93,15 @@ async def init_websocket_broker(state: APIState) -> None:
         state.websocket_broker = broker
         state.websocket_manager.attach_broker(broker)
         logger.info(f"WebSocket broker initialized: {broker.__class__.__name__}")
+        # BE-9296a: additive cross-worker fan-out for the agent wake signal. No-ops on
+        # a single worker, where the in-process registry is already complete.
+        from api.startup.agent_wake_relay import install_wake_relay
+
+        install_wake_relay(
+            broker=broker,
+            websocket_manager=state.websocket_manager,
+            worker_count=worker_count,
+        )
     except Exception as e:  # Broad catch: single-worker degrade path re-raises when multi-worker
         logger.error(f"Failed to initialize WebSocket broker: {e}", exc_info=True)
         if worker_count > 1:

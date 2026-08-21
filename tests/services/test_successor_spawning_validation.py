@@ -19,7 +19,7 @@ from datetime import UTC
 
 import pytest
 
-from giljo_mcp.models import Project
+from giljo_mcp.models import Product, Project
 
 
 # Fixtures `tenant_key`, `agent_templates`, `project`, `service`,
@@ -58,6 +58,16 @@ class TestPredecessorValidation:
         from tests.services.conftest import _spawn_and_complete
 
         # Create a second project in the same tenant (unique series_number to avoid uq_project_taxonomy)
+        # BE-9437: a project belongs to a product. Its own, so an active
+        # seed cannot collide under idx_project_single_active_per_product.
+        _owning_product_proj2 = Product(
+            id=str(uuid.uuid4()),
+            tenant_key=tenant_key,
+            name=f"Owning Product {uuid.uuid4().hex[:6]}",
+            description="seeded",
+            is_active=False,
+        )
+        db_session.add(_owning_product_proj2)
         proj2 = Project(
             id=str(uuid.uuid4()),
             name="Other Project",
@@ -65,6 +75,7 @@ class TestPredecessorValidation:
             mission="Other work",
             status="active",
             tenant_key=tenant_key,
+            product_id=_owning_product_proj2.id,
             execution_mode="multi_terminal",
             series_number=random.randint(1, 9000),
             implementation_launched_at=datetime.now(UTC),

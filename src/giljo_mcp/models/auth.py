@@ -443,7 +443,7 @@ class LoginLockout(Base):
     ServerRuntimeMetric precedent).
 
     Keying on ``(identifier, ip_address)`` rather than on the ``users`` row is
-    deliberate and load-bearing (Patrik's design): an attacker spamming a
+    deliberate and load-bearing (by design): an attacker spamming a
     victim's email from a DIFFERENT IP can only lock the ``(victim_email,
     attacker_ip)`` pair, never the victim's own ``(victim_email, victim_ip)`` —
     so the lockout itself can't be weaponised into an account-DoS. It also lets

@@ -2,6 +2,456 @@
 
 All notable changes to this project are recorded here. This changelog follows the [Keep a Changelog](https://keepachangelog.com/) convention — entries are grouped by change type (Added / Changed / Fixed / Removed / Security). Versions follow `MAJOR.MINOR.PATCH[.HOTFIX]` and tags live on the public repository (`giljoai/giljo-hq`).
 
+## [2.0.3] — 2026-08-19
+
+### Highlights
+
+- **Your AI assistant can now read a big board reliably.** It sees counts first, fetches in pages, and walks the whole list without missing or repeating a row.
+- **Search for agents.** Find projects and tasks by a word — including descriptions and commit history.
+- **Honest answers everywhere.** A mistyped filter tells you instead of pretending nothing matched, and an empty list explains when finished work is hiding.
+- **Approvals answered right in your AI client.** No dashboard trip needed.
+- **One clear "Action needed" system.** Hand-offs, mentions, and approvals share one style, click through to the exact message, and follow you between devices and reloads.
+- **Agents follow the product you are working in.** Per-product agent crews, up to 16.
+- **Search inside a conversation** in the Message Hub.
+- **Model Context Protocol SDK 2.0** and support for the newest protocol version, plus security fixes and dependency updates.
+
+...plus 91 more fixes and improvements, detailed below.
+
+### Added
+
+- **Approval requests can now be answered right in your AI client.** When an
+  agent pauses to ask you to approve something, clients that support the newest
+  connection standard show the choice inline and let you answer on the spot —
+  the agent carries on as soon as you pick. Nothing changes for other clients:
+  the request still waits on your dashboard, where it has always been, and the
+  dashboard can still resolve it either way.
+- **Codex worker lanes can now run headless without stalling.** When an
+  orchestrator runs Codex workers without opening a terminal for each one, it can
+  drive them through a new built-in helper instead of hand-writing the connection
+  itself. The helper fixes the settings that decide whether a worker can finish its
+  work unattended, so a lane no longer sits waiting on a confirmation prompt nobody
+  can answer, and no longer reports "nothing has happened yet" for work that has
+  already finished. Anything the Codex engine asks that the helper is not allowed
+  to answer on your behalf is reported as a clear error instead of a silent wait.
+  The engine is reached only over a local connection on your own machine, and the
+  existing way of launching Codex workers in terminals is unchanged.
+- **Hand-offs to you now survive a reload and follow you between devices.** When an
+  agent hands work to you in a conversation, it leaves a notification on the server
+  rather than only in the browser tab that happened to be open. You will still find
+  it after a refresh, on a second computer, or the next morning — and it names the
+  agent that is waiting. Repeated hand-offs on the same conversation leave one entry,
+  not a pile.
+- **See at a glance who on a conversation is still working.** A new
+  `get_participant_liveness` tool reports, for every participant in a thread, when
+  they were last active and whether they are active, quiet, or gone. An
+  orchestrator can now tell a busy agent apart from a stalled one without digging
+  through files, and an agent can check whether whoever assigned its work is still
+  around before deciding to wait or escalate.
+- **Agents can now wait for their turn instead of polling for it.** A new
+  `await_my_turn` tool lets an agent hold a single call open until a message or
+  hand-off actually arrives for it, then return immediately. Work reaches the
+  right agent in under a second rather than whenever its next check happened to
+  land, and waiting costs nothing while it waits. Polling still works exactly as
+  before, and remains the right choice on chat surfaces that cannot keep a call
+  open.
+Your agents can now promote a task to a project on their own. When a task turns out to be bigger than a task, an agent can convert it in one step and get exactly what the dashboard's convert wizard produces: the project is created from the task, subtasks and the task's roadmap card move over to it (keeping their place in the roadmap), and the task is removed. Previously an agent had to rebuild the work by hand, which left the task behind and quietly stranded its roadmap card. The new project arrives inactive and untagged, so you still choose when to launch it.
+Your orchestrator's personality can now differ per product. Customise the orchestrator prompt for one product and it applies only there; products you have not customised keep using your all-products prompt, and anything without one falls back to the packaged default. Existing customisations keep working exactly as before -- they simply become the all-products setting, with nothing to migrate. Chain runs stay consistent too: the conductor and the projects it drives use the same prompt.
+Ask an assistant about your projects and you now get a focused answer instead of your whole board. You can search projects by name or serial ("find the OAuth one"), ask for a specific number of results, and when a list is shortened it says so and tells you how to narrow it. The lightweight listing mode is now genuinely lighter than the detailed one, which it previously only claimed to be.
+- **Search inside a conversation.** Open any conversation in the Message Hub and
+  the new search box narrows it to the messages you are looking for, matching
+  both what was said and who said it. Clear the box to get the full
+  conversation back.
+- **The orchestrator prompt editor now tells you which prompt each product is actually
+  using.** While a product is selected, a line above the editor says whether that
+  product is served by its own prompt, by your all-products prompt, or by the built-in
+  default, and it stays correct while you browse either tab and updates the moment you
+  save or remove a prompt. Saving still does exactly one thing: it writes the text on
+  the tab you are looking at, and never changes or deletes the other one. Putting a
+  product back on the shared prompt now has a clearly labelled action that names what
+  the product will fall back to.
+
+### Changed
+
+- **Hand-off alerts now say who is waiting on you.** When work is handed to you in
+  a conversation, the notification names the agent that is blocked — "P1
+  Orchestrator is waiting on you in Laptop interop" — instead of only naming the
+  conversation. You can tell at a glance whether it needs you now, without opening
+  it first.
+Message Hub posts now always carry an explicit author. Agents must identify themselves with `from_agent` on every `post_to_thread` call, and posting in your (the human user's) voice now requires an explicit `as_user=true` — a forgotten field can no longer make an agent's message appear as if you wrote it.
+- **New agents arrive ready to configure, not switched on.** Adding an agent — or pressing
+  "Add Default Agents" — used to put it straight to work in the product you had open, even
+  though it was still carrying its stock instructions. New agents now appear in your agent
+  list where you can open and tailor them, and go live in a product only when you switch
+  them on there. Nothing runs in a product until you say so.
+- **Agents you already switched on are untouched.** This applies only to agents added from
+  now on; everything already enabled for a product stays exactly as you left it.
+- **Agent crews now start with the right instructions once, not twice.** In
+  Subagent mode each agent already loads its role from the agent file installed
+  on your machine, so the server no longer sends that same role a second time.
+  That leaves noticeably more room in every agent's context for the actual work.
+  Multi-Terminal agents are unaffected: their terminals have no installed file
+  to read from, so they keep receiving their role from the server as before.
+- **A missing agent install no longer halts a run.** Previously an orchestrator
+  was told to stop and report the mismatch when an agent file was not installed.
+  It now carries on using your coding tool's own default agent and tells you
+  once: "No Giljo HQ agent templates installed — using default agents. Run
+  giljo_setup to install tuned agents."
+- **Every project now lives under a product.** Creating a project without
+  naming one is refused up front with a message that says what to pass, instead
+  of failing deep in the database. Older installs that still held product-less
+  projects get them filed under a product on upgrade — those projects are kept,
+  never discarded.
+- **Closeout and memory-entry tools now tell you how to avoid a save failure, not just how you'll hear about it afterward.** The `summary` field's description now says to send it as the last argument in your call, so a long note can't accidentally swallow the fields that follow it.
+- **Your AI assistant now sees how big your task list is before it reads it.** Every
+  task listing comes back with the totals for your whole board — how many are done, how
+  many are still open, and the date range they span — so the assistant can ask a
+  sensible question instead of pulling everything and hoping. Listings are also bounded
+  now: you get a sensible page by default, and when there is more, the answer says so
+  plainly instead of looking complete. Asking for everything still works — it is just a
+  deliberate request now rather than the accidental default.
+
+Added
+- **Search your tasks by a word.** Ask for "the OAuth one" and the assistant can find it
+  by a word in the title, the description, or the TSK number, instead of reading the
+  whole list to look for it.
+- **A lighter task listing.** A new compact view returns just what is needed to find and
+  sort work — typically 35-40% smaller, depending on how long your task titles are —
+  leaving your assistant more room to actually do the work you asked for.
+- **Updated the dashboard's state management library to its latest major
+  release.** The dashboard now runs on Pinia 4, keeping it current with the
+  wider Vue ecosystem and on a supported upgrade path. Nothing changes in how
+  the dashboard looks or behaves.
+The per-project auto check-in slider is retired. How often waiting agents check in is now one account-level setting (Tools → Notifications, next to the silence threshold), agents on a harness with live wake support respond to new work instantly instead of sleeping on a timer, and the dashboard now tells you whether an agent is waiting for a wake signal, sleeping on a countdown, or has gone quiet. Cadence values you had set on individual projects are still honoured.
+- **A cleaner Message Hub.** The toolbar above your conversations now uses the
+  same compact icon buttons as the Projects page, with the number of deleted
+  threads shown as a small dot on the trash icon. The conversation cards line up
+  with the toolbar instead of sitting narrower than it, and the "What the
+  indicators mean" panel is gone: hover any agent to read what its status dot
+  means, in plain words.
+- **You get told when an agent is waiting on you, wherever you are.** When an
+  agent hands a conversation back to you, a notice now appears in the bar at the
+  top of every page, not only inside the Message Hub. Click it to go straight to
+  the conversation; if several are waiting, one notice takes you to the list.
+- **The in-app Privacy Policy and Terms of Service now describe the service as
+  it actually runs.** Both documents now name every third-party
+  subprocessor that helps operate the hosted service, state where your data and backups are stored, and spell out
+  the full retention picture: read-only access after a subscription lapses,
+  permanent deletion one year later with an email reminder first, your choice
+  of immediate deletion or a 30-day grace period, and how long residual copies
+  can persist in recovery backups. The governing law is now stated plainly as
+  New Hampshire, USA.
+- **The Agents list now tells you which agents you have tuned and which are brand new.**
+  The Updated column used to show the same date for every agent, because an agent that had
+  never been edited fell back to the day it was created. It now reads "Never edited" for a
+  stock agent, "Added today" for one you have just added and not switched on yet, and the
+  real date once you have changed something — with the exact time on hover. Newest first,
+  so agents that need your attention sit at the top.
+- **The "Available in all products" switch in the edit screen is easier to read.** It is
+  one line now, and its label stays put instead of rewriting itself as you flip it.
+- **Every agent briefing now says where its orchestrator instructions came from.** Each
+  briefing carries one line naming whether it is running on a custom prompt you saved for
+  this product, a custom prompt you saved for your whole account, or the built-in default,
+  with the date you saved it. A saved prompt used to replace the built-in one invisibly and
+  stay in place through every restart, so an agent behaving unexpectedly took real digging
+  to explain. Now it takes one glance, whether you are reading the agent's briefing or its
+  transcript afterwards.
+- **Settings now tells you when an account-wide prompt is quietly governing a
+  product.** If you have saved a custom orchestrator prompt for all products,
+  the System Prompt tab now says so while you are looking at an individual
+  product, shows the date you saved it, and gives you a one-click way to go
+  manage it. Viewing the all-products prompt itself now shows its saved date
+  and makes Restore Default easy to find.
+- **Saving an unchanged copy of the built-in prompt now asks first.** Saving
+  text that is identical to the packaged default used to look like it did
+  nothing; in fact it froze your account on that day's wording and stopped it
+  receiving later improvements. Settings now warns you and waits for you to
+  confirm.
+- **One clear "Action needed" style for everything that needs you.** A handover, a
+  mention, and a request for your approval now look and behave the same wherever they
+  reach you — the banner, the bell, and desktop notifications — with a small label
+  saying which of the three it is.
+- **Clicking any of them takes you to the exact message,** not just to the thread, and
+  the message is marked with wording that matches the reason you were called.
+- **Mentions and approval requests now stay in your notification bell** until you deal
+  with them, instead of disappearing with the pop-up.
+- **Notifications name things, never internal ids.** Where a notification used to show a
+  long identifier, it now shows the thread's name — or its short reference — instead.
+- **Clearing "waiting on you" is now a hand button you can actually find.** The old
+  "Mark handled" text link sat at the bottom of the thread next to the chat box and was
+  easy to miss. It is now a yellow hand button that gently pulses while a thread is
+  waiting on you, with a second copy beside the thread search box that stays on screen
+  the whole time — so the same button also tells you at a glance whether anything needs
+  you here. It respects your system's reduced-motion setting.
+
+Fixed
+- **The gold "Waiting on you" marker now disappears when you clear a thread.** Opening a
+  thread from a notification and marking it handled cleared it everywhere except the
+  marker itself, which stayed pinned above the message until you navigated away.
+- **Desktop notifications show the Giljo face instead of the wordmark**, matching the
+  rest of the app.
+- **Giljo HQ now runs on version 2.0 of the Model Context Protocol SDK.** Your
+  existing connections keep working exactly as before — every protocol version
+  your tools already speak is still served, and there is nothing to reconnect or
+  reconfigure.
+- **Support added for the newest protocol version (2026-07-28).** Newer clients
+  that speak it can now connect without being turned away, alongside the older
+  versions Giljo HQ has always supported.
+
+### Fixed
+
+- **Wait-for-your-turn now works on hosted installs, not just self-hosted ones.**
+  On a deployment that runs several server processes, an agent waiting for work could
+  miss it when the message happened to arrive on a different process. Waiting agents
+  are now woken wherever the message lands. Self-hosted installs were never affected.
+Marking a project completed from an agent now finishes it properly. It runs the same full close-down the Archive button does — the project is set aside, given a real completion date, and any agents still sitting at "complete" are moved to "closed". Before, an agent could only do the halfway version, which looked finished on the dashboard while leaving its helper agents hanging around forever.
+- **Your agents now follow the product you are working in.** Switching products used to
+  have no effect on which agents were installed or which ones an orchestrator could
+  start — every product got the same set, so agents you had tuned for one product turned
+  up in another. Enable or disable an agent on the Agents screen and that choice is now
+  remembered per product, and applies to what you install, what your orchestrator can
+  start, and what it sees on its roster.
+- **A product you have never customised keeps all of your agents**, exactly as before, so
+  nothing disappears when you upgrade.
+- **Turning an agent off stays off.** A disabled agent is no longer switched back on when
+  you restart, upgrade, or switch back to that product.
+- **Orchestrators can now start any of your enabled agents, up to 16.** The roster was
+  capped at 8 while installs already allowed 16, so an agent could be installed and yet
+  impossible to start.
+Installing your agents can no longer overwrite files you wrote yourself. Every agent
+Giljo HQ exports now says, inside the file, that it came from Giljo HQ and which product
+it belongs to -- so an install refreshes its own files, leaves anything you hand-wrote
+completely alone, and asks before replacing anything it is unsure about. It used to be an
+all-or-nothing choice: overwrite everything in the folder, or skip the update entirely.
+
+Changed
+Exported agents are now named after the product they belong to, so the same agent used by
+two products installs as two separate files instead of one quietly replacing the other.
+Where your coding tool supports it, agents install into the project you are working in
+rather than your home folder, which keeps each project's agents to itself.
+- **The "last exported" indicator now tells you about the product you are in.** Installing
+  your agents for one product used to mark them as freshly exported everywhere, so a
+  different product could look up to date when it had never been exported at all — and the
+  warning that you were about to ship outdated agents simply never appeared. Each product
+  now keeps its own record, so the date and the "may be out of date" warning describe the
+  product you are actually working in.
+- **Nothing is lost when you upgrade.** Products carry their existing export date forward,
+  and a product you have never customised keeps showing what it showed before.
+- **Agents waiting for their turn no longer wake constantly for work that is not
+  theirs.** A conversation left open to "anyone" — including ones already
+  resolved, or ones an agent was never part of — used to count as that agent's
+  turn forever, so an agent told to wait would report new work every moment and
+  never actually settle. Waiting agents now stay quiet until something genuinely
+  arrives for them, and a real hand-off still reaches them in under a second.
+- **An agent you create works as soon as you switch it on.** A newly added agent could show
+  up on the Agents screen and still be impossible to start, missing from your
+  orchestrator's roster, and left out when you installed your agents — with nothing to
+  indicate anything was wrong. Switch a new agent on for the product you are working in and
+  it can be started and installed right away.
+- **Your existing agents are untouched.** Adding an agent adds only that agent; the ones
+  you had already enabled or disabled for a product keep exactly the settings you gave
+  them, and an agent you turned off for a product stays off.
+- **You can retire an agent everywhere again.** While you had a product open there was no
+  way to switch an agent off across the board — the switch on the Agents list only covers
+  the product you are working in, and the edit screen had no control for it at all. Editing
+  an agent now offers **Available in all products**, which turns it off for every product
+  at once.
+- **The two switches now say which is which.** The list column reads "Active here" and its
+  switch still affects only the product you are working in; the new "Available in all
+  products" control in the edit screen is the one that covers everything. Turning an agent
+  off for one product
+  can never retire it everywhere, and turning it back on for one product can never
+  un-retire an agent you deliberately retired.
+- **Adding agents can no longer take you past your agent limit.** Creating an agent
+  skipped the check that stops you exceeding the maximum number of active agents, so it
+  was possible to go over — after which some agents would quietly stop being installed or
+  offered to your orchestrator. Creating an agent is now refused with the same clear
+  message you already get when switching one on.
+- **Duplicating an agent gives the copy a predictable name.** The copy was labelled
+  "(Copy)" on screen but saved under a different name entirely, which made it harder to
+  find and to start. A copy is now named after its role, so the name you see is the name
+  it keeps.
+Connected AI clients no longer lose their connection when their sign-in token renews in the background. Renewals are now accepted at the same address the server tells clients to use, so a long-running session keeps working instead of stopping with an error until you sign in again.
+- **Tasks and projects created by agents now always land on the product the agent
+  intended, even while you switch products in the dashboard.** An agent can name the
+  product it is filing against instead of relying on whichever product happens to be
+  active, and every task and project it creates now tells it which product the item
+  landed on.
+- **Long messages now appear instantly in every open window.** A lengthy post
+  could arrive live in the window that sent it while other open sessions saw
+  nothing until they refreshed the page. Every session now receives it right
+  away, and the full text is loaded in the thread you are reading.
+- **Turning a task into a project now keeps it with the right product.** The new
+  project is filed under the product the task belongs to, instead of whichever
+  product happened to be selected at that moment — so switching products in
+  another tab, or having an agent switch it for you, can no longer send a
+  promoted task somewhere you did not expect. The confirmation now names the
+  product it landed in, and if that product has been deleted the conversion
+  stops and tells you, rather than quietly filing it elsewhere.
+- **Projects with long descriptions now update live in every open window.** A
+  change to a project with a lengthy description or mission appeared instantly in
+  the window that made it, while other open sessions saw nothing until they
+  refreshed. Every session now updates right away.
+- **Agents with long missions appear on every screen the moment they start.** A
+  newly started agent carrying a long mission could be missing from other open
+  windows until the page was reloaded.
+- **Editing an agent's mission works again.** Saving a mission change reported an
+  error even though the change had been saved, and no open window updated to show
+  it. Saving now succeeds cleanly and the new mission appears everywhere at once.
+- **Two tasks in the same product can no longer end up with the same number.**
+  The database safeguard behind task numbering had quietly stopped working, so a
+  rare timing slip could leave you with two tasks sharing an ID like TSK-19. The
+  safeguard is back, and if your database already contains a duplicate pair it is
+  repaired automatically on the next start — nothing is deleted, the later task
+  simply gets the next free number.
+- **Editing a project no longer depends on which product you have selected.** If a
+  different product was selected — or none at all — updating one of your own
+  projects was refused until you switched back, even though the project was
+  plainly yours. Those refusals are gone. Your projects stay private to you
+  exactly as before; only the unnecessary step was removed.
+- **Approval notifications now say which project is waiting on you.** When a closeout
+  needs your approval, the bell and banner entry names the project in its heading and
+  its message instead of showing only the reason — so with several projects in flight
+  you can tell at a glance which one is asking. Approval notices you already received
+  are unchanged.
+- **The project shortcut on a notification works again.** Notifications that name a
+  project now show a clickable project tag that takes you straight there. It had
+  stopped appearing on notifications sent from the server.
+Setting your server's public address with a trailing slash no longer produces broken links. Orchestrator prompts and setup download links now come out correct either way, instead of working on some paths and doubling up the slash on others.
+- **The projects list's rows-per-page control no longer silently does nothing.**
+  Choosing "All" asked for more rows than the server will return in one page, so
+  the request was rejected and the table quietly stayed as it was — it looked
+  like a dead button. The control now offers only page sizes that work, up to a
+  new largest option of 200 rows, and an out-of-range choice can no longer reach
+  the server at all.
+Ask an AI assistant what work you have finished and you now get the whole answer. The project list an assistant reads is capped for safety, and that cap was keeping whichever projects were created most recently — so a project started months ago and finished last week fell outside the window and vanished from the list entirely, with nothing to say anything was missing. Finished work is now kept by when it was finished, unfinished work is never dropped, the cap sits two and a half times higher, and a list that does get cut short now says so and explains how to narrow the question.
+- **Changing a task's product no longer silently fails.** Trying to move a
+  task to a different product now shows a clear error instead of appearing
+  to save while quietly not applying the change.
+- **An agent asking for context now knows when it received a partial answer.** Requesting context now surfaces each category's own truncation signal instead of silently dropping it, and the open-task count always reflects the true total rather than the size of the page returned.
+- **Searching projects for a name containing `%` or `_` no longer returns the whole board.** Those characters used to act as database wildcards, so a search like `100%` silently matched every project instead of the one you meant.
+- **The project list tool's size-limit description now says what actually happens.** It previously claimed an over-limit request would be scaled down; it is refused instead, and the description now says so.
+- **The task list tool now accepts `limit=0` to mean "use the default"**, matching the project list tool instead of returning an error.
+- **Long list answers now arrive instead of being rejected by your assistant.** The size limit on project and task listings sat just above what an AI client will actually accept, so a large answer could be reported as complete and then never delivered. The limit is lower now, and anything beyond it comes back as a clearly-marked partial answer you can page through.
+- **Paging a long list no longer skips rows.** When several items were saved at
+  the same moment, walking through a list page by page could quietly leave one
+  out — no error, no warning, just a missing row. Pages now advance on a stable
+  order, so every item is returned exactly once.
+
+Changed
+- **A stale page marker now says so instead of silently starting over.** Asking
+  for the next page using a marker that no longer points at anything used to
+  hand back the first page again, which could keep a client looping forever.
+  It now returns a clear message telling you to start the list again.
+- **A typo'd status or priority filter now tells you instead of pretending nothing matched.** Filtering tasks by a status like `in progress` or a priority like `Medium` used to silently come back empty, even when matching tasks existed. Now you get a clear message naming the valid values.
+- **Filtering by a nonsense "hidden" value no longer quietly shows everything.** It now tells you which values are accepted instead.
+- **The project search box's advertised length limit now matches what it actually accepts**, and the project list's `mode` and status filters now show their valid options up front instead of only on a failed attempt.
+- **A hand-crafted or corrupted page marker no longer causes an internal error.**
+  A malformed continuation token used to make listing projects or tasks fail
+  with an opaque server error and no way to recover. It now returns the same
+  clear "start the list again" message every other bad marker already gave.
+- **The "how many match" count no longer changes meaning partway through a
+  list.** Walking a long list page by page used to make the reported match
+  count quietly shrink each page, so the number meant something different
+  depending on when you looked at it. It now always shows the true total match
+  count, and a new "remaining" count shows how much is left in the current
+  walk.
+
+Changed
+- **Large lists now page one page sooner, to guarantee delivery.** The size
+  limit for a single page of projects or tasks was lowered slightly after
+  testing found a narrow range where a page reported as complete could
+  actually be rejected by the client before it ever reached you. The new,
+  smaller limit closes that gap.
+- **Project search now looks inside descriptions, too.** Searching for a project used to only match its name or serial number — now "the one about the blue UI" finds it even when that phrase only appears in the description or the project's short code.
+- **Memory search now finds commit messages.** Asking "when did we fix the redirect bug" now searches the commit history saved with each project's history, not just its written summary.
+- **Your assistant can now read the manual for every filter on the project list, not 3 of 18.** Filtering options like date ranges, hidden status, and detail level now show their full descriptions and valid values right where your assistant reads them, instead of only in a hidden note it could never see.
+- **Asking for both a status and a status filter that disagree now gets a clear explanation instead of a silently wrong answer.** Previously the newer filter always won without saying so -- even when it quietly ignored a request to see everything. Now a genuine conflict is called out by name so you can fix the request; asking the same thing two ways still just works.
+- **Asking for more project detail by number now works the same as asking by name.** A detailed project view no longer gets silently shrunk back down to a summary.
+- **Asking for a lean or full task list no longer gets silently swapped for the default.** If you set `mode` to `index` or `full` on the task list, it's honored even if the old `summary_only` flag is also set — before, `summary_only` would quietly override it and you'd get the wrong-sized rows back (and a `memory_limit` you'd set could get ignored along with it).
+- **Filtering tasks by type now works instead of guaranteed to fail.** Every task carries the same type tag, so filtering by it now returns your tasks instead of being refused as invalid; filtering by any other type is refused with a clear explanation instead of silently coming back empty.
+- **An empty project list now tells you when finished projects are hiding, and how to see them.** Filtering the project list by type used to sometimes come back completely empty even when projects of that type existed -- they were simply completed, and hidden by the default view. Your assistant now sees a plain note explaining that projects exist but are hidden, with the exact option to pass to reveal them, instead of reading the empty list as "none exist."
+- **The hidden-projects note now counts YOUR search, not the whole board.** When a project list was narrowed by more than one filter at once (a type plus a search word, a date range, or an alias), the "some are hidden" note could name a number that didn't match what you'd actually see -- promising rows a follow-up search couldn't find. It now counts your exact filters, so the number it gives you is always the real one, and it stays quiet rather than guess when nothing is actually hidden.
+The in-app Privacy Policy and Terms of Service pages now show edition-appropriate content: the hosted edition lists its service providers by name, while self-hosted installs see provider-neutral wording.
+The status banner at the top of the page no longer pushes the whole page down after it loads — the space it needs is held from the first moment, so the content under your cursor stays put.
+- **Connecting from OpenCode now works with the copy-paste command.** The connect
+  screen was handing OpenCode a command written in another tool's syntax, so the
+  very first attempt failed and OpenCode answered with its help text instead of
+  connecting. The command it gives you now matches what OpenCode expects.
+- **Every connect command now says which tool it is for**, so a command copied
+  from one screen cannot quietly end up pasted into a different tool.
+- **Clearer help when a self-hosted server uses a private certificate.** The
+  connect screen now explains that command-line tools built on Node, including
+  OpenCode, refuse an untrusted certificate until you add it to your trust store,
+  and points at the one-time walkthrough that sets that up.
+- **Duplicating an agent no longer changes the original.** Making a copy of an
+  agent used to quietly take over the original's "default for this role" badge
+  and move the original to the top of the recently-changed list. The copy is
+  now created as an ordinary agent and the original is left exactly as it was —
+  including which agents get packaged when you export.
+- **The waiting banner on the roadmap no longer lingers after your agent has
+  already delivered the roadmap.** If you left the page or reloaded while your
+  agent was still working, returning could show the "waiting for your agent"
+  spinner on top of the finished roadmap until it timed out. The page now checks
+  when the roadmap was last saved and clears the banner as soon as the work has
+  landed, including after a dropped connection.
+- **Clicking a "waiting on you" message notification now takes you to the message.**
+  Both notifications land you inside the thread with the post that is waiting on you
+  marked and scrolled into view, instead of leaving you at the Message Hub to find it
+  yourself. This works from the notification at the top of any page and from the notice
+  above the thread list, and it now also works when you click the notification while you
+  are already in the Message Hub.
+- Switching your active product now updates every open tab and device immediately, so you never act on a stale screen. If a browser was asleep or lost its connection and missed the change, it corrects itself the moment you return to that tab.
+Clicking a "waiting on you" notification now takes you to the exact message that handed the work over, not just to the thread it lives in — so a busy conversation no longer leaves you scanning for the post you were sent to read. Every notification for the same hand-off — the banner, the bell, the strip above your threads, and the desktop pop-up — now lands in the same place, and the ones that arrive without a specific message still open the thread on its newest post exactly as before.
+- **The account status badge on your profile avatar now appears.** If your
+  account is on a trial, ending soon, or scheduled for deletion, the small
+  badge on your avatar in the sidebar shows it again — it had stopped
+  appearing, so the only warning was inside the menu itself.
+- Saving a task that fails now tells you why. If the server catches something specific — like a name that conflicts with a reserved tag — you see that exact reason instead of a generic "please try again" that just repeats the same failure.
+- **Task and project actions now leave a record when they fail.** Completing a task, changing an execution mode, or deleting/cancelling/restoring a project used to show a generic error that vanished as soon as you looked away — now the specific reason lands in your notifications, so you can check what actually went wrong even after the message disappears.
+- **The Privacy Policy and Terms pages now open without signing in.** Following a
+  direct link to either page, or opening one in a fresh tab, used to bounce you
+  to the welcome screen instead of showing the document. Both pages are public
+  and now open for anyone, whether or not you have an account.
+- **Connecting Claude to your server works again.** Approving the connection
+  on the consent screen could fail with "Invalid authorization request
+  parameters" and never finish, for any app that does not name a specific
+  target when it asks for access. Approving now completes as it should.
+- **Pages no longer get stuck failing to load after an update.** If part of the
+  app was requested during the short window while a new version was going live,
+  your browser or CDN could remember that piece as missing for up to a year —
+  leaving a page blank until someone cleared the cache by hand. Those responses
+  are no longer stored, so the page loads normally as soon as the update
+  finishes.
+When a closeout or memory entry is rejected because one argument was swallowed into another, the error now tells you the fix that actually works: send the long summary as the last argument, so nothing follows it and nothing can be swallowed. It previously advised shortening the summary, which never resolved the problem and cost several rounds of failed retries — and it said so while also correctly stating that no size limit had been reached.
+An agent that has gone quiet now reads the same on every screen, and it never reads as healthy when we have simply lost track of it. Opening a thread used to show a silent agent as "Monitoring" — as if it were working away — while the thread list correctly showed it as "Silent". Both now report the agent's real status, so you can tell a working agent from a stalled one before deciding whether to wait or step in.
+Editing a task now saves. Reopening a task and changing its title or description previously failed with a generic "Failed to save task" message and the edit was lost — the dashboard was sending the task's own type back unchanged, and the server refused it. Your edits go through.
+- Your orchestrator now lands on its project's message thread automatically, so a
+  message sent directly to it actually reaches it. Previously the orchestrator told
+  every agent it assigned to join the thread but never appeared there itself, which
+  meant instructions aimed at the orchestrator went nowhere. Its instructions now also
+  name the thread outright instead of leaving you to work out which one it meant.
+
+### Security
+
+- **Chats can no longer be filed against another workspace's product or project.**
+  When a chat was created with a product or project named explicitly, that name was
+  stored without checking it belonged to you. Naming one from another workspace is
+  now refused outright. Chats you create normally are unaffected.
+- **"That project isn't in this product" now tells you which product it is in, and
+  what to do about it.** Switching your active product used to turn ordinary edits
+  and roadmap updates into a flat refusal — and roadmap updates went further and
+  reported the item as missing when it existed perfectly well under another
+  product. Both now name the products involved and the fix.
+- **Search engines can read your robots.txt again.** The file was answering "sign
+  in first" to crawlers, which is not something a crawler can do.
+- **Two bundled libraries updated to close published security advisories.**
+  The nanoid and dompurify libraries were raised to their patched releases in
+  response to advisories published against the versions previously shipped.
+  No features or behavior change.
+- **Updated bundled development libraries to patched versions.** The build now
+  uses newer undici, postcss, and brace-expansion releases that resolve
+  published security advisories, including a denial-of-service issue.
+
 ## [2.0.2] — 2026-08-05
 
 Giljo HQ 2.0.2 is our biggest update since launch. GiljoAI MCP is now Giljo HQ: one headquarters for every AI agent you work with. The Message Hub has been redesigned from the ground up: calm, readable conversation cards, live agent presence, a raised hand when a conversation is waiting on you, and your-turn notifications that reach you anywhere in the app. Under the hood, this release brings a substantial security hardening pass across sign-in and connected apps, more reliable Windows installation, and dozens of fixes that make day-to-day agent orchestration smoother.
@@ -553,12 +1003,11 @@ Updated the encryption library that protects sign-in tokens to a version that fi
   roadmap items, and chain runs are now covered by the same automatic account-isolation
   safeguard already protecting your other data (no user-visible behavior change).
 - **Updated a bundled YAML parsing library to a newer version that is not affected by a known denial-of-service issue.**
-- **The installer scripts are now checked for internal network details before every
-  release.** The automated scan that keeps private addresses, internal machine names
-  and developer folder paths out of the published code was skipping the Windows and
-  Linux installers, the first files most people open. They are covered now, and the
-  list of covered files is read straight from the packaging step, so a newly published
-  script cannot quietly fall outside it.
+- **Expanded the pre-release leak scan to cover more of the published code.** The
+  automated scan that keeps private addresses, internal machine names and developer
+  folder paths out of the published code now covers more of the packaged files, and
+  the list of covered files is read straight from the packaging step, so a newly
+  published script cannot quietly fall outside it.
 - **Log downloads now serve only files that really live in your log folder.** If
   an entry in that folder is a symbolic link pointing somewhere else on disk, it
   is no longer listed or offered for download.

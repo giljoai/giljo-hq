@@ -53,6 +53,7 @@ from giljo_mcp.services.mission_orchestration_builders import (
     attach_protocol_and_identity,
     build_category_metadata,
     build_execution_mode_fields,
+    build_orchestrator_identity_block,
     check_staging_redirect,
     is_chain_member,
     maybe_build_ctx_self_close_directive,
@@ -60,6 +61,7 @@ from giljo_mcp.services.mission_orchestration_builders import (
 from giljo_mcp.services.protocol_builder import _get_user_config
 from giljo_mcp.services.protocol_survival import staging_orchestrator_actions
 from giljo_mcp.services.sequence_chain_context import SequenceChainContextResolver
+from giljo_mcp.services.settings_service import resolve_checkin_cadence_safe
 from giljo_mcp.tenant import TenantManager
 
 
@@ -384,7 +386,7 @@ class MissionOrchestrationService:
             depth_config = metadata.get("depth_config", {})
             logger.debug("[USER_CONFIG] No user_id, using frozen job_metadata config", extra={"job_id": job_id})
 
-        templates = await self._repo.get_active_templates(session, tenant_key)
+        templates = await self._repo.get_active_templates(session, tenant_key, product_id=project.product_id)
 
         # CE-OPT-001: Build category_metadata with Modified timestamps
         category_metadata = await self._build_category_metadata(
@@ -403,17 +405,17 @@ class MissionOrchestrationService:
         except Exception as _exc:  # noqa: BLE001
             logger.warning("[INTEGRATIONS] Failed to read settings from DB")
 
-        # SEC-0005b: Fetch tenant-scoped orchestrator prompt override (if any).
-        # Instantiate the service locally to avoid pulling in api.app_state (which
-        # has heavy side effects at import time and breaks service-layer tests).
-        orchestrator_prompt_override: str | None = None
+        # SEC-0005b: orchestrator override; imported locally to avoid api.app_state's
+        # import-time side effects. BE-9385d: the STAGING identity, on the product ->
+        # tenant -> seed ladder; get_job_mission walks it for the implementation one.
+        orchestrator_override = None
         try:
-            from giljo_mcp.system_prompts.service import SystemPromptService
+            from giljo_mcp.system_prompts.service import read_orchestrator_override
 
-            prompt_service = SystemPromptService(db_manager=self.db_manager)
-            prompt_record = await prompt_service.get_orchestrator_prompt(tenant_key=tenant_key, session=session)
-            if prompt_record.is_override:
-                orchestrator_prompt_override = prompt_record.content
+            pid = str(product.id) if product is not None else None
+            orchestrator_override = await read_orchestrator_override(
+                db_manager=self.db_manager, tenant_key=tenant_key, product_id=pid, session=session
+            )
         except Exception as _exc:  # noqa: BLE001
             logger.warning("[SEC-0005b] Failed to read orchestrator prompt override")
 
@@ -456,12 +458,18 @@ class MissionOrchestrationService:
             "templates": templates,
             "category_metadata": category_metadata,
             "integrations": integrations,
-            "orchestrator_prompt_override": orchestrator_prompt_override,
+            "orchestrator_prompt_override": getattr(orchestrator_override, "content", None),
+            # FE-9408: the resolved rung + saved date now travel WITH that content, so
+            # staging can name where this orchestrator's persona came from. None (a
+            # failed read) means what the seed fallback already means: built-in default.
+            "orchestrator_override": orchestrator_override,
             "project_type_abbreviation": project_type_abbreviation,
             "chain_ctx": chain_ctx,
             "conductor_agent_id": conductor_agent_id,
             "preset": preset,
             "detected_harness": detected_harness,
+            # FE-9296b: CH6 seed for the sync builder. Never raises; None -> column fallback.
+            "checkin_cadence_minutes": await resolve_checkin_cadence_safe(session, tenant_key, project),
         }
 
     async def _build_category_metadata(
@@ -640,23 +648,7 @@ class MissionOrchestrationService:
         git_integration_enabled = integrations.get("git_integration", {}).get("enabled", False)
 
         response: dict[str, Any] = {
-            "identity": {
-                "job_id": job_id,
-                "agent_id": execution.agent_id,
-                "project_id": str(project.id),
-                "project_name": project.name,
-                # CE-0033 Task 2: hoist product_id so orchestrators don't
-                # have to mine it from a hardcoded protocol example. get_context
-                # requires it; surfacing it here makes the identity self-sufficient.
-                "product_id": str(product.id) if product is not None else None,
-                "tenant_key": tenant_key,
-                "id_glossary": {
-                    "job_id": "Use for: report_progress, complete_job, set_agent_status",
-                    "agent_id": "Use for: post_to_thread(from_agent), get_thread_history(as_participant)",
-                    "project_id": "Use for: update_project_mission, spawn_job, get_workflow_status, write_project_closeout",
-                    "product_id": "Use for: get_context (REQUIRED — product-scoped context)",
-                },
-            },
+            "identity": build_orchestrator_identity_block(ctx, job_id=job_id, tenant_key=tenant_key),
             # BE-9083a: live phase-x-role checklist, early so it survives truncation.
             "next_required_actions": staging_orchestrator_actions(project, ctx.get("chain_ctx")),
             "project_description_inline": {
@@ -755,9 +747,12 @@ class MissionOrchestrationService:
             protocol_tool = resolved_harness
         is_staging = execution.status == "waiting"
 
-        # Handover 0904: Read auto check-in settings from project
+        # Handover 0904 / FE-9296b: the CH6 seed is the resolved cadence (stashed
+        # in ctx by the async builder); slider-era project columns are the fallback.
         auto_checkin_enabled = getattr(project, "auto_checkin_enabled", False)
-        auto_checkin_interval = getattr(project, "auto_checkin_interval", 10)
+        auto_checkin_interval = ctx.get("checkin_cadence_minutes") or (
+            getattr(project, "auto_checkin_interval", 10) if auto_checkin_enabled else 10
+        )
 
         # CE-OPT-001: Thread category timestamps into protocol
         category_metadata = ctx.get("category_metadata")

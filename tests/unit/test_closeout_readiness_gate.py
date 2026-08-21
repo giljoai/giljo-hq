@@ -20,14 +20,12 @@ from uuid import uuid4
 import pytest
 
 from giljo_mcp.exceptions import ProjectStateError
-from giljo_mcp.models.agent_identity import AgentExecution
-from giljo_mcp.models.products import Product
-from giljo_mcp.models.projects import Project
 from giljo_mcp.tools.project_closeout import (
     _check_agent_readiness,
     _force_decommission_agents,
     close_project_and_update_memory,
 )
+from tests.helpers.model_factories import make_agent_execution, make_product, make_project
 
 
 def _make_execution(
@@ -39,17 +37,21 @@ def _make_execution(
     messages_waiting: int = 0,
 ) -> Mock:
     """Create a mock AgentExecution."""
-    exe = Mock(spec=AgentExecution)
-    exe.agent_id = agent_id
-    exe.agent_display_name = display_name
-    exe.agent_name = display_name
-    exe.status = status
-    exe.job_id = job_id or str(uuid4())
-    exe.tenant_key = tenant_key
-    exe.messages_waiting_count = messages_waiting
-    exe.started_at = datetime.now(UTC)
-    exe.id = exe.job_id
-    return exe
+    resolved_job_id = job_id or str(uuid4())
+    return make_agent_execution(
+        # `id` is the primary key and `agent_id` a second NOT NULL uuid; this helper
+        # has always set them to the same value as the job, and the gate reads both,
+        # so the pairing is preserved rather than left to the factory's defaults.
+        id=resolved_job_id,
+        agent_id=agent_id,
+        agent_display_name=display_name,
+        agent_name=display_name,
+        status=status,
+        job_id=resolved_job_id,
+        tenant_key=tenant_key,
+        messages_waiting_count=messages_waiting,
+        started_at=datetime.now(UTC),
+    )
 
 
 def _execute_then_empty(executions):
@@ -238,15 +240,9 @@ class TestCloseoutGateIntegration:
         product_id = str(uuid4())
         tenant_key = "test-tenant"
 
-        mock_project = MagicMock(spec=Project)
-        mock_project.id = project_id
-        mock_project.tenant_key = tenant_key
-        mock_project.product_id = product_id
+        mock_project = make_project(id=project_id, tenant_key=tenant_key, product_id=product_id)
 
-        mock_product = MagicMock(spec=Product)
-        mock_product.id = product_id
-        mock_product.tenant_key = tenant_key
-        mock_product.product_memory = {}
+        mock_product = make_product(id=product_id, tenant_key=tenant_key, product_memory={})
 
         # Agent that is still working
         agent_working = _make_execution(str(uuid4()), "impl-1", "working")
@@ -315,19 +311,15 @@ class TestCloseoutGateIntegration:
         product_id = str(uuid4())
         tenant_key = "test-tenant"
 
-        mock_project = MagicMock(spec=Project)
-        mock_project.id = project_id
-        mock_project.tenant_key = tenant_key
-        mock_project.product_id = product_id
-        mock_project.created_at = datetime.now(UTC)
-        mock_project.completed_at = None
+        mock_project = make_project(
+            id=project_id,
+            tenant_key=tenant_key,
+            product_id=product_id,
+            created_at=datetime.now(UTC),
+            name="Test Project",
+        )
 
-        mock_project.name = "Test Project"
-
-        mock_product = MagicMock(spec=Product)
-        mock_product.id = product_id
-        mock_product.tenant_key = tenant_key
-        mock_product.product_memory = {}
+        mock_product = make_product(id=product_id, tenant_key=tenant_key, product_memory={})
 
         agent_working = _make_execution(str(uuid4()), "impl-1", "working")
 
@@ -418,15 +410,9 @@ class TestOrchestratorSelfDecommissionGuard:
         product_id = str(uuid4())
         tenant_key = "test-tenant"
 
-        mock_project = MagicMock(spec=Project)
-        mock_project.id = project_id
-        mock_project.tenant_key = tenant_key
-        mock_project.product_id = product_id
+        mock_project = make_project(id=project_id, tenant_key=tenant_key, product_id=product_id)
 
-        mock_product = MagicMock(spec=Product)
-        mock_product.id = product_id
-        mock_product.tenant_key = tenant_key
-        mock_product.product_memory = {}
+        mock_product = make_product(id=product_id, tenant_key=tenant_key, product_memory={})
 
         orchestrator_agent = _make_execution(
             str(uuid4()),
@@ -494,19 +480,15 @@ class TestOrchestratorSelfDecommissionGuard:
         product_id = str(uuid4())
         tenant_key = "test-tenant"
 
-        mock_project = MagicMock(spec=Project)
-        mock_project.id = project_id
-        mock_project.tenant_key = tenant_key
-        mock_project.product_id = product_id
-        mock_project.created_at = datetime.now(UTC)
-        mock_project.completed_at = None
+        mock_project = make_project(
+            id=project_id,
+            tenant_key=tenant_key,
+            product_id=product_id,
+            created_at=datetime.now(UTC),
+            name="Test Project",
+        )
 
-        mock_project.name = "Test Project"
-
-        mock_product = MagicMock(spec=Product)
-        mock_product.id = product_id
-        mock_product.tenant_key = tenant_key
-        mock_product.product_memory = {}
+        mock_product = make_product(id=product_id, tenant_key=tenant_key, product_memory={})
 
         specialist_agent = _make_execution(
             str(uuid4()),
@@ -593,19 +575,15 @@ class TestOrchestratorSelfDecommissionGuard:
         product_id = str(uuid4())
         tenant_key = "test-tenant"
 
-        mock_project = MagicMock(spec=Project)
-        mock_project.id = project_id
-        mock_project.tenant_key = tenant_key
-        mock_project.product_id = product_id
-        mock_project.created_at = datetime.now(UTC)
-        mock_project.completed_at = None
+        mock_project = make_project(
+            id=project_id,
+            tenant_key=tenant_key,
+            product_id=product_id,
+            created_at=datetime.now(UTC),
+            name="Test Project",
+        )
 
-        mock_project.name = "Test Project"
-
-        mock_product = MagicMock(spec=Product)
-        mock_product.id = product_id
-        mock_product.tenant_key = tenant_key
-        mock_product.product_memory = {}
+        mock_product = make_product(id=product_id, tenant_key=tenant_key, product_memory={})
 
         complete_orchestrator = _make_execution(
             str(uuid4()),
@@ -702,15 +680,9 @@ class TestOrchestratorSelfDecommissionGuard:
         tenant_key = "test-tenant"
         orch_job_id = str(uuid4())
 
-        mock_project = MagicMock(spec=Project)
-        mock_project.id = project_id
-        mock_project.tenant_key = tenant_key
-        mock_project.product_id = product_id
+        mock_project = make_project(id=project_id, tenant_key=tenant_key, product_id=product_id)
 
-        mock_product = MagicMock(spec=Product)
-        mock_product.id = product_id
-        mock_product.tenant_key = tenant_key
-        mock_product.product_memory = {}
+        mock_product = make_product(id=product_id, tenant_key=tenant_key, product_memory={})
 
         orchestrator_agent = _make_execution(
             str(uuid4()),

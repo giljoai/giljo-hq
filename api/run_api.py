@@ -123,7 +123,7 @@ def _strict_port_available(host: str, port: int) -> bool:
     redirected logs/api_stdout.log as the real server -- two writers at
     independent offsets NUL-padded the file and froze the live viewer
     (INF-6023b root cause). connect_ex probe matches find_available_port's
-    convention and works reliably on Windows (the dogfood platform).
+    convention and works reliably on Windows (the test-install platform).
 
     A port still in TIME_WAIT (just-stopped server) probes as available, so a
     fast deliberate restart is not blocked; only an *active* listener blocks.

@@ -29,6 +29,50 @@ from sqlalchemy.sql import func, text
 from .base import Base, generate_uuid
 
 
+def effective_last_exported_at(template: "AgentTemplate", product_export_times: dict | None = None):
+    """The export time to DISPLAY for a template in a product's context (BE-9385e).
+
+    Tolerant read, keyed on ROW EXISTENCE rather than on the value — the same
+    predicate ``product_agent_selection`` uses, and for the same reason.
+
+    ``product_export_times`` maps template id -> that product's export time for
+    every junction row the product HAS, including rows whose value is still NULL.
+    So:
+
+      * id present, value set   -> this product exported it then.
+      * id present, value None  -> this product has NOT exported it. Answered,
+        not absent.
+      * id absent (or no product in context) -> the junction has no opinion; use
+        the template's tenant-wide value.
+
+    WHY NOT "fall back whenever the value is NULL", which reads more naturally:
+    the tenant-wide column is still written by every export (BE-9208's staged-ZIP
+    watermark reads ``MAX(last_exported_at)``, so it cannot be frozen). A
+    value-keyed fallback would therefore hand a product that never exported
+    whatever timestamp ANOTHER product's export left on the shared column — the
+    exact defect this project exists to remove, reintroduced through the fallback
+    itself. Verified, not reasoned: with the value-keyed rule in place,
+    ``test_exporting_one_product_does_not_mark_another_product_as_freshly_exported``
+    still failed.
+
+    The tenant-wide column keeps its two jobs: the fallback for products with no
+    junction rows (uncurated, where selection also falls back), and pre-existing
+    information that ``ce_0094`` seeds these rows from.
+
+    Args:
+        template: The agent template being displayed.
+        product_export_times: Per-product export times by template id, or None
+            when no product is in context.
+
+    Returns:
+        This product's export time when the junction has an opinion, else the
+        template's tenant-wide time.
+    """
+    if product_export_times is not None and template.id in product_export_times:
+        return product_export_times[template.id]
+    return template.last_exported_at
+
+
 class AgentTemplate(Base):
     """
     Agent Template model - stores reusable agent mission templates.
@@ -150,10 +194,9 @@ class AgentTemplate(Base):
         ),
     )
 
-    @property
-    def may_be_stale(self) -> bool:
+    def may_be_stale_against(self, last_exported_at) -> bool:
         """
-        Check if template may be stale (modified after last export).
+        Check if this template is stale relative to a given export time.
 
         Four states:
         - User marked as managed → False (user dismissed staleness)
@@ -165,20 +208,41 @@ class AgentTemplate(Base):
         when the agent is active and its outdated state is actionable.
 
         Falls back to created_at when updated_at is NULL (freshly seeded).
+
+        BE-9385e: the rule lives here, taking the export time as an ARGUMENT,
+        because there are now two of them — this template's tenant-wide stamp and
+        the active product's own (``product_agent_assignments.last_exported_at``).
+        Re-implementing four states per caller is how two callers start giving
+        different answers about the same agent.
+
+        Args:
+            last_exported_at: The export time to judge against, or None for
+                "never exported".
         """
         if not self.is_active:
             return False  # Disabled agents don't show staleness
         if self.user_managed_export:
             return False
 
-        if self.last_exported_at is None:
+        if last_exported_at is None:
             return True  # Never exported — always stale
 
         modified_at = self.updated_at or self.created_at
         if modified_at is None:
             return True  # No timestamp at all — assume stale
 
-        return modified_at > self.last_exported_at
+        return modified_at > last_exported_at
+
+    @property
+    def may_be_stale(self) -> bool:
+        """Staleness against this template's TENANT-WIDE export stamp.
+
+        Kept as the tenant-wide answer, and still correct wherever no product is
+        in context. A product-scoped surface must resolve the effective time via
+        :func:`effective_last_exported_at` first — otherwise it reports another
+        product's export as its own, which is the BE-9385e defect.
+        """
+        return self.may_be_stale_against(self.last_exported_at)
 
     def __repr__(self) -> str:
         return f"<AgentTemplate(id={self.id}, name='{self.name}', category='{self.category}')>"

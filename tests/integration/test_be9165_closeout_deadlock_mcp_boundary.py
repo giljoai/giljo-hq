@@ -49,7 +49,6 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from api.endpoints.mcp_sdk_server import mcp
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
@@ -60,6 +59,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools.tool_accessor import ToolAccessor
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +315,7 @@ async def test_force_closeout_decommissions_unstaged_waiting_orchestrator(lifecy
         result = await _call_closeout(mcp_session, project.id, force=True)
 
     text = _content_text(result)
-    assert not result.isError, f"force=true closeout must succeed on wall 1, got isError: {text!r}"
+    assert not result.is_error, f"force=true closeout must succeed on wall 1, got isError: {text!r}"
     parsed = _parse_content_dict(result)
     assert parsed.get("entry_id"), f"closeout must write the 360 entry, got: {parsed!r}"
 
@@ -357,7 +357,7 @@ async def test_force_closeout_closes_staged_project_with_all_specialists_complet
         result = await _call_closeout(mcp_session, project.id, force=True)
 
     text = _content_text(result)
-    assert not result.isError, f"force=true closeout must succeed on wall 2, got isError: {text!r}"
+    assert not result.is_error, f"force=true closeout must succeed on wall 2, got isError: {text!r}"
     parsed = _parse_content_dict(result)
     assert parsed.get("entry_id"), f"closeout must write the 360 entry, got: {parsed!r}"
 
@@ -402,7 +402,7 @@ async def test_non_forced_closeout_still_blocks_both_states(lifecycle_mcp_client
         for project, orch_exec in ((project_a, orch_a), (project_b, orch_b)):
             result = await _call_closeout(mcp_session, project.id, force=None)
 
-            assert not result.isError, (
+            assert not result.is_error, (
                 f"non-forced CLOSEOUT_BLOCKED is a Tier-2 content rejection: {_content_text(result)!r}"
             )
             parsed = _parse_content_dict(result)
@@ -443,7 +443,7 @@ async def test_force_closeout_still_blocked_while_specialist_in_flight(lifecycle
 
     # Blocked in either contract shape: a Tier-2 content rejection or the
     # ORCHESTRATOR_SELF_DECOMMISSION_BLOCKED domain error surfaced as isError.
-    if result.isError:
+    if result.is_error:
         text = _content_text(result)
         assert "force-close" in text.lower() or "decommission" in text.lower(), (
             f"expected the force-close guard rejection, got: {text!r}"
@@ -501,7 +501,7 @@ async def test_staging_finale_with_all_deliverables_recorded_completes_orchestra
         )
 
     text = _content_text(result)
-    assert not result.isError, f"staging finale complete_job must succeed: {text!r}"
+    assert not result.is_error, f"staging finale complete_job must succeed: {text!r}"
 
     await session.refresh(orch_exec)
     assert orch_exec.status == "complete", (
@@ -540,7 +540,7 @@ async def test_genuine_staging_end_with_waiting_specialists_still_parks_orchestr
         )
 
     text = _content_text(result)
-    assert not result.isError, f"genuine staging end must succeed: {text!r}"
+    assert not result.is_error, f"genuine staging end must succeed: {text!r}"
 
     await session.refresh(orch_exec)
     assert orch_exec.status == "waiting", (

@@ -19,7 +19,7 @@
         </div>
       </div>
 
-      <template v-slot:actions>
+      <template #actions>
         <v-btn v-if="toast.action" variant="text" @click="handleAction(toast)">
           {{ toast.action.label }}
         </v-btn>

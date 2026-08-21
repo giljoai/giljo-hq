@@ -13,7 +13,7 @@ Implements per-IP sliding-window rate limiting for sensitive auth endpoints:
 
 SEC-6001 hardening (Edition Scope: Both):
 
-Unit 1 — proxy-aware client IP. Behind a reverse proxy (Railway, nginx) the
+Unit 1 — proxy-aware client IP. Behind a reverse proxy (the hosted platform, nginx) the
 TCP peer (`request.client.host`) is the proxy's shared IP, so naive per-IP
 keying collapses every caller into one bucket. We honor the FIRST-HOP
 `X-Forwarded-For` entry ONLY when the immediate peer is in the
@@ -27,7 +27,7 @@ Unit 2 — shared limiter store. The counters live in the `CacheBackend`
 registry instead of a per-process dict, so multi-worker deployments enforce
 ONE combined limit rather than `limit * workers`. CE (no Redis) transparently
 falls back to the registry's default `InProcessDictBackend` (single-process);
-SaaS/Railway registers a shared Redis backend under the same name at startup.
+hosted SaaS registers a shared Redis backend under the same name at startup.
 This CE module never imports the Redis adapter — the registry decouples them.
 
 BE-6006 — atomic counter. The window is a fixed-window counter incremented

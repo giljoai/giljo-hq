@@ -472,16 +472,18 @@ export const useProjectStore = defineStore('projects', () => {
    * Pulls active+completed projects (a project can only be superseded BY a
    * still-relevant project, not a cancelled/terminated/deleted one), scoped to
    * the active product like every other list read, and excludes the project
-   * being superseded (it can't be its own successor). Uses a large `limit`
-   * rather than the paginated `projects` array, which only holds the current
-   * page.
+   * being superseded (it can't be its own successor). FE-9485: `limit` is
+   * intentionally omitted rather than paginated — GET /api/v1/projects/ caps
+   * `limit` at 200 (BE-6076's deliberate page-size bound), and per that
+   * endpoint's own docstring, omitting `limit` returns the full set, which is
+   * what the picker needs (unlike the paginated `projects` array, which only
+   * holds the current page).
    */
   async function fetchSuccessorCandidates(excludeProjectId) {
     const productStore = useProductStore()
     const params = {
       statuses: ['active', 'completed'],
       include_completed: true,
-      limit: 500,
     }
     if (productStore.currentProductId) {
       params.product_id = productStore.currentProductId

@@ -32,7 +32,8 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
+
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 class _FakeRequest:
@@ -162,7 +163,7 @@ class TestDefaultHitlFence:
         async with new_client() as session:
             result = await session.call_tool("launch_implementation", {"project_id": str(uuid4())})
 
-        assert result.isError is True
+        assert result.is_error is True
         joined = "\n".join(getattr(b, "text", "") for b in result.content)
         assert "HITL mode" in joined, f"expected the BE-9084 fence rejection, got: {joined!r}"
 
@@ -177,7 +178,7 @@ class TestDefaultHitlFence:
         async with new_client() as session:
             result = await session.call_tool("launch_implementation", {"project_id": str(uuid4())})
 
-        assert result.isError is True
+        assert result.is_error is True
         joined = "\n".join(getattr(b, "text", "") for b in result.content)
         assert "HITL mode" in joined
 

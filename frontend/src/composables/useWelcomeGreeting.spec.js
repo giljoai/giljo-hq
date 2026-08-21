@@ -27,8 +27,8 @@ describe('useWelcomeGreeting', () => {
   })
 
   it('includes the provided name somewhere in the greeting', async () => {
-    const { fullGreeting } = await makeGreeting('Patrik')
-    expect(fullGreeting.value).toContain('Patrik')
+    const { fullGreeting } = await makeGreeting('Sam')
+    expect(fullGreeting.value).toContain('Sam')
   })
 
   it('works with different names', async () => {

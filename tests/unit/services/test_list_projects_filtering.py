@@ -140,6 +140,7 @@ async def _call_with_items(service: ProjectService, items, **kwargs):
     list_proj_mock = AsyncMock(side_effect=_fake_list_projects)
     with (
         patch.object(service, "list_projects", list_proj_mock),
+        patch.object(service, "board_counts", new_callable=AsyncMock, return_value=[]),
         patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
         patch.object(
             service,
@@ -192,7 +193,7 @@ class TestDefaultLifecycleFilter:
         """BE-5037 follow-up: default exclusion covers the full finished set
         {completed, cancelled, terminated, deleted}.
 
-        On dogfood at the time of this test, two projects (INF-0002 Ops Panel
+        On the test install at the time of this test, two projects (INF-0002 Ops Panel
         and BE-5006 BE-SPRINT-002f) carry status=='terminated'. Before this
         change they leaked through the default response because terminated was
         not in the exclusion bucket; now they are filtered out by default.
@@ -208,7 +209,7 @@ class TestDefaultLifecycleFilter:
         ]
         result, _ = await _call_with_items(service, items)
         ids = {p["project_id"] for p in result["projects"]}
-        # 6 in -> 2 out (active + inactive). Mirrors the dogfood 24->22 drop:
+        # 6 in -> 2 out (active + inactive). Mirrors the test-install 24->22 drop:
         # the two terminated rows are excluded by default.
         assert ids == {"a", "b"}, "Default must exclude completed, cancelled, terminated, deleted"
 
@@ -569,6 +570,8 @@ class TestTenantIsolation:
             list_proj_mock = AsyncMock(return_value=[])
             with (
                 patch.object(service, "list_projects", list_proj_mock),
+                patch.object(service, "board_counts", new_callable=AsyncMock, return_value=[]),
+                patch.object(service, "board_counts", new_callable=AsyncMock, return_value=[]),
                 patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
                 patch.object(service, "_build_mcp_project_list", new=AsyncMock(return_value=[])),
             ):
@@ -959,7 +962,7 @@ class TestListProjectsPayloadShareAudit:
 
     def test_payload_share_report_depth_2(self, capsys):
         """Build a representative depth-2 payload with 24 projects (the
-        dogfood cohort) and report byte share per field. Prints to stdout
+        test-install cohort) and report byte share per field. Prints to stdout
         so the audit artifact is visible in CI logs.
         """
         sample_memory_entry = {
@@ -1034,7 +1037,7 @@ class TestListProjectsPayloadShareAudit:
 
     def test_audit_mode_payload_70pct_smaller_than_depth_2(self, capsys):
         """BE-5042: mode='audit' must produce a payload at least 70% smaller
-        than depth=2 on the dogfood cohort shape (24 projects, 6 memory entries
+        than depth=2 on the test-install cohort shape (24 projects, 6 memory entries
         each, 4 agent details each).
 
         Audit mode trims memory entries to headlines (drops key_outcomes,
@@ -1438,6 +1441,7 @@ async def _call_with_items_real_build(service: ProjectService, items, **kwargs):
     list_proj_mock = AsyncMock(side_effect=_fake_list_projects)
     with (
         patch.object(service, "list_projects", list_proj_mock),
+        patch.object(service, "board_counts", new_callable=AsyncMock, return_value=[]),
         patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
     ):
         mock_product_svc.return_value.get_active_product = AsyncMock(return_value=mock_product)

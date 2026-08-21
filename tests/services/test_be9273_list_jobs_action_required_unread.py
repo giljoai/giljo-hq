@@ -38,7 +38,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import tenant_session_context
-from giljo_mcp.models import AgentExecution, AgentJob, Message, Project
+from giljo_mcp.models import AgentExecution, AgentJob, Message, Product, Project
 from giljo_mcp.models.tasks import MessageRecipient
 from giljo_mcp.repositories.agent_operations_repository import AgentOperationsRepository
 from giljo_mcp.services.job_query_service import JobQueryService
@@ -55,6 +55,16 @@ def _jobs_svc(session: AsyncSession) -> JobQueryService:
 async def _seed_project_with_two_agents(
     session: AsyncSession, tenant_key: str
 ) -> tuple[str, AgentExecution, AgentExecution]:
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_proj = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    session.add(_owning_product_proj)
     proj = Project(
         id=str(uuid.uuid4()),
         name="BE-9273 action_required_unread project",
@@ -62,6 +72,7 @@ async def _seed_project_with_two_agents(
         mission="action_required_unread wiring mission",
         status="active",
         tenant_key=tenant_key,
+        product_id=_owning_product_proj.id,
         execution_mode="multi_terminal",
         series_number=random.randint(1, 9000),
         created_at=datetime.now(UTC),
@@ -249,6 +260,16 @@ async def _seed_project_with_shared_agent(
     """One project + one execution whose ``agent_id`` is caller-supplied (so
     two tenants can share the identical literal), with one directed,
     requires_action message addressed to it."""
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_proj = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    session.add(_owning_product_proj)
     proj = Project(
         id=str(uuid.uuid4()),
         name=f"BE-9273 cross-tenant project ({tenant_key})",
@@ -256,6 +277,7 @@ async def _seed_project_with_shared_agent(
         mission="cross-tenant isolation mission",
         status="active",
         tenant_key=tenant_key,
+        product_id=_owning_product_proj.id,
         execution_mode="multi_terminal",
         series_number=random.randint(1, 9000),
         created_at=datetime.now(UTC),

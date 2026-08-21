@@ -281,3 +281,57 @@ describe('TemplateEditDialog — emit: update:modelValue', () => {
     expect(wrapper.emitted('update:modelValue')[0]).toEqual([false])
   })
 })
+
+// ---------------------------------------------------------------------------
+// FE-9385c — the availability control is one line, and its label holds still
+// ---------------------------------------------------------------------------
+// This control had NO coverage before: the heading could be removed and the
+// label rewritten and the whole suite stayed green. That gap is why these exist.
+
+describe('TemplateEditDialog — FE-9385c availability control', () => {
+  // tests/setup.js stubs v-switch as a bare checkbox, so the label arrives as an
+  // attribute rather than as rendered text here. Asserting the attribute is what
+  // is actually observable in this harness; asserting wrapper.text() would pass
+  // or fail for reasons that have nothing to do with the label.
+  const retireSwitch = (wrapper) => wrapper.find('[data-testid="retire-switch"]')
+
+  it('reads "Available in all products" when the agent IS available', () => {
+    const wrapper = mountDialog({ template: makeTemplate({ id: 7, is_active: true }) })
+
+    expect(retireSwitch(wrapper).attributes('label')).toBe('Available in all products')
+  })
+
+  it('reads the SAME label when the agent is NOT available', () => {
+    // The behaviour change: the label used to flip to "Retired everywhere". A
+    // caption that rewrites itself as you toggle is harder to read at a glance,
+    // and the switch position already carries the state.
+    const wrapper = mountDialog({ template: makeTemplate({ id: 7, is_active: false }) })
+
+    expect(retireSwitch(wrapper).attributes('label')).toBe('Available in all products')
+    expect(wrapper.html()).not.toContain('Retired everywhere')
+  })
+
+  it('no longer renders the redundant "Availability" heading', () => {
+    const wrapper = mountDialog({ template: makeTemplate({ id: 7, is_active: true }) })
+
+    // The switch and its own label said everything the heading said.
+    expect(wrapper.text()).not.toMatch(/\bAvailability\b/)
+  })
+
+  it('carries an aria-label matching the visible label', () => {
+    // The string most likely to be missed when visible text changes.
+    const wrapper = mountDialog({ template: makeTemplate({ id: 7, is_active: true }) })
+
+    expect(wrapper.html()).toContain('aria-label="Available in all products"')
+    expect(wrapper.html()).not.toMatch(/aria-label="Availability/)
+  })
+
+  it('still hides the control on CREATE, where the choice would mean nothing', () => {
+    // Unchanged behaviour, pinned because the markup around it moved: a new
+    // agent is born available, so offering the toggle would imply a decision
+    // nothing acts on.
+    const wrapper = mountDialog({ template: makeTemplate({ id: null }) })
+
+    expect(wrapper.text()).not.toContain('Available in all products')
+  })
+})

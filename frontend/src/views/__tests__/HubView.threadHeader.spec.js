@@ -18,7 +18,9 @@ vi.mock('@/services/api', () => ({
   default: { threads: { list: vi.fn().mockResolvedValue({ data: { threads: [] } }) } },
 }))
 vi.mock('@/stores/websocketEventRouter', () => ({ registerReconnectResync: () => () => {} }))
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }) }))
+// FE-9410: HubView now pushes routes as well as reading them (the attention strip
+// navigates instead of selecting in place), so the mock has to answer useRouter too.
+vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ push: vi.fn() }) }))
 
 const toasts = []
 vi.mock('@/composables/useToast', () => ({

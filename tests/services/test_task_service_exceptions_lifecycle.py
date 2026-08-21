@@ -288,23 +288,37 @@ async def test_convert_to_project_raises_authorization_error_insufficient_permis
 
 
 @pytest.mark.asyncio
-async def test_convert_to_project_raises_validation_error_no_active_product(
-    task_service, test_task, test_user, test_product
+async def test_convert_to_project_succeeds_onto_an_inactive_product(
+    task_service, test_task, test_user, test_product, db_session
 ):
-    """Test convert_to_project raises ValidationError when no active product"""
-    # Deactivate the product
+    """BE-9415: an INACTIVE product is a valid destination -- that is the point.
+
+    This test's meaning was changed deliberately, not rebaselined. It previously
+    asserted ``ValidationError`` / "No active product" when the product was
+    deactivated, because conversion resolved its destination from
+    ``get_active_product`` and an inactive product meant "nothing to file
+    against". Conversion now binds to the task's OWN ``product_id``, so whether
+    that product happens to be the active one is irrelevant -- and requiring it
+    to be active is exactly the defect BE-9415 removes.
+
+    Converted to assert the new contract for the same scenario rather than
+    deleted, so the inactive-product path stays covered. The loud-rejection case
+    that DOES still raise (a product that no longer resolves at all) is pinned in
+    ``tests/services/test_be9415_convert_binds_task_product.py``.
+    """
     test_product.is_active = False
+    await db_session.commit()
 
-    with pytest.raises(ValidationError) as exc_info:
-        await task_service.convert_to_project(
-            task_id=test_task.id,
-            project_name="Test Project",
-            strategy="create_new",
-            include_subtasks=False,
-            user_id=test_user.id,
-        )
+    result = await task_service.convert_to_project(
+        task_id=test_task.id,
+        project_name="Test Project",
+        strategy="create_new",
+        include_subtasks=False,
+        user_id=test_user.id,
+    )
 
-    assert "No active product" in str(exc_info.value)
+    assert result.product_id == test_product.id
+    assert result.product_name == test_product.name
 
 
 @pytest.mark.asyncio

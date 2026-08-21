@@ -223,6 +223,8 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import { useTaskFilters } from '@/composables/useTaskFilters'
 import { useTaskCrud } from '@/composables/useTaskCrud'
 import { useToast } from '@/composables/useToast'
+import { useNotificationStore } from '@/stores/notifications'
+import { notifyFailure } from '@/utils/notifyFailure'
 import TasksTable from './tasks/TasksTable.vue'
 import TaskEditDialog from './tasks/TaskEditDialog.vue'
 import TaskDeletedDialog from '@/components/tasks/TaskDeletedDialog.vue'
@@ -230,6 +232,7 @@ import TaskDeletedDialog from '@/components/tasks/TaskDeletedDialog.vue'
 // Stores
 const taskStore = useTaskStore()
 const productStore = useProductStore()
+const notificationStore = useNotificationStore()
 const { showToast } = useToast()
 
 // Dialog state (conversion / delete / success / error stay in view)
@@ -318,9 +321,20 @@ const {
 async function completeTask(task) {
   try {
     await _completeTask(task.id)
-  } catch {
+  } catch (error) {
     errorMessage.value = 'Failed to complete task. Please try again.'
     showErrorDialog.value = true
+    // FE-9466: the composable's own catch already pushed a notification for
+    // this same rethrown error -- same operation + entityId + error code
+    // computes the same id, so the store's dedup-by-id collapses this into
+    // the same row rather than showing the failure twice.
+    notifyFailure(notificationStore, {
+      operation: 'task.complete',
+      entityId: task.id,
+      error,
+      fallbackMessage: errorMessage.value,
+      title: 'Task not completed',
+    })
   }
 }
 
@@ -336,9 +350,19 @@ function handleNewTask() {
 async function updateTaskField(task, field, value) {
   try {
     await _updateTaskField(task, field, value)
-  } catch {
+  } catch (error) {
     errorMessage.value = `Failed to update ${field}. Please try again.`
     showErrorDialog.value = true
+    // FE-9466: useTaskCrud.updateTaskField has no catch of its own (out of
+    // pass-one scope) -- this is the only layer that sees the failure, so
+    // it is the only one that needs to push.
+    notifyFailure(notificationStore, {
+      operation: `task.updateField.${field}`,
+      entityId: task.id,
+      error,
+      fallbackMessage: errorMessage.value,
+      title: 'Task not updated',
+    })
   }
 }
 
@@ -346,9 +370,18 @@ async function updateTaskField(task, field, value) {
 async function updateTaskDueDate(task, newDate) {
   try {
     await _updateTaskDueDate(task, newDate)
-  } catch {
+  } catch (error) {
     errorMessage.value = 'Failed to update due date. Please try again.'
     showErrorDialog.value = true
+    // FE-9466: useTaskCrud.updateTaskDueDate has no catch of its own (out of
+    // pass-one scope) -- this is the only layer that sees the failure.
+    notifyFailure(notificationStore, {
+      operation: 'task.updateDueDate',
+      entityId: task.id,
+      error,
+      fallbackMessage: errorMessage.value,
+      title: 'Due date not updated',
+    })
   }
 }
 

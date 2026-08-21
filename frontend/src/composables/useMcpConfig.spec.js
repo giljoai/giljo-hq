@@ -158,14 +158,60 @@ describe('OAuth generators (BE-6157, byte-parity with ai_tools.py)', () => {
 
   it('OpenCode sign-in command registers then authenticates, no bearer (FE-9204)', () => {
     const result = generateOpenCodeOAuthConfig('https://giljo.example.com')
-    expect(result).toBe('opencode mcp add giljo_hq https://giljo.example.com/mcp && opencode mcp auth giljo_hq')
+    expect(result).toBe('opencode mcp add giljo_hq --url https://giljo.example.com/mcp && opencode mcp auth giljo_hq')
     expect(result).not.toContain('Authorization')
     expect(result).not.toContain('Bearer')
   })
 
   it('OpenCode bearer command carries the Authorization header (FE-9204)', () => {
     const result = generateOpenCodeConfig('https://giljo.example.com', 'tok_abc')
-    expect(result).toBe('opencode mcp add giljo_hq https://giljo.example.com/mcp --header "Authorization: Bearer tok_abc"')
+    expect(result).toBe('opencode mcp add giljo_hq --url https://giljo.example.com/mcp --header "Authorization=Bearer tok_abc"')
+  })
+})
+
+/**
+ * FE-9383 — OpenCode's CLI does not share Claude Code's flag syntax, and both
+ * generators used to emit the Claude Code form. An OpenCode user's first command
+ * failed twice: the bare URL is an unexpected positional (OpenCode prints its help
+ * text), and a colon-form header does not parse. Verified working form, from a live
+ * OpenCode connect on 2026-08-08:
+ *   opencode mcp add giljo_hq --url https://<host>/mcp --header "Authorization=Bearer <key>"
+ * These assertions pin BOTH halves plus the absence of the colon form, so a future
+ * copy-paste from a Claude Code generator cannot silently reintroduce the break.
+ */
+describe('OpenCode command syntax (FE-9383)', () => {
+  const URL = 'https://test.giljo.ai'
+  const KEY = 'gk_live_example'
+
+  it('passes the server URL with --url, never as a bare positional', () => {
+    for (const cmd of [generateOpenCodeConfig(URL, KEY), generateOpenCodeOAuthConfig(URL)]) {
+      expect(cmd).toContain(`--url ${URL}/mcp`)
+      // The alias is the only positional after `mcp add`; a URL must not follow it.
+      expect(cmd).not.toContain(`mcp add giljo_hq ${URL}`)
+    }
+  })
+
+  it('emits the KEY=VALUE header form and never the colon form', () => {
+    const cmd = generateOpenCodeConfig(URL, KEY)
+    expect(cmd).toContain(`Authorization=Bearer ${KEY}`)
+    expect(cmd).not.toContain('Authorization: Bearer')
+    expect(cmd).not.toContain('Authorization:')
+  })
+
+  it('dispatches both auth methods to the corrected syntax', () => {
+    expect(generateConfigForTool('opencode', URL, KEY)).toBe(generateOpenCodeConfig(URL, KEY))
+    expect(generateConfigForTool('opencode', URL, KEY, { authMethod: 'oauth' })).toBe(
+      generateOpenCodeOAuthConfig(URL),
+    )
+  })
+
+  it('leaves the Claude Code command untouched — it still takes a positional URL and a colon header', () => {
+    expect(generateClaudeConfig(URL, KEY)).toBe(
+      `claude mcp add --scope user --transport http giljo_hq ${URL}/mcp --header "Authorization: Bearer ${KEY}"`,
+    )
+    expect(generateClaudeOAuthConfig(URL)).toBe(
+      `claude mcp add --transport http giljo_hq ${URL}/mcp --scope user`,
+    )
   })
 })
 
@@ -195,14 +241,14 @@ describe('generateConfigForTool authMethod dispatch (BE-6157)', () => {
 
   it('routes opencode oauth to the sign-in-plus-auth command (FE-9204)', () => {
     const result = generateConfigForTool('opencode', URL, KEY, { authMethod: 'oauth' })
-    expect(result).toBe(`opencode mcp add giljo_hq ${URL}/mcp && opencode mcp auth giljo_hq`)
+    expect(result).toBe(`opencode mcp add giljo_hq --url ${URL}/mcp && opencode mcp auth giljo_hq`)
     expect(result).not.toContain('Authorization')
     expect(result).not.toContain('Bearer')
   })
 
   it('routes opencode bearer to the header command (FE-9204)', () => {
     expect(generateConfigForTool('opencode', URL, KEY)).toBe(
-      `opencode mcp add giljo_hq ${URL}/mcp --header "Authorization: Bearer ${KEY}"`,
+      `opencode mcp add giljo_hq --url ${URL}/mcp --header "Authorization=Bearer ${KEY}"`,
     )
   })
 

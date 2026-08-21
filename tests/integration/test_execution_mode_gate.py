@@ -39,7 +39,6 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from fastapi import HTTPException
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.organizations import Organization
@@ -47,6 +46,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.templates import AgentTemplate
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -54,7 +54,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(call_tool_result) -> dict:
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -226,7 +226,7 @@ async def test_spawn_job_refuses_null_execution_mode_at_mcp_boundary(gate_mcp_cl
             },
         )
 
-    assert result.isError is True, "spawn_job MUST refuse a NULL-execution_mode project"
+    assert result.is_error is True, "spawn_job MUST refuse a NULL-execution_mode project"
     err = _error_text(result).lower()
     assert "execution mode" in err, f"expected an execution-mode gate message, got: {err!r}"
 
@@ -248,7 +248,7 @@ async def test_spawn_job_succeeds_for_chosen_mode(gate_mcp_client):
             },
         )
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload.get("job_id")
 
@@ -266,7 +266,7 @@ async def test_get_agent_mission_blocks_null_execution_mode(gate_mcp_client):
     async with new_client() as session:
         result = await session.call_tool("get_job_mission", {"job_id": job_id})
 
-    if result.isError:
+    if result.is_error:
         assert "execution mode" in _error_text(result).lower()
     else:
         payload = _payload(result)
@@ -296,9 +296,9 @@ async def test_get_staging_instructions_blocks_null_execution_mode(gate_mcp_clie
     async with new_client() as session:
         result = await session.call_tool("get_staging_instructions", {"job_id": job_id})
 
-    text = (_error_text(result) if result.isError else json.dumps(_payload(result))).lower()
+    text = (_error_text(result) if result.is_error else json.dumps(_payload(result))).lower()
     assert "execution mode" in text, f"expected execution-mode STOP, got: {text!r}"
-    if not result.isError:
+    if not result.is_error:
         payload = _payload(result)
         # The STOP shape must not carry a rendered orchestrator protocol.
         assert payload.get("action") == "STOP" or payload.get("status") == "BLOCKED", (

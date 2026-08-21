@@ -24,14 +24,14 @@ from api.endpoints.mcp_tools._base import _detected_harness, _persisted_harness
 
 
 def _make_ctx(*, client_name: str | None, scope_state: dict | None):
-    """Build a fake FastMCP ctx: a live clientInfo axis + a scope-state axis.
+    """Build a fake SDK ctx: a live clientInfo axis + a scope-state axis.
 
-    ``client_name`` drives ``ctx.session.client_params.clientInfo`` (None -> the
+    ``client_name`` drives ``ctx.session.client_params.client_info`` (None -> the
     stateless-drop shape). ``scope_state`` is the ASGI ``scope['state']`` dict the
     middleware would have stamped (``None`` -> no HTTP request, the in-memory floor).
     """
     client_info = SimpleNamespace(name=client_name, version="9.9.9") if client_name is not None else None
-    session = SimpleNamespace(client_params=SimpleNamespace(clientInfo=client_info))
+    session = SimpleNamespace(client_params=SimpleNamespace(client_info=client_info))
     request = SimpleNamespace(scope={"state": scope_state}) if scope_state is not None else None
     return SimpleNamespace(session=session, request_context=SimpleNamespace(request=request))
 

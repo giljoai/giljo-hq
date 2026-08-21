@@ -43,13 +43,13 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -62,7 +62,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(call_tool_result) -> dict:
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -291,13 +291,13 @@ async def test_workflow_status_observes_report_progress_immediately(
                 # total may shrink vs the prior one (BE-6209a shrink guard).
                 {"job_id": job_id, "todo_items": todo_items, "replace": True},
             )
-            assert progress_result.isError is False, _error_text(progress_result)
+            assert progress_result.is_error is False, _error_text(progress_result)
 
             status_result = await session.call_tool(
                 "get_workflow_status",
                 {"project_id": project_id},
             )
-            assert status_result.isError is False, _error_text(status_result)
+            assert status_result.is_error is False, _error_text(status_result)
 
             payload = _payload(status_result)
             agents = payload.get("agents") or []
@@ -337,24 +337,24 @@ async def test_be6182_worker_lifecycle_mission_progress_complete(progress_mcp_cl
     async with new_client() as session:
         # 1. Load the mission (the agent's first action).
         mission_result = await session.call_tool("get_job_mission", {"job_id": job_id})
-        assert mission_result.isError is False, _error_text(mission_result)
+        assert mission_result.is_error is False, _error_text(mission_result)
 
         # 2. Report a pending TODO, then 3. flip it to completed.
         pending = await session.call_tool(
             "report_progress",
             {"job_id": job_id, "todo_items": [{"content": "Deliver the feature", "status": "pending"}]},
         )
-        assert pending.isError is False, _error_text(pending)
+        assert pending.is_error is False, _error_text(pending)
 
         completed = await session.call_tool(
             "report_progress",
             {"job_id": job_id, "todo_items": [{"content": "Deliver the feature", "status": "completed"}]},
         )
-        assert completed.isError is False, _error_text(completed)
+        assert completed.is_error is False, _error_text(completed)
 
         # 4. complete_job runs clean (deliverable TODO is completed; no gate trip).
         done = await session.call_tool(
             "complete_job",
             {"job_id": job_id, "result": {"summary": "Feature delivered"}},
         )
-        assert done.isError is False, _error_text(done)
+        assert done.is_error is False, _error_text(done)

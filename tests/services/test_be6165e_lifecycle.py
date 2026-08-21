@@ -31,11 +31,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import tenant_isolation_bypass
 from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.thin_prompt_generator import build_continuation_prompt
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -69,13 +71,29 @@ async def _seed_live_project(session: AsyncSession, tenant: str) -> str:
     filter keeps the run that references it. A real chain always has real member
     projects; the default INACTIVE status is non-terminal -> 'live'."""
     pid = str(uuid.uuid4())
+    # BE-9437: a project belongs to a product. Its own, so an active seed cannot
+    # collide under idx_project_single_active_per_product.
+    _product_id = str(uuid.uuid4())
+    session.add(
+        Product(
+            id=_product_id,
+            tenant_key=tenant,
+            name=f"Owning Product {_product_id[:8]}",
+            description="seeded",
+            is_active=False,
+        )
+    )
     session.add(
         Project(
             id=pid,
+            product_id=_product_id,
             tenant_key=tenant,
             name=f"chain-member-{pid[:8]}",
             description="live chain member",
             mission="member mission",
+            # BE-9429: uq_project_taxonomy_active is NULLS NOT DISTINCT, so two
+            # all-NULL taxonomy rows collide. _create() seeds two members.
+            series_number=next_series_number(),
         )
     )
     await session.flush()

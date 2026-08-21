@@ -46,7 +46,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import select
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
@@ -54,6 +53,7 @@ from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -66,7 +66,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(call_tool_result) -> dict:
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -264,7 +264,7 @@ async def test_launch_implementation_through_transport_stamps_flag(
     async with new_client() as session:
         result = await session.call_tool("launch_implementation", {"project_id": seeded["project"].id})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["status"] == "launched"
     assert payload["success"] is True
@@ -284,7 +284,7 @@ async def test_launch_implementation_is_idempotent(lifecycle_mcp_client, db_sess
 
     async with new_client() as session:
         first = await session.call_tool("launch_implementation", {"project_id": seeded["project"].id})
-    assert first.isError is False, _error_text(first)
+    assert first.is_error is False, _error_text(first)
     first_payload = _payload(first)
     assert first_payload["already_launched"] is False
 
@@ -294,7 +294,7 @@ async def test_launch_implementation_is_idempotent(lifecycle_mcp_client, db_sess
 
     async with new_client() as session:
         second = await session.call_tool("launch_implementation", {"project_id": seeded["project"].id})
-    assert second.isError is False, _error_text(second)
+    assert second.is_error is False, _error_text(second)
     second_payload = _payload(second)
     assert second_payload["already_launched"] is True
     assert second_payload["launched_at"], "idempotent call returns the original timestamp"
@@ -324,7 +324,7 @@ async def test_gate_blocks_before_launch_then_proceeds_after(lifecycle_mcp_clien
     # BEFORE launch: implement_project refuses (the human gate blocks).
     async with new_client() as session:
         blocked = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
-    assert blocked.isError is False, _error_text(blocked)
+    assert blocked.is_error is False, _error_text(blocked)
     blocked_payload = _payload(blocked)
     assert blocked_payload["status"] == "gate_not_passed"
     assert blocked_payload["reason"] == "not_launched"
@@ -332,14 +332,14 @@ async def test_gate_blocks_before_launch_then_proceeds_after(lifecycle_mcp_clien
     # The CLI door (human-authorized) flips the gate.
     async with new_client() as session:
         launched = await session.call_tool("launch_implementation", {"project_id": seeded["project"].id})
-    assert launched.isError is False, _error_text(launched)
+    assert launched.is_error is False, _error_text(launched)
     assert _payload(launched)["already_launched"] is False
 
     # AFTER launch: implement_project now proceeds — the downstream gate honors the
     # SAME flag the CLI door flipped.
     async with new_client() as session:
         ready = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
-    assert ready.isError is False, _error_text(ready)
+    assert ready.is_error is False, _error_text(ready)
     ready_payload = _payload(ready)
     assert ready_payload["status"] == "ready", "after launch_implementation the gate must clear"
     assert ready_payload["prompt"], "implementation prompt must be non-empty after launch"
@@ -394,7 +394,7 @@ async def test_launch_implementation_cross_tenant_blocked_flag_stays_unset(
     async with new_client() as session:
         result = await session.call_tool("launch_implementation", {"project_id": seeded["project"].id})
 
-    assert result.isError is True, "TENANT LEAK: tenant B must not launch tenant A's project"
+    assert result.is_error is True, "TENANT LEAK: tenant B must not launch tenant A's project"
     err = _error_text(result).lower()
     assert "not found" in err or "tenant" in err, f"expected a tenant-isolation block, got: {err!r}"
 

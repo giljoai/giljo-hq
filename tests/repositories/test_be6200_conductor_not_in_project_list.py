@@ -17,12 +17,23 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.repositories.agent_operations_repository import AgentOperationsRepository
 
 
 async def _seed_project_agent_and_conductor(db_session: AsyncSession, tenant_key: str) -> tuple[Project, str, str]:
     """Seed project P1 with one project-bound execution + a project-less conductor."""
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         id=str(uuid.uuid4()),
         name="BE6200 conductor-leak P1",
@@ -30,6 +41,7 @@ async def _seed_project_agent_and_conductor(db_session: AsyncSession, tenant_key
         mission="m",
         status="active",
         tenant_key=tenant_key,
+        product_id=_owning_product_project.id,
         series_number=random.randint(1, 9000),
     )
     db_session.add(project)

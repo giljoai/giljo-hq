@@ -1,6 +1,6 @@
 <template>
   <v-menu :close-on-content-click="true" location="right" offset="8">
-    <template v-slot:activator="{ props: menuProps }">
+    <template #activator="{ props: menuProps }">
       <div
         v-bind="menuProps"
         class="nav-orb nav-orb--avatar"
@@ -11,7 +11,7 @@
         <span v-if="currentUser" class="nav-orb-initials">{{ userInitials }}</span>
         <v-icon v-else size="18">mdi-account</v-icon>
         <!-- account-state badge anchored to avatar (SaaS only). -->
-        <component :is="AccountStatusBadgeComponent" v-if="AccountStatusBadgeComponent" />
+        <component :is="accountStatusBadgeComponent" v-if="accountStatusBadgeComponent" />
       </div>
     </template>
 
@@ -94,7 +94,7 @@
 
       <!-- Account / Profile -->
       <v-list-item :to="{ path: '/account/profile' }">
-        <template v-slot:prepend>
+        <template #prepend>
           <v-icon>mdi-account</v-icon>
         </template>
         <v-list-item-title>Account / Profile</v-list-item-title>
@@ -105,7 +105,7 @@
         v-if="isAdmin && isCeEdition"
         :to="{ name: 'SystemSettings' }"
       >
-        <template v-slot:prepend>
+        <template #prepend>
           <v-icon color="error">mdi-cog</v-icon>
         </template>
         <v-list-item-title>Admin Settings</v-list-item-title>
@@ -114,7 +114,7 @@
       <v-divider />
 
       <v-list-item :to="{ name: 'UserGuide' }">
-        <template v-slot:prepend>
+        <template #prepend>
           <v-icon>mdi-book-open-variant</v-icon>
         </template>
         <v-list-item-title>User Guide</v-list-item-title>
@@ -122,7 +122,7 @@
 
       <!-- Reset Password (SaaS only) -->
       <v-list-item v-if="isNonCeEdition" @click="showResetPasswordConfirm = true">
-        <template v-slot:prepend>
+        <template #prepend>
           <v-icon>mdi-lock-reset</v-icon>
         </template>
         <v-list-item-title>Reset Password</v-list-item-title>
@@ -236,8 +236,13 @@ const props = defineProps({
     type: String,
     default: null,
   },
-  // Account state props (from useNavDrawerAccount)
-  AccountStatusBadgeComponent: {
+  // Account state props (from useNavDrawerAccount).
+  // camelCase is load-bearing, not style: the parent binds this as the
+  // kebab-case attribute `:account-status-badge-component`, and Vue camelizes
+  // that to `accountStatusBadgeComponent`. A leading capital can never be
+  // produced by that camelization, so a PascalCase name here is unreachable
+  // from any template and the badge silently never renders (FE-9419).
+  accountStatusBadgeComponent: {
     type: Object,
     default: null,
   },

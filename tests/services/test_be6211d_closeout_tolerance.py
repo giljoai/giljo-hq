@@ -44,6 +44,7 @@ from giljo_mcp.schemas.service_responses import ProgressResult
 from giljo_mcp.services.orchestration_service import OrchestrationService
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools.write_memory_entry import write_360_memory
+from tests.helpers.model_factories import make_agent_execution
 
 
 # ---------------------------------------------------------------------------
@@ -335,14 +336,14 @@ async def test_conductor_with_genuine_work_todo_still_blocks(db_session, test_te
 
 
 def _make_mock_execution(status: str, job_id: str, tenant_key: str) -> Mock:
-    exe = Mock(spec=AgentExecution)
-    exe.status = status
-    exe.job_id = job_id
-    exe.tenant_key = tenant_key
-    exe.agent_id = str(uuid4())
-    exe.agent_display_name = "test-agent"
-    exe.started_at = datetime.now(UTC)
-    return exe
+    return make_agent_execution(
+        status=status,
+        job_id=job_id,
+        tenant_key=tenant_key,
+        agent_id=str(uuid4()),
+        agent_display_name="test-agent",
+        started_at=datetime.now(UTC),
+    )
 
 
 def _service_with_sequenced_executions(*scalar_results):

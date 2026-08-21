@@ -36,6 +36,7 @@ from uuid import uuid4
 import pytest
 
 from giljo_mcp.models import AgentExecution, AgentJob, Project
+from giljo_mcp.models.products import Product
 
 
 def _extract_tenant_key(auth_headers: dict) -> str:
@@ -52,10 +53,22 @@ async def _seed_staged_agent(db_manager, tenant_key: str, *, mission: str | None
     """A staged specialist. ``mission=None`` is the real pre-Phase-2 state."""
     project_id = str(uuid4())
     agent_id = str(uuid4())
+    product_id = str(uuid4())
     async with db_manager.get_session_async() as session:
+        # BE-9437: a project belongs to a product.
+        session.add(
+            Product(
+                id=product_id,
+                tenant_key=tenant_key,
+                name=f"BE-9330 prompt product {uuid4().hex[:8]}",
+                description="seeded",
+                is_active=False,
+            )
+        )
         session.add(
             Project(
                 id=project_id,
+                product_id=product_id,
                 name=f"BE-9330 prompt project {uuid4().hex[:8]}",
                 description="unwritten mission prompt render",
                 mission="unwritten mission prompt render",

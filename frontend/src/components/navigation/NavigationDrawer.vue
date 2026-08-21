@@ -41,7 +41,7 @@
         />
         <v-img
           v-else
-          src="/giljo_YW_Face.svg"
+          src="/icons/Giljo_YW_Face.svg"
           alt="GiljoAI"
           height="28"
           width="28"
@@ -95,7 +95,7 @@
         role="listitem"
         :exact="true"
       >
-        <template v-slot:prepend>
+        <template #prepend>
           <v-img
             v-if="item.customIcon"
             :src="item.customIcon"
@@ -109,7 +109,7 @@
           <v-icon v-else>{{ item.icon }}</v-icon>
         </template>
         <!-- Hub unread count badge -->
-        <template v-if="item.name === 'Hub' && commHub.totalUnread > 0" v-slot:append>
+        <template v-if="item.name === 'Hub' && commHub.totalUnread > 0" #append>
           <span
             :style="hubUnreadBadgeStyle()"
             data-testid="nav-hub-unread-badge"
@@ -121,7 +121,7 @@
     </v-list>
 
     <!-- ─── BOTTOM SECTION: Bell, Connection, Avatar ─── -->
-    <template v-slot:append>
+    <template #append>
       <div class="nav-bottom">
         <div class="nav-orb-row" :class="{ 'nav-orb-row--stacked': rail }">
           <!-- Notification Bell -->
@@ -129,7 +129,7 @@
 
           <!-- Connection Status -->
           <v-tooltip location="right">
-            <template v-slot:activator="{ props: tipProps }">
+            <template #activator="{ props: tipProps }">
               <div
                 v-bind="tipProps"
                 class="nav-orb nav-orb--connection"

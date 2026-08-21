@@ -41,7 +41,7 @@ def test_registry_is_non_empty(registered_tools):
 
 def test_every_tool_has_output_schema(registered_tools):
     """Every advertised tool MUST carry an outputSchema (MCP spec recommendation)."""
-    missing = [t.name for t in registered_tools if t.outputSchema is None]
+    missing = [t.name for t in registered_tools if t.output_schema is None]
     assert not missing, (
         f"Tools missing outputSchema: {missing}. "
         "Attach by adding a typed return annotation to the @mcp.tool function "
@@ -53,7 +53,7 @@ def test_every_output_schema_is_object_typed(registered_tools):
     """outputSchema.type MUST equal 'object' — MCP clients expect a JSON object."""
     bad: list[tuple[str, object]] = []
     for tool in registered_tools:
-        schema = tool.outputSchema
+        schema = tool.output_schema
         if schema is None:
             continue
         if schema.get("type") != "object":
@@ -66,6 +66,6 @@ def test_output_schema_is_serializable(registered_tools):
     import json
 
     for tool in registered_tools:
-        if tool.outputSchema is None:
+        if tool.output_schema is None:
             continue
-        json.dumps(tool.outputSchema)
+        json.dumps(tool.output_schema)

@@ -75,7 +75,14 @@ def test_tool_wrapper_callables_reexported_and_async():
         assert inspect.iscoroutinefunction(attr), f"{name} must remain an async callable"
 
 
-def test_mcp_instance_is_fastmcp():
-    from mcp.server.fastmcp import FastMCP
+def test_mcp_instance_is_the_sdk_server():
+    """The shared instance is the SDK's server object.
 
-    assert isinstance(sdk.mcp, FastMCP)
+    INF-9371: SDK 2.0 renamed ``FastMCP`` to ``MCPServer`` and deleted
+    ``mcp.server.fastmcp``. Only the class name moved — this still asserts the
+    same thing it always did, that ``mcp_sdk_server.mcp`` is the SDK's server and
+    not a stand-in of ours.
+    """
+    from mcp.server.mcpserver import MCPServer
+
+    assert isinstance(sdk.mcp, MCPServer)

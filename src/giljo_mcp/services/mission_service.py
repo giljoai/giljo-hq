@@ -41,6 +41,7 @@ from giljo_mcp.schemas.service_responses import (
 )
 from giljo_mcp.services._error_helpers import not_found_or_wrong_state_error
 from giljo_mcp.services._session_helpers import optional_tenant_session
+from giljo_mcp.services.comm_thread_enrolment import resolve_and_enrol
 from giljo_mcp.services.conductor_chain_injector import inject_conductor_chain_drive
 from giljo_mcp.services.conductor_mission_mirror import mirror_chain_mission_for_conductor
 from giljo_mcp.services.execution_mode_gate import effective_execution_mode
@@ -57,6 +58,7 @@ from giljo_mcp.services.mission_implementation_gate import (
     is_chain_member,
 )
 from giljo_mcp.services.mission_orchestration_service import MissionOrchestrationService
+from giljo_mcp.services.orchestrator_product_resolver import compose_identity_with_provenance
 from giljo_mcp.services.protocol_survival import finalize_mission_wire_fields
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
@@ -171,14 +173,11 @@ class MissionService:
                     if gate_response is not None:
                         return gate_response
 
-                # BE-9012d: resolve the project's bound Hub thread (SAME session as the
-                # render -- no cross-session read/write skew). Worker-protocol-only: an
-                # orchestrator job never renders the worker body that consumes this value,
-                # so skip the DB round-trip for it entirely (also keeps the many mocked
-                # orchestrator-path tests untouched by this new query).
-                comm_thread_id: str | None = None
-                if job.project_id and job.job_type != "orchestrator":
-                    comm_thread_id = await self._resolve_comm_thread_id(session, job, tenant_key)
+                # BE-9012d resolve + TSK-9459 structural enrolment, on the SAME session as
+                # the render (no cross-session read/write skew). The ORCHESTRATOR used to
+                # be excluded here, so it alone was never handed its own thread id and
+                # never joined -- see comm_thread_enrolment for why that is a mechanism gap.
+                comm_thread_id = await resolve_and_enrol(self, session, job, execution, tenant_key)
 
                 # Fetch team context and orchestrator state
                 all_project_executions, mission_lookup, current_team_state = await self._fetch_team_context(
@@ -206,7 +205,7 @@ class MissionService:
                 is_chain_conductor = compute_is_chain_conductor(chain_execution_mode, job.project_id)
 
                 # Resolve agent identity from template (Handover 0825)
-                agent_identity, identity_status = await self._resolve_mission_template(
+                agent_identity, identity_status, identity_source = await self._resolve_mission_template(
                     session,
                     job,
                     execution,
@@ -279,16 +278,12 @@ class MissionService:
                     context={"job_id": job_id, "tenant_key": tenant_key},
                 )
 
-            # BE-5008: Read integration settings from DB
-            integrations = {}
-            try:
-                from giljo_mcp.services.settings_service import SettingsService
+            # BE-5008 + FE-9296b: toggles + resolved cadence (assembly is session-free).
+            from giljo_mcp.services.settings_service import load_integrations_and_cadence
 
-                async with self._get_session(tenant_key) as settings_session:
-                    settings_svc = SettingsService(settings_session, tenant_key)
-                    integrations = await settings_svc.get_settings("integrations")
-            except Exception as _exc:  # noqa: BLE001
-                self._logger.warning("[INTEGRATIONS] Failed to read settings from DB")
+            integrations, checkin_cadence_minutes = await load_integrations_and_cadence(
+                self._get_session, tenant_key, project
+            )
 
             mission_response = self._assemble_mission_context(
                 job=job,
@@ -304,8 +299,10 @@ class MissionService:
                 preset=preset,
                 comm_thread_id=comm_thread_id,
                 detected_harness=detected_harness,
+                checkin_cadence_minutes=checkin_cadence_minutes,
+                identity_status=identity_status,  # BE-9333 signal + BE-9402 serve gate
+                identity_source=identity_source,  # FE-9408 provenance, gated with the identity
             )
-            mission_response.identity_status = identity_status  # BE-9333
             # BE-6177 Bug 4 (chain-blind runtime); BE-9092: proto alias keeps the inject arg-line <=120.
             proto = mission_response.full_protocol
             mission_response.full_protocol = await inject_conductor_chain_drive(
@@ -530,7 +527,7 @@ class MissionService:
         tenant_key: str,
         is_chain_conductor: bool = False,
         chain_execution_mode: str | None = None,
-    ) -> tuple[str | None, str]:
+    ) -> tuple[str | None, str, str | None]:
         """Resolve agent identity from template or orchestrator defaults.
 
         Handover 0825: Identity is resolved at read-time, not baked at spawn.
@@ -540,10 +537,14 @@ class MissionService:
         chain conductor's composed orchestrator identity.
 
         Returns:
-            ``(agent_identity, identity_status)``. BE-9333: identity is never None
-            any more -- a job whose template does not resolve gets an explicit block
-            saying so plus a ``template_unresolved`` / ``template_unbound`` status,
-            because a bare None was indistinguishable from a healthy response.
+            ``(agent_identity, identity_status, identity_source)``. BE-9333: identity
+            is never None any more -- a job whose template does not resolve gets an
+            explicit block saying so plus a ``template_unresolved`` /
+            ``template_unbound`` status, because a bare None was indistinguishable
+            from a healthy response. FE-9408: ``identity_source`` is the provenance
+            line, None for every path but the composed orchestrator one -- a bound
+            TEMPLATE identity does not come off the override ladder, so it has no rung
+            to report and must not claim one.
         """
         agent_identity: str | None = None
         job_id = job.job_id
@@ -576,38 +577,31 @@ class MissionService:
             # Tool Usage, CHECK-IN PROTOCOL, HARNESS REMINDER OVERRIDE) is
             # always appended — even when the tenant admin has saved a
             # custom seed override via SystemPromptService.
-            from giljo_mcp.system_prompts.service import SystemPromptService
-            from giljo_mcp.template_seeder import compose_orchestrator_identity
-
             project = await self._repo.get_project_by_id(session, tenant_key, job.project_id)
             project_exec_mode = getattr(project, "execution_mode", "multi_terminal") if project else "multi_terminal"
             # BE-9335: same resolver as the protocol body (identity must not contradict it).
             mode = effective_execution_mode(project_exec_mode, chain_execution_mode)
             tool = _EXECUTION_MODE_TO_TOOL.get(mode, "multi_terminal")
 
-            override_content: str | None = None
-            try:
-                prompt_service = SystemPromptService(db_manager=self.db_manager)
-                prompt_record = await prompt_service.get_orchestrator_prompt(tenant_key=tenant_key, session=session)
-                if prompt_record.is_override:
-                    override_content = prompt_record.content
-            except Exception:  # noqa: BLE001
-                self._logger.warning(
-                    "[HO1027] Failed to read orchestrator prompt override; using default seed",
-                    extra={"job_id": job_id},
-                )
-
             # BE-6211g (move c): the project-less chain conductor receives a role-
             # scoped identity (trimmed of context-response / verify-all-agents /
             # worker-spawn blocks it must not act on). role=None for every other
             # orchestrator -> byte-identical to today.
             role = "conductor" if is_chain_conductor else None
-            agent_identity = compose_orchestrator_identity(override_content, tool=tool, role=role)
+            # BE-9385d: product override -> tenant override -> seeded default, with the
+            # project-less conductor resolved through its run; never raises, a failed
+            # read degrades to the seed exactly as HO1027 required. FE-9408: the same
+            # composition, plus the line saying which rung produced it.
+            agent_identity, identity_source, prompt_scope = await compose_identity_with_provenance(
+                self, session, job, execution, tenant_key, project, tool=tool, role=role
+            )
             self._logger.info(
                 "[AGENT_IDENTITY] Composed orchestrator identity (override+harness or seed+harness)",
-                extra={"job_id": job_id, "tool": tool, "is_override": override_content is not None},
+                # BE-9385d: prompt_scope replaces is_override -- it says WHICH rung
+                # answered (product/tenant/default), which strictly subsumes it.
+                extra={"job_id": job_id, "tool": tool, "prompt_scope": prompt_scope},
             )
-            return agent_identity, IDENTITY_ORCHESTRATOR_DEFAULT
+            return agent_identity, IDENTITY_ORCHESTRATOR_DEFAULT, identity_source
 
         # BE-9333: nothing loaded. Say so in the field the agent actually reads, and log it --
         # the read path was previously silent at BOTH levels (no flag, no line). `not` rather
@@ -619,9 +613,9 @@ class MissionService:
                 "[AGENT_IDENTITY] No template resolved -- agent runs with no role framing",
                 extra={"job_id": job_id, "template_id": job.template_id, "identity_status": status},
             )
-            return agent_identity, status
+            return agent_identity, status, None
 
-        return agent_identity, IDENTITY_RESOLVED
+        return agent_identity, IDENTITY_RESOLVED, None
 
     @staticmethod
     def _compute_protocol_etag(agent_identity: str | None, full_protocol: str | None) -> str:
@@ -643,6 +637,9 @@ class MissionService:
         preset: Platform | None = None,
         comm_thread_id: str | None = None,
         detected_harness: str | None = None,
+        checkin_cadence_minutes: int | None = None,
+        identity_status: str = IDENTITY_RESOLVED,
+        identity_source: str | None = None,
     ) -> MissionResponse:
         """BE-6211f: back-compat shim — logic lives in mission_assembly.assemble_mission_context."""
         return assemble_mission_context(
@@ -660,6 +657,9 @@ class MissionService:
             preset=preset,
             comm_thread_id=comm_thread_id,
             detected_harness=detected_harness,
+            checkin_cadence_minutes=checkin_cadence_minutes,
+            identity_status=identity_status,
+            identity_source=identity_source,
         )
 
     async def _resolve_comm_thread_id(

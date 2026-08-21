@@ -45,12 +45,12 @@ from typing import Any
 from unittest.mock import create_autospec
 
 import pytest
-from mcp.shared.memory import create_connected_server_and_client_session
 
 # Importing the transport module guarantees every domain wrapper module is
 # imported and has registered its @mcp.tool against the shared instance.
 from api.endpoints.mcp_sdk_server import mcp
 from tests.helpers.mcp_dispatch import attach_registry_service_autospecs
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 # Only the async dispatch test needs the asyncio mark; the coverage gate is a
@@ -58,7 +58,7 @@ from tests.helpers.mcp_dispatch import attach_registry_service_autospecs
 
 
 # ---------------------------------------------------------------------------
-# Frozen coverage roster (the DoD gate). 48 registered tools — kept identical
+# Frozen coverage roster (the DoD gate). 49 registered tools — kept identical
 # to the registry-surface lock's EXPECTED_TOOL_SURFACE.keys(). A new @mcp.tool
 # added without an entry here fails ``test_smoke_coverage_is_the_full_registry``.
 # (INF-6049b added stage_project + implement_project; BE-6054b added 8 Hub thread
@@ -87,6 +87,8 @@ EXPECTED_SMOKE_TOOLS: frozenset[str] = frozenset(
         "join_thread",
         "post_to_thread",
         "get_my_turn",
+        "await_my_turn",
+        "get_participant_liveness",
         "pass_baton",
         "list_threads",
         "get_thread_history",
@@ -140,6 +142,13 @@ _DATE_PARAMS: frozenset[str] = frozenset(
         "due_date",
     }
 )
+
+# BE-9469 (U62-F2): list_tasks' ``hidden`` wrapper now REFUSES any value outside
+# its recognized true/false spellings -- previously it silently degraded any
+# placeholder to "no filter". "true" is accepted by every ``hidden`` param on
+# this surface (list_tasks/update_task/list_projects all share the same
+# true/false coercion), so this override is safe across all of them.
+_LITERAL_STRING_OVERRIDES: dict[str, str] = {"hidden": "true"}
 _ISO_SAMPLE = "2026-01-01T00:00:00Z"
 
 
@@ -184,6 +193,8 @@ def _synth_value(name: str, prop_schema: dict[str, Any]) -> Any:
     # string (or untyped) — structural carve-outs first.
     if name in _DATE_PARAMS:
         return _ISO_SAMPLE
+    if name in _LITERAL_STRING_OVERRIDES:
+        return _LITERAL_STRING_OVERRIDES[name]
     return "smoke"
 
 
@@ -284,7 +295,7 @@ async def test_tool_dispatches_through_transport(tool_name, smoke_state):
     async with create_connected_server_and_client_session(mcp) as session:
         result = await session.call_tool(tool_name, args)
 
-    assert result.isError is False, (
+    assert result.is_error is False, (
         f"tool {tool_name!r} failed at the transport/dispatch boundary with args {args!r}: {_error_text(result)}"
     )
     # Sanity: a non-error result must carry decodable content (dict payload).

@@ -11,7 +11,7 @@ with hand-written tenant predicates (``User.tenant_key == tenant_key``) but neve
 set tenant *context* on the session. The ``do_orm_execute`` guard
 (``_enforce_tenant_scope`` in ``giljo_mcp/database.py``) requires context, not
 explicit predicates, so it raised ``TenantIsolationError`` and the unhandled
-exception became a 500. Effect on prod/dogfood under enforce: every silent
+exception became a 500. Effect on prod/test-install under enforce: every silent
 session-extension refresh failed, bouncing real logged-in customers to /login.
 
 Fix: ``refresh_token`` sets tenant context from the signed JWT's ``tenant_key``

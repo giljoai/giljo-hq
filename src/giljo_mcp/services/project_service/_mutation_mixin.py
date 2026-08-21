@@ -75,7 +75,10 @@ class MutationMixin:
             name: Project name (required)
             mission: AI-generated mission statement (required)
             description: Human-written project description (default: "")
-            product_id: Parent product ID if project belongs to a product
+            product_id: Parent product ID. REQUIRED -- a project must belong to a
+                product (BE-9437). Keeps its ``None`` default only because the
+                parameters after it are defaulted; a missing or blank value
+                raises ValidationError rather than writing an orphan row.
             tenant_key: Tenant key for multi-tenancy (auto-generated if not provided)
             status: Initial project status (default: "inactive")
             project_type_id: Project type ID for taxonomy classification (Handover 0440a)
@@ -114,6 +117,24 @@ class MutationMixin:
                 raise ValidationError(
                     message=f"Project name exceeds 255 character limit (got {len(name)}).",
                     context={"operation": "create_project"},
+                )
+
+            # BE-9437: a project MUST belong to a product (operator ruling,
+            # 2026-08-15), and product_id is NOT NULL in every real database
+            # (ce_0004). Rejected HERE, at the owning service, because this is the
+            # one point REST, create_project_for_mcp and task conversion all pass
+            # through -- a per-transport check would have to be written three
+            # times and kept in step. The blank string is the case the REST layer
+            # cannot catch on its own: ``ProjectCreate.product_id`` is a required
+            # ``str`` with no min_length, so "" satisfies Pydantic, satisfies NOT
+            # NULL, and dies on the products FK as a 500. This makes it a 422.
+            if product_id is None or not str(product_id).strip():
+                raise ValidationError(
+                    message=(
+                        "A project must belong to a product. Pass the product_id of one of your "
+                        "own products (or omit it on the MCP tool to bind to the active product)."
+                    ),
+                    context={"operation": "create_project", "name": name},
                 )
 
             async with self._get_session(tenant_key) as session:

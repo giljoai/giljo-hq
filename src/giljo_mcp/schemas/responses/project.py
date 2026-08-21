@@ -254,6 +254,22 @@ class ProjectData(ProjectBase):
     project_type: ProjectTypeInfo | None = None
 
 
+class ProjectArchiveResult(BaseModel):
+    """Result of the archive lifecycle (BE-9384).
+
+    ``project`` is the row as it stands after the terminal transition; the other
+    fields report which of the optional lifecycle steps actually did something, so
+    a caller can tell the user what happened instead of guessing. Declared after
+    ``ProjectData`` because it embeds one.
+    """
+
+    project: ProjectData
+    deactivated: bool = False
+    closed_agents: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ProjectSummaryResult(BaseModel):
     """Project summary with metrics for dashboard display."""
 

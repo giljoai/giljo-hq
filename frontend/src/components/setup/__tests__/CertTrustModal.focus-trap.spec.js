@@ -37,7 +37,8 @@ vi.mock('@/composables/useToast', () => ({
 // <button> elements — the whole point of the test is where focus lands.
 const globalStubs = {
   Teleport: true,
-  Transition: { template: '<slot />' },
+  // FE-9419: built-in transition stub — see CertTrustModal.spec.js.
+  Transition: true,
   'v-btn': { template: '<button @click="$emit(\'click\', $event)"><slot /></button>', emits: ['click'] },
   'v-icon': { template: '<i><slot /></i>' },
   'v-spacer': { template: '<div />' },

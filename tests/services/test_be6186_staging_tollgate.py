@@ -42,6 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.database import tenant_isolation_bypass
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.services.job_completion_service import JobCompletionService
@@ -137,9 +138,22 @@ async def _seed_run(
 async def _seed_solo_orchestrator(db_session: AsyncSession, tenant_key: str) -> str:
     """Seed a project-bound staging orchestrator + project (no agents). Returns job_id."""
     project_id = str(uuid.uuid4())
+    # BE-9437: a project belongs to a product. Its own, so an active seed cannot
+    # collide under idx_project_single_active_per_product.
+    _product_id = str(uuid.uuid4())
+    db_session.add(
+        Product(
+            id=_product_id,
+            tenant_key=tenant_key,
+            name=f"Owning Product {_product_id[:8]}",
+            description="seeded",
+            is_active=False,
+        )
+    )
     db_session.add(
         Project(
             id=project_id,
+            product_id=_product_id,
             tenant_key=tenant_key,
             name="Solo",
             description="d",

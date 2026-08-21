@@ -2,7 +2,7 @@
  * FE-9233 item 4: the Serena/Git integration nudge must never render from
  * unproven integration status.
  *
- * Patrik-reported: the nudge flashes briefly on a box where both integrations
+ * Reported in testing: the nudge flashes briefly on a box where both integrations
  * ARE enabled. Mechanism (verified in SystemStatusBanner.vue): loadNudgeInputs()
  * sets hasProjects from the dashboard read FIRST, which makes the nudge
  * eligible, and only THEN awaits refreshIntegrationStatus(). In that window

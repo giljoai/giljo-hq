@@ -75,9 +75,22 @@ class TestCh3ToolAware:
         assert "ALREADY KNOWS its role" in ch3
 
     def test_codex_has_generic_worker_guardrail(self):
-        """Codex block must warn against spawning generic workers."""
-        ch3 = _build_ch3_spawning_rules(tool="codex")
-        assert "NEVER spawn a generic" in ch3
+        """Codex block must warn against spawning a generic worker IN PLACE OF an
+        installed template.
+
+        BE-9402 narrowed this guardrail on purpose. It used to read "NEVER spawn a
+        generic/default worker" unconditionally, paired with a STOP when no template
+        was installed -- which halted a run over a missing FILE. The rule is now a
+        ladder: while the gil-* template EXISTS it must be used, and only when it is
+        absent does the harness's own default agent take over (with a notice). So the
+        surviving guardrail is about SUBSTITUTION, not about default agents as such.
+        Pinned end-to-end in tests/services/test_be9402_default_agent_ladder_prose.py.
+        """
+        # Collapse whitespace first: the prose is hard-wrapped, so the sentence
+        # under test spans a newline in the rendered block.
+        ch3 = " ".join(_build_ch3_spawning_rules(tool="codex").split())
+        assert "never instruct a generic worker" in ch3
+        assert "unprefixed built-in name" in ch3
 
     def test_codex_no_claude_references(self):
         """Codex protocol must not mention Claude-specific spawn syntax.

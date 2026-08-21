@@ -85,10 +85,23 @@ async def test_update_project_uses_constructor_websocket(db_session, test_tenant
     # Create a test project
     from uuid import uuid4
 
+    from giljo_mcp.models.products import Product
     from giljo_mcp.models.projects import Project
+
+    # BE-9437: a project belongs to a product.
+    product = Product(
+        id=str(uuid4()),
+        tenant_key=test_tenant_key,
+        name=f"WS Product {uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(product)
+    await db_session.flush()
 
     project = Project(
         id=str(uuid4()),
+        product_id=product.id,
         name="Original Name",
         description="Original Desc",
         mission="Original Mission",

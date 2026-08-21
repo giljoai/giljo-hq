@@ -22,7 +22,7 @@ from giljo_mcp.services.job_completion_closeout_gate import (
 
 
 def test_default_mode_is_hitl():
-    # Patrik's 2026-07-12 "default on" call — encoded as the documented default.
+    # The 2026-07-12 "default on" call — encoded as the documented default.
     assert CLOSEOUT_MODE_DEFAULT == "hitl"
 
 

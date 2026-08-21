@@ -113,8 +113,12 @@ async def test_project_service_create_over_255_raises(project_service_with_sessi
     assert "255" in str(exc.value)
 
 
-async def test_project_service_update_over_255_raises(project_service_with_session):
-    created = await project_service_with_session.create_project(name="valid name", mission="")
+async def test_project_service_update_over_255_raises(project_service_with_session, test_product):
+    # BE-9437: product_id is required, so the row this test updates needs a real
+    # product. The cap under test is on ``name`` and is unaffected by the binding.
+    created = await project_service_with_session.create_project(
+        name="valid name", mission="", product_id=test_product.id
+    )
     with pytest.raises(ValidationError) as exc:
         await project_service_with_session.update_project(created.id, {"name": _OVER_LIMIT})
     assert "255" in str(exc.value)

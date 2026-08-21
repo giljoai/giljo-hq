@@ -107,8 +107,19 @@ async def seeded_tenant(db_manager):
             session.add(product)
             await session.flush()
             for i in range(SEED_PROJECT_COUNT):
+                # BE-9437: a project belongs to a product. Its own, so an active
+                # seed cannot collide under idx_project_single_active_per_product.
+                _owning_product_project = Product(
+                    id=str(uuid4()),
+                    tenant_key=tenant_key,
+                    name=f"Owning Product {uuid4().hex[:6]}",
+                    description="seeded",
+                    is_active=False,
+                )
+                session.add(_owning_product_project)
                 project = Project(
                     tenant_key=tenant_key,
+                    product_id=_owning_product_project.id,
                     name=f"spike-{i}",
                     description="be6063b spike seed",
                     mission="seed",

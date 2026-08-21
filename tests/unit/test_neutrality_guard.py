@@ -143,12 +143,7 @@ SCAN_EXCLUDE_NAMES = {
     # fail-open skip-reason log), _inline_approval.py (four async-fallback
     # logs). Baselining log noise would misrepresent it as
     # audited-customer-facing-contamination; excluding the files is the
-    # honest fix. _tasks_prototype.py is deliberately NOT here (post-merge
-    # audit finding on PR #589): its ``build_task_view()`` ``spec_note`` dict
-    # field is returned to calling agents via ``get_workflow_status`` when
-    # ``GILJO_TASKS_PROTOTYPE`` is set -- agent-facing-when-enabled, not
-    # log-only, so it is baselined (with that exact caveat) instead of
-    # excluded; see ``neutrality_guard_baseline.py``.
+    # honest fix.
     "_prelaunch_workproduct_detector.py",
     "_inline_approval.py",
     # TSK-9314: the canonical orchestrator tool list. Its ONLY scanned string

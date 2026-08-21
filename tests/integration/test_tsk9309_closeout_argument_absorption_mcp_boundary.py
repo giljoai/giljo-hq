@@ -46,7 +46,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import func, select
 
 from api.endpoints.mcp_sdk_server import mcp
@@ -56,6 +55,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools.tool_accessor import ToolAccessor
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 def _content_text(result) -> str:
@@ -226,7 +226,7 @@ async def test_absorbed_argument_rejection_names_the_real_cause(
         result = await mcp_session.call_tool("write_project_closeout", args)
 
     text = _content_text(result)
-    assert result.isError, f"[{label}] an absorbed-argument call must still be rejected, got: {text!r}"
+    assert result.is_error, f"[{label}] an absorbed-argument call must still be rejected, got: {text!r}"
 
     lowered = text.lower()
     assert "summary" in lowered, (
@@ -284,7 +284,7 @@ async def test_absorbed_argument_rejection_writes_nothing(closeout_mcp_client):
             {"project_id": project.id, "summary": _ABSORBED_TAIL_MARKUP},
         )
 
-    assert result.isError, f"expected rejection, got: {_content_text(result)!r}"
+    assert result.is_error, f"expected rejection, got: {_content_text(result)!r}"
 
     after = await _memory_entry_count(session, tenant_key)
     assert after == before, f"a rejected closeout must write no 360 entry (before={before}, after={after})"
@@ -321,7 +321,7 @@ async def test_well_formed_closeout_still_succeeds(closeout_mcp_client):
         )
 
     text = _content_text(result)
-    assert not result.isError, f"a well-formed closeout must still succeed, got: {text!r}"
+    assert not result.is_error, f"a well-formed closeout must still succeed, got: {text!r}"
     parsed = json.loads(text)
     assert parsed.get("entry_id"), f"the 360 entry must still be written, got: {parsed!r}"
 
@@ -351,7 +351,7 @@ async def test_genuine_omission_still_gets_the_plain_validation_error(closeout_m
         )
 
     text = _content_text(result)
-    assert result.isError, f"a missing required field must still be rejected, got: {text!r}"
+    assert result.is_error, f"a missing required field must still be rejected, got: {text!r}"
     assert "key_outcomes" in text, f"the rejection must name the missing field, got: {text!r}"
     assert "absorb" not in text.lower(), (
         f"a genuine omission must NOT be reported as absorption — that would name the wrong cause again: {text!r}"

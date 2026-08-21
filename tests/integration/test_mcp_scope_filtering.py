@@ -49,7 +49,8 @@ import bcrypt
 import jwt
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
+
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 CANONICAL_MCP_URI = "http://test/mcp"
@@ -414,7 +415,7 @@ class TestS7CallToolReadOnlyTokenAgainstWriteToolFails:
                 {"name": "should not be created", "description": "test"},
             )
 
-        assert result.isError is True
+        assert result.is_error is True
         text_blocks = [getattr(b, "text", "") for b in result.content]
         joined = "\n".join(text_blocks)
         assert "not authorized" in joined or "scope" in joined.lower()
@@ -437,7 +438,7 @@ class TestS8CallToolReadWriteTokenAgainstAgentToolFails:
                 },
             )
 
-        assert result.isError is True
+        assert result.is_error is True
         text_blocks = [getattr(b, "text", "") for b in result.content]
         joined = "\n".join(text_blocks)
         assert "not authorized" in joined or "scope" in joined.lower()
@@ -710,7 +711,7 @@ class TestS14StagingInstructionsIsAgentScoped:
         async with new_client() as session:
             result = await session.call_tool("get_staging_instructions", {"job_id": str(uuid4())})
 
-        assert result.isError is True
+        assert result.is_error is True
         text_blocks = [getattr(b, "text", "") for b in result.content]
         joined = "\n".join(text_blocks)
         assert "not authorized" in joined or "scope" in joined.lower()

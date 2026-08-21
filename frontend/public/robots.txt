@@ -1,0 +1,17 @@
+# Giljo HQ
+#
+# The app has genuinely public pages (landing, register, privacy, terms) alongside
+# a login wall, so crawling is allowed by default. Everything behind the wall is
+# already unreachable to a crawler -- it answers 401 without a session -- so the
+# rules below are about not wasting a crawler's time on machine surfaces rather
+# than about protecting them.
+
+User-agent: *
+
+# Machine surfaces: JSON APIs, the MCP endpoint, the OAuth flow, and the
+# discovery documents. None of these are pages, and none of them are useful in
+# a search result.
+Disallow: /api/
+Disallow: /mcp
+Disallow: /oauth/
+Disallow: /.well-known/

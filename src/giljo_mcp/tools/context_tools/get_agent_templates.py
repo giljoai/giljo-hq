@@ -133,15 +133,22 @@ async def get_agent_templates(
         # Filter by product assignments when product_id is provided
         if product_id and templates:
             try:
-                from giljo_mcp.repositories.product_agent_assignment_repository import (
-                    ProductAgentAssignmentRepository,
+                from giljo_mcp.repositories.product_agent_selection import (
+                    filter_templates_by_ids,
+                    template_ids_for_product,
                 )
 
-                assignment_repo = ProductAgentAssignmentRepository()
-                active_ids = await assignment_repo.get_active_template_ids_for_product(session, product_id, tenant_key)
-                # Only filter if assignments exist (no assignments = show all)
-                if active_ids:
-                    templates = [t for t in templates if t.id in active_ids]
+                # BE-9385a: was ``if active_ids:`` -- i.e. fall back whenever the
+                # ACTIVE set was empty. That is not the same rule as "this product
+                # has no junction rows", and the difference was a silent no-op: on a
+                # product with no rows, disabling one agent wrote a single
+                # is_active=False row, the active set stayed empty, the fallback
+                # re-engaged, and the agent kept showing up. Row existence is the
+                # correct predicate and it now lives in one shared place, because
+                # six call sites re-implementing it is six chances to drift.
+                templates = filter_templates_by_ids(
+                    templates, await template_ids_for_product(session, product_id, tenant_key)
+                )
             except TenantIsolationError:
                 # TenantIsolationError subclasses RuntimeError, so it would otherwise match
                 # the transient-failure tuple below and be reported as a warning. The callee

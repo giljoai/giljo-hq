@@ -23,7 +23,8 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
+
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 # The exact 14-tool "one tool per intent" guided loop (EM decision, BE-8003k;
@@ -203,7 +204,7 @@ class TestOutOfProfileDispatchRejected:
                 "spawn_job", {"project_id": str(uuid4()), "agent_name": "implementer", "mission": "probe"}
             )
 
-        assert result.isError is True
+        assert result.is_error is True
         joined = "\n".join(getattr(b, "text", "") for b in result.content)
         assert "not available in this session's tool profile" in joined
 
@@ -220,7 +221,7 @@ class TestOutOfProfileDispatchRejected:
         async with new_client() as session:
             result = await session.call_tool(gate_tool, {"project_id": str(uuid4())})
 
-        assert result.isError is True
+        assert result.is_error is True
         joined = "\n".join(getattr(b, "text", "") for b in result.content)
         assert "not available in this session's tool profile" in joined
 
@@ -465,7 +466,7 @@ class TestOrchestratorProfileTransportRegression:
         async with new_client() as session:
             result = await session.call_tool("launch_implementation", {"project_id": str(uuid4())})
 
-        assert result.isError is True
+        assert result.is_error is True
         joined = "\n".join(getattr(b, "text", "") for b in result.content)
         assert "not available in this session's tool profile" in joined
 

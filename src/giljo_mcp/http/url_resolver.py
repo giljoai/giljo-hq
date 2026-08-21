@@ -26,6 +26,11 @@ logger = logging.getLogger(__name__)
 
 MCP_RESOURCE_PATH = "/mcp"
 
+# CE-localhost fallback for GILJO_PUBLIC_URL. Shared by every reader so a
+# self-hosted install with no public address configured behaves identically
+# everywhere (BE-9442).
+GILJO_PUBLIC_URL_DEFAULT = "http://localhost:7272"
+
 # SEC-9227h belt-and-suspenders: log-once flag for the "saas mode but no pin"
 # request-time fallback. Should be unreachable in a real boot (the startup gate
 # in api/startup/saas_enforcement_gate.py aborts SaaS boot without the pin),
@@ -62,6 +67,37 @@ def _saas_pinned_base_url() -> str | None:
             )
         return None
     return pinned
+
+
+def get_public_url() -> str:
+    """Return the configured public address of this deployment, without trailing slash.
+
+    The request-less counterpart to :func:`get_public_base_url`, for the paths
+    that have no FastAPI ``Request`` in scope — MCP tool handlers, prompt
+    builders, the chain-conductor bootstrap. Those cannot derive the public
+    address from ``request.base_url``, so they read ``GILJO_PUBLIC_URL``, which
+    demo/cloud deployments set because the server sits behind a reverse proxy
+    and its bind address (``:7272``) is not what users see.
+
+    Normalisation mirrors the ``GILJO_PUBLIC_BASE_URL`` treatment in
+    :func:`_saas_pinned_base_url` — ``.strip().rstrip("/")`` — so a pasted value
+    like ``https://app.giljo.ai/`` cannot reach a caller that then appends a
+    path and emits ``https://app.giljo.ai//health`` (BE-9442). An empty or
+    whitespace-only value is treated as unset rather than yielding a
+    path-relative URL.
+
+    This is the ONLY place ``GILJO_PUBLIC_URL`` is read;
+    ``tests/unit/test_be9442_public_url_one_accessor.py`` enforces that by
+    scanning ``src/`` and ``api/``.
+
+    Note this is a DIFFERENT variable from ``GILJO_PUBLIC_BASE_URL``, which is
+    the security-critical SaaS origin pin (boot gate, Host pin, MCP audience)
+    and is resolved per-request above.
+
+    Returns:
+        Base URL string like "https://app.giljo.ai" or "http://localhost:7272".
+    """
+    return os.environ.get("GILJO_PUBLIC_URL", "").strip().rstrip("/") or GILJO_PUBLIC_URL_DEFAULT
 
 
 def get_public_base_url(request: Request) -> str:

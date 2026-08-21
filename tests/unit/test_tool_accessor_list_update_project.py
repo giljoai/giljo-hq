@@ -140,6 +140,7 @@ class TestListProjectsBehavior:
                 return_value=[mock_list_item],
             ),
             patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
+            patch.object(accessor._project_service, "board_counts", new_callable=AsyncMock, return_value=[]),
             patch.object(
                 accessor._project_service,
                 "_build_mcp_project_list",
@@ -214,6 +215,7 @@ class TestListProjectsBehavior:
                 new=AsyncMock(side_effect=_fake_list_projects),
             ),
             patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
+            patch.object(accessor._project_service, "board_counts", new_callable=AsyncMock, return_value=[]),
             patch.object(accessor._project_service, "_build_mcp_project_list", new=AsyncMock(side_effect=fake_build)),
             patch.object(
                 accessor._project_service, "_get_valid_project_types", new_callable=AsyncMock, return_value=[]
@@ -273,6 +275,7 @@ class TestListProjectsBehavior:
                 return_value=[active_proj, completed_proj],
             ),
             patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
+            patch.object(accessor._project_service, "board_counts", new_callable=AsyncMock, return_value=[]),
             patch.object(accessor._project_service, "_build_mcp_project_list", new=AsyncMock(side_effect=fake_build)),
             patch.object(
                 accessor._project_service, "_get_valid_project_types", new_callable=AsyncMock, return_value=[]
@@ -332,6 +335,7 @@ class TestListProjectsBehavior:
                 return_value=[mock_list_item],
             ),
             patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
+            patch.object(accessor._project_service, "board_counts", new_callable=AsyncMock, return_value=[]),
             patch.object(
                 accessor._project_service,
                 "_build_mcp_project_list",
@@ -413,6 +417,7 @@ class TestUpdateProjectMetadataBehavior:
                 return_value=mock_project_data,
             ) as mock_update,
             patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
+            patch.object(accessor._project_service, "board_counts", new_callable=AsyncMock, return_value=[]),
         ):
             mock_product_svc.return_value.get_active_product = AsyncMock(
                 return_value=mock_active_product,
@@ -463,6 +468,7 @@ class TestUpdateProjectMetadataBehavior:
                 return_value=mock_project_data,
             ) as mock_update,
             patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
+            patch.object(accessor._project_service, "board_counts", new_callable=AsyncMock, return_value=[]),
         ):
             mock_product_svc.return_value.get_active_product = AsyncMock(
                 return_value=mock_active_product,
@@ -538,9 +544,34 @@ class TestUpdateProjectMetadataBehavior:
             )
 
     @pytest.mark.asyncio
-    async def test_rejects_project_not_in_active_product(self):
-        """Should reject if project does not belong to the active product."""
+    async def test_updates_a_project_belonging_to_a_non_active_product(self):
+        """BE-9435: the inversion of the deleted active-product gate.
+
+        This test replaces three that pinned the gate, all removed with it:
+        ``test_rejects_project_not_in_active_product`` (the original, from the
+        tool's 2026-04-13 birth commit) and BE-9420's two refusal-message tests,
+        ``test_the_product_mismatch_refusal_names_both_products_and_the_fix`` and
+        ``test_the_refusal_survives_a_product_row_it_cannot_read`` -- the latter
+        pinned ``_describe_product``'s never-raise contract and went with the
+        helper it guarded.
+
+        The deleted assertion is replaced by its exact converse rather than by a
+        hole: the same mismatched shape those tests set up (project under
+        ``prod-OTHER``, active product ``prod-001``) must now update successfully.
+        """
         accessor = _make_accessor()
+
+        mock_project_data = Mock()
+        mock_project_data.id = "proj-001"
+        mock_project_data.name = "New Name"
+        mock_project_data.description = "Desc"
+        mock_project_data.status = "active"
+        mock_project_data.product_id = "prod-OTHER"
+        mock_project_data.created_at = "2026-04-13T00:00:00"
+        mock_project_data.updated_at = "2026-04-13T01:00:00"
+        mock_project_data.taxonomy_alias = None
+        mock_project_data.series_number = None
+        mock_project_data.project_type_id = None
 
         mock_project_obj = _mock_project(product_id="prod-OTHER")
         mock_active_product = Mock()
@@ -553,17 +584,29 @@ class TestUpdateProjectMetadataBehavior:
                 new_callable=AsyncMock,
                 return_value=mock_project_obj,
             ),
+            patch.object(
+                accessor._project_service,
+                "update_project",
+                new_callable=AsyncMock,
+                return_value=mock_project_data,
+            ) as mock_update,
             patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
+            patch.object(accessor._project_service, "board_counts", new_callable=AsyncMock, return_value=[]),
         ):
             mock_product_svc.return_value.get_active_product = AsyncMock(
                 return_value=mock_active_product,
             )
-            with pytest.raises(Exception, match=r"does not belong|not found|active product"):
-                await accessor._project_service.update_project_metadata_for_mcp(
-                    project_id="proj-001",
-                    name="New Name",
-                    tenant_key="tenant-test",
-                )
+            result = await accessor._project_service.update_project_metadata_for_mcp(
+                project_id="proj-001",
+                name="New Name",
+                tenant_key="tenant-test",
+            )
+
+        assert result["success"] is True
+        # The write must actually be delegated -- a tool that returned success
+        # without reaching the service would satisfy the assertion above.
+        mock_update.assert_called_once()
+        assert mock_update.call_args[1]["updates"]["name"] == "New Name"
 
     @pytest.mark.asyncio
     async def test_only_provided_fields_in_updates(self):
@@ -600,6 +643,7 @@ class TestUpdateProjectMetadataBehavior:
                 return_value=mock_project_data,
             ) as mock_update,
             patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
+            patch.object(accessor._project_service, "board_counts", new_callable=AsyncMock, return_value=[]),
         ):
             mock_product_svc.return_value.get_active_product = AsyncMock(
                 return_value=mock_active_product,

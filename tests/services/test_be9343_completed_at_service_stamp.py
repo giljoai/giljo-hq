@@ -466,10 +466,16 @@ class TestSoloCloseoutStamp:
         assumption to exactly this: the caller believed the project was closed because
         the tool said so.
 
-        The remedy named must be the one that actually completes a solo project --
-        the dashboard's Archive button, i.e. ``POST /api/v1/projects/{id}/archive``
-        (``api/endpoints/projects/lifecycle.py::archive_project``) -- NOT
-        ``update_project(status="completed")``, which is not the supported path.
+        The remedy named must be the one that actually completes a solo project.
+        BE-9384 changed WHICH one that is: ``update_project(status="completed")`` now
+        runs the whole archive lifecycle rather than the bare status write, so it is
+        the supported completion path an agent can reach without leaving MCP. This
+        message used to send callers to the REST endpoint and warn them off the tool
+        precisely because the tool reached only step 3 of 4.
+
+        The invariant this test exists for is unchanged and still asserted first: the
+        message must not claim the project itself was closed, because this branch
+        deliberately does not close it.
         """
         tenant_key = TenantManager.generate_tenant_key()
         _, project_id = await _seed_product_and_project(db_session, tenant_key)
@@ -490,11 +496,13 @@ class TestSoloCloseoutStamp:
             f"a solo closeout must not claim the PROJECT itself was closed -- its status "
             f"is deliberately left for the Archive press, unchanged by this call: {message!r}"
         )
-        assert f"/api/v1/projects/{project_id}/archive" in message, (
+        assert "update_project" in message and "status='completed'" in message, (
             f"the message must name the remedy that genuinely completes a solo project: {message!r}"
         )
-        assert "update_project" not in message, (
-            f"must not point at update_project(status=...) -- that is not the supported completion path: {message!r}"
+        assert project_id in message, f"the remedy must be callable as-is, with this project's id: {message!r}"
+        assert "archive lifecycle" in message, (
+            "the message must say the tool runs the FULL lifecycle -- naming the tool without that "
+            f"is what previously read as an invitation to do a bare status write: {message!r}"
         )
         assert "memory" in message.lower(), (
             f"the message must still confirm the 360 memory entry, which genuinely was written: {message!r}"

@@ -28,6 +28,10 @@ class TestBuildProductResponseVisionAnalysisFields:
         product = MagicMock()
         product.id = "prod-be5118"
         product.name = "BE-5118 fixture"
+        # BE-9385b: ProductResponse now carries the export slug, and a bare MagicMock
+        # attribute is not a string Pydantic will accept. None is the honest value --
+        # a row predating ce_0092 has no slug and the render path derives one.
+        product.slug = None
         product.description = "fixture"
         product.project_path = "/tmp/be5118"
         now = datetime(2026, 5, 27, 12, 0, 0, tzinfo=UTC)
@@ -102,6 +106,8 @@ class TestBuildProductResponseMemoryDefault:
         product = MagicMock()
         product.id = "prod-be9261"
         product.name = "BE-9261 fixture"
+        # BE-9385b: see the note above -- ProductResponse validates slug as str|None.
+        product.slug = None
         product.description = "fixture"
         product.project_path = "/tmp/be9261"
         now = datetime(2026, 7, 22, 12, 0, 0, tzinfo=UTC)

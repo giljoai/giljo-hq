@@ -25,7 +25,7 @@ from sqlalchemy import create_engine, inspect, pool, text
 from sqlalchemy.engine import make_url
 
 from giljo_mcp.database import DatabaseManager
-from tests.helpers.test_db_helper import worker_suffix
+from tests.helpers.test_db_helper import create_database_lock, worker_suffix
 
 
 def _base_url() -> str:
@@ -56,12 +56,27 @@ def _admin_exec(sql: str) -> None:
         eng.dispose()
 
 
+def _admin_create_db(name: str) -> None:
+    """CREATE a throwaway DB under the suite-wide template1 lock (TSK-9381).
+
+    Unlike every other create in the tree this one runs PER TEST, so it is the
+    busiest ``template1`` copier in the suite — a uniquely-named target still
+    contends on the shared source with any other worker mid-create.
+    """
+    eng = create_engine(_db_url("postgres"), poolclass=pool.NullPool, isolation_level="AUTOCOMMIT")
+    try:
+        with eng.connect() as conn, create_database_lock(conn):
+            conn.execute(text(f'CREATE DATABASE "{name}"'))
+    finally:
+        eng.dispose()
+
+
 @pytest.fixture
 def throwaway_db():
     """A pristine, per-test, per-worker throwaway database; dropped at teardown."""
     name = f"giljo_be3002a{worker_suffix()}_{uuid.uuid4().hex[:8]}"
     _admin_exec(f'DROP DATABASE IF EXISTS "{name}"')
-    _admin_exec(f'CREATE DATABASE "{name}"')
+    _admin_create_db(name)
     try:
         yield _db_url(name)
     finally:

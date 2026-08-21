@@ -27,13 +27,13 @@ import uuid
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import select
 
 from api.endpoints.mcp_sdk_server import mcp
 from giljo_mcp.models import Product, VisionDocument
 from giljo_mcp.models.products import ProductTechStack
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 def _error_text(result) -> str:
@@ -121,7 +121,7 @@ async def test_dev_tools_and_emit_completion_dispatch(autospec_mcp):
                 "emit_completion": True,
             },
         )
-    assert result.isError is False, f"must dispatch: {_error_text(result)}"
+    assert result.is_error is False, f"must dispatch: {_error_text(result)}"
 
 
 # ---------------------------------------------------------------------------
@@ -217,9 +217,9 @@ async def test_staged_calls_complete_a_multi_part_ingest(product_context_client)
                 "tech_stack": {"programming_languages": "Python", "dev_tools": "ruff, pytest, Vite"},
             },
         )
-        assert first.isError is False, _error_text(first)
-        assert first.structuredContent["vision_analysis_complete"] is False
-        assert first.structuredContent["missing_for_completion"]
+        assert first.is_error is False, _error_text(first)
+        assert first.structured_content["vision_analysis_complete"] is False
+        assert first.structured_content["missing_for_completion"]
 
         second = await mcp_session.call_tool(
             "update_product_context",
@@ -228,8 +228,8 @@ async def test_staged_calls_complete_a_multi_part_ingest(product_context_client)
                 "vision_summaries": [{"doc_id": doc.id, "light": "Light.", "medium": "Medium."}],
             },
         )
-        assert second.isError is False, _error_text(second)
-        assert second.structuredContent["vision_analysis_complete"] is False
+        assert second.is_error is False, _error_text(second)
+        assert second.structured_content["vision_analysis_complete"] is False
 
         third = await mcp_session.call_tool(
             "update_product_context",
@@ -239,9 +239,9 @@ async def test_staged_calls_complete_a_multi_part_ingest(product_context_client)
                 "emit_completion": True,
             },
         )
-        assert third.isError is False, _error_text(third)
-        assert third.structuredContent["vision_analysis_complete"] is True
-        assert third.structuredContent["missing_for_completion"] == []
+        assert third.is_error is False, _error_text(third)
+        assert third.structured_content["vision_analysis_complete"] is True
+        assert third.structured_content["missing_for_completion"] == []
 
     # dev_tools actually reached its column through the transport...
     ts = (
@@ -275,8 +275,8 @@ async def test_a_second_staged_call_does_not_discard_empty_columns(product_conte
             "update_product_context",
             {"product_id": product.id, "tech_stack": {"infrastructure": "Docker", "dev_tools": "ruff"}},
         )
-        assert repair.isError is False, _error_text(repair)
-        assert repair.structuredContent["fields_skipped"] == []
+        assert repair.is_error is False, _error_text(repair)
+        assert repair.structured_content["fields_skipped"] == []
 
     ts = (
         await session.execute(

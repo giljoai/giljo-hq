@@ -18,12 +18,19 @@ exists to remove, and it sat against ``ce_0088``, which deliberately prefers the
 ``closeout_executed_at`` over a drifted timestamp. The migration and the live archive
 path embodied opposite philosophies.
 
-The fix is subtraction: the endpoint stops passing the field and lets the service's
-``is None`` guard decide. So the endpoint's *composition of the update dict* is the
-failing layer, and that is what these tests pin — a service-layer test cannot see a
-field the endpoint chose to send.
+The fix is subtraction: the archive step stops passing the field and lets the service's
+``is None`` guard decide. So the *composition of the update dict* is the failing layer,
+and that is what these tests pin — a test on the stored value cannot see a field the
+caller chose to send.
 
-Edition Scope: CE (``api/endpoints/projects/lifecycle.py`` is CE).
+BE-9384: that composition moved out of the endpoint and into
+``ProjectService.archive_project`` so the MCP completion path runs the same code
+instead of a private copy. These tests moved with it — they now drive the real
+``ArchiveMixin`` against a recording double, which is strictly closer to the logic
+than going through the endpoint was. The endpoint keeps one test of its own, pinning
+that it still delegates rather than growing a second copy of the sequence.
+
+Edition Scope: Both (the archive lifecycle now serves REST and MCP alike).
 """
 
 from __future__ import annotations
@@ -33,62 +40,44 @@ from types import SimpleNamespace
 
 import pytest
 
-from api.endpoints.projects.lifecycle import archive_project
+from api.endpoints.projects.lifecycle import archive_project as archive_endpoint
 from giljo_mcp.domain.project_status import ProjectStatus
+from giljo_mcp.schemas.service_responses import ProjectData
+from giljo_mcp.services.project_service._archive_mixin import ArchiveMixin
 
 
 pytestmark = pytest.mark.asyncio
 
 
-class _RecordingProjectService:
-    """Records every ``update_project`` call so the update dict itself can be asserted."""
+class _RecordingArchiveService(ArchiveMixin):
+    """The real ``archive_project`` over doubles that record every call it makes."""
 
     def __init__(self, *, early_termination: bool = False, status: str = "active") -> None:
         self.update_calls: list[dict] = []
         self.deactivated: list[str] = []
+        self.closed_for: list[str] = []
+        self.tenant_manager = SimpleNamespace(get_current_tenant=lambda: "tk")
+        self._websocket_manager = None
         self._project = SimpleNamespace(
             id="p-be9343",
-            alias="BE-9343",
             name="Ship date under test",
-            description="",
-            mission="",
             status=status,
-            staging_status=None,
             early_termination=early_termination,
-            cancellation_reason=None,
-            created_at=datetime(2026, 7, 1, tzinfo=UTC),
-            updated_at=datetime(2026, 7, 20, tzinfo=UTC),
-            completed_at=datetime(2026, 7, 1, 10, 0, tzinfo=UTC),
-            product_id="prod-1",
-            tenant_key="tk",
-            execution_mode="claude_code_cli",
-            auto_checkin_enabled=False,
-            auto_checkin_interval=15,
-            project_type_id=None,
-            project_type=None,
-            series_number=1,
-            subseries=None,
-            taxonomy_alias="BE-9343",
-            hidden=False,
-            successor_project_id=None,
-            implementation_launched_at=None,
-            agents=[],
-            agent_count=0,
-            message_count=0,
         )
         self.closeout = SimpleNamespace(close_completed_agents_with_commit=self._close_agents)
 
     async def get_project(self, project_id: str, tenant_key: str):  # noqa: ARG002
         return self._project
 
-    async def deactivate_project(self, project_id: str):
+    async def deactivate_project(self, project_id: str, tenant_key: str | None = None):  # noqa: ARG002
         self.deactivated.append(project_id)
 
-    async def update_project(self, project_id: str, updates: dict):  # noqa: ARG002
+    async def update_project(self, project_id: str, updates: dict, websocket_manager=None):  # noqa: ARG002
         self.update_calls.append(updates)
-        return self._project
+        return ProjectData(id=self._project.id, name=self._project.name, status=str(updates.get("status", "")))
 
     async def _close_agents(self, project_id: str, tenant_key: str):  # noqa: ARG002
+        self.closed_for.append(project_id)
         return []
 
 
@@ -99,12 +88,12 @@ async def test_archive_does_not_send_completed_at() -> None:
     """THE regression. Sending the field at all is what destroyed the ship date.
 
     Asserted on the update dict rather than on a stored value, because the service's
-    stamp is additive by design: any value the endpoint sends wins, so "did the endpoint
+    stamp is additive by design: any value the archive step sends wins, so "did it
     send one" IS the defect.
     """
-    service = _RecordingProjectService()
+    service = _RecordingArchiveService()
 
-    await archive_project(project_id="p-be9343", current_user=_USER, project_service=service)
+    await service.archive_project(project_id="p-be9343", tenant_key="tk")
 
     assert len(service.update_calls) == 1, "archive must issue exactly one update"
     updates = service.update_calls[0]
@@ -117,9 +106,9 @@ async def test_archive_does_not_send_completed_at() -> None:
 
 async def test_archive_of_an_early_terminated_project_also_sends_no_date() -> None:
     """The early-termination branch picks a different status and must not regress either."""
-    service = _RecordingProjectService(early_termination=True)
+    service = _RecordingArchiveService(early_termination=True)
 
-    await archive_project(project_id="p-be9343", current_user=_USER, project_service=service)
+    await service.archive_project(project_id="p-be9343", tenant_key="tk")
 
     assert service.update_calls == [{"status": ProjectStatus.TERMINATED}]
 
@@ -130,17 +119,77 @@ async def test_archive_still_deactivates_a_running_project() -> None:
     Removing an argument is the kind of edit that quietly takes a neighbouring branch
     with it, so the deactivate-skip gate is pinned in the same file.
     """
-    service = _RecordingProjectService(status="active")
+    service = _RecordingArchiveService(status="active")
 
-    await archive_project(project_id="p-be9343", current_user=_USER, project_service=service)
+    result = await service.archive_project(project_id="p-be9343", tenant_key="tk")
 
     assert service.deactivated == ["p-be9343"], "an active project must still be deactivated first"
+    assert result.deactivated is True, "the result must report the step that actually ran"
 
 
 async def test_archive_skips_deactivation_for_an_already_terminal_project() -> None:
     """The other side of that gate — a completed project must not be deactivated again."""
-    service = _RecordingProjectService(status=ProjectStatus.COMPLETED)
+    service = _RecordingArchiveService(status=ProjectStatus.COMPLETED)
 
-    await archive_project(project_id="p-be9343", current_user=_USER, project_service=service)
+    result = await service.archive_project(project_id="p-be9343", tenant_key="tk")
 
     assert service.deactivated == []
+    assert result.deactivated is False
+
+
+async def test_archive_closes_completed_agents() -> None:
+    """The fourth step. BE-9384: skipping it silently is the defect that created that project."""
+    service = _RecordingArchiveService()
+
+    await service.archive_project(project_id="p-be9343", tenant_key="tk")
+
+    assert service.closed_for == ["p-be9343"], "archive must always run the agent-closure step"
+
+
+async def test_the_endpoint_delegates_instead_of_keeping_its_own_copy() -> None:
+    """BE-9384: the REST endpoint must call the shared lifecycle, not re-implement it.
+
+    A second inline copy is exactly how the MCP path came to diverge in the first
+    place, so "the endpoint owns no sequence of its own" is worth pinning.
+    """
+    calls: list[dict] = []
+
+    class _DelegatingService:
+        async def archive_project(self, project_id: str, tenant_key: str | None = None):
+            calls.append({"project_id": project_id, "tenant_key": tenant_key})
+
+        async def get_project(self, project_id: str, tenant_key: str):  # noqa: ARG002
+            return SimpleNamespace(
+                id=project_id,
+                alias="BE-9343",
+                name="Ship date under test",
+                description="",
+                mission="",
+                status=ProjectStatus.COMPLETED,
+                staging_status=None,
+                early_termination=False,
+                cancellation_reason=None,
+                created_at=datetime(2026, 7, 1, tzinfo=UTC),
+                updated_at=datetime(2026, 7, 20, tzinfo=UTC),
+                completed_at=datetime(2026, 7, 1, 10, 0, tzinfo=UTC),
+                product_id="prod-1",
+                tenant_key="tk",
+                execution_mode="claude_code_cli",
+                auto_checkin_enabled=False,
+                auto_checkin_interval=15,
+                project_type_id=None,
+                project_type=None,
+                series_number=1,
+                subseries=None,
+                taxonomy_alias="BE-9343",
+                hidden=False,
+                successor_project_id=None,
+                implementation_launched_at=None,
+                agents=[],
+                agent_count=0,
+                message_count=0,
+            )
+
+    await archive_endpoint(project_id="p-be9343", current_user=_USER, project_service=_DelegatingService())
+
+    assert calls == [{"project_id": "p-be9343", "tenant_key": "tk"}]

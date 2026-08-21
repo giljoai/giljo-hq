@@ -13,6 +13,7 @@ lifecycle service (the default fixture leaves it None).
 """
 
 import random
+import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
@@ -21,7 +22,7 @@ import pytest
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.exceptions import ProjectStateError, ResourceNotFoundError
-from giljo_mcp.models import Project
+from giljo_mcp.models import Product, Project
 from giljo_mcp.services.project_service import ProjectService
 from giljo_mcp.services.project_staging_service import ProjectStagingService
 
@@ -40,9 +41,28 @@ def staging_service(db_session, test_tenant_key):
 
 
 async def _seed_project(session, tenant_key, *, staging_status=None, status=ProjectStatus.INACTIVE):
-    """Seed a project (product_id NULL to avoid the single-active-per-product index)."""
+    """Seed a project under a product of its OWN.
+
+    BE-9437 made ``product_id`` NOT NULL, so the old note here -- "product_id
+    NULL to avoid the single-active-per-product index" -- describes a state that
+    no longer exists. Giving each seeded project a fresh product achieves the
+    same thing honestly: ``idx_project_single_active_per_product`` allows one
+    active project PER PRODUCT, so one product per project can never collide,
+    however many a test seeds.
+    """
+    product = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Staging Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    session.add(product)
+    await session.flush()
+
     project = Project(
         tenant_key=tenant_key,
+        product_id=product.id,
         name="Staging Project",
         description="seeded",
         mission="seeded mission",

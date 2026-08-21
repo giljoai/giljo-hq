@@ -43,11 +43,11 @@ export function useJobActions(getJob) {
     const bound = projectId ? await resolveExistingProjectThread(projectId) : null
     if (!bound) {
       // No bound thread yet — land on the Project threads tab so the list is visible.
-      router?.push({ name: 'Hub', query: { tab: 'project' } })
+      router.push({ name: 'Hub', query: { tab: 'project' } })
       showToast({ message: 'No project thread yet for this agent.', type: 'info', timeout: 4000 })
       return
     }
-    router?.push({ name: 'Hub', query: { thread: bound.thread_id, tab: 'project' } })
+    router.push({ name: 'Hub', query: { thread: bound.thread_id, tab: 'project' } })
   }
 
   function handleStepsClick(agent) {

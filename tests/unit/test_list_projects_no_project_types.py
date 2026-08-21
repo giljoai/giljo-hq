@@ -70,6 +70,7 @@ class TestListProjectsForMcpDropsProjectTypes:
 
         with (
             patch.object(service, "list_projects", new_callable=AsyncMock, return_value=[]),
+            patch.object(service, "board_counts", new_callable=AsyncMock, return_value=[]),
             patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
             patch.object(service, "_build_mcp_project_list", new_callable=AsyncMock, return_value=[]),
         ):
@@ -99,6 +100,7 @@ class TestListProjectsForMcpDropsProjectTypes:
 
         with (
             patch.object(service, "list_projects", new_callable=AsyncMock, return_value=[]),
+            patch.object(service, "board_counts", new_callable=AsyncMock, return_value=[]),
             patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
             patch.object(service, "_build_mcp_project_list", new_callable=AsyncMock, return_value=[]),
         ):
@@ -126,6 +128,7 @@ class TestListProjectsForMcpDropsProjectTypes:
 
         with (
             patch.object(service, "list_projects", new_callable=AsyncMock, return_value=[]),
+            patch.object(service, "board_counts", new_callable=AsyncMock, return_value=[]),
             patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
             patch.object(service, "_build_mcp_project_list", new_callable=AsyncMock, return_value=[]),
             patch.object(service, "_get_valid_project_types", new_callable=AsyncMock, return_value=[]) as helper,
@@ -149,6 +152,7 @@ class TestListProjectsForMcpDropsProjectTypes:
 
             with (
                 patch.object(service, "list_projects", new_callable=AsyncMock, return_value=[]),
+                patch.object(service, "board_counts", new_callable=AsyncMock, return_value=[]),
                 patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
                 patch.object(service, "_build_mcp_project_list", new_callable=AsyncMock, return_value=[]),
             ):

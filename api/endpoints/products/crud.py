@@ -119,6 +119,7 @@ def _build_product_response(product, stats=None, override_active=None) -> Produc
     return ProductResponse(
         id=str(product.id),
         name=product.name,
+        slug=product.slug,
         description=product.description,
         vision_path=None,
         project_path=product.project_path,

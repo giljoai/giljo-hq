@@ -34,6 +34,7 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import tenant_isolation_bypass
+from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.services.project_deletion_service import ProjectDeletionService
@@ -74,6 +75,16 @@ def _deletion_svc(session: AsyncSession, tenant_key: str) -> ProjectDeletionServ
 
 
 async def _create_project(session: AsyncSession, tenant_key: str, project_id: str, *, status: str = "inactive") -> None:
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    session.add(_owning_product_project)
     project = Project(
         id=project_id,
         name="Cascade Test Project",
@@ -81,6 +92,7 @@ async def _create_project(session: AsyncSession, tenant_key: str, project_id: st
         mission="Delete-cascade regression mission",
         status=status,
         tenant_key=tenant_key,
+        product_id=_owning_product_project.id,
         execution_mode="multi_terminal",
         series_number=random.randint(1, 9000),
     )

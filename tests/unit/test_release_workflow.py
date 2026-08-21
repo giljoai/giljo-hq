@@ -13,6 +13,7 @@ not execute the workflow, only verify its schema.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -81,7 +82,39 @@ class TestReleaseWorkflowStructure:
         assert len(tarball_steps) == 1, "Expected exactly one 'tarball' step"
         run_script = tarball_steps[0].get("run", "")
         assert "tar" in run_script, "Tarball step must use tar command"
-        assert "giljoai-mcp" in run_script, "Tarball must use giljoai-mcp naming"
+        assert "giljo-hq-" in run_script, "Tarball must use the giljo-hq product naming"
+
+    def test_every_asset_name_site_uses_the_same_slug(self):
+        """The four asset-name sites must agree, or the manifest points at nothing.
+
+        The installers never match on the asset name -- ``scripts/install.sh`` and
+        ``scripts/install.ps1`` both download from the manifest's ``tarball_url`` and
+        verify its raw ``sha256`` string. So a rename is safe *only* while all four
+        sites move together: the tarball name, the checksum filename, the checksum
+        file's own body line, and the ``tarball_url`` written into the manifest.
+        Rename three of four and the release publishes an asset the manifest does not
+        name, which fails at download time for every new install.
+
+        This assertion replaces a literal ``giljoai-mcp`` pin. The old pin caught the
+        product rename, which is why it is kept above in its updated form -- but a
+        name pin cannot catch a PARTIAL rename, and the partial rename is the failure
+        that actually breaks an install.
+        """
+        steps = self.workflow["jobs"]["release"]["steps"]
+        by_id = {s.get("id"): s.get("run", "") for s in steps if s.get("id")}
+
+        slugs = set()
+        for step_id in ("tarball", "checksum", "manifest"):
+            script = by_id.get(step_id, "")
+            assert script, f"Expected a '{step_id}' step with a run script"
+            for match in re.finditer(r"([A-Za-z0-9_.-]+?)-\$\{VERSION\}\.(?:tar\.gz|sha256)", script):
+                slugs.add(match.group(1))
+
+        assert slugs, "No versioned asset names found in the tarball/checksum/manifest steps"
+        assert len(slugs) == 1, (
+            f"Asset-name sites disagree: {sorted(slugs)}. All four must use one slug, "
+            "or version-manifest.json points at an asset that was never published."
+        )
 
     def test_checksum_step(self):
         """A step must generate SHA256 checksum."""

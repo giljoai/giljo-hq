@@ -234,6 +234,11 @@ async def test_get_agent_mission_through_dispatch_does_not_raise_and_renders_nat
             _scalar(job),
             _scalar(execution),
             _scalar(project),
+            # TSK-9459: get_agent_mission now resolves the project's bound Hub
+            # thread for the ORCHESTRATOR too, so it is joined structurally
+            # instead of being left off its own thread. This mocked test does not
+            # exercise the Hub — let the resolver degrade to None as documented.
+            RuntimeError("TSK-9459: no Hub thread in this mocked session"),
             all_exec,
             _scalar(project),
             _scalar(None),

@@ -238,12 +238,12 @@ class SecurityHeadersMiddleware:
 
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
-                self._apply_security_headers(MutableHeaders(raw=message["headers"]), request)
+                self._apply_security_headers(MutableHeaders(raw=message["headers"]), request, message["status"])
             await send(message)
 
         await self.app(scope, receive, send_with_headers)
 
-    def _apply_security_headers(self, response_headers: MutableHeaders, request: Request) -> None:
+    def _apply_security_headers(self, response_headers: MutableHeaders, request: Request, status: int) -> None:
         """Inject the OWASP/CSP header set into ``response_headers`` in place.
 
         ``MutableHeaders`` supports ``__setitem__`` (overwrite), ``.get()`` and
@@ -364,9 +364,28 @@ class SecurityHeadersMiddleware:
         # exist, the SPA 404 fallback returns index.html (text/html), and the
         # browser refuses to execute HTML as a JS module. Result: blank page
         # until hard-refresh. Force revalidation of HTML, cache hashed assets.
-        if "cache-control" not in (h.lower() for h in response_headers):
-            path = request.url.path
-            if path.startswith("/assets/"):
+        #
+        # SEC-9454: the long-lived policy describes the BODY we are sending, so
+        # it may only follow a response that actually carries the asset. During
+        # a deploy the new hashed filename does not exist yet; api/app.py's SPA
+        # fallback correctly 404s it (FE-6120) rather than returning index.html.
+        # Stamping that 404 immutable told every edge to serve the miss for up to
+        # a year, turning a brief deploy window into an extended outage that only
+        # a manual cache purge could end. Errors on this path get `no-store`.
+        path = request.url.path
+        is_asset = path.startswith("/assets/")
+        # 2xx carries the asset; 304 is a revalidated HIT and must keep the same
+        # policy a 200 would have (RFC 7232) — `no-store` there would tell the
+        # browser to discard the copy it just confirmed fresh. Everything else,
+        # including a 3xx redirect, is not the asset and must not outlive it.
+        serves_the_asset = 200 <= status < 300 or status == 304
+
+        if is_asset and not serves_the_asset:
+            # Set unconditionally: an error response must never be long-cached,
+            # whoever set the header.
+            response_headers["Cache-Control"] = "no-store"
+        elif "cache-control" not in (h.lower() for h in response_headers):
+            if is_asset:
                 response_headers["Cache-Control"] = "public, max-age=31536000, immutable"
             else:
                 content_type = response_headers.get("content-type", "")

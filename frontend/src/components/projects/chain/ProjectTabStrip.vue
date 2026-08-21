@@ -96,7 +96,7 @@ function truncName(tab) {
  * while a chain member is actively being staged, so it reads distinctly from a
  * genuinely-queued member instead of both showing WAITING. staging_complete (mission
  * written, Implement lit, no workers yet) is DELIBERATELY excluded from isPlanning by
- * useChainContext today (falls through to WAITING here) — that is Patrik's
+ * useChainContext today (falls through to WAITING here) — that is a deliberate
  * design-review call; to switch it to PLANNING, flip the fallback check in
  * useChainContext.js's `tabs` computed (the `stagingActive` derivation) to also
  * include 'staging_complete', no change needed in this file.

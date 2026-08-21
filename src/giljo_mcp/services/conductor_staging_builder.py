@@ -58,6 +58,12 @@ def build_conductor_staging_response(
     product's conventions and each project's description before authoring contracts. It
     is the head project's product_id, resolved by the caller; None when the head
     project is gone (the conductor degrades gracefully to list_projects).
+
+    BE-9462: ``agent_id`` is also threaded into CH_CHAIN_STAGING so its Step 0
+    create_thread call can pass ``creator_id`` -- create_thread structurally
+    registers a passed creator_id as the thread's first participant and hands
+    it the baton, so the conductor lands on its own Hub thread in ONE call
+    instead of a create_thread + join_thread pair.
     """
     chain_mode = chain_ctx.execution_mode
     platform = get_platform(chain_mode)
@@ -77,6 +83,7 @@ def build_conductor_staging_response(
             execution_mode=chain_mode,
             job_id=job_id,
             product_id=product_id,
+            agent_id=agent_id,
         ),
         "navigation_hint": (
             "You are the dedicated chain conductor. CH_CHAIN_STAGING is your "

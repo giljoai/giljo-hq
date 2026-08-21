@@ -35,9 +35,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -45,7 +45,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(call_tool_result) -> dict:
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -167,7 +167,7 @@ async def test_todos_category_forwards_job_id_through_mcp_boundary(todos_mcp_cli
                 "job_id": sentinel_job_id,
             },
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     # Regression #1: wrapper forwarded job_id and tenant_key into get_todos
@@ -213,7 +213,7 @@ async def test_todos_category_without_job_id_returns_empty_marker(todos_mcp_clie
                 # no job_id intentionally
             },
         )
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
     # 'todos' still appears (uniform contract — empty payload != silent drop)

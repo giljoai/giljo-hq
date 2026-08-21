@@ -705,8 +705,8 @@ class TestResourceIndicatorBinding:
         Pre-Phase-1.4: 400 invalid_request "resource is required for this token request".
         Post-Phase-1.4: 200, JWT.aud equals the auth-code's bound resource.
 
-        Replaces the Phase-2 contract test that locked in the strict-required behavior
-        (commit `f130868a2`). Demo prod evidence 2026-05-10 15:19:16 EDT.
+        Replaces the Phase-2 contract test that locked in the strict-required
+        behavior. Observed in production.
         """
         import jwt as _jwt
 
@@ -1301,8 +1301,8 @@ class TestTokenClientSecretVerification:
 class TestTokenAcceptsJsonAndBasicAuth:
     """API-0021e Phase 1.2: /token accepts JSON body and HTTP Basic Auth.
 
-    ChatGPT connector posts ``application/json`` to /token (verified live on
-    mcp.example.com 2026-05-10 10:06:12 EDT, Azure 172.212.159.67/.68). The
+    ChatGPT connector posts ``application/json`` to /token (observed in
+    production on mcp.example.com, from Azure egress IPs 203.0.113.67/.68). The
     pre-Phase-1.2 handler used FastAPI ``Form(...)`` parameters which only
     parse ``application/x-www-form-urlencoded`` -- every JSON request
     surfaced as a 422 with "Field required" on every field.
@@ -1535,10 +1535,10 @@ class TestAuthorizeAcceptsClaudeComRedirectUri:
 # API-0021l — 5-second idempotency window for confidential-client retry races
 # ---------------------------------------------------------------------------
 #
-# Live evidence: mcp.example.com 2026-05-10 15:41:48 EDT logs show ChatGPT's
-# connector backend issuing TWO concurrent POST /api/oauth/token from
-# different Azure egress IPs (20.169.78.85, 20.169.78.90) within the same
-# second using the same auth-code. Spec-strict single-use enforcement
+# Observed in production: mcp.example.com logs show ChatGPT's connector
+# backend issuing TWO concurrent POST /api/oauth/token from different
+# Azure egress IPs (203.0.113.85, 203.0.113.90) within the same second
+# using the same auth-code. Spec-strict single-use enforcement
 # returned 200 for the first and 400 "Authorization code has already been
 # used" for the second. The second response made the UI flash "Something
 # went wrong" before reading success. Auth0/Okta/AWS Cognito all implement
@@ -2199,3 +2199,310 @@ class TestOAuthErrorEnvelopeConformance:
         assert "revocation_endpoint" in data, data
         assert data["revocation_endpoint"].startswith(("http://", "https://")), data
         assert data["revocation_endpoint"].endswith("/api/oauth/revoke"), data
+
+
+async def _seed_auth_code_for_client(db_manager, *, client_id: str, redirect_uri: str) -> tuple[str, str]:
+    """Seed an org + user + unused authorization code for ``client_id``.
+
+    Returns ``(code_value, code_verifier)`` ready for an authorization_code
+    exchange at /token. Mirrors the seeding the existing /refresh families do.
+    """
+    from giljo_mcp.models.auth import User
+    from giljo_mcp.models.oauth import OAuthAuthorizationCode
+    from giljo_mcp.models.organizations import Organization
+    from giljo_mcp.tenant import TenantManager
+
+    verifier, challenge = _generate_pkce_pair()
+    code_value = secrets.token_urlsafe(64)
+    tenant_key = TenantManager.generate_tenant_key()
+
+    async with db_manager.get_session_async() as session:
+        org = Organization(
+            name=f"BE9409 Org {uuid4().hex[:6]}",
+            slug=f"be9409-{uuid4().hex[:8]}",
+            tenant_key=tenant_key,
+            is_active=True,
+        )
+        session.add(org)
+        await session.flush()
+
+        user = User(
+            id=str(uuid4()),
+            username=f"be9409_{uuid4().hex[:8]}",
+            email=f"be9409_{uuid4().hex[:8]}@example.com",
+            role="developer",
+            tenant_key=tenant_key,
+            is_active=True,
+            org_id=org.id,
+        )
+        session.add(user)
+        await session.flush()
+
+        session.add(
+            OAuthAuthorizationCode(
+                code=code_value,
+                client_id=client_id,
+                user_id=user.id,
+                tenant_key=tenant_key,
+                redirect_uri=redirect_uri,
+                code_challenge=challenge,
+                code_challenge_method="S256",
+                scope="mcp:read mcp:write",
+                expires_at=datetime.now(UTC) + timedelta(minutes=10),
+                used=False,
+            )
+        )
+        await session.commit()
+
+    return code_value, verifier
+
+
+class TestTokenEndpointRefreshGrant:
+    """BE-9409: POST /token must serve ``grant_type=refresh_token`` (RFC 6749 §6).
+
+    The discovery document advertises ``refresh_token`` in
+    ``grant_types_supported`` with ``token_endpoint = /api/oauth/token``, but
+    the handler served only ``authorization_code``. A compliant client
+    refreshing at /token got ``invalid_request: missing required field(s):
+    code, redirect_uri`` because the missing-field check ran BEFORE the
+    grant_type check, and refresh lived at the undiscoverable POST /refresh.
+    Observed live on prod 2026-08-12: once the access token expired, every
+    MCP tool call in the session failed and the only remedy was a full
+    re-authorization.
+
+    Boundary tests through the HTTP layer — the layer the defect lives at.
+    /refresh keeps working unchanged; these pin that /token reaches the SAME
+    logic rather than a second copy of it that can drift.
+    """
+
+    REDIRECT_URI = "http://localhost:3000/callback"
+
+    async def _mint_public_refresh_token(self, api_client, db_manager) -> str:
+        """Run the authorization_code flow for the built-in public client and
+        return its rotating refresh token (BE-6161)."""
+        code_value, verifier = await _seed_auth_code_for_client(
+            db_manager, client_id=BUILTIN_CLIENT_ID, redirect_uri=self.REDIRECT_URI
+        )
+        response = await api_client.post(
+            "/api/oauth/token",
+            data={
+                "grant_type": "authorization_code",
+                "code": code_value,
+                "client_id": BUILTIN_CLIENT_ID,
+                "code_verifier": verifier,
+                "redirect_uri": self.REDIRECT_URI,
+            },
+        )
+        assert response.status_code == 200, response.text
+        refresh_token = response.json()["refresh_token"]
+        assert isinstance(refresh_token, str) and refresh_token, response.text
+        return refresh_token
+
+    @pytest.mark.asyncio
+    async def test_token_endpoint_serves_refresh_grant_for_public_client(self, api_client, db_manager):
+        """(a) RFC 6749 §6: grant_type=refresh_token at /token returns a fresh pair.
+
+        Public PKCE clients present no secret — possession of the one-time-use
+        rotating refresh token is the proof-of-possession (BE-6161), exactly as
+        at /refresh.
+        """
+        original = await self._mint_public_refresh_token(api_client, db_manager)
+
+        response = await api_client.post(
+            "/api/oauth/token",
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": original,
+                "client_id": BUILTIN_CLIENT_ID,
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        # RFC 6749 §5.1 success envelope.
+        assert isinstance(body.get("access_token"), str) and body["access_token"], body
+        assert body.get("token_type"), body
+        assert isinstance(body.get("expires_in"), int), body
+        # BE-6161 rotation: the issued refresh token must be a new one.
+        assert isinstance(body.get("refresh_token"), str) and body["refresh_token"], body
+        assert body["refresh_token"] != original, "refresh token was not rotated"
+
+    @pytest.mark.asyncio
+    async def test_token_endpoint_refresh_grant_rejects_unknown_token(self, api_client):
+        """(b) An unknown/expired refresh token at /token → invalid_grant (401)."""
+        response = await api_client.post(
+            "/api/oauth/token",
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": secrets.token_urlsafe(48),
+                "client_id": BUILTIN_CLIENT_ID,
+            },
+        )
+        assert response.status_code == 401, response.text
+        assert response.json().get("error") == "invalid_grant", response.text
+
+    @pytest.mark.asyncio
+    async def test_token_endpoint_unknown_grant_type_is_unsupported_not_missing_fields(self, api_client):
+        """(c) A present-but-unknown grant_type → unsupported_grant_type.
+
+        The reported symptom in reverse: the grant_type check must run BEFORE
+        per-grant field validation, so a client is told the truth about what is
+        wrong instead of being sent to hunt for fields its grant never had.
+        An ABSENT grant_type is a different case and deliberately keeps its
+        existing ``invalid_request`` missing-field envelope (RFC 6749 §5.2,
+        "missing required parameter") — pinned by
+        ``test_token_missing_field_uses_rfc6749_error_envelope``.
+        """
+        response = await api_client.post(
+            "/api/oauth/token",
+            data={"grant_type": "client_credentials", "client_id": BUILTIN_CLIENT_ID},
+        )
+        assert response.status_code == 400, response.text
+        body = response.json()
+        assert body.get("error") == "unsupported_grant_type", body
+        assert "missing required field" not in _oauth_err_text(body).lower(), body
+
+    @pytest.mark.asyncio
+    async def test_token_endpoint_absent_grant_type_stays_invalid_request(self, api_client):
+        """(c) The other side of the reorder: an ABSENT grant_type is NOT an
+        unsupported grant.
+
+        RFC 6749 §5.2 classes a missing required parameter as
+        ``invalid_request``, and that is what /token returned before BE-9409.
+        The dispatch guard is written ``if grant_type and grant_type !=
+        "authorization_code"`` precisely so an absent value falls through to
+        the missing-field check instead of being mislabelled. Dropping the
+        ``grant_type and`` clause is an easy, plausible-looking simplification
+        that silently changes this envelope — the existing missing-field pin
+        cannot catch it because it sends ``grant_type=authorization_code``.
+        This is the test that goes red.
+        """
+        response = await api_client.post("/api/oauth/token", data={"client_id": BUILTIN_CLIENT_ID})
+        assert response.status_code == 400, response.text
+        body = response.json()
+        assert body.get("error") == "invalid_request", body
+        assert "grant_type" in _oauth_err_text(body), body
+
+    @pytest.mark.asyncio
+    async def test_token_endpoint_refresh_grant_rejects_wrong_client_secret(self, api_client, db_manager):
+        """(d) Client-auth parity: a confidential client presenting the wrong
+        secret on the refresh grant at /token gets the RFC 6749 §5.2
+        ``invalid_client`` envelope WITH the WWW-Authenticate challenge —
+        byte-for-byte what /refresh enforces today.
+        """
+        import bcrypt as _bcrypt
+
+        client_id = str(uuid4())
+        plaintext_secret = secrets.token_urlsafe(48)
+        secret_hash = _bcrypt.hashpw(plaintext_secret.encode("utf-8"), _bcrypt.gensalt()).decode("ascii")
+        code_value, verifier = await _seed_auth_code_for_client(
+            db_manager, client_id=client_id, redirect_uri=self.REDIRECT_URI
+        )
+
+        restore = _install_confidential_resolver(client_id, secret_hash, self.REDIRECT_URI)
+        try:
+            initial = await api_client.post(
+                "/api/oauth/token",
+                data={
+                    "grant_type": "authorization_code",
+                    "code": code_value,
+                    "client_id": client_id,
+                    "code_verifier": verifier,
+                    "redirect_uri": self.REDIRECT_URI,
+                    "client_secret": plaintext_secret,
+                },
+            )
+            assert initial.status_code == 200, initial.text
+            refresh_token = initial.json()["refresh_token"]
+
+            response = await api_client.post(
+                "/api/oauth/token",
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                    "client_id": client_id,
+                    "client_secret": f"wrong-{plaintext_secret}",
+                },
+            )
+        finally:
+            restore()
+
+        assert response.status_code == 401, response.text
+        assert response.json().get("error") == "invalid_client", response.text
+        assert response.headers.get("WWW-Authenticate") == 'Basic realm="oauth"', dict(response.headers)
+
+    @pytest.mark.asyncio
+    async def test_token_endpoint_refresh_grant_accepts_basic_auth_credentials(self, api_client, db_manager):
+        """(d) Client-auth parity: ``client_secret_basic`` (RFC 6749 §2.3.1)
+        authenticates the refresh grant at /token, as it does at /refresh.
+        """
+        import bcrypt as _bcrypt
+
+        client_id = str(uuid4())
+        plaintext_secret = secrets.token_urlsafe(48)
+        secret_hash = _bcrypt.hashpw(plaintext_secret.encode("utf-8"), _bcrypt.gensalt()).decode("ascii")
+        code_value, verifier = await _seed_auth_code_for_client(
+            db_manager, client_id=client_id, redirect_uri=self.REDIRECT_URI
+        )
+        basic = base64.b64encode(f"{client_id}:{plaintext_secret}".encode()).decode("ascii")
+
+        restore = _install_confidential_resolver(client_id, secret_hash, self.REDIRECT_URI)
+        try:
+            initial = await api_client.post(
+                "/api/oauth/token",
+                data={
+                    "grant_type": "authorization_code",
+                    "code": code_value,
+                    "client_id": client_id,
+                    "code_verifier": verifier,
+                    "redirect_uri": self.REDIRECT_URI,
+                    "client_secret": plaintext_secret,
+                },
+            )
+            assert initial.status_code == 200, initial.text
+            refresh_token = initial.json()["refresh_token"]
+
+            response = await api_client.post(
+                "/api/oauth/token",
+                data={"grant_type": "refresh_token", "refresh_token": refresh_token},
+                headers={"Authorization": f"Basic {basic}"},
+            )
+        finally:
+            restore()
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert isinstance(body.get("access_token"), str) and body["access_token"], body
+        assert body.get("refresh_token") != refresh_token, "refresh token was not rotated"
+
+    @pytest.mark.asyncio
+    async def test_refresh_grant_envelope_matches_refresh_route(self, api_client):
+        """(e) Anti-drift pin: the same refresh grant produces the same envelope
+        at /token as at /refresh.
+
+        /token must DELEGATE to the refresh logic, not carry its own copy. If a
+        later change re-implements refresh handling on /token, the two routes
+        drift and this is what goes red. Driven on the error path so the
+        idempotency window (which returns the same rotated pair for a repeated
+        token) cannot mask a difference.
+        """
+        payload = {
+            "grant_type": "refresh_token",
+            "refresh_token": secrets.token_urlsafe(48),
+            "client_id": BUILTIN_CLIENT_ID,
+        }
+        via_refresh = await api_client.post("/api/oauth/refresh", data=payload)
+        via_token = await api_client.post("/api/oauth/token", data=payload)
+
+        assert via_token.status_code == via_refresh.status_code, (
+            f"/token returned {via_token.status_code} {via_token.text}; "
+            f"/refresh returned {via_refresh.status_code} {via_refresh.text}"
+        )
+        assert via_token.json().get("error") == via_refresh.json().get("error"), (
+            via_token.text,
+            via_refresh.text,
+        )
+        assert via_token.headers.get("WWW-Authenticate") == via_refresh.headers.get("WWW-Authenticate"), (
+            dict(via_token.headers),
+            dict(via_refresh.headers),
+        )

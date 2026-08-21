@@ -424,8 +424,19 @@ async def test_role_distribution_deliberately_keeps_trashed_templates_as_fold_ta
         db_session.add_all([base, never_spawned])
         await db_session.flush()
 
+        # BE-9437: a project belongs to a product. Its own, so an active
+        # seed cannot collide under idx_project_single_active_per_product.
+        _owning_product_project = Product(
+            id=str(uuid4()),
+            tenant_key=tenant,
+            name=f"Owning Product {uuid4().hex[:6]}",
+            description="seeded",
+            is_active=False,
+        )
+        db_session.add(_owning_product_project)
         project = Project(
             tenant_key=tenant,
+            product_id=_owning_product_project.id,
             name="BE-9334 intent pin",
             description="seeded for the role-distribution intent pin",
             mission="seeded mission",

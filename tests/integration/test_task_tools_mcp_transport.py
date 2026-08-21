@@ -39,12 +39,12 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import TaxonomyType
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -58,7 +58,7 @@ pytestmark = pytest.mark.asyncio
 def _payload(call_tool_result) -> dict:
     """Decode a CallToolResult into a dict (mirrors the harness helper)."""
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -233,7 +233,7 @@ async def test_create_task_happy_path_returns_task_id(task_mcp_client, db_sessio
             },
         )
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["task_id"]
     # BE-6049c: tasks are TSK-only — an explicit task_type ("BE") is
@@ -258,7 +258,7 @@ async def test_create_task_ignores_task_type_param_and_forces_tsk(task_mcp_clien
             },
         )
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["task_id"]
     assert payload.get("task_type") == "TSK"
@@ -281,7 +281,7 @@ async def _create_seed_task(new_client, db_session, tenant_key) -> str:
                 "task_type": "BE",
             },
         )
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     return _payload(result)["task_id"]
 
 
@@ -295,7 +295,7 @@ async def test_update_task_sets_status_via_wrapper(task_mcp_client, db_session, 
             {"task_id": task_id, "status": "in_progress"},
         )
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["task_id"] == task_id
     assert "status" in payload["updated_fields"]
@@ -313,7 +313,7 @@ async def test_update_task_ignores_task_type_immutable(task_mcp_client, db_sessi
             {"task_id": task_id, "task_type": "BOGUS", "title": "renamed"},
         )
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert "task_type_id" not in payload.get("updated_fields", [])
 
@@ -328,7 +328,7 @@ async def test_update_task_rejects_invalid_status(task_mcp_client, db_session, p
             {"task_id": task_id, "status": "not_a_real_status"},
         )
 
-    assert result.isError is True
+    assert result.is_error is True
     assert "not_a_real_status" in _error_text(result) or "status" in _error_text(result).lower()
 
 
@@ -355,7 +355,7 @@ async def test_update_task_completed_with_notes_appends_and_stamps(task_mcp_clie
             {"task_id": task_id, "status": "completed", "completion_notes": "all green via transport"},
         )
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["task_id"] == task_id
     assert "status" in payload["updated_fields"]
@@ -386,7 +386,7 @@ async def test_update_task_completion_notes_without_completed_is_noop(task_mcp_c
             {"task_id": task_id, "status": "in_progress", "completion_notes": "should not be appended"},
         )
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert "completion_notes" not in payload
 
@@ -416,7 +416,7 @@ async def test_update_task_due_date_string_via_transport(task_mcp_client, db_ses
             {"task_id": task_id, "due_date": "2026-07-15"},
         )
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["task_id"] == task_id
     assert "due_date" in payload["updated_fields"]
@@ -444,7 +444,7 @@ async def test_update_task_due_date_garbage_is_actionable_error_via_transport(
             {"task_id": task_id, "due_date": "next tuesday"},
         )
 
-    assert result.isError is True
+    assert result.is_error is True
     assert "due_date" in _error_text(result)
 
 
@@ -460,7 +460,7 @@ async def test_list_tasks_summary_mode_field_shape(task_mcp_client, db_session, 
     async with new_client() as session:
         result = await session.call_tool("list_tasks", {"mode": "summary"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert "tasks" in payload
     assert len(payload["tasks"]) >= 1
@@ -479,7 +479,7 @@ async def test_list_tasks_full_mode_respects_memory_limit(task_mcp_client, db_se
             {"mode": "full", "memory_limit": 5},
         )
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     rows = payload.get("tasks", [])
     assert rows
@@ -519,7 +519,7 @@ async def test_list_tasks_is_tenant_scoped_across_two_tenants(
             "create_task",
             {"title": "tenant_b task", "description": "x", "task_type": "BE"},
         )
-    assert b_result.isError is False, _error_text(b_result)
+    assert b_result.is_error is False, _error_text(b_result)
     b_task_id = _payload(b_result)["task_id"]
     assert b_task_id != a_task_id
 
@@ -528,7 +528,7 @@ async def test_list_tasks_is_tenant_scoped_across_two_tenants(
     async with new_client() as session:
         list_result = await session.call_tool("list_tasks", {"mode": "summary"})
 
-    assert list_result.isError is False, _error_text(list_result)
+    assert list_result.is_error is False, _error_text(list_result)
     ids = {row["task_id"] for row in _payload(list_result)["tasks"]}
     assert a_task_id in ids
     assert b_task_id not in ids, (
@@ -549,7 +549,7 @@ async def test_list_tasks_summary_includes_taxonomy_and_hidden_fields(task_mcp_c
     async with new_client() as session:
         result = await session.call_tool("list_tasks", {"mode": "summary"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     row = payload["tasks"][0]
     for key in ("taxonomy_alias", "series_number", "subseries", "task_type", "hidden"):
@@ -567,7 +567,7 @@ async def test_list_tasks_full_includes_taxonomy_and_hidden_fields(task_mcp_clie
     async with new_client() as session:
         result = await session.call_tool("list_tasks", {"mode": "full"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     row = payload["tasks"][0]
     for key in ("taxonomy_alias", "series_number", "subseries", "task_type", "hidden"):
@@ -583,7 +583,7 @@ async def test_update_task_hidden_via_wrapper(task_mcp_client, db_session, prima
             "update_task",
             {"task_id": task_id, "hidden": "true"},
         )
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert "hidden" in payload["updated_fields"]
 
@@ -603,7 +603,7 @@ async def test_list_tasks_hidden_filter_via_wrapper(task_mcp_client, db_session,
             "create_task",
             {"title": "hidden task", "description": "x", "task_type": "BE"},
         )
-    assert h_create.isError is False, _error_text(h_create)
+    assert h_create.is_error is False, _error_text(h_create)
     hidden_id = _payload(h_create)["task_id"]
 
     async with new_client() as session:
@@ -650,12 +650,12 @@ async def test_list_tasks_due_before_string_via_transport(task_mcp_client, db_se
             "update_task",
             {"task_id": task_id, "due_date": "2026-07-10T00:00:00+00:00"},
         )
-    assert set_due.isError is False, _error_text(set_due)
+    assert set_due.is_error is False, _error_text(set_due)
 
     async with new_client() as session:
         result = await session.call_tool("list_tasks", {"due_before": "2026-07-15"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     ids = {row["task_id"] for row in _payload(result)["tasks"]}
     assert task_id in ids
 
@@ -663,7 +663,7 @@ async def test_list_tasks_due_before_string_via_transport(task_mcp_client, db_se
     # excludes the task.
     async with new_client() as session:
         earlier = await session.call_tool("list_tasks", {"due_before": "2026-07-01"})
-    assert earlier.isError is False, _error_text(earlier)
+    assert earlier.is_error is False, _error_text(earlier)
     ids_earlier = {row["task_id"] for row in _payload(earlier)["tasks"]}
     assert task_id not in ids_earlier
 
@@ -679,7 +679,7 @@ async def test_list_tasks_due_before_garbage_is_actionable_error_via_transport(
     async with new_client() as session:
         result = await session.call_tool("list_tasks", {"due_before": "next tuesday"})
 
-    assert result.isError is True
+    assert result.is_error is True
     assert "due_before" in _error_text(result)
 
 

@@ -7,7 +7,7 @@
 
 Regression tests for the eleven small platform-polish items shipped by
 CE-0033. Filtered scope from the v2 test-orchestrator friction report after
-Patrik's product review.
+product review.
 
 Each test exercises the production data flow — protocol renderers, the real
 mission_orchestration_service path, the actual spawn_job service method —
@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models.products import Product
 from giljo_mcp.prompts._canonical_tool_list import (
     CANONICAL_ORCHESTRATOR_TOOLS,
     render_toolsearch_call_one_line,
@@ -383,7 +384,7 @@ class TestTask9SpawnPhaseEcho:
     async def test_spawn_job_response_echoes_phase(self, db_session, db_manager, test_tenant_key):
         from datetime import UTC, datetime
 
-        from giljo_mcp.models import AgentTemplate, Project
+        from giljo_mcp.models import AgentTemplate, Product, Project
         from giljo_mcp.services.orchestration_service import OrchestrationService
         from giljo_mcp.tenant import TenantManager
 
@@ -397,6 +398,16 @@ class TestTask9SpawnPhaseEcho:
                 is_active=True,
             )
         )
+        # BE-9437: a project belongs to a product. Its own, so an active
+        # seed cannot collide under idx_project_single_active_per_product.
+        _owning_product_proj = Product(
+            id=str(uuid4()),
+            tenant_key=test_tenant_key,
+            name=f"Owning Product {uuid4().hex[:6]}",
+            description="seeded",
+            is_active=False,
+        )
+        db_session.add(_owning_product_proj)
         proj = Project(
             id=str(uuid4()),
             name="CE-0033 phase echo",
@@ -404,6 +415,7 @@ class TestTask9SpawnPhaseEcho:
             mission="...",
             status="active",
             tenant_key=test_tenant_key,
+            product_id=_owning_product_proj.id,
             execution_mode="multi_terminal",
             implementation_launched_at=datetime.now(UTC),
             series_number=99001,
@@ -441,6 +453,16 @@ class TestTask9SpawnPhaseEcho:
                 is_active=True,
             )
         )
+        # BE-9437: a project belongs to a product. Its own, so an active
+        # seed cannot collide under idx_project_single_active_per_product.
+        _owning_product_proj = Product(
+            id=str(uuid4()),
+            tenant_key=test_tenant_key,
+            name=f"Owning Product {uuid4().hex[:6]}",
+            description="seeded",
+            is_active=False,
+        )
+        db_session.add(_owning_product_proj)
         proj = Project(
             id=str(uuid4()),
             name="CE-0033 phase none",
@@ -448,6 +470,7 @@ class TestTask9SpawnPhaseEcho:
             mission="...",
             status="active",
             tenant_key=test_tenant_key,
+            product_id=_owning_product_proj.id,
             execution_mode="multi_terminal",
             implementation_launched_at=datetime.now(UTC),
             series_number=99002,
@@ -520,6 +543,16 @@ class TestTask11PredecessorRequiredForPhaseGt1:
                 is_active=True,
             )
         )
+        # BE-9437: a project belongs to a product. Its own, so an active
+        # seed cannot collide under idx_project_single_active_per_product.
+        _owning_product_proj = Product(
+            id=str(uuid4()),
+            tenant_key=test_tenant_key,
+            name=f"Owning Product {uuid4().hex[:6]}",
+            description="seeded",
+            is_active=False,
+        )
+        db_session.add(_owning_product_proj)
         proj = Project(
             id=str(uuid4()),
             name="CE-0033 pred guard",
@@ -527,6 +560,7 @@ class TestTask11PredecessorRequiredForPhaseGt1:
             mission="...",
             status="active",
             tenant_key=test_tenant_key,
+            product_id=_owning_product_proj.id,
             execution_mode="multi_terminal",
             implementation_launched_at=datetime.now(UTC),
             series_number=99003,

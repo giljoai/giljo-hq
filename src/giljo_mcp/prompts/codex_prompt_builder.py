@@ -9,6 +9,7 @@ Extracted from ThinClientPromptGenerator (Handover 0950g).
 Refactored to inherit from ExecutionPromptBuilderBase (quality-sprint-002e).
 """
 
+from giljo_mcp.prompts.default_agent_ladder import MISSING_AGENT_TEMPLATES_NOTICE
 from giljo_mcp.prompts.execution_prompt_base import ExecutionPromptBuilderBase
 
 
@@ -54,10 +55,11 @@ class CodexPromptBuilder(ExecutionPromptBuilderBase):
             "developer_instructions, model config, and sandbox settings.",
             "The agent ALREADY KNOWS its role \u2014 you do NOT re-explain it.",
             "",
-            "### NEVER spawn generic workers",
-            "- NEVER spawn a generic/default Codex worker and instruct it to 'act as' a GiljoAI agent",
+            "### Prefer the installed template; fall back to the default agent",
             "- NEVER use agent='worker', agent='implementer', agent='tester', or any unprefixed name",
-            "- If a gil-* template is missing, STOP and report the mismatch: do not substitute a generic agent",
+            "  while the gil-* template exists — built-in Codex roles shadow unprefixed names",
+            "- If a gil-* template is MISSING, do NOT stop: spawn Codex's DEFAULT subagent for that",
+            f'  job and say so once — "{MISSING_AGENT_TEMPLATES_NOTICE}"',
             "- DO NOT re-explain the agent's role in instructions= (the template handles this)",
             "- DO NOT override template behavior with lengthy instruction text",
             "",

@@ -149,8 +149,10 @@ async def test_spawn_time_identity_nonempty_after_reset_of_default_template(
     job = SimpleNamespace(job_type="implementer", template_id=template.id, project_id=None, job_id="job-be9018")
     execution = SimpleNamespace(agent_name="reviewer", agent_display_name="reviewer")
 
-    # BE-9333: _resolve_mission_template now returns (identity, identity_status).
-    identity, identity_status = await svc._resolve_mission_template(MagicMock(), job, execution, test_tenant_key)
+    # BE-9333 / FE-9408: returns (identity, identity_status, identity_source).
+    identity, identity_status, _source = await svc._resolve_mission_template(
+        MagicMock(), job, execution, test_tenant_key
+    )
 
     assert identity is not None
     assert identity_status == "resolved"

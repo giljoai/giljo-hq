@@ -28,6 +28,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.services.conductor_chain_injector import inject_conductor_chain_drive
@@ -43,6 +44,16 @@ async def _seed_head_run(session: AsyncSession, tenant: str) -> tuple[str, str]:
     """Seed a head project + an active run with conductor_agent_id NULL (first touch)."""
     head_pid = str(uuid.uuid4())
     p2 = str(uuid.uuid4())
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    session.add(_owning_product_project)
     project = Project(
         id=head_pid,
         name=f"BE-6181 det {uuid.uuid4().hex[:6]}",
@@ -50,6 +61,7 @@ async def _seed_head_run(session: AsyncSession, tenant: str) -> tuple[str, str]:
         mission="Drive run.",
         status="active",
         tenant_key=tenant,
+        product_id=_owning_product_project.id,
         series_number=1,
         execution_mode="claude_code_cli",
         implementation_launched_at=datetime.now(UTC),

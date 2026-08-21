@@ -80,7 +80,11 @@ export function createAuthGuard({ setupService, configService }) {
       to.path !== '/register' &&
       to.path !== '/reset-password' &&
       to.path !== '/account/confirm-deletion' &&
-      to.path !== '/account/cancel-deletion'
+      to.path !== '/account/cancel-deletion' &&
+      // Public policy documents: a visitor must be able to read these before
+      // signing up, so the public-landing redirect must not swallow them.
+      to.path !== '/privacy' &&
+      to.path !== '/terms'
     ) {
       const signal = setupState.route_signal
       // Only preserve deep-links to /login when users actually exist. On a

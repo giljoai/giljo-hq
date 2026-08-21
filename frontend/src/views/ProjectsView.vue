@@ -118,12 +118,11 @@
         class="filter-cta-roadmap"
         @click="toggleRoadmapSort"
       />
-      <v-btn
-        variant="outlined"
-        icon="mdi-delete-restore"
-        :disabled="deletedCount === 0"
-        :title="deletedCount > 0 ? `Deleted projects (${deletedCount})` : 'No deleted projects'"
-        aria-label="View deleted projects"
+      <!-- FE-9368: the count moved out of the tooltip and onto the icon as an alert
+           dot. Shared with the Message Hub's trash button so the two pages match. -->
+      <DeletedCountButton
+        :count="deletedCount"
+        entity="projects"
         class="filter-cta-deleted"
         @click="showDeletedDialog = true"
       />
@@ -321,6 +320,7 @@ import { storeToRefs } from 'pinia'
 import ManualCloseoutModal from '@/components/orchestration/ManualCloseoutModal.vue'
 import ProjectReviewModal from '@/components/projects/ProjectReviewModal.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import DeletedCountButton from '@/components/common/DeletedCountButton.vue'
 import ProjectCreateEditDialog from '@/components/projects/ProjectCreateEditDialog.vue'
 import ProjectDeletedDialog from '@/components/projects/ProjectDeletedDialog.vue'
 import api from '@/services/api'

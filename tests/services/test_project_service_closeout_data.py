@@ -10,6 +10,7 @@ Updated 0731c: Typed returns - get_closeout_data returns CloseoutData model.
 """
 
 import random
+import uuid
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,11 +31,22 @@ async def test_get_closeout_data_all_agents_complete(
     tenant_key = TenantManager.generate_tenant_key()
     tenant_manager.set_current_tenant(tenant_key)
 
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         name="Closeout Ready",
         mission="Finish the reporting module",
         description="Reporting work",
         tenant_key=tenant_key,
+        product_id=_owning_product_project.id,
         status="active",
         series_number=random.randint(1, 9000),
     )
@@ -83,11 +95,22 @@ async def test_get_closeout_data_with_blocked_agents(
     tenant_key = TenantManager.generate_tenant_key()
     tenant_manager.set_current_tenant(tenant_key)
 
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         name="Mixed Outcomes",
         mission="Ship analytics",
         description="Analytics work",
         tenant_key=tenant_key,
+        product_id=_owning_product_project.id,
         status="active",
         series_number=random.randint(1, 9000),
     )
@@ -230,11 +253,22 @@ async def test_get_closeout_data_tenant_isolation(db_manager, db_session: AsyncS
     tenant_one = TenantManager.generate_tenant_key()
     tenant_two = TenantManager.generate_tenant_key()
 
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_one,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         name="Tenant One Project",
         mission="Isolation check",
         description="Isolation test",
         tenant_key=tenant_one,
+        product_id=_owning_product_project.id,
         status="active",
         series_number=random.randint(1, 9000),
     )

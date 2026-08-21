@@ -14,8 +14,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createVuetify } from 'vuetify'
+import { createRouter, createMemoryHistory } from 'vue-router'
 import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
 import LaunchTab from '@/components/projects/LaunchTab.vue'
@@ -26,6 +27,19 @@ import path from 'path'
 const vuetify = createVuetify({
   components,
   directives,
+})
+
+// FE-9427: LaunchTab calls useRouter() (goToIntegrations -> /tools?tab=connect).
+// Mounted without a router that returned `undefined`, so the navigation path was
+// inert and every assertion aimed at it would have been meaningless. Routes are
+// the ones this component actually pushes, not a catch-all -- a catch-all would
+// let a wrong destination pass.
+const router = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: '/', name: 'Root', component: { template: '<div />' } },
+    { path: '/tools', name: 'Tools', component: { template: '<div />' } },
+  ],
 })
 
 // Mock user store with tenant_key
@@ -91,7 +105,7 @@ describe('LaunchTab.0243a - Design Tokens Extraction', () => {
   beforeEach(() => {
     wrapper = mount(LaunchTab, {
       global: {
-        plugins: [vuetify],
+        plugins: [vuetify, router],
       },
       props: {
         project: mockProject,
@@ -455,5 +469,82 @@ describe('LaunchTab.0243a - Design Tokens Extraction', () => {
         expect(content).toMatch(/\$color-panel-background:\s*rgba\(20,\s*35,\s*50,\s*0\.8\)/)
       }
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// FE-9427: the integration icons' DESTINATION.
+//
+// LaunchTab.goToIntegrations() pushes /tools?tab=connect. Before this lane the
+// spec mounted LaunchTab with no router, so useRouter() returned `undefined`
+// and any click on those icons would have thrown -- which is how we know the
+// handler was never exercised here. It is not exercised anywhere else either:
+// ProjectTabs.integrationIcons.spec.js mocks vue-router and builds a
+// `mockRouter.push` spy, but never asserts it. So the icons were tested for
+// their appearance and never for what they DO.
+//
+// The v-tooltip passthrough stub is the repo-standard idiom for reaching an
+// activator-slot child (see ProjectTabs.integrationIcons.spec.js) -- the global
+// flat stub renders only the default slot, so the icons never reach the DOM.
+// ---------------------------------------------------------------------------
+describe('LaunchTab.0243a - integration icons navigate to Connect (FE-9427)', () => {
+  const mockProject = {
+    id: 'project-123',
+    project_id: 'project-123',
+    name: 'Test Project',
+    description: 'Test project description.',
+    mission: null,
+    agents: [],
+    tenant_key: 'test-tenant-key-123',
+  }
+
+  function mountWithTooltips(navRouter) {
+    return mount(LaunchTab, {
+      global: {
+        plugins: [vuetify, navRouter],
+        stubs: {
+          'v-tooltip': {
+            template:
+              '<div class="v-tooltip-stub"><slot name="activator" :props="{}" /><slot /></div>',
+          },
+        },
+      },
+      props: { project: mockProject },
+    })
+  }
+
+  function freshRouter() {
+    return createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'Root', component: { template: '<div />' } },
+        { path: '/tools', name: 'Tools', component: { template: '<div />' } },
+      ],
+    })
+  }
+
+  it('clicking the Git status icon lands on Tools with the Connect tab selected', async () => {
+    const navRouter = freshRouter()
+    const wrapper = mountWithTooltips(navRouter)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="git-status-icon"]').trigger('click')
+    await flushPromises()
+
+    expect(navRouter.currentRoute.value.path).toBe('/tools')
+    expect(navRouter.currentRoute.value.query).toEqual({ tab: 'connect' })
+    wrapper.unmount()
+  })
+
+  it('clicking the Serena status icon lands on the same place', async () => {
+    const navRouter = freshRouter()
+    const wrapper = mountWithTooltips(navRouter)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="serena-status-icon"]').trigger('click')
+    await flushPromises()
+
+    expect(navRouter.currentRoute.value.fullPath).toBe('/tools?tab=connect')
+    wrapper.unmount()
   })
 })

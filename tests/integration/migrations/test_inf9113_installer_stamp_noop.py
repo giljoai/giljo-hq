@@ -45,13 +45,13 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy import text
 
-from tests.helpers.test_db_helper import worker_suffix
+from tests.helpers.test_db_helper import bootstrap_db_base, worker_suffix
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 ALEMBIC_INI = PROJECT_ROOT / "alembic.ini"
 
-SCRATCH_DB = f"{os.environ.get('GILJO_BOOTSTRAP_TEST_DB', 'giljo_test_bootstrap')}{worker_suffix()}"
+SCRATCH_DB = f"{bootstrap_db_base()}{worker_suffix()}"
 ADMIN_USER = os.environ.get("POSTGRES_OWNER_USER", "giljo_owner")
 ADMIN_PASSWORD = os.environ.get("POSTGRES_OWNER_PASSWORD", "")
 DB_HOST = os.environ.get("POSTGRES_HOST", "localhost")

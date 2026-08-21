@@ -15,12 +15,15 @@ rather than bare string literals, so the export-vocabulary lives in one place.
 """
 
 from giljo_mcp import branding
+from giljo_mcp.install_targets import INSTALL_PATHS, resolve_install_scope
 from giljo_mcp.platform_registry import (
     EXPORT_ANTIGRAVITY_CLI,
     EXPORT_CLAUDE_CODE,
+    EXPORT_CODEX_CLI,
     EXPORT_GEMINI_CLI,
     EXPORT_GENERIC,
 )
+from giljo_mcp.template_renderer import OWNERSHIP_MARKER_TOKEN
 
 
 # BE-9067: the canonical "what Giljo HQ is" primer, persisted into the agent's
@@ -133,7 +136,81 @@ def build_inline_primer_note() -> str:
     )
 
 
-def build_setup_instructions(platform: str, download_url: str) -> str:
+def build_agent_install_block(platform: str, harness: str | None = None) -> str:
+    """The per-file, marker-aware agent install step (BE-9385b).
+
+    Replaces the whole-directory "Overwrite (all) / Skip (all)" prompt every
+    platform used to carry. That prompt could not tell a GiljoAI export from a file
+    the user wrote by hand, so answering Overwrite destroyed user-authored agents
+    and answering Skip left GiljoAI's own agents stale -- there was no third option
+    because nothing on disk said who owned what.
+
+    Now every exported file carries a ``giljo-managed:`` marker naming its tenant,
+    product, template and content hash, so the installing agent can decide
+    per file instead of per directory.
+
+    Defined ONCE and shared by every platform branch, per this module's
+    never-copy-paste-per-platform rule: five copies of a reconciliation algorithm
+    is five chances for them to drift into disagreeing about what is safe.
+    """
+    target = resolve_install_scope(platform, harness)
+    if target is None:
+        return ""
+
+    if target.scope == "project":
+        where = (
+            f"Install into the CURRENT REPOSITORY at `{target.path}` (create it if needed).\n"
+            "Repo-level is the default because a repo is one product's working tree, so agents\n"
+            f"installed there cannot collide with another product's. If the user is not in a\n"
+            f"repository, or asks for them to be available everywhere, use `{_user_path(platform)}`\n"
+            "instead and say which you chose.\n"
+        )
+    else:
+        where = f"Install into `{target.path}` (create it if needed).\n"
+
+    return (
+        "Step A — Choose the install location:\n"
+        f"{where}\n"
+        "Step B — Install agents ONE FILE AT A TIME. Never overwrite the whole directory.\n"
+        "Each exported agent file carries an ownership marker line near the top:\n"
+        f"  {OWNERSHIP_MARKER_TOKEN} v1 tenant=... product=... template=... hash=...\n"
+        "For every agent file in the download, look at what is already at that path and\n"
+        "apply exactly one of these rules:\n"
+        "  1. NOTHING THERE -> write the file. No question needed.\n"
+        f"  2. A file with a `{OWNERSHIP_MARKER_TOKEN}` marker whose product= MATCHES the\n"
+        "     incoming one -> this is our own file; overwrite it. If its hash= is also\n"
+        "     identical, it is unchanged: skip it and do not rewrite it.\n"
+        f"  3. A file with a `{OWNERSHIP_MARKER_TOKEN}` marker for a DIFFERENT product ->\n"
+        "     a real conflict. Flag it and resolve it WITH the user (Step C). Never\n"
+        "     resolve it silently in either direction.\n"
+        "  4. A file with NO marker -> the user wrote this themselves. DO NOT TOUCH IT,\n"
+        "     ever, under any answer. Report it at the end as preserved.\n"
+        "Rule 4 has no exceptions. A file we did not write is not ours to replace.\n\n"
+        "Step C — Resolving a rule 3 conflict:\n"
+        "Say which product owns the file already on disk and which one is installing, then\n"
+        "let the user choose. Two answers install cleanly:\n"
+        "  - REPLACE -> write the incoming file over the existing one.\n"
+        "  - SKIP -> leave the existing file alone and report that agent as not installed.\n"
+        "If they would rather keep both and rename one themselves, that is their call — but\n"
+        "tell them plainly what it costs: the orchestrator spawns agents BY NAME, and the\n"
+        "names it knows are the ones on the server, so a file renamed by hand will not be\n"
+        "spawnable until its name matches a server name again. That is information the user\n"
+        "is entitled to, not a reason to refuse or to undo their rename.\n\n"
+        "Step D — Stale copies of OUR OWN agents:\n"
+        f"If a file carries a `{OWNERSHIP_MARKER_TOKEN}` marker with the SAME product= and\n"
+        "template= as an incoming agent but a DIFFERENT filename, it is our own file under an\n"
+        "old name (the product was renamed). Write the new file, then delete the old one.\n"
+        "Only ever delete a file whose marker names this same product AND template.\n\n"
+    )
+
+
+def _user_path(platform: str) -> str:
+    """The user-level fallback path for ``platform``, for prose that offers a choice."""
+    paths = INSTALL_PATHS.get(platform, {})
+    return paths.get("user") or paths.get("agent_files") or paths.get("plugin_root") or "~/agents/"
+
+
+def build_setup_instructions(platform: str, download_url: str, harness: str | None = None) -> str:
     """Build a natural-language prompt the LLM will execute to install GiljoAI CLI integration."""
     if platform == EXPORT_CLAUDE_CODE:
         return (
@@ -151,19 +228,9 @@ def build_setup_instructions(platform: str, download_url: str) -> str:
             "Extract only the commands/ entries from the zip into ~/.claude/commands/ "
             "(create if needed, overwrite existing). If INSTALL_COMMANDS=false, do not touch "
             "~/.claude/commands/.\n\n"
-            "Step 4 — Install agents if INSTALL_AGENTS=true (consent required if any exist):\n"
-            "Check if ~/.claude/agents/ contains any .md files.\n"
-            "  - If none exist (or the directory is missing): extract agents/* into "
-            "~/.claude/agents/ and continue.\n"
-            "  - If .md files already exist: ask the user ONCE via AskUserQuestion:\n"
-            '      "GiljoAI agent templates already exist in ~/.claude/agents/. '
-            "Overwrite with agent templates from the server? Any local edits will be lost. "
-            'To preserve them, choose Skip agents (or re-run giljo_setup later with the Agents only scope)."\n'
-            "      Options: [Overwrite, Skip agents]\n"
-            "    - Overwrite -> extract agents/* into ~/.claude/agents/ (overwrite).\n"
-            "    - Skip agents -> do NOT extract agents/*. Tell the user their existing "
-            "agent files were preserved.\n"
-            "If INSTALL_AGENTS=false, do not touch ~/.claude/agents/.\n\n"
+            "Step 4 — Install agents if INSTALL_AGENTS=true:\n"
+            f"{build_agent_install_block(EXPORT_CLAUDE_CODE, harness)}"
+            "If INSTALL_AGENTS=false, do not touch any agents directory.\n\n"
             "Step 5 — Clean up:\n"
             "Delete the downloaded zip.\n\n"
             "Adapt all commands for the OS you are running on.\n\n"
@@ -192,19 +259,9 @@ def build_setup_instructions(platform: str, download_url: str) -> str:
             "Extract only the commands/ entries from the zip into ~/.gemini/commands/ "
             "(create if needed, overwrite existing). If INSTALL_COMMANDS=false, do not touch "
             "~/.gemini/commands/.\n\n"
-            "Step 1c — Install agents if INSTALL_AGENTS=true (consent required if any exist):\n"
-            "Check if ~/.gemini/agents/ contains any .md files.\n"
-            "  - If none exist (or the directory is missing): extract agents/* into "
-            "~/.gemini/agents/ and continue.\n"
-            "  - If .md files already exist: ask the user ONCE:\n"
-            '      "GiljoAI agent templates already exist in ~/.gemini/agents/. '
-            "Overwrite with agent templates from the server? Any local edits will be lost. "
-            'To preserve them, choose Skip agents (or re-run giljo_setup later with the Agents only scope)."\n'
-            "      Options: [Overwrite, Skip agents]\n"
-            "    - Overwrite -> extract agents/* into ~/.gemini/agents/ (overwrite).\n"
-            "    - Skip agents -> do NOT extract agents/*. Tell the user their existing "
-            "agent files were preserved.\n"
-            "If INSTALL_AGENTS=false, do not touch ~/.gemini/agents/.\n\n"
+            "Step 1c — Install agents if INSTALL_AGENTS=true:\n"
+            f"{build_agent_install_block(EXPORT_GEMINI_CLI, harness)}"
+            "If INSTALL_AGENTS=false, do not touch any agents directory.\n\n"
             "Step 1d — Clean up:\n"
             "Delete the downloaded zip.\n\n"
             "Step 2 — Enable custom agents if INSTALL_AGENTS=true:\n"
@@ -320,17 +377,8 @@ def build_setup_instructions(platform: str, download_url: str) -> str:
         "If ~/.codex/agents/ contains old GiljoAI backup directories, *.bak*, or "
         "*.model-backup files, move them to ~/.codex/agent_backups/ before continuing; "
         "Codex may discover backups under ~/.codex/agents/ and report duplicate agent roles.\n"
-        "  - If none exist (or the directory is missing): extract agents/* into "
-        "~/.codex/agents/ and set AGENTS_INSTALLED=true.\n"
-        "  - If gil-*.toml files already exist: ask the user ONCE:\n"
-        '      "GiljoAI agent templates already exist in ~/.codex/agents/. '
-        "Overwrite with agent templates from the server? Any local edits will be lost. "
-        'Choose Skip agents to refresh skills only; re-run giljo_setup with the Agents only scope for an agent-only refresh."\n'
-        "      Options: [Overwrite, Skip agents]\n"
-        "    - Overwrite -> extract agents/* into ~/.codex/agents/ and set "
-        "AGENTS_INSTALLED=true.\n"
-        "    - Skip agents -> do NOT extract agents/*. Set AGENTS_INSTALLED=false and "
-        "tell the user their existing agent files were preserved.\n"
+        f"{build_agent_install_block(EXPORT_CODEX_CLI, harness)}"
+        "Set AGENTS_INSTALLED=true if you wrote any agent file, false otherwise.\n"
         "If INSTALL_AGENTS=false, set AGENTS_INSTALLED=false and do not touch ~/.codex/agents/.\n\n"
         "Step 1e — Optional global AGENTS.md guidance for Codex subagent display:\n"
         "Ask the user before editing ~/.codex/AGENTS.md. This global file is the Codex home-level "

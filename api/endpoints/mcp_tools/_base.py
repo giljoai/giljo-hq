@@ -6,7 +6,7 @@
 """
 Shared base for the MCP @mcp.tool wrapper subpackage (BE-6042d).
 
-Holds the single ``FastMCP`` instance every wrapper registers against, the tool
+Holds the single ``MCPServer`` instance every wrapper registers against, the tool
 scope registry, and the helpers each domain wrapper module delegates through.
 Both the wrapper modules (``mcp_tools/_*_tools.py``) and the transport layer
 (``mcp_sdk_server.py``) import from here, which is what keeps the import graph
@@ -16,16 +16,19 @@ Extracted verbatim from the pre-split ``mcp_sdk_server.py`` — behavior unchang
 """
 
 import functools
+import hashlib
 import inspect
 import logging
+import os
 import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from mcp.server.fastmcp import Context, FastMCP
-from mcp.server.fastmcp.exceptions import FastMCPError
-from mcp.server.transport_security import TransportSecuritySettings
+from mcp.server.caching import CacheHint
+from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import MCPServerError
+from mcp.server.request_state import RequestStateSecurity
 from pydantic import BaseModel
 from starlette.requests import Request as StarletteRequest
 
@@ -45,6 +48,7 @@ from api.endpoints.mcp_tools._silence_scope import NON_SILENCE_CLEARING_TOOLS, S
 from giljo_mcp import __version__ as _giljo_version
 from giljo_mcp import branding
 from giljo_mcp.exceptions import BaseGiljoError, ValidationError
+from giljo_mcp.services._mcp_wire_bounds import CursorRejectedError
 from giljo_mcp.services.debounce import should_run
 from giljo_mcp.services.memory_entry_write_validator import MemoryEntryWriteValidationError
 from giljo_mcp.tenant_guard import TenantIsolationError
@@ -102,7 +106,7 @@ _SQL_LEAK_SIGNATURE = re.compile(
 # Bounded so a runaway agent cannot OOM Postgres TOAST or balloon a JSONB
 # column, while staying well above any legitimate value. Surfaced on the
 # @mcp.tool wrappers via ``Field(max_length=...)`` so an over-length param is
-# rejected at the FastMCP arg-validation boundary (a clean 422-style ToolError)
+# rejected at the SDK arg-validation boundary (a clean 422-style ToolError)
 # rather than reaching the service layer / a DB constraint (a 500). The wrapper
 # descriptions cite these same constants so the advertised cap can never drift
 # from the enforced one.
@@ -116,7 +120,7 @@ MCP_MISSION_MAX = 100_000  # an orchestrator mission / execution plan
 MCP_LIST_ITEMS_MAX = 100  # recipients list, etc. (per-call item count)
 
 # BE-9083c: per-tool inline-result size hint advertised on tools/list via the
-# FastMCP ``meta`` kwarg (surfaces as ``_meta["anthropic/maxResultSizeChars"]``).
+# SDK ``meta`` kwarg (surfaces as ``_meta["anthropic/maxResultSizeChars"]``).
 # Claude Code reads it to raise its inline-truncation ceiling for THESE heavy read
 # tools (mission/staging/thread-history/projects), so a large-but-legitimate payload
 # is delivered whole instead of being tail-truncated (the BE-9083a incident). It is
@@ -159,25 +163,84 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # MCP Server instance
 # ---------------------------------------------------------------------------
-mcp = FastMCP(
+# INF-9371 (SDK 2.0): FastMCP is renamed MCPServer, and the four transport kwargs
+# (stateless_http, json_response, streamable_http_path, transport_security) moved
+# off the constructor onto streamable_http_app(). They now live with the app
+# factory in mcp_sdk_server.py — the layer that owns the ASGI surface — including
+# the deliberate DNS-rebinding opt-out and its rationale.
+#
+# INF-9115: serverInfo.version must report the GiljoAI product version, not the
+# installed `mcp` package version (without it, create_initialization_options()
+# falls back to the SDK's own version and every client's initialize handshake
+# reports the SDK release). 1.x had no version= kwarg, so this was a
+# post-construction patch of mcp._mcp_server.version; 2.0 declares the kwarg and
+# makes MCPServer.version read-only, so the same guarantee is now stated at
+# construction instead of patched in afterwards.
+# INF-9371: tools/list is cacheable per the 2026-07-28 spec, and the SDK applies
+# these hints after the handler returns. `private` is not a default we accepted but
+# a requirement: the advertised roster is per-session (token scope ∩ tool profile ∩
+# the BE-9084 HITL fence), so a shared cache could serve one session's roster to
+# another -- an authorization leak, not a staleness bug. The TTL is deliberately
+# short: a tenant flipping Headless mode in Settings changes which launch-gate tools
+# are advertised, and that must take effect in about a minute, not after a long
+# cache life. tools/list is cheap, so the win here is suppressing repeated calls
+# inside one burst of agent activity, not long-lived caching.
+_TOOLS_LIST_CACHE_TTL_MS = 60_000
+
+
+def _request_state_security() -> RequestStateSecurity:
+    """Seal the multi-round-trip ``requestState`` under a key EVERY worker shares.
+
+    BE-8003l. The SDK installs ``RequestStateBoundary`` unconditionally, and when
+    ``request_state_security=`` is omitted it defaults to
+    ``RequestStateSecurity.ephemeral()`` -- ``keys=[os.urandom(32)]``, held only by
+    the minting process. Its own docstring says the limit outright: *"Suits
+    single-process deployments ... state minted by another worker is rejected.
+    Multi-instance deployments must share a key."*
+
+    Prod runs multiple uvicorn workers behind ``stateless_http=True``, so nothing
+    guarantees a client's round-2 retry routes back to the worker that minted its
+    token. Under the ephemeral default, a retry that lands on a different worker
+    is refused with -32602 *above* the tool -- so ``request_approval``'s own
+    fallback would never run. Sharing the key is what makes the MRTR round-trip
+    work at all in a multi-worker deployment, and it also stops a restart
+    invalidating an approval that is mid-flight.
+
+    The key is DERIVED from the app's existing JWT secret, never reused as one. We
+    hash it under our own label here, and ``AESGCMRequestStateCodec`` then runs the
+    result through HKDF under the SDK's label (``mcp/request-state/v1/aes-256-gcm``),
+    so the AES key is cryptographically unrelated to the one JWT signs with. That
+    secret is already required at boot (``api/app.py``) and is identical across
+    workers by construction, so this adds no new configuration for a self-hoster.
+
+    Hashing is also what makes this safe to ship: the SDK REQUIRES >= 32 bytes and
+    raises at construction otherwise. Secrets in the wild are routinely shorter
+    than that, and this module is imported at app start -- so handing the raw
+    secret over would refuse to boot the whole server on a short one. The digest
+    is always 32 bytes, whatever the operator set.
+
+    No secret configured (a bare import, a half-configured box) falls back to the
+    SDK default rather than hard-failing: a single-process deployment is exactly
+    the case ``ephemeral()`` is correct for.
+    """
+    secret = os.getenv("JWT_SECRET") or os.getenv("GILJO_MCP_SECRET_KEY") or os.getenv("SECRET_KEY")
+    if not secret:
+        logger.warning(
+            "No JWT_SECRET/GILJO_MCP_SECRET_KEY/SECRET_KEY set; sealing MCP requestState under a "
+            "per-process ephemeral key. Multi-worker deployments will refuse cross-worker retries."
+        )
+        return RequestStateSecurity.ephemeral()
+    derived = hashlib.sha256(b"giljo/mcp/request-state/v1|" + secret.encode()).digest()
+    return RequestStateSecurity(keys=[derived])
+
+
+mcp = MCPServer(
     name=branding.MCP_ALIAS,
     instructions=f"{branding.DESCRIPTOR}. {branding.TWO_HUB_DISAMBIGUATION}",
-    stateless_http=True,
-    json_response=True,
-    streamable_http_path="/",
-    # Disable SDK's built-in DNS rebinding protection — our MCPAuthMiddleware
-    # handles auth (Bearer token + tenant isolation). The server binds to
-    # 127.0.0.1 (localhost HTTP) or LAN IP (HTTPS only), configured at install.
-    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+    version=_giljo_version,
+    cache_hints={"tools/list": CacheHint(ttl_ms=_TOOLS_LIST_CACHE_TTL_MS, scope="private")},
+    request_state_security=_request_state_security(),
 )
-
-# INF-9115: FastMCP (mcp SDK 1.27.2) has no version= constructor kwarg — without
-# this, Server.create_initialization_options() falls back to the installed `mcp`
-# PyPI package's own version, so every MCP client's initialize handshake reported
-# serverInfo.version=1.27.2 instead of the actual GiljoAI product version. Same
-# post-construction access pattern _base.py already uses for mcp._mcp_server
-# below (list_tools).
-mcp._mcp_server.version = _giljo_version
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +369,8 @@ TOOL_DISPATCH: dict[str, ToolResolver] = {
     "create_thread": lambda acc: acc._comm_thread_service.create_thread,
     "post_to_thread": lambda acc: acc._comm_thread_service.post_to_thread,
     "get_my_turn": lambda acc: acc._comm_thread_service.get_my_turn,
+    "await_my_turn": lambda acc: acc._comm_thread_service.await_my_turn,
+    "get_participant_liveness": lambda acc: acc._comm_thread_service.get_participant_liveness,
     "pass_baton": lambda acc: acc._comm_thread_service.pass_baton,
     "list_threads": lambda acc: acc._comm_thread_service.list_threads,
     "get_thread_history": lambda acc: acc._comm_thread_service.get_thread_history,
@@ -371,15 +436,17 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
 
     # BE-3006d: sanitizing catch-all at the single dispatch chokepoint.
     #
-    # FastMCP's Tool.run wraps ANY exception escaping the wrapper into
-    # ``ToolError(f"Error executing tool {name}: {e}")`` and the lowlevel server
-    # serialises ``str(e)`` straight onto the wire (isError=True). An unexpected
-    # DB error therefore leaks ``[SQL: ...] [parameters: ...]`` to the calling
-    # agent. We classify here:
+    # The SDK wraps ANY exception escaping the tool wrapper and serialises
+    # ``str(e)`` straight onto the wire (isError=True). An unexpected DB error
+    # therefore leaks ``[SQL: ...] [parameters: ...]`` to the calling agent.
+    # INF-9371: still true on SDK 2.0 — MCPServer._handle_call_tool catches every
+    # non-MCPError exception and returns ``CallToolResult(is_error=True,
+    # content=[TextContent(str(e))])``, so this chokepoint remains the only thing
+    # standing between a driver string and the agent. We classify here:
     #   - Curated client errors (BaseGiljoError < 500) carry actionable,
     #     agent-authored context (valid_types, blockers, ...) -> surface verbatim.
     #   - Validation/tool rejections (pydantic.ValidationError is a ValueError in
-    #     v2; FastMCPError; the structured memory-write rejection) are already
+    #     v2; MCPServerError; the structured memory-write rejection) are already
     #     clean 422-style and never contain SQL -> surface verbatim.
     #   - Server-side BaseGiljoError (>= 500) may embed a raw driver string in
     #     ``.context`` (e.g. OrchestrationError(context={'error': str(db_err)})),
@@ -388,12 +455,25 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
     #     raise a generic, sanitized ToolError that exposes none of it.
     try:
         result = await tool_func(**kwargs)
+    except CursorRejectedError as exc:
+        # BE-9469: a refused continuation cursor is a Tier-2 DELIBERATE REJECTION, not an
+        # error -- see the two-tier contract below. It is raised deep in the read layer
+        # (where the filter fingerprint is known) and converted to the structured response
+        # HERE, at the one boundary both list tools pass through, so the two tools cannot
+        # drift into two different refusal shapes.
+        #
+        # Why a return and not an isError: the agent can FIX this by restarting the walk,
+        # and the message says exactly how. A transport error makes it guess whether the
+        # server is broken; a structured rejection on the success path hands it a remedy it
+        # can read like any other tool content.
+        logger.info("MCP tool '%s' refused a continuation cursor: %s", method_name, exc.code)
+        return {"success": False, "error": exc.code, "message": str(exc)}
     except BaseGiljoError as exc:
         if exc.default_status_code < 500:
             raise
         logger.exception("MCP tool dispatch '%s' failed with a server-side error", method_name)
-        raise FastMCPError(_SANITIZED_TOOL_ERROR) from exc
-    except FastMCPError:
+        raise MCPServerError(_SANITIZED_TOOL_ERROR) from exc
+    except MCPServerError:
         raise
     except TenantIsolationError as exc:
         # Cross-tenant access: a known security-boundary rejection. Log the full
@@ -401,7 +481,7 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
         # model name + internal guard phrasing) and never sanitize it to the
         # generic 500 — re-raise the clean, fixed not-found contract instead.
         logger.warning("MCP tool dispatch '%s' blocked by tenant isolation guard", method_name)
-        raise FastMCPError(_NOT_FOUND_TOOL_ERROR) from exc
+        raise MCPServerError(_NOT_FOUND_TOOL_ERROR) from exc
     except _CLEAN_VALIDATION_ERRORS as exc:
         # pydantic ValidationError + clean 422-style rejections surface VERBATIM.
         # TSK-9134: unless the message carries a SQL/bind-param leak signature ->
@@ -412,11 +492,11 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
                 "SQL/bind-parameter leak signature; sanitizing before it reaches the agent",
                 method_name,
             )
-            raise FastMCPError(_SANITIZED_TOOL_ERROR) from exc
+            raise MCPServerError(_SANITIZED_TOOL_ERROR) from exc
         raise
     except Exception as exc:
         logger.exception("MCP tool dispatch '%s' raised an unexpected error", method_name)
-        raise FastMCPError(_SANITIZED_TOOL_ERROR) from exc
+        raise MCPServerError(_SANITIZED_TOOL_ERROR) from exc
 
     # ------------------------------------------------------------------
     # BE-6081: the TWO-TIER MCP-boundary error contract — the single
@@ -426,7 +506,7 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
     #
     #   Tier 1 — ERRORS RAISE (post-0480). Service-layer failures and any
     #   unexpected tool error propagate as exceptions and are classified by
-    #   the try/except above into a FastMCPError -> the SDK serialises them as
+    #   the try/except above into an MCPServerError -> the SDK serialises them as
     #   isError on the wire. No tool RETURNS {success: False} for an error.
     #
     #   Tier 2 — DELIBERATE domain REJECTIONS RETURN (BE-5028). A few tool
@@ -437,8 +517,19 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
     #   path below UNCHANGED and reaches the agent as normal tool content
     #   (NOT isError). Known sites: write_memory_entry (GIT_COMMITS_REQUIRED,
     #   CLOSEOUT_BLOCKED, ORCHESTRATOR_ONLY_ENTRY_TYPE), get_context
-    #   (agent-execution not-found), and request_approval
-    #   (ORCHESTRATOR_ONLY_APPROVAL — BE-9054 worker rejection).
+    #   (agent-execution not-found), request_approval
+    #   (ORCHESTRATOR_ONLY_APPROVAL — BE-9054 worker rejection), and
+    #   post_to_thread's wrapper (FROM_AGENT_REQUIRED /
+    #   FROM_AGENT_AS_USER_EXCLUSIVE — BE-9379 attribution fail-closed,
+    #   returned before dispatch so a refused post writes nothing), and
+    #   update_task's convert_to_project branch (CONVERT_FIELD_CONFLICT /
+    #   USER_CONTEXT_REQUIRED — BE-9382, returned before the conversion runs
+    #   so a refused promotion writes nothing), and list_projects/list_tasks'
+    #   continuation cursor (CURSOR_MALFORMED / CURSOR_FILTER_MISMATCH /
+    #   CURSOR_AXIS_MISMATCH / CURSOR_VERSION_UNSUPPORTED — BE-9469; raised in
+    #   the read layer where the filter fingerprint is known, converted to this
+    #   shape by the except clause above, and returned before any fetch runs so a
+    #   refused cursor costs no query).
     #
     # The post-0480 raise-rule governs Tier-1 internal errors ONLY; it does
     # not forbid these intentional Tier-2 rejection responses. Regression:
@@ -479,7 +570,7 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
     # Wire-contract normalisation: every @mcp.tool wrapper in this module is
     # annotated `-> dict[str, Any]`, but service-layer methods return typed
     # Pydantic response models (MissionResponse, ProgressResult, SpawnResult,
-    # SendMessageResult, etc.). FastMCP validates the return against the
+    # SendMessageResult, etc.). The SDK validates the return against the
     # annotation and rejects Pydantic instances with a DictModel error, which
     # surfaces to MCP clients while server-side state has already been
     # persisted. Normalise here so every tool produces a JSON-safe dict

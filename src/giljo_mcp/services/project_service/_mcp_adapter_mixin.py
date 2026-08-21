@@ -19,11 +19,13 @@ import logging
 from typing import Any
 
 from giljo_mcp.ctx_bootstrap_template import render_ctx_bootstrap
+from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.exceptions import (
     AlreadyExistsError,
     ValidationError,
 )
 from giljo_mcp.repositories.product_repository import ProductRepository
+from giljo_mcp.schemas.service_responses import ProjectArchiveResult
 from giljo_mcp.services.vision_hash import compute_vision_inputs_hash
 
 
@@ -78,22 +80,21 @@ class McpAdapterMixin:
                     context={"operation": "create_project", "valid_types": valid_types},
                 )
 
-        if not product_id:
-            from giljo_mcp.services.product_service import ProductService
+        # BE-9411: an explicitly supplied product_id is agent input and is
+        # validated as belonging to this tenant before anything is written; an
+        # omitted one resolves to the active product exactly as before. The
+        # resolver never falls back from a bad id to the active product.
+        from giljo_mcp.services.product_service import ProductService
 
-            product_service = ProductService(
-                db_manager=self.db_manager,
-                tenant_key=effective_tenant_key,
-                websocket_manager=ws,
-                test_session=self._test_session,
-            )
-            active_product = await product_service.get_active_product()
-            if not active_product:
-                raise ValidationError(
-                    "No active product set. Please activate a product first.",
-                    context={"tenant_key": effective_tenant_key, "operation": "create_project"},
-                )
-            product_id = active_product.id
+        product_service = ProductService(
+            db_manager=self.db_manager,
+            tenant_key=effective_tenant_key,
+            websocket_manager=ws,
+            test_session=self._test_session,
+        )
+        bound_product = await product_service.resolve_binding_product(product_id, operation="create_project")
+        product_id = bound_product.id
+        product_name = bound_product.name
 
         # BE-5122: CTX project_type renders its mission from the CTX bootstrap
         # template using product + vision-input state. The dict is mandatory
@@ -145,6 +146,10 @@ class McpAdapterMixin:
             "mission": project.mission,
             "status": project.status,
             "product_id": project.product_id,
+            # BE-9411: name the landing, not just its id. An agent can then
+            # self-check where a create actually went for one field read —
+            # which is what the misfiling incident had no way to do.
+            "product_name": product_name,
             "project_type": resolved_type_label,
             "series_number": project.series_number or 0,
             "taxonomy_alias": project.taxonomy_alias,
@@ -258,9 +263,14 @@ class McpAdapterMixin:
         subseries: str | None = None,
         websocket_manager: Any | None = None,
     ) -> dict[str, Any]:
-        """Update project metadata via MCP tool (validation + active product enforcement).
+        """Update project metadata via MCP tool (validation + tenant-scoped resolution).
 
         Pushed down from ToolAccessor.update_project_metadata (sprint 002f).
+
+        BE-9435: the project is resolved by id within the caller's tenant, and the
+        active product plays no part -- it need not match the project's owning
+        product, and no product need be active at all. Flipping (or deselecting) the
+        active product is ordinary use, so gating an edit on it refused normal work.
         """
         if not project_id or not project_id.strip():
             raise ValidationError(
@@ -303,30 +313,17 @@ class McpAdapterMixin:
         effective_tenant_key = tenant_key or self.tenant_manager.get_current_tenant()
         ws = websocket_manager or self._websocket_manager
 
-        from giljo_mcp.services.product_service import ProductService
-
-        product_service = ProductService(
-            db_manager=self.db_manager,
-            tenant_key=effective_tenant_key,
-            websocket_manager=ws,
-        )
-        active_product = await product_service.get_active_product()
-        if not active_product:
-            raise ValidationError(
-                "No active product set. Please activate a product first.",
-                context={"tenant_key": effective_tenant_key, "operation": "update_project_metadata"},
-            )
-
+        # BE-9435: this tool resolves NO active product at all -- neither to require
+        # one nor to compare against it. The tenant-scoped read below is the whole
+        # boundary: another tenant's id reads as nonexistent here.
+        #
+        # Both refusals that used to stand on this spot were designed in with the
+        # tool (2026-04-13) rather than added for any incident, and neither survived
+        # the question "what breaks without it". The mismatch refusal fired on an
+        # ordinary product flip; requiring merely SOME product to be active refused
+        # an edit for a state nothing downstream reads. update_task -- same MCP
+        # surface, same write class -- has never carried either one.
         project = await self.get_project(project_id=project_id, tenant_key=effective_tenant_key)
-        if project.product_id != active_product.id:
-            raise ValidationError(
-                "Project does not belong to the active product.",
-                context={
-                    "project_id": project_id,
-                    "project_product_id": project.product_id,
-                    "active_product_id": active_product.id,
-                },
-            )
 
         if project_type is not None:
             resolved_type = await self.get_project_type_by_label(project_type, effective_tenant_key)
@@ -387,8 +384,28 @@ class McpAdapterMixin:
         if subseries is not None:
             updates["subseries"] = subseries
 
+        # BE-9384: completing a SOLO project runs the full archive lifecycle -- the
+        # same one the dashboard's Archive button runs -- instead of the bare status
+        # write. Reaching only the status write left spawned agents stranded at
+        # 'complete' and skipped deactivation, and this tool was the only completion
+        # path an agent could reach over MCP, so the unsupported path was the only
+        # reachable one. Note the lifecycle DERIVES the terminal status from
+        # early_termination, so an early-terminated project correctly lands
+        # 'terminated' here even though the caller asked for 'completed'.
+        #
+        # A chain member keeps the bare write: its run's conductor owns member
+        # lifecycle (_closeout_finalize flips the row and marks the run entry), and
+        # rerouting it would fire a second, competing terminal transition.
+        runs_archive_lifecycle = status == ProjectStatus.COMPLETED and not await self._has_active_chain_run(
+            project_id, effective_tenant_key
+        )
+        if runs_archive_lifecycle:
+            del updates["status"]
+
+        updated = None
         try:
-            updated = await self.update_project(project_id=project_id, updates=updates, websocket_manager=ws)
+            if updates:
+                updated = await self.update_project(project_id=project_id, updates=updates, websocket_manager=ws)
         except AlreadyExistsError as e:
             # BE-9016 (Sentry GILJOAI-BACKEND-A): the "single active project per
             # product" conflict is an EXPECTED, agent-actionable domain rejection
@@ -405,6 +422,14 @@ class McpAdapterMixin:
                 }
             raise
 
+        message = None
+        if runs_archive_lifecycle:
+            archived = await self.archive_project(
+                project_id=project_id, tenant_key=effective_tenant_key, websocket_manager=ws
+            )
+            updated = archived.project
+            message = self._build_archive_message(archived)
+
         return {
             "success": True,
             "project_id": updated.id,
@@ -412,5 +437,41 @@ class McpAdapterMixin:
             "description": updated.description,
             "status": updated.status,
             "updated_at": updated.updated_at,
-            "message": f"Project '{updated.name}' updated successfully.",
+            "message": message or f"Project '{updated.name}' updated successfully.",
         }
+
+    async def _has_active_chain_run(self, project_id: str, tenant_key: str) -> bool:
+        """Whether this project is a member of a live chain run (BE-9384 guard).
+
+        Read-only, and the same detector ``mark_chain_member_status`` uses:
+        ``find_active_run_for_project`` returns None on the solo path, which is the
+        common case. Local import mirrors that helper -- SequenceRunService imports
+        project models, so a module-level import would cycle.
+        """
+        from giljo_mcp.services.sequence_run_service import SequenceRunService
+
+        svc = SequenceRunService(
+            db_manager=self.db_manager,
+            tenant_manager=self.tenant_manager,
+            session=self._test_session,
+            websocket_manager=self._websocket_manager,
+        )
+        run = await svc.find_active_run_for_project(project_id=project_id, tenant_key=tenant_key)
+        return run is not None
+
+    @staticmethod
+    def _build_archive_message(archived: ProjectArchiveResult) -> str:
+        """Say which lifecycle steps actually fired, rather than a fixed sentence.
+
+        The agent needs to know whether its spawned agents were closed -- that is the
+        step whose silent absence made the old path look like it had worked.
+        """
+        parts = [f"Project '{archived.project.name}' completed via the archive lifecycle"]
+        if archived.deactivated:
+            parts.append("deactivated first")
+        parts.append(f"status set to '{archived.project.status}' with completion date stamped")
+        if archived.closed_agents:
+            parts.append(f"{len(archived.closed_agents)} agent(s) closed: {', '.join(archived.closed_agents)}")
+        else:
+            parts.append("no agents were awaiting closure")
+        return "; ".join(parts) + "."

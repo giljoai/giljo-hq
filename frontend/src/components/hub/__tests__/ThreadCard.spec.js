@@ -91,7 +91,7 @@ describe('ThreadCard', () => {
     const w = mountCard({
       ...BASE,
       participants: [
-        { participant_id: 'u', participant_type: 'user', display_name: 'Patrik' },
+        { participant_id: 'u', participant_type: 'user', display_name: 'Sam Rivera' },
         { participant_id: 'a', participant_type: 'agent', display_name: 'Alpha', harness: 'codex' },
       ],
     })

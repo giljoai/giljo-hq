@@ -21,7 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.repositories.configuration_repository import ConfigurationRepository
-from giljo_mcp.services.settings_service import AGENT_SILENCE_THRESHOLD_KEY, MAX_AGENT_SILENCE_THRESHOLD_MINUTES
+from giljo_mcp.services.settings_service import (
+    AGENT_CHECKIN_CADENCE_KEY,
+    AGENT_SILENCE_THRESHOLD_KEY,
+    MAX_AGENT_CHECKIN_CADENCE_MINUTES,
+    MAX_AGENT_SILENCE_THRESHOLD_MINUTES,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -120,6 +125,51 @@ class TenantConfigurationService:
                 session,
                 self.tenant_key,
                 AGENT_SILENCE_THRESHOLD_KEY,
+                minutes,
+                category="system",
+            )
+            await session.commit()
+
+        return minutes
+
+    async def get_agent_checkin_cadence_minutes(self) -> int | None:
+        """Return this tenant's per-tenant check-in cadence override, or None if unset.
+
+        FE-9296b: the account-level agent check-in cadence, hosted exactly like the
+        silence threshold above — SaaS writes a per-tenant `configurations` row; CE's
+        deployment-wide value lives in `system_settings` via SystemSettingsService.
+        """
+        async with self._get_session() as session:
+            raw = await self._repo.get_value(session, self.tenant_key, AGENT_CHECKIN_CADENCE_KEY)
+
+        if raw is None:
+            return None
+        try:
+            minutes = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return minutes if 1 <= minutes <= MAX_AGENT_CHECKIN_CADENCE_MINUTES else None
+
+    async def set_agent_checkin_cadence_minutes(self, minutes: int) -> int:
+        """Upsert this tenant's per-tenant check-in cadence override.
+
+        Same write discipline as the silence threshold: single validated path,
+        tenant-scoped by self.tenant_key (ADR-009).
+
+        Raises:
+            ValidationError: if minutes is not an int in [1, MAX_AGENT_CHECKIN_CADENCE_MINUTES]
+                (untrusted agent/API input — clean 4xx, not a DB constraint 500).
+        """
+        if type(minutes) is not int or not (1 <= minutes <= MAX_AGENT_CHECKIN_CADENCE_MINUTES):
+            raise ValidationError(
+                f"agent_checkin_cadence_minutes must be an integer between 1 and {MAX_AGENT_CHECKIN_CADENCE_MINUTES}"
+            )
+
+        async with self._get_session() as session:
+            await self._repo.upsert_value(
+                session,
+                self.tenant_key,
+                AGENT_CHECKIN_CADENCE_KEY,
                 minutes,
                 category="system",
             )

@@ -4,7 +4,20 @@ import { createVuetify } from 'vuetify'
 import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
 import { createPinia, setActivePinia } from 'pinia'
+import { createRouter, createMemoryHistory } from 'vue-router'
 import ProductForm from '@/components/products/ProductForm.vue'
+
+// FE-9427: ProductForm calls useRouter() -- after creating a product it pushes
+// /projects?project_id=... Without a router installed that returned `undefined`,
+// and the push sits inside a try/catch written for a cancelled navigation, so
+// the missing router was swallowed there.
+const projectsRouter = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: '/', name: 'Root', component: { template: '<div />' } },
+    { path: '/projects', name: 'Projects', component: { template: '<div />' } },
+  ],
+})
 
 /**
  * 0842h: Tests for the vision analysis banner and custom instructions
@@ -56,7 +69,7 @@ describe('ProductForm — Vision Analysis Banner', () => {
         ...props,
       },
       global: {
-        plugins: [vuetify, pinia],
+        plugins: [vuetify, pinia, projectsRouter],
         stubs: {
           'v-dialog': {
             template: '<div class="v-dialog" v-if="modelValue"><slot /></div>',

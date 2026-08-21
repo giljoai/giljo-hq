@@ -17,7 +17,6 @@ own tenants with unique keys, so per-worker DBs never collide.
 
 from __future__ import annotations
 
-import os
 import secrets
 import uuid
 
@@ -30,8 +29,10 @@ from httpx import AsyncClient as HTTPXAsyncClient
 from giljo_mcp.auth.jwt_manager import JWTManager
 from giljo_mcp.models import User
 from giljo_mcp.models.organizations import Organization
+from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -68,7 +69,6 @@ async def _seed_user(db_manager) -> dict:
         )
         session.add(user)
         await session.commit()
-        os.environ.setdefault("JWT_SECRET", "test_secret_key")
         token = JWTManager.create_access_token(
             user_id=user.id, username=user.username, role="developer", tenant_key=tenant_key
         )
@@ -170,13 +170,30 @@ async def _seed_live_members(db_manager, tenant_key: str, run: dict) -> None:
     member_ids = list(dict.fromkeys((run.get("resolved_order") or []) + (run.get("project_ids") or [])))
     async with db_manager.get_session_async() as session:
         for pid in member_ids:
+            # BE-9437: product_id is NOT NULL. One product per member -- these are
+            # INACTIVE so idx_project_single_active_per_product does not bite, but
+            # a product each keeps the members independent.
+            product_id = str(uuid.uuid4())
+            session.add(
+                Product(
+                    id=product_id,
+                    tenant_key=tenant_key,
+                    name=f"chain-member-product-{pid[:8]}",
+                    description="owning product for a chain member",
+                    is_active=False,
+                )
+            )
             session.add(
                 Project(
                     id=pid,
+                    product_id=product_id,
                     tenant_key=tenant_key,
                     name=f"chain-member-{pid[:8]}",
                     description="live chain member",
                     mission="member mission",
+                    # BE-9429: uq_project_taxonomy_active is NULLS NOT DISTINCT,
+                    # so these all-NULL taxonomy rows collide without a serial.
+                    series_number=next_series_number(),
                 )
             )
         await session.commit()

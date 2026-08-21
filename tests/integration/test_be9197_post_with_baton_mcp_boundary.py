@@ -30,7 +30,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import delete
 
 from giljo_mcp.database import tenant_session_context
@@ -39,6 +38,7 @@ from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.projects import TaxonomyType
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -63,7 +63,7 @@ class _ExplodingWsManager:
 
 def _payload(res) -> dict:
     if getattr(res, "structuredContent", None):
-        return res.structuredContent
+        return res.structured_content
     block = res.content[0]
     text = getattr(block, "text", None)
     if text is None:
@@ -147,13 +147,13 @@ async def _setup_thread(new_client):
     """A thread created by alpha (alpha holds the baton), with beta and gamma joined."""
     async with new_client() as s:
         res = await s.call_tool("create_thread", {"subject": "baton ergonomics", "creator_id": "alpha"})
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     thread = _payload(res)
     tid = thread["thread_id"]
     for agent in ("beta", "gamma"):
         async with new_client() as s:
             join = await s.call_tool("join_thread", {"thread_id": tid, "agent_id": agent})
-            assert join.isError is False, _error_text(join)
+            assert join.is_error is False, _error_text(join)
     return tid, thread.get("chat_id")
 
 
@@ -161,7 +161,7 @@ async def _owner_sees_turn(new_client, agent_id: str, thread_id: str) -> bool:
     """The incident surface: does get_my_turn(agent_id) list this thread?"""
     async with new_client() as s:
         res = await s.call_tool("get_my_turn", {"agent_id": agent_id})
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     return any(t["thread_id"] == thread_id for t in _payload(res)["threads"])
 
 
@@ -175,7 +175,7 @@ async def test_explicit_pass_baton_to_respected(comm_mcp_client_ws):
             "post_to_thread",
             {"thread_id": tid, "content": "over to you", "from_agent": "alpha", "pass_baton_to": "gamma"},
         )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     payload = _payload(res)
     assert payload["baton_passed"] is True
     assert payload["next_action_owner"] == "gamma"
@@ -202,7 +202,7 @@ async def test_pass_baton_to_all_opens_turn_to_anyone(comm_mcp_client_ws):
             "post_to_thread",
             {"thread_id": tid, "content": "ACCEPTED", "from_agent": "alpha", "pass_baton_to": "all"},
         )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     assert _payload(res)["next_action_owner"] == "all"
     # 'all' threads surface for any polling agent, even one never addressed.
     assert await _owner_sees_turn(new_client, "beta", tid)
@@ -225,7 +225,7 @@ async def test_auto_pass_on_directed_action_request(comm_mcp_client_ws):
                 "requires_action": True,
             },
         )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     payload = _payload(res)
     assert payload["baton_passed"] is True
     assert payload["next_action_owner"] == "beta"
@@ -250,7 +250,7 @@ async def test_explicit_param_beats_auto_rule(comm_mcp_client_ws):
                 "pass_baton_to": "gamma",
             },
         )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     assert _payload(res)["next_action_owner"] == "gamma"
     assert await _owner_sees_turn(new_client, "gamma", tid)
     # BE-9207: get_my_turn is no longer a pure baton proxy. beta received a directed
@@ -281,7 +281,7 @@ async def test_explicit_none_suppresses_auto_pass(comm_mcp_client_ws):
                 "pass_baton_to": "none",
             },
         )
-    assert res.isError is False, _error_text(res)
+    assert res.is_error is False, _error_text(res)
     payload = _payload(res)
     assert payload["baton_passed"] is False
     # Creator alpha still holds the baton (pass_baton_to='none' suppressed the auto-pass).
@@ -307,7 +307,7 @@ async def test_broadcast_without_param_unchanged(comm_mcp_client_ws):
             "post_to_thread",
             {"thread_id": tid, "content": "plain broadcast", "from_agent": "alpha"},
         )
-        assert res.isError is False, _error_text(res)
+        assert res.is_error is False, _error_text(res)
     async with new_client() as s:
         res = await s.call_tool(
             "post_to_thread",
@@ -318,7 +318,7 @@ async def test_broadcast_without_param_unchanged(comm_mcp_client_ws):
                 "requires_action": True,
             },
         )
-        assert res.isError is False, _error_text(res)
+        assert res.is_error is False, _error_text(res)
 
     payload = _payload(res)
     assert payload["baton_passed"] is False
@@ -329,9 +329,15 @@ async def test_broadcast_without_param_unchanged(comm_mcp_client_ws):
 
 async def test_emission_parity_with_pass_baton(comm_mcp_client_ws):
     """The atomic path's thread_update must be byte-identical to pass_baton's:
-    same thread, same target => the two event payloads compare equal. Also
-    asserts ORDER: the atomic path emits the message event first, then the
-    baton update — mirroring the post-then-pass two-call sequence."""
+    same thread, same target, same hander => the two event payloads compare equal.
+    Also asserts ORDER: the atomic path emits the message event first, then the
+    baton update — mirroring the post-then-pass two-call sequence.
+
+    BE-9296a: the event now also carries WHO handed over, so ``from_agent`` is
+    supplied on BOTH calls. That is not a weakening — it is what keeps the
+    comparison apples-to-apples. "Same hand-off" now includes the hander, and
+    omitting it on one side would compare an attributed hand-off against an
+    anonymous one and call the difference a parity break."""
     new_client, tenant_key, ws = comm_mcp_client_ws
     tid, _chat = await _setup_thread(new_client)
 
@@ -340,16 +346,20 @@ async def test_emission_parity_with_pass_baton(comm_mcp_client_ws):
             "post_to_thread",
             {"thread_id": tid, "content": "handing off", "from_agent": "alpha", "pass_baton_to": "beta"},
         )
-        assert res.isError is False, _error_text(res)
+        assert res.is_error is False, _error_text(res)
     async with new_client() as s:
-        res = await s.call_tool("pass_baton", {"thread_id": tid, "to": "beta"})
-        assert res.isError is False, _error_text(res)
+        res = await s.call_tool("pass_baton", {"thread_id": tid, "to": "beta", "from_agent": "alpha"})
+        assert res.is_error is False, _error_text(res)
 
     baton_events = _baton_events(ws)
     assert len(baton_events) == 2
     (tenant_a, event_a), (tenant_b, event_b) = baton_events
     assert tenant_a == tenant_b == tenant_key
     assert event_a == event_b  # full event equality: type + every data field
+    # And the identity is actually populated on both — an equality that held only
+    # because both sides were None would pass while naming nobody.
+    assert event_a["data"]["from_display_name"]
+    assert event_a["data"]["from_kind"] == "agent"
 
     # ORDER: the atomic post's thread_message precedes its baton thread_update.
     flat = [e for _t, e in ws.events]
@@ -376,7 +386,7 @@ async def test_emit_is_best_effort_never_fails_the_post(comm_mcp_client_ws):
                 "post_to_thread",
                 {"thread_id": tid, "content": "over to you", "from_agent": "alpha", "pass_baton_to": "beta"},
             )
-        assert res.isError is False, _error_text(res)
+        assert res.is_error is False, _error_text(res)
         assert _payload(res)["baton_passed"] is True
     finally:
         app_state.state.websocket_manager = _ws

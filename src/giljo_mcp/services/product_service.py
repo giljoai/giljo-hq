@@ -29,6 +29,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
@@ -39,6 +40,7 @@ from giljo_mcp.exceptions import (
 )
 from giljo_mcp.models import Product
 from giljo_mcp.models.products import VALID_TARGET_PLATFORMS
+from giljo_mcp.product_slug import slugify_product_name
 from giljo_mcp.repositories.product_repository import ProductRepository
 from giljo_mcp.schemas.jsonb_validators import validate_product_memory
 from giljo_mcp.services._session_helpers import tenant_context_session
@@ -221,6 +223,46 @@ class ProductService:
     # CRUD Operations
     # ============================================================================
 
+    async def _allocate_product_slug(self, session, name: str) -> str:
+        """Return a slug for ``name`` that is free within this tenant (BE-9385b).
+
+        The slug qualifies exported agent filenames, so two live products in one
+        tenant must never share one. ``slugify_product_name`` is deterministic and
+        lossy -- "Acme Corp" and "Acme-Corp" both reduce to ``acme-corp`` -- so
+        this appends the lowest free numeric suffix (``acme-corp-2``, ``-3``, …),
+        matching how the ce_0092 backfill de-duplicates existing rows.
+
+        Only LIVE products are considered, mirroring the partial unique index:
+        deleting a product frees its slug for reuse, which is what a user renaming
+        and recreating would expect.
+
+        Concurrency: the unique index is the real guarantee; this loop exists so
+        the common case yields a readable slug rather than an integrity error. Two
+        simultaneous creates in one tenant could still collide and raise -- the
+        same shape as the existing duplicate-name check a few lines below, and a
+        tenant is a single user (ADR-009), so the window is theoretical.
+        """
+        base = slugify_product_name(name)
+
+        stmt = select(Product.slug).where(
+            Product.tenant_key == self.tenant_key,
+            Product.deleted_at.is_(None),
+            Product.slug.is_not(None),
+        )
+        taken = set((await session.execute(stmt)).scalars().all())
+
+        if base not in taken:
+            return base
+        # Bounded rather than while-True: a tenant cannot hold enough products to
+        # exhaust this, and an unbounded loop over a query result is how a wedge
+        # gets written. The uuid tail is unreachable in practice and exists so the
+        # function is total.
+        for suffix in range(2, 1000):
+            candidate = f"{base}-{suffix}"
+            if candidate not in taken:
+                return candidate
+        return f"{base}-{uuid4().hex[:8]}"
+
     async def create_product(
         self,
         name: str,
@@ -292,11 +334,21 @@ class ProductService:
 
                 product_id = str(uuid4())
 
+                # BE-9385b: allocate the export slug ONCE, here, and never again.
+                # It qualifies every exported agent filename, so rewriting it on a
+                # later rename would strand the files the user already installed --
+                # immutability is the point, not an oversight. Uniqueness is also
+                # enforced by idx_product_slug_unique_per_tenant; this allocator
+                # picks a free suffix so the user gets a readable name instead of
+                # an IntegrityError on a second product with a similar name.
+                slug = await self._allocate_product_slug(session, name)
+
                 validated_memory = validate_product_memory(product_memory) or default_memory
                 product = Product(
                     id=product_id,
                     tenant_key=self.tenant_key,
                     name=name,
+                    slug=slug,
                     description=description,
                     project_path=project_path,
                     core_features=core_features,
@@ -578,3 +630,65 @@ class ProductService:
             raise BaseGiljoError(
                 message=f"Failed to get active product: {e!s}", context={"tenant_key": self.tenant_key}
             ) from e
+
+    async def resolve_binding_product(self, product_id: str | None, *, operation: str) -> Product:
+        """Resolve the product a newly created entity binds to (BE-9411).
+
+        The active product is mutable shared state: another session, or the
+        operator toggling the dashboard, changes it under a running agent. A
+        create that resolves it at write time therefore lands wherever the
+        server happens to be pointing at that instant — which is how a staged
+        orchestrator filed a task onto a product that was not its own.
+
+        Two paths, and the difference between them is the whole point:
+
+        - ``product_id`` omitted → the active product, exactly as before. This
+          keeps every existing caller working and is still subject to the flip;
+          that is documented behavior, not a bug.
+        - ``product_id`` supplied → validated as belonging to THIS tenant and
+          returned regardless of which product is active. Agent input is never
+          trusted: the lookup is tenant-scoped (``ProductRepository.get_by_id``
+          filters on ``tenant_key`` and excludes soft-deleted rows), so another
+          tenant's real id is as unusable as a made-up one.
+
+        A supplied id that does not resolve raises ``ValidationError`` — a clean
+        422-class rejection that surfaces verbatim to the agent. It must NEVER
+        fall back to the active product: a silent fallback would recreate the
+        exact defect while reporting success.
+
+        Deliberately does not require the target to be *active*. Binding to a
+        product other than the active one is the reason this exists.
+
+        Args:
+            product_id: Explicit product UUID, or None/empty for the active product.
+            operation: Calling operation name, for the error context.
+
+        Returns:
+            The bound Product (read for its ``id`` and ``name``; detail relations
+            are NOT eager-loaded, so callers must not touch them).
+
+        Raises:
+            ValidationError: No active product set, or the supplied id does not
+                belong to this tenant.
+        """
+        if not product_id or not str(product_id).strip():
+            active_product = await self.get_active_product(eager_load=False)
+            if not active_product:
+                raise ValidationError(
+                    "No active product set. Please activate a product first.",
+                    context={"tenant_key": self.tenant_key, "operation": operation},
+                )
+            return active_product
+
+        requested_id = str(product_id).strip()
+        async with self._get_session() as session:
+            product = await self._repo.get_by_id(session, self.tenant_key, requested_id, eager_load=False)
+
+        if product is None:
+            raise ValidationError(
+                f"Product '{requested_id}' was not found for this account, so nothing was created. "
+                "Pass the product_id of one of your own products, or omit product_id to bind to "
+                "the active product.",
+                context={"product_id": requested_id, "tenant_key": self.tenant_key, "operation": operation},
+            )
+        return product

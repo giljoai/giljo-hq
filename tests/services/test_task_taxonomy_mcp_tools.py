@@ -327,31 +327,33 @@ async def test_list_tasks_filters_by_status(db_session, two_tenant_service_setup
     assert second_id not in ids
 
 
-async def test_list_tasks_filter_by_non_tsk_type_returns_nothing(db_session, two_tenant_service_setup):
-    """BE-6049c: tasks are TSK-only, so filtering by any other type yields no tasks.
-
-    (Filtering by a real, non-reserved type still resolves the abbreviation —
-    it simply matches no rows because every task carries the TSK tag.)
+async def test_list_tasks_filter_by_non_tsk_type_is_refused(db_session, two_tenant_service_setup):
+    """BE-9470 (finding 5) superseded the old behaviour this test used to pin:
+    tasks are TSK-only, so a non-TSK task_type filter structurally cannot match
+    a single row. Before BE-9470 that silently answered matched:0 (indistinguishable
+    from a genuine empty result, and self-contradicting against counts.by_type);
+    it is now refused with why, the same U61 precedent applied to status/priority.
+    task_type='TSK' is the one value that IS accepted -- see
+    test_be9470_tasks_side.py for that coverage.
     """
     tenant_a = two_tenant_service_setup["tenant_a"]
     db_manager = two_tenant_service_setup["db_manager"]
     task_service_a = two_tenant_service_setup["task_service_a"]
     await _seed_taxonomy_for(db_session, tenant_a, db_manager)
 
-    made = await task_service_a.create_task_for_mcp(
+    await task_service_a.create_task_for_mcp(
         title="some work",
         description="",
         tenant_key=tenant_a,
         db_manager=db_manager,
     )
 
-    response = await task_service_a.list_tasks_for_mcp(
-        tenant_key=tenant_a,
-        mode="summary",
-        task_type="BE",
-    )
-    ids = {t["task_id"] for t in response["tasks"]}
-    assert made["task_id"] not in ids
+    with pytest.raises(ValidationError, match="TSK"):
+        await task_service_a.list_tasks_for_mcp(
+            tenant_key=tenant_a,
+            mode="summary",
+            task_type="BE",
+        )
 
 
 async def test_list_tasks_is_tenant_scoped(db_session, two_tenant_service_setup):

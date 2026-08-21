@@ -28,8 +28,10 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 
 from giljo_mcp.exceptions import ValidationError
+from giljo_mcp.models.projects import Project
 from giljo_mcp.models.templates import AgentTemplate
 from giljo_mcp.repositories.agent_completion_repository import AgentCompletionRepository
 from giljo_mcp.services.job_lifecycle_service import JobLifecycleService
@@ -137,13 +139,17 @@ async def test_spawn_rejection_message_does_not_offer_a_deleted_agent(
         test_session=db_session,
     )
 
+    # BE-9385a: _validate_spawn_agent takes the project (it reads product_id off it
+    # to scope the allowlist), so load the real row rather than passing a bare id.
+    project = (await db_session.execute(select(Project).where(Project.id == test_project_id))).scalar_one()
+
     with pytest.raises(ValidationError) as exc_info:
         await service._validate_spawn_agent(
             session=db_session,
             agent_display_name="implementer",
             agent_name=f"be9337-nonexistent-{uuid4().hex[:8]}",
             tenant_key=test_tenant_key,
-            project_id=test_project_id,
+            project=project,
             parent_job_id=None,
         )
 

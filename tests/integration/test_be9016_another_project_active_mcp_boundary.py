@@ -42,12 +42,12 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import delete, select
 
 from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -187,7 +187,7 @@ class TestAnotherProjectActiveMcpBoundary:
             # BE-6081 Tier 2: a deliberate, agent-actionable domain rejection must
             # flow through as normal content, NOT isError (this is the exact
             # symptom fixed -- pre-fix this was a raw IntegrityError -> isError).
-            assert not result.isError, (
+            assert not result.is_error, (
                 "ANOTHER_PROJECT_ACTIVE must be a structured Tier-2 rejection, "
                 f"not isError. content: {_content_text(result)!r}"
             )

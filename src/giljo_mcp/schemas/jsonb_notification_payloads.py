@@ -152,6 +152,15 @@ class CloseoutApprovalRequiredPayload(BaseModel):
     auto-creates a user_approval — either a solo closeout block or a chain-link
     settlement approval. Carries enough for the bell/banner to render and link back
     to the project's approval card; the approval itself is the load-bearing record.
+
+    BE-9436b: ``project_name`` names the project the closeout belongs to, so the
+    row obeys the affiliated-name rule (names, never UUIDs) the way
+    ``ProjectPrelaunchWorkproductPayload`` already does. OPTIONAL, unlike that
+    sibling: the emitter is deliberately fail-open (a notification failure must
+    never break the closeout gate), so a project whose name cannot be resolved
+    must still produce a bell row rather than none at all. Rows written before
+    this field existed simply lack the key — ``extra="forbid"`` forbids unknown
+    keys, never absent ones, and the read path does not re-validate.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -159,6 +168,28 @@ class CloseoutApprovalRequiredPayload(BaseModel):
     project_id: str = Field(..., min_length=1, max_length=36)
     approval_id: str = Field(..., min_length=1, max_length=36)
     reason_count: int = Field(..., ge=0)
+    project_name: str | None = Field(default=None, max_length=255)
+
+
+class HubBatonHandoverPayload(BaseModel):
+    """Validates payload for Notification.type == "hub.baton_handover".
+
+    BE-9296a: emitted when a Hub baton is handed to the OPERATOR. FE-9289c already
+    drops a bell entry from the live WebSocket event, but that entry is client-local
+    (localStorage), so a hand-off that arrives while the dashboard is closed — or on
+    a different device — was simply never seen. This is the durable server row that
+    survives a reload and reaches a second browser.
+
+    Carries what the bell needs to render the row and route back to the thread:
+    ``chat_id`` is the human-facing CHT-#### serial, ``handed_by`` is the SERVER-
+    resolved display name of whoever handed over (never self-declared text).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    thread_id: str = Field(..., min_length=1, max_length=36)
+    chat_id: str = Field(..., min_length=1, max_length=64)
+    handed_by: str | None = Field(default=None, max_length=200)
 
 
 NOTIFICATION_PAYLOAD_VALIDATORS: dict[str, type[BaseModel]] = {
@@ -170,6 +201,7 @@ NOTIFICATION_PAYLOAD_VALIDATORS: dict[str, type[BaseModel]] = {
     "system.context_tuning_due": ContextTuningDuePayload,
     "project.pre_launch_workproduct": ProjectPrelaunchWorkproductPayload,
     "closeout.approval_required": CloseoutApprovalRequiredPayload,
+    "hub.baton_handover": HubBatonHandoverPayload,
 }
 
 

@@ -294,7 +294,12 @@ const oauthParams = computed(() => ({
   code_challenge_method: route.query.code_challenge_method || '',
   scope: route.query.scope || '',
   state: route.query.state || '',
-  resource: route.query.resource || '',
+  // SEC-9451: absent must stay absent. `|| ''` turned a missing param into an
+  // empty string, and the backend accepts `None` but rejects `""` — so a
+  // client that sends no `resource` (claude.ai sends none) was 400'd on its
+  // own consent POST. `undefined` is dropped by JSON.stringify, so the key
+  // never reaches the request body. The forwarding above is unaffected.
+  resource: route.query.resource || undefined,
 }))
 
 // Check if required OAuth parameters are present

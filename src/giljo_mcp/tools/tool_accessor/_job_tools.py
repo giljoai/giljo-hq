@@ -37,9 +37,15 @@ class JobLifecycleMixin:
         reason: str = "",
         wake_in_minutes: int | None = None,
         tenant_key: str | None = None,
+        wake_on_signal: bool = False,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Set agent resting/blocked status. Sprint 002f: collapsed to AgentStateService."""
         return await self._agent_state_service.set_agent_status(
-            job_id=job_id, status=status, reason=reason, wake_in_minutes=wake_in_minutes, tenant_key=tenant_key
+            job_id=job_id,
+            status=status,
+            reason=reason,
+            wake_in_minutes=wake_in_minutes,
+            wake_on_signal=wake_on_signal,
+            tenant_key=tenant_key,
         )

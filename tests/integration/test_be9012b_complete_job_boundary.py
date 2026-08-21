@@ -30,7 +30,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import select
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob, AgentTodoItem
@@ -38,6 +37,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.tasks import Message, MessageRecipient
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -45,7 +45,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(call_tool_result) -> dict:
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     text = getattr(call_tool_result.content[0], "text", None)
     if text is None:
         raise AssertionError(f"unexpected content block: {call_tool_result.content[0]!r}")
@@ -191,7 +191,7 @@ async def test_closeout_dance_gone_without_flags_via_mcp(boundary_client):
             {"job_id": job.job_id, "result": {"summary": "closeout, no flags"}},
         )
 
-    assert result.isError is False, f"closeout dance must be gone; got: {_error_text(result)}"
+    assert result.is_error is False, f"closeout dance must be gone; got: {_error_text(result)}"
     payload = _payload(result)
     assert payload.get("status") == "success", payload
 
@@ -217,5 +217,5 @@ async def test_action_required_post_still_blocks_via_mcp(boundary_client):
             {"job_id": job.job_id, "result": {"summary": "should be blocked"}},
         )
 
-    assert result.isError is True, "an unresolved action-required post must block complete_job at the boundary"
+    assert result.is_error is True, "an unresolved action-required post must block complete_job at the boundary"
     assert "COMPLETION_BLOCKED" in _error_text(result)

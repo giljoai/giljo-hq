@@ -3,6 +3,11 @@
     <!-- LIST VIEW. FE-9365c: the list and the thread are two views of the same region,
          not two panes side by side. Opening a card REPLACES the list. -->
     <template v-if="!commHub.selectedThreadId">
+      <!-- FE-9368 (A): ONE column for the whole list view. The card column was capped
+           at 1120px while the bar above it ran the full page width, so the two never
+           lined up. Capping and centring them together keeps the readable card width
+           and makes the bar exactly as wide as the cards it filters. -->
+      <div class="hub-view__column">
       <v-row class="align-center mb-4 main-window-reveal main-window-reveal--hero main-window-delay-1">
         <v-col>
           <h1 class="text-headline-large">Message Hub</h1>
@@ -84,26 +89,25 @@
             hide-details
             data-testid="hub-sort"
           />
-          <v-btn color="primary" prepend-icon="mdi-plus" data-testid="new-thread-btn" @click="showNewThread = true">
-            New Thread
-          </v-btn>
+          <!-- FE-9368 (B): the icon toolbar ProjectsView already uses (FE-6176). The
+               labels moved into the tooltips; the deleted COUNT moved onto the trash
+               icon as an alert dot, so the row reads as icons rather than sentences. -->
           <v-btn
-            variant="outlined"
-            :color="deletedThreads.length > 0 ? 'warning' : 'grey'"
-            prepend-icon="mdi-delete-restore"
-            :disabled="deletedThreads.length === 0"
+            color="primary"
+            variant="flat"
+            icon="mdi-plus"
+            title="New thread"
+            aria-label="Create new thread"
+            class="filter-cta-new"
+            data-testid="new-thread-btn"
+            @click="showNewThread = true"
+          />
+          <DeletedCountButton
+            :count="deletedThreads.length"
+            entity="threads"
+            class="filter-cta-deleted"
             data-testid="deleted-threads-btn"
             @click="openDeletedThreads"
-          >
-            Deleted ({{ deletedThreads.length }})
-          </v-btn>
-          <v-btn
-            variant="outlined"
-            icon="mdi-help-circle-outline"
-            title="What the indicators mean"
-            :color="legendOpen ? 'warning' : undefined"
-            data-testid="hub-legend-btn"
-            @click="legendOpen = !legendOpen"
           />
         </div>
 
@@ -115,7 +119,7 @@
           type="button"
           class="hub-view__attention smooth-border"
           data-testid="hub-attention-strip"
-          @click="onThreadSelect(attentionThread.thread_id)"
+          @click="openAttentionThread"
         >
           <v-icon size="16" class="hub-view__attention-icon">mdi-hand-back-right-outline</v-icon>
           <span class="hub-view__attention-text">
@@ -133,24 +137,12 @@
           :sort="sort"
           @select="onThreadSelect"
         />
+      </div>
     </template>
 
     <!-- THREAD VIEW — replaces the list in the same region. -->
     <template v-else>
-      <div class="hub-view__back-row">
-        <button type="button" class="hub-view__back" data-testid="hub-back" @click="backToList">
-          <v-icon size="16">mdi-arrow-left</v-icon> All threads
-        </button>
-        <v-btn
-          variant="outlined"
-          size="small"
-          icon="mdi-help-circle-outline"
-          title="What the indicators mean"
-          :color="legendOpen ? 'warning' : undefined"
-          data-testid="hub-legend-btn-thread"
-          @click="legendOpen = !legendOpen"
-        />
-      </div>
+      <HubThreadToolbar v-model="messageSearch" @back="backToList" />
       <div class="hub-view__main">
           <!-- Thread header: the sharing moment. Rename lives here as well as on the
                card (DoD 3), and the id sits in a terminal block with the join_thread
@@ -231,14 +223,15 @@
             </button>
           </div>
 
-        <ThreadTimeline class="hub-view__timeline" />
+        <ThreadTimeline
+          class="hub-view__timeline"
+          :search="messageSearch"
+          :focus-message-id="focusMessageId"
+          :focus-reason="focusReason"
+        />
         <HubComposer class="hub-view__composer" />
       </div>
     </template>
-
-    <!-- The legend floats beside the content (prototype placement), available from BOTH
-         the list and an open thread. Default CLOSED. -->
-    <IndicatorLegend v-if="legendOpen" @close="legendOpen = false" />
 
     <!-- New thread dialog -->
     <NewThreadDialog
@@ -263,8 +256,8 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useCommHubStore } from '@/stores/commHubStore'
 import { useUserStore } from '@/stores/user'
 import { registerReconnectResync } from '@/stores/websocketEventRouter'
@@ -272,17 +265,25 @@ import { useToast } from '@/composables/useToast'
 import { useClipboard } from '@/composables/useClipboard'
 import api from '@/services/api'
 import ThreadList from '@/components/hub/ThreadList.vue'
-import IndicatorLegend from '@/components/hub/IndicatorLegend.vue'
 import AgentPill from '@/components/hub/AgentPill.vue'
+import DeletedCountButton from '@/components/common/DeletedCountButton.vue'
 import ThreadTimeline from '@/components/hub/ThreadTimeline.vue'
 import HubComposer from '@/components/hub/HubComposer.vue'
+import HubThreadToolbar from '@/components/hub/HubThreadToolbar.vue'
 import NewThreadDialog from '@/components/hub/NewThreadDialog.vue'
 import ThreadCreatedDialog, { isThreadCreatedHintHidden } from '@/components/hub/ThreadCreatedDialog.vue'
 import ThreadDeletedDialog from '@/components/hub/ThreadDeletedDialog.vue'
+import {
+  hubThreadRoute,
+  resolveFocusMessageId,
+  focusReasonOf,
+} from '@/components/hub/hubThreadRoute'
+import { threadDisplayName } from '@/components/hub/threadDisplayName'
 
 const commHub = useCommHubStore()
 const userStore = useUserStore()
 const route = useRoute()
+const router = useRouter()
 const { showToast } = useToast()
 const { copy } = useClipboard()
 const showNewThread = ref(false)
@@ -305,9 +306,10 @@ const sortOptions = [
   { title: 'Serial', value: 'serial' },
 ]
 
-// The indicator legend (FE-9365e fills the panel in). Default CLOSED — it must not
-// cover the cards on load.
-const legendOpen = ref(false)
+// FE-9368 (D): the in-thread message filter. Cleared whenever the open thread changes,
+// so a query typed in one conversation never silently hides messages in the next one.
+const messageSearch = ref('')
+watch(() => commHub.selectedThreadId, () => { messageSearch.value = '' })
 
 // The header's pill row: agent participants of the open thread, same filter as the
 // card. The user is not a "registered agent" here either.
@@ -402,18 +404,7 @@ onMounted(async () => {
   // the list has to be known before the operator clicks rather than fetched on click.
   await loadDeletedThreads()
 
-  // FE-9012c (D3): the /jobs message icon deep-links via ?thread=<id>&tab=project.
-  // Honor an explicit tab, then pre-select the thread and align the tab to its
-  // binding (project_id present => Project threads, else General threads).
-  if (route.query.tab === 'project' || route.query.tab === 'town') {
-    activeTab.value = route.query.tab
-  }
-  const deepLinkThreadId = route.query.thread
-  if (deepLinkThreadId) {
-    await onThreadSelect(deepLinkThreadId)
-    const t = commHub.threadsById.get(deepLinkThreadId)
-    if (t) activeTab.value = t.project_id != null ? 'project' : 'town'
-  }
+  await applyThreadDeepLink()
 
   // Register reconnect-resync: reload threads and re-fetch selected thread on WS reconnect
   unregisterResync = registerReconnectResync(async () => {
@@ -429,9 +420,61 @@ onBeforeUnmount(() => {
 })
 
 async function onThreadSelect(threadId) {
+  // FE-9410: SELECT first, then fetch. Selection is the only thing that swaps this
+  // region from the list to the thread (the two are v-if branches over
+  // selectedThreadId), and loadThread() deliberately does not set it. ThreadList
+  // selects inside its own onSelect before emitting, so card clicks always worked and
+  // every caller that reached this function DIRECTLY — the attention strip, the
+  // ?thread= deep link — fetched a thread it never opened. Re-selecting an already
+  // selected thread is idempotent, so the ThreadList path is unaffected.
+  commHub.selectThread(threadId)
   await commHub.loadThread(threadId)
   await commHub.loadParticipants(threadId)
 }
+
+/**
+ * FE-9410: the attention strip navigates rather than selecting in place, so it travels
+ * the identical route as the app-wide banner row — one hand-off, one landing.
+ */
+function openAttentionThread() {
+  if (!attentionThread.value) return
+  router.push(hubThreadRoute(attentionThread.value))
+}
+
+/**
+ * FE-9012c (D3): the /jobs message icon deep-links via ?thread=<id>&tab=project.
+ * Honor an explicit tab, then open the thread and align the tab to its binding
+ * (project_id present => Project threads, else General threads).
+ */
+async function applyThreadDeepLink() {
+  if (route.query.tab === 'project' || route.query.tab === 'town') {
+    activeTab.value = route.query.tab
+  }
+  const deepLinkThreadId = route.query.thread
+  if (!deepLinkThreadId) return
+  await onThreadSelect(deepLinkThreadId)
+  const t = commHub.threadsById.get(deepLinkThreadId)
+  if (t) activeTab.value = t.project_id != null ? 'project' : 'town'
+}
+
+// FE-9410: mount is not enough. The your-turn banner is app-wide, so it is clickable
+// while the operator is ALREADY standing in the Hub, and that push changes the query
+// under a component that never remounts. Without this watch the second notification for
+// the same hand-off does nothing at all.
+watch(() => route.query.thread, (threadId) => { if (threadId) applyThreadDeepLink() })
+
+/**
+ * FE-9410 / FE-9418: which message the operator was sent here to read. The rule itself
+ * lives beside the route that writes the anchor — see `resolveFocusMessageId`.
+ */
+const focusMessageId = computed(() =>
+  resolveFocusMessageId(route.query, commHub.selectedThreadId, commHub.messagesFor(commHub.selectedThreadId)),
+)
+
+// FE-9436: why they were sent — the words on the mark, nothing more. Read from the SAME
+// query that authorised the focus above, so the two cannot disagree: an id resolves only
+// when that query names a recognised reason, and this returns that same reason.
+const focusReason = computed(() => focusReasonOf(route.query))
 
 function onThreadCreated(thread) {
   if (thread?.thread_id) {
@@ -470,7 +513,8 @@ async function onRestoreThread(thread) {
   try {
     await api.threads.restore(thread.thread_id)
     deletedThreads.value = deletedThreads.value.filter((t) => t.thread_id !== thread.thread_id)
-    showToast({ type: 'success', message: `Thread ${thread.chat_id || thread.thread_id} restored.` })
+    // FE-9436: the shared naming rule. The old fallback rendered a raw thread UUID here.
+    showToast({ type: 'success', message: `${threadDisplayName(thread)} restored.` })
     await commHub.loadThreads(commHub.filters)
   } catch (err) {
     const msg = err?.response?.data?.detail ?? 'Failed to restore thread.'
@@ -495,6 +539,15 @@ async function onRestoreThread(thread) {
 
   @include filterBar.list-filter-bar;
 
+  // FE-9368 (A): the list view's single column. 1120px is the card width FE-9365c
+  // chose for readability; hanging the header, tabs, bar and cards off ONE cap is
+  // what makes the bar and the cards line up instead of merely sitting near each
+  // other. Centred, so the empty space is symmetrical on a wide monitor.
+  &__column {
+    max-width: 1120px;
+    margin-inline: auto;
+  }
+
   // General / Projects on their OWN row between the subtitle and the filter bar.
   &__tabs {
     display: flex;
@@ -502,11 +555,8 @@ async function onRestoreThread(thread) {
     margin-bottom: 16px;
   }
 
-  &__back-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
+  // FE-9439: the back link, the in-thread search and the hand toggle moved to
+  // HubThreadToolbar.vue with their styles — see that file for why.
 
   // The one accent strip. Yellow because it is the handover colour — and it exists
   // only when the baton points at the operator, so it is rare by construction.
@@ -551,22 +601,6 @@ async function onRestoreThread(thread) {
     align-items: center;
     gap: v.$spacing-sm;
     min-width: 0;
-  }
-
-  &__back {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: none;
-    border: none;
-    padding: 0;
-    margin-bottom: v.$spacing-md;
-    cursor: pointer;
-    font-size: 0.8125rem; // 13
-    color: var(--text-muted);
-    transition: color $transition-fast;
-
-    &:hover { color: $color-brand-yellow; }
   }
 
   &__main {

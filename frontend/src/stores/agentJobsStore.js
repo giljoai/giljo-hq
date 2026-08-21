@@ -116,6 +116,13 @@ export const useAgentJobsStore = defineStore('agentJobsDomain', () => {
       next.set(job.unique_key, job)
     }
     jobsById.value = next
+    // FE-9380: this is the authoritative project-scoped replace, so any queued
+    // delta is stale against it by definition -- and a project switch reaches
+    // here without ever calling $reset. Left alive, a patch queued for the
+    // previous project flushes after the replace and inserts a row the new
+    // project never had (invisible to JobsTab's project_id filter, rendered by
+    // LaunchTab's unfiltered list). The next WS event re-syncs anything real.
+    discardPendingUpdates()
   }
 
   function upsertJob(patch) {
@@ -208,6 +215,18 @@ export const useAgentJobsStore = defineStore('agentJobsDomain', () => {
 
   // Debounced version of flush -- batches rapid-fire minor events (~300ms)
   const debouncedFlush = debounce(flushPendingUpdates, 300)
+
+  /**
+   * FE-9380: drop the queue instead of applying it. The queue and its timer live
+   * in this closure, not in jobsById, so clearing the Map alone leaves them able
+   * to write state back into it. Called wherever jobsById is authoritatively
+   * replaced. debounce().cancel() only drops the scheduled call -- the debouncer
+   * keeps working for subsequent queues.
+   */
+  function discardPendingUpdates() {
+    pendingUpdates.clear()
+    debouncedFlush.cancel()
+  }
 
   /**
    * Queue a patch for debounced application. Resolves the unique_key,
@@ -351,12 +370,84 @@ export const useAgentJobsStore = defineStore('agentJobsDomain', () => {
   // WebSocket event handlers
   // =========================
 
+  // =========================
+  // BE-9416: mission top-up
+  // =========================
+  // agent:created and agent:mission_updated now BOUND the mission they carry, so
+  // it clears the cross-worker broker's pg_notify byte cap (an unbounded mission
+  // meant the event silently never reached sessions on another uvicorn worker).
+  // A bounded event states mission_truncated/mission_length, and the store fetches
+  // the rest -- ids-not-blobs, with the hydration on the receiving side.
+  //
+  // Done in the STORE, not in the components that render the mission: both
+  // AgentJobModal and AgentMissionEditModal read the row, so one top-up here
+  // serves them and anything added later. A component-level fetch would have to
+  // be repeated per reader and would miss the row until someone opened it.
+
+  const missionTopUpInFlight = new Set()
+  const missionTopUpQueued = new Set()
+
+  async function topUpMission(jobId) {
+    if (!jobId) return
+
+    // COALESCE rather than drop. A read already in flight may have queried the
+    // server before this newer event's write committed, so simply skipping the
+    // second request could leave the row stuck on its excerpt for good. One
+    // follow-up pass serves everything that arrived during the first, so the last
+    // event is always answered by a read that STARTED after it -- N events cost at
+    // most 2 reads, not N.
+    if (missionTopUpInFlight.has(jobId)) {
+      missionTopUpQueued.add(jobId)
+      return
+    }
+    missionTopUpInFlight.add(jobId)
+
+    try {
+      const response = await api.agentJobs.get(jobId)
+      const mission = response?.data?.mission
+      if (typeof mission === 'string') {
+        const key = resolveJobId(jobId)
+        const previous = key ? jobsById.value.get(key) : null
+        // Existing-only: a top-up must never CREATE a row. The event that
+        // triggered it may have been filtered as cross-project (Handover 0463),
+        // and a fetch answering it must not smuggle the ghost row back in.
+        if (previous) {
+          upsertJob({
+            ...previous,
+            mission,
+            mission_truncated: false,
+            mission_length: mission.length,
+          })
+        }
+      }
+    } catch (error) {
+      // Deliberately silent and non-fatal, and deliberately NOT written to any
+      // store-wide loading/error state: this is a background read nobody asked
+      // for, and it must not raise a banner over a mission the operator can
+      // already partly read.
+      // eslint-disable-next-line no-console
+      console.debug('[agentJobsStore] mission top-up failed (non-fatal):', error)
+    } finally {
+      missionTopUpInFlight.delete(jobId)
+      if (missionTopUpQueued.delete(jobId)) {
+        topUpMission(jobId)
+      }
+    }
+  }
+
+  function maybeTopUpMission(payload) {
+    if (!payload?.mission_truncated) return
+    topUpMission(payload.job_id || payload.agent_id || payload.id)
+  }
+
   function handleCreated(payload) {
     upsertJob(payload)
+    maybeTopUpMission(payload)
   }
 
   function handleUpdated(payload) {
     upsertJob(payload)
+    maybeTopUpMission(payload)
   }
 
   function handleStatusChanged(payload) {
@@ -481,6 +572,14 @@ export const useAgentJobsStore = defineStore('agentJobsDomain', () => {
 
   function $reset() {
     jobsById.value = new Map()
+    // FE-9380: the debouncers hold session state outside jobsById. Without this,
+    // a patch queued just before the reset flushes up to 300ms later and
+    // re-inserts the previous session's job into the fresh Map.
+    discardPendingUpdates()
+    // Unlike setJobs, a reset means there is no session left to refresh counts
+    // for -- so drop that fetch too rather than letting it hit /jobs for a
+    // session that has gone away.
+    debouncedFetchWaitingCounts.cancel()
   }
 
   // Create a proxy object that maintains .value structure
@@ -514,6 +613,7 @@ export const useAgentJobsStore = defineStore('agentJobsDomain', () => {
     upsertJob,
     removeJob,
     refreshMessagesWaitingCounts,
+    topUpMission,
 
     // ws handlers
     handleCreated,

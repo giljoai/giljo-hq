@@ -78,6 +78,30 @@ async def authed_client_for_first_admin(db_manager, api_client):
     yield api_client
 
 
+async def _global_user_count(db_manager) -> int:
+    """Users across every tenant, read NOW (INF-9417).
+
+    ``create-first-admin`` refuses whenever ANY user exists, so this is the
+    endpoint's own precondition. It is deliberately read AFTER the response and
+    never before: read beforehand it is a prediction, and the suite runs under
+    ``pytest-xdist`` where a peer can both create users and -- via the BE-9238
+    teardown -- delete them, so a pre-read is stale in both directions.
+    """
+    from sqlalchemy import func, select
+
+    from giljo_mcp.database import tenant_isolation_bypass
+    from giljo_mcp.models.auth import User
+
+    async with db_manager.get_session_async() as session:
+        with tenant_isolation_bypass(
+            session,
+            reason="first-admin tests assert on the endpoint's global user-count precondition",
+            models=(User,),
+        ):
+            result = await session.execute(select(func.count()).select_from(User))
+        return result.scalar()
+
+
 @_skip_in_saas
 @pytest.mark.asyncio
 async def test_create_first_admin_accepts_workspace_name(api_client, db_manager):
@@ -91,22 +115,15 @@ async def test_create_first_admin_accepts_workspace_name(api_client, db_manager)
 
     NOTE: This test uses unique credentials to avoid conflicts.
     If first admin already exists, endpoint returns 400 (expected behavior).
+
+    INF-9417: the branch is chosen by the RESPONSE, never by a user count read
+    beforehand. The old shape read ``count(*) FROM users``, POSTed, and then
+    asserted 201-or-400 on that now-stale number -- so any concurrent writer
+    decided the outcome while the test still believed the old one. The count is
+    not even monotonic: ``tests/conftest.py``'s BE-9238 teardown DELETEs the
+    tenants a peer minted, so it moves in both directions. Each branch is now
+    checked against the state at the time of the response instead.
     """
-    from sqlalchemy import func, select
-
-    from giljo_mcp.database import tenant_isolation_bypass
-    from giljo_mcp.models.auth import User
-
-    # Check if any users already exist (endpoint rejects if total_users > 0, not just admins)
-    async with db_manager.get_session_async() as session:
-        with tenant_isolation_bypass(
-            session,
-            reason="test setup checks first-admin global user count",
-            models=(User,),
-        ):
-            user_count_result = await session.execute(select(func.count()).select_from(User))
-        user_count = user_count_result.scalar()
-
     unique_suffix = str(uuid4())[:8]
     request_body = {
         "username": f"admin_{unique_suffix}",
@@ -119,44 +136,45 @@ async def test_create_first_admin_accepts_workspace_name(api_client, db_manager)
     # Act
     response = await api_client.post("/api/auth/create-first-admin", json=request_body)
 
-    # Assert based on whether users already exist (endpoint checks total user count)
-    if user_count > 0:
-        # Users already exist - endpoint should reject (fresh install only)
-        assert response.status_code == 400, f"Expected 400 when users exist, got {response.status_code}"
+    # Assert: whichever branch the endpoint took must be correct ON ITS OWN TERMS.
+    if response.status_code == 400:
         assert "already exists" in response.text.lower() or "already created" in response.text.lower()
-    else:
-        # No admin yet - should create successfully
-        assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.text}"
+        assert await _global_user_count(db_manager) > 0, (
+            "the endpoint refused because users already exist, so users must exist -- "
+            "a refusal against an empty users table is a real failure, not a race"
+        )
+        return
 
-        data = response.json()
-        assert data["username"] == f"admin_{unique_suffix}"
-        assert data["role"] == "admin"
-        assert data["tenant_key"].startswith("tk_")
+    assert response.status_code == 201, f"Expected 201 or 400, got {response.status_code}: {response.text}"
 
-        # Verify organization was created with correct name
-        from sqlalchemy import select
+    data = response.json()
+    assert data["username"] == f"admin_{unique_suffix}"
+    assert data["role"] == "admin"
+    assert data["tenant_key"].startswith("tk_")
 
-        from giljo_mcp.models.auth import User
-        from giljo_mcp.models.organizations import Organization
+    # Verify organization was created with correct name
+    from sqlalchemy import select
 
-        async with db_manager.get_session_async() as session:
-            session.info["tenant_key"] = data["tenant_key"]
-            # Get user
-            user_stmt = select(User).where(User.username == f"admin_{unique_suffix}")
-            user_result = await session.execute(user_stmt)
-            user = user_result.scalar_one_or_none()
+    from giljo_mcp.models.auth import User
+    from giljo_mcp.models.organizations import Organization
 
-            if user:
-                # Verify user has org_id
-                assert user.org_id is not None, "User should have org_id set"
+    async with db_manager.get_session_async() as session:
+        session.info["tenant_key"] = data["tenant_key"]
+        user_stmt = select(User).where(User.username == f"admin_{unique_suffix}")
+        user_result = await session.execute(user_stmt)
+        user = user_result.scalar_one_or_none()
 
-                # Get organization
-                org_stmt = select(Organization).where(Organization.id == user.org_id)
-                org_result = await session.execute(org_stmt)
-                org = org_result.scalar_one()
+        # Unconditional: the endpoint reported 201, so the row is there. The old
+        # `if user:` made every assertion below optional, so the test could pass
+        # having checked nothing at all.
+        assert user is not None, "endpoint returned 201, so the admin row must exist"
+        assert user.org_id is not None, "User should have org_id set"
 
-                # Verify organization name matches workspace_name
-                assert org.name == f"Acme Corporation {unique_suffix}", f"Expected org name, got '{org.name}'"
+        org_stmt = select(Organization).where(Organization.id == user.org_id)
+        org_result = await session.execute(org_stmt)
+        org = org_result.scalar_one()
+
+        assert org.name == f"Acme Corporation {unique_suffix}", f"Expected org name, got '{org.name}'"
 
 
 @_skip_in_saas
@@ -170,22 +188,10 @@ async def test_create_first_admin_defaults_workspace_name(api_client, db_manager
     - Organization created with default name
 
     NOTE: This test uses unique credentials to avoid conflicts.
+
+    INF-9417: branch on the RESPONSE, not on a stale pre-read of the user count.
+    See ``test_create_first_admin_accepts_workspace_name`` for the full reasoning.
     """
-    from sqlalchemy import func, select
-
-    from giljo_mcp.database import tenant_isolation_bypass
-    from giljo_mcp.models.auth import User
-
-    # Check if any users already exist (endpoint rejects if total_users > 0, not just admins)
-    async with db_manager.get_session_async() as session:
-        with tenant_isolation_bypass(
-            session,
-            reason="test setup checks first-admin global user count",
-            models=(User,),
-        ):
-            user_count_result = await session.execute(select(func.count()).select_from(User))
-        user_count = user_count_result.scalar()
-
     unique_suffix = str(uuid4())[:8]
     request_body = {
         "username": f"admin_default_{unique_suffix}",
@@ -198,38 +204,40 @@ async def test_create_first_admin_defaults_workspace_name(api_client, db_manager
     # Act
     response = await api_client.post("/api/auth/create-first-admin", json=request_body)
 
-    # Assert based on whether users already exist (endpoint checks total user count)
-    if user_count > 0:
-        # Users already exist - endpoint should reject (fresh install only)
-        assert response.status_code == 400, f"Expected 400 when users exist, got {response.status_code}"
-    else:
-        # No admin yet - should create successfully with default org name
-        assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.text}"
+    # Assert: whichever branch the endpoint took must be correct ON ITS OWN TERMS.
+    if response.status_code == 400:
+        assert await _global_user_count(db_manager) > 0, (
+            "the endpoint refused because users already exist, so users must exist -- "
+            "a refusal against an empty users table is a real failure, not a race"
+        )
+        return
 
-        data = response.json()
-        assert data["username"] == f"admin_default_{unique_suffix}"
+    assert response.status_code == 201, f"Expected 201 or 400, got {response.status_code}: {response.text}"
 
-        # Verify organization was created with default name
-        from sqlalchemy import select
+    data = response.json()
+    assert data["username"] == f"admin_default_{unique_suffix}"
 
-        from giljo_mcp.models.auth import User
-        from giljo_mcp.models.organizations import Organization
+    # Verify organization was created with default name
+    from sqlalchemy import select
 
-        async with db_manager.get_session_async() as session:
-            session.info["tenant_key"] = data["tenant_key"]
-            # Get user
-            user_stmt = select(User).where(User.username == f"admin_default_{unique_suffix}")
-            user_result = await session.execute(user_stmt)
-            user = user_result.scalar_one_or_none()
+    from giljo_mcp.models.auth import User
+    from giljo_mcp.models.organizations import Organization
 
-            if user:
-                # Get organization
-                org_stmt = select(Organization).where(Organization.id == user.org_id)
-                org_result = await session.execute(org_stmt)
-                org = org_result.scalar_one()
+    async with db_manager.get_session_async() as session:
+        session.info["tenant_key"] = data["tenant_key"]
+        user_stmt = select(User).where(User.username == f"admin_default_{unique_suffix}")
+        user_result = await session.execute(user_stmt)
+        user = user_result.scalar_one_or_none()
 
-                # Verify organization name is default
-                assert org.name == "My Organization", f"Expected 'My Organization', got '{org.name}'"
+        # Unconditional, for the same reason as its sibling: `if user:` made the
+        # org-name assertion -- the only thing this test exists to check -- optional.
+        assert user is not None, "endpoint returned 201, so the admin row must exist"
+
+        org_stmt = select(Organization).where(Organization.id == user.org_id)
+        org_result = await session.execute(org_stmt)
+        org = org_result.scalar_one()
+
+        assert org.name == "My Organization", f"Expected 'My Organization', got '{org.name}'"
 
 
 @pytest.mark.asyncio
@@ -377,7 +385,6 @@ async def _seed_user_key_and_open_notification(db_manager) -> dict:
         session.add(notification)
         await session.commit()
 
-        os.environ.setdefault("JWT_SECRET", "test_secret_key")
         token = JWTManager.create_access_token(
             user_id=user.id,
             username=user.username,

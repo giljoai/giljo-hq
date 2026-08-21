@@ -32,37 +32,31 @@ Removed the never-production-called create_template / update_template / list_tem
 """
 
 import logging
-import re
 from datetime import UTC, datetime
-from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import func
 
 from giljo_mcp.database import DatabaseManager, tenant_session_context
-from giljo_mcp.domain.soft_delete import RECOVER_WINDOW_DAYS, recover_window_expired
 from giljo_mcp.exceptions import (
-    AuthorizationError,
     BaseGiljoError,
-    ProjectStateError,
-    ResourceNotFoundError,
     TemplateNotFoundError,
     ValidationError,
 )
 
 # Model imports: Use domain-specific imports (Post-0128a)
 from giljo_mcp.models.templates import AgentTemplate, TemplateArchive
+from giljo_mcp.repositories.product_agent_selection import record_product_export
 from giljo_mcp.repositories.template_repository import TemplateRepository
 from giljo_mcp.schemas.jsonb_validators import validate_behavioral_rules, validate_success_criteria
 from giljo_mcp.schemas.service_responses import (
     TemplateDetail,
     TemplateGetResult,
 )
+from giljo_mcp.services import template_lifecycle, template_write_paths
 from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.system_roles import SYSTEM_MANAGED_ROLES
-from giljo_mcp.template_validation import get_role_color, slugify_name
 from giljo_mcp.tenant import TenantManager
-from giljo_mcp.utils.log_sanitizer import sanitize
 
 
 logger = logging.getLogger(__name__)
@@ -226,103 +220,11 @@ class TemplateService:
     ) -> AgentTemplate:
         """Create a template from a validated create request (owning-service write path).
 
-        BE-8000j: this owns the FULL create materialization the REST endpoint
-        previously performed inline — name generation + collision suffixing,
-        canonical MCP bootstrap injection (system_instructions is always the
-        canonical bootstrap, never the caller-supplied value), background-color /
-        description defaults, ``{var}`` extraction from user_instructions, and
-        ``is_default`` sibling clearing — then delegates the commit to
-        :meth:`add_and_commit_template`. The endpoint stays thin and only
-        translates the raised ``ValidationError`` into HTTP 400.
-
-        Args:
-            session: Caller-owned DB session (transaction boundary owned by caller).
-            data: A ``TemplateCreate``-shaped request object (attribute access:
-                ``name``/``role``/``cli_tool``/``custom_suffix``/``background_color``/
-                ``description``/``user_instructions``/``model``/``behavioral_rules``/
-                ``success_criteria``/``tags``/``is_default``/``is_active``/``category``).
-                Duck-typed on purpose so the service does not import the API layer.
-            tenant_key: Tenant key for isolation (REQUIRED).
-            created_by: Username stamped as the template author.
-
-        Returns:
-            The persisted (flushed + refreshed) AgentTemplate.
-
-        Raises:
-            ValidationError: Name shape invalid, name too long, or suffix exhaustion.
+        Delegates to :func:`giljo_mcp.services.template_write_paths.create_from_request`
+        (BE-9394 extraction). This stays the owning-service entry point every caller and
+        test uses; the full contract lives on that function.
         """
-        from giljo_mcp.template_seeder import _get_mcp_bootstrap_section
-
-        # Generate name from role + suffix (always slugify for safety)
-        raw_name = data.name or data.role or ""
-        generated_name = slugify_name(data.role or raw_name, data.custom_suffix)
-
-        if not generated_name or not re.match(r"^[a-z0-9]+(-[a-z0-9]+)*$", generated_name):
-            raise ValidationError(message="Name must use lowercase letters, numbers, and hyphens only")
-        if len(generated_name) > 100:
-            raise ValidationError(message="Name must be 100 characters or less")
-
-        # Auto-suffix if name already taken for this tenant
-        base_name = generated_name
-        counter = 2
-        while await self.check_template_name_exists(session, tenant_key, generated_name):
-            generated_name = f"{base_name}-{counter}"
-            counter += 1
-            if counter > 20:
-                raise ValidationError(message=f"Too many agents named '{base_name}' — use a custom suffix")
-
-        # Inject canonical MCP bootstrap — ignore whatever the frontend sends
-        canonical_bootstrap = _get_mcp_bootstrap_section()
-
-        # Auto-assign background color
-        background_color = data.background_color or get_role_color(data.role)
-
-        # Set default description when missing
-        description = data.description
-        if not description:
-            if data.cli_tool == "claude":
-                description = f"Subagent for {data.role}"
-            else:
-                # Generic fallback for non-Claude templates
-                description = f"{data.role} agent template" if data.role else "Agent template"
-
-        # Extract variables from user_instructions (if any)
-        variables = re.findall(r"\{(\w+)\}", data.user_instructions or "")
-
-        if data.is_default and data.role:
-            existing_defaults = await self.get_default_templates_by_role(session, tenant_key, data.role)
-            for existing in existing_defaults:
-                existing.is_default = False
-
-        new_template = AgentTemplate(
-            id=str(uuid4()),
-            tenant_key=tenant_key,
-            name=generated_name,
-            category=data.category or "role",
-            role=data.role,
-            cli_tool=data.cli_tool,
-            background_color=background_color,
-            description=description,
-            system_instructions=canonical_bootstrap,
-            user_instructions=data.user_instructions or "",
-            model=data.model or "sonnet",
-            tools=None,
-            variables=variables,
-            behavioral_rules=data.behavioral_rules or [],
-            success_criteria=data.success_criteria or [],
-            version="1.0.0",
-            is_active=data.is_active,
-            is_default=data.is_default,
-            tags=data.tags or [],
-            tool=data.cli_tool,
-            created_by=created_by,
-        )
-
-        await self.add_and_commit_template(session, new_template)
-
-        self._logger.info("Created template %s for tenant %s", new_template.id, tenant_key)
-
-        return new_template
+        return await template_write_paths.create_from_request(self, session, data, tenant_key, created_by)
 
     async def update_template_from_request(
         self,
@@ -334,115 +236,11 @@ class TemplateService:
     ) -> tuple[AgentTemplate, list[str]]:
         """Update a template from a validated update request (owning-service write path).
 
-        BE-8000j: owns the FULL update logic the REST endpoint previously ran
-        inline — the system-managed guard, the read-only ``system_instructions``
-        guard, archive-on-user_instructions-change, the 16-slot active-limit
-        check, the metadata-only ``updated_at`` preservation, the field-allowlist
-        apply, legacy ``tool``/``cli_tool`` mirroring, and role→background-color.
-        The endpoint stays thin and translates the raised domain exceptions to
-        their existing HTTP status codes.
-
-        Args:
-            session: Caller-owned DB session.
-            template_id: Template UUID.
-            updates: A ``TemplateUpdate``-shaped request object exposing
-                ``model_dump(exclude_unset=True)`` (duck-typed; the service does
-                not import the API layer).
-            tenant_key: Tenant key for isolation (REQUIRED).
-            username: Username stamped on the auto-archive.
-
-        Returns:
-            ``(template, updated_fields)`` — the refreshed template and the list of
-            request field names applied (for the caller's WebSocket event payload).
-
-        Raises:
-            TemplateNotFoundError: No live template with this id for the tenant (HTTP 404).
-            AuthorizationError: System-managed template, or system_instructions write (HTTP 403).
-            ProjectStateError: active-slot limit exceeded (HTTP 409).
+        Delegates to :func:`giljo_mcp.services.template_write_paths.update_from_request`
+        (BE-9394 extraction). This stays the owning-service entry point every caller and
+        test uses; the full contract lives on that function.
         """
-        template = await self.get_template_by_id(session, template_id, tenant_key)
-
-        if not template:
-            raise TemplateNotFoundError(
-                message="Template not found",
-                context={"template_id": template_id, "tenant_key": tenant_key},
-            )
-
-        # Check if system-managed
-        if self._is_system_managed_role(template.role):
-            raise AuthorizationError(message="Cannot modify system-managed templates")
-
-        # Apply updates
-        update_data = updates.model_dump(exclude_unset=True)
-
-        # Block attempts to modify system_instructions via API
-        if "system_instructions" in update_data:
-            raise AuthorizationError(message="system_instructions is read-only; use reset-system to restore defaults")
-
-        if "user_instructions" in update_data:
-            await self.create_template_archive(
-                session,
-                template,
-                archive_reason="Update user instructions",
-                archive_type="auto",
-                archived_by=username,
-            )
-
-        # Enforce the active-slot limit when toggling is_active for user-managed roles
-        if "is_active" in update_data and update_data["is_active"] is not None:
-            new_is_active = bool(update_data["is_active"])
-            if new_is_active != bool(template.is_active) and not self._is_system_managed_role(template.role):
-                is_valid, error_msg = await self.validate_active_agent_limit(
-                    session=session,
-                    tenant_key=tenant_key,
-                    template_id=template.id,
-                    new_is_active=new_is_active,
-                    role=template.role,
-                )
-                if not is_valid:
-                    raise ProjectStateError(message=error_msg)
-
-        # Metadata-only updates (e.g. is_active toggle) should not bump updated_at,
-        # otherwise the staleness check falsely triggers after enable/disable.
-        metadata_only_fields = {"is_active"}
-        is_metadata_only = set(update_data.keys()).issubset(metadata_only_fields)
-        previous_updated_at = template.updated_at
-
-        # Clear user_managed_export when content fields change (re-triggers staleness)
-        content_fields = {"user_instructions", "role", "model", "tools", "description", "cli_tool"}
-        if update_data.keys() & content_fields and "user_managed_export" not in update_data:
-            template.user_managed_export = False
-
-        for field, value in update_data.items():
-            if field == "user_instructions" and value:
-                template.user_instructions = value
-            elif field in _ALLOWED_TEMPLATE_UPDATE_FIELDS:
-                setattr(template, field, value)
-
-        # INF-6049c: keep the legacy "tool" column (Handover 0045) mirrored to the live
-        # cli_tool so it cannot drift. create mirrors on insert; do the same on update.
-        if "cli_tool" in update_data:
-            template.tool = template.cli_tool
-
-        # If role changed, auto-update background color to match new role
-        if "role" in update_data:
-            template.background_color = get_role_color(template.role)
-
-        await self.commit_and_refresh_template(session, template)
-
-        # Restore updated_at when only metadata changed — use raw SQL to bypass onupdate
-        if is_metadata_only and previous_updated_at is not None:
-            from sqlalchemy import update as sql_update
-
-            _t = AgentTemplate.__table__  # SEC-9093: raw table -> guard injects tenant_key predicate
-            _stmt = sql_update(_t).where(_t.c.id == template.id).values(updated_at=previous_updated_at)
-            await session.execute(_stmt)
-            await session.commit()
-            await session.refresh(template)
-
-        self._logger.info("Updated template %s", sanitize(template_id))
-
-        return template, list(update_data.keys())
+        return await template_write_paths.update_from_request(self, session, template_id, updates, tenant_key, username)
 
     # ============================================================================
     # Validation Methods
@@ -654,35 +452,10 @@ class TemplateService:
     async def purge_expired_deleted_templates(self, tenant_key: str | None = None) -> int:
         """Hard-delete trashed templates past the recovery window (TSK-6132 reaper).
 
-        Walks this tenant's soft-deleted templates and permanently removes those
-        whose ``deleted_at`` is past ``RECOVER_WINDOW_DAYS`` (the same boundary
-        ``restore_template`` refuses to recover past). Performs the same hard-delete
-        steps the removed ``hard_delete_template`` method used (nullify historical
-        AgentJob refs → delete TemplateArchive version history → delete the
-        template); those steps are FK-safe for the template's self-references.
-        Returns the count purged; tenant-isolated and idempotent (re-running finds
-        none).
+        Delegates to :func:`giljo_mcp.services.template_lifecycle.purge_expired_deleted_templates`
+        (BE-9394 extraction). Full contract lives on that function.
         """
-        effective_tenant_key = tenant_key or self.tenant_manager.get_current_tenant()
-        if not effective_tenant_key:
-            raise ValidationError(
-                message="No tenant context available", context={"operation": "purge_expired_deleted_templates"}
-            )
-        purged = 0
-        async with self._get_session(effective_tenant_key) as session:
-            with tenant_session_context(session, effective_tenant_key):
-                for template in await self._repo.list_deleted(session, effective_tenant_key):
-                    if not recover_window_expired(template.deleted_at):
-                        continue
-                    try:
-                        await self._repo.nullify_job_template_refs(session, template.id)
-                        await self._repo.delete_archives(session, template.id)
-                        await self._repo.delete_template(session, template)
-                        await self._repo.flush(session)
-                        purged += 1
-                    except Exception:
-                        self._logger.exception("Reaper failed to purge template %s", template.id)
-        return purged
+        return await template_lifecycle.purge_expired_deleted_templates(self, tenant_key)
 
     async def delete_template(
         self,
@@ -692,44 +465,10 @@ class TemplateService:
     ) -> bool:
         """Soft-delete (trash) a template by stamping deleted_at.
 
-        Drops the template out of every live read; ``restore_template`` recovers
-        it within the 30-day window. Archives survive the soft-delete and
-        re-surface automatically when the template is restored.
-
-        The system-managed-role guard and permission check MUST be enforced by
-        the calling REST endpoint (crud.py) before reaching this method — the
-        same contract as before BE-6137.
-
-        Args:
-            session: Database session (caller-owned transaction)
-            template_id: Template UUID
-            tenant_key: Tenant key for isolation
-
-        Returns:
-            True if soft-deleted, False if not found
-
-        Raises:
-            BaseGiljoError: On unexpected database failure
+        Delegates to :func:`giljo_mcp.services.template_lifecycle.delete_template`
+        (BE-9394 extraction). Full contract lives on that function.
         """
-        try:
-            async with self._get_session(tenant_key) as _session:
-                template = await self._repo.get_by_id(_session, template_id, tenant_key)
-                if not template:
-                    return False
-
-                template.deleted_at = datetime.now(UTC)
-                await self._repo.flush(_session)
-
-            self._logger.info("Soft-deleted template %s (tenant %s)", sanitize(template_id), tenant_key)
-            return True
-        except BaseGiljoError:
-            raise
-        except Exception as e:
-            self._logger.exception("Failed to soft-delete template %s", sanitize(template_id))
-            raise BaseGiljoError(
-                message=str(e),
-                context={"operation": "delete_template", "template_id": template_id},
-            ) from e
+        return await template_lifecycle.delete_template(self, session, template_id, tenant_key)
 
     async def restore_template(
         self,
@@ -738,62 +477,10 @@ class TemplateService:
     ) -> AgentTemplate:
         """Restore a soft-deleted (trashed) template within the 30-day window.
 
-        Clears deleted_at so the template re-enters every live read. Archives
-        were never deleted and re-surface automatically. No serial to re-mint
-        (AgentTemplate is keyed on name/version; the partial unique index handles
-        the re-create case).
-
-        Args:
-            template_id: Template UUID
-            tenant_key: Tenant key for isolation
-
-        Returns:
-            Refreshed AgentTemplate ORM instance
-
-        Raises:
-            ValidationError: No tenant context, or recovery window expired (>30d)
-            ResourceNotFoundError: No trashed template matched id for the tenant
-            BaseGiljoError: On unexpected database failure
+        Delegates to :func:`giljo_mcp.services.template_lifecycle.restore_template`
+        (BE-9394 extraction). Full contract lives on that function.
         """
-        try:
-            if not tenant_key:
-                tenant_key = self.tenant_manager.get_current_tenant()
-            if not tenant_key:
-                raise ValidationError(
-                    message="No tenant context available",
-                    context={"operation": "restore_template", "template_id": template_id},
-                )
-
-            async with self._get_session(tenant_key) as session:
-                template = await self._repo.get_deleted_template_by_id(session, template_id, tenant_key)
-                if not template:
-                    raise ResourceNotFoundError(
-                        message="Deleted template not found",
-                        context={"template_id": template_id, "tenant_key": tenant_key},
-                    )
-
-                if recover_window_expired(template.deleted_at):
-                    raise ValidationError(
-                        message=(
-                            f"This template was deleted more than {RECOVER_WINDOW_DAYS} days ago "
-                            "and can no longer be recovered."
-                        ),
-                        context={"template_id": template_id, "tenant_key": tenant_key},
-                    )
-
-                template.deleted_at = None
-                await self._repo.flush_and_refresh(session, template)
-
-            self._logger.info("Restored template %s (tenant %s)", sanitize(template_id), tenant_key)
-            return template
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError):
-            raise
-        except Exception as e:
-            self._logger.exception("Failed to restore template %s", sanitize(template_id))
-            raise BaseGiljoError(
-                message=str(e),
-                context={"operation": "restore_template", "template_id": template_id},
-            ) from e
+        return await template_lifecycle.restore_template(self, template_id, tenant_key)
 
     async def list_deleted_templates(
         self,
@@ -801,31 +488,10 @@ class TemplateService:
     ) -> list[AgentTemplate]:
         """List soft-deleted (trashed) templates for the recover dialog.
 
-        Tenant-isolated; ordered most-recently-trashed first.
-
-        Raises:
-            ValidationError: No tenant context
-            BaseGiljoError: On unexpected database failure
+        Delegates to :func:`giljo_mcp.services.template_lifecycle.list_deleted_templates`
+        (BE-9394 extraction). Full contract lives on that function.
         """
-        try:
-            if not tenant_key:
-                tenant_key = self.tenant_manager.get_current_tenant()
-            if not tenant_key:
-                raise ValidationError(
-                    message="No tenant context available",
-                    context={"operation": "list_deleted_templates"},
-                )
-
-            async with self._get_session(tenant_key) as session:
-                return await self._repo.list_deleted(session, tenant_key)
-        except (BaseGiljoError, ResourceNotFoundError, ValidationError):
-            raise
-        except Exception as e:
-            self._logger.exception("Failed to list deleted templates")
-            raise BaseGiljoError(
-                message=str(e),
-                context={"operation": "list_deleted_templates"},
-            ) from e
+        return await template_lifecycle.list_deleted_templates(self, tenant_key)
 
     # ============================================================================
     # Template History Methods (Phase 2 - Handover 1011)
@@ -1005,6 +671,7 @@ class TemplateService:
         self,
         template_ids: list[str],
         tenant_key: str,
+        product_id: str | None = None,
     ) -> int:
         """
         Update last_exported_at timestamp for a set of templates.
@@ -1015,6 +682,10 @@ class TemplateService:
         Args:
             template_ids: List of template UUIDs to mark as exported.
             tenant_key: Tenant isolation key (REQUIRED).
+            product_id: BE-9385e — the product that performed this export. When
+                given, the same timestamp is recorded on that product's junction
+                rows in this transaction, so the export does not read as fresh in
+                every other product. None keeps the tenant-wide write alone.
 
         Returns:
             Number of templates updated.
@@ -1024,8 +695,6 @@ class TemplateService:
             ...     ["tpl-1", "tpl-2"], "tenant-1"
             ... )
         """
-        from datetime import datetime
-
         if not template_ids:
             return 0
 
@@ -1035,6 +704,7 @@ class TemplateService:
             updated_count = await self._repo.update_exported_timestamps(
                 session, template_ids, tenant_key, export_timestamp
             )
+            await record_product_export(session, product_id, tenant_key, template_ids, export_timestamp)
             self._logger.info(
                 "Updated last_exported_at for %d template(s) via MCP export",
                 updated_count,

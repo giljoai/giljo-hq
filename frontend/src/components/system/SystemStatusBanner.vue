@@ -20,9 +20,39 @@
 -->
 <template>
   <div
-    v-if="visibleBanners.length > 0 || showTutorialRow || showIntegRow || showAgentRow"
+    v-if="renderedRowCount > 0 || pendingReserveRows > 0"
     class="system-status-banner"
   >
+    <!-- FE-9368 (E): the Message Hub handover, app-wide. The Hub's own attention strip
+         and gold card only reach an operator who is already in the Hub, and they
+         normally are not. Leads with the raised hand rather than the Gil avatar: this
+         row is an agent waiting on you, not Gil talking. Not dismissible on purpose,
+         it is a live read of the baton, so it leaves when the turn does. -->
+    <div
+      v-if="yourTurnThreads.length > 0"
+      class="system-banner-alert system-banner-alert--info system-banner-alert--clickable"
+      role="alert"
+      data-testid="your-turn-banner"
+      @click="openYourTurn"
+    >
+      <div class="system-banner-alert__content">
+        <v-icon icon="mdi-hand-back-right-outline" size="18" class="system-banner-alert__hand" />
+        <span class="system-banner-alert__text" data-testid="your-turn-banner-text">
+          {{ yourTurnMessage }}
+        </span>
+      </div>
+
+      <div class="system-banner-alert__actions">
+        <button
+          data-testid="your-turn-cta"
+          class="system-banner-btn system-banner-btn--cta"
+          @click.stop="openYourTurn"
+        >
+          {{ yourTurnCta }}
+        </button>
+      </div>
+    </div>
+
     <div
       v-for="n in visibleBanners"
       :key="n.id"
@@ -154,6 +184,23 @@
         </button>
       </div>
     </div>
+
+    <!-- FE-9377: reserved space for rows whose eligibility is still resolving.
+         Every row type above arms asynchronously (notification fetch, dashboard
+         stats + git/serena status, hub thread list), so on a load with a due
+         banner the strip used to insert ~30-300ms AFTER the page content painted
+         and push the whole page down 42px — sliding content under a stationary
+         cursor. The last settled row count is cached in localStorage; the next
+         load reserves that height from the FIRST frame and arriving rows fill it
+         in place. A stale reservation collapses at the settle timeout — a
+         deliberate skeleton collapse beats an insertion under the cursor. -->
+    <div
+      v-if="pendingReserveRows > 0"
+      class="system-banner-skeleton"
+      data-testid="banner-reserved-space"
+      aria-hidden="true"
+      :style="{ height: pendingReserveRows * BANNER_ROW_PX + 'px' }"
+    />
   </div>
 </template>
 
@@ -174,6 +221,9 @@ import {
 import { useOnboardingReminders } from '@/composables/useOnboardingReminders'
 import { useIntegrationStatus } from '@/composables/useIntegrationStatus'
 import { resolveNotificationRoute } from '@/components/navigation/notificationRouting'
+import { useYourTurnThreads } from '@/composables/useYourTurnThreads'
+import { hubThreadRoute } from '@/components/hub/hubThreadRoute'
+import { threadDisplayName } from '@/components/hub/threadDisplayName'
 
 const router = useRouter()
 const notifStore = useNotificationStore()
@@ -415,6 +465,147 @@ async function loadNudgeInputs() {
 }
 
 watch(() => productStore.effectiveProductId, loadNudgeInputs, { immediate: true })
+
+// ── FE-9368 (E): Message Hub "waiting on you", app-wide ──────────────────────
+// A CLIENT-ARMED row like the two above: its visibility is a live read of the baton
+// in commHubStore, not a Notification row. That is what makes it behave identically
+// in both editions without touching either banner emitter, and it is honest by
+// construction: the row cannot outlive the state that justifies it.
+const { yourTurnThreads, ensureThreadsLoaded } = useYourTurnThreads()
+
+// The list arrives on the WS event router for a baton handed over while the app is
+// open; this covers the other case, a turn that was already yours when the page loaded.
+watch(() => userStore.currentUser?.id, (id) => { if (id) ensureThreadsLoaded() }, { immediate: true })
+
+// FE-9436: the shared naming rule. The comment below promises this surface says what the
+// Hub says, word for word — a promise two copies of a fallback list cannot keep, and one
+// of the two copies had already drifted into printing a UUID.
+const threadLabel = (thread) => threadDisplayName(thread)
+
+// Wording is the Hub's, kept word for word so the two surfaces do not describe the
+// same event two different ways.
+const yourTurnMessage = computed(() => {
+  if (yourTurnThreads.value.length > 1) return 'Multiple chat threads are waiting for you'
+  const thread = yourTurnThreads.value[0]
+  const author = thread?.last_message?.author
+  return author
+    ? `${author} is waiting on you in "${threadLabel(thread)}"`
+    : `Waiting on you in "${threadLabel(thread)}"`
+})
+
+const yourTurnCta = computed(() =>
+  yourTurnThreads.value.length > 1 ? 'Open Message Hub' : 'Open thread',
+)
+
+/**
+ * One pending thread opens it; several open the list, since we cannot pick for them.
+ *
+ * FE-9410: the single-thread route comes from hubThreadRoute() — the same helper the
+ * Hub's own attention strip uses — so the two notifications raised by one hand-off land
+ * identically. It carries the message context the bare `?thread=` link dropped, which
+ * is what left the operator on the Hub instead of at the post waiting for them.
+ */
+function openYourTurn() {
+  const threads = yourTurnThreads.value
+  if (threads.length === 1) {
+    router.push(hubThreadRoute(threads[0]))
+    return
+  }
+  router.push({ path: '/hub' })
+}
+
+// ── FE-9377: first-frame space reservation (no post-paint layout shift) ───────
+// Every row above arms asynchronously, so a due banner used to insert after the
+// page content painted and shift the whole page down. The cure has to be known
+// SYNCHRONOUSLY at first render, and the only sync source of truth is what this
+// browser rendered last time: the settled row count is persisted to localStorage
+// and the next load reserves that height from the first frame. Rows that arrive
+// fill the reserved space in place (pendingReserveRows shrinks as
+// renderedRowCount grows — total strip height stays constant).
+//
+// The settle timer only matters for a STALE reservation (a cached row that no
+// longer arms — e.g. dismissed elsewhere, notification resolved server-side):
+// the leftover skeleton collapses at SETTLE_TIMEOUT_MS. Deliberately generous
+// and deliberately NOT short-circuited by per-source "done" signals — settling
+// early right before a slow fetch lands would turn one shift into two.
+//
+// The record carries the OWNING user id: a shared
+// browser with two accounts must not inherit the other account's reserved
+// strip. Identity is NOT knowable at first frame (the session cookie is
+// httpOnly and /auth/me is async), so the reservation renders optimistically
+// from the stored record and is DROPPED the moment the resolved user id
+// disagrees with the record's owner — it can never survive into the other
+// account's steady state, and writes always stamp the current owner.
+/** Height of one banner row (9px padding ×2 + 24px content — all rows nowrap). */
+const BANNER_ROW_PX = 42
+const RESERVE_STORAGE_KEY = 'giljo_banner_reserved_rows'
+/** Reservation cap: never hold more than 3 rows of blank space on spec. */
+const RESERVE_ROW_CAP = 3
+const SETTLE_TIMEOUT_MS = 4000
+
+/** Reads the stored {u: ownerUserId, n: rowCount} record; malformed → nothing. */
+function readReserveRecord() {
+  try {
+    const rec = JSON.parse(localStorage.getItem(RESERVE_STORAGE_KEY) ?? 'null')
+    const n = Number.isFinite(rec?.n) ? Math.min(Math.max(rec.n, 0), RESERVE_ROW_CAP) : 0
+    return { owner: typeof rec?.u === 'string' ? rec.u : '', rows: n }
+  } catch {
+    return { owner: '', rows: 0 }
+  }
+}
+
+const reserveRecord = readReserveRecord()
+const reservedRows = ref(reserveRecord.rows)
+const settled = ref(false)
+
+// Drop an inherited reservation as soon as the session's real identity lands.
+watch(
+  () => userStore.currentUser?.id,
+  (id) => {
+    if (id && reserveRecord.owner && String(id) !== reserveRecord.owner) {
+      reservedRows.value = 0
+    }
+  },
+  { immediate: true },
+)
+
+/** Rows currently rendered in the strip (the your-turn strip is one row however many threads). */
+const renderedRowCount = computed(
+  () =>
+    (yourTurnThreads.value.length > 0 ? 1 : 0) +
+    visibleBanners.value.length +
+    (showTutorialRow.value ? 1 : 0) +
+    (showIntegRow.value ? 1 : 0) +
+    (showAgentRow.value ? 1 : 0),
+)
+
+const pendingReserveRows = computed(() =>
+  settled.value ? 0 : Math.max(0, reservedRows.value - renderedRowCount.value),
+)
+
+let settleTimer = null
+onMounted(() => {
+  settleTimer = setTimeout(() => {
+    settled.value = true
+  }, SETTLE_TIMEOUT_MS)
+})
+onBeforeUnmount(() => clearTimeout(settleTimer))
+
+// After settle, mirror the rendered count so the NEXT load's first frame
+// reserves exactly what this steady state shows (dismissals shrink it, newly
+// armed rows grow it). Stamped with the owning user id; no write until the
+// session's identity is known.
+watch(
+  [settled, renderedRowCount, () => userStore.currentUser?.id],
+  ([isSettled, count, userId]) => {
+    if (isSettled && userId) {
+      localStorage.setItem(
+        RESERVE_STORAGE_KEY,
+        JSON.stringify({ u: String(userId), n: Math.min(count, RESERVE_ROW_CAP) }),
+      )
+    }
+  },
+)
 </script>
 
 <style scoped lang="scss">
@@ -446,6 +637,13 @@ watch(() => productStore.effectiveProductId, loadNudgeInputs, { immediate: true 
     min-width: 0;
   }
 
+  // FE-9368: the handover row's raised hand. Brand yellow, the same accent the
+  // unified banner chrome gives every other banner icon and the Hub gives the hand.
+  &__hand {
+    flex-shrink: 0;
+    color: var(--color-accent-primary);
+  }
+
   // FE-9202: Gil avatar — the banner speaks in Gil's voice (generic-agent branding rule).
   &__avatar {
     flex-shrink: 0;
@@ -469,6 +667,18 @@ watch(() => productStore.effectiveProductId, loadNudgeInputs, { immediate: true 
     gap: 6px;
     flex-shrink: 0;
   }
+
+  // FE-9368: the whole handover strip is the target, not just its button.
+  &--clickable {
+    cursor: pointer;
+  }
+}
+
+// FE-9377: reserved space while row eligibility resolves — same tint as the
+// rows that will fill it, inert to the pointer.
+.system-banner-skeleton {
+  background: var(--banner-bg);
+  pointer-events: none;
 }
 
 .system-banner-btn {

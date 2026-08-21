@@ -466,19 +466,32 @@ class TestFrontendConfigApiFields:
 class TestToolAccessorEnvVarPattern:
     """Site #2 reads GILJO_PUBLIC_URL, defaulting to http://localhost:7272."""
 
-    def test_site_2_bootstrap_setup_source_uses_env_var(self):
+    def test_site_2_bootstrap_setup_source_uses_public_url_accessor(self):
+        """BE-9442 moved the env read behind one accessor; the guarantee is unchanged.
+
+        This test previously asserted the literal
+        ``os.environ.get("GILJO_PUBLIC_URL", "http://localhost:7272")`` appeared in
+        ``bootstrap_setup``. That expression no longer exists anywhere outside
+        ``giljo_mcp.http.url_resolver`` — it was one of three sites that omitted
+        ``.rstrip("/")`` and emitted ``https://host//api/download/...``.
+
+        What INF-5012 was actually protecting is unchanged and still asserted: this
+        site must resolve its URL from the deployment's public address, NOT from the
+        server's bind address in config. Only the expression moved.
+        """
         src = _source("src/giljo_mcp/tools/tool_accessor/_setup_tools.py")
         tree = ast.parse(src)
         found_any = False
         for node in ast.walk(tree):
             if isinstance(node, ast.AsyncFunctionDef) and node.name == "bootstrap_setup":
                 body = ast.unparse(node)
-                if "GILJO_PUBLIC_URL" in body and "http://localhost:7272" in body and "os.environ" in body:
+                if "get_public_url()" in body:
                     found_any = True
         assert found_any, (
-            "Site #2 tool_accessor.bootstrap_setup must read "
-            'os.environ.get("GILJO_PUBLIC_URL", "http://localhost:7272")'
+            "Site #2 tool_accessor.bootstrap_setup must resolve its URL via "
+            "giljo_mcp.http.url_resolver.get_public_url() (BE-9442)"
         )
+        assert "os.environ" not in src, "BE-9442: no direct GILJO_PUBLIC_URL env read may return to this file"
 
     def test_env_var_set_yields_demo_url(self, monkeypatch):
         monkeypatch.setenv("GILJO_PUBLIC_URL", "https://mcp.example.com")

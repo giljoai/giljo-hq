@@ -22,7 +22,6 @@ Edition scope: CE.
 
 from __future__ import annotations
 
-import os
 import secrets
 import uuid
 
@@ -135,7 +134,6 @@ async def _seed(db_manager, *, run_mode: str = "claude_code_cli") -> dict:
         run.conductor_agent_id = await mint_conductor_job(session, tenant_key=tenant_key, run_id=run.id)
         await session.commit()
 
-        os.environ.setdefault("JWT_SECRET", "test_secret_key")
         token = JWTManager.create_access_token(
             user_id=user.id,
             username=user.username,

@@ -24,6 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.exceptions import AuthorizationError, ProjectStateError, TemplateNotFoundError, ValidationError
 from giljo_mcp.models import AgentTemplate, User
+from giljo_mcp.models.templates import effective_last_exported_at
+from giljo_mcp.repositories.product_agent_selection import active_product_export_timestamps
 from giljo_mcp.services.template_service import USER_MANAGED_AGENT_LIMIT, TemplateService
 from giljo_mcp.system_roles import SYSTEM_MANAGED_ROLES
 from giljo_mcp.utils.log_sanitizer import sanitize
@@ -42,14 +44,27 @@ def _is_system_managed_role(role: str | None) -> bool:
     return bool(role and role in SYSTEM_MANAGED_ROLES)
 
 
-def _convert_to_response(template: AgentTemplate) -> TemplateResponse:
-    """Convert ORM model to response schema"""
+def _convert_to_response(template: AgentTemplate, product_export_times: dict | None = None) -> TemplateResponse:
+    """Convert ORM model to response schema.
+
+    BE-9385e: ``product_export_times`` carries the ACTIVE product's own export
+    times, keyed by template id. Passing it is what makes the "last exported"
+    fields describe the product the user is actually in; omitting it keeps the
+    tenant-wide answer, which is still correct where no product is in context.
+
+    Args:
+        template: The ORM template.
+        product_export_times: The active product's export times by template id
+            (see :func:`effective_last_exported_at`), or None for no product
+            context.
+    """
     # Merge system and user instructions for backward compatibility
     merged_content = template.system_instructions or ""
     if template.user_instructions:
         merged_content = f"{merged_content}\n\n{template.user_instructions}"
 
-    may_be_stale = template.may_be_stale
+    last_exported_at = effective_last_exported_at(template, product_export_times)
+    may_be_stale = template.may_be_stale_against(last_exported_at)
 
     return TemplateResponse(
         id=template.id,
@@ -72,7 +87,7 @@ def _convert_to_response(template: AgentTemplate) -> TemplateResponse:
         created_at=template.created_at,
         updated_at=template.updated_at,
         # Handover 0335: Export tracking fields
-        last_exported_at=template.last_exported_at,
+        last_exported_at=last_exported_at,
         may_be_stale=may_be_stale,
         user_managed_export=template.user_managed_export or False,
         category=template.category,
@@ -82,6 +97,19 @@ def _convert_to_response(template: AgentTemplate) -> TemplateResponse:
         created_by=template.created_by,
         is_system_role=_is_system_managed_role(template.role),
     )
+
+
+async def _convert_in_product_context(
+    session: AsyncSession, tenant_key: str, template: AgentTemplate
+) -> TemplateResponse:
+    """Convert one template, with the active product's export time applied (BE-9385e).
+
+    Single-template responses go through here so a row the user just edited does
+    not come back carrying another product's export time and re-displaying the
+    lie the list view no longer tells.
+    """
+    export_times = await active_product_export_timestamps(session, tenant_key)
+    return _convert_to_response(template, export_times)
 
 
 @router.get("/{template_id}", response_model=TemplateResponse)
@@ -103,7 +131,7 @@ async def get_template(
     if not template:
         raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
 
-    return _convert_to_response(template)
+    return await _convert_in_product_context(session, current_user.tenant_key, template)
 
 
 @router.get("/", response_model=list[TemplateResponse])
@@ -121,7 +149,10 @@ async def list_templates(
         session, current_user.tenant_key, role=role, is_active=is_active
     )
 
-    return [_convert_to_response(t) for t in templates]
+    # BE-9385e: resolved ONCE for the whole list, not per row.
+    export_times = await active_product_export_timestamps(session, current_user.tenant_key)
+
+    return [_convert_to_response(t, export_times) for t in templates]
 
 
 @router.post("/", response_model=TemplateResponse, status_code=status.HTTP_201_CREATED)
@@ -136,7 +167,11 @@ async def create_template(
 
     Routes through ``TemplateService.create_template_from_request`` (BE-8000j) —
     the owning service performs all validation, materialization, and the write.
-    This endpoint only translates the service's ``ValidationError`` into HTTP 400.
+    This endpoint only translates the service's domain exceptions into their HTTP
+    status codes: ``ValidationError`` -> 400, and (BE-9394) ``ProjectStateError`` ->
+    409 when a born-active template would exceed the active-slot cap. The update
+    endpoint has always translated that same rejection to 409; without this arm the
+    create-side refusal would surface as an unhandled 500.
     """
     try:
         new_template = await template_service.create_template_from_request(
@@ -147,8 +182,10 @@ async def create_template(
         )
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=exc.message) from exc
+    except ProjectStateError as exc:
+        raise HTTPException(status_code=409, detail=exc.message) from exc
 
-    return _convert_to_response(new_template)
+    return await _convert_in_product_context(session, current_user.tenant_key, new_template)
 
 
 @router.put("/{template_id}", response_model=TemplateResponse)
@@ -186,7 +223,7 @@ async def update_template(
 
     logger.info("Updated template %s", sanitize(template_id))
 
-    response = _convert_to_response(template)
+    response = await _convert_in_product_context(session, tenant_key, template)
 
     # Broadcast template update via EventBus for real-time UI refresh
     try:
@@ -199,7 +236,12 @@ async def update_template(
                     "tenant_key": tenant_key,
                     "template_id": template.id,
                     "is_active": template.is_active,
-                    "may_be_stale": template.may_be_stale,
+                    # BE-9385e: the PRODUCT-AWARE value the response carries, not the
+                    # tenant-wide property. The UI updates the row's staleness badge
+                    # from this event, so broadcasting the tenant-wide answer here
+                    # would flip the badge straight back to another product's export
+                    # the moment the user edits an agent.
+                    "may_be_stale": response.may_be_stale,
                     "updated_fields": updated_fields,
                 },
             )

@@ -2,7 +2,7 @@
  * FE-9233 regression: a THROTTLED (429) or erroring (5xx) /api/setup/status
  * must never be read as "this box is a fresh install".
  *
- * Reported on the CE dogfood box 2026-07-19: hammering refresh tripped the
+ * Reported on the CE test-install box 2026-07-19: hammering refresh tripped the
  * per-IP rate limiter (expected), and the app then rerouted a fully set-up
  * install to /welcome — the CreateAdminAccount wizard.
  *

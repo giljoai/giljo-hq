@@ -29,7 +29,7 @@ on purpose: re-deriving them from the same ``app`` object the test inspects
 would make the assertions tautological and unable to catch a regression.
 
 The route baselines were since bumped from 257 -> 259 to admit the two
-intentional, Patrik-approved Roadmap routes (FE-6022a): ``GET /api/v1/roadmap``
+intentional, approved Roadmap routes (FE-6022a): ``GET /api/v1/roadmap``
 and ``PATCH /api/v1/roadmap/reorder``, then 259 -> 260 for the FE-6022c-polish
 remove route ``DELETE /api/v1/roadmap/items/{item_id}``. The middleware stack is
 unchanged.
@@ -152,7 +152,8 @@ EXPECTED_ROUTE_SIGNATURES = frozenset(
 # PATCH /api/v1/threads/{thread_id} — the operator's rename + set-status verb. A
 # thread could previously only be named at CREATE time, and status moved only as a
 # side effect of an agent posting.
-EXPECTED_ROUTE_COUNT = 247
+# FE-9296b: +2 (GET/PUT /api/v1/settings/system/agent-checkin-cadence)
+EXPECTED_ROUTE_COUNT = 249
 
 # FULL frozen route-signature set — the STRICT set-equality lock. Snapshotted
 # from the UNMODIFIED 1,237-line api/app.py (git HEAD~1, the BE-6042a pilot) and
@@ -322,6 +323,8 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/settings/database", frozenset({"GET"})),
         ("/api/v1/settings/general", frozenset({"GET"})),
         ("/api/v1/settings/general", frozenset({"PUT"})),
+        ("/api/v1/settings/system/agent-checkin-cadence", frozenset({"GET"})),
+        ("/api/v1/settings/system/agent-checkin-cadence", frozenset({"PUT"})),
         ("/api/v1/settings/system/agent-silence-threshold", frozenset({"GET"})),
         ("/api/v1/settings/system/agent-silence-threshold", frozenset({"PUT"})),
         ("/api/v1/stats/call-counts", frozenset({"GET"})),

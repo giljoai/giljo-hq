@@ -38,7 +38,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import tenant_session_context
-from giljo_mcp.models import AgentExecution, AgentJob, Project
+from giljo_mcp.models import AgentExecution, AgentJob, Product, Project
 from giljo_mcp.models.auth import User
 from giljo_mcp.models.comm import CommParticipant
 from giljo_mcp.models.tasks import Message, MessageRecipient
@@ -154,6 +154,16 @@ async def test_workflow_status_unread_count_and_drain_ability_agree(db_manager, 
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
 
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         id=str(uuid.uuid4()),
         name="BE-9292a registry project",
@@ -161,6 +171,7 @@ async def test_workflow_status_unread_count_and_drain_ability_agree(db_manager, 
         mission="count and drain must agree",
         status="active",
         tenant_key=tenant,
+        product_id=_owning_product_project.id,
         execution_mode="multi_terminal",
         series_number=random.randint(1, 9000),
         created_at=datetime.now(UTC),

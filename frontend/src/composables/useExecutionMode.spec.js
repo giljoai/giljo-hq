@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ref } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
+import { useNotificationStore } from '@/stores/notifications'
 
 const showToastMock = vi.fn()
 vi.mock('@/composables/useToast', () => ({
@@ -175,6 +176,38 @@ describe('useExecutionMode', () => {
 
     // Store now reflects the user's pick — a store-first reader sees subagent mode.
     expect(store.getProjectState('proj-1')?.execution_mode).toBe('subagent')
+  })
+
+  // FE-9466: the composable already showed a toast on failure; it now also
+  // pushes a persistent notification carrying the server's own reason, so
+  // the reason survives a reload/navigation instead of vanishing with the toast.
+  it('pushes a persistent notification carrying the server reason when the save fails (FE-9466)', async () => {
+    const serverMessage = 'Cannot change execution mode after staging.'
+    apiUpdateMock.mockRejectedValueOnce(
+      Object.assign(new Error('Request failed with status code 409'), {
+        response: {
+          status: 409,
+          data: { error_code: 'EXECUTION_MODE_LOCKED', message: serverMessage, context: {} },
+        },
+      }),
+    )
+    const { handleExecutionModeChange } = await makeComposable({ projectId: 'proj-9' })
+    await handleExecutionModeChange('subagent')
+
+    const store = useNotificationStore()
+    expect(store.notifications.some((n) => n.message === serverMessage)).toBe(true)
+  })
+
+  it('falls back to a generic notification message on an unstructured failure (FE-9466)', async () => {
+    apiUpdateMock.mockRejectedValueOnce(new Error('Network Error'))
+    const { handleExecutionModeChange } = await makeComposable({ projectId: 'proj-9' })
+    await handleExecutionModeChange('subagent')
+
+    const store = useNotificationStore()
+    const pushed = store.notifications.find((n) =>
+      n.id?.startsWith('failure:project.executionMode:proj-9'),
+    )
+    expect(pushed?.message).toBe('Failed to save execution mode. Please try again.')
   })
 
   it('handleExecutionModeChange does NOT update the store when the API call fails', async () => {

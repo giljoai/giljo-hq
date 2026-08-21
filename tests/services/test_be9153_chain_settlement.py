@@ -33,6 +33,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.user_approval import UserApproval
 from giljo_mcp.services.project_helpers import complete_chain_run_if_finished
@@ -54,9 +55,20 @@ def _approval_svc(session: AsyncSession) -> UserApprovalService:
 
 async def _seed_member(db_session, tenant_key: str) -> dict:
     """A chain-member project with an orchestrator (sub-orch) job + working execution."""
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         id=str(uuid4()),
         tenant_key=tenant_key,
+        product_id=_owning_product_project.id,
         name=f"Link {uuid4().hex[:6]}",
         description="x",
         mission="x",

@@ -29,6 +29,12 @@ import { ref, computed, watch } from 'vue'
 // to a user-settings DB field only if cross-device persistence is later wanted).
 const STATUS_STORAGE_KEY = 'giljo.projects.selectedStatuses'
 
+// BE-9455: the largest page `GET /api/v1/projects/` will serve. Declared on the
+// endpoint as `limit: int | None = Query(ge=1, le=200)` (api/endpoints/projects/
+// crud.py); `offset` is `ge=0`. A request outside those bounds is rejected with
+// a 422 before the query runs, so this is the ceiling the controls must respect.
+export const API_MAX_PAGE_SIZE = 200
+
 function loadPersistedStatuses() {
   try {
     const raw = localStorage.getItem(STATUS_STORAGE_KEY)
@@ -117,9 +123,25 @@ export function useProjectFilters({
    * (while not searching) yields an empty `statuses` array (empty page).
    */
   function buildServerParams() {
+    // BE-9455: `itemsPerPage` is whatever v-data-table-server reports, and that
+    // is not always a row count — Vuetify's "All" option is the sentinel -1
+    // (VDataTableFooter.js option `{ value: -1 }`). Vuetify itself never does
+    // arithmetic on it; its paginate composable branches on the sentinel at
+    // every site (`startIndex` returns 0, `stopIndex` returns the full length).
+    // Forwarding it verbatim sent `limit=-1` AND, via `(page - 1) * -1`, a
+    // NEGATIVE offset — two independent 422s, so selecting "All" left the table
+    // unchanged and looked like a dead control.
+    //
+    // Clamp rather than special-case the one sentinel: any non-positive or
+    // over-cap size resolves to the largest page the API will serve, and offset
+    // is derived from the CLAMPED size so paging stays consistent with it. That
+    // kills the whole class — a future option-list change, a copied composable,
+    // or a Vuetify default shift cannot reintroduce an out-of-contract request.
+    const requested = itemsPerPage.value
+    const limit = requested > 0 ? Math.min(requested, API_MAX_PAGE_SIZE) : API_MAX_PAGE_SIZE
     const params = {
-      limit: itemsPerPage.value,
-      offset: (currentPage.value - 1) * itemsPerPage.value,
+      limit,
+      offset: Math.max(0, (currentPage.value - 1) * limit),
     }
     const sb = sortBy.value && sortBy.value[0]
     if (sb && sb.key) {

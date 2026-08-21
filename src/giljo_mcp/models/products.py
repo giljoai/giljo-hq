@@ -65,6 +65,23 @@ class Product(Base):
         comment="Organization that owns this product (Handover 0424)",
     )
     name = Column(String(255), nullable=False)
+
+    # BE-9385b: the stable, URL-safe short name that qualifies exported agent
+    # filenames (``<agent-name>--<product-slug>.md``), so the same agent shared by
+    # two products installs twice instead of overwriting itself.
+    #
+    # Allocated ONCE at creation and never rewritten -- not even on rename. That
+    # immutability is the feature: a rename that renamed every exported file would
+    # strand the copies the user already installed. Uniqueness is enforced by the
+    # partial index ``idx_product_slug_unique_per_tenant`` rather than by
+    # convention, so two products whose names slugify identically cannot produce
+    # the same filename. NULL is tolerated on read (the render path derives a slug
+    # from the name) for rows predating ce_0092.
+    slug = Column(
+        String(64),
+        nullable=True,
+        comment="Stable URL-safe short name qualifying exported agent filenames (BE-9385b)",
+    )
     description = Column(Text, nullable=True)
 
     # Handover 0084: Project path for agent export (required for copy-command interface)
@@ -222,6 +239,19 @@ class Product(Base):
         # Handover 0050: Enforce single active product per tenant (defense in depth)
         Index(
             "idx_product_single_active_per_tenant", "tenant_key", unique=True, postgresql_where=text("is_active = true")
+        ),
+        # BE-9385b: exported filenames are qualified by this slug, so a duplicate
+        # within a tenant would mean two products' agents racing for one path. The
+        # index is what makes that impossible by construction rather than by the
+        # allocator remembering to check. Soft-deleted rows are excluded (they
+        # export nothing, and excluding them lets a slug be reused after a delete);
+        # NULL is excluded so rows predating ce_0092 do not collide with each other.
+        Index(
+            "idx_product_slug_unique_per_tenant",
+            "tenant_key",
+            "slug",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL AND slug IS NOT NULL"),
         ),
     )
 

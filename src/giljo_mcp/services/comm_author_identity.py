@@ -19,17 +19,20 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.harness_resolver import GENERIC_HARNESS
 
 
-# TSK-0008: an omitted from_agent falls back to the authenticated principal. The backend
-# cannot tell an agent that forgot the field from a genuine user post, so it attributes
-# AND advises rather than silently stamping.
-_PRINCIPAL_FALLBACK_WARNING = (
-    "from_agent omitted; attributed to the authenticated principal. An AGENT post "
-    "must pass from_agent (its role/lane id) or it is mis-attributed (TSK-0008)."
+# BE-9379: an anonymous post (neither from_agent nor as_user) NEVER attributes to the
+# human principal anymore — that was the impersonation surface (an agent forgets one
+# field and its post renders as the operator, CHT-0483). It lands on the neutral
+# 'orchestrator' identity with an advisory instead. The MCP boundary refuses the
+# omission outright (FROM_AGENT_REQUIRED); this fallback exists for internal callers.
+_NO_AUTHOR_WARNING = (
+    "no author declared (neither from_agent nor as_user); attributed to 'orchestrator'. "
+    "An agent post must pass from_agent (its role/lane id); a post in the human user's "
+    "voice must pass as_user=true (BE-9379)."
 )
-_NO_PRINCIPAL_WARNING = "from_agent omitted and no principal resolved; attributed to 'orchestrator'."
 
 # BE-9292a: the label-shaped identity that made an undeliverable baton available to
 # pass in the first place.
@@ -111,6 +114,8 @@ async def resolve_and_register_author(
     from_agent: str | None,
     user_id: str | None,
     detected_harness: str | None,
+    as_user: bool = False,
+    self_reported_status: str | None = None,
 ) -> AuthorIdentity:
     """Resolve the author, then guarantee they hold a participant row on this thread.
 
@@ -121,6 +126,12 @@ async def resolve_and_register_author(
     cursors). An agent posting under a UUID slug is legitimate, and guessing from that
     shape is what once rendered agents as the human user.
 
+    USER ATTRIBUTION IS EXPLICIT (BE-9379). A post lands on the authenticated
+    principal ONLY when the caller deliberately claims the human's voice with
+    ``as_user=True`` — a present ``user_id`` alone no longer implies it, because
+    the MCP wrapper injects the principal on every call and the implicit fallback
+    is how an agent that forgot ``from_agent`` impersonated the operator.
+
     REGISTRATION IS UNCONDITIONAL. It used to happen only inside the broadcast branch
     and only when the thread was project-anchored, so a direct message registered
     nobody and a standalone or chain thread registered no one at all — leaving the
@@ -128,6 +139,10 @@ async def resolve_and_register_author(
     ``display_name`` is never NULL here (it falls back to the slug), so the directory
     always has something to render, and the upsert lets a later explicit ``join_thread``
     replace it with a real name.
+
+    BE-9475: ``self_reported_status`` rides the same upsert. It is already validated
+    against the locked vocabulary at the MCP boundary before it reaches this far -- this
+    function forwards it, it does not police it.
     """
     if from_agent:
         # Prefer the STORED display name from the poster's own row (set at join_thread)
@@ -146,20 +161,25 @@ async def resolve_and_register_author(
                 else await _label_collision_warning(repo, session, tenant_key, thread_id, from_agent)
             ),
         )
-    elif user_id:
+    elif as_user:
+        if not user_id:
+            raise ValidationError(
+                "as_user=true requires an authenticated user principal, and this session has none.",
+                context={"operation": "comm_thread.post"},
+            )
         user = await user_repo.get_user_by_id(session, user_id, tenant_key)
         identity = AuthorIdentity(
             agent_id=user_id,
             kind="user",
             display_name=user.display_name if user else "user",
-            warning=_PRINCIPAL_FALLBACK_WARNING,
+            warning=None,  # deliberate, not a forgotten field — nothing to advise
         )
     else:
         identity = AuthorIdentity(
             agent_id="orchestrator",
             kind="agent",
             display_name="orchestrator",
-            warning=_NO_PRINCIPAL_WARNING,
+            warning=_NO_AUTHOR_WARNING,
         )
 
     await repo.add_participant(
@@ -171,5 +191,10 @@ async def resolve_and_register_author(
         display_name=identity.display_name,
         harness=detected_harness or GENERIC_HARNESS,
         touch_last_seen=True,  # posting is activity
+        # BE-9475: the author's own status report, when it made one. It lands on the SAME
+        # upsert that registers the poster, so a headless agent's first post both creates
+        # its row and says what it is doing -- there is no window where it is registered
+        # but statusless. NULL when omitted, which preserves any previous declaration.
+        self_reported_status=self_reported_status,
     )
     return identity

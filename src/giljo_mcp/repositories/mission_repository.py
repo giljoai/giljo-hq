@@ -23,6 +23,8 @@ from sqlalchemy.orm import joinedload, selectinload
 from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES, AgentExecution, AgentJob
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.templates import AgentTemplate
+from giljo_mcp.repositories.product_agent_selection import template_ids_for_product
+from giljo_mcp.template_renderer import MAX_PACKAGED_TEMPLATES
 
 
 logger = logging.getLogger(__name__)
@@ -291,29 +293,74 @@ class MissionRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_product_name(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        product_id: str,
+    ) -> str | None:
+        """Get just a product's name (FE-9408 provenance line), tenant-scoped.
+
+        One scalar column rather than ``get_project_with_vision_docs`` above: the
+        provenance line needs a label, and that method eagerly loads every vision
+        document attached to the product -- multi-KB of text, dragged into the
+        identity path to render a few words.
+        """
+        from giljo_mcp.models.products import Product
+
+        result = await session.execute(
+            select(Product.name).where(and_(Product.id == product_id, Product.tenant_key == tenant_key))
+        )
+        return result.scalar_one_or_none()
+
     async def get_active_templates(
         self,
         session: AsyncSession,
         tenant_key: str,
-        limit: int = 8,
+        limit: int = MAX_PACKAGED_TEMPLATES,
+        *,
+        product_id: str | None = None,
     ) -> list[AgentTemplate]:
-        """Get active agent templates for a tenant.
+        """Get the agent templates the orchestrator may spawn.
 
         BE-9325: soft-delete leaves ``is_active`` True, so without the ``deleted_at``
         filter a trashed agent stays on the roster the orchestrator is shown as
         available to spawn -- and spawning it then resolves nothing.
+
+        BE-9385a, two changes:
+
+        1. ``product_id`` narrows the roster to that product's junction. ``None``
+           (no product in context) and a product with no junction rows both keep
+           the tenant-wide set -- the tolerance rule, which lives in
+           ``product_agent_selection``.
+        2. The cap is now ``MAX_PACKAGED_TEMPLATES`` (16), shared with the export
+           path, instead of a local literal 8. Those were two numbers for one
+           concept: with more than 8 active agents the orchestrator was shown a
+           roster it could spawn from that was strictly smaller than the set the
+           export had already installed on disk -- so an agent could exist as a
+           file and be unspawnable. The export cap was deliberately raised 8->16
+           in BE-9208; the roster stayed at 8 by omission. Measured cost of the
+           unification: nothing for a stock install (6 seeded agents, under both
+           caps), ~+320 tokens of mission prompt in the cap-saturated worst case.
+
+        The product filter is applied IN the query, not to its result: filtering
+        after ``LIMIT`` would silently shrink the roster below the cap.
         """
-        result = await session.execute(
-            select(AgentTemplate)
-            .where(
-                and_(
-                    AgentTemplate.tenant_key == tenant_key,
-                    AgentTemplate.is_active,
-                    AgentTemplate.deleted_at.is_(None),
-                )
+        template_ids = await template_ids_for_product(session, product_id, tenant_key)
+
+        stmt = select(AgentTemplate).where(
+            and_(
+                AgentTemplate.tenant_key == tenant_key,
+                AgentTemplate.is_active,
+                AgentTemplate.deleted_at.is_(None),
             )
-            .limit(limit)
         )
+        if template_ids is not None:
+            # An empty set is a real answer (every agent disabled for this
+            # product), and ``in_(())`` correctly matches nothing.
+            stmt = stmt.where(AgentTemplate.id.in_(template_ids))
+
+        result = await session.execute(stmt.limit(limit))
         return list(result.scalars().all())
 
     async def get_category_metadata(

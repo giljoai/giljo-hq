@@ -32,11 +32,17 @@ strip the type going forward — task_conversion_service.py):
 Both A and B are COLLISION-SAFE. ce_0023 backfilled serials PER TYPE, so legacy
 rows of different types can share a serial (e.g. ``DOC-19`` + ``BE-19`` tasks).
 Collapsing them onto one namespace can violate the partial-unique indexes
-``uq_task_taxonomy_active`` / ``uq_project_taxonomy_active`` (both NULLS NOT
-DISTINCT, live + numbered rows only). Where a re-typed/un-typed row would collide
+``uq_task_taxonomy_active`` / ``uq_project_taxonomy_active`` (live + numbered
+rows only). BE-9431 correction: this text originally said "both NULLS NOT
+DISTINCT", which was true of ``uq_project_taxonomy_active`` but not of the task
+index at the time this revision runs — ce_0059 had dropped that flag and
+ce_0095 only restores it later in the chain. The collision handling below is
+therefore stricter than the task index required in that window, which is safe
+(it avoids collisions the index would not have caught) and is exactly what the
+restored index now enforces. Where a re-typed/un-typed row would collide
 with a slot already claimed in its destination namespace, we reassign it a fresh
-serial above the bucket's global (tasks + projects) watermark — Patrik authorized
-dropping the historical serial (title is the durable identity). Rows that do NOT
+serial above the bucket's global (tasks + projects) watermark — this design drops
+the historical serial (title is the durable identity). Rows that do NOT
 collide keep their original serial.
 
 Idempotent: a second run finds no non-TSK tasks and no TSK-typed projects, so

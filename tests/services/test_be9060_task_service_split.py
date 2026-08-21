@@ -33,6 +33,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from giljo_mcp.services.task_service import _ALLOWED_TASK_UPDATE_FIELDS, TaskService
+from giljo_mcp.services.task_service import _mcp_read_layer as read_layer
 from giljo_mcp.services.task_service._lifecycle_mixin import _TaskLifecycleMixin
 from giljo_mcp.services.task_service._mcp_adapter_mixin import McpAdapterMixin
 from giljo_mcp.services.task_service._mutation_mixin import (
@@ -194,3 +195,140 @@ def test_full_row_truncates_description_at_memory_limit():
     full = TaskService._task_to_full_row(_stub_task(), memory_limit=None)
     assert full["description"] == "a" * 50
     assert full["product_id"] == "prod-1"
+
+
+# ---------------------------------------------------------------------------
+# BE-9468: the read-layer fragment of the same package split.
+#
+# The bounds and projections for the agent-facing list live in a fourth module,
+# ``_mcp_read_layer``, added rather than folded into ``_mcp_adapter_mixin`` because that
+# file was at 654 lines against the 800-line cap. These tests guard it the way the rest
+# of this file guards the split: the structure and the pure helpers, at the unit layer.
+# The behavioral surface is covered end-to-end through the real MCP transport in
+# tests/integration/test_be9468_list_tasks_read_layer.py.
+# ---------------------------------------------------------------------------
+
+
+def test_read_layer_bounds_are_ordered_and_sane():
+    """The two row bounds must be usable together: a default you can actually raise."""
+    assert 0 < read_layer.LIST_TASKS_LIMIT_DEFAULT < read_layer.LIST_TASKS_LIMIT_MAX
+    # The char ceiling has to fit more than one row or the tool returns nothing.
+    assert read_layer.LIST_TASKS_CHAR_CEILING > 10_000
+
+
+def test_index_row_carries_no_embedded_type_block():
+    """The lean row's whole point: the plain abbreviation, not a repeated constant object.
+
+    The embedded block is byte-identical on every row (every task is TSK by contract) and
+    carries a second UUID to say so. Here ``type`` is a string.
+    """
+    row = read_layer.task_to_index_row(_stub_task())
+    assert row["type"] == "TSK"
+    assert row["name"] == "Ship the thing"
+    assert set(row) == {"task_id", "taxonomy_alias", "name", "status", "type", "due_date", "created_at"}
+    assert read_layer.task_to_index_row(_stub_task(task_type=None))["type"] is None
+
+
+def test_the_char_ceiling_drops_whole_rows_and_never_trims_one():
+    """Rows, not fields. A row that survives is complete or it is not returned at all."""
+    rows = [{"task_id": f"id-{i:03d}", "name": "n" * 200} for i in range(50)]
+    kept, dropped = read_layer.fit_rows_to_char_ceiling(rows, envelope={"tasks": []}, ceiling=2_000)
+
+    assert dropped > 0, "the fixture must actually overflow the ceiling or this proves nothing"
+    assert len(kept) + dropped == len(rows)
+    assert kept == rows[: len(kept)], "the cut falls on the TAIL -- the oldest rows"
+    for row in kept:
+        assert set(row) == {"task_id", "name"}, f"a surviving row must be whole, got {sorted(row)!r}"
+
+
+def test_the_char_ceiling_actually_holds_as_a_postcondition():
+    """The bound must HOLD, not approximately hold.
+
+    The in-repo ``_response_ceiling`` helper writes its truncation metadata after its
+    last size check and overshoots its own ceiling by exactly 64 chars while reporting
+    success. A bound that does not hold is worse than no bound, because it reports a
+    reassuring result. Asserted here as a property across a range of ceilings.
+    """
+    rows = [{"task_id": f"id-{i:03d}", "name": "n" * 200} for i in range(50)]
+    for ceiling in (1_000, 2_000, 5_000, 12_000):
+        envelope = {"tasks": [], "count": 0, "mode": "index"}
+        kept, _dropped = read_layer.fit_rows_to_char_ceiling(rows, envelope=envelope, ceiling=ceiling)
+        payload = dict(envelope, tasks=kept, count=len(kept))
+        assert read_layer.wire_length(payload) <= ceiling, (
+            f"the ceiling must hold: {read_layer.wire_length(payload)} chars over a {ceiling} ceiling"
+        )
+
+
+def test_a_ceiling_too_small_for_any_row_returns_none_rather_than_a_husk():
+    """The degenerate case has to be a clean empty answer, not a partial row.
+
+    Returning half a row would be the field-trimming failure mode arriving by the back
+    door. Zero rows plus a truncation signal is an answer a caller can act on.
+    """
+    rows = [{"task_id": "id-1", "name": "n" * 500}]
+    kept, dropped = read_layer.fit_rows_to_char_ceiling(rows, envelope={"tasks": []}, ceiling=10)
+    assert kept == []
+    assert dropped == 1
+
+
+def test_the_truncation_block_reuses_the_shipped_vocabulary():
+    """Extend the shipped shape; never invent a second one.
+
+    A caller that learned to read a truncated project list must be able to read a
+    truncated task list without learning anything new, so the keys are pinned here.
+    """
+    note = read_layer.truncation_note(
+        reason="limit", ceiling=50, rows_fetched=50, dropped="the OLDEST-CREATED tasks", advice="narrow it"
+    )
+    assert set(note) == {"reason", "ceiling", "rows_fetched", "dropped", "advice"}
+
+
+def test_apply_bounds_always_states_truncated_either_way():
+    """``truncated`` is present on EVERY response, and the detail block only on a cut.
+
+    Absence is indistinguishable from an older server, so the flag can never be omitted.
+    """
+    small = read_layer.apply_bounds(
+        {"tasks": [{"task_id": "a"}], "count": 1}, [{"task_id": "a"}], limit_cut=False, effective_limit=50
+    )
+    assert small["truncated"] is False
+    assert "truncation" not in small
+
+    cut = read_layer.apply_bounds(
+        {"tasks": [{"task_id": "a"}], "count": 1}, [{"task_id": "a"}], limit_cut=True, effective_limit=1
+    )
+    assert cut["truncated"] is True
+    assert cut["truncation"]["reason"] == "limit"
+
+
+# ---------------------------------------------------------------------------
+# BE-9470: the filter-validator fragment of the same package split.
+#
+# resolve_list_mode / resolve_task_limit / the status+priority+task_type
+# validators / resolve_task_type_id / resolve_active_product_for_list_tasks
+# moved into a fifth module, ``_mcp_filter_validators``, split out of
+# ``_mcp_read_layer`` when finding 4's mode-wins rewrite and finding 5's new
+# task_type domain fix pushed that file to 838 lines against the 800-line cap.
+# Behavioral coverage lives in tests/services/test_be9470_tasks_side.py; this
+# guards the STRUCTURE the way the rest of this file guards every other split.
+# ---------------------------------------------------------------------------
+
+
+def test_filter_validators_module_exists_and_is_imported_by_the_mixin():
+    from giljo_mcp.services.task_service import _mcp_adapter_mixin as adapter
+    from giljo_mcp.services.task_service import _mcp_filter_validators as validators
+
+    for name in (
+        "resolve_list_mode",
+        "resolve_task_limit",
+        "validate_task_status_filter",
+        "validate_task_type_filter",
+        "normalize_task_priority_filter",
+        "resolve_task_type_id",
+        "resolve_active_product_for_list_tasks",
+    ):
+        assert callable(getattr(validators, name)), name
+    # The mixin imports these names directly from the new module -- a stale
+    # import back to _mcp_read_layer would be a silent re-break of the split.
+    assert adapter.resolve_list_mode is validators.resolve_list_mode
+    assert adapter.resolve_task_type_id is validators.resolve_task_type_id

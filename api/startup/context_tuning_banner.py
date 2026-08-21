@@ -22,7 +22,7 @@ that many projects have completed since the last tune (or since product creation
 if never tuned). This is the same count-based staleness the closeout toast uses;
 both now flow from the single ``tuning_reminder_threshold`` preference through the
 owning ``ProductTuningService.check_tuning_staleness``. This replaces FE-9202's
-fixed 14-day/336h time cadence (the F2 "design-stands" boundary Patrik closed):
+fixed 14-day/336h time cadence (the F2 "design-stands" boundary):
 the banner no longer keys off wall-clock at all.
 
 Manual-refresh reset: a manual context tune resets the countdown for free —

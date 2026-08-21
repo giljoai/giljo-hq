@@ -36,15 +36,15 @@ class TestCreateUserSplitName:
         user = await user_service.create_user(
             username="split_fl_user",
             email="split_fl@example.com",
-            first_name="Patrik",
-            last_name="Eriksson",
+            first_name="Sam",
+            last_name="Rivera",
             password="Password123!",
             role="developer",
         )
 
         assert isinstance(user, User)
-        assert user.first_name == "Patrik"
-        assert user.last_name == "Eriksson"
+        assert user.first_name == "Sam"
+        assert user.last_name == "Rivera"
 
         # Verify at DB level (re-read to bypass ORM cache)
         with tenant_session_context(db_session, user.tenant_key):
@@ -52,8 +52,8 @@ class TestCreateUserSplitName:
                 select(User).where(User.id == user.id, User.tenant_key == user.tenant_key)
             )
         db_user = result.scalar_one()
-        assert db_user.first_name == "Patrik"
-        assert db_user.last_name == "Eriksson"
+        assert db_user.first_name == "Sam"
+        assert db_user.last_name == "Rivera"
 
     @pytest.mark.asyncio
     async def test_create_dual_writes_full_name_from_parts(self, user_service):
@@ -216,8 +216,8 @@ class TestUserDisplayNameProperty:
 
     def test_display_name_uses_first_and_last_when_both_set(self):
         """'First Last' is returned when both columns are populated."""
-        u = self._make_user(first_name="Patrik", last_name="Eriksson")
-        assert u.display_name == "Patrik Eriksson"
+        u = self._make_user(first_name="Sam", last_name="Rivera")
+        assert u.display_name == "Sam Rivera"
 
     def test_display_name_uses_first_only_when_no_last(self):
         """'First' (no trailing space) when last_name is NULL."""

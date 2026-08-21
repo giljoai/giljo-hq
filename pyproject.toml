@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "giljo-mcp"
-version = "2.0.2"
+version = "2.0.3"
 description = "Giljo HQ Coding Orchestrator - Multi-agent orchestration system"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -57,8 +57,10 @@ dependencies = [
     # MCP SDK (Model Context Protocol)
     # Upper bound: minor bumps require re-running
     # tests/integration/test_mcp_wire_contract_dict_serialization.py (wire contract).
-    # Patch bumps allowed. CVE-2025-66416 DNS rebinding fix required >=1.27.1.
-    "mcp>=1.27.1,<1.29",
+    # Patch bumps allowed. The 2.x floor supersedes the CVE-2025-66416 floor
+    # (DNS rebinding, fixed in 1.27.1). <2.1 also fences the provisional
+    # MCPServer.middleware signature our SEC-9126 gate rides on.
+    "mcp>=2.0.0,<2.1",
 
     # Core Utilities
     "python-dotenv>=1.0.0",

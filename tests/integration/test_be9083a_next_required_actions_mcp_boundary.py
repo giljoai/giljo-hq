@@ -35,7 +35,6 @@ from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.organizations import Organization
@@ -44,6 +43,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.services.protocol_survival import PROTOCOL_END_MARKER
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -51,7 +51,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(result) -> dict:
     if getattr(result, "structuredContent", None):
-        return result.structuredContent
+        return result.structured_content
     return json.loads(_raw_text(result))
 
 
@@ -210,7 +210,7 @@ async def _seed_active_run(db_session, tenant_key: str, project_ids: list[str], 
 async def _mission_result(client, job_id: str, **extra_args):
     async with client() as session:
         result = await session.call_tool("get_job_mission", {"job_id": job_id, **extra_args})
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         return _payload(result), _raw_text(result)
 
 
@@ -290,7 +290,7 @@ async def test_solo_orchestrator_staging_cell(mcp_client):
 
     async with client() as session:
         result = await session.call_tool("get_staging_instructions", {"job_id": job_id})
-        assert result.isError is False, _error_text(result)
+        assert result.is_error is False, _error_text(result)
         payload = _payload(result)
         raw = _raw_text(result)
 

@@ -29,14 +29,25 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from giljo_mcp.models import Project
+from giljo_mcp.models import Product, Project
 from giljo_mcp.services.sequence_chain_context import SequenceChainContextResolver
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.services.silence_detector import SilenceDetector
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    session.add(_owning_product_project)
     project = Project(
         id=str(uuid.uuid4()),
         name=f"BE-6190 {uuid.uuid4().hex[:6]}",
@@ -44,7 +55,10 @@ async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
         mission="Be a chain member.",
         status="active",
         tenant_key=tenant_key,
-        series_number=1,
+        product_id=_owning_product_project.id,
+        # BE-9429: uq_project_taxonomy_active is NULLS NOT DISTINCT, so these
+        # NULL-product/NULL-type rows collide unless the serial differs.
+        series_number=next_series_number(),
         execution_mode="claude_code_cli",
         created_at=datetime.now(UTC),
     )

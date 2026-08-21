@@ -16,6 +16,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createVuetify } from 'vuetify'
+import { createRouter, createMemoryHistory } from 'vue-router'
 import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
 import { nextTick } from 'vue'
@@ -25,6 +26,17 @@ import LaunchTab from '@/components/projects/LaunchTab.vue'
 const vuetify = createVuetify({
   components,
   directives,
+})
+
+// FE-9427: LaunchTab calls useRouter() (goToIntegrations -> /tools?tab=connect).
+// Without a router installed that returned `undefined`, so the navigation path
+// was inert. Routes are the ones this component actually pushes.
+const router = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: '/', name: 'Root', component: { template: '<div />' } },
+    { path: '/tools', name: 'Tools', component: { template: '<div />' } },
+  ],
 })
 
 // Mock useAgentJobs composable
@@ -117,7 +129,7 @@ describe('LaunchTab - Agent Mission Edit Integration (0244b)', () => {
           isStaging: false,
         },
         global: {
-          plugins: [vuetify],
+          plugins: [vuetify, router],
         },
       })
 
@@ -134,7 +146,7 @@ describe('LaunchTab - Agent Mission Edit Integration (0244b)', () => {
           isStaging: false,
         },
         global: {
-          plugins: [vuetify],
+          plugins: [vuetify, router],
         },
       })
 
@@ -155,7 +167,7 @@ describe('LaunchTab - Agent Mission Edit Integration (0244b)', () => {
           isStaging: false,
         },
         global: {
-          plugins: [vuetify],
+          plugins: [vuetify, router],
         },
       })
 
@@ -176,7 +188,7 @@ describe('LaunchTab - Agent Mission Edit Integration (0244b)', () => {
           isStaging: false,
         },
         global: {
-          plugins: [vuetify],
+          plugins: [vuetify, router],
         },
       })
 
@@ -206,7 +218,7 @@ describe('LaunchTab - Agent Mission Edit Integration (0244b)', () => {
           isStaging: false,
         },
         global: {
-          plugins: [vuetify],
+          plugins: [vuetify, router],
         },
       })
 
@@ -240,7 +252,7 @@ describe('LaunchTab - Agent Mission Edit Integration (0244b)', () => {
           isStaging: false,
         },
         global: {
-          plugins: [vuetify],
+          plugins: [vuetify, router],
         },
       })
 
@@ -270,7 +282,7 @@ describe('LaunchTab - Agent Mission Edit Integration (0244b)', () => {
           isStaging: false,
         },
         global: {
-          plugins: [vuetify],
+          plugins: [vuetify, router],
           stubs: {
             AgentMissionEditModal: {
               template: '<div class="agent-mission-edit-modal-stub"></div>',
@@ -292,7 +304,7 @@ describe('LaunchTab - Agent Mission Edit Integration (0244b)', () => {
           isStaging: false,
         },
         global: {
-          plugins: [vuetify],
+          plugins: [vuetify, router],
         },
       })
 
@@ -316,7 +328,7 @@ describe('LaunchTab - Agent Mission Edit Integration (0244b)', () => {
           isStaging: false,
         },
         global: {
-          plugins: [vuetify],
+          plugins: [vuetify, router],
         },
       })
 

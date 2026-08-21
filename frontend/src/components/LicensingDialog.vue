@@ -25,7 +25,7 @@
         </p>
 
         <v-alert type="info" variant="tonal" density="compact" class="mt-4">
-          <template v-slot:text>
+          <template #text>
             Contact <strong>sales@giljo.ai</strong> to obtain a Commercial License.
           </template>
         </v-alert>

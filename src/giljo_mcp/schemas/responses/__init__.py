@@ -66,6 +66,7 @@ from giljo_mcp.schemas.responses.project import (
     CloseoutData,
     CloseoutPromptResult,
     NuclearDeleteResult,
+    ProjectArchiveResult,
     ProjectCloseOutResult,
     ProjectCompleteResult,
     ProjectData,
@@ -133,6 +134,7 @@ __all__ = [
     # Product
     "ProductStatistics",
     "ProgressResult",
+    "ProjectArchiveResult",
     "ProjectCloseOutResult",
     "ProjectCompleteResult",
     "ProjectData",

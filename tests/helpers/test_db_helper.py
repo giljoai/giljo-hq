@@ -16,6 +16,7 @@ import asyncio
 import contextlib
 import os
 import re
+from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -60,12 +61,52 @@ WORKER_TEST_DB_PATTERN = re.compile(r"^(giljo_mcp_test\d*|giljo_test\d*)(_gw\d+)
 # concurrent copies fail with "source database template1 is being accessed by
 # other users". A session-level pg_advisory_lock on the shared admin connection
 # serializes just the create step (a brief one-time cost) and removes the race.
-_DB_CREATE_LOCK_KEY = 7281642
+#
+# THE ONE KEY (TSK-9381). ``template1`` is a single shared resource, so every
+# CREATE DATABASE anywhere in the suite must take the SAME lock or the lock buys
+# nothing. This was previously two keys: the migration scratch-DB bootstrap used
+# 7281643 while intending — per its own comment, "same serialization key family
+# as the main test-DB bootstrap" — to exclude against this one. Two keys exclude
+# nothing, so the two paths could copy template1 simultaneously. Use
+# ``create_database_lock`` / ``create_database_lock_async`` below rather than
+# hand-rolling the pair of statements; a new create site that invents its own key
+# reopens the same hole, and ``test_tsk9381_one_create_database_lock.py`` fails if
+# one appears.
+DB_CREATE_LOCK_KEY = 7281642
 
 # Test engines use SQLAlchemy NullPool (DatabaseManager(use_null_pool=True)) so
 # no idle connections are retained between checkouts. Under pytest-xdist many
 # worker processes each open an engine; a retained per-engine pool would exhaust
 # PostgreSQL ``max_connections``. NullPool keeps aggregate usage bounded.
+
+
+@contextlib.contextmanager
+def create_database_lock(conn):
+    """Hold :data:`DB_CREATE_LOCK_KEY` for a sync ``CREATE DATABASE`` (TSK-9381).
+
+    ``conn`` must be an AUTOCOMMIT connection to a maintenance database and must
+    stay open for the whole block: ``pg_advisory_lock`` is SESSION-scoped, so the
+    lock lives on this connection, not on a transaction.
+
+    Wrap the existence check as well as the CREATE. Checking outside the lock is
+    a classic check-then-act race — two workers both read "absent" and both
+    proceed to copy ``template1``.
+    """
+    conn.execute(text("SELECT pg_advisory_lock(:k)"), {"k": DB_CREATE_LOCK_KEY})
+    try:
+        yield conn
+    finally:
+        conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": DB_CREATE_LOCK_KEY})
+
+
+@contextlib.asynccontextmanager
+async def create_database_lock_async(conn):
+    """Async twin of :func:`create_database_lock`. Same key, same contract."""
+    await conn.execute(text("SELECT pg_advisory_lock(:k)"), {"k": DB_CREATE_LOCK_KEY})
+    try:
+        yield conn
+    finally:
+        await conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": DB_CREATE_LOCK_KEY})
 
 
 def worker_suffix() -> str:
@@ -191,14 +232,19 @@ class PostgreSQLTestHelper:
         Under pytest-xdist each worker gets its own database — ``giljo_mcp_test_gw0``,
         ``giljo_mcp_test_gw1``, ... locally and ``giljo_test_gw0``, ``giljo_test_gw1``,
         ... in CI (base name supplied via DATABASE_URL) — so parallel workers never
-        mutate one another's schema. The suffix is applied to either recognized test
-        DB base name; ``_worker_suffix()`` returns "" off-xdist, so serial callers
-        (the CI integration / test-saas steps, plain local runs) keep the bare
-        ``giljo_test`` / ``giljo_mcp_test`` name unchanged.
+        mutate one another's schema. The suffix is applied to any recognized test DB
+        base name, INCLUDING the numbered parallel-clone bases the module comment
+        above documents (``giljo_mcp_test2`` -> ``giljo_mcp_test2_gwN``; BE-9373 —
+        the suffix condition previously matched only the two canonical bases, so a
+        clone that set a numbered base got ONE shared DB for all xdist workers and
+        every clone in practice fell back to the default base, colliding with
+        sibling clones' runs). ``_worker_suffix()`` returns "" off-xdist, so serial
+        callers (the CI integration / test-saas steps, plain local runs) keep their
+        bare base name unchanged.
         """
         env_config = PostgreSQLTestHelper._config_from_env()
         base = env_config["database"] if env_config else PostgreSQLTestHelper.DEFAULT_CONFIG["database"]
-        if base in ("giljo_mcp_test", "giljo_test"):
+        if re.fullmatch(r"giljo_mcp_test\d*|giljo_test\d*", base):
             base = f"{base}{_worker_suffix()}"
         return base
 
@@ -303,17 +349,53 @@ class PostgreSQLTestHelper:
         already there. So a model column added since the DB was last created
         stays missing, and tests fail far from the real cause. If the DB
         already exists, its live columns are diffed against ``Base.metadata``
-        (``_missing_columns``, narrow by design) and, on drift, the DB is
-        dropped and recreated so the bootstrap ``create_all`` starts clean.
+        (``_missing_columns``, narrow by design) and, on drift, its ``public``
+        schema is reset so the bootstrap ``create_all`` starts clean.
 
-        Drop+recreate (rather than failing loudly) is the chosen response
-        because it IS race-safe here: the target DB name is per-worker-unique
-        (``resolve_test_db_name``), so no sibling xdist worker ever targets
-        this same name, and the whole drop+recreate below runs while this call
-        still holds ``_DB_CREATE_LOCK_KEY`` -- the same process-wide advisory
-        lock that already serializes CREATE DATABASE against the
-        ``template1``-copy race -- so no other process can be mid CREATE
-        against ANY test DB while this one is dropped and recreated.
+        Resetting (rather than failing loudly) is the chosen response because it
+        IS race-safe here: the target DB name is per-worker-unique
+        (``resolve_test_db_name``), so no sibling xdist worker ever targets this
+        same name and nothing else can observe the reset. It is scoped to the
+        schema rather than the database because that is the scope of the
+        guarantee: ``_missing_columns`` diffs ``public``, and BE-9288 asserts
+        ``public`` is empty afterwards. ``CASCADE`` also takes enum types and
+        sequences, so ``create_all`` starts genuinely clean.
+
+        NEVER GO IDLE WHILE HOLDING THE LOCK (INF-9406). ``DB_CREATE_LOCK_KEY``
+        is a PostgreSQL advisory lock, which is CLUSTER-scoped: every xdist
+        worker AND every concurrent clone on the same server queues on the one
+        key, however disjoint their database names are. This function used to
+        hold it across two operations issued on OTHER connections -- the
+        ``_missing_columns`` diff and ``drop_test_database()``, each of which
+        builds its own engine -- so the lock-holding connection sat ``idle`` for
+        as long as those took. Measured: a holder idle 27s on the existence
+        check while two sessions waited 24s on ``pg_advisory_lock``, which took
+        the BE-9288 guard test's own body to 33.1s (29.1s of it purely waiting
+        to acquire) against the 30s ``--timeout`` in pyproject.toml -- and
+        ``--timeout-method=thread`` kills by ``os._exit(1)``, so that landed as
+        a dead xdist worker and a red suite rather than as a slow test.
+
+        Removing the idle hold was necessary and NOT sufficient, and the reason
+        is the second half of INF-9406. The drift response still held the lock
+        across a ``DROP DATABASE`` -- and ``DROP DATABASE`` forces a
+        CLUSTER-WIDE immediate checkpoint and waits for it, so its duration is
+        set by every OTHER worker's dirty buffers. Measured during a concurrent
+        two-tree ``-n 6`` pair: one holder ACTIVE (never idle) for **34.30s** on
+        that single statement, a sibling clone's worker blocked **28.54s**
+        behind it, and BOTH died -- the waiter on the queue, the holder on its
+        own statement inside its own 30s-timed body. That is why the crash only
+        ever reproduced on concurrent pairs and never solo: solo, nothing else
+        has dirtied the cluster.
+
+        So the shape now is: the read-only diff happens BEFORE the lock (safe --
+        the name is per-worker-unique, so nothing else mutates that schema); the
+        drift response is a ``public``-schema reset, also before the lock, which
+        forces no checkpoint and copies no ``template1``; and the critical
+        section holds nothing but the authoritative existence check and
+        ``CREATE DATABASE`` -- the one operation the lock exists for. Keep it
+        that way: ``test_inf9406_lock_section_never_idles.py`` enforces both
+        that everything inside runs on ``conn`` and that no ``DROP DATABASE``,
+        ``DROP SCHEMA`` or ``pg_terminate_backend`` ever goes back in.
         """
         target_db = PostgreSQLTestHelper.resolve_test_db_name()
         # Defence-in-depth: never CREATE/connect a name that isn't a test DB.
@@ -324,11 +406,33 @@ class PostgreSQLTestHelper:
         admin_engine = create_async_engine(admin_url, isolation_level="AUTOCOMMIT")
         try:
             async with admin_engine.connect() as conn:
+                # The drift diff runs BEFORE the lock (INF-9406). It is
+                # read-only and needs its own connection to target_db, so
+                # holding the cluster-wide lock across it is exactly the idle
+                # hold that stalls every other worker and clone. This pre-check
+                # only decides WHETHER a diff is possible; the authoritative
+                # existence check is still taken under the lock below, so
+                # TSK-9381's check-then-act closure is untouched. A pre-check
+                # that disagreed with it could only happen if another process
+                # created or dropped this name mid-call, which per-worker
+                # uniqueness rules out -- and either way the in-lock branches
+                # below still decide.
+                pre_exists = bool(
+                    (
+                        await conn.execute(
+                            text("SELECT 1 FROM pg_database WHERE datname = :name"),
+                            {"name": target_db},
+                        )
+                    ).scalar()
+                )
+                drifted = bool(await PostgreSQLTestHelper._missing_columns(target_db)) if pre_exists else False
+
                 # Serialize concurrent CREATE DATABASE across xdist workers so
-                # template1 is only copied by one session at a time. Also
-                # covers the drop+recreate drift path below -- see docstring.
-                await conn.execute(text("SELECT pg_advisory_lock(:k)"), {"k": _DB_CREATE_LOCK_KEY})
-                try:
+                # template1 is only copied by one session at a time. That copy
+                # is the ONLY shared resource here, so it is the only thing this
+                # cluster-scoped lock covers -- the drift response is handled
+                # below, outside it (INF-9406).
+                async with create_database_lock_async(conn):
                     result = await conn.execute(
                         text("SELECT 1 FROM pg_database WHERE datname = :name"),
                         {"name": target_db},
@@ -338,21 +442,62 @@ class PostgreSQLTestHelper:
                         # above and matches ^(giljo_mcp_test|giljo_test)(_gw\d+)?$
                         # (safe id).
                         await conn.execute(text(f'CREATE DATABASE "{target_db}"'))
-                    elif await PostgreSQLTestHelper._missing_columns(target_db):
-                        # Stale schema: reuse the existing drop path, then the
-                        # same CREATE statement as the fresh-DB branch above.
-                        await PostgreSQLTestHelper.drop_test_database()
-                        await conn.execute(text(f'CREATE DATABASE "{target_db}"'))
-                finally:
-                    await conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _DB_CREATE_LOCK_KEY})
         finally:
             await admin_engine.dispose()
 
-        # Ensure required extensions exist inside the test database itself.
+        # The drift response, and the required extensions, inside the test
+        # database itself. Both run OUTSIDE the create-database lock.
         db_url = PostgreSQLTestHelper.get_test_db_url(database=target_db)
         db_engine = create_async_engine(db_url, isolation_level="AUTOCOMMIT")
         try:
             async with db_engine.connect() as conn:
+                if drifted:
+                    # Stale schema: reset it rather than dropping the database.
+                    #
+                    # WHY NOT ``DROP DATABASE`` (INF-9406, measured on this
+                    # server, PG 18): ``DROP DATABASE`` forces a CLUSTER-WIDE
+                    # immediate checkpoint and waits for it, so its cost is a
+                    # function of every OTHER worker's dirty buffers rather than
+                    # of this database. Measured: 0.47s on an idle cluster,
+                    # 34.30s during a concurrent two-tree ``-n 6`` pair -- past
+                    # the 30s ``--timeout`` in pyproject.toml, whose
+                    # ``thread`` method kills by ``os._exit(1)``, i.e. a dead
+                    # xdist worker and a red suite. ``DROP SCHEMA ... CASCADE``
+                    # forces NO checkpoint (measured: 0.273s vs 2.000s on the
+                    # same populated database, checkpoints_requested +0 vs +1),
+                    # and it copies no ``template1``, so it needs no lock.
+                    #
+                    # It is equivalent for what the guard actually guarantees:
+                    # ``_missing_columns`` diffs the ``public`` schema, and
+                    # BE-9288 asserts ``public`` is empty afterwards. CASCADE
+                    # also removes enum types and sequences, so the caller's
+                    # ``create_all`` starts genuinely clean -- dropping only the
+                    # tables would leave types behind and break it.
+                    #
+                    # The terminate stays: unlike ``DROP DATABASE``, which
+                    # ERRORS when other sessions are attached, ``DROP SCHEMA``
+                    # BLOCKS on their locks. Without it a stray connection turns
+                    # a loud failure into a hang, which is worse than the bug.
+                    await conn.execute(
+                        text(
+                            """
+                            SELECT pg_terminate_backend(pg_stat_activity.pid)
+                            FROM pg_stat_activity
+                            WHERE pg_stat_activity.datname = :name
+                            AND pid <> pg_backend_pid()
+                            """
+                        ),
+                        {"name": target_db},
+                    )
+                    await conn.execute(text("DROP SCHEMA public CASCADE"))
+                    await conn.execute(text("CREATE SCHEMA public"))
+                    # Both environments run the suite as a superuser (local
+                    # ``postgres``; CI ``giljo_test``), so this is belt-and-
+                    # braces -- it keeps the reset correct for a self-hoster
+                    # running the suite as a non-superuser, since PG 15 stopped
+                    # granting CREATE on ``public`` to everyone by default.
+                    await conn.execute(text("GRANT ALL ON SCHEMA public TO PUBLIC"))
+                # Recreated last: the reset above drops pg_trgm with the schema.
                 await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         finally:
             await db_engine.dispose()
@@ -406,6 +551,184 @@ class PostgreSQLTestHelper:
     # truncating tables out from under sibling xdist workers. Per-worker DB
     # isolation + per-test transaction rollback (TransactionalTestContext)
     # make them unnecessary. Use ``drop_test_database`` for whole-DB teardown.
+
+
+def clone_dir_slot() -> str:
+    """The numeric clone slot read off the DIRECTORY name ("2" in ``clone_CI2``), or "".
+
+    The counterpart to :func:`clone_slot`, and the two answer different questions
+    on purpose:
+
+    * :func:`clone_slot` asks **"which lane am I RUNNING as"** — it reads the
+      configured test-DB base, i.e. the pin that is actually in force.
+    * this function asks **"which lane SHOULD I be"** — it reads the checkout
+      directory, the same source this repo's local suite wrapper derives its base
+      from (``clone_CI<N>`` -> ``giljo_mcp_test<N>``).
+
+    They agree exactly when the tree is pinned correctly, and the gap between them
+    IS the accident this project exists to make loud: a numbered clone running on
+    the unnumbered shared base. Nothing could detect that before, because a single
+    derivation cannot disagree with itself.
+
+    Read off ``__file__`` rather than the process working directory. ``local_suite.sh``
+    uses ``basename $(pwd)`` because it also reads ``./.env`` and ``./.venv`` and so
+    is already anchored at the repo root; pytest carries no such guarantee, and a
+    run launched from a subdirectory must not be able to report a different lane
+    than the tree it is testing.
+
+    Returns "" for any tree whose directory does not end in digits — the primary
+    checkout, a CI runner's workspace, a rename — so callers
+    must treat "" as "this tree has no lane of its own", never as lane 0.
+    """
+    # parents[2] of tests/helpers/test_db_helper.py is the repo root.
+    match = re.search(r"CI(\d+)$", Path(__file__).resolve().parents[2].name)
+    return match.group(1) if match else ""
+
+
+def clone_slot() -> str:
+    """The numeric clone slot for THIS tree ("6" in ``clone_CI6``), or "" when unnumbered.
+
+    THE ONE ANSWER to "which lane am I". The slot is read off the configured
+    test-DB base rather than off the directory name, because the base is what the
+    local CI-faithful test runner already derives from the clone directory and
+    pins into ``DATABASE_URL`` (``clone_CI6`` -> ``giljo_mcp_test6``). Every
+    scratch-DB name that needs lane isolation must call THIS, not re-derive it:
+    a second derivation is free to drift away from the first, and the two bare
+    literals this function replaced (``giljo_test_bootstrap``, ``giljo_mcp_test9``)
+    are what that drift already cost — see INF-9387 and :func:`bootstrap_db_base`.
+
+    Unnumbered bases (CI's ``giljo_test``, the plain local ``giljo_mcp_test``)
+    yield "", so callers keep their historical unnumbered name unchanged.
+    """
+    env_config = PostgreSQLTestHelper._config_from_env()
+    base = env_config["database"] if env_config else PostgreSQLTestHelper.DEFAULT_CONFIG["database"]
+    # Defensive: a base already carrying a worker suffix must not contribute its
+    # worker number as the clone slot.
+    slot = re.search(r"(\d+)$", re.sub(r"_gw\d+$", "", base))
+    return slot.group(1) if slot else ""
+
+
+def lane_scratch_db_selector(prefix: str) -> str:
+    """A ``LIKE`` pattern matching only THIS lane's databases under ``prefix``.
+
+    ``lane_scratch_db_selector("giljo_test_bootstrap")`` yields
+    ``giljo_test_bootstrap2%`` in lane CI2 — that lane's scratch base plus its
+    ``_gwN`` variants, and nothing belonging to a sibling lane.
+
+    **It REFUSES rather than returning a slot-less pattern, and the refusal is the
+    point of the function.** With no clone slot, ``giljo_test_bootstrap%`` is not
+    "my scratch databases", it is *everyone's* — one string meaning both things is
+    the defect class this module keeps paying for. A caller that asked for a
+    lane-scoped selector and silently received a global one is worse off than one
+    that got an exception, because the widened selector still appears to work and
+    only reaches other people's databases.
+
+    Measured cost of exactly that widening (2026-08-14): a lane building a local
+    reproduction dropped 20 databases with ``LIKE 'giljo_test_bootstrap%'`` — its
+    own slot-4 set plus lanes 1, 2 and 3's and the unnumbered default's. Every drop
+    succeeded, so nothing live was severed and the scratch DBs self-provision on
+    next use; the cost was the cross-lane reach, not the data. The selector should
+    have carried the slot digit. The check that was run ("is this drop safe?") and
+    the claim that was made ("these are mine") were about different sets.
+
+    Args:
+        prefix: A scratch-DB base name WITHOUT its slot digit — e.g.
+            ``giljo_test_bootstrap``. An already-slotted name is refused, since it
+            would yield ``giljo_test_bootstrap22%``.
+
+    Raises:
+        RuntimeError: when this tree has no clone slot, or ``prefix`` is a pattern
+            or already carries a slot.
+    """
+    if not prefix or "%" in prefix:
+        raise RuntimeError(
+            f"lane_scratch_db_selector({prefix!r}): pass a bare scratch-DB prefix, not a pattern. "
+            "This function appends the wildcard itself, so the slot digit cannot be left out of it."
+        )
+    if re.search(r"\d$", prefix):
+        raise RuntimeError(
+            f"lane_scratch_db_selector({prefix!r}): the prefix already ends in a digit, so the slot "
+            "would be appended twice. Pass the unslotted base name and let this function add the slot."
+        )
+
+    slot = clone_slot()
+    if not slot:
+        raise RuntimeError(
+            f"lane_scratch_db_selector({prefix!r}): refusing to build a slot-less selector.\n"
+            f"  This tree resolves to an UNNUMBERED test-DB base, so '{prefix}%' would match EVERY "
+            f"lane's databases on this server rather than this lane's.\n"
+            f"  Fix: run under a numbered clone (clone_CI<N>) with its base pinned via "
+            f"DATABASE_URL, or name the databases you mean explicitly instead of matching a pattern."
+        )
+    return f"{prefix}{slot}%"
+
+
+def schema_guard_scratch_base() -> str:
+    """Base name for the BE-9288 schema-drift guard's throwaway scratch DB, isolated PER CLONE.
+
+    Two properties, and the second was missing until INF-9387:
+
+    * **Slot 9 keeps it clear of real trees.** The guard drops and recreates this
+      DB, so it must never be a database a developer is actually running against.
+      Real simultaneous clones use the small slots (2, 3, 4 ... 6), so a 9-prefixed
+      slot sits outside the range they occupy.
+    * **The clone slot keeps it clear of sibling LANES.** The literal
+      ``giljo_mcp_test9`` isolated xdist workers within one run (via the caller's
+      ``worker_suffix()``) and nothing else: every clone hardcoded the same 9, so
+      CI1/CI3/CI4/CI5/CI6 all targeted ``giljo_mcp_test9_gw0..gwN`` at once while
+      the ``scratch_db`` fixture force-drops and recreates. One lane's CREATE landed
+      between another's DROP and CREATE, or a sibling dropped a scratch DB
+      mid-test — red runs on a database belonging to nobody. Appending
+      :func:`clone_slot` gives lane CI6 ``giljo_mcp_test96`` and lane CI5
+      ``giljo_mcp_test95``.
+
+    Digits are appended with no separator because every name that reaches
+    ``get_test_db_url`` must satisfy :data:`WORKER_TEST_DB_PATTERN`, which admits
+    only digits and a ``_gwN`` suffix. So one point still rests on convention, as
+    it always did: **do not create a clone numbered 9 or 9x** (``clone_CI9``,
+    ``CI96``). Such a tree's own base would BE another tree's scratch name — CI9's
+    ``giljo_mcp_test9`` is the unnumbered tree's scratch, CI96's is lane 6's — and
+    the guard force-drops its scratch, so the collision costs a live database
+    rather than a name. Real lanes are CI1-CI6, which is exactly what "outside the
+    range real clones use" means. Widening a production-safety allowlist to buy a
+    separator would be a far worse trade than keeping this convention.
+
+    Unnumbered bases keep the historical ``giljo_mcp_test9`` exactly.
+    """
+    return f"giljo_mcp_test9{clone_slot()}"
+
+
+def bootstrap_db_base() -> str:
+    """Base name for the migration-bootstrap scratch DB, isolated PER CLONE (TSK-9381).
+
+    ``GILJO_BOOTSTRAP_TEST_DB`` still wins when set. Otherwise the numeric clone
+    slot is carried over from the configured test-DB base, so a clone running on
+    ``giljo_mcp_test6`` gets ``giljo_test_bootstrap6`` instead of sharing one
+    global ``giljo_test_bootstrap`` with every other clone on the same Postgres.
+
+    THE GAP THIS CLOSES: BE-9373 gave the per-worker test DBs clone isolation via
+    ``resolve_test_db_name``, which reads the base out of ``DATABASE_URL``. The
+    migration scratch DB was missed because its name is not derived from
+    ``DATABASE_URL`` at all — it was a bare literal, and nothing in the tree ever
+    set the override. So setting a numbered base isolated a lane's test DBs while
+    leaving it sharing the scratch DB, which the migration conftest DROPS and
+    RECREATES per worker and the tests run ``upgrade``/``downgrade``/``drop_all``
+    against. Two clones running suites at once demolished each other's schema
+    mid-test, surfacing as ``UniqueViolation`` on ``pg_type_typname_nsp_index``
+    (two concurrent CREATEs in one DB) or ``UndefinedTable`` on a table another
+    process had just dropped — a different victim every run, which is what made
+    it read as ambient flakiness rather than as an isolation bug.
+
+    Unchanged everywhere it was already correct: CI's base is ``giljo_test`` (no
+    digits) and the plain local default is ``giljo_mcp_test`` (no digits), so both
+    still resolve to ``giljo_test_bootstrap``. Only a numbered clone moves — which
+    is exactly the case that was broken.
+    """
+    override = os.environ.get("GILJO_BOOTSTRAP_TEST_DB", "")
+    if override:
+        return override
+
+    return f"giljo_test_bootstrap{clone_slot()}"
 
 
 class TransactionalTestContext:

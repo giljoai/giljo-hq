@@ -4,6 +4,8 @@ import { useTaskCrud } from './useTaskCrud'
 const mockUpdateTask = vi.fn(() => Promise.resolve({ id: 1 }))
 const mockCreateTask = vi.fn(() => Promise.resolve())
 const mockFetchTasks = vi.fn(() => Promise.resolve())
+const mockShowToast = vi.fn()
+const mockAddNotification = vi.fn()
 
 vi.mock('@/stores/tasks', () => ({
   useTaskStore: () => ({
@@ -21,6 +23,37 @@ vi.mock('@/stores/products', () => ({
     currentProductId: 'product-1',
   }),
 }))
+
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({ showToast: mockShowToast }),
+}))
+
+vi.mock('@/stores/notifications', () => ({
+  useNotificationStore: () => ({ addNotification: mockAddNotification }),
+}))
+
+// A save can fail two ways: with our structured server error shape
+// ({error_code, message, context} under response.data), or without one
+// (a network error, a legacy 500, anything unstructured). Axios errors are
+// real Error instances with a `.response` property attached -- mirror that
+// shape rather than a bare object, since that's what the interceptor chain
+// (api.js normalizeRejection) actually hands the composable's catch block.
+function structuredServerError(message, errorCode = 'RESERVED_TAG_ERROR') {
+  return Object.assign(new Error('Request failed with status code 400'), {
+    response: {
+      status: 400,
+      data: { error_code: errorCode, message, context: {} },
+    },
+  })
+}
+
+function unstructuredError() {
+  return new Error('Network Error')
+}
+
+function stubForm() {
+  return { validate: () => Promise.resolve({ valid: true }) }
+}
 
 describe('useTaskCrud', () => {
   let crud
@@ -91,10 +124,10 @@ describe('useTaskCrud', () => {
   })
 
   it('completeTask forwards optional completion notes', async () => {
-    await crud.completeTask(42, 'shipped to dogfood')
+    await crud.completeTask(42, 'shipped to test install')
     expect(mockUpdateTask).toHaveBeenCalledWith(42, {
       status: 'completed',
-      completion_notes: 'shipped to dogfood',
+      completion_notes: 'shipped to test install',
     })
   })
 
@@ -120,5 +153,57 @@ describe('useTaskCrud', () => {
     const task = { id: 8, title: 'task' }
     await crud.updateTaskDueDate(task, null)
     expect(mockUpdateTask).toHaveBeenCalledWith(8, { due_date: null })
+  })
+
+  describe('saveTask error surfacing (FE-9461)', () => {
+    it('renders the server reason when the save fails with a structured error', async () => {
+      const serverMessage = "'TSK' is a reserved tag and cannot be selected."
+      mockUpdateTask.mockRejectedValueOnce(structuredServerError(serverMessage))
+      crud.editTask({ id: 1, title: 'Test', status: 'pending', priority: 'high' })
+
+      await crud.saveTask(stubForm())
+
+      expect(mockShowToast).toHaveBeenCalledWith({ message: serverMessage, type: 'error' })
+    })
+
+    it('falls back to the generic message when the save fails without a structured error', async () => {
+      mockUpdateTask.mockRejectedValueOnce(unstructuredError())
+      crud.editTask({ id: 1, title: 'Test', status: 'pending', priority: 'high' })
+
+      await crud.saveTask(stubForm())
+
+      expect(mockShowToast).toHaveBeenCalledWith({
+        message: 'Failed to save task. Please try again.',
+        type: 'error',
+      })
+    })
+  })
+
+  describe('completeTask error surfacing (FE-9466)', () => {
+    it('pushes a persistent notification carrying the server reason on a structured failure', async () => {
+      const serverMessage = 'Cannot complete a task with unresolved subtasks.'
+      mockUpdateTask.mockRejectedValueOnce(
+        structuredServerError(serverMessage, 'TASK_HAS_OPEN_SUBTASKS'),
+      )
+
+      await expect(crud.completeTask(42)).rejects.toThrow()
+
+      expect(mockAddNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'failure:task.complete:42:TASK_HAS_OPEN_SUBTASKS',
+          message: serverMessage,
+        }),
+      )
+    })
+
+    it('falls back to a generic message on an unstructured failure, never the raw error', async () => {
+      mockUpdateTask.mockRejectedValueOnce(unstructuredError())
+
+      await expect(crud.completeTask(42)).rejects.toThrow()
+
+      const pushed = mockAddNotification.mock.calls.at(-1)?.[0]
+      expect(pushed?.message).toBe('Failed to complete task. Please try again.')
+      expect(pushed?.message).not.toMatch(/Network Error/)
+    })
   })
 })

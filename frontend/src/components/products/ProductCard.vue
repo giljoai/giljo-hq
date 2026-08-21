@@ -88,7 +88,7 @@
 
     <v-card-actions class="justify-center">
       <v-tooltip location="top" content-class="branded-tooltip">
-        <template v-slot:activator="{ props }">
+        <template #activator="{ props }">
           <v-btn
             icon
             size="small"
@@ -105,7 +105,7 @@
         <span>View Product Details</span>
       </v-tooltip>
       <v-tooltip location="top" content-class="branded-tooltip">
-        <template v-slot:activator="{ props }">
+        <template #activator="{ props }">
           <v-btn
             icon
             size="small"
@@ -122,7 +122,7 @@
         <span>Tune Context</span>
       </v-tooltip>
       <v-tooltip location="top" content-class="branded-tooltip">
-        <template v-slot:activator="{ props }">
+        <template #activator="{ props }">
           <v-btn
             icon
             size="small"
@@ -139,7 +139,7 @@
         <span>{{ isActive ? 'Deactivate Product' : 'Activate Product' }}</span>
       </v-tooltip>
       <v-tooltip location="top" content-class="branded-tooltip">
-        <template v-slot:activator="{ props }">
+        <template #activator="{ props }">
           <v-btn
             icon
             size="small"
@@ -156,7 +156,7 @@
         <span>Edit Product</span>
       </v-tooltip>
       <v-tooltip location="top" content-class="branded-tooltip">
-        <template v-slot:activator="{ props }">
+        <template #activator="{ props }">
           <v-btn
             icon
             size="small"

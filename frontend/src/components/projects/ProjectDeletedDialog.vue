@@ -21,7 +21,7 @@
 
       <v-list v-if="deletedProjects.length > 0" class="smooth-border rounded">
         <v-list-item v-for="(project, index) in deletedProjects" :key="project.id">
-          <template v-slot:prepend>
+          <template #prepend>
             <v-icon icon="mdi-folder-minus"></v-icon>
           </template>
 
@@ -32,7 +32,7 @@
             </div>
           </div>
 
-          <template v-slot:append>
+          <template #append>
             <div class="d-flex align-center ga-1">
               <v-btn
                 class="restore-btn"

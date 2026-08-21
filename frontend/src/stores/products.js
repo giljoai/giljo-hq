@@ -213,9 +213,14 @@ export const useProductStore = defineStore('products', () => {
       } else {
         activeProduct.value = null
       }
+      return true
     } catch (err) {
       console.error('Failed to fetch active product:', err)
       activeProduct.value = null
+      // FE-9412: report the read failure so callers can tell "the server says
+      // there is no active product" apart from "the server did not answer".
+      // Existing callers ignore the return and keep their current behaviour.
+      return false
     }
   }
 
@@ -284,11 +289,44 @@ export const useProductStore = defineStore('products', () => {
   }
 
   /**
-   * Handle product status change events by refreshing the active product.
+   * FE-9412: reconcile this session against the server's active product.
+   *
+   * Re-reads the active product and, when it no longer matches what this
+   * session is scoped by, re-scopes through setCurrentProduct() — the same
+   * call the local activation path makes (useProductActivation), so a session
+   * that learns about an activation second-hand lands in the same state as the
+   * one that performed it: header, project list, tasks and roadmap together.
+   *
+   * The live WS event and the focus/reconnect backstop both come through here,
+   * so the two paths cannot drift apart.
+   */
+  async function revalidateActiveProduct() {
+    // This runs on every tab focus, so a flaky network must not be able to
+    // blank the header or move the session: on a failed read, put back what
+    // the session already had and change nothing.
+    const previousActive = activeProduct.value
+    const read = await fetchActiveProduct()
+    if (!read) {
+      activeProduct.value = previousActive
+      return
+    }
+
+    const serverActiveId = activeProduct.value?.id
+    // No active product on the server (e.g. a deactivation) leaves this
+    // session's selection alone — there is nothing to re-scope to.
+    if (!serverActiveId || serverActiveId === currentProductId.value) {
+      return
+    }
+
+    await setCurrentProduct(serverActiveId)
+  }
+
+  /**
+   * Handle product status change events by reconciling the active product.
    */
   async function handleProductStatusChanged() {
     try {
-      await fetchActiveProduct()
+      await revalidateActiveProduct()
     } catch (e) {
       console.warn('[PRODUCTS] Failed to refresh active product on WS event:', e)
     }
@@ -318,6 +356,7 @@ export const useProductStore = defineStore('products', () => {
     updateProduct,
     deleteProduct,
     fetchActiveProduct,
+    revalidateActiveProduct,
     initializeFromStorage,
     clearProductData,
 

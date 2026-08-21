@@ -13,7 +13,7 @@ side effect at import time. Behavior, signatures, names, and descriptions unchan
 
 from typing import Annotated, Any, Literal
 
-from mcp.server.fastmcp import Context
+from mcp.server.mcpserver import Context
 from pydantic import Field
 
 from api.endpoints.mcp_tools._base import (
@@ -38,6 +38,18 @@ from giljo_mcp.services.memory_entry_write_validator import (
 # validate_memory_entry_write (raises the structured MemoryEntryWriteValidationError,
 # surfaced clean by the _call_tool catch-all) — the wrappers only advertise it.
 _SUMMARY_CAP_TEXT = f"Max {MEMORY_SUMMARY_MAX} chars (server-enforced)."
+
+# BE-9464: TSK-9450 fixed the message a caller sees AFTER an absorbed call is
+# refused; it never touched what the schema teaches beforehand. Length is not
+# the variable that matters here -- absorption swallows whatever FOLLOWS a long
+# free-text argument in the caller's own tool-call serialization, so send this
+# one LAST and there is nothing left to swallow. Why + measurements:
+# tests/integration/test_tsk9450_absorption_remedy_wording_mcp_boundary.py
+_SUMMARY_ORDER_TEXT = (
+    "Send this argument LAST in your call -- anything ordered after a long "
+    "free-text argument like this one can be silently absorbed into it and "
+    "never arrive as its own argument."
+)
 _OUTCOMES_CAP_TEXT = (
     f"Max {MEMORY_KEY_OUTCOMES_COUNT} items, each max {MEMORY_KEY_OUTCOME_MAX} chars (server-enforced)."
 )
@@ -75,7 +87,7 @@ async def write_project_closeout(
     project_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
     summary: Annotated[
         str,
-        Field(description=f"Brief 2-3 sentence headline of project outcome. {_SUMMARY_CAP_TEXT}"),
+        Field(description=f"Brief 2-3 sentence headline of project outcome. {_SUMMARY_CAP_TEXT} {_SUMMARY_ORDER_TEXT}"),
     ],
     key_outcomes: Annotated[
         list[str],
@@ -169,7 +181,12 @@ async def write_memory_entry(
     project_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
     summary: Annotated[
         str,
-        Field(description=f"Brief 2-3 sentence headline of what was accomplished or handed over. {_SUMMARY_CAP_TEXT}"),
+        Field(
+            description=(
+                f"Brief 2-3 sentence headline of what was accomplished or handed over. "
+                f"{_SUMMARY_CAP_TEXT} {_SUMMARY_ORDER_TEXT}"
+            )
+        ),
     ],
     key_outcomes: Annotated[
         list[str],

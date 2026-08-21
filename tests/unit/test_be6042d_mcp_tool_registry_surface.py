@@ -68,10 +68,27 @@ from api.endpoints.mcp_sdk_server import TOOL_SCOPES, mcp
 # a new tool being introduced for the purpose. DELIBERATELY ADMITTED: param addition
 # only, count stays 46 — that is the load-bearing half, since a new tool here would
 # grow the surface of a product about to be submitted to a connector directory.
+# BE-9477 added the patch_fields param to update_roadmap_metadata: editing one
+# roadmap field used to clear the others, and the fix is an opt-in partial update on
+# the EXISTING tool rather than a second write tool beside it. DELIBERATELY ADMITTED:
+# param addition only, count stays 46. This lock caught it on CI's unit step, which is
+# exactly its job — the change is intended, and it had to be admitted here by hand
+# rather than land silently.
 EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
+    # BE-9411: product_id binds the new project to a named product instead of
+    # whatever is globally active at write time. Optional -- omitted, the tool
+    # behaves exactly as before.
     "create_project": {
         "fn": "create_project",
-        "params": ["bootstrap_template_vars", "description", "name", "project_type", "series_number", "suffix"],
+        "params": [
+            "bootstrap_template_vars",
+            "description",
+            "name",
+            "product_id",
+            "project_type",
+            "series_number",
+            "suffix",
+        ],
         "scope": "mcp:write",
     },
     # BE-6111c: read-only orchestrator self-healing diagnostic (net-new tool).
@@ -87,13 +104,18 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
             "completed_before",
             "created_after",
             "created_before",
+            # BE-9469: the opaque continuation token. A PARAMETER on the shipped tool,
+            # never a new tool -- the operator ruling is standing.
+            "cursor",
             "depth",
             "hidden",
             "include_completed",
             "include_superseded",
+            "limit",  # BE-9468 read layer: bounded caller-facing row cap
             "memory_limit",
             "mode",
             "project_type",
+            "query",  # BE-9468 read layer: substring search over name/id/alias
             "status",
             "status_filter",
             "summary_only",
@@ -135,16 +157,22 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
         "params": ["chain_mission", "execution_mode", "project_ids", "resolved_order", "review_policy"],
         "scope": "mcp:agent",
     },
+    # BE-9411: product_id binds the new task to a named product instead of
+    # whatever is globally active at write time. Optional -- omitted, the tool
+    # behaves exactly as before.
     "create_task": {
         "fn": "create_task",
-        "params": ["assigned_to", "description", "priority", "task_type", "title"],
+        "params": ["assigned_to", "description", "priority", "product_id", "task_type", "title"],
         "scope": "mcp:write",
     },
     "update_task": {
         "fn": "update_task",
         # BE-6225a: completion_notes folded in from the retired complete_task tool.
+        # BE-9382: convert_to_project promotes the task through the UI's own
+        # conversion path (no separate convert tool).
         "params": [
             "completion_notes",
+            "convert_to_project",
             "description",
             "due_date",
             "hidden",
@@ -156,16 +184,37 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
         ],
         "scope": "mcp:write",
     },
+    # BE-9468 added `limit` (bounded row cap, default/max from the read layer) and
+    # `query` (substring search over title/description/taxonomy_alias). Both are
+    # OPTIONAL with defaults, so every call that worked before still works -- the
+    # signature grew, the contract did not change.
     "list_tasks": {
         "fn": "list_tasks",
-        "params": ["due_before", "hidden", "memory_limit", "mode", "priority", "status", "summary_only", "task_type"],
+        "params": [
+            # BE-9469: the opaque continuation token. A PARAMETER, never a new tool.
+            "cursor",
+            "due_before",
+            "hidden",
+            "limit",
+            "memory_limit",
+            "mode",
+            "priority",
+            "query",
+            "status",
+            "summary_only",
+            "task_type",
+        ],
         "scope": "mcp:read",
     },
     # FE-6022a: Roadmapping Pane bulk-upsert tool. 0006 added the `remove` param
     # (drop items from the roadmap in the same call).
+    # BE-9477: patch_fields makes an item patch only the metadata it carries --
+    # an omitted field keeps its stored value, an explicitly empty one is
+    # cleared. Optional and DEFAULT FALSE, so an existing caller takes the
+    # identical path it always did.
     "update_roadmap_metadata": {
         "fn": "update_roadmap_metadata",
-        "params": ["items", "remove", "summary"],
+        "params": ["items", "patch_fields", "remove", "summary"],
         "scope": "mcp:write",
     },
     # FE-6022c: Roadmapping Pane read tool.
@@ -197,11 +246,20 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
     },
     "post_to_thread": {
         "fn": "post_to_thread",
+        # BE-9379 added as_user: attribution is fail-closed — from_agent is required,
+        # and posting in the human user's voice is an explicit as_user=true (the two
+        # are mutually exclusive). DELIBERATELY ADMITTED — param addition only,
+        # tool set + count unchanged.
+        # BE-9475 added my_status: a headless participant's own status claim, the only
+        # channel an agent with no agent_executions row has for saying what it is doing.
+        # DELIBERATELY ADMITTED — param addition only, tool set + count unchanged.
         "params": [
+            "as_user",
             "content",
             "from_agent",
             "loop_directive",
             "loop_interval_minutes",
+            "my_status",
             "pass_baton_to",
             "requires_action",
             "set_status",
@@ -215,9 +273,22 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
         "params": ["agent_id"],
         "scope": "mcp:read",
     },
+    "await_my_turn": {
+        "fn": "await_my_turn",
+        "params": ["agent_id", "timeout_seconds"],
+        "scope": "mcp:read",
+    },
+    "get_participant_liveness": {
+        "fn": "get_participant_liveness",
+        "params": ["thread_id"],
+        "scope": "mcp:read",
+    },
     "pass_baton": {
         "fn": "pass_baton",
-        "params": ["thread_id", "to"],
+        # BE-9296a added from_agent: the hander's id, so the recipient's alert names
+        # WHO is waiting rather than only the thread. DELIBERATELY ADMITTED — param
+        # addition only, optional, tool set + count unchanged.
+        "params": ["from_agent", "thread_id", "to"],
         "scope": "mcp:agent",
     },
     "list_threads": {
@@ -294,7 +365,7 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
     },
     "set_agent_status": {
         "fn": "set_agent_status",
-        "params": ["job_id", "reason", "status", "wake_in_minutes"],
+        "params": ["job_id", "reason", "status", "wake_in_minutes", "wake_on_signal"],
         "scope": "mcp:agent",
     },
     "get_job_mission": {
@@ -460,7 +531,17 @@ def test_registered_tool_set_is_exactly_preserved():
     BE-9012b (BE-6225e) merged reactivate_job + dismiss_reactivation into
     resolve_reactivation: 48 -> 47. BE-9012d hard-removed the 3 bus tools:
     47 -> 44. BE-9201 added create_product + create_vision_document
-    (agent-side product bootstrap): 44 -> 46.
+    (agent-side product bootstrap): 44 -> 46. BE-9296a added await_my_turn (the
+    blocking form of get_my_turn — the server wake signal): 46 -> 47, and
+    get_participant_liveness (the orchestrator's who-is-still-there read): 47 -> 48.
+    BE-9385b added set_agent_export_alias (the install-time "keep both" rename, which
+    MUST round-trip to the server or spawn-by-name silently stops resolving): 48 -> 49.
+    BE-9396 retracted that tool one day later, before it reached any release: the
+    operator ruled that giljo_setup guarantees server -> disk and nothing beyond it,
+    so a file the user renames by hand leaves the guarantee rather than pulling the
+    server into chasing it. The install prose now flags the conflict and lets the
+    installing LLM resolve it with the user -- the round-trip was the enforcement
+    layer, and enforcement was the part that was over-built: 49 -> 48.
     """
     live_names = {t.name for t in mcp._tool_manager.list_tools()}
     expected_names = set(EXPECTED_TOOL_SURFACE)
@@ -468,7 +549,7 @@ def test_registered_tool_set_is_exactly_preserved():
         f"Tool registry drift. Missing: {sorted(expected_names - live_names)}; "
         f"Unexpected: {sorted(live_names - expected_names)}"
     )
-    assert len(live_names) == 46
+    assert len(live_names) == 48
 
 
 def test_every_tool_fn_params_and_scope_preserved():

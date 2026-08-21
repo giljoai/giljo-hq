@@ -356,18 +356,22 @@ def _build_closeout_message(*, project_id: str, is_chain_member: bool) -> str:
     claiming it "closed" is false, and it was the false claim that led a caller to
     believe a solo project had been closed when it had not.
 
-    The remedy named is the endpoint the dashboard's Archive button actually calls
-    (``archive_project`` in ``api/endpoints/projects/lifecycle.py``), which flips the
-    row from any status -- never ``update_project(status=...)``, which is not the
-    supported completion path.
+    BE-9384: the remedy named is now reachable from here. ``update_project(status=
+    "completed")`` runs the same archive lifecycle the dashboard's Archive button
+    runs (deactivate, terminal status with the completion date stamped, spawned
+    agents closed), so an agent can finish a solo project without leaving MCP. It
+    used to reach the status write alone, which is why this message previously sent
+    callers to the REST endpoint and warned them off the tool.
     """
     if is_chain_member:
         return "Project closed: this chain member's status was updated and 360 Memory was updated successfully."
     return (
         "360 Memory updated successfully. This project's own status was NOT changed -- "
-        "closeout does not complete a solo project; that is left for the Archive action. "
-        f"To mark it completed, call POST /api/v1/projects/{project_id}/archive "
-        "(the same endpoint the dashboard's Archive button uses)."
+        "closeout does not complete a solo project. "
+        f"To complete it, call update_project(project_id='{project_id}', status='completed'), "
+        "which runs the full archive lifecycle (the same one the dashboard's Archive button uses): "
+        "it deactivates the project, stamps the completion date, and closes any spawned agents "
+        "still sitting at 'complete'."
     )
 
 

@@ -45,7 +45,10 @@ export const COMM_HUB_EVENT_ROUTES = {
   thread_message: {
     handler: async (payload) => {
       const commHub = useCommHubStore()
-      commHub.handleThreadMessage(payload)
+      // BE-9414: awaited because a truncated long post fetches its full body here.
+      // Unawaited, the hydration would race the notification/badge work below and
+      // be unobservable to any caller (tests included) that waits on this handler.
+      await commHub.handleThreadMessage(payload)
       dispatchWindowEvent('hub:thread_message', payload)
       refreshWaitingCountsForOpenProject(payload, commHub)
     },

@@ -623,6 +623,7 @@ class OrchestrationAgentStateService:
         reason: str = "",
         wake_in_minutes: int | None = None,
         tenant_key: str | None = None,
+        wake_on_signal: bool = False,
     ) -> ErrorReportResult:
         """
         Set agent resting or blocked status (Handover 0880: expanded from report_error).
@@ -630,7 +631,8 @@ class OrchestrationAgentStateService:
         Handles three agent-settable states:
         - blocked: agent needs human help (shows "Needs Input")
         - idle: agent dispatched work, resting (shows "Monitoring")
-        - sleeping: agent will auto-check in N minutes (shows "Sleeping")
+        - sleeping: agent will auto-check in N minutes (shows "Sleeping"), or is
+          parked on the server wake signal (FE-9296b, shows "Waiting for wake")
 
         Auto-wake: report_progress() transitions idle/sleeping/blocked → working.
 
@@ -639,6 +641,11 @@ class OrchestrationAgentStateService:
             status: Target status — "blocked", "idle", or "sleeping"
             reason: Human-readable reason (displayed in dashboard)
             wake_in_minutes: Sleep interval hint for "sleeping" status
+            wake_on_signal: FE-9296b — True when a "sleeping" agent is parked on
+                ``await_my_turn`` rather than a timed sleep. Stored as a
+                structured ``wake_mode=signal`` marker in block_reason (same
+                idiom as the ``wake_in_minutes=N`` marker) so the dashboard can
+                distinguish wake-waiting from timed sleeping.
             tenant_key: Optional tenant key (uses current if not provided)
 
         Returns:
@@ -668,9 +675,13 @@ class OrchestrationAgentStateService:
                     context={"method": "set_agent_status", "job_id": job_id},
                 )
 
-            # Build block_reason string (stores reason + optional wake metadata)
+            # Build block_reason string (stores reason + optional wake metadata).
+            # FE-9296b: wake_on_signal wins over wake_in_minutes — an agent parked
+            # on await_my_turn has no timed wake, so the timer marker would lie.
             block_reason = reason
-            if status == "sleeping" and wake_in_minutes:
+            if status == "sleeping" and wake_on_signal:
+                block_reason = f"{reason} | wake_mode=signal" if reason else "wake_mode=signal"
+            elif status == "sleeping" and wake_in_minutes:
                 block_reason = (
                     f"{reason} | wake_in_minutes={wake_in_minutes}" if reason else f"wake_in_minutes={wake_in_minutes}"
                 )

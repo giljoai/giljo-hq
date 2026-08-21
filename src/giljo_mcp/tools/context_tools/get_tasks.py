@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager, tenant_session_context
@@ -26,11 +26,22 @@ from giljo_mcp.models import Task, TaxonomyType
 
 logger = logging.getLogger(__name__)
 
+OPEN_STATUSES = ("pending", "in_progress", "blocked")
+
 
 def _estimate_tokens(data: Any) -> int:
+    """Rough token estimate for this row's identifier-dense JSON shape.
+
+    NOT the naive chars÷4 heuristic: measured on the real wire serializer
+    (pydantic_core.to_json) against tiktoken o200k_base for rows shaped like
+    this tool's output, chars/token is 2.92-3.00 at n=1/10/50 rows -- ÷4
+    understates by 19.8-21.7% on this identifier-dense shape (UUIDs, ISO
+    timestamps). ÷3 lands within a percent of the measured token count at
+    n=50 (5189 vs 5196).
+    """
     import json
 
-    return len(json.dumps(data, default=str)) // 4
+    return len(json.dumps(data, default=str)) // 3
 
 
 async def _query(
@@ -51,7 +62,7 @@ async def _query(
             Task.tenant_key == tenant_key,
             Task.product_id == product_id,
             Task.deleted_at.is_(None),  # BE-6130b: exclude trashed tasks
-            Task.status.in_(["pending", "in_progress", "blocked"]),
+            Task.status.in_(OPEN_STATUSES),
         )
         .order_by(Task.created_at.desc())
         .limit(limit)
@@ -79,6 +90,28 @@ async def _query(
     return summary
 
 
+async def _count_open(
+    session: AsyncSession,
+    *,
+    product_id: str,
+    tenant_key: str,
+) -> int:
+    """BE-9467: the TRUE open-task count, not the length of a capped page.
+
+    Same predicates as ``_query`` (minus ``limit``/``order_by``), so this
+    always agrees with what "open" means for the page above it. Indexed on
+    tenant_key + product_id + status (idx_task_product, idx_task_status).
+    """
+    stmt = select(func.count(Task.id)).where(
+        Task.tenant_key == tenant_key,
+        Task.product_id == product_id,
+        Task.deleted_at.is_(None),
+        Task.status.in_(OPEN_STATUSES),
+    )
+    with tenant_session_context(session, tenant_key):
+        return (await session.execute(stmt)).scalar_one()
+
+
 async def get_tasks(
     product_id: str,
     tenant_key: str,
@@ -98,8 +131,9 @@ async def get_tasks(
     Returns:
         Dict with:
         - source: "tasks"
-        - data: {"tasks": [<summary rows>], "open_count": N}
-        - metadata: {tenant_key, product_id, estimated_tokens, ...}
+        - data: {"tasks": [<page, bounded by limit>], "open_count": <TRUE open count>}
+        - metadata: {tenant_key, product_id, estimated_tokens, limit,
+          truncated: bool -- True when open_count exceeds len(tasks)}
     """
     if not tenant_key:
         raise ValueError("tenant_key is required")
@@ -108,16 +142,24 @@ async def get_tasks(
 
     if session is not None:
         summary_rows = await _query(session, product_id=product_id, tenant_key=tenant_key, limit=limit)
+        true_open_count = await _count_open(session, product_id=product_id, tenant_key=tenant_key)
     else:
         async with db_manager.get_session_async(tenant_key=tenant_key) as new_session:
             summary_rows = await _query(new_session, product_id=product_id, tenant_key=tenant_key, limit=limit)
+            true_open_count = await _count_open(new_session, product_id=product_id, tenant_key=tenant_key)
 
-    data = {"tasks": summary_rows, "open_count": len(summary_rows)}
+    # BE-9467: open_count is the TRUE count (a second indexed query), not
+    # len(page) -- a tenant with more open tasks than `limit` was previously
+    # told it had exactly `limit`, in a field whose name promised otherwise.
+    data = {"tasks": summary_rows, "open_count": true_open_count}
+    truncated = true_open_count > len(summary_rows)
     logger.info(
-        "tasks_context_fetched product_id=%s tenant_key=%s count=%d",
+        "tasks_context_fetched product_id=%s tenant_key=%s returned=%d open_count=%d truncated=%s",
         product_id,
         tenant_key,
         len(summary_rows),
+        true_open_count,
+        truncated,
     )
     return {
         "source": "tasks",
@@ -127,5 +169,6 @@ async def get_tasks(
             "tenant_key": tenant_key,
             "estimated_tokens": _estimate_tokens(data),
             "limit": limit,
+            "truncated": truncated,
         },
     }

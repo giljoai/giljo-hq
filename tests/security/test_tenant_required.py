@@ -154,6 +154,9 @@ _TENANT_LEVEL_INVENTORY: list[tuple[str, str, str, str, str]] = [
     # in every edition, not require_ce_mode-gated.
     ("settings", "/api/v1/settings", "PUT", "/general", "service_injected"),
     ("settings", "/api/v1/settings", "PUT", "/system/agent-silence-threshold", "service_injected"),
+    # FE-9296b: the account-level check-in cadence, hosted exactly like the
+    # silence threshold above (same handler shape, same tenant flow).
+    ("settings", "/api/v1/settings", "PUT", "/system/agent-checkin-cadence", "service_injected"),
 ]
 
 

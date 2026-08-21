@@ -13,7 +13,7 @@ side effect at import time. Behavior, signatures, names, and descriptions unchan
 
 from typing import Annotated, Any, Literal
 
-from mcp.server.fastmcp import Context
+from mcp.server.mcpserver import Context
 from pydantic import Field
 
 from api.endpoints.mcp_tools import _base
@@ -23,12 +23,18 @@ from api.endpoints.mcp_tools._base import (
     MCP_ID_MAX,
     MCP_MISSION_MAX,
     MCP_NAME_MAX,
+    MCP_SHORT_TEXT_MAX,
     _call_tool,
     _detected_harness,
     _parse_iso_datetime_param,
     mcp,
 )
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
+from giljo_mcp.services.project_service._mcp_list_bounds import (
+    _QUERY_MAX_LENGTH,
+    LIST_PROJECTS_LIMIT_DEFAULT,
+    LIST_PROJECTS_LIMIT_MAX,
+)
 
 
 @mcp.tool(
@@ -51,10 +57,12 @@ async def diagnose_project_state(
 @mcp.tool(
     title="Create Project",
     description=(
-        "Create a new project bound to the active product. project_type is a taxonomy abbreviation "
-        "(e.g. FE, BE, INF); the reserved 'TSK' type is task-only and is never valid here. "
-        "series_number is auto-assigned server-side -- omit it for a normal create. Project is "
-        "created inactive; the user activates/launches from the dashboard. See get_giljo_guide for "
+        "Create a new project. Pass product_id to bind it to a specific product; omit it and the "
+        "project binds to the active product, which another session or the user can change under "
+        "you. project_type is a taxonomy abbreviation (e.g. FE, BE, INF); the reserved 'TSK' type "
+        "is task-only and is never valid here. series_number is auto-assigned server-side -- omit "
+        "it for a normal create. Project is created inactive; the user activates/launches from the "
+        "dashboard. The response names the product the project landed on. See get_giljo_guide for "
         "chain creation (shared series_number + a/b/c suffix), taxonomy errors, and Edition Scope."
     ),
     annotations=_tool_hints("create_project"),
@@ -66,9 +74,10 @@ async def create_project(
     series_number: int = 0,
     suffix: Annotated[str, Field(max_length=8)] = "",
     bootstrap_template_vars: dict[str, Any] | None = None,
+    product_id: Annotated[str, Field(max_length=MCP_ID_MAX)] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
-    """Create a new project bound to the active product.
+    """Create a new project bound to a product.
 
     Args:
         name: Project name (required)
@@ -90,6 +99,14 @@ async def create_project(
             with keys 'new_documents' (optional list of {document_name, document_type})
             and any extra substitution vars consumed by the CTX bootstrap template.
             For non-CTX project types, this parameter is ignored.
+        product_id: Optional product UUID to bind the project to. Omit to use the
+            active product (the default, and what every existing caller gets).
+            PASS IT WHEN YOU KNOW YOUR PRODUCT: the active product is shared,
+            mutable state -- another session or the user switching products in the
+            dashboard changes it mid-session, and an omitted product_id follows
+            that change. A product_id that does not belong to your account is
+            rejected and nothing is created; it never falls back to the active
+            product.
     """
     params = {
         "name": name,
@@ -102,90 +119,185 @@ async def create_project(
         params["subseries"] = suffix
     if bootstrap_template_vars is not None:
         params["bootstrap_template_vars"] = bootstrap_template_vars
+    if product_id:
+        params["product_id"] = product_id
     return await _call_tool(ctx, "create_project", params)
 
 
 @mcp.tool(
     title="List Projects",
     description=(
-        "List projects for the active product with server-side filtering. Default returns only "
-        "active-lifecycle projects (excludes completed/cancelled/terminated/deleted); pass "
-        "include_completed=true or an explicit status to change that. Prefer mode=triage|planning|"
-        "audit|forensic over numeric depth. Cheap-first: summary_only/mode=triage to find a "
-        "project_id, then get_context(categories=['project']) for one project's full detail. "
-        "Requires an active product. See get_giljo_guide for read-vs-write routing."
+        "List and SEARCH projects for the active product with server-side filtering. Default "
+        "returns only active-lifecycle projects (excludes completed/cancelled/terminated/"
+        "deleted); pass include_completed=true or an explicit status to change that. EVERY "
+        "response carries a counts block describing the WHOLE board (totals by status and type, "
+        "the date span) so you can size it before choosing what to ask for. counts.matched is "
+        "your filters' full hit count and stays constant across a walk; counts.remaining (only "
+        "while walking, via cursor) is the part still ahead of you and shrinks each page. If your "
+        "default-view result looks emptier than expected, counts.advice explains why and names "
+        "the true count for YOUR filters (not a whole-board number) and how to see the rest -- "
+        "this is NOT a truncation, just an explicit note. Use query "
+        "to find a project by name, serial, or a word from its description without listing the "
+        "board. Results are bounded by "
+        f"limit (default {LIST_PROJECTS_LIMIT_DEFAULT}, max {LIST_PROJECTS_LIMIT_MAX}); a cut "
+        "response says so via truncated + truncation, and carries truncation.next_cursor -- pass "
+        "it back as cursor with the SAME filters to walk the rest, page by page, until truncated "
+        "is false. That is how you list EVERYTHING without guessing at slices. "
+        "Prefer mode=triage|planning|audit|forensic "
+        "over numeric depth. Cheap-first: mode=triage to find a project_id, then "
+        "get_context(categories=['project']) for one project's full detail. Requires an active "
+        "product. See get_giljo_guide for read-vs-write routing."
     ),
     meta=MCP_HEAVY_TOOL_META,  # BE-9083c: raise Claude Code's inline-truncation ceiling
     annotations=_tool_hints("list_projects"),
 )
 async def list_projects(
-    status: str = "",
-    project_type: str = "",
-    taxonomy_alias_prefix: str = "",
-    created_after: str = "",
-    created_before: str = "",
-    completed_after: str = "",
-    completed_before: str = "",
-    include_completed: bool = False,
-    include_superseded: bool = False,
-    hidden: str = "",
-    summary_only: bool = True,
-    depth: int = 0,
-    status_filter: str = "",
-    mode: str = "",
-    memory_limit: int = 0,
+    status: Annotated[
+        str,
+        Field(
+            description=(
+                "Filter by status. Single value or comma-separated list. Valid values: "
+                "active, cancelled, completed, deleted, inactive, parked, superseded, "
+                "terminated. When set, include_completed is ignored. status='deleted' "
+                "reaches soft-deleted rows (the default hides them). If status_filter is "
+                "ALSO passed with a different effective meaning, the call is refused "
+                "(conflict) naming both values and the remedy; identical values pass."
+            )
+        ),
+    ] = "",
+    project_type: Annotated[
+        str,
+        Field(
+            description="Filter by taxonomy type abbreviation. Single value ('BE') or comma-separated list "
+            "('BE,FE,INF'). Must match a configured type."
+        ),
+    ] = "",
+    taxonomy_alias_prefix: Annotated[
+        str,
+        Field(
+            description="Prefix-match against taxonomy_alias (e.g. 'BE-50' matches BE-5001..BE-5099 but not "
+            "BE-5100; 'BE-5036' exact-matches one)."
+        ),
+    ] = "",
+    created_after: Annotated[
+        str, Field(description="ISO-8601 datetime (e.g. '2026-01-01T00:00:00Z'); only rows created at/after this.")
+    ] = "",
+    created_before: Annotated[
+        str, Field(description="ISO-8601 datetime (e.g. '2026-01-01T00:00:00Z'); only rows created before this.")
+    ] = "",
+    completed_after: Annotated[
+        str,
+        Field(description="ISO-8601 datetime (e.g. '2026-01-01T00:00:00Z'); only rows completed at/after this."),
+    ] = "",
+    completed_before: Annotated[
+        str,
+        Field(description="ISO-8601 datetime (e.g. '2026-01-01T00:00:00Z'); only rows completed before this."),
+    ] = "",
+    include_completed: Annotated[
+        bool,
+        Field(
+            description="When True, archived projects (completed, cancelled, terminated, deleted) are "
+            "included. Ignored when status is explicitly set."
+        ),
+    ] = False,
+    include_superseded: Annotated[
+        bool,
+        Field(
+            description="When True, superseded projects (work replaced by a successor) are included. Hidden "
+            "by default even under include_completed=True. An explicit status='superseded' also surfaces them."
+        ),
+    ] = False,
+    hidden: Annotated[str, Field(description="'true' / 'false' / '' (empty = no filter, default).")] = "",
+    summary_only: Annotated[
+        bool,
+        Field(
+            description="When True (default), return only summary fields to minimize payload. An explicit "
+            "nonzero depth overrides this default (see depth); mode always wins over both when passed."
+        ),
+    ] = True,
+    depth: Annotated[
+        int,
+        Field(
+            description="Detail level 0-3: 0 = summary fields only. 1 = + description, mission, agent job "
+            "summary. 2 = + 360 memory entries, agent job details. 3 = + message history, git commits from 360 "
+            "memory. An explicit nonzero depth overrides the summary_only=True default (same precedence mode "
+            "already has); mode still wins over depth when both are passed."
+        ),
+    ] = 0,
+    status_filter: Annotated[
+        str,
+        Field(
+            description="Legacy -- prefer `status`. Used when `status` is unset. Valid values: active, all, "
+            "cancelled, completed, inactive, parked. When BOTH `status` and `status_filter` are passed, a "
+            "genuine disagreement is refused (conflict) naming both values; identical/compatible values pass."
+        ),
+    ] = "",
+    mode: Annotated[
+        Literal["", "triage", "planning", "audit", "forensic"],
+        Field(
+            description="Agent-facing projection depth, preferred over numeric depth. 'triage' = "
+            "id+name+status+dates (cheapest). 'planning' = + description, mission, agent counts. 'audit' = + "
+            "memory headlines + agent summaries. 'forensic' = + full memory bodies, agent results (no cap). "
+            "'' (default) = use numeric depth instead."
+        ),
+    ] = "",
+    memory_limit: Annotated[
+        int,
+        Field(
+            description="Cap memory entries returned (audit mode default 5, max 50). 0 = use mode default. "
+            "Forensic ignores the cap unless explicitly set."
+        ),
+    ] = 0,
+    query: Annotated[
+        str,
+        Field(
+            max_length=_QUERY_MAX_LENGTH,
+            description=(
+                "Case-insensitive substring to search project name, id, description, "
+                "project_alias and taxonomy_alias (e.g. 'oauth', 'BE-1042'). Empty = no search. "
+                "The cheapest path from a half-remembered name -- or a phrase you recall from the "
+                "description -- to one project_id."
+            ),
+        ),
+    ] = "",
+    limit: Annotated[
+        int,
+        Field(
+            ge=0,
+            le=LIST_PROJECTS_LIMIT_MAX,
+            description=(
+                f"Max projects to return (default {LIST_PROJECTS_LIMIT_DEFAULT}, max "
+                f"{LIST_PROJECTS_LIMIT_MAX}). 0 = use the default. Values above the max are "
+                "REJECTED with a validation error, not clamped. A response cut by this bound "
+                "sets truncated=true and carries a truncation block naming it; read "
+                "counts.matched to see how many rows your filters actually match."
+            ),
+        ),
+    ] = 0,
+    cursor: Annotated[
+        str,
+        Field(
+            max_length=MCP_SHORT_TEXT_MAX,
+            description=(
+                "Continue a previous list from where it stopped. Pass back the opaque token from "
+                "that response's truncation.next_cursor, WITH THE SAME FILTERS. Empty = start at "
+                "the first page. Walking is the only way to read a set larger than one page: keep "
+                "passing the newest next_cursor until a response comes back with truncated=false, "
+                "and every project will have been returned exactly once. Changing any filter "
+                "mid-walk is REFUSED rather than silently answered from the wrong set -- restart "
+                "without cursor if you want different filters. Changing limit or mode mid-walk is "
+                "fine."
+            ),
+        ),
+    ] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
     """List projects for the active product (v1.2.1 server-side filtering).
 
-    Default returns only projects in active lifecycle. Four statuses are
-    auto-excluded from the default response: completed, cancelled, terminated,
-    deleted. The two returned by default are: active, inactive. The hidden
-    column is per-row UI declutter and does NOT affect default visibility --
-    agent sees hidden and non-hidden alike. Pass include_completed=true to
-    retrieve archived projects. Pass hidden=true|false to filter explicitly
-    when needed (rare).
-
-    NOTE: status="deleted" returns soft-deleted rows. The default response
-    hides soft-deleted projects (deleted_at IS NULL), but explicitly passing
-    status="deleted" flips the soft-delete filter to deleted_at IS NOT NULL,
-    so soft-deleted projects are reachable when the agent asks for them by
-    status. Frontend StatusBadge enum parity is preserved either way.
-
-    Args:
-        status: Filter by status. Single value ("active") or comma-separated list
-            ("active,inactive"). Valid values: active, inactive, completed,
-            cancelled, terminated, deleted. When set, include_completed is
-            ignored -- explicit status arg overrides the default exclusion.
-        project_type: Filter by taxonomy type abbreviation. Single value ("BE")
-            or comma-separated list ("BE,FE,INF"). Must match a configured type.
-        taxonomy_alias_prefix: Prefix-match against taxonomy alias (e.g. "BE-50"
-            matches BE-5001..BE-5099 but not BE-5100; "BE-5036" exact-matches one).
-        created_after / created_before: ISO-8601 datetimes (e.g. "2026-01-01T00:00:00Z").
-        completed_after / completed_before: ISO-8601 datetimes for completion window.
-        include_completed: When True, archived projects (completed, cancelled,
-            terminated, deleted) are included. Ignored when `status` is explicitly set.
-        include_superseded: When True, superseded projects (work replaced by a
-            successor) are included. Hidden by default even under
-            include_completed=True. An explicit status="superseded" also surfaces them.
-        hidden: "true" / "false" / "" (empty = no filter, default).
-        summary_only: When True (default), return only summary fields to minimize payload.
-        depth: Detail level 0-3 when summary_only=False:
-            0 = summary fields only.
-            1 = + description, mission, agent job summary.
-            2 = + 360 memory entries, agent job details.
-            3 = + message history, git commits from 360 memory.
-        status_filter: Legacy parameter -- prefer `status`. Accepts "all" or a single
-            status string. Honored only when `status` is unset.
-        mode: BE-5042 agent-facing projection (preferred over numeric depth).
-            "triage"   = id+name+status+dates (cheapest).
-            "planning" = + description, mission, agent counts.
-            "audit"    = + memory headlines + agent summaries (default last 5
-                         memory entries).
-            "forensic" = + full memory bodies, agent results (no cap).
-            When set, mode wins over numeric `depth`. Empty string = use depth.
-        memory_limit: Cap memory entries returned (audit mode default 5, max 50).
-            0 = use mode default. Forensic ignores the cap unless explicitly set.
+    BE-9470: every parameter's contract now lives on its own Field description
+    above (the wire an agent actually reads), not here -- FastMCP never
+    serializes a docstring Args: block to the schema, so this stayed one
+    source of truth instead of two that could disagree.
     """
     # Normalize status -> list[str] | None
     status_arg: list[str] | str | None
@@ -234,6 +346,9 @@ async def list_projects(
             "hidden": hidden_arg,
             "mode": mode or None,
             "memory_limit": memory_limit or None,
+            "query": query or None,
+            "limit": limit or None,
+            "cursor": cursor or None,
         },
     )
 
@@ -243,8 +358,11 @@ async def list_projects(
     description=(
         "Update project metadata (name, description, status, project_type, series_number, suffix). "
         "Only provided fields are updated. The reserved 'TSK' tag is not a selectable project_type. "
-        "To find a project to update, call list_projects first. See get_giljo_guide for chain "
-        "repositioning routing."
+        "status='completed' on a solo project runs the FULL archive lifecycle (the same one the "
+        "dashboard's Archive button runs): deactivate, terminal status with completion date stamped, "
+        "and spawned agents moved from 'complete' to 'closed'. This is the supported way to finish a "
+        "project over MCP. To find a project to update, call list_projects first. See get_giljo_guide "
+        "for chain repositioning routing."
     ),
     # BE-9251: status accepts terminal values (completed/cancelled) -- a general
     # editor tool that CAN produce a terminal transition, not just rename/redescribe.
@@ -269,6 +387,12 @@ async def update_project(
         status: New status — "inactive", "active", "completed", "cancelled", or "parked". Leave
             empty to keep current. "parked" sets a project aside without cancelling it -- hidden
             from the roadmap but resumable; unpark by setting status back to "inactive" or "active".
+            "completed" on a solo project is the supported completion path: it runs the whole
+            archive lifecycle, not just the status write. The final status is derived, not taken
+            literally -- a project the user terminated early lands on "terminated" instead, because
+            the early-termination flag decides which terminal state is correct. "cancelled" is a
+            different outcome (abandoned, not finished) and stays a plain status write. A member of
+            a running chain also stays a plain status write; its conductor owns member completion.
         project_type: Taxonomy type abbreviation (e.g. FE, BE). Leave empty to keep current.
             The reserved 'TSK' tag is not a selectable project type (tasks only).
         series_number: Sequential number within the type series (1-9999). Use 0 to keep current.

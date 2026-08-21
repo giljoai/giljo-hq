@@ -23,8 +23,8 @@ can NEITHER break out of the argument NOR inject an extra command:
 - AppleScript string layer (macOS, best-effort): backslash + double-quote escape,
   then the whole ``osascript -e`` argument is POSIX single-quoted.
 
-macOS is BEST-EFFORT and explicitly **not validated** (no Mac in the lab); each
-entry carries ``macos_validated=False`` so callers can surface that.
+macOS is BEST-EFFORT and explicitly **not validated** — macOS validation is
+pending; each entry carries ``macos_validated=False`` so callers can surface that.
 """
 
 from __future__ import annotations
@@ -188,7 +188,7 @@ def linux_command_fallback(binary: str, title: str, seed_prompt: str) -> str:
 
 
 def macos_command(binary: str, title: str, seed_prompt: str) -> str:
-    """Best-effort osascript launcher (macOS NOT validated — no Mac in the lab).
+    """Best-effort osascript launcher (macOS validation pending).
 
     BE-6182: carries the autonomy flag + natural-language loaded prompt. Three
     quoting layers, innermost-out: the shell command POSIX-single-quotes the seed;
@@ -386,7 +386,7 @@ _WIN_SPAWN = "wt -w 0 new-tab --title 'giljo sub-orch' -d \"$PWD\" {win_shell} -
 _LINUX_SPAWN = (
     "gnome-terminal --working-directory=\"$PWD\" --title='giljo sub-orch' -- bash -c \"{prefix} '{prompt}'; exec bash\""
 )
-# macOS — rendered but NOT validated (no Mac in the lab). osascript driving Terminal.app.
+# macOS — rendered but not validated (validation pending). osascript driving Terminal.app.
 _MACOS_SPAWN = (
     'osascript -e "tell application \\"Terminal\\" to do script \\"cd \\\\\\"$PWD\\\\\\" && {prefix} \'{prompt}\'\\""'
 )
@@ -415,7 +415,7 @@ _GENERIC_WIN_SPAWN = 'wt -w 0 new-tab --title "giljo sub-orch" -d "$PWD" cmd /k 
 _GENERIC_LINUX_SPAWN = (
     'gnome-terminal --working-directory="$PWD" --title="giljo sub-orch" -- {harness} --prompt "{prompt}"'
 )
-# macOS — rendered but NOT validated (no Mac in the lab). osascript driving Terminal.app.
+# macOS — rendered but not validated (validation pending). osascript driving Terminal.app.
 _GENERIC_MACOS_SPAWN = (
     'osascript -e \'tell application "Terminal" to do script "cd \\"$PWD\\" && {harness} --prompt \\"{prompt}\\""\''
 )
@@ -490,7 +490,7 @@ def _validation_label(binary: str, os_name: str) -> str:
 
     The claude positional invocation is binary-verified on Windows AND Linux.
     codex/gemini/agy flags are set but the full invocation is not yet binary-verified,
-    and macOS (osascript) is unvalidated (no Mac in the lab) — all "pending validation".
+    and macOS (osascript) validation is pending — all "pending validation".
     """
     if binary == "claude" and _OS_SPAWN[os_name].validated:
         return "VALIDATED"

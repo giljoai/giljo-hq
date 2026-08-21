@@ -53,11 +53,11 @@ const HTTP_API = { host: 'localhost', port: '7272', protocol: 'http', ssl_enable
 const HTTPS_API = { host: 'giljo.example.com', port: 443, protocol: 'https', ssl_enabled: true }
 
 let mountedWrappers = []
-async function mountCard({ mode, api }) {
+async function mountCard({ mode, api, toolId = 'claude_code' }) {
   fetchConfig.mockResolvedValue({ api, giljo_mode: mode })
   const ConnectToolCard = (await import('@/components/setup/ConnectToolCard.vue')).default
   const wrapper = mount(ConnectToolCard, {
-    props: { toolId: 'claude_code' },
+    props: { toolId },
     global: { stubs: globalStubs },
   })
   mountedWrappers.push(wrapper)
@@ -115,5 +115,39 @@ describe('ConnectToolCard — FE-9339 inline cert-trust link', () => {
     await wrapper.find('[data-testid="cert-trust-link"]').trigger('keydown.enter')
     await nextTick()
     expect(wrapper.find('[data-test="cert-modal-open"]').exists()).toBe(true)
+  })
+})
+
+// FE-9383 — the same CE-over-HTTPS moment, named before it happens. A Node-based CLI
+// answers an untrusted certificate with a TLS verification error, which reads as "the
+// command is wrong" and sends the user back to re-copy a command that was already
+// correct. The note says what actually failed and points at the trust store; product
+// copy must never offer "turn verification off" as the way out.
+describe('ConnectToolCard — FE-9383 Node/TLS note', () => {
+  it('CE + https: states the failure in terms of Node clients and the trust store', async () => {
+    const wrapper = await mountCard({ mode: 'ce', api: HTTPS_API, toolId: 'opencode' })
+    const note = wrapper.find('[data-testid="node-tls-note"]')
+    expect(note.exists()).toBe(true)
+    expect(note.text()).toContain('OpenCode')
+    expect(note.text()).toContain('trust store')
+  })
+
+  it('CE + http (localhost default): stays silent — there is no certificate to trust', async () => {
+    const wrapper = await mountCard({ mode: 'ce', api: HTTP_API, toolId: 'opencode' })
+    expect(wrapper.find('[data-testid="node-tls-note"]').exists()).toBe(false)
+  })
+
+  it('SaaS: never renders — a hosted tenant has no server certificate of its own', async () => {
+    const wrapper = await mountCard({ mode: 'saas', api: HTTPS_API, toolId: 'opencode' })
+    expect(wrapper.find('[data-testid="node-tls-note"]').exists()).toBe(false)
+  })
+
+  it('never offers disabling TLS verification as the fix', async () => {
+    const wrapper = await mountCard({ mode: 'ce', api: HTTPS_API, toolId: 'opencode' })
+    const text = wrapper.text()
+    expect(text).not.toContain('NODE_TLS_REJECT_UNAUTHORIZED')
+    expect(text).not.toContain('--insecure')
+    expect(text).not.toContain('rejectUnauthorized')
+    expect(text.toLowerCase()).not.toContain('disable certificate')
   })
 })

@@ -27,6 +27,13 @@ _RECONNECT_MAX_DELAY_SECONDS = 30.0
 # of an opaque asyncpg error from the server.
 _MAX_NOTIFY_PAYLOAD_BYTES = 7999
 
+# INF-3009f: this broker's direct database connections per worker process —
+# 1 session-pinned LISTEN + the publish pool. The startup connection-budget check
+# (api/startup/database.py) counts these; keep in sync with start() below.
+_PUBLISH_POOL_MIN_SIZE = 1
+_PUBLISH_POOL_MAX_SIZE = 5
+MAX_DB_CONNECTIONS_PER_PROCESS = 1 + _PUBLISH_POOL_MAX_SIZE
+
 
 class PostgresNotifyWebSocketEventBroker(WebSocketEventBroker):
     """
@@ -62,7 +69,9 @@ class PostgresNotifyWebSocketEventBroker(WebSocketEventBroker):
             # Fail loud: an unreachable PG at boot is a config error, not a
             # degrade case (the caller decides whether boot survives it).
             await self._connect_listener()
-            self._publish_pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=5)
+            self._publish_pool = await asyncpg.create_pool(
+                self._dsn, min_size=_PUBLISH_POOL_MIN_SIZE, max_size=_PUBLISH_POOL_MAX_SIZE
+            )
         except BaseException:
             await self.stop()
             raise

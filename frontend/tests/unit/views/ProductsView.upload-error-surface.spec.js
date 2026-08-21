@@ -59,7 +59,19 @@ vi.mock('@/composables/useProductSoftDelete', () => ({
   }),
 }))
 
+import { createRouter, createMemoryHistory } from 'vue-router'
 import ProductsView from '@/views/ProductsView.vue'
+
+// FE-9427: ProductsView calls useRoute() and useRouter() -- onMounted reads
+// ?create / ?tune and then router.replace()s them off the URL. Both returned
+// `undefined` without a router installed, so that deep-link path was inert.
+const productsRouter = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: '/', name: 'Root', component: { template: '<div />' } },
+    { path: '/products', name: 'Products', component: { template: '<div />' } },
+  ],
+})
 
 function makeAxiosError(status, body) {
   // Shape matches axios error objects.
@@ -86,7 +98,7 @@ describe('ProductsView — SEC-0001 upload error surfacing', () => {
   async function mountView() {
     wrapper = mount(ProductsView, {
       global: {
-        plugins: [createTestingPinia({ createSpy: vi.fn, stubActions: false })],
+        plugins: [createTestingPinia({ createSpy: vi.fn, stubActions: false }), productsRouter],
         stubs: {
           'v-container': { template: '<div><slot /></div>' },
           'v-card': { template: '<div><slot /></div>' },

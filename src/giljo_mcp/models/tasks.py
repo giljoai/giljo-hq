@@ -158,9 +158,32 @@ class Task(Base):
         Index("idx_task_tenant_created_user", "tenant_key", "created_by_user_id"),  # Composite for "Created by Me"
         Index("idx_task_converted_to_project", "converted_to_project_id"),  # Conversion tracking
         # BE-5065: shared task+project series counter — partial unique index on
-        # typed rows. Mirrors uq_project_taxonomy_active. NULLS NOT DISTINCT
-        # collapses any all-NULL slot, but the WHERE clause keeps legacy
-        # untyped tasks (series_number IS NULL) exempt.
+        # typed rows. The WHERE clause keeps legacy untyped tasks
+        # (series_number IS NULL) exempt.
+        #
+        # NULLS NOT DISTINCT is load-bearing here, and it has a history worth
+        # knowing before anyone "tidies" it. ce_0023 created this index in raw
+        # SQL WITH the flag; ce_0059 (BE-6130b) had to widen the predicate,
+        # rewrote the statement as op.create_index(...) kwargs, and the flag —
+        # which had no kwarg in the SQL being translated — was silently dropped.
+        # baseline_v38_unified.py was later derived from a migrated database and
+        # inherited the weakened shape, so fresh installs got it too, and this
+        # model matched the weakened shape. BE-9429 found it; BE-9431 fixed it.
+        #
+        # Why it matters: subseries is NULL on ordinary rows, and under
+        # Postgres' default NULLS DISTINCT a NULL anywhere in the indexed tuple
+        # makes the row unique by construction — so between ce_0059 and ce_0095
+        # this index rejected nothing for the common case and two live typed
+        # tasks in one product could share a serial. The serial ALLOCATOR
+        # (get_next_series_number_shared, row-locked) does the real work; this
+        # index is the backstop beneath it, and it is only a backstop with the
+        # flag on.
+        #
+        # ce_0095 restores it on existing databases (healing any duplicates by
+        # reassignment first, so the CE installer's every-boot upgrade cannot
+        # brick a boot) and the baseline builds it strict for fresh installs, so
+        # model and chain now agree. tests/integration/migrations/
+        # test_be9429_index_parity.py fails if they ever stop agreeing.
         Index(
             "uq_task_taxonomy_active",
             "tenant_key",
@@ -169,6 +192,7 @@ class Task(Base):
             "series_number",
             "subseries",
             unique=True,
+            postgresql_nulls_not_distinct=True,
             # BE-6130b: also exclude soft-deleted rows so a trashed task's serial
             # can be re-minted on a later create/restore without a unique clash
             # (mirrors uq_project_taxonomy_active's deleted_at predicate).

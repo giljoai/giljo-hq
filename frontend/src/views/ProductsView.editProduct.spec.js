@@ -54,40 +54,56 @@ vi.mock('@/stores/settings', () => ({
   useSettingsStore: () => ({ fetchFieldToggleConfig: vi.fn().mockResolvedValue(undefined) }),
 }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ showToast: h.showToast }) }))
-vi.mock('@/composables/useProductActivation', () => ({
-  useProductActivation: () => ({
-    showActivationWarning: { value: false },
-    pendingActivation: { value: null },
-    currentActiveProduct: { value: null },
-    toggleProductActivation: vi.fn(),
-    confirmActivation: vi.fn(),
-    cancelActivation: vi.fn(),
-  }),
-}))
-vi.mock('@/composables/useProductSoftDelete', () => ({
-  useProductSoftDelete: () => ({
-    showDeletedProductsDialog: { value: false },
-    deletedProducts: { value: [] },
-    restoringProductId: { value: null },
-    purgingProductId: { value: null },
-    purgingAllProducts: { value: false },
-    loadDeletedProducts: vi.fn().mockResolvedValue(undefined),
-    restoreProduct: vi.fn(),
-    purgeDeletedProduct: vi.fn(),
-    purgeAllDeletedProducts: vi.fn(),
-  }),
-}))
-vi.mock('@/composables/useProductVisionUpload', () => ({
-  useProductVisionUpload: () => ({
-    uploadingVision: { value: false },
-    uploadProgress: { value: 0 },
-    visionUploadError: { value: null },
-    existingVisionDocuments: { value: [] },
-    loadExistingVisionDocuments: vi.fn().mockResolvedValue(undefined),
-    uploadVisionFilesOnAttach: vi.fn(),
-    resetUploadState: vi.fn(),
-  }),
-}))
+// FE-9419: these three return REAL refs, matching both the real composables
+// and the sibling ProductsView.spec.js. A plain `{ value: x }` stand-in is not
+// a ref, so Vue's template auto-unwrap (which tests isRef) leaves it alone and
+// ProductsView hands the wrapper OBJECT to every child prop derived from it —
+// `:model-value="showDeletedProductsDialog"` arrives as an object, not a
+// boolean. That produced eleven invalid-prop warnings and, worse, meant any
+// assertion about those children was reading a state the component never has.
+vi.mock('@/composables/useProductActivation', async () => {
+  const { ref } = await import('vue')
+  return {
+    useProductActivation: () => ({
+      showActivationWarning: ref(false),
+      pendingActivation: ref(null),
+      currentActiveProduct: ref(null),
+      toggleProductActivation: vi.fn(),
+      confirmActivation: vi.fn(),
+      cancelActivation: vi.fn(),
+    }),
+  }
+})
+vi.mock('@/composables/useProductSoftDelete', async () => {
+  const { ref } = await import('vue')
+  return {
+    useProductSoftDelete: () => ({
+      showDeletedProductsDialog: ref(false),
+      deletedProducts: ref([]),
+      restoringProductId: ref(null),
+      purgingProductId: ref(null),
+      purgingAllProducts: ref(false),
+      loadDeletedProducts: vi.fn().mockResolvedValue(undefined),
+      restoreProduct: vi.fn(),
+      purgeDeletedProduct: vi.fn(),
+      purgeAllDeletedProducts: vi.fn(),
+    }),
+  }
+})
+vi.mock('@/composables/useProductVisionUpload', async () => {
+  const { ref } = await import('vue')
+  return {
+    useProductVisionUpload: () => ({
+      uploadingVision: ref(false),
+      uploadProgress: ref(0),
+      visionUploadError: ref(null),
+      existingVisionDocuments: ref([]),
+      loadExistingVisionDocuments: vi.fn().mockResolvedValue(undefined),
+      uploadVisionFilesOnAttach: vi.fn(),
+      resetUploadState: vi.fn(),
+    }),
+  }
+})
 vi.mock('@/services/api', () => ({
   default: {
     products: {
@@ -98,14 +114,27 @@ vi.mock('@/services/api', () => ({
   },
 }))
 
+import { createRouter, createMemoryHistory } from 'vue-router'
 import ProductsView from './ProductsView.vue'
 import ProductCard from '@/components/products/ProductCard.vue'
 import ProductForm from '@/components/products/ProductForm.vue'
 
+// FE-9427: ProductsView calls useRoute() and useRouter() -- onMounted reads
+// ?create / ?tune and then router.replace()s them off the URL. Both returned
+// `undefined` without a router installed, so that whole deep-link path was
+// inert and the view's own optional chaining was the only thing hiding it.
+const productsRouter = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: '/', name: 'Root', component: { template: '<div />' } },
+    { path: '/products', name: 'Products', component: { template: '<div />' } },
+  ],
+})
+
 function mountView() {
   return mount(ProductsView, {
     shallow: true,
-    global: { renderStubDefaultSlot: true },
+    global: { renderStubDefaultSlot: true, plugins: [productsRouter] },
   })
 }
 

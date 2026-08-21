@@ -36,7 +36,7 @@ POOL_RECYCLE_SECONDS = 3600  # 1 hour -- recycle stale DB connections
 # INF-3009a: explicit, fixed per-worker pool defaults. These replace the old
 # psutil host-RAM heuristic, which mis-sized the pool inside containers (it read
 # the HOST's RAM, ignored worker count, and could request ~150 connections/worker
-# against a Railway Postgres with ~100 total slots). The authoritative knob is now
+# against a managed Postgres with ~100 total slots). The authoritative knob is now
 # DatabaseConfig.pg_pool_size / pg_max_overflow (env: GILJO_PG_POOL_SIZE /
 # GILJO_PG_MAX_OVERFLOW); these constants are only the fallback when nothing is set.
 DEFAULT_POOL_SIZE = 10
@@ -232,8 +232,9 @@ class DatabaseManager:
         writer. When the database is already Alembic-managed (an ``alembic_version``
         table is present), ``create_all`` is redundant and is SKIPPED so boot
         performs ZERO DDL — Alembic's migration chain is the single source of
-        truth (SaaS prod runs ``alembic upgrade heads`` via railway preDeploy;
-        CE runs it in startup.py before the API boots). Only a fresh, un-migrated
+        truth (SaaS prod runs ``alembic upgrade heads`` via the platform's
+        pre-deploy hook; CE runs it in startup.py before the API boots). Only a
+        fresh, un-migrated
         database — i.e. the test-suite per-worker bootstrap, which never runs
         migrations and so has no ``alembic_version`` — falls through to create_all.
         """

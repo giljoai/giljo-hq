@@ -61,7 +61,19 @@ vi.mock('@/services/setupService', () => ({
 }))
 
 // ------------------------------------------- Import after mocks are in place --
+import { createRouter, createMemoryHistory } from 'vue-router'
 import ProfilePage from '@/views/account/ProfilePage.vue'
+
+// FE-9427: ProfilePage calls useRouter() -- after a successful password change
+// it logs out and pushes /login. Without a router installed that returned
+// `undefined`.
+const authRouter = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: '/', name: 'Root', component: { template: '<div />' } },
+    { path: '/login', name: 'Login', component: { template: '<div />' } },
+  ],
+})
 import setupService from '@/services/setupService'
 
 // ================================================================= Tests ===
@@ -76,7 +88,7 @@ describe('ProfilePage.vue — Workspace/Role badge edition visibility (FE-9172)'
   async function mountPage(mode) {
     vi.mocked(setupService.checkEnhancedStatus).mockResolvedValue({ mode })
     const wrapper = mount(ProfilePage, {
-      global: { plugins: [vuetify] },
+      global: { plugins: [vuetify, authRouter] },
     })
     await flushPromises()
     return wrapper

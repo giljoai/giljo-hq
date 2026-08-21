@@ -31,6 +31,24 @@ export default [
       'src/components/__tests__/StatusBadge.spec.js',
     ],
   },
+  // FE-9430: adopt eslint-plugin-vue's own flat/recommended. Before this, the
+  // .vue block spread `configs['recommended'].rules`, which is an eslintrc-style
+  // object carrying only its own 8-rule layer -- the essential and
+  // strongly-recommended layers arrive via `extends`, and flat config does not
+  // follow `extends`. So 8 of the plugin's 118 rules were running. Spreading the
+  // flat array here activates all of them.
+  ...pluginVue.configs['flat/recommended'],
+  {
+    // FE-9430: Prettier owns formatting in this repo (.prettierrc + `npm run
+    // format`), so the plugin's layout rules stay off -- otherwise eslint and
+    // prettier fight over the same lines forever. This is the plugin's own
+    // documented overlay for that choice, not a local invention. Measured: it
+    // is the difference between 5782 and 138 warnings, and without it `npm run
+    // lint` (which runs --fix) would rewrite the indentation and attribute
+    // layout of 181 files on its first run.
+    name: 'giljo/vue-layout-rules-off',
+    rules: { ...pluginVue.configs['no-layout-rules'].rules },
+  },
   {
     files: ['src/**/*.{js,mjs,jsx,ts,tsx}'],
     languageOptions: {
@@ -98,9 +116,24 @@ export default [
       },
     },
     rules: {
-      ...pluginVue.configs['recommended'].rules,
       'vue/multi-word-component-names': 'off',
+      // flat/recommended ships this at 'warn'; this repo treats an unsanitized
+      // v-html as a hard error (see the SEC-0003 allowlist block below).
       'vue/no-v-html': 'error',
+      // FE-9419: A prop named in PascalCase is unreachable from a kebab-case
+      // template binding — Vue camelizes the attribute and never produces a
+      // leading capital — so the prop silently keeps its default forever. That
+      // shipped once (NavAvatarMenu's account-status badge, invisible in SaaS)
+      // and cost a warning nobody was reading. flat/recommended carries this
+      // rule at 'warn'; the line below raises it to error, which is the point.
+      'vue/prop-name-casing': ['error', 'camelCase'],
+      // FE-9430: Vuetify 3 v-data-table addresses per-column slots by DOTTED
+      // name (`v-slot:item.status`). vue-eslint-parser parses the dot as a
+      // directive modifier, which v-slot genuinely does not support — so every
+      // Vuetify data table in the app reports as invalid. allowModifiers is the
+      // rule's own published option for exactly this; the rule stays at error
+      // and keeps all its other checks. 36 sites across 6 files.
+      'vue/valid-v-slot': ['error', { allowModifiers: true }],
       'no-console': ['warn', { allow: ['warn', 'error'] }],
       'no-debugger': 'error',
       'no-unused-vars': [
@@ -137,10 +170,13 @@ export default [
     // every value through the hardened useSanitizeMarkdown / sanitizeHtml
     // pipeline (see per-site justification comments in each file). The
     // vue/no-v-html rule is disabled here rather than via inline
-    // `<!-- eslint-disable-next-line -->` comments because eslint-plugin-vue
-    // v9.20 under ESLint flat config does not honour HTML-comment directives
-    // (fixed in eslint-plugin-vue >=9.25). Keep this list MINIMAL -- any new
-    // v-html site requires a separate reviewed entry.
+    // `<!-- eslint-disable-next-line -->` comments. That was originally forced:
+    // eslint-plugin-vue v9.20 under flat config did not honour HTML-comment
+    // directives. FE-9430 note: it is no longer forced — the plugin is now
+    // v10, and flat/recommended brings in `vue/comment-directive`, so template
+    // HTML-comment directives DO work again. This file-level block is kept
+    // deliberately: it is reviewable in one place. Keep this list MINIMAL --
+    // any new v-html site requires a separate reviewed entry.
     files: [
       'src/components/DatabaseConnection.vue',
       'src/components/hub/ThreadTimeline.vue',
@@ -151,6 +187,24 @@ export default [
     ],
     rules: {
       'vue/no-v-html': 'off',
+    },
+  },
+  {
+    // FE-9430: the product-creation form is one object owned by
+    // ProductForm.vue and edited field-by-field by its five tab children, which
+    // receive it as a `form` prop and bind `v-model="form.<field>"`. That is a
+    // deliberate shared-form design, not a defect: no site here reassigns the
+    // prop, the object identity never changes under the children, and the
+    // parent reassigns the whole ref itself when vision analysis returns.
+    // shallowOnly keeps the rule at ERROR for the case that genuinely breaks in
+    // Vue -- reassigning the prop -- while not reporting the 27 nested-field
+    // bindings. Scoped to these five files ON PURPOSE (same shape as the
+    // SEC-0003 block above): every other component, including anything written
+    // later, still gets the full rule. Narrowing it globally would silence the
+    // pattern in code nobody has written yet.
+    files: ['src/components/products/product-form/*.vue'],
+    rules: {
+      'vue/no-mutating-props': ['error', { shallowOnly: true }],
     },
   },
   {

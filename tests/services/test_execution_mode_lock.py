@@ -29,13 +29,14 @@ Updated for Handover 0730: Exception-based patterns (no success wrapper)
 """
 
 import random
+import uuid
 from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.exceptions import ProjectStateError
-from giljo_mcp.models import Project
+from giljo_mcp.models import Product, Project
 from giljo_mcp.services.project_service import ProjectService
 from giljo_mcp.tenant import TenantManager
 
@@ -52,11 +53,22 @@ async def test_update_execution_mode_allowed_before_staging(
     tenant_key = TenantManager.generate_tenant_key()
     tenant_manager.set_current_tenant(tenant_key)
 
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         name="Pre-Staging Project",
         mission="",  # Empty - no staging
         description="Test description",
         tenant_key=tenant_key,
+        product_id=_owning_product_project.id,
         status="inactive",
         execution_mode="multi_terminal",
         series_number=random.randint(1, 9000),
@@ -90,11 +102,22 @@ async def test_update_execution_mode_allowed_when_staged_but_not_launched(
     tenant_key = TenantManager.generate_tenant_key()
     tenant_manager.set_current_tenant(tenant_key)
 
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         name="Staged Not Launched Project",
         mission="Orchestrator-generated mission from staging.",
         description="Test description",
         tenant_key=tenant_key,
+        product_id=_owning_product_project.id,
         status="active",
         execution_mode="multi_terminal",  # legacy/default value never explicitly chosen
         staging_status="staging_complete",
@@ -124,11 +147,22 @@ async def test_update_execution_mode_blocked_after_implementation_launched(
     tenant_key = TenantManager.generate_tenant_key()
     tenant_manager.set_current_tenant(tenant_key)
 
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         name="Launched Project",
         mission="This is the orchestrator-generated mission for the project.",
         description="Test description",
         tenant_key=tenant_key,
+        product_id=_owning_product_project.id,
         status="active",
         execution_mode="claude_code_cli",
         implementation_launched_at=datetime.now(UTC),  # agents are live
@@ -160,11 +194,22 @@ async def test_update_other_fields_still_allowed_after_launch(
     tenant_key = TenantManager.generate_tenant_key()
     tenant_manager.set_current_tenant(tenant_key)
 
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         name="Locked Project",
         mission="Original generated mission",
         description="Original description",
         tenant_key=tenant_key,
+        product_id=_owning_product_project.id,
         status="active",
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
@@ -203,11 +248,22 @@ async def test_set_first_mode_allowed_when_unselected_despite_mission(
     tenant_key = TenantManager.generate_tenant_key()
     tenant_manager.set_current_tenant(tenant_key)
 
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_project)
     project = Project(
         name="CTX-like Project",
         mission="A bootstrap mission rendered at creation.",  # mission exists...
         description="Test description",
         tenant_key=tenant_key,
+        product_id=_owning_product_project.id,
         status="inactive",
         execution_mode=None,  # ...but no mode chosen yet
         series_number=random.randint(1, 9000),

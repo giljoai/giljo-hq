@@ -10,7 +10,7 @@ CLAUDE.md + the BE-5042 lesson mandate MCP-BOUNDARY tests: the regroup is a
 wrapper-only change (17 flat prose params -> 4 typed grouped dicts, unpacked to the
 SAME flat ProductService kwargs), so every behavioral test here drives the REAL
 transport (``create_connected_server_and_client_session``), not the service in
-isolation. Sections map to Patrik's 4 hard invariants:
+isolation. Sections map to the product's 4 hard invariants:
 
 * Section A (autospec transport, no DB) — invariant 4 (input validation preserved):
   a valid grouped call dispatches; an over-cap grouped field and an unknown grouped
@@ -38,7 +38,6 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import select
 
 from api.endpoints.mcp_sdk_server import mcp
@@ -46,6 +45,7 @@ from api.endpoints.mcp_tools._base import MCP_DESCRIPTION_MAX
 from giljo_mcp.models import Product, VisionDocument
 from giljo_mcp.models.products import ProductTechStack
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 # The 17 flat prose params BE-9118 regrouped into the tech_stack/architecture/
@@ -159,7 +159,7 @@ async def test_grouped_call_dispatches(autospec_mcp):
                 "testing": {"testing_strategy": "TDD", "test_coverage_target": 90},
             },
         )
-    assert result.isError is False, f"valid grouped call must dispatch: {_error_text(result)}"
+    assert result.is_error is False, f"valid grouped call must dispatch: {_error_text(result)}"
 
 
 @pytest.mark.asyncio
@@ -174,7 +174,7 @@ async def test_grouped_over_cap_field_is_clean_422(autospec_mcp):
                 "tech_stack": {"programming_languages": "x" * (MCP_DESCRIPTION_MAX + 1)},
             },
         )
-    assert result.isError is True
+    assert result.is_error is True
     _assert_no_leak(_error_text(result))
 
 
@@ -187,7 +187,7 @@ async def test_unknown_group_subkey_is_clean_422(autospec_mcp):
             "update_product_context",
             {"product_id": str(uuid.uuid4()), "tech_stack": {"quality_standards": "wrong group"}},
         )
-    assert result.isError is True
+    assert result.is_error is True
     _assert_no_leak(_error_text(result))
 
 
@@ -210,7 +210,7 @@ async def test_apply_context_tuning_valid_typed_proposal_dispatches(autospec_mcp
                 ],
             },
         )
-    assert result.isError is False, f"valid typed proposal must dispatch: {_error_text(result)}"
+    assert result.is_error is False, f"valid typed proposal must dispatch: {_error_text(result)}"
 
 
 @pytest.mark.asyncio
@@ -224,7 +224,7 @@ async def test_apply_context_tuning_malformed_proposal_is_clean_422(autospec_mcp
             "apply_context_tuning",
             {"product_id": str(uuid.uuid4()), "proposals": [{"section": "description"}]},
         )
-    assert result.isError is True
+    assert result.is_error is True
     text = _error_text(result)
     _assert_no_leak(text)
     # The Pydantic boundary names the missing required field (the new shape).
@@ -243,7 +243,7 @@ async def test_apply_context_tuning_over_cap_proposed_value_is_clean_422(autospe
                 "proposals": [{"section": "description", "drift_detected": True, "proposed_value": "x" * 10_001}],
             },
         )
-    assert result.isError is True
+    assert result.is_error is True
     _assert_no_leak(_error_text(result))
 
 
@@ -338,7 +338,7 @@ async def test_single_grouped_call_flips_vision_complete_atomically(product_cont
                 "consolidated_vision": {"light": "Consolidated light.", "medium": "Consolidated medium."},
             },
         )
-    assert result.isError is False, f"atomic grouped call must dispatch: {_error_text(result)}"
+    assert result.is_error is False, f"atomic grouped call must dispatch: {_error_text(result)}"
 
     # The grouped field unpacked and wrote to the tech_stack child row...
     ts = (

@@ -33,7 +33,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from giljo_mcp.models import AgentExecution, AgentJob, Project
+from giljo_mcp.models import AgentExecution, AgentJob, Product, Project
 from giljo_mcp.services.workflow_status_service import WorkflowStatusService
 from giljo_mcp.tenant import TenantManager
 
@@ -44,6 +44,16 @@ async def _seed_project(
     *,
     closeout_executed_at: datetime | None = None,
 ) -> str:
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    session.add(_owning_product_project)
     project = Project(
         id=str(uuid.uuid4()),
         name=f"BE-6208f {uuid.uuid4().hex[:6]}",
@@ -51,6 +61,7 @@ async def _seed_project(
         mission="Be a chain member.",
         status="active",
         tenant_key=tenant_key,
+        product_id=_owning_product_project.id,
         series_number=1,
         execution_mode="claude_code_cli",
         closeout_executed_at=closeout_executed_at,
@@ -157,4 +168,5 @@ async def test_ready_to_advance_is_only_added_field(db_session: AsyncSession) ->
         "staging_status",
     }
     # BE-8003a added the computed next_action envelope alongside ready_to_advance.
-    assert set(dumped) == pre_be6208f_keys | {"ready_to_advance", "next_action"}
+    # FE-9296b added checkin_cadence_minutes (the resolved account-level cadence).
+    assert set(dumped) == pre_be6208f_keys | {"ready_to_advance", "next_action", "checkin_cadence_minutes"}

@@ -90,7 +90,7 @@ def test_read_only_hint_agrees_with_tool_scopes():
             expected_read_only = False
         else:
             expected_read_only = TOOL_SCOPES[tool.name] == SCOPE_READ
-        actual = tool.annotations.readOnlyHint if tool.annotations else None
+        actual = tool.annotations.read_only_hint if tool.annotations else None
         if actual != expected_read_only:
             mismatches.append((tool.name, actual, expected_read_only))
     assert not mismatches, (
@@ -121,7 +121,7 @@ def test_mutating_tools_carry_an_explicit_destructive_hint():
     missing = sorted(
         t.name
         for t in _live_tools()
-        if TOOL_SCOPES[t.name] != SCOPE_READ and (t.annotations is None or t.annotations.destructiveHint is None)
+        if TOOL_SCOPES[t.name] != SCOPE_READ and (t.annotations is None or t.annotations.destructive_hint is None)
     )
     assert not missing, f"mutating tools with no explicit destructiveHint: {missing}"
 
@@ -133,7 +133,7 @@ def test_every_tool_declares_open_world_false():
     here must carry an explicit openWorldHint=False (via _tool_hints()).
     """
     not_closed_world = sorted(
-        t.name for t in _live_tools() if t.annotations is None or t.annotations.openWorldHint is not False
+        t.name for t in _live_tools() if t.annotations is None or t.annotations.open_world_hint is not False
     )
     assert not not_closed_world, f"tools not declaring openWorldHint=False: {not_closed_world}"
 
@@ -148,14 +148,14 @@ def test_tool_hints_helper_derives_read_only_from_tool_scopes():
     write_name = next(name for name, scope in TOOL_SCOPES.items() if scope != SCOPE_READ)
 
     read_hints = _tool_hints(read_name)
-    assert read_hints.readOnlyHint is True
-    assert read_hints.destructiveHint is None  # not meaningful when readOnlyHint=True
-    assert read_hints.openWorldHint is False
+    assert read_hints.read_only_hint is True
+    assert read_hints.destructive_hint is None  # not meaningful when readOnlyHint=True
+    assert read_hints.open_world_hint is False
 
     write_hints = _tool_hints(write_name, destructive=True)
-    assert write_hints.readOnlyHint is False
-    assert write_hints.destructiveHint is True
-    assert write_hints.openWorldHint is False
+    assert write_hints.read_only_hint is False
+    assert write_hints.destructive_hint is True
+    assert write_hints.open_world_hint is False
 
 
 def test_tool_hints_helper_fails_loud_for_an_unmapped_tool_name():

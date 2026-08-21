@@ -2,8 +2,21 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createVuetify } from 'vuetify'
+import { createRouter, createMemoryHistory } from 'vue-router'
 import ProjectReviewModal from '@/components/projects/ProjectReviewModal.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
+
+// FE-9427: ProjectReviewModal calls useRouter() -- openInHub() pushes the named
+// 'Hub' route. Mounted without a router that returned `undefined`, so the
+// deep-link path was inert. The route is named because the component pushes by
+// name; a catch-all would let a wrong destination pass.
+const hubRouter = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: '/', name: 'Root', component: { template: '<div />' } },
+    { path: '/hub', name: 'Hub', component: { template: '<div />' } },
+  ],
+})
 
 // Mock the api module
 vi.mock('@/services/api', () => ({
@@ -87,7 +100,7 @@ describe('ProjectReviewModal.vue', () => {
         ...props,
       },
       global: {
-        plugins: [pinia, vuetify],
+        plugins: [pinia, vuetify, hubRouter],
       },
     })
   }

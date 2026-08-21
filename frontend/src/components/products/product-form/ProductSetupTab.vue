@@ -92,7 +92,7 @@
           :key="doc.id"
           class="border rounded mb-2"
         >
-          <template v-slot:prepend>
+          <template #prepend>
             <v-icon :color="(doc.is_summarized || doc.chunked) ? 'success' : 'warning'">
               {{ (doc.is_summarized || doc.chunked) ? 'mdi-check-circle' : 'mdi-clock-outline' }}
             </v-icon>
@@ -105,7 +105,7 @@
             • {{ formatDate(doc.created_at) }}
           </v-list-item-subtitle>
 
-          <template v-slot:append>
+          <template #append>
             <v-btn
               icon
               size="small"

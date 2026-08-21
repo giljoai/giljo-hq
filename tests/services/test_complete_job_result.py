@@ -25,7 +25,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
-from giljo_mcp.models import AgentExecution, AgentTemplate, Message, Project
+from giljo_mcp.models import AgentExecution, AgentTemplate, Message, Product, Project
 from giljo_mcp.models.tasks import MessageRecipient
 from giljo_mcp.services.orchestration_service import OrchestrationService
 from giljo_mcp.tenant import TenantManager
@@ -64,6 +64,16 @@ async def project(db_session, tenant_key, agent_templates) -> Project:
     """Create a test project with required fields."""
     from datetime import datetime
 
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_proj = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    db_session.add(_owning_product_proj)
     proj = Project(
         id=str(uuid.uuid4()),
         name="Result Storage Test Project",
@@ -71,6 +81,7 @@ async def project(db_session, tenant_key, agent_templates) -> Project:
         mission="Test completion result storage and auto-messaging",
         status="active",
         tenant_key=tenant_key,
+        product_id=_owning_product_proj.id,
         execution_mode="multi_terminal",
         implementation_launched_at=datetime.now(UTC),
         series_number=random.randint(1, 9000),

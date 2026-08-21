@@ -43,7 +43,11 @@ from giljo_mcp.services.debounce import should_run
 logger = logging.getLogger(__name__)
 
 
-def _client_info_patch(client_info: dict[str, Any] | None) -> dict[str, Any]:
+def _client_info_patch(
+    client_info: dict[str, Any] | None,
+    protocol_version: str | None = None,
+    capabilities: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Build the session_data patch for a captured ``initialize`` clientInfo (BE-9035b).
 
     Stores the raw ``client_info`` (INF-8003d) AND the harness token it resolves to
@@ -58,12 +62,46 @@ def _client_info_patch(client_info: dict[str, Any] | None) -> dict[str, Any]:
     every client that is not an unambiguously-hosted surface. Rows written before
     BE-9327 simply lack the key; every reader uses ``.get``, so a legacy session
     resolves to no preset — exactly its behaviour today.
+
+    INF-9371 adds ``protocol_version`` on the same vehicle: the revision the client
+    requested at initialize, which is stated once and never restated. Capturing it
+    turns "which revision does the live fleet speak" from an inference off the client
+    generation into an observation (TSK-9425 could only infer it). ``None`` when the
+    body carried none; rows written before this simply lack the key.
+
+    BE-9449 adds ``client_capabilities`` for the same reason and at the same moment: the
+    capability vector the client DECLARED at initialize, stored verbatim. It is the only
+    signal that separates Claude Desktop from claude.ai web — both send the byte-identical
+    ``Anthropic/ClaudeAI`` v1.0.0 clientInfo, so that axis cannot come from clientInfo —
+    and it is where a consumer reads whether the client supports ``elicitation``. Stored
+    UNFILTERED on purpose: the value is in seeing what clients actually send, undeclared
+    keys included. ``None`` when the body declared none; rows written before this simply
+    lack the key, so every reader uses ``.get``.
+
+    Note this is deliberately a NEW key and does NOT fill ``session_data["capabilities"]``.
+    "Capabilities" is overloaded here: ``platform_registry`` takes a ``capabilities``
+    argument that is Giljo's OWN derived vector (preset, can_spawn_terminals), a different
+    concept from the client's declared MCP capabilities. One JSONB field must not carry
+    both meanings — merging them could change preset and terminal resolution.
+
+    BE-9036 — WHY THIS SURVIVED THE SDK 2.0 CAPABILITY AXIS (persist leg of three).
+    Be precise about what is a workaround here: capturing ``client_info`` is the legacy
+    tier's DATA SOURCE and is not a workaround at all. Only the ``resolved_harness`` /
+    ``resolved_preset`` precompute exists to survive the ``stateless_http`` clientInfo
+    drop, and it is still needed. SDK 2.0 delivers identity per request only via the
+    2026-07-28 ``_meta`` envelope; a handshake-era client sends none, and measurement on
+    mcp 2.0.0 confirms a 2025-era ``tools/call`` carries neither clientInfo nor
+    capabilities. Since the live fleet is 2025-era, initialize remains the ONLY moment
+    this server ever learns who the client is — which is exactly why the resolution is
+    persisted here rather than recomputed later.
     """
     info = client_info or {}
     return {
         "client_info": info,
         "resolved_harness": harness_from_client_info(info.get("name"), info.get("version")),
         "resolved_preset": preset_from_client_info(info.get("name"), info.get("version")),
+        "protocol_version": protocol_version,
+        "client_capabilities": capabilities,
     }
 
 
@@ -196,6 +234,8 @@ class MCPSessionManager:
         auth_method: str | None = None,
         username: str | None = None,
         session_id: str | None = None,
+        protocol_version: str | None = None,
+        capabilities: dict[str, Any] | None = None,
     ) -> MCPSession:
         """Mint a NEW MCP session row — one per client connection (BE-9066).
 
@@ -217,7 +257,7 @@ class MCPSessionManager:
         session_data: dict[str, Any] = {
             "initialized": False,
             "capabilities": {},
-            **_client_info_patch(client_info),
+            **_client_info_patch(client_info, protocol_version, capabilities),
             "tool_call_history": [],
         }
         if auth_method:

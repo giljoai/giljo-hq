@@ -17,8 +17,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
-from giljo_mcp.models.products import Product, VisionDocument
 from giljo_mcp.schemas.service_responses import ConsolidationResult
+from tests.helpers.model_factories import make_product, make_vision_document
 
 
 @pytest.fixture
@@ -39,36 +39,38 @@ def mock_db_manager():
 
 
 def _make_product(docs, *, hash_value=None):
-    product = MagicMock(spec=Product)
-    product.id = "test-product-id"
-    product.tenant_key = "test-tenant"
-    product.vision_documents = docs
-    product.consolidated_vision_hash = hash_value
-    product.consolidated_vision_light = "agent-written light"
-    product.consolidated_vision_light_tokens = 3
-    product.consolidated_vision_medium = "agent-written medium"
-    product.consolidated_vision_medium_tokens = 3
-    return product
+    return make_product(
+        id="test-product-id",
+        tenant_key="test-tenant",
+        vision_documents=docs,
+        consolidated_vision_hash=hash_value,
+        consolidated_vision_light="agent-written light",
+        consolidated_vision_light_tokens=3,
+        consolidated_vision_medium="agent-written medium",
+        consolidated_vision_medium_tokens=3,
+    )
 
 
 def _make_doc(name, body, *, is_active=True, display_order=0, deleted_at=None, doc_id=None):
-    """Build a spec'd VisionDocument mock for the aggregate builder.
+    """Build a real transient VisionDocument for the aggregate builder.
 
-    IMPORTANT: always sets ``deleted_at`` (default None = active). A
-    ``MagicMock(spec=VisionDocument)`` auto-vivifies the BE-6130b ``deleted_at``
-    column to a truthy child-mock unless it is set explicitly, and
-    ``vision_hash._active_sorted_docs`` excludes any doc whose ``deleted_at`` is
-    not None — so an unset ``deleted_at`` silently drops the doc from the
-    aggregate (the empty-output failure mode these fixtures guard against).
+    INF-9417: this was a spec'd VisionDocument mock that had to set ``deleted_at``
+    by hand on every call -- a spec'd mock auto-vivifies the BE-6130b
+    ``deleted_at`` column to a truthy child, and
+    ``vision_hash._active_sorted_docs`` then drops the doc from the aggregate,
+    which is the empty-output failure these fixtures were written to guard
+    against. A real instance answers ``None`` for an unset nullable column, so
+    that hand-pin is no longer load-bearing. ``deleted_at`` remains a parameter
+    only because several tests deliberately pass a soft-delete stamp.
     """
-    doc = MagicMock(spec=VisionDocument)
-    doc.id = doc_id
-    doc.document_name = name
-    doc.vision_document = body
-    doc.is_active = is_active
-    doc.display_order = display_order
-    doc.deleted_at = deleted_at
-    return doc
+    return make_vision_document(
+        id=doc_id,
+        document_name=name,
+        vision_document=body,
+        is_active=is_active,
+        display_order=display_order,
+        deleted_at=deleted_at,
+    )
 
 
 @pytest.mark.asyncio
@@ -221,11 +223,11 @@ async def test_consolidate_excludes_soft_deleted_sibling(mock_db_manager):
     """BE-6130b regression: a soft-deleted (trashed) doc is excluded from the
     aggregate while its active siblings are included.
 
-    Guards both halves of the bug: (1) the soft-delete read filter in
-    vision_hash._active_sorted_docs excludes deleted_at-stamped docs, and (2)
-    every fixture mock sets deleted_at — a spec=VisionDocument mock that omits
-    it auto-vivifies deleted_at to a truthy child-mock, which would silently
-    empty the aggregate.
+    Guards the soft-delete read filter in vision_hash._active_sorted_docs, which
+    excludes deleted_at-stamped docs. (This docstring used to guard a second half --
+    every fixture pinning deleted_at by hand so a spec'd mock could not auto-vivify
+    it truthy. INF-9417 removed the need: the fixtures now build real
+    VisionDocument instances, which answer None for an unset nullable column.)
     """
     from datetime import UTC, datetime
 

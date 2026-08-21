@@ -124,10 +124,13 @@
       </span>
 
       <!-- Terminal chip rides the pill row (prototype), not the footer. -->
+      <!-- FE-9368: the chip explains itself now that the legend is gone. Only the two
+           terminal states ever render one; `open` is the default and needs no chip. -->
       <span
         v-if="isTerminal"
         class="thread-card__status smooth-border"
         :style="statusStyle"
+        :title="statusTitle"
         data-testid="thread-card-status"
       >
         {{ thread.status }}
@@ -243,6 +246,14 @@ const statusStyle = computed(() => {
   const hex = getAgentColor('reviewer')?.hex
   return { backgroundColor: hexToRgba(hex, 0.15), color: hex }
 })
+
+// FE-9368: what the chip means, in the operator's words. Carried over from the legend
+// panel that used to be the only place these two states were explained.
+const STATUS_MEANINGS = {
+  resolved: "resolved: the agents agreed it's done; still readable",
+  closed: 'closed: accepted by the orchestrator, final',
+}
+const statusTitle = computed(() => STATUS_MEANINGS[String(props.thread.status || '').toLowerCase()] || '')
 
 // ---- states ----
 // FE-9365f: the yellow card comes from the BATON and nothing else. It used to also

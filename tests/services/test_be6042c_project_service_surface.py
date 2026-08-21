@@ -33,7 +33,7 @@ import pytest
 from giljo_mcp.services.project_service import ProjectService
 
 
-# The 16 public methods of ProjectService (all coroutines; everything
+# The public methods of ProjectService (all coroutines; everything
 # non-underscore). Locks dropped/duplicated/shadowed methods after the split.
 EXPECTED_PUBLIC_METHODS = frozenset(
     {
@@ -43,6 +43,10 @@ EXPECTED_PUBLIC_METHODS = frozenset(
         "list_projects",
         # BE-6076: filtered COUNT backing the dashboard list X-Total-Count header.
         "count_projects",
+        # BE-9468: board-wide grouped counts backing the agent list's `counts` block.
+        # Peer of list_projects rather than a repository call from the adapter, so the
+        # MCP read path keeps ONE service seam and stays testable without a database.
+        "board_counts",
         "get_project_type_by_id",
         # Mutation / lifecycle concern
         "create_project",
@@ -53,6 +57,9 @@ EXPECTED_PUBLIC_METHODS = frozenset(
         "deactivate_project",
         "update_project",
         "launch_project",
+        # BE-9384: the archive lifecycle, shared by the REST endpoint and the MCP
+        # terminal transition (previously inlined in the endpoint, reachable by neither).
+        "archive_project",
         # MCP adapter concern
         "create_project_for_mcp",
         "render_ctx_bootstrap_mission",

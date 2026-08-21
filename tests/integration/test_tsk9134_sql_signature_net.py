@@ -38,12 +38,12 @@ import inspect
 import pydantic
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from api.endpoints.mcp_sdk_server import mcp
 from api.endpoints.mcp_tools._base import _SANITIZED_TOOL_ERROR
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_dispatch import attach_registry_service_autospecs
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 # A unique sentinel planted as a bind-parameter value. If it ever reaches the
@@ -141,7 +141,7 @@ async def test_valueerror_with_sqlalchemy_dump_is_sanitized(autospec_mcp):
         f"[parameters: {{'id': 'uuid', 'title': '{_SECRET_BIND}'}}]"
     )
     result = await _dispatch_create_task_raising(autospec_mcp, leaky)
-    assert result.isError is True
+    assert result.is_error is True
     text = _error_text(result)
     _assert_no_leak(text)
     assert "internal error" in text.lower() or _SANITIZED_TOOL_ERROR[:40] in text
@@ -154,7 +154,7 @@ async def test_naive_wrapper_dml_plus_params_is_sanitized(autospec_mcp):
     DML-statement + params-token branch catches it."""
     leaky = ValueError(f"query failed: DELETE FROM projects WHERE id = 'x'; params={{'tenant': '{_SECRET_BIND}'}}")
     result = await _dispatch_create_task_raising(autospec_mcp, leaky)
-    assert result.isError is True
+    assert result.is_error is True
     _assert_no_leak(_error_text(result))
 
 
@@ -164,7 +164,7 @@ async def test_typeerror_with_sql_dump_is_sanitized(autospec_mcp):
     by a TypeError must be sanitized -> RED before the net."""
     leaky = TypeError(f"bad bind\n[SQL: UPDATE projects SET name=%(n)s]\n[parameters: {{'n': '{_SECRET_BIND}'}}]")
     result = await _dispatch_create_task_raising(autospec_mcp, leaky)
-    assert result.isError is True
+    assert result.is_error is True
     _assert_no_leak(_error_text(result))
 
 
@@ -189,7 +189,7 @@ async def test_pydantic_validation_message_passes_through_unchanged(autospec_mcp
         pyd_err = exc
 
     result = await _dispatch_create_task_raising(autospec_mcp, pyd_err)
-    assert result.isError is True
+    assert result.is_error is True
     text = _error_text(result)
     # The actionable pydantic detail survives; it was NOT replaced by the net.
     assert "quantity" in text
@@ -203,7 +203,7 @@ async def test_clean_validation_valueerror_passes_through_unchanged(autospec_mcp
     surfaces verbatim -- the net must not over-sanitize legitimate rejections."""
     clean = ValueError("core_features must be a non-empty list of short strings")
     result = await _dispatch_create_task_raising(autospec_mcp, clean)
-    assert result.isError is True
+    assert result.is_error is True
     text = _error_text(result)
     assert "core_features must be a non-empty list" in text
     assert _SANITIZED_TOOL_ERROR[:40] not in text
@@ -216,7 +216,7 @@ async def test_sql_keyword_alone_in_prose_is_not_sanitized(autospec_mcp):
     keyword alone is not a leak, so the pydantic contract is preserved."""
     prose = ValueError("Invalid choice: SELECT a plan from the pricing page and try again.")
     result = await _dispatch_create_task_raising(autospec_mcp, prose)
-    assert result.isError is True
+    assert result.is_error is True
     text = _error_text(result)
     assert "SELECT a plan from the pricing page" in text
     assert _SANITIZED_TOOL_ERROR[:40] not in text

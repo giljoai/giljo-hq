@@ -9,8 +9,8 @@ Handles graceful shutdown of all services and connections.
 Each step has a timeout to prevent hanging on unresponsive services.
 
 Log diet (TSK-9194, incident 2026-07-16): the per-step progress banner burst
-past Railway's 500 logs/sec replica cap when 4 uvicorn workers shut down at
-once, dropping the diagnostic tail. Shutdown now emits at most 3 lines per
+past the hosted platform's 500 logs/sec replica cap when 4 uvicorn workers
+shut down at once, dropping the diagnostic tail. Shutdown now emits at most 3 lines per
 process at INFO (opening line + one summary line); per-step detail lives at
 DEBUG, and a failed or timed-out step is still named at WARNING+.
 """

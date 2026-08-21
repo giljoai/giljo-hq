@@ -6,9 +6,9 @@
     offset="8"
     @update:model-value="$emit('menu-toggle', $event)"
   >
-    <template v-slot:activator="{ props: logMenuProps }">
+    <template #activator="{ props: logMenuProps }">
       <v-tooltip location="right">
-        <template v-slot:activator="{ props: tipProps }">
+        <template #activator="{ props: tipProps }">
           <div
             v-bind="{ ...logMenuProps, ...tipProps }"
             class="nav-orb nav-orb--logs"
@@ -55,7 +55,7 @@
             <v-list-item-subtitle class="log-archive-size"
               >{{ archive.size_kb }} KB</v-list-item-subtitle
             >
-            <template v-slot:prepend>
+            <template #prepend>
               <v-icon size="18">mdi-file-clock-outline</v-icon>
             </template>
           </v-list-item>

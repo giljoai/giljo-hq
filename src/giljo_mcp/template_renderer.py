@@ -22,6 +22,7 @@ Handover 0836a: Added render_gemini_agent() and render_codex_agent() for multi-p
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from typing import TYPE_CHECKING
@@ -38,7 +39,7 @@ from .models import AgentTemplate
 
 logger = logging.getLogger(__name__)
 
-# Single source of truth for the packaging cap. Raised 8 -> 16 (Patrik, BE-9208):
+# Single source of truth for the packaging cap. Raised 8 -> 16 (BE-9208):
 # up to 16 enabled agents ship. Every export path relies on this default rather
 # than passing its own literal, so the cap lives in exactly one place.
 MAX_PACKAGED_TEMPLATES = 16
@@ -149,6 +150,85 @@ def _slugify_filename(name: str) -> str:
     # collapse multiple dashes
     slug = re.sub(r"-+", "-", slug).strip("-")
     return slug or "agent"
+
+
+# ---------------------------------------------------------------------------
+# Ownership marker (BE-9385b)
+#
+# Every exported agent file says, in its own bytes, that GiljoAI produced it and
+# which product it belongs to. That is what lets an install overwrite ITS OWN
+# files while leaving a user's hand-written agents alone -- the distinction the
+# old whole-directory "Overwrite (all) / Skip (all)" prompt could not make, and
+# the reason answering "Overwrite" used to destroy user-authored agents.
+#
+# THE MARKER IS RENDER-TIME ONLY AND MUST NEVER BE PERSISTED. The ce_0049 /
+# ce_0084 / ce_0085 / ce_0090 heal migrations repair seeded templates by comparing
+# stored text against a byte-exact literal; a marker written into
+# ``system_instructions`` would make every one of those comparisons miss, and a
+# self-hoster's templates would silently stop healing on upgrade -- a failure that
+# surfaces releases later, in someone else's install, with nothing pointing back
+# here. So the functions below take text and RETURN text; nothing in this module
+# writes to a template row, and
+# ``test_be9385b_collision_safe_export_mcp_boundary.py`` asserts the columns stay
+# clean after an export.
+# ---------------------------------------------------------------------------
+
+OWNERSHIP_MARKER_TOKEN = "giljo-managed:"
+
+# Truncated SHA-256. Not a security boundary -- it answers "is the installed copy
+# still what the server rendered?", so an installer can skip an unchanged file
+# instead of rewriting it. 16 hex chars is ample for that and keeps the marker on
+# one readable line.
+_MARKER_HASH_CHARS = 16
+
+
+def build_ownership_marker(
+    *,
+    tenant_key: str,
+    product_id: str,
+    template_id: str,
+    content: str,
+) -> str:
+    """Return the marker payload for ``content``.
+
+    Key ORDER is fixed rather than dict-dependent so golden tests stay stable and
+    two renders of the same agent produce byte-identical markers.
+
+    The hash covers ``content`` as rendered **before** the marker is injected --
+    it has to, or it would be hashing itself. Callers therefore build the marker
+    from the un-marked text and inject afterwards, which
+    :func:`inject_ownership_marker` enforces by construction (it takes both).
+    """
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:_MARKER_HASH_CHARS]
+    return f"{OWNERSHIP_MARKER_TOKEN} v1 tenant={tenant_key} product={product_id} template={template_id} hash={digest}"
+
+
+def inject_ownership_marker(content: str, marker: str) -> str:
+    """Return ``content`` with ``marker`` as an HTML comment in the body.
+
+    Placed as the first body line, AFTER any YAML frontmatter -- never inside it.
+    A ``giljo:`` key in frontmatter would be at the mercy of each harness's agent
+    schema validator (Gemini's is stricter than Claude Code's, and we cannot test
+    against it from here); an HTML comment is inert in every Markdown renderer,
+    trivially greppable by the installing agent, and cannot collide with a schema.
+    """
+    line = f"<!-- {marker} -->"
+    if content.startswith("---\n"):
+        end = content.find("\n---\n", 4)
+        if end != -1:
+            close = end + len("\n---\n")
+            return content[:close] + line + "\n" + content[close:]
+    # No frontmatter (the generic renderer): the marker leads the document.
+    return f"{line}\n{content}"
+
+
+def inject_toml_ownership_marker(content: str, marker: str) -> str:
+    """Return ``content`` with ``marker`` as a leading TOML comment.
+
+    TOML comments are legal anywhere, so line 1 is both the most visible place and
+    the cheapest for an installer to read without parsing the file.
+    """
+    return f"# {marker}\n{content}"
 
 
 def hex_to_claude_color(hex_code: str | None) -> str | None:
@@ -604,8 +684,12 @@ def render_template(template: AgentTemplate) -> str:
 
 __all__ = [
     "CODEX_TOML_FORMAT_REFERENCE",
+    "OWNERSHIP_MARKER_TOKEN",
     "_slugify_filename",
+    "build_ownership_marker",
     "hex_to_claude_color",
+    "inject_ownership_marker",
+    "inject_toml_ownership_marker",
     "render_antigravity_agent",
     "render_claude_agent",
     "render_codex_agent",

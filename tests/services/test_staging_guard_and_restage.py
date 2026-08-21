@@ -20,9 +20,8 @@ from uuid import uuid4
 
 import pytest
 
-from giljo_mcp.models.agent_identity import AgentExecution
-from giljo_mcp.models.projects import Project
 from giljo_mcp.services.project_lifecycle_service import ProjectLifecycleService
+from tests.helpers.model_factories import make_agent_execution, make_project
 
 
 # ---------------------------------------------------------------------------
@@ -64,34 +63,28 @@ def lifecycle_service(mock_db_manager, mock_tenant_manager):
 
 def _make_project(staging_status=None, execution_mode="multi_terminal", status="active"):
     """Create a mock Project with configurable staging_status."""
-    project = MagicMock(spec=Project)
-    project.id = str(uuid4())
-    project.name = "Test Project"
-    project.status = status
-    project.staging_status = staging_status
-    project.execution_mode = execution_mode
-    project.tenant_key = "tenant-test"
-    project.mission = "Test mission"
-    project.description = "Test description"
-    project.cancellation_reason = None
-    project.early_termination = None
-    project.created_at = datetime.now(UTC)
-    project.updated_at = datetime.now(UTC)
-    project.completed_at = None
-    project.product_id = str(uuid4())
-    return project
+    return make_project(
+        name="Test Project",
+        status=status,
+        staging_status=staging_status,
+        execution_mode=execution_mode,
+        tenant_key="tenant-test",
+        mission="Test mission",
+        description="Test description",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        product_id=str(uuid4()),
+    )
 
 
 def _make_orchestrator_execution(status="waiting"):
     """Create a mock AgentExecution for an orchestrator."""
-    execution = MagicMock(spec=AgentExecution)
-    execution.agent_id = str(uuid4())
-    execution.job_id = str(uuid4())
-    execution.status = status
-    execution.agent_display_name = "orchestrator"
-    execution.agent_name = "orchestrator"
-    execution.tenant_key = "tenant-test"
-    return execution
+    return make_agent_execution(
+        status=status,
+        agent_display_name="orchestrator",
+        agent_name="orchestrator",
+        tenant_key="tenant-test",
+    )
 
 
 # ---------------------------------------------------------------------------

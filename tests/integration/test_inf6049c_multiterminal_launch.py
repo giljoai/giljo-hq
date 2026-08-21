@@ -30,7 +30,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from mcp.shared.memory import create_connected_server_and_client_session
 from sqlalchemy import select
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
@@ -39,6 +38,7 @@ from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.templates import AgentTemplate
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
 pytestmark = pytest.mark.asyncio
@@ -46,7 +46,7 @@ pytestmark = pytest.mark.asyncio
 
 def _payload(call_tool_result) -> dict:
     if getattr(call_tool_result, "structuredContent", None):
-        return call_tool_result.structuredContent
+        return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
     text = getattr(first_block, "text", None)
     if text is None:
@@ -253,7 +253,7 @@ async def test_implement_payload_routes_each_agent_to_its_tool_and_carries_launc
     async with new_client() as session:
         result = await session.call_tool("implement_project", {"project_id": project.id})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["status"] == "ready"
 
@@ -337,7 +337,7 @@ async def test_stage_project_multiterminal_carries_launch_commands(
     async with new_client() as session:
         result = await session.call_tool("stage_project", {"project_id": project.id, "mode": "multi_terminal"})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert "launch_commands" in payload
     lc = payload["launch_commands"]
@@ -382,7 +382,7 @@ async def test_multiterminal_role_default_fallback_when_template_id_absent(
     async with new_client() as session:
         result = await session.call_tool("implement_project", {"project_id": project.id})
 
-    assert result.isError is False, _error_text(result)
+    assert result.is_error is False, _error_text(result)
     by_agent = {e["agent"]: e for e in _payload(result)["launch_commands"]}
     # Role-default fallback fired: gemini, NOT the pre-BE-6204 claude default.
     assert by_agent["analyzer"]["cli_tool"] == "gemini"

@@ -320,6 +320,14 @@ ACCEPTED_EXECUTION_MODES: frozenset[str] = VALID_EXECUTION_MODES | LEGACY_MODE_A
 # new subagent projects and stored legacy CLI projects.
 SUBAGENT_EXECUTION_MODES: frozenset[str] = frozenset({MODE_SUBAGENT} | LEGACY_MODE_ALIASES)
 
+# BE-9402: modes whose session gets its agent persona from a LOCAL FILE. Registry-DERIVED,
+# never a hand-written exclusion list: a legacy token qualifies exactly when it names a real
+# CLI harness, since that is what giljo_setup installs agent files into. ``generic_mcp`` maps
+# to GENERIC_HARNESS -- no CLI, no install target -- so it drops out on its own.
+LOCAL_AGENT_FILE_MODES: frozenset[str] = frozenset(
+    {MODE_SUBAGENT} | {mode for mode, harness in LEGACY_MODE_TO_HARNESS.items() if harness != GENERIC_HARNESS}
+)
+
 # tool_type values a subagent PROMPT / render request may target, in canonical order:
 # the 5 detectable harness tool_types (claude-code / codex / gemini / antigravity /
 # opencode) PLUS the legacy ``generic_mcp`` token (tolerance). Consumed by
@@ -501,37 +509,6 @@ def export_platform_pattern() -> str:
     return "^(" + "|".join(EXPORT_PLATFORMS) + ")$"
 
 
-# ---------------------------------------------------------------------------
-# Export behavior facet (BE-6116): agent-template install paths per EXPORT
-# platform. Keyed by the export/download vocabulary (note ``claude_code`` drops
-# the ``_cli`` suffix and ``generic`` is the pseudo-platform) -- a non-branching
-# sibling table consumed by AgentTemplateAssembler. The dict shape varies per
-# platform (the installer surfaces different keys), so this is data, not identity.
-# ---------------------------------------------------------------------------
-INSTALL_PATHS: dict[str, dict[str, str]] = {
-    "claude_code": {
-        "project": ".claude/agents/",
-        "user": "~/.claude/agents/",
-    },
-    "gemini_cli": {
-        "project": ".gemini/agents/",
-        "user": "~/.gemini/agents/",
-    },
-    "antigravity_cli": {
-        "plugin_root": "~/.gemini/config/plugins/giljoai/",
-        "install_command": "agy plugin install ~/.gemini/config/plugins/giljoai/",
-    },
-    "codex_cli": {
-        "agent_files": "~/.codex/agents/",
-        "global_config_optional": "~/.codex/config.toml",
-    },
-    "generic": {
-        "project": "agents/",
-        "user": "~/agents/",
-    },
-}
-
-
 def get_mode(execution_mode: str | None) -> Mode | None:
     """Return the :class:`Mode` for a CANONICAL ``execution_mode``, or ``None``.
 
@@ -660,6 +637,28 @@ def is_subagent_mode(execution_mode: str | None) -> bool:
     empty / ``None``. Equivalent to ``normalize_execution_mode(mode) == "subagent"``.
     """
     return execution_mode in SUBAGENT_EXECUTION_MODES
+
+
+def has_local_agent_file_channel(execution_mode: str | None) -> bool:
+    """BE-9402: True when this mode's session loads its agent persona from a LOCAL FILE.
+
+    DELIBERATELY NOT :func:`is_subagent_mode`, and the two must never be "unified" -- they
+    ask different questions and disagree on exactly one token, ``generic_mcp``:
+
+    * ``is_subagent_mode`` asks TOPOLOGY -- subagent orchestrator rather than
+      multi_terminal? For ``generic_mcp``, yes ("no CLI -> subagent"), and the protocol
+      body should keep rendering it that way.
+    * This asks the IDENTITY CHANNEL question -- has the harness already handed this agent
+      its persona from disk? For ``generic_mcp``, **no**: no CLI, so giljo_setup has nowhere
+      to install agent files, and its own protocol prose says templates are "served by the
+      MCP server, not local files" (``chapters_reference._CH3_GENERIC``). Like
+      multi_terminal, the server is its ONLY identity channel.
+
+    Conflating them strands ``generic_mcp`` sessions -- which live in prod and CE
+    self-hoster databases permanently -- with no persona. False for ``multi_terminal``,
+    empty, None and any unrecognised token: an unknown mode fails SAFE toward serving.
+    """
+    return execution_mode in LOCAL_AGENT_FILE_MODES
 
 
 def is_subagent_render(execution_mode_or_tool: str | None) -> bool:

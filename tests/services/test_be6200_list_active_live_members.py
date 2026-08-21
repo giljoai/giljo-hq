@@ -35,6 +35,7 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import tenant_isolation_bypass
+from giljo_mcp.models.products import Product
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.services.sequence_run_service import SequenceRunService
@@ -69,6 +70,16 @@ async def _create_project(
     status: str = "active",
     deleted_at: datetime | None = None,
 ) -> None:
+    # BE-9437: a project belongs to a product. Its own, so an active
+    # seed cannot collide under idx_project_single_active_per_product.
+    _owning_product_project = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"Owning Product {uuid.uuid4().hex[:6]}",
+        description="seeded",
+        is_active=False,
+    )
+    session.add(_owning_product_project)
     project = Project(
         id=project_id,
         name="Live-member Test Project",
@@ -76,6 +87,7 @@ async def _create_project(
         mission="BE-6200 regression mission",
         status=status,
         tenant_key=tenant_key,
+        product_id=_owning_product_project.id,
         execution_mode="multi_terminal",
         series_number=random.randint(1, 9000),
         deleted_at=deleted_at,

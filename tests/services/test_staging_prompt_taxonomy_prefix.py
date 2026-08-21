@@ -78,7 +78,7 @@ def test_build_staging_prompt_omits_prefix_when_no_taxonomy():
 # ---------------------------------------------------------------------------
 #
 # build_staging_prompt is what /api/v1/prompts/staging/{project_id} returns
-# to the user (the literal text Patrik pastes into a fresh terminal to launch
+# to the user (the literal text the operator pastes into a fresh terminal to launch
 # the orchestrator). CE-0034 added the ToolSearch bootstrap to build_thin_prompt
 # instead — a sibling method on a separate call path that does NOT render the
 # user-facing prompt. CE-0035 adds the same block to build_staging_prompt

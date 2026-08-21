@@ -190,7 +190,15 @@ def test_multi_terminal_render_is_byte_identical_to_golden() -> None:
     internal handover numbers ("Handover 0435c" / "Handover 0827b", both neutrality
     guard baseline entries, both removed) that a customer cannot dereference. Same shape
     as the BE-9256 re-freeze above. diff-verified as exactly 2 changed lines, both
-    citation removals, with no other edit and no line-ending change."""
+    citation removals, with no other edit and no line-ending change.
+
+    FE-9296b: re-frozen for the cadence-slider retirement -- _build_orchestrator_protocol
+    now renders CH6 for every non-CLI orchestrator in the IMPLEMENTATION render (the old
+    auto_checkin_enabled gate is retired; staging omits it with CH5 under the CE-0033
+    payload budget), so the multi_terminal composition gains one ch6_auto_checkin chapter
+    in the IMPL block, carrying the rewritten wake-capability prose (await_my_turn PATH A /
+    timed-sleep PATH B). diff-verified as 80 inserted lines (one CH6 chapter block) and
+    ZERO deletions or modifications."""
     golden = _GOLDEN.read_text(encoding="utf-8")
     assert _multi_terminal_golden_render() == golden
 

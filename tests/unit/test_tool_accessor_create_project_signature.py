@@ -16,8 +16,29 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from giljo_mcp.services.product_service import ProductService
 from giljo_mcp.services.project_service import ProjectService
 from giljo_mcp.tools.tool_accessor import ToolAccessor
+
+
+def _stub_binding_resolution():
+    """Stand in for BE-9411 product resolution.
+
+    These tests supply an explicit ``product_id`` against a ``Mock()`` db_manager.
+    Since BE-9411 that id is validated against the tenant instead of being trusted,
+    which needs a real session -- and validation is not what these tests are about
+    (they pin status/mission forwarding). Real validation coverage lives in
+    ``tests/integration/test_be9411_explicit_product_id_on_creates.py``.
+    """
+    product = Mock()
+    product.id = "prod-status"
+    product.name = "Stubbed Product"
+    return patch.object(
+        ProductService,
+        "resolve_binding_product",
+        new_callable=AsyncMock,
+        return_value=product,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -49,11 +70,14 @@ class TestCreateProjectHardcodedBehavior:
             test_session=None,
         )
 
-        with patch.object(
-            tool_accessor._project_service,
-            "create_project",
-            new_callable=AsyncMock,
-        ) as mock_create:
+        with (
+            _stub_binding_resolution(),
+            patch.object(
+                tool_accessor._project_service,
+                "create_project",
+                new_callable=AsyncMock,
+            ) as mock_create,
+        ):
             mock_project = Mock()
             mock_project.id = "proj-status"
             mock_project.alias = "PRJ-STS"
@@ -89,11 +113,14 @@ class TestCreateProjectHardcodedBehavior:
             test_session=None,
         )
 
-        with patch.object(
-            tool_accessor._project_service,
-            "create_project",
-            new_callable=AsyncMock,
-        ) as mock_create:
+        with (
+            _stub_binding_resolution(),
+            patch.object(
+                tool_accessor._project_service,
+                "create_project",
+                new_callable=AsyncMock,
+            ) as mock_create,
+        ):
             mock_project = Mock()
             mock_project.id = "proj-mission"
             mock_project.alias = "PRJ-MSN"
@@ -128,11 +155,14 @@ class TestCreateProjectHardcodedBehavior:
             test_session=None,
         )
 
-        with patch.object(
-            tool_accessor._project_service,
-            "create_project",
-            new_callable=AsyncMock,
-        ) as mock_create:
+        with (
+            _stub_binding_resolution(),
+            patch.object(
+                tool_accessor._project_service,
+                "create_project",
+                new_callable=AsyncMock,
+            ) as mock_create,
+        ):
             mock_project = Mock()
             mock_project.id = "proj-expl"
             mock_project.alias = "PRJ-EXP"

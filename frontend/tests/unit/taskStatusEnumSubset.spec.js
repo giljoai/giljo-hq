@@ -2,7 +2,7 @@
  * taskStatusEnumSubset.spec.js — drift guard for FE/BE TaskStatus alignment
  * (IMP-5030 follow-up to FE-5041).
  *
- * Context: a dogfood task row was written with status='terminated' (not a
+ * Context: a test-install task row was written with status='terminated' (not a
  * valid TaskStatus), and the frontend rendered the capitalized fallback
  * label "Terminated", giving the appearance of an FE-only status. There is
  * no FE-side hardcoded TaskStatus list (the canonical set ships via

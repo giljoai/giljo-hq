@@ -13,8 +13,8 @@ side effect at import time. Behavior, signatures, names, and descriptions unchan
 
 from typing import Annotated, Any, Literal
 
-from mcp.server.fastmcp import Context
-from pydantic import BaseModel, Field, field_validator
+from mcp.server.mcpserver import Context
+from pydantic import BaseModel, Field, model_validator
 
 from api.endpoints.mcp_tools import _base
 from api.endpoints.mcp_tools._base import (
@@ -34,6 +34,11 @@ from giljo_mcp.platform_registry import (
     WORKSPACE_NONE,
     WORKSPACE_SHARED_WORKING_TREE,
     get_preset,
+)
+from giljo_mcp.services.product_tuning_service import (
+    SECTION_FIELD_MAP,
+    STRUCTURED_TUNING_SECTIONS,
+    TUNING_PROPOSED_VALUE_MAX,
 )
 
 
@@ -133,7 +138,13 @@ async def giljo_setup(
         # this session has no file to write, so route to memory or keep in-context.
         result["primer"] = build_inline_primer_note()
     else:
-        result = await _call_tool(ctx, "bootstrap_setup", {"platform": platform, "user_id": user_id})
+        # BE-9385b: forward the resolved harness so the install prose can target the
+        # repository where the harness supports it, instead of always writing to ~/.
+        result = await _call_tool(
+            ctx,
+            "bootstrap_setup",
+            {"platform": platform, "user_id": user_id, "harness": _resolve_preset_name(harness, ctx)},
+        )
 
     # IMP-6038: record THIS tenant's acknowledgement of the bundled
     # SKILLS_VERSION through the tenant-scoped service (single validated write
@@ -187,21 +198,43 @@ async def giljo_setup(
 # _call_tool's dispatch (not a new @mcp.tool registration).
 
 
-# BE-9118: preserve the pre-typed submit_tuning_review proposed_value string cap.
-_TUNING_PROPOSED_VALUE_MAX = 10_000
-
-
 class _TuningProposal(BaseModel):
     """One reviewed context-tuning proposal (BE-9118 typed-boundary model).
 
     Replaces the former ``list[dict]`` proposals param. Structural + type validation
-    (required section/drift_detected, proposed_value type + length cap, confidence
-    enum) now happens at the FastMCP arg-validation boundary as a clean 422-style
-    ToolError, instead of the service's aggregated ValueError string. The service's
-    ``_validate_proposals`` stays as defense-in-depth for the non-MCP caller and for
-    semantics the boundary intentionally leaves to it (section membership +
-    target_platforms item types). ``extra="allow"`` tolerates the informational keys
-    the served tuning prompt includes so the model need not enumerate every one.
+    (required section/drift_detected, proposed_value shape + per-string length cap,
+    confidence enum) happens at the FastMCP arg-validation boundary as a clean
+    422-style ToolError, instead of the aggregated ValueError string raised by
+    ``giljo_mcp.tools.submit_tuning_review._validate_proposals``.
+    BE-9473: ``_validate_shape_and_size`` below also checks section MEMBERSHIP at
+    the boundary now (an unknown section is rejected here, not passed through to
+    that function). ``submit_tuning_review._validate_proposals`` -- a TOOL-layer
+    function, not a service method -- stays as defense-in-depth for the non-MCP
+    caller, and still owns ``target_platforms`` item-type checking -- that
+    symmetry is NOT assumed, it is simply unchanged by this project.
+    ``extra="allow"`` tolerates the informational keys the served tuning prompt
+    includes so the model need not enumerate every one.
+
+    BE-9473 (F2): the length cap used to be a per-field validator that fired on
+    ``proposed_value`` alone, with no visibility into ``section`` -- so a
+    STRUCTURED section (tech_stack/architecture: multiple fields) sent as one
+    oversized flat string was rejected for its length, and the real problem (wrong
+    shape -- address it by sub-key) stayed hidden behind however many resubmits it
+    took to shrink the string under the cap. ``_validate_shape_and_size`` runs
+    AFTER the whole model is built (``mode="after"``), so it sees ``section`` and
+    ``proposed_value`` together and reports the SHAPE problem on the first
+    rejection, before size is even considered.
+
+    Shape wins over size for a stronger reason than redundancy: the cap is PER
+    SUB-KEY, and a flat string sent for a structured section has no sub-keys, so
+    there is no cap it is actually violating. Reporting "exceeds 10000 characters"
+    against it would be a precise-looking number measured against a rule that does
+    not apply to what was sent -- a confident, wrong answer, the defect class this
+    validation exists to prevent. The test that settles it: shortening the blob
+    still fails (wrong shape, still no sub-keys);
+    fixing the shape lets the call proceed, and each corrected sub-value is then
+    capped against the rule that genuinely governs it, below. Shape's remedy works;
+    size's does not -- that is why shape is reported and size is not.
     """
 
     model_config = {"extra": "allow"}
@@ -214,14 +247,47 @@ class _TuningProposal(BaseModel):
     evidence: str | None = None
     reasoning: str | None = None
 
-    @field_validator("proposed_value")
-    @classmethod
-    def _cap_proposed_value(cls, v: Any) -> Any:
-        if isinstance(v, str) and len(v) > _TUNING_PROPOSED_VALUE_MAX:
-            raise ValueError(
-                f"proposed_value string exceeds {_TUNING_PROPOSED_VALUE_MAX} character limit ({len(v)} chars)"
-            )
-        return v
+    @model_validator(mode="after")
+    def _validate_shape_and_size(self) -> "_TuningProposal":
+        if self.section not in SECTION_FIELD_MAP:
+            raise ValueError(f"unknown section {self.section!r}, must be one of {sorted(SECTION_FIELD_MAP)}")
+
+        v = self.proposed_value
+        if v is None:
+            if self.drift_detected:
+                raise ValueError(
+                    "drift_detected=True requires a non-null proposed_value "
+                    "(pass drift_detected=false if nothing needs to change)."
+                )
+            return self
+
+        if self.section in STRUCTURED_TUNING_SECTIONS:
+            known_fields = SECTION_FIELD_MAP[self.section].get("fields", {})
+            if isinstance(v, str):
+                subkeys = sorted(f"{self.section}.{f}" for f in known_fields)
+                raise ValueError(
+                    f"'{self.section}' is a structured, multi-field section -- a single string "
+                    f"is not a valid proposed_value for it. Address ONE field via a dotted "
+                    f"sub-key ({subkeys}), or pass proposed_value as a dict keyed by field name "
+                    f"to update several fields in one proposal."
+                )
+            if isinstance(v, dict):
+                problems = []
+                for key, sub_value in v.items():
+                    if key not in known_fields:
+                        problems.append(f"unknown sub-key '{key}', must be one of {sorted(known_fields)}")
+                    elif isinstance(sub_value, str) and len(sub_value) > TUNING_PROPOSED_VALUE_MAX:
+                        problems.append(
+                            f"sub-key '{key}' exceeds {TUNING_PROPOSED_VALUE_MAX} character "
+                            f"limit ({len(sub_value)} chars)"
+                        )
+                if problems:
+                    raise ValueError("; ".join(problems))
+            return self
+
+        if isinstance(v, str) and len(v) > TUNING_PROPOSED_VALUE_MAX:
+            raise ValueError(f"proposed_value exceeds {TUNING_PROPOSED_VALUE_MAX} character limit ({len(v)} chars)")
+        return self
 
 
 @mcp.tool(
@@ -239,17 +305,35 @@ async def apply_context_tuning(
         list[_TuningProposal],
         Field(
             description=(
-                "Per-section proposals. Each item: {section: str (e.g. "
-                "'tech_stack.backend_frameworks', 'architecture.api_style', 'core_features' -- an "
-                "unknown value is rejected with the full allowed list), drift_detected: bool "
-                "(required), proposed_value: str|dict|list (required when drift_detected=True; str "
-                "<=10000 chars, list[str] for target_platforms), confidence: 'high'|'medium'|'low' "
-                "(optional)}."
+                "Per-section proposals. Each item: {section: str, drift_detected: bool "
+                "(required), proposed_value: str|dict|list (required when drift_detected=True), "
+                "confidence: 'high'|'medium'|'low' (optional)}. FLAT sections take a plain "
+                "string (list[str] for target_platforms): 'description', 'core_features', "
+                "'brand_guidelines', 'quality_standards', 'target_platforms'. STRUCTURED "
+                "sections -- 'tech_stack', 'architecture' -- hold multiple fields, so a plain "
+                "string is REJECTED for them: address one field per proposal via a dotted "
+                "sub-key ('tech_stack.infrastructure', 'architecture.primary_pattern', ...), or "
+                "pass proposed_value as a dict keyed by field name to update several fields at "
+                "once. An unknown section is rejected with the full allowed list. "
+                f"proposed_value is capped at {TUNING_PROPOSED_VALUE_MAX} chars PER STRING (per "
+                "sub-key inside a dict, not the whole submission). Every problem across every "
+                "proposal is reported together in one rejection. Updating a field that already "
+                "holds a value needs force=true -- see the force param."
             )
         ),
     ],
     overall_summary: Annotated[str, Field(max_length=MCP_SHORT_TEXT_MAX)] = "",
-    force: bool = False,
+    force: Annotated[
+        bool,
+        Field(
+            description=(
+                "Updating a product field that is already populated is rejected with 'Fields "
+                "already populated: <detail>' unless force=True. Reviewing an existing product "
+                "is the COMMON case, so most calls that touch tech_stack, architecture, or "
+                "quality_standards on a product that already has values need force=True."
+            )
+        ),
+    ] = False,
     ctx: Context = None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
