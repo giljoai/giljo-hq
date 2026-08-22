@@ -99,7 +99,7 @@ jobs:
         id: tarball
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
-          TARBALL_NAME="giljoai-mcp-${VERSION}.tar.gz"
+          TARBALL_NAME="giljo-hq-${VERSION}.tar.gz"
 
           # Create tarball from the cleaned workspace
           tar -czf "/tmp/${TARBALL_NAME}" -C "$GITHUB_WORKSPACE" .
@@ -114,10 +114,10 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
           TARBALL_PATH="${{ steps.tarball.outputs.TARBALL_PATH }}"
-          CHECKSUM_FILE="/tmp/giljoai-mcp-${VERSION}.sha256"
+          CHECKSUM_FILE="/tmp/giljo-hq-${VERSION}.sha256"
 
           SHA256=$(sha256sum "$TARBALL_PATH" | awk '{print $1}')
-          echo "${SHA256}  giljoai-mcp-${VERSION}.tar.gz" > "$CHECKSUM_FILE"
+          echo "${SHA256}  giljo-hq-${VERSION}.tar.gz" > "$CHECKSUM_FILE"
 
           echo "SHA256=${SHA256}" >> "$GITHUB_OUTPUT"
           echo "CHECKSUM_PATH=${CHECKSUM_FILE}" >> "$GITHUB_OUTPUT"
@@ -136,7 +136,7 @@ jobs:
           cat > "$MANIFEST_PATH" <<MANIFEST_EOF
           {
             "version": "${VERSION}",
-            "tarball_url": "https://github.com/${REPO}/releases/download/${TAG}/giljoai-mcp-${VERSION}.tar.gz",
+            "tarball_url": "https://github.com/${REPO}/releases/download/${TAG}/giljo-hq-${VERSION}.tar.gz",
             "sha256": "${SHA256}",
             "min_python": "3.12",
             "min_postgres": "18"
