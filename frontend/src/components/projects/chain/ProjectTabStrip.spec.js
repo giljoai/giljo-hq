@@ -96,3 +96,22 @@ describe('ProjectTabStrip — badge states', () => {
     expect(badgeEl(wrapper).text()).toBe('PLANNING')
   })
 })
+
+describe('ProjectTabStrip — single-row card (FE-9493)', () => {
+  it('renders exactly two spans per card: alias then status badge', () => {
+    const wrapper = mount(ProjectTabStrip, {
+      props: { tabs: [makeTab({ taxonomyAlias: 'FE-1' })] },
+    })
+    const spans = wrapper.find('button').findAll('span')
+    expect(spans).toHaveLength(2)
+    expect(spans[0].classes()).toContain('chain-tab__alias')
+    expect(spans[1].classes()).toContain('chain-tab__badge')
+  })
+
+  it('clicking the card emits select and no other component event', async () => {
+    const wrapper = mount(ProjectTabStrip, { props: { tabs: [makeTab()] } })
+    await wrapper.find('button').trigger('click')
+    expect(wrapper.emitted('select')).toEqual([['p1']])
+    expect(wrapper.emitted('review')).toBeFalsy()
+  })
+})

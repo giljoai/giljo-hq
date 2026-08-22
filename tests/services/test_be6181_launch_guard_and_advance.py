@@ -15,9 +15,10 @@ Regression at the FAILING layer (ProjectStagingService.launch_implementation):
    is staging_complete.
 
 2. Launching a chain member advances its active run FORWARD-ONLY (current_index)
-   and marks project_statuses[member]="implementing" — crossing the gate IS the
-   advance. A solo project (no active run) leaves no trace and never errors
-   (byte-identical solo behavior; Deletion Test holds).
+   and marks project_statuses[member]="planning" (FE-9493: two-stage lifecycle —
+   promoted to "implementing" separately once a worker actually spawns) —
+   crossing the gate IS the advance. A solo project (no active run) leaves no
+   trace and never errors (byte-identical solo behavior; Deletion Test holds).
 
 DB-touching: uses the db_session fixture (TransactionalTestContext, rollback at
 teardown). No module-level mutable state. No ordering dependencies.
@@ -179,7 +180,7 @@ async def test_relaunch_skips_guard_and_is_idempotent(db_session: AsyncSession) 
 
 
 async def test_launch_advances_chain_member_forward(db_session: AsyncSession) -> None:
-    """Launching a chain member at idx 1 advances current_index forward + marks implementing.
+    """Launching a chain member at idx 1 advances current_index forward + marks planning.
 
     BE-6188: the advance now requires the prior project (p0) to have closed out
     (closeout_executed_at set) — the commit-SHA gate. p0 is seeded closed_out.
@@ -201,14 +202,14 @@ async def test_launch_advances_chain_member_forward(db_session: AsyncSession) ->
     run_svc = SequenceRunService(db_manager=None, tenant_manager=TenantManager(), session=db_session)
     run = await run_svc.get(run_id=run_id, tenant_key=tenant)
     assert run["current_index"] == 1  # advanced forward to idx of p1
-    assert run["project_statuses"][p1] == "implementing"
+    assert run["project_statuses"][p1] == "planning"
     assert run["project_statuses"][p0] == "completed"  # merge preserved
 
 
 async def test_launch_advance_blocked_without_prior_closeout(db_session: AsyncSession) -> None:
     """BE-6188: launching p1 does NOT advance current_index past p0 while p0 has no
     closeout (the commit-SHA gate). The launch itself still succeeds and p1 is marked
-    implementing; only the index stays put until p0 closes out."""
+    planning; only the index stays put until p0 closes out."""
     tenant = TenantManager.generate_tenant_key()
     p0 = await _seed_project(db_session, tenant, staging_status="staging_complete")  # NOT closed out
     p1 = await _seed_project(db_session, tenant, staging_status="staging_complete")
@@ -225,7 +226,7 @@ async def test_launch_advance_blocked_without_prior_closeout(db_session: AsyncSe
     run_svc = SequenceRunService(db_manager=None, tenant_manager=TenantManager(), session=db_session)
     run = await run_svc.get(run_id=run_id, tenant_key=tenant)
     assert run["current_index"] == 0  # advance BLOCKED — p0 never closed out
-    assert run["project_statuses"][p1] == "implementing"  # status still applied
+    assert run["project_statuses"][p1] == "planning"  # status still applied
 
 
 async def test_launch_advance_is_forward_only(db_session: AsyncSession) -> None:
@@ -246,7 +247,7 @@ async def test_launch_advance_is_forward_only(db_session: AsyncSession) -> None:
     run_svc = SequenceRunService(db_manager=None, tenant_manager=TenantManager(), session=db_session)
     run = await run_svc.get(run_id=run_id, tenant_key=tenant)
     assert run["current_index"] == 1  # NOT rewound to 0
-    assert run["project_statuses"][p0] == "implementing"
+    assert run["project_statuses"][p0] == "planning"
 
 
 async def test_solo_launch_leaves_no_run_trace(db_session: AsyncSession) -> None:

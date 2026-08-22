@@ -103,8 +103,14 @@ _CONDUCTOR_STAGING_END_NEXT_STEP = (
 # member. If ANY run member is in one of these, the run has left the staging
 # phase, so a conductor complete_job is NOT a staging-end (it is the final
 # impl-phase self-complete or a premature mid-drive call the C1 guard handles).
+# FE-9493: "planning" (sub-orchestrator entered, no worker yet) is the same event
+# this set always meant to catch here — advance_chain_member_to_implementing used
+# to write "implementing" for it and now writes "planning" instead, with
+# "implementing" reserved for the member's first spawned worker starting. Both
+# values must stay in this set or a member that entered planning but has not yet
+# spawned a worker would misread as "still staging" here.
 _RUN_IMPL_STARTED_STATUSES: frozenset[str] = frozenset(
-    {"implementing", "awaiting_review", "completed", "failed", "stalled", "terminated"}
+    {"planning", "implementing", "awaiting_review", "completed", "failed", "stalled", "terminated"}
 )
 
 

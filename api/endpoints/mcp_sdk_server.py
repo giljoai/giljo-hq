@@ -439,9 +439,8 @@ async def _scope_gate(ctx, call_next):
 
     Ordering matters and is not incidental: the chain runs outermost-first and
     the SDK's own ``RequestStateBoundary`` is what populates ``ctx.request``, so
-    this gate is APPENDED (innermost). Installed outside that boundary it would
-    see no HTTP request, and every scope / profile / HITL resolver would quietly
-    fall through to the unrestricted posture.
+    this gate is APPENDED (innermost) and depends on that boundary having
+    already run to see the HTTP request at all.
 
     Refusals RETURN a ``CallToolResult(isError=True)`` rather than raising: an
     exception raised at this layer escapes as a JSON-RPC protocol error with

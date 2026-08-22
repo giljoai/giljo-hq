@@ -36,6 +36,7 @@ from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.services.conductor_job_minter import mint_conductor_job
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -87,6 +88,11 @@ async def _seed(db_manager, *, run_mode: str = "claude_code_cli") -> dict:
         await session.flush()
 
         # NULL execution_mode (never staged) — the bug repro state.
+        # BE-9486: series_number MUST come from a collision-free source, not a
+        # random draw -- p1/p2 share (tenant_key, product_id), so a random draw
+        # over the same range for both rows can land on the same number and
+        # trip uq_project_taxonomy_active (see test_fe6172_chain_staging_prompt.py,
+        # this file's sibling, which is how BE-9486 was actually caught).
         p1 = Project(
             id=str(uuid.uuid4()),
             name=f"Alpha {suffix}",
@@ -95,7 +101,7 @@ async def _seed(db_manager, *, run_mode: str = "claude_code_cli") -> dict:
             tenant_key=tenant_key,
             product_id=product.id,
             status="inactive",
-            series_number=uuid.uuid4().int % 9000 + 1,
+            series_number=next_series_number(),
             execution_mode=None,
         )
         p2 = Project(
@@ -106,7 +112,7 @@ async def _seed(db_manager, *, run_mode: str = "claude_code_cli") -> dict:
             tenant_key=tenant_key,
             product_id=product.id,
             status="inactive",
-            series_number=uuid.uuid4().int % 9000 + 1,
+            series_number=next_series_number(),
             execution_mode=None,
         )
         session.add_all([p1, p2])

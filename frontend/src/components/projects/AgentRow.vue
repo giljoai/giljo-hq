@@ -47,7 +47,7 @@
           <div
             class="agent-badge"
             :class="{ 'agent-badge--active': agent.status === 'working' }"
-            :style="getAgentBadgeStyle(agent?.agent_name || agent?.agent_display_name)"
+            :style="getAgentBadgeStyle(getAgentColorKey(agent))"
           >
             {{ getAgentAbbr(getPrimaryAgentLabel(agent)) }}
           </div>
@@ -308,6 +308,7 @@
 import { computed } from 'vue'
 import { getStatusLabel, getStatusColor, isStatusItalic } from '@/utils/statusConfig'
 import { getAgentBadgeStyle } from '@/utils/colorUtils'
+import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { isOrchestrator } from '@/utils/agentDisplay'
 
 /**
@@ -393,12 +394,7 @@ function getPrimaryAgentLabel(agent) {
 }
 
 function getAgentAbbr(displayName) {
-  if (!displayName) return '??'
-  const parts = displayName.split(/[-_\s]+/).filter(Boolean)
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase()
-  }
-  return displayName.substring(0, 2).toUpperCase()
+  return getAgentInitials(displayName)
 }
 
 function getMessagesWaiting(agent) {

@@ -63,7 +63,7 @@
         v-if="!message._grouped"
         class="timeline-msg__avatar smooth-border"
         :class="{ 'timeline-msg__avatar--user': message._isUser }"
-        :style="message._isUser ? undefined : avatarStyle(message._name)"
+        :style="message._isUser ? undefined : avatarStyle({ role: message._role, name: message._name })"
         :title="message._name"
         aria-hidden="true"
       >
@@ -143,7 +143,7 @@
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useCommHubStore } from '@/stores/commHubStore'
 import { useSanitizeMarkdown } from '@/composables/useSanitizeMarkdown'
-import { getAgentColor } from '@/config/agentColors'
+import { getAgentColor, getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
 import { BATON_FOCUS, MENTION_FOCUS, APPROVAL_FOCUS } from '@/components/hub/hubThreadRoute'
 
@@ -266,6 +266,10 @@ function authorFor(message) {
   return {
     isUser: message.from_kind === 'user',
     name: p?.display_name || message.from_display_name || message.from_agent_id,
+    // FE-9490: the participant's stable role, so the avatar colour can key off
+    // it (see getAgentColorKey) instead of the human display name alone — the
+    // same agent must resolve to the same badge colour everywhere.
+    role: p?.role || '',
     harness: p?.harness || '',
   }
 }
@@ -341,6 +345,7 @@ const decoratedMessages = computed(() =>
       ...m,
       _isUser: author.isUser,
       _name: author.name,
+      _role: author.role,
       _harness: author.isUser ? '' : harnessLabel(author.harness),
       _isDirect: m.message_type === 'direct',
       _grouped: continuesRun(m, filteredMessages.value[i - 1]),
@@ -350,17 +355,17 @@ const decoratedMessages = computed(() =>
 )
 
 function avatarInitials(name) {
-  if (!name) return '?'
-  const parts = name.split(/[-_\s]+/).filter(Boolean)
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
-  return name.slice(0, 2).toUpperCase()
+  return getAgentInitials(name)
 }
 
 // Fallback to orchestrator color (the canonical default from agentColors.js)
 const FALLBACK_HEX = getAgentColor('orchestrator')?.hex
 
-function avatarStyle(name) {
-  const colorObj = getAgentColor(name)
+// FE-9490: keyed off {role, name} — role (the stable participant field) wins
+// over the display name, same priority getAgentColorKey enforces for every
+// other badge site, so this agent's colour matches the Hub pill/composer/panel.
+function avatarStyle({ role, name } = {}) {
+  const colorObj = getAgentColor(getAgentColorKey({ role, display_name: name }))
   const hex = colorObj?.hex || FALLBACK_HEX
   return {
     backgroundColor: hexToRgba(hex, 0.2),

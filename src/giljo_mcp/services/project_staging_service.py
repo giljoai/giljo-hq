@@ -623,7 +623,8 @@ class ProjectStagingService:
         the human approved the per-call MCP prompt). For a project that is a member
         of an active run at index ``idx``:
           - ``current_index = max(existing, idx)`` — FORWARD-ONLY (never rewind).
-          - ``project_statuses[project_id] = "running"`` (merged).
+          - ``project_statuses[project_id] = "planning"`` (merged; FE-9493 — promoted to
+            "implementing" separately once the member's first worker actually starts).
 
         Solo path (no active run) -> no-op. BEST-EFFORT: wrapped so a failure NEVER
         propagates to the already-committed launch. Tenant-scoped; the run write

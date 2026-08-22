@@ -93,7 +93,7 @@ import { useAgentJobs } from '@/composables/useAgentJobs'
 import { useJobActions } from '@/composables/useJobActions'
 import { usePlayButton } from '@/composables/usePlayButton'
 import { isSubagentExecutionMode } from '@/composables/useExecutionMode'
-import { getAgentColor as getAgentColorConfig } from '@/config/agentColors'
+import { getAgentColor as getAgentColorConfig, getAgentColorKey } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
 import { isOrchestrator } from '@/utils/agentDisplay'
 import AgentRow from '@/components/projects/AgentRow.vue'
@@ -185,7 +185,7 @@ const executionOrderPhases = computed(() => {
     if (isOrchestrator(agent)) continue
     const phase = agent.phase ?? 999
     if (!groups[phase]) groups[phase] = []
-    const agentColor = getAgentColor(agent.agent_name || agent.agent_display_name)
+    const agentColor = getAgentColorConfig(getAgentColorKey(agent)).hex
     groups[phase].push({
       displayName: agent.agent_display_name || agent.agent_name || 'unknown',
       color: agentColor,
@@ -197,8 +197,8 @@ const executionOrderPhases = computed(() => {
     label: 'Start',
     agents: [{
       displayName: 'Orchestrator',
-      color: getAgentColor('orchestrator'),
-      tintedBg: hexToRgba(getAgentColor('orchestrator'), 0.15),
+      color: getAgentColorConfig('orchestrator').hex,
+      tintedBg: hexToRgba(getAgentColorConfig('orchestrator').hex, 0.15),
     }],
   }]
 
@@ -256,10 +256,6 @@ const phaseSortedAgents = computed(() => {
  *  composer can address a DIRECTED Hub post to it (the Hub addresses
  *  participants by agent_id, not by role — unlike the retired bus). */
 const orchestratorAgentId = computed(() => phaseSortedAgents.value.find(isOrchestrator)?.agent_id || '')
-
-function getAgentColor(displayName) {
-  return getAgentColorConfig(displayName).hex
-}
 
 // BE-5107: backend computes duration_seconds; FE ticks locally between WS events
 // using working_started_at as the anchor so the cell doesn't freeze. For terminal

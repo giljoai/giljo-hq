@@ -359,10 +359,10 @@ async def lifespan(app: FastAPI):
     register_mcp_subscription_gate(giljo_mode=GILJO_MODE)
 
     # Phase 9: Trial reaper (SaaS only)
-    # Uses importlib to satisfy CE/SaaS import boundary (no static import from saas/)
-    # INF-3009b: also gated on should_run_background_jobs() (default ON) so a single
-    # dedicated worker service owns the reaper once WEB_CONCURRENCY>1 — preventing
-    # duplicate trial-warning/expiry emails from racing web workers.
+    # Uses importlib to satisfy CE/SaaS import boundary (no static import from saas/).
+    # INF-3009b: also gated on should_run_background_jobs() (default ON) so this
+    # background job runs in exactly one process, preventing duplicate work when
+    # more than one worker process is live.
     _trial_reaper_task = None
     if GILJO_MODE == "saas" and should_run_background_jobs():
         try:
@@ -376,17 +376,17 @@ async def lifespan(app: FastAPI):
             state.degraded_services.append("trial_reaper")
 
     # Phase 10: Deletion reaper (SaaS only)
-    # INF-3009b: also gated on should_run_background_jobs() (default ON) so the
-    # destructive hard-purge sweep runs in exactly one process, never racing.
+    # INF-3009b: also gated on should_run_background_jobs() (default ON) so this
+    # destructive sweep runs in exactly one process, never racing.
     _deletion_reaper_task = None
     if GILJO_MODE == "saas" and should_run_background_jobs():
         try:
             import importlib as _il
 
             _del_reaper_mod = _il.import_module("giljo_mcp.saas.deletion.reaper")
-            # BE-9040 WP1: the reaper purges the tenant's backup bucket BEFORE the
-            # DB cascade, so it needs the same storage adapter the backup
-            # scheduler uses (built from the SAME "one selection point" factory).
+            # BE-9040 WP1: shares the storage adapter factory with the backup
+            # scheduler ("one selection point") so both agree on the same
+            # storage configuration — see saas/ for what each step does.
             _del_restore_svc_mod = _il.import_module("giljo_mcp.saas.restore.service")
             _deletion_reaper_task = await _del_reaper_mod.start_deletion_reaper(
                 state.db_manager.AsyncSessionLocal,
@@ -398,10 +398,10 @@ async def lifespan(app: FastAPI):
             state.degraded_services.append("deletion_reaper")
 
     # Phase 10.6: Backup snapshot scheduler (SaaS only — INF-6139)
-    # Nightly per-tenant snapshot sweep into the durable object-storage backend.
-    # Uses importlib to satisfy the CE/SaaS import boundary (no static import from saas/).
-    # INF-3009b: also gated on should_run_background_jobs() (default ON) so the
-    # per-tenant snapshot sweep runs once in the dedicated worker, not per web worker.
+    # Periodic per-tenant snapshot job; see saas/ for the schedule and storage
+    # backend. Uses importlib to satisfy the CE/SaaS import boundary (no static
+    # import from saas/). INF-3009b: also gated on should_run_background_jobs()
+    # (default ON) so this job runs in exactly one process, not once per worker.
     _backup_scheduler_task = None
     if GILJO_MODE == "saas" and should_run_background_jobs():
         try:
@@ -419,9 +419,10 @@ async def lifespan(app: FastAPI):
             state.degraded_services.append("backup_scheduler")
 
     # Phase 10.5: Billing email-sync subscriber (SaaS only — BE-6011)
-    # Subscribes a SaaS handler to the neutral CE user:email:changed signal so a
-    # billing-owner email change mirrors onto the org's billing-provider customer record.
-    # Uses importlib to satisfy the CE/SaaS import boundary (no static import from saas/).
+    # Subscribes a SaaS handler to the neutral CE user:email:changed signal so
+    # billing records stay in sync with the account's email; see saas/ for
+    # the sync target. Uses importlib to satisfy the CE/SaaS import boundary
+    # (no static import from saas/).
     if GILJO_MODE == "saas":
         try:
             import importlib as _il

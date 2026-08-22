@@ -227,6 +227,7 @@ async def mark_chain_member_status(
     status: str,
     test_session: Any | None = None,
     websocket_manager: Any | None = None,
+    not_from: frozenset[str] | None = None,
 ) -> bool:
     """Best-effort: set a chain member's per-project status in its active run (BE-6181).
 
@@ -237,13 +238,23 @@ async def mark_chain_member_status(
     BE-6181 (so a conductor could never finish its chain).
 
     (The launch-time advance in ``ProjectStagingService.launch_implementation``
-    writes ``project_statuses[pid]="implementing"`` INLINE rather than via this
-    helper, because it must also bump ``current_index`` atomically in the same
-    ``SequenceRunService.update`` call.)
+    writes ``project_statuses[pid]="planning"`` via ``advance_chain_member_to_implementing``
+    rather than via this helper, because it must also bump ``current_index`` atomically
+    in the same ``SequenceRunService.update`` call.)
 
     Solo path (project is not a member of any active sequence run) is a clean no-op:
     ``find_active_run_for_project`` returns None ⇒ this returns False with no write,
     so solo execution stays byte-identical.
+
+    ``not_from`` (FE-9493): an optional forward-only guard — when the member's CURRENT
+    status is a member of this set, the write is skipped (returns False, no exception,
+    no write) instead of overwriting it. Every existing caller passes ``status="completed"``
+    with no ``not_from`` (default None preserves their exact behavior — completed is
+    already the terminal write, nothing to guard against). The one caller that DOES pass
+    it is ``mission_service.get_agent_mission``'s planning->implementing promotion, so a
+    late/racing worker mission-fetch can never demote a member that already reached
+    ``awaiting_review`` / ``completed`` (or any other terminal state) back to
+    ``implementing``.
 
     BEST-EFFORT: this is a side-effect that must NEVER fail the primary operation
     (launch / closeout already committed). Any error is logged and swallowed; the
@@ -258,7 +269,7 @@ async def mark_chain_member_status(
 
     Returns:
         True if a run was found and ``project_statuses[project_id]`` was set to
-        ``status``; False otherwise (solo, or a swallowed error).
+        ``status``; False otherwise (solo, guarded by ``not_from``, or a swallowed error).
     """
     # Local import avoids a module-load cycle (SequenceRunService imports project models).
     from giljo_mcp.services.sequence_run_service import SequenceRunService
@@ -275,8 +286,19 @@ async def mark_chain_member_status(
             return False
 
         merged_statuses = dict(run.get("project_statuses") or {})
-        if merged_statuses.get(project_id) == status:
+        current = merged_statuses.get(project_id)
+        if current == status:
             return True  # idempotent no-op — already at target status
+        if not_from is not None and current in not_from:
+            logger.info(
+                "[CHAIN_MEMBER_STATUS] forward-only guard blocked run=%s project=%s current=%s target=%s (tenant=%s)",
+                run["id"],
+                sanitize(project_id),
+                current,
+                status,
+                tenant_key,
+            )
+            return False
 
         merged_statuses[project_id] = status
         await svc.update(
@@ -333,10 +355,14 @@ async def advance_chain_member_to_implementing(
     """Advance the active run when a chain member ENTERS implementation (§14 gateless flow).
 
     Single source of truth for the "a chain member crossed staging→implementation
-    advances its run" bookkeeping. Sets ``project_statuses[project_id] = "implementing"``
-    (the conductor's "running" signal) and bumps ``current_index`` FORWARD-ONLY to the
-    project's index — gated on the project being LEFT BEHIND having closed out
-    (``advance_index_if_committed``), so the tail is never batch-unlocked.
+    advances its run" bookkeeping. Sets ``project_statuses[project_id] = "planning"``
+    (FE-9493: this project's sub-orchestrator has started working it — no worker agent
+    spawned yet; the conductor's "running" signal) and bumps ``current_index``
+    FORWARD-ONLY to the project's index — gated on the project being LEFT BEHIND having
+    closed out (``advance_index_if_committed``), so the tail is never batch-unlocked.
+    A member is promoted from ``"planning"`` to ``"implementing"`` separately, when its
+    first spawned worker actually starts (``mission_service.get_agent_mission``'s
+    atomic-start promotion, guarded forward-only via ``mark_chain_member_status``).
 
     TSK-9091: also writes ``sequence_runs.status = "running"`` on every call. This is
     the semantically-true "the chain is actually driving" transition — it fires the
@@ -394,8 +420,10 @@ async def advance_chain_member_to_implementing(
         forward_index = max(run.get("current_index", 0), idx)
 
         merged_statuses = dict(run.get("project_statuses") or {})
-        # "implementing" is the in-flight per-project status in VALID_PROJECT_STATUSES.
-        merged_statuses[project_id] = "implementing"
+        # FE-9493: "planning" is the in-flight per-project status in VALID_PROJECT_STATUSES
+        # for "sub-orchestrator entered, no worker yet" — distinct from "implementing"
+        # ("first spawned worker started"), so the FE tab strip can show them differently.
+        merged_statuses[project_id] = "planning"
 
         resolver = SequenceChainContextResolver(
             db_manager=db_manager,

@@ -31,6 +31,7 @@ from giljo_mcp.models import Product, Project, User
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.taxonomy_seeds import next_series_number
 
 
 pytestmark = pytest.mark.asyncio
@@ -86,6 +87,12 @@ async def _seed(db_manager) -> dict:
         session.add(product)
         await session.flush()
 
+        # BE-9486: series_number MUST come from a collision-free source, not a
+        # random draw. p1/p2 share (tenant_key, product_id) with product_id NULL
+        # nowhere in play, so a random draw over the same ~9000-value range for
+        # both rows has a real (if small) chance of landing on the same number
+        # and tripping uq_project_taxonomy_active -- exactly what BE-9429 already
+        # fixed for other seed helpers via tests/helpers/taxonomy_seeds.py.
         p1 = Project(
             id=str(uuid.uuid4()),
             name=f"Alpha {suffix}",
@@ -94,7 +101,7 @@ async def _seed(db_manager) -> dict:
             tenant_key=tenant_key,
             product_id=product.id,
             status="inactive",
-            series_number=uuid.uuid4().int % 9000 + 1,
+            series_number=next_series_number(),
             execution_mode="multi_terminal",
         )
         p2 = Project(
@@ -105,7 +112,7 @@ async def _seed(db_manager) -> dict:
             tenant_key=tenant_key,
             product_id=product.id,
             status="inactive",
-            series_number=uuid.uuid4().int % 9000 + 1,
+            series_number=next_series_number(),
             execution_mode="multi_terminal",
         )
         session.add_all([p1, p2])

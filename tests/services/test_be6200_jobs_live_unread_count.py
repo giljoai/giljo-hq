@@ -35,10 +35,13 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models import AgentExecution, AgentJob, Message, Product, Project
+from giljo_mcp.models.auth import User
 from giljo_mcp.models.tasks import MessageRecipient
+from giljo_mcp.repositories.agent_operations_repository import AgentOperationsRepository
 from giljo_mcp.services.job_query_service import JobQueryService
 from giljo_mcp.tenant import TenantManager
 
@@ -51,7 +54,7 @@ def _jobs_svc(session: AsyncSession) -> JobQueryService:
 
 
 async def _seed_project_with_two_agents(
-    session: AsyncSession, tenant_key: str
+    session: AsyncSession, tenant_key: str, *, orchestrator_status: str = "complete"
 ) -> tuple[str, AgentExecution, AgentExecution]:
     # BE-9437: a project belongs to a product. Its own, so an active
     # seed cannot collide under idx_project_single_active_per_product.
@@ -93,7 +96,7 @@ async def _seed_project_with_two_agents(
             job_id=job.job_id,
             tenant_key=tenant_key,
             agent_display_name=display_name,
-            status="complete" if display_name == "orchestrator" else "working",
+            status=orchestrator_status if display_name == "orchestrator" else "working",
             messages_sent_count=0,
             messages_waiting_count=0,
             messages_read_count=0,
@@ -157,9 +160,17 @@ async def test_list_jobs_excludes_completion_reports_from_waiting_count(db_sessi
 
 
 async def test_list_jobs_counts_real_directives_not_completion_reports(db_session: AsyncSession) -> None:
-    """Real directives still count; completion_reports mixed in are excluded."""
+    """Real directives still count; completion_reports mixed in are excluded.
+
+    BE-9491: the orchestrator here is seeded LIVE ('blocked'), not 'complete' --
+    this test's concern is message TYPE filtering (directive vs completion_report),
+    which is orthogonal to recipient liveness. A 'complete' recipient's real
+    directives are now EXCLUDED too (see
+    test_terminal_orchestrator_real_broadcast_now_shows_zero_unread below) --
+    that is the intended BE-9491 fix, not a regression of this test.
+    """
     tenant = TenantManager.generate_tenant_key()
-    pid, orchestrator, analyzer = await _seed_project_with_two_agents(db_session, tenant)
+    pid, orchestrator, analyzer = await _seed_project_with_two_agents(db_session, tenant, orchestrator_status="blocked")
 
     await _send(db_session, tenant, pid, analyzer, orchestrator, 2, message_type="directive")
     await _send(db_session, tenant, pid, analyzer, orchestrator, 3, message_type="completion_report")
@@ -170,3 +181,63 @@ async def test_list_jobs_counts_real_directives_not_completion_reports(db_sessio
     assert _waiting_for(result.jobs, orchestrator.agent_id) == 2, (
         "only the 2 real directives count as unread work; the 3 completion_reports are excluded"
     )
+
+
+async def test_terminal_orchestrator_real_broadcast_now_shows_zero_unread(db_session: AsyncSession) -> None:
+    """BE-9491: a COMPLETE orchestrator's genuinely-unread broadcast (not a
+    completion_report -- this is the exact 3,503-shape bug) must now show 0,
+    WITHOUT deleting or touching the seeded ``message_recipients`` row
+    (forward-only, no backfill, no migration)."""
+    tenant = TenantManager.generate_tenant_key()
+    pid, orchestrator, analyzer = await _seed_project_with_two_agents(db_session, tenant)  # orchestrator: 'complete'
+
+    await _send(db_session, tenant, pid, analyzer, orchestrator, 1, message_type="broadcast")
+    await db_session.flush()
+
+    row_count_before = (
+        await db_session.execute(
+            select(func.count(MessageRecipient.id)).where(MessageRecipient.agent_id == orchestrator.agent_id)
+        )
+    ).scalar_one()
+    assert row_count_before == 1  # the phantom row exists, exactly like the 3,503
+
+    result = await _jobs_svc(db_session).list_jobs(tenant_key=tenant, project_id=pid)
+    assert _waiting_for(result.jobs, orchestrator.agent_id) == 0, (
+        "a finished agent's genuinely-unread broadcast must no longer count"
+    )
+
+    row_count_after = (
+        await db_session.execute(
+            select(func.count(MessageRecipient.id)).where(MessageRecipient.agent_id == orchestrator.agent_id)
+        )
+    ).scalar_one()
+    assert row_count_after == row_count_before, "the read-side fix must not touch the underlying row"
+
+
+async def test_human_user_recipient_unread_count_unaffected_by_terminal_clause(db_session: AsyncSession) -> None:
+    """Two-EXISTS regression guard (Risk #1 in the BE-9491 project description):
+    ``MessageRecipient.agent_id`` also holds a directed post's HUMAN user_id. A
+    naive single-EXISTS liveness clause would be vacuously "terminal" for a
+    human (zero AgentExecution rows) and silently zero the operator's own
+    unread badge -- this must never happen."""
+    tenant = TenantManager.generate_tenant_key()
+    pid, orchestrator, _analyzer = await _seed_project_with_two_agents(db_session, tenant)
+    user = User(id=str(uuid.uuid4()), tenant_key=tenant, username=f"operator_{uuid.uuid4().hex[:6]}")
+    db_session.add(user)
+    await db_session.flush()
+
+    msg = Message(
+        tenant_key=tenant,
+        project_id=pid,
+        content="direct to the operator",
+        message_type="direct",
+        status="pending",
+        from_agent_id=str(orchestrator.agent_id),
+    )
+    db_session.add(msg)
+    await db_session.flush()
+    db_session.add(MessageRecipient(message_id=msg.id, agent_id=user.id, tenant_key=tenant))
+    await db_session.flush()
+
+    counts = await AgentOperationsRepository().get_live_unread_counts_by_agent(db_session, tenant, pid, [user.id])
+    assert counts.get(user.id, 0) == 1, "a human user_id recipient must never be zeroed by the terminal-agent clause"

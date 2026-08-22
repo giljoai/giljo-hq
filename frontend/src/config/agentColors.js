@@ -126,3 +126,52 @@ export function getAgentColor(displayName) {
   }
   return AGENT_COLORS.orchestrator
 }
+
+/**
+ * FE-9490: resolve the ONE colour key an agent/participant hands to
+ * getAgentColor(), so every badge site agrees on which colour an agent gets.
+ *
+ * Before this helper, callers each picked their own priority — some tried
+ * `role || display_name` (Hub participants), some `agent_name || agent_display_name`
+ * (job/agent records), and one used display_name alone — so the SAME agent could
+ * resolve to a different colour in the Hub than in the Agents panel whenever its
+ * role/agent_name (the stable template key) differed from its human display name.
+ *
+ * Priority is fixed here: the stable template key (`role` or `agent_name`) wins
+ * over the human-chosen display name, because the display name can carry a
+ * per-session suffix (e.g. "Reviewer (Phase 5)") that a plain segment match may
+ * not resolve as cleanly as the canonical key does.
+ *
+ * @param {string|Object|null|undefined} entity - a participant/agent object
+ *   (checked for `role`, `agent_name`, `display_name`, `agent_display_name`, in
+ *   that order) or a plain string, passed straight through.
+ * @returns {string}
+ */
+export function getAgentColorKey(entity) {
+  if (!entity) return ''
+  if (typeof entity === 'string') return entity
+  return entity.role || entity.agent_name || entity.display_name || entity.agent_display_name || ''
+}
+
+/**
+ * FE-9490: derive display initials for an agent/participant name.
+ *
+ * Strips everything but letters/digits before splitting into words, so a
+ * parenthetical or other punctuated suffix — e.g. "Reviewer (Phase 5)" — cannot
+ * leak a stray character (the reported bug: initials rendered as "R("). Word
+ * separators (space, hyphen, underscore, and now punctuation) all fold to the
+ * same split, matching the character set getAgentColor() already normalizes.
+ *
+ * @param {string|null|undefined} name
+ * @returns {string} Two-character initials, uppercased; '??' when nothing
+ *   usable survives (empty, punctuation-only, or all-whitespace names).
+ */
+export function getAgentInitials(name) {
+  const clean = String(name ?? '')
+    .replace(/[^A-Za-z0-9]+/g, ' ')
+    .trim()
+  if (!clean) return '??'
+  const parts = clean.split(/\s+/)
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+  return parts[0].slice(0, 2).toUpperCase()
+}

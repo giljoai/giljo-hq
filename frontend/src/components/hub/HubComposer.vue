@@ -171,7 +171,7 @@
 import { ref, computed, watch } from 'vue'
 import { useCommHubStore } from '@/stores/commHubStore'
 import { useToast } from '@/composables/useToast'
-import { getAgentColor } from '@/config/agentColors'
+import { getAgentColor, getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
 import { agentStatusDot } from '@/composables/useAgentStatusDot'
 import MarkHandledToggle from '@/components/hub/MarkHandledToggle.vue'
@@ -198,7 +198,7 @@ function yourTurnBadgeStyle() {
 // source of truth as the timeline/Home screen (FE-6122). No new map.
 // Roles colour the badge where one is known, matching the card pills.
 function agentBadgeStyle(participant) {
-  const hex = getAgentColor(participant?.role || participant?.display_name)?.hex
+  const hex = getAgentColor(getAgentColorKey(participant))?.hex
   return {
     backgroundColor: hexToRgba(hex, 0.2),
     color: hex,
@@ -206,10 +206,7 @@ function agentBadgeStyle(participant) {
 }
 
 function agentAbbr(name) {
-  if (!name) return '??'
-  const parts = String(name).split(/[-_\s]+/).filter(Boolean)
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
-  return String(name).slice(0, 2).toUpperCase()
+  return getAgentInitials(name)
 }
 
 function dotStyle(participant) {

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/hero-card.png" alt="Giljo HQ" width="100%">
+<img src="docs/images/giljo-logo.png" alt="Giljo HQ" width="420">
 
 <br>
 
@@ -44,9 +44,7 @@ Define your product once. Every agent that connects gets the full picture.
 
 <br>
 
-<div align="center">
-<img src="docs/images/section-what-is.png" alt="What Is Giljo HQ" width="100%">
-</div>
+## What Is Giljo HQ
 
 Giljo HQ, a GiljoAI product, is a passive context server for AI coding tools. It stores your product knowledge, generates structured prompts, and coordinates multi-agent workflows via the Model Context Protocol (MCP). It does not write code or call any AI model. Your AI coding tool does all reasoning and coding using your own subscription.
 
@@ -56,9 +54,7 @@ GiljoAI sits at the intersection of product thinking and development. Whether yo
 
 <br>
 
-<div align="center">
-<img src="docs/images/section-quick-start.png" alt="Quick Start" width="100%">
-</div>
+## Quick Start
 
 **Windows (PowerShell):**
 ```powershell
@@ -86,9 +82,7 @@ Requires Python 3.12+, PostgreSQL 18+, Node.js 22+.
 
 <br>
 
-<div align="center">
-<img src="docs/images/section-six-pillars.png" alt="The Six Pillars" width="100%">
-</div>
+## The Six Pillars
 
 ### Your Tools, Your Subscription
 
@@ -101,6 +95,14 @@ GiljoAI never touches your AI credits. You bring your own Claude Code CLI, Claud
 </div>
 
 Create a Product to represent the software you are building. Fill in context fields: description, tech stack, architecture, testing strategy, and more. Upload a vision document and let your AI tool populate the fields automatically. Vision documents are the most impactful input you can give GiljoAI. A well-written product proposal gives every agent session a shared understanding of what you are building and why.
+
+### Roadmap
+
+<div align="center">
+<img src="docs/images/section-roadmap.png" alt="Roadmap" width="100%">
+</div>
+
+The Roadmap turns a product's inactive projects and pending tasks into a single prioritized plan. Each item carries a risk and complexity score, so you can see what is safe to tackle next and what needs more thought first. Drag to reorder. Activate a project straight from the Roadmap to stage it, and GiljoAI assembles its bootstrap prompt the same way it does anywhere else in the dashboard. A task that turns out to be bigger than expected converts into a project in one step, keeping its position on the board.
 
 ### Projects and Missions
 
@@ -122,7 +124,11 @@ Agent templates install and refresh through the `giljo_setup` tool (choose "Agen
 
 ### 360 Memory
 
-Each completed project writes to 360 Memory automatically: what was built, key decisions, patterns discovered, and what worked. This is not a plugin; it is a core product behavior. Your next project starts with accumulated context from previous ones. You control how many memories back agents read through the context settings. Optionally enrich memory with git commit history.
+<div align="center">
+<img src="docs/images/section-360-memory.png" alt="360 Memory" width="100%">
+</div>
+
+Each completed project writes to 360 Memory automatically: what was built, key decisions, patterns discovered, and what worked. This is not a plugin; it is a core product behavior. Your next project starts with accumulated context from previous ones. You control how many memories back agents read through the context settings. Optionally enrich memory with git commit history. Search across summaries, outcomes, and decisions, or filter by tag or project, to find what happened before.
 
 ### Dashboard and Monitoring
 
@@ -134,9 +140,17 @@ The Jobs page shows real-time agent activity: status, step progress, duration, a
 
 <br>
 
+### Message Hub
+
 <div align="center">
-<img src="docs/images/section-edition.png" alt="Edition" width="100%">
+<img src="docs/images/section-message-hub.png" alt="Message Hub" width="100%">
 </div>
+
+The Message Hub is where agents coordinate across sessions and machines: persistent threads with participants, messages, and a baton that tracks whose turn it is. An agent on a different CLI tool or a different machine can join the same thread and pick up right where another left off. The dashboard view of a thread is an audit record for you to read. Nothing shown there is fetched back into an agent's context automatically.
+
+<br>
+
+## Edition
 
 This is the **Giljo HQ Community Edition**, free for single-user use under the [Elastic License 2.0](LICENSE).
 
@@ -151,9 +165,7 @@ This is the **Giljo HQ Community Edition**, free for single-user use under the [
 
 <br>
 
-<div align="center">
-<img src="docs/images/section-tech-stack.png" alt="Tech Stack" width="100%">
-</div>
+## Tech Stack
 
 | Layer | Technology |
 |---|---|
@@ -166,9 +178,7 @@ This is the **Giljo HQ Community Edition**, free for single-user use under the [
 
 <br>
 
-<div align="center">
-<img src="docs/images/section-architecture.png" alt="Architecture" width="100%">
-</div>
+## Architecture
 
 ```
 Production (single port):
@@ -184,9 +194,7 @@ Database always runs on localhost. Auth is required for all connections. Multi-t
 
 <br>
 
-<div align="center">
-<img src="docs/images/section-installation.png" alt="Installation Options" width="100%">
-</div>
+## Installation Options
 
 ```bash
 python install.py              # Production install (recommended)
@@ -209,9 +217,7 @@ python startup.py --verbose    # Detailed logging
 
 <br>
 
-<div align="center">
-<img src="docs/images/section-documentation.png" alt="Documentation" width="100%">
-</div>
+## Documentation
 
 | Document | Description |
 |---|---|
@@ -226,9 +232,7 @@ python startup.py --verbose    # Detailed logging
 
 <br>
 
-<div align="center">
-<img src="docs/images/section-security.png" alt="Security" width="100%">
-</div>
+## Security
 
 - JWT authentication required for all connections (no IP-based bypass)
 - bcrypt password hashing (cost factor 12), minimum 12 characters
@@ -240,9 +244,7 @@ python startup.py --verbose    # Detailed logging
 
 <br>
 
-<div align="center">
-<img src="docs/images/section-support.png" alt="Support" width="100%">
-</div>
+## Support
 
 - **Issues:** [github.com/giljoai/giljo-hq/issues](https://github.com/giljoai/giljo-hq/issues)
 - **Website:** [giljo.ai](https://giljo.ai)

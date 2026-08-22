@@ -20,8 +20,8 @@ unless EVERY prerequisite is live, and the error names each missing one:
    (BE-3008c); re-asserted here so this gate is a single documented checkpoint
    that survives phase reordering.
 2. **Background jobs** must be OFF in a multi-worker web process
-   (``GILJO_RUN_BACKGROUND_JOBS`` falsey, INF-3009b) — a dedicated single-replica
-   worker service owns the reapers, else each web worker races them and duplicates
+   (``GILJO_RUN_BACKGROUND_JOBS`` falsey, INF-3009b) — these jobs must run in
+   exactly one process, else concurrent web workers race them and duplicate
    customer emails / destructive sweeps.
 3. **Shared cache/license backend** (SaaS only) must be a live Redis
    (``state.redis_mode == "connected"``, INF-3009c/d) — per-process dicts make
@@ -45,7 +45,7 @@ CE never imports anything under a ``saas`` tree: the two SaaS-only checks reach
 so the Deletion Test holds regardless of whether the SaaS tree exists.
 
 The actual test/prod ``WEB_CONCURRENCY`` flip stays operator-gated and out of
-scope (operator-internal flip checklist).
+scope for this module.
 """
 
 from __future__ import annotations
@@ -71,15 +71,13 @@ logger = logging.getLogger("api.app")
 def log_deploy_posture() -> None:
     """Log the effective restart policy + worker count so incident logs self-describe.
 
-    Incident 2026-07-16: a platform SIGTERM after a healthy deploy left the prod
-    service down for ~51 min, and diagnosing it required reconstructing the
-    restart policy and worker posture from platform state after the fact. This
-    one INFO line puts both in every boot log. ``GILJO_RESTART_POLICY`` is
-    exported by the platform's start-command config (the single source of
-    truth for the start command), so ``restart_policy=unset`` is itself a
-    signal: this process was NOT launched by the config-as-code start command
-    (CE, local dev, or a dashboard start-command override drifting from the
-    repo).
+    Restart policy and worker posture are otherwise only visible in
+    deployment-platform state, which is hard to reconstruct after the fact
+    once an incident is already underway. This one INFO line puts both in
+    every boot log. ``GILJO_RESTART_POLICY`` is an environment-provided value
+    naming how this process was started, so ``restart_policy=unset`` is
+    itself a signal: this process was not launched with that value set (e.g.
+    CE, local dev, or an ad-hoc override).
     """
     policy = os.getenv("GILJO_RESTART_POLICY", "").strip() or "unset"
     logger.info(

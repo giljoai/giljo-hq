@@ -19,7 +19,6 @@ status emitters, JSON-RPC peeking, protocol-version validation, the session-id s
 wrapper, and the response builders) live in :mod:`api.endpoints.mcp_transport`.
 """
 
-import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -53,6 +52,7 @@ from api.endpoints.mcp_transport import (
 )
 from giljo_mcp.auth.jwt_manager import JWTAudienceMismatchError, JWTManager
 from giljo_mcp.http.url_resolver import get_canonical_mcp_resource_uri_from_scope
+from giljo_mcp.signals import SIGNAL_POST_AUTH_GATE_FAILED, publish_signal
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +67,11 @@ from giljo_mcp.http.url_resolver import get_canonical_mcp_resource_uri_from_scop
 # by the deployment that registers them. The gate takes the resolved tenant_key
 # and returns a block message (the request is refused with a JSON-RPC 403
 # carrying that message) or None to allow.
+#
+# If a registered gate raises, the request continues and CE announces the fact on
+# giljo_mcp.signals.SIGNAL_POST_AUTH_GATE_FAILED. That publish is a no-op unless
+# the deployment installed an observer, and it never raises, so the request path
+# is unaffected either way.
 # ---------------------------------------------------------------------------
 
 McpPostAuthGate = Callable[[str], Awaitable[str | None]]
@@ -88,35 +93,6 @@ def clear_mcp_post_auth_gate() -> None:
     """Remove any registered gate (test teardown + CE-equivalent default)."""
     global _mcp_post_auth_gate  # noqa: PLW0603
     _mcp_post_auth_gate = None
-
-
-def _capture_mcp_post_auth_gate_failure(tenant_key: str) -> None:
-    """Route the /mcp post-auth gate fail-open to a tagged, alertable Sentry event.
-
-    BE-9127: this file is CE-shipped, but the post-auth gate only ever runs in SaaS
-    (the gate is never registered in CE). The WARNING logged above is below the
-    default LoggingIntegration ``event_level=ERROR``, so it produces NO Sentry event
-    on its own — like the SEC-9093 tenant-guard tripwire, this emits an explicit
-    ``capture_message`` inside a tagged scope so the fail-open is alertable (tag
-    ``mcp_auth.fail_open``). Env-gated (``GILJO_MODE == "saas"`` + ``SENTRY_DSN_BACKEND``)
-    with a lazy ``sentry_sdk`` import + fail-open ``try/except``: CE never imports
-    ``sentry_sdk`` here (Deletion Test holds), and a Sentry error can never touch the
-    request path or the unchanged WARNING log.
-    """
-    if os.environ.get("GILJO_MODE", "").strip().lower() != "saas":
-        return
-    if not os.environ.get("SENTRY_DSN_BACKEND"):
-        return
-    try:
-        import sentry_sdk
-
-        with sentry_sdk.new_scope() as scope:
-            scope.set_tag("mcp_auth.fail_open", "post_auth_gate_failed")
-            scope.set_tag("tenant_key", tenant_key)
-            scope.set_context("mcp_auth", {"signal": "mcp_post_auth_gate_failed"})
-            sentry_sdk.capture_message("mcp_post_auth_gate_failed — failing open", level="error")
-    except Exception:  # noqa: BLE001 - observability must never break fail-open
-        logger.debug("mcp_post_auth_gate Sentry capture failed (non-blocking)", exc_info=True)
 
 
 def _initialize_capture(scope: Scope) -> dict[str, Any]:
@@ -377,9 +353,9 @@ class MCPAuthMiddleware:
         if gate is not None:
             try:
                 block_message = await gate(tenant_key)
-            except Exception:  # noqa: BLE001 - entitlement gate must never 5xx / lock out
+            except Exception:  # noqa: BLE001 - gate errors are handled per the registering deployment's policy
                 logger.warning("mcp_post_auth_gate_failed tenant=%s", tenant_key, exc_info=True)
-                _capture_mcp_post_auth_gate_failure(tenant_key)
+                publish_signal(SIGNAL_POST_AUTH_GATE_FAILED, {"tenant_key": tenant_key})
                 block_message = None
             if block_message:
                 resp = _subscription_required_response(block_message)

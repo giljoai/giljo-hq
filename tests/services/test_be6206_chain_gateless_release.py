@@ -25,7 +25,8 @@ Pinned here:
      still gets the byte-identical human-gate BLOCKED response (Deletion Test on the gate).
   3. STAGING-END stamp (DB, real complete_job): a chain member's staging-end is classified
      as staging-end (NOT closeout) AND stamps implementation_launched_at + marks the run
-     member "implementing" (so subsequent reads see "running").
+     member "planning" (FE-9493: promoted to "implementing" separately once its first
+     spawned worker starts) so subsequent reads see "running", not "still staging".
   4. SOLO control (DB, real complete_job): a solo staging-end does NOT stamp
      implementation_launched_at (it waits for the human Implement press) — byte-identical.
 
@@ -303,8 +304,14 @@ async def test_solo_orchestrator_still_human_gate_blocked(db_session: AsyncSessi
 async def test_chain_member_staging_end_stamps_and_advances(db_session: AsyncSession) -> None:
     """§14 follow-up: a chain member's staging-end complete_job is classified as
     staging-end (NOT closeout) AND stamps implementation_launched_at + marks the run
-    member 'implementing' — the gateless replacement for the launch_implementation
-    advance, so the conductor's running-vs-done detection still works."""
+    member 'planning' — the gateless replacement for the launch_implementation
+    advance, so the conductor's running-vs-done detection still works.
+
+    FE-9493: this used to assert "implementing" — the value has since split into
+    "planning" (the sub-orch entering the project, written here) and "implementing"
+    (promoted separately once the member's first spawned worker actually starts,
+    in mission_service.get_agent_mission's atomic-start). Both still count as
+    "implementation has begun" for job_completion_staging._RUN_IMPL_STARTED_STATUSES."""
     tenant = TenantManager.generate_tenant_key()
     p1 = await _seed_project(db_session, tenant, staging_status="staging")
     p2 = await _seed_project(db_session, tenant, staging_status="staging")
@@ -328,12 +335,11 @@ async def test_chain_member_staging_end_stamps_and_advances(db_session: AsyncSes
     )
     assert reloaded.staging_status == "staging_complete", "staging-end still flips staging_status"
 
-    # (c) the run member is marked "implementing" so the conductor sees it running, not done.
+    # (c) the run member is marked "planning" so the conductor sees it running, not done
+    # (FE-9493: promoted to "implementing" separately once a worker actually starts).
     run = await _run_svc(db_session).find_active_run_for_project(project_id=p1, tenant_key=tenant)
     assert run is not None
-    assert run["project_statuses"].get(p1) == "implementing", (
-        "the staging-end advance must mark the member implementing"
-    )
+    assert run["project_statuses"].get(p1) == "planning", "the staging-end advance must mark the member planning"
 
 
 # ===========================================================================

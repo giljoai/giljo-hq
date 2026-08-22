@@ -2,6 +2,75 @@
 
 All notable changes to this project are recorded here. This changelog follows the [Keep a Changelog](https://keepachangelog.com/) convention — entries are grouped by change type (Added / Changed / Fixed / Removed / Security). Versions follow `MAJOR.MINOR.PATCH[.HOTFIX]` and tags live on the public repository (`giljoai/giljo-hq`).
 
+## [2.0.4] — 2026-08-21
+
+### Highlights
+
+- **Messages to finished agents no longer pile up.** A note sent to an agent that had already finished used to sit forever as unread, on a job that will never read it. Those badges stay accurate now, and you are told when a message could not be delivered.
+- **Agents stay attached to a conversation.** Waiting for a reply used to end in a timeout on most AI clients, and the agent dropped off the thread. An agent now holds the line, and an empty wait tells it in plain words to keep waiting.
+- **Agents you run yourself can show what they are doing.** An agent joining from your own terminal used to sit on "Monitoring" however hard it was working. It can now report working, sleeping or blocked, in the same colours the Jobs board uses.
+- **Tools state their rules before you hit them.** Several tools taught their own rules by rejecting you. They now say up front which fields take a single value, which need updating one at a time, and when overwriting existing content needs an explicit flag.
+- **Roadmap editing got easier.** Name items the way you already see them (`BE-0001`), change one field without resending the rest, and see every problem in a rejected batch at once.
+- **Agent badges agree with themselves.** The same agent shows the same initials and the same colour everywhere, and a name with a bracket no longer renders as "R(".
+- **Chain member cards are single-row**, and a member no longer flips to "planning" just because you clicked it.
+- **Release downloads are named after the product**: `giljo-hq-<version>.tar.gz`.
+
+### Added
+
+- **Agents you run yourself can now show what they are doing.** An agent that joins a
+  chat from your own terminal used to sit on the blue "Monitoring" dot no matter how hard
+  it was working, because only agents started from the dashboard reported a status. Such
+  an agent can now say so when it posts, and its dot turns white for working, purple for
+  sleeping, orange for blocked, and so on — the same colours the Jobs board already uses.
+  Agents started from the dashboard are unaffected: their real status still wins, so
+  nothing can talk over what the platform already knows.
+- **README now covers Message Hub, Roadmap, and 360 Memory.** The three sections explain how agents coordinate across sessions, how work gets prioritized and staged, and how project history carries forward automatically.
+
+### Changed
+
+- **Editing your roadmap no longer means looking up ids first.** Roadmap items
+  can now be named the way you already see them — `BE-0001`, `IMP-0086` — as
+  well as by their full id, so your agent can rank work straight from what it
+  already knows.
+- **A rejected roadmap save now tells you everything that is wrong, at once.**
+  One over-long note used to hide every other problem in the batch until you
+  fixed it and tried again; the answer now lists every row that needs a change,
+  and says what the limit is.
+- **Your AI assistant now sees, up front, that overwriting an already-filled-in product field needs an extra flag.** Updating your product's tech stack, architecture, quality, or testing details when they already have values used to require the assistant to guess or fail once before learning it needed to opt in explicitly; that requirement is now documented directly on the tool it was missing from.
+Chain member cards in the project strip are now single-row, showing just the taxonomy tag and current status at a glance instead of a two-row pill with a truncated project name.
+After posting to a Message Hub thread, agents now get a one-line reminder in the reply itself: expect a response, and stay available to catch it. Posts that close or resolve a thread do not carry the reminder. This keeps agents attached to conversations instead of posting and walking away.
+Release downloads are now named after the product: `giljo-hq-<version>.tar.gz` instead of the old `giljoai-mcp-` name. The installer reads the download location from the release manifest, so upgrading and installing are unaffected.
+
+### Fixed
+
+- **Your AI assistant now sees the context-tuning rules before it hits them, not after.** Reviewing and updating a product's stored tech stack or architecture used to reject with only a "too long" error, hiding the real fix (update one field at a time) behind several shrink-and-retry attempts. The assistant is now told up front which fields take a single value and which need to be updated one at a time, and a review that overwrites an existing value tells your assistant to say so explicitly instead of failing with no explanation.
+- **A tuning review that changes nothing now says so clearly.** Submitting updates that could not be applied used to be reported as a success with nothing changed; it is now reported as a clear, actionable rejection instead.
+- **Editing one roadmap field no longer clears the others.** Your agent can now
+  move an item, or change its risk, without resending everything else about
+  it — the risk, complexity and blocked note you set already stay put. Ask it
+  to patch fields, and anything it leaves out is kept; anything it deliberately
+  sends as empty is cleared.
+- **Closed a rare project/task numbering edge case.** Hardened the internal
+  numbering preview so it can never hand out a number that collides with one
+  already in use, even under heavy concurrent activity.
+- **Finished agents no longer pile up phantom "unread message" badges.** A
+  status update or follow-up note sent to an agent that had already finished
+  used to sit there forever, showing as waiting on a job that will never come
+  back to read it. Those badges now stay accurate, and if a message could not
+  be delivered to a finished agent you are told so.
+- The Mark Superseded dialog failed to load the list of replacement projects.
+- **Agent badges no longer show a stray bracket for names with a parenthetical note.** An agent name like "Reviewer (Phase 5)" used to render its badge as "R(" in some places; badges now always show clean letter initials.
+- **The same agent now shows the same badge colour everywhere.** Previously an agent could appear in one colour on the Message Hub and a different colour on the Agents panel; both now agree.
+- **New agent names can no longer contain punctuation** (parentheses, colons, and similar), so this class of badge glitch can't happen again. Existing agent names are unaffected.
+- **A chain member no longer shows "planning" just because you clicked on it.** Viewing an unstarted project in a multi-project chain used to make its status card flip to "planning" even though nothing had actually started working on it. The status shown now always reflects what the project is really doing.
+Agents can now reliably stay attached to a Message Hub thread. The wait-for-my-turn call previously held the connection exactly as long as most AI clients allow, so the default call often ended in a timeout error instead of a clean "nothing yet, call again" answer, and agents dropped off the thread. The hold is now shorter than every common client limit, and an empty wait now tells the agent in plain words to call again and keep holding the line.
+
+### Security
+
+- **Documentation hygiene: an error report no longer spells out its own permissive outcome.** A monitoring message emitted when a hosted-plan check errors said, in plain text, that the request proceeds anyway. The message is now a neutral error signal. No behaviour changed, and the alerting tag is unchanged.
+- **Documentation hygiene: removed personal-name attribution from shipped code.** Code comments, docs, and test fixtures no longer reference an individual by name.
+- **Documentation hygiene: removed internal operational detail from shipped code comments.** Internal server hostnames, timestamps, and infrastructure details that had no bearing on how the software works have been generalized or removed from source comments and documentation.
+
 ## [2.0.3] — 2026-08-19
 
 ### Highlights
@@ -54,9 +123,27 @@ All notable changes to this project are recorded here. This changelog follows th
   land, and waiting costs nothing while it waits. Polling still works exactly as
   before, and remains the right choice on chat surfaces that cannot keep a call
   open.
-Your agents can now promote a task to a project on their own. When a task turns out to be bigger than a task, an agent can convert it in one step and get exactly what the dashboard's convert wizard produces: the project is created from the task, subtasks and the task's roadmap card move over to it (keeping their place in the roadmap), and the task is removed. Previously an agent had to rebuild the work by hand, which left the task behind and quietly stranded its roadmap card. The new project arrives inactive and untagged, so you still choose when to launch it.
-Your orchestrator's personality can now differ per product. Customise the orchestrator prompt for one product and it applies only there; products you have not customised keep using your all-products prompt, and anything without one falls back to the packaged default. Existing customisations keep working exactly as before -- they simply become the all-products setting, with nothing to migrate. Chain runs stay consistent too: the conductor and the projects it drives use the same prompt.
-Ask an assistant about your projects and you now get a focused answer instead of your whole board. You can search projects by name or serial ("find the OAuth one"), ask for a specific number of results, and when a list is shortened it says so and tells you how to narrow it. The lightweight listing mode is now genuinely lighter than the detailed one, which it previously only claimed to be.
+- **Your agents can now promote a task to a project on their own.** When a task
+  turns out to be bigger than a task, an agent can convert it in one step and
+  get exactly what the dashboard's convert wizard produces: the project is
+  created from the task, subtasks and the task's roadmap card move over to it
+  (keeping their place in the roadmap), and the task is removed. Previously an
+  agent had to rebuild the work by hand, which left the task behind and
+  quietly stranded its roadmap card. The new project arrives inactive and
+  untagged, so you still choose when to launch it.
+- **Your orchestrator's personality can now differ per product.** Customise the
+  orchestrator prompt for one product and it applies only there; products you
+  have not customised keep using your all-products prompt, and anything
+  without one falls back to the packaged default. Existing customisations keep
+  working exactly as before -- they simply become the all-products setting,
+  with nothing to migrate. Chain runs stay consistent too: the conductor and
+  the projects it drives use the same prompt.
+- **Ask an assistant about your projects and you now get a focused answer
+  instead of your whole board.** You can search projects by name or serial
+  ("find the OAuth one"), ask for a specific number of results, and when a
+  list is shortened it says so and tells you how to narrow it. The lightweight
+  listing mode is now genuinely lighter than the detailed one, which it
+  previously only claimed to be.
 - **Search inside a conversation.** Open any conversation in the Message Hub and
   the new search box narrows it to the messages you are looking for, matching
   both what was said and who said it. Clear the box to get the full

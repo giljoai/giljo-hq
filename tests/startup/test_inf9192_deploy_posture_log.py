@@ -7,15 +7,15 @@
 
 Failing layer this regression-locks: the 2026-07-16 prod outage (platform
 SIGTERM -> clean exit -> ON_FAILURE treated it terminal) had to be diagnosed by
-reconstructing the restart policy and worker posture from Railway state after
-the fact — nothing in the boot log stated either. ``log_deploy_posture`` puts
+reconstructing the restart policy and worker posture from deployment platform
+state after the fact — nothing in the boot log stated either. ``log_deploy_posture`` puts
 both in every boot log, and it must fire on the SAME path every boot takes
 (``assert_multiworker_prerequisites``, lifespan Phase 8.55, both editions),
 including the single-worker early-return branch.
 
-``GILJO_RESTART_POLICY`` is exported by railway.toml's startCommand, so
+``GILJO_RESTART_POLICY`` is exported by the deployment start command, so
 ``restart_policy=unset`` deliberately self-describes a process NOT launched by
-the config-as-code startCommand (CE, local dev, or dashboard override drift).
+that start command (CE, local dev, or dashboard override drift).
 
 Parallel-safe: env via monkeypatch only, no DB, no module-level mutable state.
 """
@@ -44,7 +44,7 @@ def _posture_lines(caplog) -> list[str]:
 
 
 def test_declared_policy_and_worker_count_logged(monkeypatch, posture_caplog):
-    """Railway posture: startCommand exported both vars -> the line states both."""
+    """Deployment posture: the platform's start command exported both vars -> the line states both."""
     monkeypatch.setenv("GILJO_RESTART_POLICY", "ALWAYS")
     monkeypatch.setenv("WEB_CONCURRENCY", "4")
 

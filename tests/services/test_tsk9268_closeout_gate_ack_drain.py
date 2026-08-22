@@ -240,6 +240,72 @@ async def test_undrained_action_required_dm_still_blocks_project_completion(db_m
 
 
 # ---------------------------------------------------------------------------
+# (b2) read-side gap #2: a BROADCAST-delivered directive (the OTHER branch of
+#     _resolve_recipients -- every DM test above only exercises the
+#     to_participant branch) must ALSO stay visible and blocking once its
+#     recipient later completes.
+# ---------------------------------------------------------------------------
+
+
+async def test_broadcast_action_required_directive_still_blocks_after_recipient_completes(
+    db_manager, db_session: AsyncSession
+):
+    """The read-side fix scopes its terminal-exclusion to
+    ``Message.message_type == "broadcast"`` (mirroring
+    ``_resolve_recipients``'s no-``to_participant`` branch, which -- unlike the
+    directed branch -- drops a terminal candidate unconditionally, with no
+    ``requires_action`` exemption). That scoping must still carve out
+    ``requires_action`` itself: a broadcast directive delivered while the
+    recipient was live, then never drained before they completed, is exactly
+    the shape a project-anchored broadcast directive takes in prod, and must
+    keep blocking closeout exactly like the directed-DM case does.
+
+    The row can only exist this way -- the write side never delivers a NEW
+    broadcast to an already-terminal candidate -- so the worker is seeded
+    ACTIVE, the broadcast is posted and confirmed delivered, and ONLY THEN
+    does the worker flip to 'complete', mirroring the real prod sequencing.
+    """
+    tenant = TenantManager.generate_tenant_key()
+    project, orch_job, _worker_job, worker = await _seed_team(
+        db_session, tenant, worker_status="working", stale_waiting_count=0
+    )
+    comm = _comm_service(db_manager, db_session)
+
+    thread = await comm.create_thread(
+        subject="broadcast lane coordination", project_id=project.id, creator_id=SENDER, tenant_key=tenant
+    )
+    tid = thread["thread_id"]
+    await comm.join_thread(thread_id=tid, participant_id=worker.agent_id, tenant_key=tenant)
+    post_result = await comm.post_to_thread(
+        thread_id=tid,
+        content="broadcast directive: confirm gate result before closeout",
+        from_agent=SENDER,
+        requires_action=True,
+        tenant_key=tenant,
+    )
+    assert worker.agent_id in post_result["recipients"], "must be delivered while the worker is still live"
+    assert "skipped_recipients" not in post_result
+
+    worker.status = "complete"
+    await db_session.commit()
+
+    ops_repo = AgentOperationsRepository()
+    live_action_required = await ops_repo.get_live_action_required_unread_counts_by_agent(
+        db_session, tenant, project.id, [worker.agent_id]
+    )
+    assert live_action_required.get(worker.agent_id, 0) == 1, (
+        "a broadcast directive must not vanish from the action-required badge once its recipient completes"
+    )
+
+    result = await _write_completion(db_manager, db_session, tenant, project.id, orch_job.job_id)
+    assert result.get("success") is False
+    assert result.get("error") == "CLOSEOUT_BLOCKED"
+    unread_blockers = [b for b in result["blockers"] if b.get("issue_type") == "unread_messages"]
+    assert len(unread_blockers) == 1
+    assert unread_blockers[0]["messages_waiting"] == 1
+
+
+# ---------------------------------------------------------------------------
 # (c) three-readers-agree: the gate, diagnose_project_state, and the post-write
 #     verifier derive the SAME unread count from the SAME store
 # ---------------------------------------------------------------------------

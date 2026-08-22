@@ -463,7 +463,7 @@ def _build_ch_chain_drive(
         commit-SHA timestamp, kept as human/log evidence only). Do NOT advance on status
         "complete" alone. Then go to STEP A for P_(i+1) — advancing
         IS spawning the next project; there is NO launch_implementation and NO PATCH. The
-        run's current_index + per-project "implementing" status are advanced SERVER-SIDE
+        run's current_index + per-project "planning" status are advanced SERVER-SIDE
         at each sub-orch's own staging-end (job_completion_service._handle_staging_end), so
         the conductor never crosses a gate to make progress.
     Also preserved:
@@ -569,7 +569,7 @@ order, do these IN ORDER:
   STEP B — WAIT FOR P_i's CLOSEOUT, THEN ADVANCE:
     P_i's sub-orch runs FREE (STEP A released it); it self-stages, implements, commits, and
     writes its closeout. The server advances the run's current_index + marks P_i
-    "implementing" at the sub-orch's OWN staging-end, so you cross nothing to progress. PARK
+    "planning" at the sub-orch's OWN staging-end, so you cross nothing to progress. PARK
     AND SELF-PACE the poll loop. CAUTION (CLI): set_agent_status(status="sleeping",
     wake_in_minutes=N) only sets the DASHBOARD label -- it does NOT re-invoke you, so calling
     it then stopping STALLS the whole chain. Drive your OWN wake: launch a short BACKGROUND sleep

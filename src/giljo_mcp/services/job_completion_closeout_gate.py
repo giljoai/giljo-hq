@@ -355,11 +355,20 @@ def build_completion_blocked_error(
     reasons: list[str] = []
     if unread_messages:
         unread_ids = [str(msg.id) for msg in unread_messages[:5]]
+        # The gate is PROJECT-scoped while the drain is THREAD-scoped, so the blocking
+        # posts are not necessarily on the thread this job has been talking on — naming
+        # only "that job's coordination thread" sent agents to drain the wrong thread and
+        # read the resulting no-op as a broken gate. Name the threads, and name the
+        # UNFILTERED call: a narrowed read acks what it returns but leaves the cursor
+        # where it was, so unread_only keeps re-serving the same posts.
+        blocked_threads = sorted({str(t) for t in (getattr(m, "thread_id", None) for m in unread_messages) if t})
         reasons.append(
             f"Acknowledge {len(unread_messages)} action-required message(s) before completing. "
-            f"Call get_thread_history(as_participant=<the agent id of job {job_id}>, mark_read=true) "
-            f"on that job's coordination thread (join_thread first if that id is not a participant) "
-            f"to read and acknowledge them — that ack is what clears this gate. Pending: {unread_ids}"
+            f"They are on thread(s) {blocked_threads} — not necessarily the thread this job has "
+            f"been posting on. On EACH, call get_thread_history(thread_id=<that thread>, "
+            f"as_participant=<the agent id of job {job_id}>, mark_read=true) with NO "
+            f"directed_only/action_required_only/tail filter (join_thread first if that id is not "
+            f"a participant) — that ack is what clears this gate. Pending: {unread_ids}"
         )
     if incomplete_todos:
         todo_names = [todo.content for todo in incomplete_todos[:5]]
@@ -386,11 +395,15 @@ def build_completion_blocked_error(
     else:
         next_action = build_next_action(
             tool="get_thread_history",
-            args_hint={"as_participant": "<the agent id of this job>", "mark_read": True},
+            args_hint={
+                "thread_id": "<each thread named in the reason above>",
+                "as_participant": "<the agent id of this job>",
+                "mark_read": True,
+            },
             why=(
-                "Completion is blocked by unacknowledged action-required messages on this "
-                "job's coordination thread. Reading them with mark_read=true is what clears "
-                "the gate."
+                "Completion is blocked by unacknowledged action-required messages. Read each "
+                "named thread with mark_read=true and no filters — that ack is what clears the "
+                "gate. A filtered read acks only what it returns and never advances your cursor."
             ),
         )
 

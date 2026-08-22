@@ -44,9 +44,8 @@ def _saas_pinned_base_url() -> str | None:
     In SaaS mode the canonical public host is a single known value, while
     ``request.base_url`` honors X-Forwarded-Host — an attacker-influenceable
     header when the edge passes it through (uvicorn runs with
-    ``proxy_headers=True``). Emailed lifecycle links (password reset, email
-    verify, account deletion) built from it would then point at an attacker
-    domain. Pinning is gated on BOTH ``GILJO_MODE=saas`` AND
+    ``proxy_headers=True``). Outbound links built from it would then point at
+    an attacker domain. Pinning is gated on BOTH ``GILJO_MODE=saas`` AND
     ``GILJO_PUBLIC_BASE_URL`` being set, so CE/LAN self-host deployments
     (nginx, mkcert LAN, tunnel) keep the request-derived flexibility.
     """

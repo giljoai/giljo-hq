@@ -13,6 +13,13 @@ re-exports every public name so external import paths
 (``giljo_mcp.database.register_tenant_scoped_models``, ``TENANT_SCOPED_MODELS``,
 ``tenant_session_context``, ``TenantIsolationError`` ...) are unchanged.
 
+The invariant this exists to hold: every UPDATE/DELETE reaching a tenant-scoped
+table must carry a predicate binding it to the tenant whose context the session
+is running under. The guard re-injects that predicate where it can, refuses the
+statement where it cannot, and logs what it saw either way. Anything it could not
+scope is also announced on ``signals.SIGNAL_UNSCOPED_WRITE`` -- a plain statement
+of fact with no opinion about who, if anyone, is listening.
+
 Edition-pure: imports ZERO ``saas/`` modules (Deletion Test). SaaS widens the
 scoped set at import time via ``register_tenant_scoped_models``.
 """
@@ -70,6 +77,7 @@ from .models import (
     VisionDocument,
 )
 from .models.oauth import OAuthAuthorizationCode, OAuthRefreshToken, OAuthRevokedToken
+from .signals import SIGNAL_UNSCOPED_WRITE, publish_signal
 from .tenant import TenantManager
 
 
@@ -271,41 +279,6 @@ _TENANT_GUARD_AUDIT_MODE = "audit"
 _AUDIT_WARN_SEEN: set[tuple[str | None, frozenset[str]]] = set()
 _AUDIT_WARN_SEEN_MAX = 2048
 
-# SEC-9093: SaaS-only Sentry tripwire for the genuinely-unscoped (no-explicit-tenant-
-# predicate) UPDATE/DELETE class -- what the TSK-9023 evidence called Class-B. Once the
-# known Class-B call sites are scoped, this stream goes quiet, so any Sentry event here is a
-# real anomaly worth waking up for. The Class-A shape-mismatch warns (caller DID carry an
-# explicit predicate; the guard just can't re-inject on the AnnotatedTable shape) are NOT
-# captured -- ~123/week of those would train humans to ignore the tripwire.
-#
-# Env-gated + fail-open by the same discipline as api/observability/sentry_init.py (which CE
-# core must not import -- that would invert layering and break the Deletion Test): CE never
-# imports sentry_sdk, and a Sentry failure can never touch the write path. The WARNING log in
-# _audit_warn is UNCHANGED -- this is an additive alert, not a log-level bump, so a CE
-# self-hoster with no SENTRY_DSN_BACKEND sees no new behavior.
-_SENTRY_DSN_ENV = "SENTRY_DSN_BACKEND"
-
-
-def _capture_unscoped_write_to_sentry(model_names: list[str], statement_type: str, path: str | None) -> None:
-    """Send a Class-B (predicate-absent) guard warn to Sentry. No-op in CE / without a DSN."""
-    if os.getenv("GILJO_MODE", "").strip().lower() != "saas":
-        return
-    if not os.getenv(_SENTRY_DSN_ENV):
-        return
-    try:
-        import sentry_sdk
-
-        with sentry_sdk.new_scope() as scope:
-            scope.set_tag("tenant_guard.tripwire", "unscoped_write")
-            scope.set_tag("tenant_guard.statement_type", statement_type)
-            scope.set_context("tenant_guard", {"models": model_names, "statement_type": statement_type, "path": path})
-            sentry_sdk.capture_message(
-                f"tenant guard tripwire: unscoped {statement_type} touching {', '.join(model_names)}",
-                level="error",
-            )
-    except Exception:  # noqa: BLE001 -- fail-open: a Sentry error must never affect the write path
-        logger.debug("tenant-guard Sentry tripwire capture failed (non-blocking)", exc_info=True)
-
 
 def _guard_mode() -> str:
     return os.getenv(_TENANT_GUARD_MODE_ENV, "enforce").strip().lower()
@@ -324,9 +297,11 @@ def _audit_warn(
     execute_state: ORMExecuteState,
     unscoped_write: bool = False,
 ) -> None:
-    """Log a tenant-guard audit warning (de-duped). ``unscoped_write`` marks the Class-B
-    (predicate-absent) UPDATE/DELETE class, which is additionally routed to the SaaS Sentry
-    tripwire; the log line itself is identical regardless."""
+    """Log a tenant-guard audit warning (de-duped).
+
+    ``unscoped_write`` marks the case the guard could not scope to the active tenant, which
+    is additionally announced on :data:`SIGNAL_UNSCOPED_WRITE`; the log line itself is
+    identical regardless."""
     model_names = sorted(model.__name__ for model in models)
     path = _best_effort_request_path(session)
     dedupe_key = (path, frozenset(model_names))
@@ -354,7 +329,12 @@ def _audit_warn(
     )
 
     if unscoped_write:
-        _capture_unscoped_write_to_sentry(model_names, statement_type, path)
+        # Neutral announcement: the guard states what it saw and stops. Nothing is
+        # registered in a plain install, so this is a no-op there (see signals.py).
+        publish_signal(
+            SIGNAL_UNSCOPED_WRITE,
+            {"models": model_names, "statement_type": statement_type, "path": path},
+        )
 
 
 def _table_model(element: Any) -> type[Any] | None:
@@ -673,11 +653,10 @@ def _enforce_tenant_scope(execute_state: ORMExecuteState) -> None:
         message = f"{message}; statement carries an explicit tenant predicate on: {explicit_names}"
         if not caller_scoped_to_this_tenant:
             message = f"{message}; predicate value(s) {sorted(explicit_tenant_values)} do not match this tenant"
-    # SEC-9093 (D2), hardened by SEC-9272: Class-B == no explicit tenant predicate on the
-    # statement, OR an explicit predicate that does not resolve to THIS tenant. Only this
-    # (genuinely-not-scoped-to-this-tenant) class feeds the Sentry tripwire; the explicit-and-
-    # matching Class-A case stays log-only. _audit_warn (incl. the Sentry capture) fires BEFORE
-    # the raise below so a blocked Class-B write is never silent.
+    # SEC-9093 (D2), hardened by SEC-9272: a statement counts as unscoped when it carries no
+    # explicit tenant predicate, OR carries one that does not resolve to THIS tenant. A
+    # statement that IS explicitly scoped to this tenant stays log-only. _audit_warn fires
+    # BEFORE the raise below so a blocked write is never silent.
     _audit_warn(
         session,
         reason=message,
@@ -685,8 +664,8 @@ def _enforce_tenant_scope(execute_state: ORMExecuteState) -> None:
         execute_state=execute_state,
         unscoped_write=not caller_scoped_to_this_tenant,
     )
-    # Class-B fails closed -- but observe-only audit mode suppresses the raise (the _audit_warn +
-    # Sentry tripwire above still fire), exactly like the two sibling raises earlier in this
+    # An unscoped write fails closed -- but observe-only audit mode suppresses the raise (the
+    # _audit_warn above still fires), exactly like the two sibling raises earlier in this
     # function, so GILJO_TENANT_GUARD_MODE=audit stays a working kill switch to stop a bad flip
     # without a redeploy.
     if not caller_scoped_to_this_tenant and not audit_mode:

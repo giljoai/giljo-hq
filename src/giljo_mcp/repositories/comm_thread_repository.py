@@ -553,20 +553,32 @@ class CommThreadRepository(
 
     async def ack_messages_for_participant(
         self, session: AsyncSession, tenant_key: str, *, agent_id: str, message_ids: list[str]
-    ) -> None:
+    ) -> int:
         """Record per-recipient acknowledgment of thread posts (BE-9012a, D4).
 
         Bulk-inserts ``message_acknowledgments``, ON CONFLICT DO NOTHING (uq_msg_ack)
-        so a repeated mark_read is idempotent. Reuses the junction; caller commits."""
+        so a repeated mark_read is idempotent. Reuses the junction; caller commits.
+
+        Returns how many acks were NEWLY written — ``RETURNING`` under ON CONFLICT DO
+        NOTHING yields only the rows that actually inserted, so a repeat drain returns
+        0. That count is what ``marked_read`` reports: state that changed, never rows
+        merely re-read.
+        """
         if not message_ids:
-            return
+            return 0
         rows = [
             {"id": generate_uuid(), "message_id": mid, "agent_id": agent_id, "tenant_key": tenant_key}
             for mid in message_ids
         ]
-        stmt = pg_insert(MessageAcknowledgment.__table__).values(rows).on_conflict_do_nothing(constraint="uq_msg_ack")
-        await session.execute(stmt)
+        stmt = (
+            pg_insert(MessageAcknowledgment.__table__)
+            .values(rows)
+            .on_conflict_do_nothing(constraint="uq_msg_ack")
+            .returning(MessageAcknowledgment.__table__.c.id)
+        )
+        newly_acked = len((await session.execute(stmt)).scalars().all())
         await session.flush()
+        return newly_acked
 
     async def search_threads(
         self, session: AsyncSession, tenant_key: str, query: str, *, limit: int = 50

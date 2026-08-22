@@ -145,6 +145,43 @@ describe('AgentRow — phase badge variants', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Agent badge initials (FE-9490): punctuation in the display name must not
+// leak into the rendered badge.
+// ---------------------------------------------------------------------------
+
+describe('AgentRow — agent badge initials', () => {
+  it('does not leak a bracket for a parenthetical display name ("Reviewer (Phase 5)" -> "R(")', async () => {
+    const wrapper = await mountRow({
+      agent: makeAgent({
+        agent_name: 'reviewer',
+        agent_display_name: 'Reviewer (Phase 5)',
+        status: 'working',
+      }),
+      now: NOW_MS,
+      isSubagentMode: false,
+    })
+    const badge = wrapper.find('.agent-badge')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toBe('RP')
+    expect(badge.text()).not.toContain('(')
+  })
+
+  it('still renders ordinary two-word initials unchanged', async () => {
+    const wrapper = await mountRow({
+      agent: makeAgent({
+        agent_name: 'implementer',
+        agent_display_name: 'Backend Implementer',
+        status: 'waiting',
+      }),
+      now: NOW_MS,
+      isSubagentMode: false,
+    })
+    const badge = wrapper.find('.agent-badge')
+    expect(badge.text()).toBe('BI')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Status chip: label + color
 // ---------------------------------------------------------------------------
 

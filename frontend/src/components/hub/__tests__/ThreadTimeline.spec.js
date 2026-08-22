@@ -20,6 +20,7 @@ import { createVuetify } from 'vuetify'
 
 import ThreadTimeline from '@/components/hub/ThreadTimeline.vue'
 import { useCommHubStore } from '@/stores/commHubStore'
+import { getAgentColor } from '@/config/agentColors'
 
 const vuetify = createVuetify()
 const THREAD_ID = 'thr-timeline'
@@ -171,6 +172,55 @@ describe('ThreadTimeline server-resolved author kind (BE-9289a)', () => {
     const row = wrapper.find('[data-testid="timeline-message-msg-uuid-agent"]')
     expect(row.classes()).toContain('timeline-msg--agent')
     expect(row.classes()).not.toContain('timeline-msg--user')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// FE-9490 — badge consolidation: initials no longer swallow punctuation, and
+// the avatar colour keys off the participant's ROLE (not the display name
+// alone), so the same agent reads the same colour here as it does in the
+// AgentPill/HubComposer badges elsewhere in the Hub.
+// ---------------------------------------------------------------------------
+
+const PUNCT_THREAD = 'thr-fe9490'
+const REVIEWER_ID = 'reviewer-phase5-agent'
+
+describe('ThreadTimeline agent badge consistency (FE-9490)', () => {
+  let pinia
+  let store
+
+  beforeEach(() => {
+    pinia = createPinia()
+    setActivePinia(pinia)
+    store = useCommHubStore()
+    store.selectedThreadId = PUNCT_THREAD
+    store.handleThreadMessage({
+      thread_id: PUNCT_THREAD, message_id: 'msg-reviewer-phase5', from_agent_id: REVIEWER_ID,
+      from_kind: 'agent', from_display_name: 'Reviewer (Phase 5)', content: 'reviewing',
+      message_type: 'broadcast', created_at: '2026-06-18T10:02:00Z',
+    })
+    store.participantsByThreadId = new Map([
+      [PUNCT_THREAD, [{ participant_id: REVIEWER_ID, role: 'reviewer', display_name: 'Reviewer (Phase 5)' }]],
+    ])
+  })
+
+  it('does not leak a bracket into the avatar initials for a parenthetical name', () => {
+    const wrapper = mountTimeline(pinia)
+    const row = wrapper.find('[data-testid="timeline-message-msg-reviewer-phase5"]')
+    const avatar = row.find('.timeline-msg__avatar')
+    expect(avatar.text()).toBe('RP')
+    expect(avatar.text()).not.toContain('(')
+  })
+
+  it('colours the avatar by the participant ROLE, matching the reviewer badge everywhere else', () => {
+    const wrapper = mountTimeline(pinia)
+    const row = wrapper.find('[data-testid="timeline-message-msg-reviewer-phase5"]')
+    const avatar = row.find('.timeline-msg__avatar')
+    // jsdom normalizes an inline hex style to rgb() -- compare the hex from the
+    // single source of truth converted the same way, not the literal hex string.
+    const reviewerHex = getAgentColor('reviewer').hex
+    const [r, g, b] = [1, 3, 5].map((i) => Number.parseInt(reviewerHex.slice(i, i + 2), 16))
+    expect(avatar.attributes('style') || '').toContain(`color: rgb(${r}, ${g}, ${b})`)
   })
 })
 

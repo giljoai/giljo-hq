@@ -12,10 +12,10 @@
         v-if="!isOrchestrator"
         class="agent-badge-sq"
         :style="{
-          background: hexToRgba(getAgentDisplayNameColor(agent?.agent_display_name), 0.15),
-          color: getAgentDisplayNameColor(agent?.agent_display_name),
+          background: hexToRgba(getAgentDisplayNameColor(agent), 0.15),
+          color: getAgentDisplayNameColor(agent),
         }"
-      >{{ getAgentAbbr(agent?.agent_display_name) }}</div>
+      >{{ getAgentInitials(agent?.agent_display_name) }}</div>
       <v-icon v-else class="dlg-icon">mdi-information-outline</v-icon>
     </template>
 
@@ -27,8 +27,8 @@
           <span
             class="agent-tinted-badge"
             :style="{
-              backgroundColor: hexToRgba(getAgentDisplayNameColor(agent.agent_display_name), 0.15),
-              color: getAgentDisplayNameColor(agent.agent_display_name),
+              backgroundColor: hexToRgba(getAgentDisplayNameColor(agent), 0.15),
+              color: getAgentDisplayNameColor(agent),
             }"
           >
             {{ agent.agent_display_name }}
@@ -88,7 +88,7 @@
 import { ref, computed, watch, getCurrentInstance } from 'vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import api from '@/services/api'
-import { getAgentColor as getAgentColorConfig } from '@/config/agentColors'
+import { getAgentColor as getAgentColorConfig, getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
 
 const props = defineProps({
@@ -135,18 +135,8 @@ const handleClose = () => {
   emit('update:modelValue', false)
 }
 
-const getAgentDisplayNameColor = (displayName) => {
-  return getAgentColorConfig(displayName).hex
-}
-
-const getAgentAbbr = (agentName) => {
-  if (!agentName) return '?'
-  return agentName
-    .split(/[\s_-]+/)
-    .map(word => word[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2)
+const getAgentDisplayNameColor = (agentEntity) => {
+  return getAgentColorConfig(getAgentColorKey(agentEntity)).hex
 }
 
 /**

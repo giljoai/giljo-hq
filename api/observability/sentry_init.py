@@ -106,8 +106,8 @@ def _should_drop_event(event: dict[str, Any]) -> bool:
 def _scrub_request_pii(event: dict[str, Any]) -> None:
     """Strip body, cookies, query string, and PII headers from ``event["request"]`` in place.
 
-    Query strings are dropped wholesale (SEC-9174 #35): lifecycle links carry
-    ``?token=<plaintext>`` and the social OAuth callbacks carry ``?code=&state=``;
+    Query strings are dropped wholesale (SEC-9174 #35): some request paths carry
+    sensitive material directly in the query string (tokens, auth codes), and
     no Sentry triage flow needs the raw query, so removal beats a param allowlist.
     """
     request = event.get("request")

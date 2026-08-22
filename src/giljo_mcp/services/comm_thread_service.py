@@ -35,6 +35,7 @@ from giljo_mcp.models.comm import (
     LOOP_DIRECTIVE_MESSAGE_TYPE,
     TERMINAL_THREAD_STATUSES,
     VALID_PARTICIPANT_TYPES,
+    CommParticipant,
     CommThread,
 )
 from giljo_mcp.repositories.agent_operations_repository import AgentOperationsRepository
@@ -44,6 +45,10 @@ from giljo_mcp.schemas.comm_serializers import message_dict, thread_dict
 from giljo_mcp.services._comm_thread_baton_mixin import CommThreadBatonMixin
 from giljo_mcp.services._comm_thread_chain_hub_mixin import CommThreadChainHubMixin
 from giljo_mcp.services._comm_thread_edit_mixin import CommThreadEditMixin
+from giljo_mcp.services._comm_thread_liveness_mixin import (
+    CommThreadLivenessMixin,
+    _build_skipped_recipients_notice,
+)
 from giljo_mcp.services._comm_thread_softdelete_mixin import CommThreadSoftDeleteMixin
 from giljo_mcp.services._comm_thread_wake_mixin import CommThreadWakeMixin
 from giljo_mcp.services.comm_author_identity import resolve_and_register_author
@@ -69,6 +74,19 @@ _FROM_AGENT_MAX = 64
 _TAIL_MIN = 1
 _TAIL_MAX = 500
 
+# Returned on a mark_read read whose filters/truncation forbid a cursor advance.
+# The acks ARE written (exactly the posts returned — that is what clears the completion
+# gate); the per-participant watermark is not, so unread_only keeps returning them. Say
+# so, rather than let a repeated non-zero count read as progress that is not happening.
+_NARROWED_MARK_READ_NOTE = (
+    "Acknowledged exactly the posts returned, but the per-participant read cursor did "
+    "NOT advance: this read was narrowed (directed_only / action_required_only) or "
+    "truncated (tail / after_message_id / since), so the returned set is not the "
+    "contiguous run up to the newest post and advancing would skip what it excluded. "
+    "unread_only will keep returning these posts until you re-read the thread with "
+    "as_participant + mark_read=true and NO filters."
+)
+
 
 class CommThreadService(
     CommThreadChainHubMixin,
@@ -76,6 +94,7 @@ class CommThreadService(
     CommThreadEditMixin,
     CommThreadBatonMixin,
     CommThreadWakeMixin,
+    CommThreadLivenessMixin,
 ):
     """Service surface for comm_threads / comm_participants + thread messaging."""
 
@@ -346,8 +365,13 @@ class CommThreadService(
             from_agent_id, from_kind = author.agent_id, author.kind
             from_display_name, attribution_warning = author.display_name, author.warning
 
-            recipient_ids = await self._resolve_recipients(
-                session, tk, thread, to_participant=to_participant, from_agent_id=from_agent_id
+            recipient_ids, skipped_recipients, candidate_count = await self._resolve_recipients(
+                session,
+                tk,
+                thread,
+                to_participant=to_participant,
+                from_agent_id=from_agent_id,
+                requires_action=requires_action,
             )
 
             # A loop-directive post is marked with the reserved message_type so the
@@ -400,69 +424,18 @@ class CommThreadService(
                 # Stay-on-the-line (1CZA1D): see _post_advice_entry / POST_ADVICE.
                 **self._post_advice_entry(set_status),
             }
+            # BE-9491: additive, mirrors BE-9247's forward_notice -- post already succeeded.
+            skipped_notice = _build_skipped_recipients_notice(
+                skipped_recipients, recipient_ids, candidate_count, is_broadcast=not to_participant
+            )
+            if skipped_notice:
+                result["skipped_recipients"] = skipped_notice
+                result["skipped_recipient_details"] = skipped_recipients
 
         # BE-9296a: COMMITTED here, and not one line earlier — see the mixin.
         self._signal_post_wake(tk, to_participant, requires_action, pass_baton_to, baton_passed, recipient_ids)
         await self.emit_handover_notice(notice)
         return result
-
-    async def _resolve_recipients(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-        thread: CommThread,
-        *,
-        to_participant: str | None,
-        from_agent_id: str,
-    ) -> list[str]:
-        """Who this post is delivered to: a direct target, else every OTHER participant.
-
-        Both branches also REGISTER, which is why they belong together and are lifted
-        out as one unit — delivery and the directory move in lockstep here.
-        """
-        if to_participant:
-            # BE-9292a: delivering to someone enrols them. A broadcast cannot diverge
-            # (it fans out FROM the directory), but a directed post used to write a
-            # recipient row and no participant row — leaving its addressee obliged to
-            # reply and unable to acknowledge. See enrol_addressee.
-            await enrol_addressee(self._repo, self._user_repo, session, tenant_key, thread.id, to_participant)
-            return [to_participant]
-        # BE-6141: a broadcast on a PROJECT-ANCHORED thread auto-enrolls the project's
-        # active agents as participants first, so the broadcast reaches agents that
-        # never manually join_thread'd. Standalone threads (NULL project_id) are
-        # unaffected — they still broadcast to exactly the participants who joined.
-        if thread.project_id:
-            await self._auto_enroll_project_roster(session, tenant_key, thread.id, thread.project_id)
-        participants = await self._repo.get_participants(session, tenant_key, thread.id)
-        return [p.participant_id for p in participants if p.participant_id != from_agent_id]
-
-    async def _auto_enroll_project_roster(
-        self, session: AsyncSession, tenant_key: str, thread_id: str, project_id: str
-    ) -> None:
-        """Enroll a project's ACTIVE agents as thread participants (BE-6141).
-
-        Reuses the AgentExecution roster (the owning AgentOperationsRepository)
-        and the collision-safe ``add_participant`` join, so a broadcast reaches
-        agents that never manually joined. Re-enrolling an existing participant never
-        duplicates the row. Scoped to the project's active agents — does not
-        over-enroll terminal (complete/closed/decommissioned) agents.
-
-        BE-9289a: a PLACEHOLDER writer (``authoritative=False``) — it fills blanks but
-        never corrects. It re-runs on EVERY broadcast carrying a non-null roster name and
-        the literal role ``"auto-enrolled"``, so were it allowed to overwrite, an agent's
-        declared identity would flip back to the placeholder on every message.
-        """
-        roster = await self._agent_ops.get_active_agent_ids_for_project(session, tenant_key, project_id)
-        for agent_id, display_name in roster:
-            await self._repo.add_participant(
-                session,
-                tenant_key,
-                thread_id,
-                participant_id=agent_id,
-                participant_type="agent",
-                display_name=display_name,
-                role="auto-enrolled",
-            )
 
     async def list_threads(
         self,
@@ -507,6 +480,48 @@ class CommThreadService(
                     entry.update(facts.get(entry["thread_id"], {}))
             return {"count": len(threads), "threads": payload}
 
+    async def _apply_mark_read(
+        self,
+        session: AsyncSession,
+        tenant_key: str,
+        *,
+        participant: CommParticipant,
+        as_participant: str,
+        messages: list,
+        narrowed: bool,
+    ) -> tuple[int, bool]:
+        """Ack the returned posts and, on a clean forward drain, advance the cursor.
+
+        Returns ``(marked_read, cursor_advanced)``. ``marked_read`` is the number of
+        acks NEWLY written — not ``len(messages)``. Those differ on every repeat read,
+        and reporting the latter was the defect: a second identical filtered call
+        re-reported the same non-zero count while changing nothing, so the caller could
+        not tell a real acknowledgement from a no-op.
+
+        The cursor is advanced ONLY on a clean forward drain. Narrowing
+        (directed/action) or truncation (tail/marker) means the returned set is not the
+        contiguous run up to newest, so advancing would skip unread posts it excluded.
+        That refusal is deliberate (BE-9012a) and stays; the acks are exact and
+        per-message either way, which is what the completion gate reads. What the
+        caller now gets is a signal that it happened — ``cursor_advanced`` — instead of
+        a silent stall that makes ``unread_only`` repeat forever.
+        """
+        # D4: per-recipient acted-on state for every post seen (idempotent).
+        marked_read = await self._repo.ack_messages_for_participant(
+            session, tenant_key, agent_id=as_participant, message_ids=[m.id for m in messages]
+        )
+        if narrowed:
+            return marked_read, False
+        newest = messages[-1]  # oldest-first => last is the newest returned
+        if newest.created_at is not None and (
+            participant.last_read_at is None or newest.created_at > participant.last_read_at
+        ):
+            participant.last_read_message_id = newest.id
+            participant.last_read_at = newest.created_at
+            await session.flush()
+            return marked_read, True
+        return marked_read, False
+
     async def get_thread_history(
         self,
         *,
@@ -549,6 +564,9 @@ class CommThreadService(
             (idempotent) and, on a clean forward drain (no narrowing/truncation),
             advance the cursor to the newest returned post. Refuses with a structured
             ``NOT_A_PARTICIPANT`` rejection if the reader never joined. ONLY write path.
+            ``marked_read`` counts acks NEWLY written, so a repeat drain reports 0;
+            ``cursor_advanced`` says whether the watermark moved, and a narrowed read
+            also carries ``mark_read_note`` naming the unfiltered call that advances it.
           - ``directed_only`` / ``action_required_only`` — posts delivered to the reader
             (DM or received broadcast) / ``requires_action=True`` posts.
         Every query is ``tenant_key``-scoped; the cursor is per-(thread, participant) —
@@ -656,27 +674,18 @@ class CommThreadService(
                 action_required_only=action_required_only,
             )
 
+            narrowed = bool(directed_only or action_required_only or tail or after_message_id or since)
             marked_read = 0
+            cursor_advanced = False
             if mark_read and participant is not None and messages:
-                # D4: per-recipient acted-on state for every post seen (idempotent).
-                await self._repo.ack_messages_for_participant(
-                    session, tk, agent_id=as_participant, message_ids=[m.id for m in messages]
+                marked_read, cursor_advanced = await self._apply_mark_read(
+                    session,
+                    tk,
+                    participant=participant,
+                    as_participant=as_participant,
+                    messages=messages,
+                    narrowed=narrowed,
                 )
-                marked_read = len(messages)
-                # Advance the watermark ONLY on a clean forward drain: narrowing
-                # (directed/action) or truncation (tail/marker) means the returned set
-                # is not the contiguous run up to newest, so advancing would skip unread
-                # posts it excluded. The acks above still record what was seen.
-                is_full_drain = not (directed_only or action_required_only or tail or after_message_id or since)
-                newest = messages[-1]  # oldest-first => last is the newest returned
-                if (
-                    is_full_drain
-                    and newest.created_at is not None
-                    and (participant.last_read_at is None or newest.created_at > participant.last_read_at)
-                ):
-                    participant.last_read_message_id = newest.id
-                    participant.last_read_at = newest.created_at
-                    await session.flush()
 
             # FE-9012c (D3): one batched junction fetch, merged per message. Gated so
             # the default read (MCP agent poll) is byte-identical and query-identical.
@@ -702,6 +711,9 @@ class CommThreadService(
             # Additive only when mark_read requested (legacy read stays byte-identical).
             if mark_read:
                 response["marked_read"] = marked_read
+                response["cursor_advanced"] = cursor_advanced
+                if messages and narrowed:
+                    response["mark_read_note"] = _NARROWED_MARK_READ_NOTE
             return response
 
     async def search_threads(self, *, query: str, limit: int = 50, tenant_key: str | None = None) -> dict[str, Any]:

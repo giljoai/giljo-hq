@@ -108,7 +108,7 @@ async def test_advance_blocked_without_closeout(db_session: AsyncSession) -> Non
 
     refreshed = await _run_svc(db_session).find_active_run_for_project(project_id=p2, tenant_key=tenant)
     assert refreshed["current_index"] == 0, "advance must be BLOCKED while p1 has no closeout"
-    assert refreshed["project_statuses"].get(p2) == "implementing", (
+    assert refreshed["project_statuses"].get(p2) == "planning", (
         "the per-project status update applies even when the advance is blocked"
     )
 
@@ -136,7 +136,7 @@ async def test_advance_succeeds_with_closeout(db_session: AsyncSession) -> None:
 
     refreshed = await _run_svc(db_session).find_active_run_for_project(project_id=p2, tenant_key=tenant)
     assert refreshed["current_index"] == 1, "advance must succeed once p1 has closed out"
-    assert refreshed["project_statuses"].get(p2) == "implementing"
+    assert refreshed["project_statuses"].get(p2) == "planning"
 
 
 # ---------------------------------------------------------------------------

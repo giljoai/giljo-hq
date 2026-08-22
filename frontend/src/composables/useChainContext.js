@@ -37,6 +37,16 @@ import { registerReconnectResync } from '@/stores/websocketEventRouter'
  */
 const WORKING_STATUSES = new Set(['implementing', 'working', 'running', 'in_progress'])
 
+/**
+ * FE-9493: 'planning' — the member's sub-orchestrator has started working the
+ * project, but no worker agent has spawned yet. Written server-side by
+ * advance_chain_member_to_implementing (launch / staging-end); promoted to
+ * 'implementing' separately once the first spawned worker actually starts
+ * (mission_service.get_agent_mission's atomic-start promotion). A pure read of
+ * run.project_statuses[pid] — see the isPlanning derivation in `tabs` below.
+ */
+const PLANNING_STATUSES = new Set(['planning'])
+
 export function useChainContext() {
   const route = useRoute()
   const sequenceRunStore = useSequenceRunStore()
@@ -165,18 +175,16 @@ export function useChainContext() {
       const status = statusFor(pid)
       const isCompleted = status === 'completed'
       const isWorking = WORKING_STATUSES.has(status)
-      // isPlanning (FE-9239): the member is actively being staged, so the tab strip
-      // can show PLANNING instead of a generic WAITING. Prefer the live WS-updated
-      // projectStateStore flags (isStaging/isStaged) — they react instantly to
-      // staging events without waiting for a project refetch — and fall back to the
-      // resolved project record's staging_status only when no live state exists yet.
-      // 'staging_complete' (mission written, Implement lit, no workers yet) is
-      // deliberately NOT planning by default — it renders WAITING pending design
-      // review (see ProjectTabStrip.vue badgeState for the one-line change spot).
-      const liveState = projectStateStore.getProjectState(pid)
-      const stagingActive = liveState
-        ? Boolean(liveState.isStaging || liveState.isStaged)
-        : proj?.staging_status === 'staging' || proj?.staging_status === 'staged'
+      // isPlanning (FE-9239, re-derived FE-9493): a PURE read of the run's own
+      // per-member status, refreshed live by the sequence:updated WS event — so
+      // the badge moves only when the BACKEND moves, identically for a visited and
+      // an unvisited member. The prior derivation preferred the SOLO staging flags
+      // (projectStateStore.isStaging/isStaged), which populate the instant a member
+      // is merely fetched (e.g. by clicking its tab to view it) — so a click alone
+      // could flip a WAITING member to PLANNING while its sub-orchestrator was still
+      // idle. 'staged' now correctly reads WAITING; only a real 'planning' status
+      // from the backend reads PLANNING.
+      const isPlanning = PLANNING_STATUSES.has(status) && !isCompleted && !isWorking
       return {
         projectId: pid,
         order: i,
@@ -192,7 +200,7 @@ export function useChainContext() {
         needsReview: isCompleted && !sequenceRunStore.isReviewed(run.value?.id, pid),
         isStarted: status !== '' && status !== 'pending',
         isWorking,
-        isPlanning: stagingActive && !isCompleted && !isWorking,
+        isPlanning,
       }
     }),
   )

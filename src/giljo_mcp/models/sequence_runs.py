@@ -30,8 +30,24 @@ VALID_RUN_STATUSES: frozenset[str] = frozenset(
 
 # terminated = the in-flight project at a graceful chain terminate (BE-6165b). `released`
 # (a downstream project freed from the run) is modeled as drop-out-of-run, NOT a status value.
+# FE-9493: "implementing" used to double as both "this member's sub-orchestrator entered
+# the project" and "its first spawned worker started" -- the FE tab strip could not tell
+# them apart, so a visited-but-idle member misread as WORKING. "planning" is the new
+# in-between value for the first signal; "implementing" is now reserved for the second
+# (the sub-orch's own worker actually running). See advance_chain_member_to_implementing
+# and mission_service.get_agent_mission's atomic-start promotion for the two writers.
 VALID_PROJECT_STATUSES: frozenset[str] = frozenset(
-    {"pending", "staged", "implementing", "awaiting_review", "completed", "failed", "stalled", "terminated"}
+    {
+        "pending",
+        "staged",
+        "planning",
+        "implementing",
+        "awaiting_review",
+        "completed",
+        "failed",
+        "stalled",
+        "terminated",
+    }
 )
 
 # BE-9000k: the ONE terminal-status set for a chain member — a project that has

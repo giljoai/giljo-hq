@@ -419,7 +419,17 @@ async def update_product_context(
         _TestingContext | None,
         Field(description="Testing group: testing_strategy, testing_frameworks, test_coverage_target."),
     ] = None,
-    force: bool = False,
+    force: Annotated[
+        bool,
+        Field(
+            description=(
+                "Updating a product field that is already populated is rejected with 'Fields "
+                "already populated: <detail>' unless force=True. Reviewing an existing product "
+                "is the COMMON case, so most calls that touch tech_stack, architecture, or "
+                "quality on a product that already has values need force=True."
+            )
+        ),
+    ] = False,
     emit_completion: Annotated[
         bool,
         Field(
