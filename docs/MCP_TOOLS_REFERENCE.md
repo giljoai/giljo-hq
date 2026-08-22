@@ -4,16 +4,17 @@
 
 ## Overview
 
-Giljo HQ, a GiljoAI product, exposes **48 tools** to connected AI coding tools. Every tool requires a
-valid API key passed as a Bearer token. Tenant isolation is enforced server-side;
-agents cannot cross tenant boundaries.
+Giljo HQ, a GiljoAI product, registers **48 tools**. A connected session is served 47 of
+them by default: `launch_implementation` appears only when headless launch is enabled.
+Every tool requires a valid API key passed as a Bearer token. Tenant isolation is
+enforced server-side; agents cannot cross tenant boundaries.
 
-Tool names match the exact MCP registrations. The tool surface — including the exact
-tool set, every parameter name, and every tool's scope — is drift-guarded by the
-roster-lock test suite (`tests/unit/test_be6042d_mcp_tool_registry_surface.py`): any
-add, rename, drop, param change, or scope change turns CI red until the lock is
-updated deliberately. That test is the source of truth for the counts and scopes
-below.
+Tool names match the exact MCP registrations at the time of the date above. The MCP
+registry itself is roster-locked by
+`tests/unit/test_be6042d_mcp_tool_registry_surface.py`: no tool can be added, renamed,
+dropped, or change a parameter or scope without CI turning red. That lock compares the
+live registry against a baseline held inside the test, **not** against this page, so the
+counts and entries below are maintained by hand.
 
 ### Scopes
 

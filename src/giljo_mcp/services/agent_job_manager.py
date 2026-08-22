@@ -36,6 +36,7 @@ from giljo_mcp.models.agent_identity import AgentExecution
 from giljo_mcp.repositories.agent_job_repository import AgentJobRepository
 from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.tenant import TenantManager
+from giljo_mcp.utils.identity import validate_agent_display_name
 
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,11 @@ class AgentJobManager:
             BaseGiljoError: Database operation failed
         """
         try:
+            # FE-9490: this is the succession write boundary for agent_display_name
+            # (a NEW executor for an existing job) -- reject punctuation before it
+            # reaches the DB. See giljo_mcp.utils.identity for the character policy.
+            agent_display_name = validate_agent_display_name(agent_display_name)
+
             repo = AgentJobRepository(None)
             async with self._get_session(tenant_key) as session:
                 new_agent_id = str(uuid4())

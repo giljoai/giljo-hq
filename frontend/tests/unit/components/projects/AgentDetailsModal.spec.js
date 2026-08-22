@@ -20,10 +20,16 @@ import * as directives from 'vuetify/directives'
 import AgentDetailsModal from '@/components/projects/AgentDetailsModal.vue'
 import api from '@/services/api'
 
-// Mock the agentColors config
-vi.mock('@/config/agentColors', () => ({
-  getAgentColor: () => ({ hex: '#4a90d9' }),
-}))
+// Mock the agentColors config -- only getAgentColor's return shape is faked;
+// getAgentColorKey/getAgentInitials (FE-9490) keep their REAL implementation
+// via importOriginal, since AgentDetailsModal now delegates to them directly.
+vi.mock('@/config/agentColors', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    getAgentColor: () => ({ hex: '#4a90d9' }),
+  }
+})
 
 describe('AgentDetailsModal Component', () => {
   let vuetify

@@ -345,7 +345,7 @@ class OrchestrationService:
 
         return {
             "status": "healthy",
-            "server": "giljo_mcp",
+            "server": branding.MCP_ALIAS,
             "version": get_installed_version(),
             "skills_version": SKILLS_VERSION,
             "timestamp": datetime.now(UTC).isoformat(),

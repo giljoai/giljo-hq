@@ -631,7 +631,7 @@ function Get-LatestRelease {
     }
 
     # Download tarball
-    $tarballName = "giljoai-mcp-$version.tar.gz"
+    $tarballName = "giljo-hq-$version.tar.gz"
     $tempDir     = Join-Path ([System.IO.Path]::GetTempPath()) "giljoai-install"
     if (-not (Test-Path $tempDir)) {
         New-Item -ItemType Directory -Path $tempDir -Force | Out-Null

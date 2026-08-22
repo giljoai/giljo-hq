@@ -3,8 +3,7 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Agent operations repository for auxiliary agent queries.
+"""Agent operations repository for auxiliary agent queries.
 
 BE-5022d: Extracted from AgentJobRepository to keep files under 800 lines.
 Contains operations for: heartbeat, silence detection, workflow status,
@@ -25,6 +24,7 @@ from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES, AgentEx
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.system_setting import SystemSetting
 from giljo_mcp.models.tasks import MessageAcknowledgment, MessageRecipient
+from giljo_mcp.repositories._agent_liveness_mixin import AgentLivenessMixin, _should_hide_from_unread_clause
 
 
 SILENCE_THRESHOLD_SETTING_KEY = "agent_silence_threshold_minutes"
@@ -48,7 +48,7 @@ def _already_acked_exists_clause(tenant_key: str):
     )
 
 
-class AgentOperationsRepository:
+class AgentOperationsRepository(AgentLivenessMixin):
     """Repository for auxiliary agent operations.
 
     Provides database operations for heartbeat tracking, silence detection,
@@ -377,7 +377,6 @@ class AgentOperationsRepository:
         if not agent_ids:
             return {}
 
-        already_acked = _already_acked_exists_clause(tenant_key)
         stmt = (
             select(MessageRecipient.agent_id, func.count(Message.id))
             .join(MessageRecipient, Message.id == MessageRecipient.message_id)
@@ -387,7 +386,8 @@ class AgentOperationsRepository:
                 Message.project_id == project_id,
                 Message.message_type != "completion_report",
                 MessageRecipient.agent_id.in_(agent_ids),
-                ~already_acked,
+                ~_already_acked_exists_clause(tenant_key),
+                ~_should_hide_from_unread_clause(tenant_key),
             )
             .group_by(MessageRecipient.agent_id)
         )
@@ -421,7 +421,6 @@ class AgentOperationsRepository:
         if not project_ids or not agent_ids:
             return {}
 
-        already_acked = _already_acked_exists_clause(tenant_key)
         stmt = (
             select(Message.project_id, MessageRecipient.agent_id, func.count(Message.id))
             .join(MessageRecipient, Message.id == MessageRecipient.message_id)
@@ -431,7 +430,8 @@ class AgentOperationsRepository:
                 Message.project_id.in_(project_ids),
                 Message.message_type != "completion_report",
                 MessageRecipient.agent_id.in_(agent_ids),
-                ~already_acked,
+                ~_already_acked_exists_clause(tenant_key),
+                ~_should_hide_from_unread_clause(tenant_key),
             )
             .group_by(Message.project_id, MessageRecipient.agent_id)
         )
@@ -466,7 +466,6 @@ class AgentOperationsRepository:
         if not agent_ids:
             return {}
 
-        already_acked = _already_acked_exists_clause(tenant_key)
         stmt = (
             select(MessageRecipient.agent_id, func.count(Message.id))
             .join(MessageRecipient, Message.id == MessageRecipient.message_id)
@@ -477,7 +476,8 @@ class AgentOperationsRepository:
                 Message.requires_action.is_(True),
                 Message.auto_generated.is_(False),
                 MessageRecipient.agent_id.in_(agent_ids),
-                ~already_acked,
+                ~_already_acked_exists_clause(tenant_key),
+                ~_should_hide_from_unread_clause(tenant_key),
             )
             .group_by(MessageRecipient.agent_id)
         )
@@ -501,7 +501,6 @@ class AgentOperationsRepository:
         if not project_ids or not agent_ids:
             return {}
 
-        already_acked = _already_acked_exists_clause(tenant_key)
         stmt = (
             select(Message.project_id, MessageRecipient.agent_id, func.count(Message.id))
             .join(MessageRecipient, Message.id == MessageRecipient.message_id)
@@ -512,7 +511,8 @@ class AgentOperationsRepository:
                 Message.requires_action.is_(True),
                 Message.auto_generated.is_(False),
                 MessageRecipient.agent_id.in_(agent_ids),
-                ~already_acked,
+                ~_already_acked_exists_clause(tenant_key),
+                ~_should_hide_from_unread_clause(tenant_key),
             )
             .group_by(Message.project_id, MessageRecipient.agent_id)
         )
@@ -545,7 +545,6 @@ class AgentOperationsRepository:
         if not agent_ids:
             return {}
 
-        already_acked = _already_acked_exists_clause(tenant_key)
         stmt = (
             select(
                 MessageRecipient.agent_id,
@@ -559,7 +558,8 @@ class AgentOperationsRepository:
                 Message.project_id == project_id,
                 Message.message_type != "completion_report",
                 MessageRecipient.agent_id.in_(agent_ids),
-                ~already_acked,
+                ~_already_acked_exists_clause(tenant_key),
+                ~_should_hide_from_unread_clause(tenant_key),
             )
             .group_by(MessageRecipient.agent_id, "thread_id")
         )

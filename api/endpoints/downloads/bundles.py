@@ -203,14 +203,12 @@ async def _record_export(db, selected, tenant_key: str, export_context) -> None:
     BE-9385e adds the per-product record in the SAME transaction, so the staleness
     indicator stops showing one product's export as every other product's.
 
-    Extracted from ``download_agent_templates`` rather than inlined: that handler
-    sat exactly at the 200-line function cap, so the per-product write had to leave
-    the function rather than push it over. The house rule is extract, never raise.
+    Extracted from ``download_agent_templates`` rather than inlined, to keep that
+    handler within its size limit.
 
-    This is a relocation, not a new write: the module held exactly one direct
-    commit before this change and holds exactly one after. The per-product write
-    it wraps does NOT touch raw ORM -- it goes through ``record_product_export``,
-    which routes to the junction's own repository.
+    This is a relocation, not a new write: the per-product write it wraps does
+    NOT touch raw ORM -- it goes through ``record_product_export``, which routes
+    to the junction's own repository.
 
     Args:
         db: Active database session (this function owns the commit).
@@ -233,7 +231,7 @@ async def _record_export(db, selected, tenant_key: str, export_context) -> None:
         export_timestamp,
     )
 
-    await db.commit()  # single-writer-allow: relocated by the 200-line cap; net endpoint writes 1 before, 1 after
+    await db.commit()  # single-writer-allow: single commit for this module, relocated from download_agent_templates
     logger.info("Updated last_exported_at for %d templates (tenant: %s)", len(selected), sanitize(tenant_key))
 
 

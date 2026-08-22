@@ -169,3 +169,51 @@ async def is_chain_member(
     except Exception:  # noqa: BLE001 - best-effort chain detection; never block the gate
         logger.warning("[BE-6196] chain-member check failed (non-fatal); falling back to solo gate")
         return False
+
+
+# FE-9493: a chain member that has already settled past "implementing" — a late/racing
+# worker's first mission fetch must never demote it back. Passed as mark_chain_member_status's
+# forward-only ``not_from`` guard from promote_chain_member_on_first_worker_start below.
+_CHAIN_MEMBER_SETTLED_STATUSES: frozenset[str] = frozenset(
+    {"awaiting_review", "completed", "failed", "stalled", "terminated"}
+)
+
+
+async def promote_chain_member_on_first_worker_start(mission_service: Any, job: AgentJob, tenant_key: str) -> None:
+    """FE-9493: promote a chain member planning->implementing on its first worker's start.
+
+    Called from ``MissionService.get_agent_mission``'s atomic waiting->working start
+    block, split out here for the same size-budget reason as the rest of this module
+    (see the module docstring). This IS "the first agent a chain member's
+    sub-orchestrator spawned starts working" — the WORKING signal the tab strip needs,
+    distinct from "planning" (the sub-orch itself entering the project, written by
+    ``advance_chain_member_to_implementing``).
+
+    ``mission_service`` is the calling ``MissionService`` instance (mirrors the rest of
+    this module treating the service's handles as directly accessible — see the module
+    docstring); its ``db_manager`` / ``tenant_manager`` / ``_test_session`` /
+    ``_websocket_manager`` are read straight off it, keeping the call site to one line.
+
+    Gated on ``job.job_type != "orchestrator"`` so the sub-orch's OWN first mission
+    fetch (which already wrote "planning" via the staging-end/launch path) never
+    re-fires this. Best-effort + forward-only guarded: solo (no active run) and
+    non-chain-member projects are a clean no-op via ``find_active_run_for_project``
+    returning None; a member that already settled (awaiting_review/completed/failed/
+    stalled/terminated) is never demoted back to "implementing" by a late/racing worker.
+    """
+    if job.job_type == "orchestrator" or not job.project_id:
+        return
+    # Local import: project_helpers does not import this module, so no cycle risk,
+    # but mirrors the local-import idiom the rest of the chain-write call sites use.
+    from giljo_mcp.services.project_helpers import mark_chain_member_status
+
+    await mark_chain_member_status(
+        db_manager=mission_service.db_manager,
+        tenant_manager=mission_service.tenant_manager,
+        project_id=str(job.project_id),
+        tenant_key=tenant_key,
+        status="implementing",
+        test_session=mission_service._test_session,
+        websocket_manager=mission_service._websocket_manager,
+        not_from=_CHAIN_MEMBER_SETTLED_STATUSES,
+    )

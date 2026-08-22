@@ -35,6 +35,7 @@ from sqlalchemy import delete, select
 from sqlalchemy import update as sa_update
 
 from giljo_mcp.database import tenant_session_context
+from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.auth import User
 from giljo_mcp.models.organizations import Organization
 from giljo_mcp.models.projects import TaxonomyType
@@ -721,3 +722,42 @@ async def test_be9214_sequence_run_conductor_agent_id_holds_64(db_session):
 
     reloaded = await db_session.get(SequenceRun, run.id)
     assert reloaded.conductor_agent_id == _BE9214_LONG_ID
+
+
+async def test_be9491_broadcast_skips_terminal_agent_over_the_wire(comm_mcp_client, db_session):
+    """BE-9491 MCP-boundary regression (BE-5042 pattern): a broadcast reaching a
+    TERMINAL ('complete') agent participant must not deliver to it, and the
+    additive ``skipped_recipients`` field must appear in the SAME transport
+    response this suite's other post_to_thread tests exercise -- the new field
+    needs its own assertion at the actual @mcp.tool wrapper layer, not just at
+    the service layer (tests/services/test_be9491_finished_agent_broadcast_filter.py)."""
+    new_client, tenant_key, _uid, _base, _mp = comm_mcp_client
+
+    job = AgentJob(tenant_key=tenant_key, job_type="implementer", mission="finish and go quiet", status="active")
+    db_session.add(job)
+    await db_session.flush()
+    db_session.add(
+        AgentExecution(
+            agent_id="agent-finished",
+            job_id=job.job_id,
+            tenant_key=tenant_key,
+            agent_display_name="agent-finished",
+            status="complete",
+        )
+    )
+    await db_session.flush()
+
+    thread = await _create_thread(new_client, subject="status", creator_id="agent-alpha")
+    tid = thread["thread_id"]
+
+    async with new_client() as s:
+        join = await s.call_tool("join_thread", {"thread_id": tid, "agent_id": "agent-finished"})
+        assert join.is_error is False, _error_text(join)
+        post = await s.call_tool(
+            "post_to_thread", {"thread_id": tid, "content": "wrap party", "from_agent": "agent-alpha"}
+        )
+    assert post.is_error is False, _error_text(post)
+    post_payload = _payload(post)
+    assert "agent-finished" not in post_payload["recipients"]
+    assert post_payload["skipped_recipients"]
+    assert any(entry["agent_id"] == "agent-finished" for entry in post_payload["skipped_recipient_details"])

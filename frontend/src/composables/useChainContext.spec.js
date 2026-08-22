@@ -351,10 +351,10 @@ describe('useChainContext — tab isWorking derivation (bug fix: position != act
   })
 })
 
-describe('useChainContext — tab isPlanning derivation (FE-9239)', () => {
-  it('isPlanning is true when staging_status is "staging" (record fallback, no live state)', async () => {
-    projectByIdMock.mockImplementation((id) =>
-      makeProject(id, { staging_status: id === 'p1' ? 'staging' : '' }),
+describe('useChainContext — tab isPlanning derivation (FE-9493, rewritten from FE-9239)', () => {
+  it('isPlanning is true when project_statuses is "planning"', async () => {
+    fetchRunMock.mockResolvedValue(
+      makeRun({ project_statuses: { p1: 'planning', p2: 'pending', p3: 'pending' } }),
     )
     setup()
     await ctx.loadRun('run-1')
@@ -364,34 +364,24 @@ describe('useChainContext — tab isPlanning derivation (FE-9239)', () => {
     expect(t2.isPlanning).toBe(false)
   })
 
-  it('isPlanning is true when staging_status is "staged"', async () => {
-    projectByIdMock.mockImplementation((id) =>
-      makeProject(id, { staging_status: id === 'p1' ? 'staged' : '' }),
-    )
-    setup()
-    await ctx.loadRun('run-1')
-    await flushPromises()
-    const [t1] = ctx.chainCtx.value.tabs
-    expect(t1.isPlanning).toBe(true)
-  })
-
-  it('isPlanning is false for staging_complete (default: falls through to WAITING, not PLANNING)', async () => {
-    projectByIdMock.mockImplementation((id) =>
-      makeProject(id, { staging_status: id === 'p1' ? 'staging_complete' : '' }),
+  it('isPlanning is false for "staged" (queued, conductor has not started it — WAITING)', async () => {
+    fetchRunMock.mockResolvedValue(
+      makeRun({ project_statuses: { p1: 'staged', p2: 'pending', p3: 'pending' } }),
     )
     setup()
     await ctx.loadRun('run-1')
     await flushPromises()
     const [t1] = ctx.chainCtx.value.tabs
     expect(t1.isPlanning).toBe(false)
+    expect(t1.isWorking).toBe(false)
+    expect(t1.isCompleted).toBe(false)
   })
 
-  it('isPlanning is false for a completed member even if staging_status is stale "staging"', async () => {
+  it('isPlanning is false for a completed member even if project_statuses is stale "planning"', async () => {
+    // Guards the FE precedence (isCompleted checked before isPlanning) independent
+    // of the BE forward-only guard already covering this at the write boundary.
     fetchRunMock.mockResolvedValue(
       makeRun({ project_statuses: { p1: 'completed', p2: 'pending', p3: 'pending' } }),
-    )
-    projectByIdMock.mockImplementation((id) =>
-      makeProject(id, { staging_status: id === 'p1' ? 'staging' : '' }),
     )
     setup()
     await ctx.loadRun('run-1')
@@ -401,12 +391,9 @@ describe('useChainContext — tab isPlanning derivation (FE-9239)', () => {
     expect(t1.isPlanning).toBe(false)
   })
 
-  it('isPlanning is false for a working (implementing) member even if staging_status is stale "staged"', async () => {
+  it('isPlanning is false for a working (implementing) member', async () => {
     fetchRunMock.mockResolvedValue(
       makeRun({ project_statuses: { p1: 'implementing', p2: 'pending', p3: 'pending' } }),
-    )
-    projectByIdMock.mockImplementation((id) =>
-      makeProject(id, { staging_status: id === 'p1' ? 'staged' : '' }),
     )
     setup()
     await ctx.loadRun('run-1')
@@ -416,30 +403,59 @@ describe('useChainContext — tab isPlanning derivation (FE-9239)', () => {
     expect(t1.isPlanning).toBe(false)
   })
 
-  it('prefers the live projectStateStore flags over the record staging_status fallback (live says staging)', async () => {
-    getProjectStateMock.mockImplementation((id) =>
-      id === 'p1' ? { isStaging: true, isStaged: false } : null,
+  it("regression (FE-9493): a member at project_statuses[pid]==='pending' stays WAITING after " +
+    'setProject({ staging_status: "staged" }) — the bug\'s exact repro', async () => {
+    fetchRunMock.mockResolvedValue(
+      makeRun({ project_statuses: { p1: 'implementing', p2: 'pending', p3: 'pending' } }),
     )
-    projectByIdMock.mockImplementation((id) => makeProject(id, { staging_status: '' }))
-    setup()
-    await ctx.loadRun('run-1')
-    await flushPromises()
-    const [t1] = ctx.chainCtx.value.tabs
-    expect(t1.isPlanning).toBe(true)
-  })
-
-  it('live store flags override a stale record staging_status (record says staging, live says settled)', async () => {
+    // Simulates the OLD bug's trigger: visiting p2 populates projectStateStore
+    // (ProjectLaunchView -> stores/projects.js _upsertEntity -> setProject())
+    // with isStaged derived from staging_status === 'staged'. The FIX must not
+    // even consult this store for isPlanning/isWorking any more.
     getProjectStateMock.mockImplementation((id) =>
-      id === 'p1' ? { isStaging: false, isStaged: false } : null,
+      id === 'p2' ? { isStaging: false, isStaged: true } : null,
     )
     projectByIdMock.mockImplementation((id) =>
-      makeProject(id, { staging_status: id === 'p1' ? 'staging' : '' }),
+      makeProject(id, { staging_status: id === 'p2' ? 'staged' : '' }),
     )
     setup()
     await ctx.loadRun('run-1')
     await flushPromises()
-    const [t1] = ctx.chainCtx.value.tabs
-    expect(t1.isPlanning).toBe(false)
+    const [, t2] = ctx.chainCtx.value.tabs
+    expect(t2.isPlanning).toBe(false)
+    expect(t2.isWorking).toBe(false)
+    expect(t2.isCompleted).toBe(false)
+  })
+
+  it("regression (FE-9493, operator's exact scenario): open members 2, 3 and 4 while " +
+    'member 1 is working — 2/3/4 stay WAITING', async () => {
+    fetchRunMock.mockResolvedValue(
+      makeRun({
+        project_ids: ['p1', 'p2', 'p3', 'p4'],
+        resolved_order: ['p1', 'p2', 'p3', 'p4'],
+        project_statuses: { p1: 'implementing', p2: 'pending', p3: 'pending', p4: 'pending' },
+      }),
+    )
+    // "Open members 2, 3 and 4" == the user clicked each tab, which navigates and
+    // populates projectStateStore for that member (isStaged: true, mirroring
+    // Stage Chain leaving every member at staging_status 'staged'). None of that
+    // may influence the badge any more.
+    getProjectStateMock.mockImplementation((id) =>
+      ['p2', 'p3', 'p4'].includes(id) ? { isStaging: false, isStaged: true } : null,
+    )
+    projectByIdMock.mockImplementation((id) =>
+      makeProject(id, { staging_status: id === 'p1' ? '' : 'staged' }),
+    )
+    setup()
+    await ctx.loadRun('run-1')
+    await flushPromises()
+    const [t1, t2, t3, t4] = ctx.chainCtx.value.tabs
+    expect(t1.isWorking).toBe(true)
+    for (const t of [t2, t3, t4]) {
+      expect(t.isPlanning).toBe(false)
+      expect(t.isWorking).toBe(false)
+      expect(t.isCompleted).toBe(false)
+    }
   })
 })
 

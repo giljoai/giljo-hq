@@ -29,10 +29,7 @@ from giljo_mcp.exceptions import (
     ResourceNotFoundError,
     ValidationError,
 )
-from giljo_mcp.models import (
-    AgentExecution,
-    AgentJob,
-)
+from giljo_mcp.models import AgentExecution, AgentJob
 from giljo_mcp.repositories.agent_completion_repository import AgentCompletionRepository
 from giljo_mcp.repositories.agent_job_repository import AgentJobRepository
 from giljo_mcp.schemas.jsonb_validators import validate_agent_job_metadata
@@ -45,6 +42,7 @@ from giljo_mcp.services.protocol_survival import build_spawn_footer
 from giljo_mcp.services.sequence_chain_context import renders_multi_terminal
 from giljo_mcp.system_roles import ORCHESTRATOR_AGENT_NAME
 from giljo_mcp.tenant import TenantManager
+from giljo_mcp.utils.identity import validate_agent_display_name
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 
@@ -533,6 +531,8 @@ class JobLifecycleService:
             ValidationError: Invalid agent_name or suffix cap exceeded
             AlreadyExistsError: Duplicate orchestrator
         """
+        # FE-9490: reject punctuation before it reaches the DB (giljo_mcp.utils.identity).
+        agent_display_name = validate_agent_display_name(agent_display_name)
         repo = AgentCompletionRepository()
         is_orchestrator = agent_display_name == "orchestrator"
         project_id = project.id

@@ -23,6 +23,8 @@ import json
 
 import pytest
 
+from giljo_mcp import branding
+
 
 pytestmark = pytest.mark.asyncio
 
@@ -55,7 +57,7 @@ async def test_health_check_round_trip(mcp_client):
 
     payload = _extract_payload(result)
     assert payload.get("status") == "healthy", f"expected status=healthy, got payload={payload}"
-    assert payload.get("server") == "giljo_mcp", f"expected server=giljo_mcp, got payload={payload}"
+    assert payload.get("server") == branding.MCP_ALIAS, f"expected server={branding.MCP_ALIAS}, got payload={payload}"
 
 
 def _extract_payload(call_tool_result) -> dict:

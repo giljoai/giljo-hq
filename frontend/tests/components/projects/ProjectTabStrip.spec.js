@@ -1,7 +1,9 @@
 /**
  * ProjectTabStrip.spec.js — FE-6174c
  *
- * Rewritten to cover the two-row non-clickable badge design.
+ * Rewritten for the single-row card design (FE-9493): each card renders
+ * exactly two direct children (alias badge + status badge), badge stays
+ * non-clickable/display-only, and `select` is the only emit on click.
  * Edition scope: CE.
  */
 import { describe, it, expect, vi } from 'vitest'
@@ -38,6 +40,13 @@ describe('ProjectTabStrip — emits', () => {
     // We verify by attempting to trigger and checking nothing fires
     expect(wrapper.emitted('review')).toBeFalsy()
   })
+
+  it('clicking the card emits select and select only', async () => {
+    const wrapper = mountStrip([baseTabs.working])
+    await wrapper.find('[data-testid="chain-tab-0"]').trigger('click')
+    expect(wrapper.emitted('select')).toEqual([['p1']])
+    expect(wrapper.emitted('review')).toBeFalsy()
+  })
 })
 
 describe('ProjectTabStrip — badge: review badge is NON-clickable', () => {
@@ -62,33 +71,38 @@ describe('ProjectTabStrip — badge: review badge is NON-clickable', () => {
   })
 })
 
-describe('ProjectTabStrip — two-row structure', () => {
-  it('.chain-tab__row1 contains alias and name', async () => {
+describe('ProjectTabStrip — single-row card structure (FE-9493)', () => {
+  it('each card renders exactly two direct-child spans: alias then status badge', async () => {
     const wrapper = mountStrip([baseTabs.working])
-    const row1 = wrapper.find('.chain-tab__row1')
-    expect(row1.exists()).toBe(true)
-    expect(row1.find('.chain-tab__alias').exists()).toBe(true)
-    expect(row1.find('.chain-tab__name').exists()).toBe(true)
-  })
-})
-
-describe('ProjectTabStrip — truncName', () => {
-  it('caps a >15-char name to 15 + ellipsis', async () => {
-    const wrapper = mountStrip([baseTabs.working]) // name: 'Alpha Project Long Name' (>15)
-    const nameSpan = wrapper.find('.chain-tab__name')
-    expect(nameSpan.text()).toBe('Alpha Project L…')
+    const btn = wrapper.find('[data-testid="chain-tab-0"]')
+    const spans = btn.findAll('span')
+    expect(spans).toHaveLength(2)
+    expect(spans[0].classes()).toContain('chain-tab__alias')
+    expect(spans[1].classes()).toContain('chain-tab__badge')
   })
 
-  it('shows full name when <=15 chars', async () => {
-    const wrapper = mountStrip([baseTabs.done]) // name: 'Gamma' (5 chars)
-    const nameSpan = wrapper.find('.chain-tab__name')
-    expect(nameSpan.text()).toBe('Gamma')
+  it('has no .chain-tab__row1, .chain-tab__row2, or .chain-tab__name wrappers', async () => {
+    const wrapper = mountStrip([baseTabs.working])
+    expect(wrapper.find('.chain-tab__row1').exists()).toBe(false)
+    expect(wrapper.find('.chain-tab__row2').exists()).toBe(false)
+    expect(wrapper.find('.chain-tab__name').exists()).toBe(false)
+  })
+
+  it('the project name does not render as visible text, only via :title', async () => {
+    const wrapper = mountStrip([baseTabs.working]) // name: 'Alpha Project Long Name'
+    expect(wrapper.text()).not.toContain('Alpha Project Long Name')
   })
 
   it('binds full name to :title on the button', async () => {
     const wrapper = mountStrip([baseTabs.working])
     const btn = wrapper.find('[data-testid="chain-tab-0"]')
     expect(btn.attributes('title')).toBe('Alpha Project Long Name')
+  })
+
+  it('status badge is announced to screen readers (no aria-hidden)', async () => {
+    const wrapper = mountStrip([baseTabs.working])
+    const badge = wrapper.find('.chain-tab__badge')
+    expect(badge.attributes('aria-hidden')).toBeUndefined()
   })
 })
 

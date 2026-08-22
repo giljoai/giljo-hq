@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models.projects import Project, TaxonomyType
@@ -180,7 +180,28 @@ class TaxonomyRepository:
         Soft-deleted projects AND tasks are excluded (ACTIVE pool only) so this
         preview agrees with the allocator after BE-6130b made tasks soft-delete.
         Returns 1 when the product has no rows.
+
+        BE-9486: this ``max(...) + 1`` read was unprotected — a second reader of
+        the same bucket could observe the same watermark as a concurrent
+        ``ProjectRepository.get_next_series_number_shared`` call before either
+        side inserted, so a caller that ever treats this preview as an allocator
+        (rather than a display-only hint) could mint a duplicate. This method has
+        no caller today that pairs it with an insert, so there is no separate
+        "lock rows" step to call first the way ``ProjectRepository`` callers do —
+        the lock is taken HERE, using the identical ``pg_advisory_xact_lock``
+        bucket key as ``ProjectRepository.lock_rows_for_series_shared``, so the
+        two allocators serialize against each other too and this can never mint a
+        stale watermark regardless of how a future caller wires it up.
         """
+        if not tenant_key:
+            raise ValueError("tenant_key is required to compute the next series number")
+
+        bucket_key = f"taxonomy:{tenant_key}:{product_id or ''}"
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": bucket_key},
+        )
+
         project_query = select(func.coalesce(func.max(Project.series_number), 0)).where(
             Project.tenant_key == tenant_key,
             Project.product_id == product_id,

@@ -20,7 +20,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { getAgentColor } from '@/config/agentColors'
+import { getAgentColor, getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
 import { agentStatusDot, agentPillTitle } from '@/composables/useAgentStatusDot'
 
@@ -38,13 +38,11 @@ const harness = computed(() => {
 
 const initials = computed(() => {
   const name = props.participant.display_name || props.participant.participant_id || '?'
-  const parts = String(name).split(/[-_\s]+/).filter(Boolean)
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
-  return String(name).slice(0, 2).toUpperCase()
+  return getAgentInitials(name)
 })
 
 const badgeStyle = computed(() => {
-  const hex = getAgentColor(props.participant.role || props.participant.display_name)?.hex
+  const hex = getAgentColor(getAgentColorKey(props.participant))?.hex
   return { backgroundColor: hexToRgba(hex, 0.2), color: hex }
 })
 

@@ -207,7 +207,7 @@ frontend/stats.html
 audit/
 BLIND_AUDIT_REPORT.md
 
-# Operator-only quickstart lives on private NAS, not in repo
+# Operator-only quickstart -- kept outside the repo.
 handovers/ops_panel_operator_quickstart.md
 
 # ── Secrets & credentials — defense-in-depth ──────────────
@@ -223,9 +223,9 @@ id_dsa*
 *_rsa
 *_ed25519
 *_ecdsa
-# Catch loose SSH keys named after their target host (e.g. DEMOSERVER,
-# DEMOSERVER.pub). These belong in ~/.ssh/, never a repo working dir.
-DEMOSERVER*
+# Loose SSH keys named after their target host belong in ~/.ssh/, never in
+# a repo working dir. Host-specific globs are operator-local -- put them in
+# .git/info/exclude, not here.
 *.pub
 .stignore
 .stfolder/
@@ -258,7 +258,7 @@ CLAUDE.md
 CLAUDE.md
 handovers/Reference_docs/DELIVERY_PIPELINE.md
 
-# Stale DB dumps / snapshots - never commit (real backups = Railway snapshots + live DB)
+# Stale DB dumps / snapshots - never commit (real backups live outside the repo)
 backups/
 
 # Chain conductor sub-orch spawn scratch (server-authored launcher + prompt files)

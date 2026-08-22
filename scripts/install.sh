@@ -699,7 +699,7 @@ print('')
     fi
 
     # Download tarball
-    local tarball_name="giljoai-mcp-${RELEASE_VERSION}.tar.gz"
+    local tarball_name="giljo-hq-${RELEASE_VERSION}.tar.gz"
     RELEASE_TARBALL="${TEMP_DIR}/${tarball_name}"
 
     print_step "Downloading $tarball_name..."

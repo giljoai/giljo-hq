@@ -666,7 +666,10 @@ async def get_thread_history(
         bool,
         Field(
             description="Acknowledge the returned posts and advance your persistent read cursor "
-            "(on a clean unread drain). Requires as_participant; join_thread first. This is a WRITE."
+            "(on a clean unread drain). Requires as_participant; join_thread first. This is a WRITE. "
+            "Combined with directed_only/action_required_only/tail/after_message_id/since it still "
+            "acks exactly the posts returned, but CANNOT advance the cursor — the response then says "
+            "cursor_advanced=false and unread_only keeps returning them until you re-read unfiltered."
         ),
     ] = False,
     directed_only: Annotated[

@@ -134,7 +134,7 @@
         :data-agent-display-name="agent.agent_display_name"
         @click="handleAgentInfo(agent)"
       >
-        <div class="agent-badge" :style="getAgentBadgeStyle(agent.agent_name || agent.agent_display_name)">
+        <div class="agent-badge" :style="getAgentBadgeStyle(getAgentColorKey(agent))">
           {{ getAgentInitials(agent.agent_display_name) }}
         </div>
         <div class="agent-info">
@@ -218,6 +218,7 @@ import AgentMissionEditModal from '@/components/projects/AgentMissionEditModal.v
 import AgentTipsDialog from '@/components/common/AgentTipsDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { getAgentBadgeStyle } from '@/utils/colorUtils'
+import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 
 /**
  * LaunchTab Component - Complete Rewrite (Handover 0241)
@@ -285,26 +286,6 @@ const projectId = computed(() => {
   }
   return id
 })
-
-/**
- * Get agent initials - uses word initials
- * Split by dash, space, or underscore and use first letter of each part
- * e.g., "Backend-Implementer" -> "BI", "Backend-Tester" -> "BT"
- */
-const getAgentInitials = (displayName) => {
-  if (!displayName) return '??'
-
-  // Split by dash, space, or underscore
-  const parts = displayName.split(/[-_\s]+/).filter(Boolean)
-
-  if (parts.length >= 2) {
-    // Use first letter of first two parts: "Backend-Implementer" -> "BI"
-    return (parts[0][0] + parts[1][0]).toUpperCase()
-  }
-
-  // Single word fallback: use first two letters
-  return displayName.substring(0, 2).toUpperCase()
-}
 
 const projectStateStore = useProjectStateStore()
 const missionText = computed(

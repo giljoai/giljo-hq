@@ -13,12 +13,19 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import AgentJobModal from '@/components/projects/AgentJobModal.vue'
 
-// Mock agentColors config
-vi.mock('@/config/agentColors', () => ({
-  getAgentColor: (name) => ({
-    hex: name ? '#4CAF50' : '#757575',
-  }),
-}))
+// Mock agentColors config -- only getAgentColor's return shape is faked (a
+// fixed, easy-to-assert-on hex); getAgentColorKey/getAgentInitials (FE-9490)
+// keep their REAL implementation via importOriginal so the badge-key and
+// initials logic under test is the actual production code, not a stand-in.
+vi.mock('@/config/agentColors', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    getAgentColor: (name) => ({
+      hex: name ? '#4CAF50' : '#757575',
+    }),
+  }
+})
 
 const createMockAgent = (overrides = {}) => ({
   job_id: 'job-300',

@@ -5,8 +5,8 @@
       <div class="dlg-header">
         <div
           class="agent-badge-sq"
-          :style="getAgentBadgeStyle(displayAgent?.agent_name || displayAgent?.agent_display_name)"
-        >{{ getAgentAbbr(displayAgent?.agent_name || displayAgent?.agent_display_name) }}</div>
+          :style="getAgentBadgeStyle(getAgentColorKey(displayAgent))"
+        >{{ getAgentInitials(displayAgent?.agent_name || displayAgent?.agent_display_name) }}</div>
         <span class="dlg-title"><span class="agent-name-label">{{ displayAgent?.agent_name || displayAgent?.agent_display_name }}</span>&nbsp;- Assigned Job</span>
         <v-btn icon variant="text" size="small" class="dlg-close" @click="handleClose">
           <v-icon icon="mdi-close" size="18" />
@@ -107,6 +107,7 @@
 <script setup>
 import { computed, ref, toRaw, watch } from 'vue'
 import { getAgentBadgeStyle } from '@/utils/colorUtils'
+import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 
 // Props
 const props = defineProps({
@@ -228,15 +229,6 @@ function getStatusColor(status) {
 }
 
 
-function getAgentAbbr(agentName) {
-  if (!agentName) return '?'
-  return agentName
-    .split(/[\s_-]+/)
-    .map(word => word[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2)
-}
 </script>
 
 <style lang="scss" scoped>

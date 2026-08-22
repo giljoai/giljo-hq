@@ -82,10 +82,16 @@ vi.mock('@/stores/user', () => ({
   })
 }))
 
-// Mock agentColors
-vi.mock('@/config/agentColors', () => ({
-  getAgentColor: () => ({ hex: '#888888', name: 'grey' }),
-}))
+// Mock agentColors -- only getAgentColor's return shape is faked;
+// getAgentColorKey/getAgentInitials (FE-9490) keep their REAL implementation
+// via importOriginal, since LaunchTab now delegates to them directly.
+vi.mock('@/config/agentColors', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    getAgentColor: () => ({ hex: '#888888', name: 'grey' }),
+  }
+})
 
 describe('LaunchTab - Agent Mission Edit Integration (0244b)', () => {
   let wrapper

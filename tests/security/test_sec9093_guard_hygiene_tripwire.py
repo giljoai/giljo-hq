@@ -15,11 +15,12 @@ D1 -- three genuinely-unscoped Class-B call sites are scoped so the tenant guard
      Class-A (still warns); the raw table is what makes it go quiet. These tests pin both the
      "raw is quiet" and the "mapped warns" halves so a revert is caught.
 
-D2 -- the guard's _audit_warn routes ONLY the predicate-absent (Class-B) UPDATE/DELETE class
-     to the SaaS Sentry tripwire, fail-open and env-gated (no-op in CE / without a DSN).
+D2 -- the guard's _audit_warn announces ONLY the predicate-absent (Class-B) UPDATE/DELETE
+     class on the neutral ``signals.SIGNAL_UNSCOPED_WRITE`` hub. What a deployment does with
+     that announcement (Sentry) lives in saas/ and is pinned by
+     tests/saas/test_sec9093_unscoped_write_tripwire.py.
 """
 
-import sys
 import types
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -29,11 +30,19 @@ from sqlalchemy import delete as sql_delete
 from sqlalchemy import select
 from sqlalchemy import update as sql_update
 
-from giljo_mcp import tenant_guard
+from giljo_mcp import signals, tenant_guard
 from giljo_mcp.models.auth import APIKey, User
 from giljo_mcp.models.templates import AgentTemplate, TemplateArchive
 from giljo_mcp.repositories.template_repository import TemplateRepository
 from giljo_mcp.tenant import TenantManager
+
+
+@pytest.fixture(autouse=True)
+def _clean_signal_observers():
+    """The signal hub is module state — never leak an observer between tests."""
+    signals.clear_signal_observers()
+    yield
+    signals.clear_signal_observers()
 
 
 def _tk() -> str:
@@ -300,13 +309,12 @@ async def test_classb_triggers_sentry_capture_classa_does_not(db_session, monkey
     table is NOT itself a detected tenant model. We force that shape deterministically (walk reports
     an unrelated tenant model while the DELETE targets a different table -- the same technique as
     test_sec9156_guard_failclosed.py) and re-assert the D2 classification: the predicate-ABSENT
-    (Class-B) case feeds the Sentry tripwire (and, since SEC-9156 shipped Step 2, now also raises);
-    the explicit-predicate (Class-A) case does neither."""
+    (Class-B) case is announced on the neutral unscoped-write signal (and, since SEC-9156 shipped
+    Step 2, now also raises); the explicit-predicate (Class-A) case does neither."""
     calls = []
-    monkeypatch.setattr(
-        tenant_guard,
-        "_capture_unscoped_write_to_sentry",
-        lambda model_names, statement_type, path: calls.append((tuple(model_names), statement_type)),
+    signals.register_signal_observer(
+        signals.SIGNAL_UNSCOPED_WRITE,
+        lambda payload: calls.append((tuple(payload["models"]), payload["statement_type"])),
     )
     # Walk reports APIKey as "touched" while the DELETE targets TemplateArchive's table -> no model
     # matches the target -> nothing injectable -> the no-match tripwire branch (never injects/executes
@@ -319,73 +327,10 @@ async def test_classb_triggers_sentry_capture_classa_does_not(db_session, monkey
     tenant_guard._AUDIT_WARN_SEEN.clear()
     with pytest.raises(tenant_guard.TenantIsolationError):
         await db_session.execute(sql_delete(TemplateArchive).where(TemplateArchive.id == "no-such-id"))
-    assert calls == [(("APIKey",), "delete")], "Class-B (predicate-absent, uninjectable) must feed the tripwire once"
+    assert calls == [(("APIKey",), "delete")], "Class-B (predicate-absent, uninjectable) must announce once"
 
     # Class-A: an explicit tenant predicate is present -> capture must NOT fire.
     calls.clear()
     tenant_guard._AUDIT_WARN_SEEN.clear()
     await db_session.execute(sql_delete(TemplateArchive).where(TemplateArchive.tenant_key == tenant_a))
-    assert calls == [], "Class-A (explicit predicate present) must NOT feed the tripwire"
-
-
-# ---------------------------------------------------------------------------
-# D2 -- helper env-gating + fail-open (unit)
-# ---------------------------------------------------------------------------
-def _fake_sentry(record: list):
-    scope = types.SimpleNamespace(set_tag=lambda *a, **k: None, set_context=lambda *a, **k: None)
-
-    class _Scope:
-        def __enter__(self):
-            return scope
-
-        def __exit__(self, *a):
-            return False
-
-    mod = types.ModuleType("sentry_sdk")
-    mod.new_scope = _Scope
-    mod.capture_message = lambda msg, level=None: record.append((msg, level))
-    return mod
-
-
-def test_capture_noop_in_ce(monkeypatch):
-    record = []
-    monkeypatch.delenv("GILJO_MODE", raising=False)
-    monkeypatch.setenv("SENTRY_DSN_BACKEND", "https://x@example/1")
-    monkeypatch.setitem(sys.modules, "sentry_sdk", _fake_sentry(record))
-    tenant_guard._capture_unscoped_write_to_sentry(["Task"], "delete", None)
-    assert record == [], "CE (GILJO_MODE unset) must never capture"
-
-
-def test_capture_noop_without_dsn(monkeypatch):
-    record = []
-    monkeypatch.setenv("GILJO_MODE", "saas")
-    monkeypatch.delenv("SENTRY_DSN_BACKEND", raising=False)
-    monkeypatch.setitem(sys.modules, "sentry_sdk", _fake_sentry(record))
-    tenant_guard._capture_unscoped_write_to_sentry(["Task"], "delete", None)
-    assert record == [], "SaaS without a DSN must never capture"
-
-
-def test_capture_fires_in_saas_with_dsn(monkeypatch):
-    record = []
-    monkeypatch.setenv("GILJO_MODE", "saas")
-    monkeypatch.setenv("SENTRY_DSN_BACKEND", "https://x@example/1")
-    monkeypatch.setitem(sys.modules, "sentry_sdk", _fake_sentry(record))
-    tenant_guard._capture_unscoped_write_to_sentry(["Message"], "update", "/api/x")
-    assert len(record) == 1
-    msg, level = record[0]
-    assert level == "error"
-    assert "Message" in msg and "update" in msg
-
-
-def test_capture_fail_open_on_sentry_error(monkeypatch):
-    monkeypatch.setenv("GILJO_MODE", "saas")
-    monkeypatch.setenv("SENTRY_DSN_BACKEND", "https://x@example/1")
-    boom = types.ModuleType("sentry_sdk")
-
-    def _raise():
-        raise RuntimeError("sentry down")
-
-    boom.new_scope = _raise
-    monkeypatch.setitem(sys.modules, "sentry_sdk", boom)
-    # Must NOT raise -- fail-open guarantees the write path is never affected.
-    tenant_guard._capture_unscoped_write_to_sentry(["Task"], "delete", None)
+    assert calls == [], "Class-A (explicit predicate present) must NOT announce"

@@ -11,6 +11,7 @@ import { createVuetify } from 'vuetify'
 import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
 import AgentJobModal from '@/components/projects/AgentJobModal.vue'
+import { getAgentInitials } from '@/config/agentColors'
 
 const vuetify = createVuetify({
   components,
@@ -196,14 +197,23 @@ describe('AgentJobModal', () => {
       expect(style.color).toBe('#D4B08A')
     })
 
+    // FE-9490: AgentJobModal's own initials splitter (map(word => word[0]) over
+    // the WHOLE split, no punctuation stripped) was one of six copy-pasted
+    // duplicates and was removed in favour of the shared getAgentInitials()
+    // (frontend/src/config/agentColors.js) that every badge site now calls —
+    // see AgentJobModal.vue's template, which now calls it directly instead of
+    // a local getAgentAbbr. These assertions exercise that same shared helper,
+    // and their expected values are the CORRECTED shape (two-char single-word
+    // and '??' fallback), matching the convention every other badge site
+    // already used before this consolidation.
     it('should return abbreviation for agent name', () => {
-      expect(wrapper.vm.getAgentAbbr('test-agent')).toBe('TA')
-      expect(wrapper.vm.getAgentAbbr('code_implementer')).toBe('CI')
-      expect(wrapper.vm.getAgentAbbr('single')).toBe('S') // Single word returns first letter only
+      expect(getAgentInitials('test-agent')).toBe('TA')
+      expect(getAgentInitials('code_implementer')).toBe('CI')
+      expect(getAgentInitials('single')).toBe('SI') // Single word -> first two chars (shared convention)
     })
 
     it('should return default abbreviation for null agent name', () => {
-      expect(wrapper.vm.getAgentAbbr(null)).toBe('?')
+      expect(getAgentInitials(null)).toBe('??')
     })
   })
 

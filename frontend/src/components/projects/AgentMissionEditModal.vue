@@ -149,7 +149,7 @@
 <script setup>
 import { ref, computed, watch, getCurrentInstance } from 'vue'
 import api from '@/services/api'
-import { getAgentColor as getAgentColorConfig } from '@/config/agentColors'
+import { getAgentColor as getAgentColorConfig, getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
 
 const props = defineProps({
@@ -202,23 +202,14 @@ const executionCount = computed(() => {
 })
 
 const agentPrimaryColor = computed(() => {
-  return getAgentColorConfig(props.agent?.agent_display_name).hex
+  return getAgentColorConfig(getAgentColorKey(props.agent)).hex
 })
 
 const agentTintedBg = computed(() => {
   return hexToRgba(agentPrimaryColor.value, 0.15)
 })
 
-const agentAbbr = computed(() => {
-  const name = props.agent?.agent_display_name
-  if (!name) return '?'
-  return name
-    .split(/[\s_-]+/)
-    .map(word => word[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2)
-})
+const agentAbbr = computed(() => getAgentInitials(props.agent?.agent_display_name))
 
 // Validation rules
 const missionRules = [

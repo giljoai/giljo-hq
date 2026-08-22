@@ -529,7 +529,11 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
     #   CURSOR_AXIS_MISMATCH / CURSOR_VERSION_UNSUPPORTED — BE-9469; raised in
     #   the read layer where the filter fingerprint is known, converted to this
     #   shape by the except clause above, and returned before any fetch runs so a
-    #   refused cursor costs no query).
+    #   refused cursor costs no query), and apply_context_tuning
+    #   (NO_SECTIONS_APPLIED — BE-9473 F3; every drift-flagged proposal failed
+    #   to resolve to a real product field, returned before any DB write or
+    #   tuning_state stamp so a failed write cannot be mistaken for a
+    #   completed review).
     #
     # The post-0480 raise-rule governs Tier-1 internal errors ONLY; it does
     # not forbid these intentional Tier-2 rejection responses. Regression:

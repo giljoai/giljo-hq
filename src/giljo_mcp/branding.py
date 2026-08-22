@@ -26,6 +26,11 @@ PRODUCT_SHORT = "Giljo HQ"
 MCP_ALIAS = "giljo_hq"
 DESCRIPTOR = "Giljo HQ — project, task, and agent coordination for the one-person software company"
 
+# Distribution artefact slug (the release tarball name is "{DIST_SLUG}-{version}.tar.gz").
+# Derived from MCP_ALIAS, not hand-copied, so a future rename changes one constant and
+# every producer/consumer of the tarball name follows via the guard test. (INF-9483-follow)
+DIST_SLUG = MCP_ALIAS.replace("_", "-")
+
 # Shared disambiguation sentence appended to messaging/task-tool descriptions
 # and to the MCP server's own `instructions=` text (BE-9275a step 2 + step 8).
 # Warns an agent that may also have Giljo AMH (giljo_amh) connected in the same

@@ -56,6 +56,7 @@ from giljo_mcp.services.mission_assembly import (
 from giljo_mcp.services.mission_implementation_gate import (
     check_implementation_gate,
     is_chain_member,
+    promote_chain_member_on_first_worker_start,
 )
 from giljo_mcp.services.mission_orchestration_service import MissionOrchestrationService
 from giljo_mcp.services.orchestrator_product_resolver import compose_identity_with_provenance
@@ -237,6 +238,7 @@ class MissionService:
                         },
                     )
 
+                    await promote_chain_member_on_first_worker_start(self, job, tenant_key)
             # WebSocket emissions happen after the database transaction is complete
             if execution and status_changed and old_status is not None:
                 try:

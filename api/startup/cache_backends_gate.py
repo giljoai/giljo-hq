@@ -13,11 +13,11 @@ and just logged a warning, leaving each worker on its own per-process dict —
 the worst failure mode, because it looks like shared state is working when
 it silently is not.
 
-Contract (SaaS only — this module is a no-op for CE):
+No-op for CE — see `saas/` for the exact configuration surface. Contract
+(SaaS only):
 
 - `REDIS_URL` unset: stay on the CE in-process backend. One INFO line states
-  the mode. This is a legitimate SaaS operating mode today (Redis becomes
-  load-bearing only when INF-3009d migrates consumers onto it).
+  the mode. This is a legitimate SaaS operating mode today.
 - `REDIS_URL` set and reachable: register the Redis-backed adapters, record
   the live client on `state` so `/health` can reuse it for a live ping.
 - `REDIS_URL` set but unreachable at boot: raise. Callers must NOT catch this
