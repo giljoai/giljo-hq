@@ -175,7 +175,16 @@ defineEmits(['card-click'])
 }
 
 /* ═══ RESPONSIVE ═══ */
-@media (max-width: 960px) {
+// FE-9536: the old single 960px cutoff jumped straight from 3 columns to 1,
+// skipping the whole tablet band (portrait ~768-834px, 16:9 landscape
+// ~1024-1194px) where 3 cards could never fit but 1 wastes the width.
+@media (max-width: $breakpoint-tablet) {
+  .quick-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: $breakpoint-mobile) {
   .quick-grid {
     grid-template-columns: 1fr;
   }

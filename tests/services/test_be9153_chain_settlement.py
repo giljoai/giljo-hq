@@ -186,7 +186,7 @@ async def test_chain_closeout_held_then_drained_on_decide(db_session):
 
     # DRAIN: deciding the last settlement approval re-triggers the chain closeout.
     await _approval_svc(db_session).mark_decided(
-        tenant_key=tenant, approval_id=approval.id, option_id="approve", user_id=None
+        tenant_key=tenant, approval_id=approval.id, option_id="approve", user_id=None, decided_via="mcp"
     )
 
     purged = await _run_svc(db_session).find_active_run_for_conductor(conductor_agent_id=conductor, tenant_key=tenant)

@@ -121,6 +121,43 @@ describe('resolveJobsNavPath', () => {
     })
     expect(result).toBe('/launch?via=jobs')
   })
+
+  // FE-9525d: branch D — several active projects at once (BE-9525a/b retired
+  // the single-active-project-per-product invariant) route to the sectioned
+  // Jobs viewport instead of an arbitrary single project.
+  describe('branch D (FE-9525d: several active projects)', () => {
+    it('returns /jobs-overview when activeProjects has more than one entry', () => {
+      const result = resolveJobsNavPath({
+        activeProject: { id: 'p1' },
+        activeProjects: [{ id: 'p1' }, { id: 'p2' }],
+      })
+      expect(result).toBe('/jobs-overview')
+    })
+
+    it('still returns the single-project path when activeProjects has exactly one entry (byte-identical)', () => {
+      const result = resolveJobsNavPath({
+        activeProject: { id: 'solo' },
+        activeProjects: [{ id: 'solo' }],
+      })
+      expect(result).toBe('/projects/solo?via=jobs')
+    })
+
+    it('omitting activeProjects falls back to the single-project behaviour (back-compat)', () => {
+      const result = resolveJobsNavPath({
+        activeProject: { id: 'solo' },
+      })
+      expect(result).toBe('/projects/solo?via=jobs')
+    })
+
+    it('branch C (an in-flight chain run) still wins over branch D', () => {
+      const result = resolveJobsNavPath({
+        activeProject: { id: 'p1' },
+        activeProjects: [{ id: 'p1' }, { id: 'p2' }],
+        activeRun: { id: 'run-1', resolved_order: ['p1', 'p2'] },
+      })
+      expect(result).toBe('/projects/p1?run=run-1')
+    })
+  })
 })
 
 // ── isJobsRouteActive ────────────────────────────────────────────────────────

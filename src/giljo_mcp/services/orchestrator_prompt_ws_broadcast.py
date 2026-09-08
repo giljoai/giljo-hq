@@ -57,6 +57,7 @@ async def broadcast_orchestrator_prompt_generated(
     estimated_tokens: int | None = None,
     tool: str | None = None,
     timestamp: str | None = None,
+    product_id: str | None = None,  # BE-9518
 ) -> None:
     """Broadcast ``orchestrator:prompt_generated`` to the calling tenant (BE-9332).
 
@@ -79,6 +80,7 @@ async def broadcast_orchestrator_prompt_generated(
         "estimated_tokens": estimated_tokens,
         "tool": tool,
         "timestamp": timestamp,
+        "product_id": product_id,  # BE-9518
     }
     data.update({key: value for key, value in optional.items() if value is not None})
 

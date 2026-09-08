@@ -103,7 +103,7 @@ class Project(Base):
     # resolve and supply a real tenant_key (or raise); a forgotten key must fail
     # loudly, never auto-fill. (PK id keeps its default — PKs must auto-generate.)
     tenant_key = Column(String(36), nullable=False)
-    # BE-9437: a project MUST belong to a product (operator ruling, 2026-08-15).
+    # BE-9437: a project MUST belong to a product.
     # NOT NULL is the floor under BE-9411 (creates bind to an explicit product)
     # and BE-9415 (conversions bind to the task's own product): those closed the
     # paths that CHOSE a product, this closes the possibility of having none.
@@ -338,14 +338,6 @@ class Project(Base):
             "idx_projects_closeout_executed",
             "closeout_executed_at",
             postgresql_where=text("closeout_executed_at IS NOT NULL"),
-        ),
-        # Single active project per product constraint (Handover 0050b)
-        # Ensures only ONE project can be active per product at any time
-        Index(
-            "idx_project_single_active_per_product",
-            "product_id",
-            unique=True,
-            postgresql_where=text("status = 'active'"),
         ),
     )
 

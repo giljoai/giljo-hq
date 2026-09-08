@@ -44,6 +44,7 @@ vi.mock('@/stores/projects', () => ({
   useProjectStore: () => ({
     projects: [],
     activeProject: null,
+    activeProjects: [],
   }),
 }))
 

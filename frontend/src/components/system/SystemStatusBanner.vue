@@ -19,169 +19,154 @@
   visual language.
 -->
 <template>
-  <div
-    v-if="renderedRowCount > 0 || pendingReserveRows > 0"
-    class="system-status-banner"
-  >
-    <!-- FE-9368 (E): the Message Hub handover, app-wide. The Hub's own attention strip
-         and gold card only reach an operator who is already in the Hub, and they
-         normally are not. Leads with the raised hand rather than the Gil avatar: this
-         row is an agent waiting on you, not Gil talking. Not dismissible on purpose,
-         it is a live read of the baton, so it leaves when the turn does. -->
-    <div
-      v-if="yourTurnThreads.length > 0"
-      class="system-banner-alert system-banner-alert--info system-banner-alert--clickable"
-      role="alert"
-      data-testid="your-turn-banner"
-      @click="openYourTurn"
-    >
-      <div class="system-banner-alert__content">
-        <v-icon icon="mdi-hand-back-right-outline" size="18" class="system-banner-alert__hand" />
-        <span class="system-banner-alert__text" data-testid="your-turn-banner-text">
-          {{ yourTurnMessage }}
-        </span>
-      </div>
+  <div v-if="renderedRowCount > 0 || pendingReserveRows > 0" class="system-status-banner">
+    <!-- FE-9552: never stack -- chevron, qty, then the top family block; only
+         visibility is gated (isBannerVisible), so this IS the fold mechanic. -->
+    <div class="banner-fold-strip">
+      <BannerFoldControls
+        v-if="totalBannerCount > 1"
+        v-model="foldExpanded"
+        :qty="totalBannerCount"
+      />
 
-      <div class="system-banner-alert__actions">
-        <button
-          data-testid="your-turn-cta"
-          class="system-banner-btn system-banner-btn--cta"
-          @click.stop="openYourTurn"
+      <div class="banner-fold-rows">
+        <!-- FE-9368 (E) / FE-9589: the Message Hub handover row, extracted to
+             YourTurnBannerRow.vue (Guardrail 1) alongside its two siblings. -->
+        <YourTurnBannerRow
+          :threads="isBannerVisible('your-turn') ? visibleYourTurnThreads : []"
+          @open="openYourTurn"
+          @dismiss="dismissYourTurn"
+        />
+
+        <!-- FE-9501b (D6) / FE-9511: the raised-hand row for a request_approval
+             question on a project you may not have open. Same shape as the Hub
+             baton row above (FE-9368) on purpose -- one visual language for "an
+             agent needs you" -- but a DIFFERENT data source: UserApprovalService's
+             awaiting_user gate has no Hub thread/baton of its own (checked
+             user_approval_service.py), so this reads useApprovalsStore directly
+             instead of commHubStore. Not dismissible for the same reason the Hub
+             row isn't: it is a live read of a pending approval and leaves the
+             instant the approval is decided.
+
+             FE-9511: markup + canned-text/pill rendering live in
+             ApprovalBannerRow.vue to keep that file within the project's file-size budget. The text is a
+             CANNED string keyed off the server-derived `banner_state` on each
+             approval -- never `approval.reason`, which stays agent-authored
+             prose demoted to the Review screen (ApprovalCard). Pills are the
+             project taxonomy_alias, carried on the payload so they render for a
+             project this session never opened (FE-9508's trap).
+
+             FE-9552: fed an empty array when folded away (renders nothing for zero). -->
+        <ApprovalBannerRow
+          :approvals="isBannerVisible('approval') ? visibleApprovals : []"
+          @open="openApprovals"
+          @dismiss="dismissApprovals"
+        />
+
+        <!-- FE-9586: the thread-post family — somebody NAMED you, or directed an
+             action-request at you. The banner these two signals never had, which is
+             why FE-9553 could only ship their popouts event-shaped with a TTL rather
+             than as projections of banner state.
+
+             Server-projected, not derived here: useThreadPostAttention reads
+             GET /api/v1/threads/attention. The client used to decide "was I
+             mentioned" by matching a display name against the post body, and could
+             not see all of it — a mention past the broker's excerpt cut-off was
+             invisible to the reader it named.
+
+             A BROADCAST action-request is deliberately absent: BE-9197 rules it
+             "whoever picks it up", obligating nobody in particular. It keeps its bell
+             row and raises no banner.
+
+             Fed empty arrays when folded away, like the approval row (FE-9552). -->
+        <ThreadPostBannerRow
+          :mentions="isBannerVisible('thread-post') ? visibleMentions : []"
+          :directed-asks="isBannerVisible('thread-post') ? visibleDirectedAsks : []"
+          @open="openThreadPost"
+          @dismiss="dismissThreadPosts"
+        />
+
+        <!-- FE-9538. FE-9552: rows filtered to visible fold keys; @open now also
+             dismisses (acting on the CTA IS handling it), matching goTo() below. -->
+        <LifecycleBannerRow
+          :rows="visibleLifecycleRows"
+          @open="openLifecycleRow"
+          @dismiss="lifecycleBannerStore.dismiss"
+        />
+
+        <div
+          v-for="n in visibleSystemBanners"
+          :key="n.id"
+          class="system-banner-alert"
+          :class="`system-banner-alert--${n.severity}`"
+          role="alert"
+          data-testid="system-banner"
         >
-          {{ yourTurnCta }}
-        </button>
-      </div>
-    </div>
+          <div class="system-banner-alert__content">
+            <img src="/icons/Giljo_YW_Face.svg" alt="" class="system-banner-alert__avatar" />
+            <span class="system-banner-alert__text">{{ n.body || n.title }}</span>
+          </div>
 
-    <div
-      v-for="n in visibleBanners"
-      :key="n.id"
-      class="system-banner-alert"
-      :class="`system-banner-alert--${n.severity}`"
-      role="alert"
-      data-testid="system-banner"
-    >
-      <div class="system-banner-alert__content">
-        <img src="/icons/Giljo_YW_Face.svg" alt="" class="system-banner-alert__avatar" />
-        <span class="system-banner-alert__text">{{ n.body || n.title }}</span>
-      </div>
+          <div class="system-banner-alert__actions">
+            <button
+              v-if="hasCta(n)"
+              data-testid="banner-cta-btn"
+              class="system-banner-btn system-banner-btn--cta"
+              @click="goTo(n)"
+            >
+              {{ n.cta_label || 'Go to settings' }}
+            </button>
 
-      <div class="system-banner-alert__actions">
-        <button
-          v-if="hasCta(n)"
-          data-testid="banner-cta-btn"
-          class="system-banner-btn system-banner-btn--cta"
-          @click="goTo(n)"
+            <button
+              v-if="n.dismissible"
+              data-testid="banner-dismiss-btn"
+              class="system-banner-btn system-banner-btn--dismiss"
+              aria-label="Dismiss notification"
+              @click="dismiss(n)"
+            >
+              <v-icon icon="mdi-close" size="16" />
+            </button>
+          </div>
+        </div>
+
+        <!-- FE-9202: CLIENT-ARMED tutorial row (useTutorialState localStorage, not
+             a Notification row). FE-9552: markup in OnboardingNudgeRow.vue. -->
+        <OnboardingNudgeRow
+          v-if="showTutorialRow && isBannerVisible('tutorial')"
+          row-testid="tutorial-activate-banner"
+          cta-testid="tutorial-activate-cta"
+          cta-label="Go to Products"
+          dismiss-testid="tutorial-activate-dismiss"
+          @cta="onTutorialCta"
+          @dismiss="dismissTutorialRow"
         >
-          {{ n.cta_label || 'Go to settings' }}
-        </button>
+          Next: activate your product
+        </OnboardingNudgeRow>
 
-        <button
-          v-if="n.dismissible"
-          data-testid="banner-dismiss-btn"
-          class="system-banner-btn system-banner-btn--dismiss"
-          aria-label="Dismiss notification"
-          @click="dismiss(n)"
+        <!-- FE-9202: onboarding nudges (byte-preserved useOnboardingReminders cadence). -->
+        <OnboardingNudgeRow
+          v-if="showIntegRow && isBannerVisible('integ')"
+          row-testid="onboarding-integration-banner"
+          cta-testid="onboarding-integration-cta"
+          cta-label="Go to Tools"
+          dismiss-testid="onboarding-integration-dismiss"
+          @cta="onIntegCta"
+          @dismiss="dismissIntegRow"
         >
-          <v-icon icon="mdi-close" size="16" />
-        </button>
-      </div>
-    </div>
-
-    <!-- FE-9202: CLIENT-ARMED tutorial "activate your product" row. Visibility
-         comes from useTutorialState localStorage, NOT a Notification row. -->
-    <div
-      v-if="showTutorialRow"
-      class="system-banner-alert system-banner-alert--info"
-      role="alert"
-      data-testid="tutorial-activate-banner"
-    >
-      <div class="system-banner-alert__content">
-        <img src="/icons/Giljo_YW_Face.svg" alt="" class="system-banner-alert__avatar" />
-        <span class="system-banner-alert__text">Next: activate your product</span>
-      </div>
-
-      <div class="system-banner-alert__actions">
-        <button
-          data-testid="tutorial-activate-cta"
-          class="system-banner-btn system-banner-btn--cta"
-          @click="goToProducts"
-        >
-          Go to Products
-        </button>
-        <button
-          data-testid="tutorial-activate-dismiss"
-          class="system-banner-btn system-banner-btn--dismiss"
-          aria-label="Dismiss"
-          @click="dismissTutorialRow"
-        >
-          <v-icon icon="mdi-close" size="16" />
-        </button>
-      </div>
-    </div>
-
-    <!-- FE-9202: CLIENT-ARMED onboarding nudges, converted from the former Home
-         popup cards (OnboardingReminders). Trigger + dismissal cadence are
-         byte-preserved via useOnboardingReminders (same localStorage state). -->
-    <div
-      v-if="showIntegRow"
-      class="system-banner-alert system-banner-alert--info"
-      role="alert"
-      data-testid="onboarding-integration-banner"
-    >
-      <div class="system-banner-alert__content">
-        <img src="/icons/Giljo_YW_Face.svg" alt="" class="system-banner-alert__avatar" />
-        <span class="system-banner-alert__text">
           Enable Git and Serena MCP in your connect settings to give your agents more context.
-        </span>
-      </div>
-      <div class="system-banner-alert__actions">
-        <button
-          data-testid="onboarding-integration-cta"
-          class="system-banner-btn system-banner-btn--cta"
-          @click="goToTools"
-        >
-          Go to Tools
-        </button>
-        <button
-          data-testid="onboarding-integration-dismiss"
-          class="system-banner-btn system-banner-btn--dismiss"
-          aria-label="Dismiss"
-          @click="dismissIntegRow"
-        >
-          <v-icon icon="mdi-close" size="16" />
-        </button>
-      </div>
-    </div>
+        </OnboardingNudgeRow>
 
-    <div
-      v-if="showAgentRow"
-      class="system-banner-alert system-banner-alert--info"
-      role="alert"
-      data-testid="onboarding-agent-banner"
-    >
-      <div class="system-banner-alert__content">
-        <img src="/icons/Giljo_YW_Face.svg" alt="" class="system-banner-alert__avatar" />
-        <span class="system-banner-alert__text">
+        <OnboardingNudgeRow
+          v-if="showAgentRow && isBannerVisible('agent')"
+          row-testid="onboarding-agent-banner"
+          cta-testid="onboarding-agent-cta"
+          cta-label="Go to Tools"
+          dismiss-testid="onboarding-agent-dismiss"
+          @cta="onAgentCta"
+          @dismiss="dismissAgentRow"
+        >
           Tune your agent templates and product context in Tools — make the defaults yours.
-        </span>
-      </div>
-      <div class="system-banner-alert__actions">
-        <button
-          data-testid="onboarding-agent-cta"
-          class="system-banner-btn system-banner-btn--cta"
-          @click="goToTools"
-        >
-          Go to Tools
-        </button>
-        <button
-          data-testid="onboarding-agent-dismiss"
-          class="system-banner-btn system-banner-btn--dismiss"
-          aria-label="Dismiss"
-          @click="dismissAgentRow"
-        >
-          <v-icon icon="mdi-close" size="16" />
-        </button>
+        </OnboardingNudgeRow>
       </div>
     </div>
 
@@ -223,7 +208,19 @@ import { useIntegrationStatus } from '@/composables/useIntegrationStatus'
 import { resolveNotificationRoute } from '@/components/navigation/notificationRouting'
 import { useYourTurnThreads } from '@/composables/useYourTurnThreads'
 import { hubThreadRoute } from '@/components/hub/hubThreadRoute'
-import { threadDisplayName } from '@/components/hub/threadDisplayName'
+import { useApprovalsStore } from '@/stores/useApprovalsStore'
+import { useLifecycleBannerNav } from '@/composables/useLifecycleBannerNav'
+import { useBannerFold } from '@/composables/useBannerFold'
+import { useThreadPostAttention } from '@/composables/useThreadPostAttention'
+import { useBannerSpaceReserve } from '@/composables/useBannerSpaceReserve'
+import { useBannerDismiss } from '@/composables/useBannerDismiss'
+import { useCommHubStore } from '@/stores/commHubStore'
+import YourTurnBannerRow from './YourTurnBannerRow.vue'
+import ApprovalBannerRow from './ApprovalBannerRow.vue'
+import ThreadPostBannerRow from './ThreadPostBannerRow.vue'
+import LifecycleBannerRow from './LifecycleBannerRow.vue'
+import OnboardingNudgeRow from './OnboardingNudgeRow.vue'
+import BannerFoldControls from './BannerFoldControls.vue'
 
 const router = useRouter()
 const notifStore = useNotificationStore()
@@ -237,6 +234,8 @@ const CE_SYSTEM_TYPES = new Set([
   'system.skills_drift',
   // FE-9202: 14-day context-tuning reminder (both editions).
   'system.context_tuning_due',
+  // D17: CE-only tool-rename notice — was missing here, so it never rendered.
+  'system.tool_rename_notice',
 ])
 
 /**
@@ -311,6 +310,9 @@ function hasCta(n) {
 }
 
 function goTo(n) {
+  // FE-9552: CTA also dismisses -- fires first, before any early return below.
+  if (n.dismissible) dismiss(n)
+
   const href = externalHref(n)
   if (href) {
     window.open(href, '_blank', 'noopener')
@@ -360,6 +362,11 @@ function dismissTutorialRow() {
 
 function goToProducts() {
   router.push('/Products')
+}
+
+function onTutorialCta() { // FE-9552: CTA also dismisses
+  goToProducts()
+  dismissTutorialRow()
 }
 
 watch(
@@ -428,6 +435,16 @@ function dismissAgentRow() {
   agentHidden.value = true
 }
 
+function onIntegCta() {
+  goToTools()
+  dismissIntegRow()
+}
+
+function onAgentCta() {
+  goToTools()
+  dismissAgentRow()
+}
+
 // Load the nudge trigger inputs ONCE, gated so a permanently-dismissed card
 // fires no network call. Driven by a watch on effectiveProductId (not onMounted)
 // because the banner mounts app-wide before the product store is populated — the
@@ -477,26 +494,6 @@ const { yourTurnThreads, ensureThreadsLoaded } = useYourTurnThreads()
 // open; this covers the other case, a turn that was already yours when the page loaded.
 watch(() => userStore.currentUser?.id, (id) => { if (id) ensureThreadsLoaded() }, { immediate: true })
 
-// FE-9436: the shared naming rule. The comment below promises this surface says what the
-// Hub says, word for word — a promise two copies of a fallback list cannot keep, and one
-// of the two copies had already drifted into printing a UUID.
-const threadLabel = (thread) => threadDisplayName(thread)
-
-// Wording is the Hub's, kept word for word so the two surfaces do not describe the
-// same event two different ways.
-const yourTurnMessage = computed(() => {
-  if (yourTurnThreads.value.length > 1) return 'Multiple chat threads are waiting for you'
-  const thread = yourTurnThreads.value[0]
-  const author = thread?.last_message?.author
-  return author
-    ? `${author} is waiting on you in "${threadLabel(thread)}"`
-    : `Waiting on you in "${threadLabel(thread)}"`
-})
-
-const yourTurnCta = computed(() =>
-  yourTurnThreads.value.length > 1 ? 'Open Message Hub' : 'Open thread',
-)
-
 /**
  * One pending thread opens it; several open the list, since we cannot pick for them.
  *
@@ -514,98 +511,161 @@ function openYourTurn() {
   router.push({ path: '/hub' })
 }
 
-// ── FE-9377: first-frame space reservation (no post-paint layout shift) ───────
-// Every row above arms asynchronously, so a due banner used to insert after the
-// page content painted and shift the whole page down. The cure has to be known
-// SYNCHRONOUSLY at first render, and the only sync source of truth is what this
-// browser rendered last time: the settled row count is persisted to localStorage
-// and the next load reserves that height from the first frame. Rows that arrive
-// fill the reserved space in place (pendingReserveRows shrinks as
-// renderedRowCount grows — total strip height stays constant).
-//
-// The settle timer only matters for a STALE reservation (a cached row that no
-// longer arms — e.g. dismissed elsewhere, notification resolved server-side):
-// the leftover skeleton collapses at SETTLE_TIMEOUT_MS. Deliberately generous
-// and deliberately NOT short-circuited by per-source "done" signals — settling
-// early right before a slow fetch lands would turn one shift into two.
-//
-// The record carries the OWNING user id: a shared
-// browser with two accounts must not inherit the other account's reserved
-// strip. Identity is NOT knowable at first frame (the session cookie is
-// httpOnly and /auth/me is async), so the reservation renders optimistically
-// from the stored record and is DROPPED the moment the resolved user id
-// disagrees with the record's owner — it can never survive into the other
-// account's steady state, and writes always stamp the current owner.
-/** Height of one banner row (9px padding ×2 + 24px content — all rows nowrap). */
-const BANNER_ROW_PX = 42
-const RESERVE_STORAGE_KEY = 'giljo_banner_reserved_rows'
-/** Reservation cap: never hold more than 3 rows of blank space on spec. */
-const RESERVE_ROW_CAP = 3
-const SETTLE_TIMEOUT_MS = 4000
+// ── FE-9501b (D6): raised hand for a request_approval question ───────────────
+// The store itself is already app-wide (keyed by approval id, not scoped to
+// whatever project is open) -- it was just never FED for an unopened project,
+// because its only feed sat inside the project-scoped agent:status_changed
+// handler. websocketEventRouter's new global-activity pass fixes the feed; this
+// is the surface that was missing on top of it.
+const approvalsStore = useApprovalsStore()
+const pendingApprovals = computed(() => approvalsStore.pendingApprovals)
 
-/** Reads the stored {u: ownerUserId, n: rowCount} record; malformed → nothing. */
-function readReserveRecord() {
-  try {
-    const rec = JSON.parse(localStorage.getItem(RESERVE_STORAGE_KEY) ?? 'null')
-    const n = Number.isFinite(rec?.n) ? Math.min(Math.max(rec.n, 0), RESERVE_ROW_CAP) : 0
-    return { owner: typeof rec?.u === 'string' ? rec.u : '', rows: n }
-  } catch {
-    return { owner: '', rows: 0 }
+// ── FE-9586: the thread-post family ─────────────────────────────────────────
+// Server-projected (useThreadPostAttention). `mentions`/`directedAsks` are null
+// until the read lands -- the empty arrays below are for RENDERING only, and the
+// popout lifecycle reads the same projection's `loaded` flag rather than these,
+// because an empty list from an unhydrated read must never read as "cleared".
+const {
+  mentions: rawMentions,
+  directedAsks: rawDirectedAsks,
+  loaded: attentionLoaded,
+  ensureLoaded: ensureAttentionLoaded,
+} = useThreadPostAttention()
+const threadPostMentions = computed(() => rawMentions.value || [])
+const threadPostDirectedAsks = computed(() => rawDirectedAsks.value || [])
+onMounted(ensureAttentionLoaded)
+
+/**
+ * Open the thread that is asking for you, or the Hub when several are.
+ *
+ * Ruling 3: the banner never navigates on its own -- this runs because the
+ * operator clicked. Reading the thread is also what CLEARS the row: selectThread
+ * persists the read watermark, the projection re-reads, and both the banner and
+ * its popout go with it.
+ */
+function openThreadPost(threadId) {
+  if (threadId) {
+    router.push(hubThreadRoute(threadId)).catch(() => {})
+    return
   }
+  // FE-9589: with several entries live the row cannot name one thread, and the
+  // Hub LIST selects none -- so this landed somewhere that wrote no watermark
+  // and the row could never clear itself. Advance the watermark across every
+  // thread the row names, then go where the CTA has always gone. The
+  // single-thread path above is untouched: selectThread still does the write.
+  commHub
+    .markThreadsRead([
+      ...visibleMentions.value.map((m) => m.thread_id),
+      ...visibleDirectedAsks.value.map((a) => a.thread_id),
+    ])
+    .catch(() => {})
+  router.push({ path: '/hub' }).catch(() => {})
 }
 
-const reserveRecord = readReserveRecord()
-const reservedRows = ref(reserveRecord.rows)
-const settled = ref(false)
+// The other half of "within one broadcast": an approval already pending when
+// the page loads, which no live event will ever re-announce. Mirrors
+// useYourTurnThreads' ensureThreadsLoaded -- one list read per mount, its own
+// transport errors swallowed so a failure here costs the banner, never the page.
+let approvalsRequested = false
+// FE-9589: hydration proof, not emptiness. Dismissal reconciliation must never
+// run against a list that has not been read yet -- an unloaded read and "nothing
+// pending" are the same empty array.
+const approvalsLoaded = ref(false)
+async function ensureApprovalsLoaded() {
+  if (approvalsRequested) return
+  approvalsRequested = true
+  try {
+    await approvalsStore.fetchPending()
+    approvalsLoaded.value = true
+  } catch {
+    /* leave the row absent on a failed read -- non-fatal */
+  }
+}
+onMounted(ensureApprovalsLoaded)
 
-// Drop an inherited reservation as soon as the session's real identity lands.
-watch(
-  () => userStore.currentUser?.id,
-  (id) => {
-    if (id && reserveRecord.owner && String(id) !== reserveRecord.owner) {
-      reservedRows.value = 0
-    }
-  },
-  { immediate: true },
-)
+/**
+ * One approval opens its project; several prefer a VIEWED-product match
+ * (BE-9525c/FE-9525d) before falling back to the untargeted Projects list.
+ * FE-9538 (Ask 2): every project-targeted push carries `tab=jobs`+
+ * `decide=1`, consumed once by ProjectTabs.vue to open DecisionModal (hosts
+ * ApprovalCard) -- its only route entry point.
+ */
+const DECISION_NAV_QUERY = { tab: 'jobs', decide: '1' }
+function openApprovals() {
+  const approvals = pendingApprovals.value
+  if (approvals.length === 1 && approvals[0]?.project_id) {
+    router.push({ name: 'ProjectLaunch', params: { projectId: approvals[0].project_id }, query: DECISION_NAV_QUERY })
+    return
+  }
+  const viewedProductId = productStore.effectiveProductId
+  const inViewedProduct = approvals.find((a) => a.product_id === viewedProductId && a.project_id)
+  if (inViewedProduct) {
+    router.push({ name: 'ProjectLaunch', params: { projectId: inViewedProduct.project_id }, query: DECISION_NAV_QUERY })
+    return
+  }
+  router.push({ path: '/projects' })
+}
 
-/** Rows currently rendered in the strip (the your-turn strip is one row however many threads). */
-const renderedRowCount = computed(
-  () =>
-    (yourTurnThreads.value.length > 0 ? 1 : 0) +
-    visibleBanners.value.length +
-    (showTutorialRow.value ? 1 : 0) +
-    (showIntegRow.value ? 1 : 0) +
-    (showAgentRow.value ? 1 : 0),
-)
+const commHub = useCommHubStore()
 
-const pendingReserveRows = computed(() =>
-  settled.value ? 0 : Math.max(0, reservedRows.value - renderedRowCount.value),
-)
-
-let settleTimer = null
-onMounted(() => {
-  settleTimer = setTimeout(() => {
-    settled.value = true
-  }, SETTLE_TIMEOUT_MS)
+// ── FE-9589: dismissal for the three live-read families ─────────────────────
+// Keys, filtering and reconciliation live in useBannerDismiss (Guardrail 1);
+// persistence in bannerDismissStore (per user, localStorage, survives a
+// reload). Dismissing silences the ANNOUNCEMENT only -- nothing here writes
+// server state, so a dismissed approval is still pending, a dismissed baton is
+// still yours, and both are still in the Hub and the bell.
+const {
+  visibleApprovals,
+  visibleMentions,
+  visibleDirectedAsks,
+  visibleYourTurnThreads,
+  dismissApprovals,
+  dismissThreadPosts,
+  dismissYourTurn,
+} = useBannerDismiss({
+  approvals: pendingApprovals,
+  approvalsLoaded,
+  mentions: threadPostMentions,
+  directedAsks: threadPostDirectedAsks,
+  attentionLoaded,
+  yourTurnThreads,
+  threadsLoaded: computed(() => commHub.threadList.length > 0),
 })
-onBeforeUnmount(() => clearTimeout(settleTimer))
 
-// After settle, mirror the rendered count so the NEXT load's first frame
-// reserves exactly what this steady state shows (dismissals shrink it, newly
-// armed rows grow it). Stamped with the owning user id; no write until the
-// session's identity is known.
-watch(
-  [settled, renderedRowCount, () => userStore.currentUser?.id],
-  ([isSettled, count, userId]) => {
-    if (isSettled && userId) {
-      localStorage.setItem(
-        RESERVE_STORAGE_KEY,
-        JSON.stringify({ u: String(userId), n: Math.min(count, RESERVE_ROW_CAP) }),
-      )
-    }
-  },
-)
+const { lifecycleBannerStore, openLifecycleBanner } = useLifecycleBannerNav(router) // FE-9538
+
+function openLifecycleRow(row) { // FE-9552: CTA also dismisses (row+CTA both emit 'open')
+  openLifecycleBanner(row)
+  lifecycleBannerStore.dismiss(row.id)
+}
+
+// FE-9552: never stack -- fold state lives in useBannerFold.
+const { totalBannerCount, foldExpanded, visibleBannerKeys, isBannerVisible } = useBannerFold({
+  // FE-9589: the DISMISSED-FILTERED lists. The fold counts what is painted; a
+  // dismissed row that still counted would reserve height for nothing and put a
+  // qty on the chevron the operator cannot reach.
+  yourTurnCount: computed(() => visibleYourTurnThreads.value.length),
+  approvalCount: computed(() => visibleApprovals.value.length),
+  threadPostCount: computed(
+    () => visibleMentions.value.length + visibleDirectedAsks.value.length,
+  ),
+  lifecycleRows: computed(() => lifecycleBannerStore.rows),
+  systemBanners: visibleBanners,
+  showTutorial: showTutorialRow,
+  showInteg: showIntegRow,
+  showAgent: showAgentRow,
+})
+const visibleLifecycleRows = computed(() => lifecycleBannerStore.rows.filter((row) => isBannerVisible(`lifecycle:${row.id}`)))
+const visibleSystemBanners = computed(() => visibleBanners.value.filter((n) => isBannerVisible(`system:${n.id}`)))
+
+// ── FE-9377: first-frame space reservation (no post-paint layout shift) ───────
+// The mechanism moved to useBannerSpaceReserve (FE-9586) unchanged;
+// its docblock carries the reasoning. It needs the PAINTED row set, so it is
+// constructed after useBannerFold above.
+const { BANNER_ROW_PX, renderedRowCount, pendingReserveRows } = useBannerSpaceReserve({
+  visibleBannerKeys,
+  currentUserId: computed(() => userStore.currentUser?.id),
+})
 </script>
 
 <style scoped lang="scss">
@@ -615,6 +675,17 @@ watch(
   position: sticky;
   top: 0;
   z-index: 100;
+}
+
+// FE-9552: collapsed = 1 row (no shift); expanded = normal-flow stack, not
+// the "violent" shift the DoD rules out. Header lives in BannerFoldControls.vue.
+.banner-fold-strip {
+  @include banner.unified-fold-strip;
+}
+
+.banner-fold-rows {
+  flex: 1;
+  min-width: 0;
 }
 
 .system-banner-alert {
@@ -635,13 +706,6 @@ watch(
     gap: 8px;
     flex: 1;
     min-width: 0;
-  }
-
-  // FE-9368: the handover row's raised hand. Brand yellow, the same accent the
-  // unified banner chrome gives every other banner icon and the Hub gives the hand.
-  &__hand {
-    flex-shrink: 0;
-    color: var(--color-accent-primary);
   }
 
   // FE-9202: Gil avatar — the banner speaks in Gil's voice (generic-agent branding rule).
@@ -666,11 +730,6 @@ watch(
     align-items: center;
     gap: 6px;
     flex-shrink: 0;
-  }
-
-  // FE-9368: the whole handover strip is the target, not just its button.
-  &--clickable {
-    cursor: pointer;
   }
 }
 

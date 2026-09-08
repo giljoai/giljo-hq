@@ -118,17 +118,18 @@ class ProjectQueryService:
             self.db_manager, tenant_key or self.tenant_manager.get_current_tenant(), self._test_session
         )
 
-    async def get_active_project(self) -> ActiveProjectDetail | None:
-        """Get the currently active project for the current tenant.
+    async def get_active_projects(self, product_id: str | None = None) -> list[ActiveProjectDetail]:
+        """Get every currently active project for the current tenant, optionally scoped to a product.
 
-        Returns the active project (status='active') or None if no project is active.
-
-        Follows Single Active Project architecture (Handover 0050b):
-        - Only ONE project can be active per product at any time
-        - Database enforces this via partial unique index
+        Returns the active projects (status='active') for ``product_id``, or every
+        active project tenant-wide if ``product_id`` is omitted (kept for callers
+        with no product context, per BE-9525a). BE-9525b (ruling 5 amended) dropped
+        ``idx_project_single_active_per_product``, so this is genuinely plural now
+        — a product may legally have more than one ACTIVE project, and there is no
+        remaining single-row guarantee to resolve to instead.
 
         Returns:
-            ActiveProjectDetail with project details, or None if no active project
+            List of ActiveProjectDetail, one per active project in scope (may be empty)
 
         Raises:
             ValidationError: When no tenant context is available
@@ -137,60 +138,66 @@ class ProjectQueryService:
         try:
             tenant_key = self.tenant_manager.get_current_tenant()
 
-            self._logger.debug(f"[get_active_project] Retrieved tenant_key from context: {tenant_key}")
+            self._logger.debug(f"[get_active_projects] Retrieved tenant_key from context: {tenant_key}")
 
             if not tenant_key:
-                self._logger.error("[get_active_project] No tenant context available!")
+                self._logger.error("[get_active_projects] No tenant context available!")
                 raise ValidationError(
                     message="No tenant context available",
-                    context={"operation": "get_active_project"},
+                    context={"operation": "get_active_projects"},
                 )
 
             async with self._get_session() as session:
-                project = await self._repo.get_active_project(session, tenant_key)
+                projects = await self._repo.get_active_projects(session, tenant_key, product_id)
 
-                if not project:
-                    self._logger.info(f"No active project found for tenant {tenant_key}")
-                    return None
+                if not projects:
+                    self._logger.info(f"No active projects found for tenant {tenant_key}")
+                    return []
 
-                agent_count = await self._repo.count_agent_jobs(session, tenant_key, project.id)
-                message_count = await self._repo.count_messages(session, tenant_key, project.id)
+                self._logger.info(f"Found {len(projects)} active project(s) for tenant {tenant_key}")
 
-                self._logger.info(f"Found active project: {project.name} (ID: {project.id})")
-
-                return ActiveProjectDetail(
-                    id=str(project.id),
-                    alias=project.alias or "",
-                    name=project.name,
-                    mission=project.mission or "",
-                    description=project.description,
-                    status=project.status,
-                    product_id=project.product_id,
-                    created_at=project.created_at.isoformat() if project.created_at else None,
-                    updated_at=project.updated_at.isoformat() if project.updated_at else None,
-                    completed_at=project.completed_at.isoformat() if project.completed_at else None,
-                    implementation_launched_at=(
-                        project.implementation_launched_at.isoformat() if project.implementation_launched_at else None
-                    ),
-                    deleted_at=project.deleted_at.isoformat() if project.deleted_at else None,
-                    agent_count=agent_count,
-                    message_count=message_count,
-                    project_type_id=project.project_type_id,
-                    # BE-9326: nested type info, same as the ProjectDetail builders.
-                    # Safe to read here: the row comes from
-                    # ProjectRepository.get_active_project, which selectinloads
-                    # project_type, and this construction happens inside the session.
-                    project_type=project.project_type,
-                    series_number=project.series_number,
-                    subseries=project.subseries,
-                    taxonomy_alias=project.taxonomy_alias,
-                )
+                details = []
+                for project in projects:
+                    agent_count = await self._repo.count_agent_jobs(session, tenant_key, project.id)
+                    message_count = await self._repo.count_messages(session, tenant_key, project.id)
+                    details.append(
+                        ActiveProjectDetail(
+                            id=str(project.id),
+                            alias=project.alias or "",
+                            name=project.name,
+                            mission=project.mission or "",
+                            description=project.description,
+                            status=project.status,
+                            product_id=project.product_id,
+                            created_at=project.created_at.isoformat() if project.created_at else None,
+                            updated_at=project.updated_at.isoformat() if project.updated_at else None,
+                            completed_at=project.completed_at.isoformat() if project.completed_at else None,
+                            implementation_launched_at=(
+                                project.implementation_launched_at.isoformat()
+                                if project.implementation_launched_at
+                                else None
+                            ),
+                            deleted_at=project.deleted_at.isoformat() if project.deleted_at else None,
+                            agent_count=agent_count,
+                            message_count=message_count,
+                            project_type_id=project.project_type_id,
+                            # BE-9326: nested type info, same as the ProjectDetail builders.
+                            # Safe to read here: the row comes from
+                            # ProjectRepository.get_active_projects, which selectinloads
+                            # project_type, and this construction happens inside the session.
+                            project_type=project.project_type,
+                            series_number=project.series_number,
+                            subseries=project.subseries,
+                            taxonomy_alias=project.taxonomy_alias,
+                        )
+                    )
+                return details
 
         except ValidationError:
             raise
         except Exception as e:
-            self._logger.exception("Failed to get active project")
-            raise BaseGiljoError(message=f"Failed to get active project: {e!s}", context={}) from e
+            self._logger.exception("Failed to get active projects")
+            raise BaseGiljoError(message=f"Failed to get active projects: {e!s}", context={}) from e
 
     async def get_project_agent_summary(self, project_id: str, tenant_key: str) -> dict:
         """Get a lightweight summary of agent jobs for a project.

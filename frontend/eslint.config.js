@@ -85,6 +85,11 @@ export default [
       'giljo-internal/no-vuetify-dialog-chrome': 'error',
       // FE-3007c: a missing api endpoint must crash in dev, not silently no-op
       'giljo-internal/no-optional-call-on-api': 'error',
+      // FE-9553: the one-live-surface rule at the toast choke point. ERROR, not
+      // warn: this is an invariant about which surface owns an event, and the
+      // four-surface sprawl it undoes was built one reasonable warning-level
+      // addition at a time.
+      'giljo-internal/no-toast-for-agent-events': 'error',
       // Hygiene rules — warn level
       'giljo-internal/no-orphaned-exports': 'warn',
       'giljo-internal/no-stale-todos': 'warn',
@@ -156,6 +161,11 @@ export default [
       'giljo-internal/no-vuetify-dialog-chrome': 'error',
       // FE-3007c: a missing api endpoint must crash in dev, not silently no-op
       'giljo-internal/no-optional-call-on-api': 'error',
+      // FE-9553: the one-live-surface rule at the toast choke point. ERROR, not
+      // warn: this is an invariant about which surface owns an event, and the
+      // four-surface sprawl it undoes was built one reasonable warning-level
+      // addition at a time.
+      'giljo-internal/no-toast-for-agent-events': 'error',
       'giljo-internal/no-orphaned-exports': 'warn',
       'giljo-internal/no-stale-todos': 'warn',
       'giljo-internal/no-scattered-mode-checks': 'warn',

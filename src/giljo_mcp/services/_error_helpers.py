@@ -26,6 +26,30 @@ from giljo_mcp.repositories.agent_job_repository import AgentJobRepository
 from giljo_mcp.schemas.service_responses import build_next_action
 
 
+# BE-9563: ``method`` labels that would otherwise read as a callable tool.
+#
+# These strings reach the AGENT, which is not obvious from the call site:
+# ``BaseGiljoError.__str__`` renders its context dict into the message, and
+# ``_base.py`` re-RAISES a sub-500 ``BaseGiljoError`` verbatim, so the SDK puts
+# ``str(e)`` on the wire. An agent calling ``resume_or_dismiss_job`` on a
+# wrong-state job was shown ``'method': 'dismiss_reactivation'`` -- a name that is
+# not a tool. Observed on prod.
+#
+# The SERVICE METHODS keep their names: they are the single writer and BE-9554
+# deliberately left the accessor layer alone. Only the LABEL is qualified, which
+# keeps it accurate for an operator reading logs while no longer reading as
+# something an agent could call. The dotted form matches the convention already in
+# use at ~50 of the ~180 label sites (``comm_thread.post``, ``taxonomy.validate``).
+#
+# They live HERE rather than in the calling service because that service sits at
+# 799 of its 800-line cap and cannot hold them, and because this module is where
+# ``method`` is defined and documented in the first place. Names are short
+# deliberately -- the call sites they appear on are already near the line limit.
+M_REACTIVATE = "service.reactivate_job"
+M_DISMISS = "service.dismiss_reactivation"
+M_CLOSE = "service.close_job"
+
+
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -164,7 +188,7 @@ def _wrong_state_next_action(
                 f"This agent stopped responding (status '{actual_status}') and will not report its own "
                 "completion. 'closed' is reachable only from 'complete', but complete_job DOES accept a "
                 f"'{actual_status}' execution — so if you have VERIFIED this agent's deliverable, call "
-                "complete_job(job_id, result={...}) yourself to record it, then close_job again. "
+                "complete_job(job_id, result={...}) yourself to record it, then finalize_job again. "
                 "If complete_job returns COMPLETION_BLOCKED, settle its leftover ledger "
                 "first: report_progress(job_id, todo_items=[...], replace=true) and drain any "
                 "action-required messages. Do NOT reach for write_project_closeout(force=true) to "

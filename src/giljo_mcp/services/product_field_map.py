@@ -37,6 +37,7 @@ PRODUCT_DIRECT_FIELDS: tuple[str, ...] = (
     "brand_guidelines",
     "target_platforms",
     "project_path",
+    "extraction_custom_instructions",
 )
 
 # Columns living on the three 1:1 relation tables, grouped by the ``update_product``

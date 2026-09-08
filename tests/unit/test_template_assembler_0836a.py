@@ -68,13 +68,23 @@ class TestRenderGeminiAgent:
         assert frontmatter["kind"] == "local"
         assert frontmatter["model"] == "inherit"
         assert frontmatter["max_turns"] == 50
-        assert "run_shell_command" in frontmatter["tools"]
-        assert "read_file" in frontmatter["tools"]
-        assert "write_file" in frontmatter["tools"]
-        assert "glob" in frontmatter["tools"]
-        assert "grep_search" in frontmatter["tools"]
-        assert any(t.startswith("mcp_giljo_mcp_") for t in frontmatter["tools"])
-        assert "shell" not in frontmatter["tools"]  # Must use run_shell_command
+
+    def test_omits_tools_to_inherit_all(self):
+        """BE-9567: no hardcoded ``tools:`` roster. gemini-cli's local-executor.ts
+        falls back to ``parentToolRegistry.getAllToolNames()`` when the key is
+        absent, so the subagent inherits every parent tool (MCP included) --
+        exactly what the other five renderers already rely on. A hand-maintained
+        allowlist here had already drifted to zero live matches (wrong alias,
+        one retired tool name) with no error surfaced anywhere."""
+        template = _make_template()
+        result = render_gemini_agent(template)
+
+        yaml_section = result.split("---\n")[1]
+        frontmatter = yaml.safe_load(yaml_section)
+
+        assert "tools" not in frontmatter
+        assert "mcp_giljo_mcp_" not in result
+        assert "mcp_giljo_hq_" not in result
 
     def test_no_color_field(self):
         """Gemini does not support agent colors — no color in frontmatter."""

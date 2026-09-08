@@ -142,11 +142,16 @@ describe('BE-9385a — the Agents toggle is per-product', () => {
     expect(api.templates.update).not.toHaveBeenCalled()
   })
 
-  it('uses the ACTIVE product even while a different product is being browsed', async () => {
-    // The store's `effectiveProductId` prefers `currentProductId` (what the user
-    // is looking at) over `activeProduct`. The server exports and spawns for the
-    // ACTIVE product, so writing the browsed one would put the screen and the
-    // export back out of step — the exact defect this project removes.
+  it('FE-9524/D1: uses the BROWSED (viewed) product, not the legacy activeProduct slot, when they diverge', async () => {
+    // FE-9524/D1 retired "active product" as a global concept -- several
+    // products may be shown at once, and the server exports/spawns for
+    // whichever product_id a call names explicitly (BE-9523), not for one
+    // tenant-wide "the active product". `effectiveProductId` (the viewed tab)
+    // is therefore the correct scope; keying on `activeProduct` here would
+    // curate agents for whichever product happens to be MOST RECENTLY shown,
+    // not the one on screen -- this is the exact stale-reader class the
+    // project record calls out (finding 3), rewritten from the pre-D1 pin
+    // that asserted the opposite.
     const wrapper = mountManager({
       products: {
         activeProduct: { id: ACTIVE_PRODUCT_ID, name: 'Active' },
@@ -158,9 +163,9 @@ describe('BE-9385a — the Agents toggle is per-product', () => {
     await wrapper.find('[data-testid="template-toggle-analyzer"]').setValue(false)
     await flushPromises()
 
-    expect(api.assignments.toggle).toHaveBeenCalledWith(ACTIVE_PRODUCT_ID, 7, false)
+    expect(api.assignments.toggle).toHaveBeenCalledWith(BROWSED_PRODUCT_ID, 7, false)
     expect(api.assignments.toggle).not.toHaveBeenCalledWith(
-      BROWSED_PRODUCT_ID,
+      ACTIVE_PRODUCT_ID,
       expect.anything(),
       expect.anything()
     )

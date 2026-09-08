@@ -499,6 +499,16 @@ class UserService:
                     threshold = int(payload["tuning_reminder_threshold"])
                     prefs["tuning_reminder_threshold"] = max(threshold, 3)
 
+                # FE-9553. Per-key guards: absent means "leave it alone".
+                if "banner_lifecycle_enabled" in payload:
+                    prefs["banner_lifecycle_enabled"] = bool(payload["banner_lifecycle_enabled"])
+
+                if "banner_advisories_in_fold" in payload:
+                    prefs["banner_advisories_in_fold"] = bool(payload["banner_advisories_in_fold"])
+
+                if "popout_scope" in payload:
+                    prefs["popout_scope"] = payload["popout_scope"]
+
                 prefs = validate_notification_preferences(prefs)
 
                 user.notification_preferences = prefs

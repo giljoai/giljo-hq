@@ -3,25 +3,27 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9084 — default-HITL launch fence at the MCP gate.
+"""BE-9084 / BE-9542 — headless launch fence at the MCP gate.
 
-The bypass this closes: a jwt/OAuth mcp:agent session that declares
-``giljo_tool_profile="full"`` in its initialize clientInfo widens its profile to
-the full surface (``_profile_toolset_from_state`` -> ``None``), which would
-otherwise re-expose ``launch_implementation`` and let a CLI agent self-cross the
-human Implement gate.
+The invariants pinned here:
 
-The fence (``mcp_sdk_server._launch_gate_blocked``) enforces HITL by DEFAULT for
-every jwt session, regardless of declared profile, keyed on the tenant's
-``security.allow_headless_launch`` toggle (default ``False``). The operator
-api_key path is never fenced (full bypass), and ``_profile_toolset_from_state`` is
-left untouched (the operator-widening path stays — locked by
-``test_be8003k_tool_profiles``).
+  - A client-declared tool profile may only NARROW a session's auth-derived
+    toolset, never widen it. Client-declared values are untrusted, so no
+    privilege decision keys on one. See
+    ``test_be8003k_tool_profiles.TestProfileResolverPrecedence`` for the
+    resolver-level regression.
+  - Headless launch is governed by a tenant-scoped setting. These tests cover both
+    the enabled and the explicitly-disabled paths, at the same tools/list filter and
+    tools/call gate this file drives. The legacy ``_jwt_full_state`` fixture is kept
+    because its assertions still hold and additionally prove that an inert
+    declaration does not interfere.
+  - The fence is an independent check that resolves conservatively when the tenant
+    setting cannot be read, and an explicitly stored value is always honored.
 
 Failing-layer discipline (CLAUDE.md): these drive the REAL scope-gated tools/list
 filter and tools/call dispatch gate (the layer the fence lives in) with a real jwt
 request state and a REAL ``SettingsService`` read of a committed settings row —
-two-sided (default HITL rejects; toggle ON allows) plus the api_key bypass.
+both directions plus the operator path.
 Parallel-safe: a unique ``tenant_key`` per test, no module-level mutable state.
 Edition Scope: Both.
 """
@@ -65,16 +67,32 @@ async def _seed_headless_setting(db_manager, tenant_key: str, allow: bool) -> No
 
 
 def _jwt_full_state(tenant_key: str) -> dict:
-    """A jwt/OAuth mcp:agent session that declared the full profile — the bypass shape.
+    """A jwt/OAuth mcp:agent session that declares the full profile.
 
-    ``mcp:agent`` in scope + ``tool_profile="full"`` is exactly the session that
-    reaches ``launch_implementation`` today (scope allows it, declared-full removes
-    the profile restriction). The fence must gate it back to HITL by default.
+    BE-9499c: the declaration is now INERT for widening purposes —
+    ``_profile_toolset_from_state`` clamps a declared ``full`` on a jwt+mcp:agent
+    session to exactly ``orchestrator`` (the same set this session would resolve
+    to with NO declaration at all; see ``_jwt_orchestrator_state`` below). Kept as
+    a fixture because it exercises the same toggle-admission path while also
+    proving a stale/inert declaration does not interfere with it.
     """
     return {
         "auth_method": "jwt",
         "scopes": ["mcp:read", "mcp:write", "mcp:agent"],
         "tool_profile": "full",
+        "tenant_key": tenant_key,
+    }
+
+
+def _jwt_orchestrator_state(tenant_key: str) -> dict:
+    """A jwt/OAuth mcp:agent session with NO clientInfo profile declaration at all
+    -- the actual shape claude.ai / Claude Desktop connect with (BE-9440 Phase 1:
+    those harnesses have no way to author ``giljo_tool_profile``). Resolves to
+    ``orchestrator`` purely from auth (scope), never from a declaration.
+    """
+    return {
+        "auth_method": "jwt",
+        "scopes": ["mcp:read", "mcp:write", "mcp:agent"],
         "tenant_key": tenant_key,
     }
 
@@ -131,17 +149,17 @@ async def gate_client(db_manager, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Default HITL (no toggle / toggle False): the launch gate is fenced for a
-# full-declaring jwt session — hidden from tools/list AND rejected at dispatch.
+# Default posture: under the platform default a full-declaring jwt session
+# sees + can call the launch gate. An EXPLICIT stored False (the opt-out)
+# still fences.
 # ---------------------------------------------------------------------------
 
 
-class TestDefaultHitlFence:
+class TestDefaultHeadlessFence:
     @pytest.mark.asyncio
-    async def test_default_hitl_hides_launch_from_tools_list(self, gate_client):
-        """No settings row -> default False (HITL). A full-declaring jwt session must
-        NOT be advertised ``launch_implementation`` — but the fence is SURGICAL: the
-        rest of its full agent surface stays visible."""
+    async def test_no_row_advertises_launch_from_tools_list(self, gate_client):
+        """Under the platform default, a full-declaring jwt session MUST be
+        advertised ``launch_implementation``."""
         new_client, holder = gate_client
         holder.state = _jwt_full_state(holder.tenant_key)
 
@@ -149,28 +167,27 @@ class TestDefaultHitlFence:
             result = await session.list_tools()
 
         advertised = {t.name for t in result.tools}
-        assert "launch_implementation" not in advertised, "default HITL must hide the launch gate"
-        assert "spawn_job" in advertised, "the fence must not strip the rest of the agent surface"
+        assert "launch_implementation" in advertised, "platform default must advertise the launch gate"
+        assert "spawn_job" in advertised
         assert "stage_project" in advertised
 
     @pytest.mark.asyncio
-    async def test_default_hitl_rejects_launch_call(self, gate_client):
-        """A crafted tools/call to ``launch_implementation`` is server-rejected with the
-        HITL fence text (defense-in-depth: hiding from list alone is insufficient)."""
+    async def test_no_row_allows_launch_call(self, gate_client):
+        """Under the platform default the launch call is NOT fenced (may still fail
+        downstream on the fabricated project_id, but never with the HITL fence text)."""
         new_client, holder = gate_client
         holder.state = _jwt_full_state(holder.tenant_key)
 
         async with new_client() as session:
             result = await session.call_tool("launch_implementation", {"project_id": str(uuid4())})
 
-        assert result.is_error is True
         joined = "\n".join(getattr(b, "text", "") for b in result.content)
-        assert "HITL mode" in joined, f"expected the BE-9084 fence rejection, got: {joined!r}"
+        assert "HITL mode" not in joined, f"platform default must not be HITL-fenced, got: {joined!r}"
 
     @pytest.mark.asyncio
-    async def test_explicit_false_toggle_also_blocks(self, gate_client, db_manager):
-        """An explicitly-persisted ``allow_headless_launch=False`` blocks identically to
-        the no-row default (two ways to express HITL converge)."""
+    async def test_explicit_false_toggle_still_blocks(self, gate_client, db_manager):
+        """An explicitly-persisted ``allow_headless_launch=False`` (the opt-out) still
+        fences exactly as before BE-9542 — the flip changes the UNSET default only."""
         new_client, holder = gate_client
         await _seed_headless_setting(db_manager, holder.tenant_key, allow=False)
         holder.state = _jwt_full_state(holder.tenant_key)
@@ -181,6 +198,18 @@ class TestDefaultHitlFence:
         assert result.is_error is True
         joined = "\n".join(getattr(b, "text", "") for b in result.content)
         assert "HITL mode" in joined
+
+    @pytest.mark.asyncio
+    async def test_explicit_false_toggle_still_hides_from_tools_list(self, gate_client, db_manager):
+        """Mirrors the call-rejection proof above at the tools/list layer."""
+        new_client, holder = gate_client
+        await _seed_headless_setting(db_manager, holder.tenant_key, allow=False)
+        holder.state = _jwt_full_state(holder.tenant_key)
+
+        async with new_client() as session:
+            result = await session.list_tools()
+
+        assert "launch_implementation" not in {t.name for t in result.tools}
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +245,82 @@ class TestHeadlessOnAllows:
         joined = "\n".join(getattr(b, "text", "") for b in result.content)
         assert "HITL mode" not in joined, f"Headless-ON must not be HITL-fenced, got: {joined!r}"
         assert "gated by the human Implement step" not in joined
+
+
+# ---------------------------------------------------------------------------
+# BE-9499c: the DoD proof — an OAuth session with NO clientInfo self-declaration
+# reaches launch_implementation purely off the operator-authored tenant toggle,
+# and a self-declared "full" no longer widens anything for that same session.
+# ---------------------------------------------------------------------------
+
+
+class TestToggleAdmitsWithNoDeclaration:
+    @pytest.mark.asyncio
+    async def test_toggle_on_with_no_declaration_advertises_launch(self, gate_client, db_manager):
+        """An mcp:agent session with no declared profile: toggle ON alone must be
+        sufficient."""
+        new_client, holder = gate_client
+        await _seed_headless_setting(db_manager, holder.tenant_key, allow=True)
+        holder.state = _jwt_orchestrator_state(holder.tenant_key)
+        assert "tool_profile" not in holder.state, "this proof must not declare a profile at all"
+
+        async with new_client() as session:
+            result = await session.list_tools()
+
+        advertised = {t.name for t in result.tools}
+        assert "launch_implementation" in advertised, (
+            "Headless-ON must admit the launch gate for an undeclared orchestrator session"
+        )
+
+    @pytest.mark.asyncio
+    async def test_toggle_on_with_no_declaration_allows_dispatch(self, gate_client, db_manager):
+        """Same undeclared session: the dispatch gate must not profile-reject it, and
+        the call may only fail downstream (fabricated project_id), never on the
+        profile or HITL text."""
+        new_client, holder = gate_client
+        await _seed_headless_setting(db_manager, holder.tenant_key, allow=True)
+        holder.state = _jwt_orchestrator_state(holder.tenant_key)
+
+        async with new_client() as session:
+            result = await session.call_tool("launch_implementation", {"project_id": str(uuid4())})
+
+        joined = "\n".join(getattr(b, "text", "") for b in result.content)
+        assert "not available in this session's tool profile" not in joined
+        assert "HITL mode" not in joined
+
+    @pytest.mark.asyncio
+    async def test_toggle_explicit_off_with_no_declaration_still_hides_launch(self, gate_client, db_manager):
+        """BE-9542: with no declaration but an EXPLICIT stored False, the launch gate
+        must stay hidden -- toggle admission is not a blanket bypass, and the opt-out
+        still works with no profile declared at all."""
+        new_client, holder = gate_client
+        await _seed_headless_setting(db_manager, holder.tenant_key, allow=False)
+        holder.state = _jwt_orchestrator_state(holder.tenant_key)
+
+        async with new_client() as session:
+            result = await session.list_tools()
+
+        assert "launch_implementation" not in {t.name for t in result.tools}
+
+    @pytest.mark.asyncio
+    async def test_self_declared_full_no_longer_widens_the_dispatch_gate(self, gate_client, db_manager):
+        """BE-9499c regression: with the toggle explicitly OFF, a self-declared `full`
+        must be rejected with the PROFILE text at dispatch, exactly like an
+        undeclared session -- the declaration buys the caller nothing. (BE-9542: this
+        now requires an explicit opt-out to seed, since the unset default flipped.)"""
+        new_client, holder = gate_client
+        await _seed_headless_setting(db_manager, holder.tenant_key, allow=False)
+        holder.state = _jwt_full_state(holder.tenant_key)
+
+        async with new_client() as session:
+            declared_full = await session.call_tool("launch_implementation", {"project_id": str(uuid4())})
+            holder.state = _jwt_orchestrator_state(holder.tenant_key)
+            undeclared = await session.call_tool("launch_implementation", {"project_id": str(uuid4())})
+
+        declared_text = "\n".join(getattr(b, "text", "") for b in declared_full.content)
+        undeclared_text = "\n".join(getattr(b, "text", "") for b in undeclared.content)
+        assert "HITL mode" in declared_text
+        assert "HITL mode" in undeclared_text
 
 
 # ---------------------------------------------------------------------------
@@ -339,17 +444,17 @@ class TestRealMiddlewarePath:
         assert inner.scope_state.get("tenant_key") == tenant_key
 
         stamped = _FakeRequest(inner.scope_state)
-        # Default HITL (no settings row) -> the fence BLOCKS this real jwt state.
-        assert await _launch_gate_blocked(stamped) is True
-
-        # Opt the tenant into Headless -> the same real jwt state is ALLOWED.
-        await _seed_headless_setting(db_manager, tenant_key, allow=True)
+        # Default posture: the fence ALLOWS this real jwt state.
         assert await _launch_gate_blocked(stamped) is False
+
+        # Explicitly opt the tenant OUT of Headless -> the same real jwt state is BLOCKED.
+        await _seed_headless_setting(db_manager, tenant_key, allow=False)
+        assert await _launch_gate_blocked(stamped) is True
 
 
 # ---------------------------------------------------------------------------
-# REST toggle endpoint: default False, and the PUT read-modify-write never
-# clobbers the sibling ``security`` key (cookie_domain_whitelist).
+# REST toggle endpoint: BE-9542 default True, and the PUT read-modify-write
+# never clobbers the sibling ``security`` key (cookie_domain_whitelist).
 # ---------------------------------------------------------------------------
 
 
@@ -361,13 +466,14 @@ class _StubUser:
 
 class TestHeadlessLaunchEndpoint:
     @pytest.mark.asyncio
-    async def test_get_defaults_to_false_when_unset(self, db_session):
+    async def test_get_defaults_to_true_when_unset(self, db_session):
+        """BE-9542: a fresh tenant (no settings row at all) reads True (Headless)."""
         from api.endpoints.user_settings import get_headless_launch
         from giljo_mcp.tenant import TenantManager
 
         user = _StubUser(TenantManager.generate_tenant_key())
         resp = await get_headless_launch(current_user=user, db=db_session)
-        assert resp.allow_headless_launch is False
+        assert resp.allow_headless_launch is True
 
     @pytest.mark.asyncio
     async def test_put_sets_toggle_and_preserves_sibling_security_keys(self, db_session):
@@ -409,4 +515,59 @@ class TestHeadlessLaunchEndpoint:
             HeadlessLaunchUpdateRequest(allow_headless_launch=False), current_user=user, db=db_session
         )
         got = await get_headless_launch(current_user=user, db=db_session)
+        assert got.allow_headless_launch is False
+
+    @pytest.mark.asyncio
+    async def test_put_stamps_the_explicit_marker(self, db_session):
+        """BE-9542: the dedicated PUT endpoint stamps allow_headless_launch_explicit=True,
+        distinguishing a deliberate write from another security writer's incidental one."""
+        from api.endpoints.user_settings import HeadlessLaunchUpdateRequest, update_headless_launch
+        from giljo_mcp.services.settings_service import SettingsService
+        from giljo_mcp.tenant import TenantManager
+
+        tenant_key = TenantManager.generate_tenant_key()
+        user = _StubUser(tenant_key)
+        await update_headless_launch(
+            HeadlessLaunchUpdateRequest(allow_headless_launch=False), current_user=user, db=db_session
+        )
+
+        svc = SettingsService(db_session, tenant_key)
+        security = await svc.get_settings("security")
+        assert security["allow_headless_launch_explicit"] is True
+
+    @pytest.mark.asyncio
+    async def test_unrelated_security_writer_does_not_set_the_explicit_marker(self, db_session):
+        """A tenant who only ever whitelists a cookie domain -- never touching the
+        headless toggle -- gets allow_headless_launch=False (the schema default) via
+        the full model_dump, but NOT the explicit marker: this is exactly the
+        ambiguity BE-9542's hard-stop identified, and the marker is how future
+        tooling can tell it apart from a deliberate opt-out."""
+        from giljo_mcp.services.settings_service import SettingsService
+        from giljo_mcp.tenant import TenantManager
+
+        tenant_key = TenantManager.generate_tenant_key()
+        svc = SettingsService(db_session, tenant_key)
+        await svc.update_settings("security", {"cookie_domain_whitelist": ["app.example.com"]})
+
+        security = await svc.get_settings("security")
+        assert security["allow_headless_launch"] is False, "schema default, NOT a deliberate opt-out"
+        assert security["allow_headless_launch_explicit"] is False, "never touched via the dedicated PUT"
+
+    @pytest.mark.asyncio
+    async def test_explicit_off_survives_a_simulated_redeploy(self, db_session):
+        """DoD: 'a tenant who explicitly disabled it stays disabled, across the
+        deploy.' Simulated here by re-reading through a FRESH SettingsService/request
+        cycle after the explicit PUT -- there is no in-process state to carry it, so
+        this proves the persisted row (not a cache) is what the next read consults."""
+        from api.endpoints.user_settings import HeadlessLaunchUpdateRequest, get_headless_launch, update_headless_launch
+        from giljo_mcp.tenant import TenantManager
+
+        tenant_key = TenantManager.generate_tenant_key()
+        user = _StubUser(tenant_key)
+        await update_headless_launch(
+            HeadlessLaunchUpdateRequest(allow_headless_launch=False), current_user=user, db=db_session
+        )
+
+        # A brand-new request cycle reading the SAME tenant later ("across the deploy").
+        got = await get_headless_launch(current_user=_StubUser(tenant_key), db=db_session)
         assert got.allow_headless_launch is False

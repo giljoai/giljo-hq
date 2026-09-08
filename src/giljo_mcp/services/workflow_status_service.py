@@ -102,18 +102,26 @@ class WorkflowStatusService:
                 job_type_map = {ex.job_id: ex.job_type or "" for ex in executions}
                 active_count = sum(1 for ex in executions if ex.status == "working")
                 completed_count = sum(1 for ex in executions if ex.status == "complete")
+                # BE-9541: "closed" is a terminal-done status distinct from
+                # "complete" (see TERMINAL_EXECUTION_STATUSES), but nothing
+                # counted it -- a project whose sole agent was closed reported
+                # 0 completed / 0% / "Unknown". Counted in its own bucket AND folded into the
+                # done total below so progress/stage treat it as finished
+                # work, matching the model's own terminal-status grouping.
+                closed_count = sum(1 for ex in executions if ex.status == "closed")
                 pending_count = sum(1 for ex in executions if ex.status == "waiting")
                 blocked_count = sum(1 for ex in executions if ex.status == "blocked")
                 silent_count = sum(1 for ex in executions if ex.status == "silent")
                 decommissioned_count = sum(1 for ex in executions if ex.status == "decommissioned")
                 total_count = len(executions)
 
+                done_count = completed_count + closed_count
                 actionable_count = total_count - decommissioned_count
-                progress_percent = compute_completion_percent(completed_count, total_count, decommissioned_count)
+                progress_percent = compute_completion_percent(done_count, total_count, decommissioned_count)
 
                 if total_count == 0:
                     current_stage = "Not started"
-                elif completed_count == actionable_count:
+                elif done_count == actionable_count:
                     current_stage = "Completed"
                 elif blocked_count > 0 and silent_count > 0:
                     current_stage = f"In Progress ({blocked_count} blocked, {silent_count} silent)"
@@ -160,7 +168,7 @@ class WorkflowStatusService:
                             "stuck condition and the suggested recovery step."
                         ),
                     )
-                elif total_count > 0 and completed_count == actionable_count and not ready_to_advance:
+                elif total_count > 0 and done_count == actionable_count and not ready_to_advance:
                     next_action = build_next_action(
                         tool="write_project_closeout",
                         args_hint={"project_id": project_id},
@@ -180,6 +188,7 @@ class WorkflowStatusService:
                 return WorkflowStatus(
                     active_agents=active_count,
                     completed_agents=completed_count,
+                    closed_agents=closed_count,
                     pending_agents=pending_count,
                     blocked_agents=blocked_count,
                     silent_agents=silent_count,

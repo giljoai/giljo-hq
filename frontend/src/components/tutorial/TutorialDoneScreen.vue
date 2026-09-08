@@ -1,18 +1,21 @@
 <template>
   <div class="done-screen">
     <img src="/icons/Giljo_YW_Face.svg" alt="" class="done-face" />
-    <h2 class="done-title">Product active. Time for a mission.</h2>
+    <h2 class="done-title">Great work, you just added a product. Time to put your agents to work.</h2>
+    <!-- FE-9569 Part 4: the old copy promised "four read-only audits that
+         seed your 360 Memory" as though that already happened (it had not),
+         alongside a lookalike card that didn't match what the user then
+         found on Home. Reconciled against the REAL Home quick-launch logic
+         (WelcomeView.vue's quickCards computed): right after this tour
+         finishes -- active product, zero projects -- Home shows exactly
+         newProjectCard + PROJECT_TEMPLATES' two cards. Described in prose
+         instead of rendering a second lookalike card (operator's own
+         stated alternative). -->
     <p class="done-sub">
-      Your Home screen now shows this card. It creates a real project your agent runs — {{ cardSub }}
+      Your Home screen will now show three cards: create your first project, bootstrap a new
+      product, and import an existing product. We suggest Import an existing product — it
+      creates a few seed projects to get you going, and writes your first 360 memories.
     </p>
-
-    <div class="spotlight-card" data-testid="tutorial-spotlight-card">
-      <v-icon size="26" class="spotlight-icon">{{ template.icon }}</v-icon>
-      <div class="spotlight-text">
-        <span class="spotlight-title">{{ template.cardTitle }}</span>
-        <span class="spotlight-desc">Creates a staged project · you paste one prompt · agents do the rest</span>
-      </div>
-    </div>
 
     <!-- FE-9320: the finish state needs its own way out. Until now the only exit
          from a COMPLETED tutorial was the footer's "Skip - I'll explore on my
@@ -31,11 +34,10 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { PROJECT_TEMPLATES } from '@/composables/projectTemplates'
-
-const props = defineProps({
-  /** Router door choice — decides which bootstrap card gets the spotlight. */
+defineProps({
+  /** Router door choice -- kept for API compatibility with callers, but no
+   *  longer drives per-door copy (FE-9569 Part 4: the message is the same
+   *  regardless of which door produced the product). */
   routerChoice: {
     type: String,
     default: null,
@@ -43,22 +45,6 @@ const props = defineProps({
 })
 
 defineEmits(['close'])
-
-// D → import an existing product; A/B/C → bootstrap a new one. Labels and
-// icons come from projectTemplates.js, the single source of truth.
-const templateId = computed(() =>
-  props.routerChoice === 'D' ? 'existing_product_bootstrap' : 'new_product_bootstrap',
-)
-
-const template = computed(
-  () => PROJECT_TEMPLATES.find((t) => t.id === templateId.value) || PROJECT_TEMPLATES[0],
-)
-
-const cardSub = computed(() =>
-  props.routerChoice === 'D'
-    ? 'four read-only audits that seed your 360 Memory.'
-    : 'a skeleton scaffold plus four starter dev projects.',
-)
 </script>
 
 <style scoped lang="scss">
@@ -80,6 +66,7 @@ const cardSub = computed(() =>
 
 .done-title {
   margin: 0;
+  max-width: 480px;
   font-family: 'Outfit', $typography-font-primary;
   font-weight: 700;
   font-size: 28px;
@@ -89,41 +76,9 @@ const cardSub = computed(() =>
 
 .done-sub {
   margin: 0;
-  max-width: 440px;
+  max-width: 460px;
   font-size: 14px;
   line-height: 1.6;
-  color: var(--text-secondary);
-}
-
-.spotlight-card {
-  background: $elevation-raised;
-  border-radius: $border-radius-rounded;
-  box-shadow: inset 0 0 0 1px rgba($color-brand-yellow, 0.5), 0 12px 40px rgba($color-brand-yellow, 0.12);
-  padding: 20px 26px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.spotlight-icon {
-  color: $color-brand-yellow;
-}
-
-.spotlight-text {
-  display: flex;
-  flex-direction: column;
-  text-align: left;
-}
-
-.spotlight-title {
-  font-family: 'Outfit', $typography-font-primary;
-  font-weight: 600;
-  font-size: 16px;
-  color: $color-text-primary;
-}
-
-.spotlight-desc {
-  font-size: 12px;
   color: var(--text-secondary);
 }
 

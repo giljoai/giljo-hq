@@ -7,12 +7,13 @@
  *   - building the Hub unread-count badge style object
  *
  * Extracted from NavigationDrawer.vue to keep that component under the 800-line
- * CI guardrail (Guardrail 1) without any behaviour change.
+ * repository file-size guardrail without any behaviour change.
  *
- * Branch precedence (C > A > B):
- *   C: activeRun     → /projects/<headPid>?run=<runId>  (the /jobs multi variant)
- *   A: activeProject → /projects/<id>?via=jobs           (solo project page)
- *   B: neither       → /launch?via=jobs                  (launch page)
+ * Branch precedence (C > A > D > B):
+ *   C: activeRun      → /projects/<headPid>?run=<runId>  (the /jobs multi variant)
+ *   A: ONE active project → /projects/<id>?via=jobs      (solo project page, unchanged)
+ *   D: SEVERAL active projects → /jobs                    (FE-9525d sectioned viewport)
+ *   B: none            → /launch?via=jobs                 (launch page)
  *
  * FE-6173 removed the old "branch C" which pointed at the (now-deleted)
  * /mission-control route. FE-6174c REINSTATES a chain branch — but it now resolves
@@ -20,6 +21,13 @@
  * ?run=<id>, which lights up useChainContext's conditional chain layer), NOT a
  * bespoke cockpit route. So an active chain takes the user to the live chain view
  * without a dead route.
+ *
+ * FE-9525d: BE-9525a/b retired the single-active-project-per-product invariant,
+ * so branch A can no longer assume "the" active project. `activeProjects` (the
+ * full list) is now the source of truth for the count; `activeProject` (its
+ * first entry) is kept only for the chain-membership check below and the
+ * count===1 case, so a single-project tenant's nav target is byte-identical to
+ * before this project.
  *
  * Edition scope: CE.
  */
@@ -30,12 +38,13 @@ import { hexToRgba } from '@/utils/colorUtils'
  * Resolve the path the Jobs nav item should link to.
  *
  * @param {Object} ctx
- * @param {{ id: string } | null | undefined} ctx.activeProject  the active solo project
+ * @param {{ id: string } | null | undefined} ctx.activeProject  the FIRST active project (back-compat; used for the chain-membership check and the count===1 case)
+ * @param {Array<{ id: string }>} [ctx.activeProjects]  the FULL list of active projects for the viewed product (FE-9525d). Omit for old single-project callers -- treated as [activeProject] when absent.
  * @param {{ id: string, resolved_order?: string[], project_ids?: string[] } | null | undefined} [ctx.activeRun]
  *        an in-flight chain run (sequenceRunStore); when present it wins.
  * @returns {string}
  */
-export function resolveJobsNavPath({ activeProject, activeRun } = {}) {
+export function resolveJobsNavPath({ activeProject, activeProjects, activeRun } = {}) {
   // Branch C (FE-6174c): an in-flight chain run routes to the ACTIVE member's
   // /jobs multi view. Active member = resolved_order[current_index] (FE-6221b
   // mid-flight-entry fix — landing on member 1 when the chain is already driving
@@ -55,6 +64,12 @@ export function resolveJobsNavPath({ activeProject, activeRun } = {}) {
   const runContainsActiveProject = !!activeProject && runMemberIds.includes(activeProject.id)
   if (activeRun?.id && activeMemberPid && (!activeProject || runContainsActiveProject)) {
     return `/projects/${activeMemberPid}?run=${activeRun.id}`
+  }
+  const resolvedActiveProjects = activeProjects ?? (activeProject ? [activeProject] : [])
+  if (resolvedActiveProjects.length > 1) {
+    // NOT '/jobs' -- that bare path is a pre-existing legacy-redirect alias to
+    // /launch?via=jobs (jobsRedirect.spec.js pins it).
+    return '/jobs-overview'
   }
   if (activeProject) {
     return `/projects/${activeProject.id}?via=jobs`

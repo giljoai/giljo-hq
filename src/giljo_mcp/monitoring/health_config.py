@@ -94,6 +94,7 @@ class AgentHealthStatus:
         recommended_action: Recommended remediation action
         project_id: Project ID for contextual alerts (empty if orphaned job)
         project_name: Project name for contextual alerts (empty if orphaned job)
+        product_id: Product ID for contextual alerts (empty if orphaned job)
     """
 
     execution_id: str  # Primary key - guaranteed unique (AgentExecution.id)
@@ -108,3 +109,4 @@ class AgentHealthStatus:
     recommended_action: str
     project_id: str = ""
     project_name: str = ""
+    product_id: str = ""

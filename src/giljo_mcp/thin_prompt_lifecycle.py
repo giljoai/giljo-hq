@@ -318,6 +318,7 @@ class ThinClientLifecycleMixin:
             "prompt": staging_prompt,
             "estimated_prompt_tokens": staging_tokens,
             "launch_commands": launch_commands,
+            "product_id": result.get("product_id"),  # BE-9518
         }
 
     async def implement(

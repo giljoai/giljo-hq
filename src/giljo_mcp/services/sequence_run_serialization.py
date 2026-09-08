@@ -35,6 +35,9 @@ def serialize_sequence_run(run: SequenceRun) -> dict[str, Any]:
         # BE-9098: durable per-member review acknowledgment (drives the FE badge
         # persistence). Defaults to [] so pre-column rows serialize cleanly.
         "reviewed_project_ids": run.reviewed_project_ids or [],
+        # BE-9540: per-member review provenance ({project_id -> "ui" | "harness"}).
+        # Defaults to {} so pre-column rows serialize cleanly.
+        "reviewed_via": run.reviewed_via or {},
         "chain_mission": run.chain_mission,
         "conductor_agent_id": run.conductor_agent_id,
         "conductor_project_id": run.conductor_project_id,

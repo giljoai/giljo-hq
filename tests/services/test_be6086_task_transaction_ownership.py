@@ -316,6 +316,8 @@ async def test_update_task_happy_path_persists_and_broadcasts_after_commit(db_ma
         # Broadcast fired (after the explicit owner commit).
         mock_ws.broadcast_to_tenant.assert_called_once()
         assert mock_ws.broadcast_to_tenant.call_args.kwargs.get("event_type") == "task:updated"
+        # BE-9518: task:updated must carry product_id like task:created already does.
+        assert mock_ws.broadcast_to_tenant.call_args.kwargs["data"]["product_id"] == product_id
     finally:
         await _purge_tenant(db_manager, tenant_key)
 

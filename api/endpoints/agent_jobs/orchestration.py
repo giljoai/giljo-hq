@@ -283,9 +283,19 @@ async def launch_implementation(
 
     if result["already_launched"]:
         logger.info("Project %s already launched at %s", sanitize(project_id), result["launched_at"])
-        return LaunchImplementationResponse(already_launched=True, launched_at=result["launched_at"])
+        return LaunchImplementationResponse(
+            already_launched=True,
+            launched_at=result["launched_at"],
+            implementation_launched_at=result["implementation_launched_at"],
+        )
 
     logger.info(
         "Implementation launched for project %s at %s", sanitize(project_id), result["implementation_launched_at"]
     )
-    return LaunchImplementationResponse(success=True, implementation_launched_at=result["implementation_launched_at"])
+    # BE-9541: both keys are populated by the shared service now -- carry both
+    # through so a REST caller checking either field sees the same timestamp.
+    return LaunchImplementationResponse(
+        success=True,
+        implementation_launched_at=result["implementation_launched_at"],
+        launched_at=result["launched_at"],
+    )

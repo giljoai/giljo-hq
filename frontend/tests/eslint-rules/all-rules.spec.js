@@ -305,3 +305,82 @@ ruleTester.run(
     ],
   },
 )
+
+// FE-9553: the one-live-surface rule at the toast choke point.
+//
+// `filename` is load-bearing in every case below: this rule keys entirely on
+// WHERE the toast is raised, so the same line of code is a violation in the
+// socket store and perfectly correct in a view. The valid cases are therefore
+// as important as the invalid ones -- a rule that flagged everywhere would be
+// worse than no rule, since 203 of the 219 toast call sites in this app are
+// legitimate user feedback.
+ruleTester.run(
+  'giljo-internal/no-toast-for-agent-events',
+  plugin.rules['no-toast-for-agent-events'],
+  {
+    valid: [
+      // A view may toast: it is reachable from a click.
+      {
+        code: 'function onClick() { showToast({ message: "saved" }) }',
+        filename: '/app/frontend/src/views/ProjectsView.vue',
+      },
+      // A composable reached from a click may toast.
+      {
+        code: 'function act() { showToast({ message: "done" }) }',
+        filename: '/app/frontend/src/composables/useJobActions.js',
+      },
+      // An axios response interceptor may toast: the response exists BECAUSE
+      // the user made a request. Deliberately out of scope -- an earlier draft
+      // of this rule flagged the lapsed-subscription toast, which is textbook
+      // feedback for the user's own blocked write.
+      {
+        code: 'function surface() { showToast({ message: "reactivate" }) }',
+        filename: '/app/frontend/src/saas/composables/installLicenseStateInterceptor.js',
+      },
+      // Specs are exempt: they assert about toasts.
+      {
+        code: 'showToast({ message: "x" })',
+        filename: '/app/frontend/src/stores/websocket.spec.js',
+      },
+      // Non-toast calls in a covered file are untouched.
+      {
+        code: 'function f() { addNotification({ type: "lifecycle" }) }',
+        filename: '/app/frontend/src/stores/eventRoutes/projectEventRoutes.js',
+      },
+    ],
+    invalid: [
+      // The socket store: a frame arrives whether or not anyone clicked.
+      {
+        code: 'function handleDisconnect() { showToast({ message: "Connection Lost" }) }',
+        filename: '/app/frontend/src/stores/websocket.js',
+        errors: [{ messageId: 'agentToast' }],
+      },
+      // A WebSocket event route.
+      {
+        code: 'function onEvent() { showToast({ message: "agent finished" }) }',
+        filename: '/app/frontend/src/stores/eventRoutes/agentEventRoutes.js',
+        errors: [{ messageId: 'agentToast' }],
+      },
+      // The router passes.
+      {
+        code: 'function pass() { showToast({ message: "routed" }) }',
+        filename: '/app/frontend/src/stores/websocketEventRouter.js',
+        errors: [{ messageId: 'agentToast' }],
+      },
+      // Reached through a composable object rather than a bare identifier.
+      {
+        code: 'function f() { useToast().showToast({ message: "x" }) }',
+        filename: '/app/frontend/src/stores/websocket.js',
+        errors: [{ messageId: 'agentToast' }],
+      },
+      // The imperative global, which module-scope code uses when no composable
+      // is available -- the escape hatch the rule must also cover, or the
+      // invariant is one `window.$toast` away from being bypassed.
+      {
+        code: 'function f() { window.$toast.warning("x") }',
+        filename: '/app/frontend/src/stores/websocket.js',
+        errors: [{ messageId: 'agentToast' }],
+      },
+    ],
+  },
+)

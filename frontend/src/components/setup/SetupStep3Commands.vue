@@ -44,6 +44,7 @@
           <div class="checklist-item">
             <v-icon
               size="20"
+              data-testid="setup-skills-dot"
               :color="toolStatus[activeToolId]?.commands ? COLOR_SUCCESS : COLOR_MUTED"
             >
               {{ toolStatus[activeToolId]?.commands ? 'mdi-check-circle' : 'mdi-checkbox-blank-circle-outline' }}
@@ -56,6 +57,7 @@
           <div class="checklist-item">
             <v-icon
               size="20"
+              data-testid="setup-agents-dot"
               :color="toolStatus[activeToolId]?.agents ? COLOR_SUCCESS : COLOR_MUTED"
             >
               {{ toolStatus[activeToolId]?.agents ? 'mdi-check-circle' : 'mdi-checkbox-blank-circle-outline' }}
@@ -97,10 +99,6 @@ const props = defineProps({
     type: Array,
     required: true,
   },
-  previouslyCompleted: {
-    type: Boolean,
-    default: false,
-  },
 })
 
 const emit = defineEmits(['can-proceed', 'step-data'])
@@ -120,22 +118,48 @@ const activeTool = computed(() => TOOL_META[activeToolId.value] || { name: 'Tool
 // Active tab
 const activeToolId = ref(props.connectedTools[0] || 'claude_code')
 
-// Installation status per tool — pre-fill if user already completed this step before
-const toolStatus = reactive(
-  Object.fromEntries(props.connectedTools.map((id) => [id, {
-    commands: props.previouslyCompleted,
-    agents: props.previouslyCompleted,
-  }])),
+// Installation status per tool. Never pre-filled (FE-9497): a previous run tells
+// us nothing about what is installed now, so only observed install events tick a box.
+// FE-9569 detector 2: `toolStatus` used to be built ONCE here from the initial
+// `connectedTools` prop and never re-keyed. Detector 1's credential-status
+// seed is async, so this step could mount before connectedTools finished
+// settling -- toolStatus stayed `{}` forever, every `if (toolStatus[id])`
+// WS-event guard below silently no-opped, and the checklist looked
+// permanently stuck even once a real setup:bootstrap_complete arrived. The
+// FE-9497 rule itself is unchanged (still only an OBSERVED event ticks a
+// box -- nothing here pre-fills from history); this just keeps the map's
+// keys in sync with the tools the wizard actually knows about, so an event
+// for a real connected tool always has somewhere to land. Confirmed
+// 2026-09-03 (FE-9569 thread): api/endpoints/mcp_tools/_setup_tools.py's
+// giljo_setup handler already emits setup:bootstrap_complete unconditionally
+// on every call, re-run or not -- this was the one real gap.
+const toolStatus = reactive({})
+watch(
+  () => props.connectedTools,
+  (ids) => {
+    for (const id of ids) {
+      if (!toolStatus[id]) {
+        toolStatus[id] = { commands: false, agents: false }
+      }
+    }
+    // Keep the active tab pointed at a real, known tool once the list settles.
+    if (ids.length > 0 && !ids.includes(activeToolId.value)) {
+      activeToolId.value = ids[0]
+    }
+  },
+  { immediate: true },
 )
 
-// Check if a tool has commands installed (agents are optional for proceeding)
+// A tool counts as installed only when BOTH skills and agents landed (FE-9497).
 function isToolComplete(toolId) {
-  return !!toolStatus[toolId]?.commands
+  return !!toolStatus[toolId]?.commands && !!toolStatus[toolId]?.agents
 }
 
-// can-proceed: at least 1 tool with both checkmarks
+// can-proceed: at least 1 tool with both checkmarks. Falls back to the active
+// tool so a canProceed check is never blind to a status key that exists but
+// whose id, for whatever reason, is momentarily absent from connectedTools.
 const canProceed = computed(() =>
-  props.connectedTools.some((id) => isToolComplete(id)),
+  props.connectedTools.some((id) => isToolComplete(id)) || isToolComplete(activeToolId.value),
 )
 
 // Installed tools list for step-data

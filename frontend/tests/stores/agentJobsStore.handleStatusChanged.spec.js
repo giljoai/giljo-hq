@@ -146,3 +146,63 @@ describe('agentJobsStore - handleStatusChanged', () => {
     expect(job.status).toBe('working')
   })
 })
+
+/**
+ * D4 (Headless S3a): job:mission_updated routes to handleMissionLengthUpdated,
+ * a NEW existing-only action added alongside handleStatusChanged's guard --
+ * not a relaxation of it. Pinned here so a later change cannot quietly let
+ * this event create ghost rows the way handleStatusChanged already refuses to.
+ */
+describe('agentJobsStore - handleMissionLengthUpdated (ghost-row guard, D4)', () => {
+  let store
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    store = useAgentJobsStore()
+  })
+
+  it('patches mission_length onto an existing job', () => {
+    store.setJobs([
+      {
+        job_id: 'job-1',
+        agent_id: 'agent-1',
+        agent_display_name: 'orchestrator',
+        status: 'waiting',
+      },
+    ])
+
+    store.handleMissionLengthUpdated({
+      job_id: 'job-1',
+      job_type: 'orchestrator',
+      mission_length: 42,
+      project_id: 'proj-1',
+    })
+
+    const job = store.getJob('job-1')
+    expect(job.mission_length).toBe(42)
+    expect(job.agent_display_name).toBe('orchestrator')
+  })
+
+  it('never creates a row for a job it has not seen (prevents ghost rows)', () => {
+    store.setJobs([
+      {
+        job_id: 'known-job',
+        agent_id: 'known-agent',
+        agent_display_name: 'implementer',
+        status: 'working',
+      },
+    ])
+
+    const countBefore = store.jobCount
+
+    store.handleMissionLengthUpdated({
+      job_id: 'unknown-job-from-other-project',
+      job_type: 'orchestrator',
+      mission_length: 99,
+      project_id: 'other-project',
+    })
+
+    expect(store.jobCount).toBe(countBefore)
+    expect(store.getJob('unknown-job-from-other-project')).toBeNull()
+  })
+})

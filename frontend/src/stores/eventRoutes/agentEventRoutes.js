@@ -64,6 +64,13 @@ export const AGENT_EVENT_ROUTES = {
     },
   },
   'agent:mission_updated': { store: 'agentJobs', action: 'handleUpdated' },
+  // D4 (Headless S3a): job:mission_updated (mission_service.py) fires on ANY job's
+  // mission write (job_id/job_type/mission_length/project_id -- no display identity).
+  // Distinct from its two confusably-named, already-wired neighbours: 'project:'
+  // mission_updated (projectEventRoutes -> projectState.handleMissionUpdated) and
+  // 'agent:mission_updated' immediately above. Routed to the existing-only
+  // handleMissionLengthUpdated (not handleUpdated) -- see that action's comment.
+  'job:mission_updated': { store: 'agentJobs', action: 'handleMissionLengthUpdated' },
   'agent:health_alert': {
     handler: async (payload) => {
       const {
@@ -167,6 +174,24 @@ export const AGENT_EVENT_ROUTES = {
     },
   },
 
+  // D12 (Headless S3a): orchestrator:handover_initiated (api/endpoints/agent_jobs/
+  // simple_handover.py) fires when the retiring orchestrator's retirement +
+  // continuation prompts are generated -- {agent_id, job_id, project_id, timestamp}.
+  // Routed through the SAME existing-only handleStatusChanged used by
+  // agent:status_changed above (no new store code, no relaxation of the
+  // Handover 0462/0463 ghost-row guard): 'handed_over' is an already-configured
+  // statusConfig.js status with no live writer today, exactly matching this event.
+  'orchestrator:handover_initiated': {
+    handler: async (payload, { storeRegistry } = {}) => {
+      const agentJobsStore = storeRegistry?.agentJobs?.() ?? useAgentJobsStore()
+      agentJobsStore.handleStatusChanged?.({
+        job_id: payload?.job_id,
+        agent_id: payload?.agent_id,
+        status: 'handed_over',
+        project_id: payload?.project_id,
+      })
+    },
+  },
   // Handover 0431: Orchestrator prompt generated
   'orchestrator:prompt_generated': {
     handler: async (payload, { storeRegistry } = {}) => {

@@ -435,6 +435,7 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
             "estimated_prompt_tokens": estimated_tokens,
             "mission": regenerated_mission,
             "estimated_mission_tokens": estimated_mission_tokens,
+            "product_id": str(product.id) if product else None,  # BE-9518
         }
 
     async def _resolve_user_config(

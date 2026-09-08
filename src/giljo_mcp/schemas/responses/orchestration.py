@@ -80,6 +80,11 @@ class WorkflowStatus(BaseModel):
 
     active_agents: int = 0
     completed_agents: int = 0
+    # BE-9541: a ``closed`` execution is terminal-done (TERMINAL_EXECUTION_STATUSES
+    # groups it with "complete"), but was never counted anywhere -- a project
+    # whose sole agent was closed reported 0 completed / 0% / "Unknown" stage.
+    # Additive; defaults 0 for every pre-existing caller.
+    closed_agents: int = 0
     pending_agents: int = 0
     blocked_agents: int = 0
     silent_agents: int = 0

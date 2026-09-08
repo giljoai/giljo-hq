@@ -10,7 +10,9 @@ Three discoverability/completeness gaps that stranded a naive headless conductor
 2026-06-28), all CHAIN-scoped so SOLO stays byte-identical:
 
   1. get_giljo_guide had chain CREATION (a/b/c suffix) but NO chain-DRIVE recipe.
-     A naive ``/giljo`` agent could not discover ``start_chain_run`` -> conductor.
+     A naive ``/giljo`` agent could not discover the headless chain entry point.
+     BE-9554 renamed that entry point ``start_chain_run`` -> ``link_projects``; the
+     guarantee this file pins is unchanged, only the tool it names.
   2c. CH_SUB_ORCHESTRATOR omitted the three Hub tools from its documented bootstrap
       query, forcing a guaranteed second ToolSearch round-trip every chain run.
   2a. CH_SUB_ORCHESTRATOR's workers-inert line is now explicit ("do NOT launch them
@@ -74,10 +76,10 @@ def _chain_drive() -> str:
 
 
 def test_guide_carries_headless_chain_drive_recipe() -> None:
-    """The guide now teaches the headless chain DRIVE (start_chain_run -> conductor),
+    """The guide now teaches the headless chain DRIVE (link_projects -> conductor),
     not just chain CREATION. A naive /giljo agent can route 'run/link these projects'."""
     guide = build_giljo_guide()["guide"]
-    assert "start_chain_run" in guide, "guide must name the headless chain entry point"
+    assert "link_projects" in guide, "guide must name the headless chain entry point"
     # Intent-routing vocabulary so the agent routes by meaning, not a single keyword.
     low = guide.lower()
     for verb in ("run", "link", "join", "chain"):
@@ -124,7 +126,7 @@ async def test_guide_headless_chain_recipe_surfaces_over_transport() -> None:
         result = await session.call_tool("get_giljo_guide", {})
     assert result.is_error is False, f"get_giljo_guide errored at the transport boundary: {result}"
     guide = json.loads(result.content[0].text)["guide"]
-    assert "start_chain_run" in guide
+    assert "link_projects" in guide
     assert "get_staging_instructions" in guide
     assert "ready_to_advance" in guide
 

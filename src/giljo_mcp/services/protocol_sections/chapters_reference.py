@@ -335,7 +335,7 @@ Implementation phase (all agents, post-staging-complete):
   working →[set_agent_status("sleeping")]→ sleeping
   idle / sleeping / blocked →[report_progress or any active MCP]→ working
   complete →[message received]→ blocked (auto, HO0827b)
-  blocked →[resolve_reactivation(action="resume" | "dismiss")]→ working | complete
+  blocked →[resume_or_dismiss_job(action="resume" | "dismiss")]→ working | complete
 
 Note: spawned non-orchestrator agents bypass the staging lock entirely.
 
@@ -633,7 +633,7 @@ Call: post_to_thread(thread_id=<your coordination thread>, to_participant="<comp
 This auto-blocks the completed agent (server-side).
 
 ── STEP 2: Reactivate the job ─────────────────────────────────────────────
-Call: resolve_reactivation(job_id="<completed-agent-job-id>", action="resume")
+Call: resume_or_dismiss_job(job_id="<completed-agent-job-id>", action="resume")
 Transitions the agent from blocked→working and increments reactivation_count.
 
 ── STEP 3: Launch a fresh local agent for the same role ───────────────────
@@ -651,7 +651,7 @@ Reactivation targets the job_id, not the terminal session.
 WHEN NOT TO REACTIVATE:
 - Completed agent's work is fine and the issue is in a different agent → fix there
 - Post-completion message is purely informational (no action needed)
-  → call resolve_reactivation(job_id="...", action="dismiss") to return agent to 'complete'
+  → call resume_or_dismiss_job(job_id="...", action="dismiss") to return agent to 'complete'
 - Agent was decommissioned (failed/replaced) → spawn a new job instead
 
 HANDLING POST-COMPLETION MESSAGES:
@@ -660,7 +660,7 @@ When a completed agent receives a message and gets auto-blocked:
 1. Check get_thread_history(as_participant="<agent_id>") on the coordination thread for that agent's pending messages
 2. Read the message content
 3. If informational (another agent sharing results, no action needed):
-   → Call resolve_reactivation(job_id="...", action="dismiss") — agent returns to 'complete'
+   → Call resume_or_dismiss_job(job_id="...", action="dismiss") — agent returns to 'complete'
 4. If it requires rework:
    → Follow the Reactivation Protocol above (Steps 1-4)
 
@@ -678,8 +678,8 @@ def _build_ch6_auto_checkin(interval: int = 10, *, for_conductor: bool = False) 
     FE-9296b: the per-project cadence slider is retired — the cadence is an
     account-level Settings value (slider-era per-project values honoured as
     overrides), and the chapter branches on harness wake capability (BE-9296a):
-    wake-capable harnesses park on ``await_my_turn``; every other harness (chat
-    surfaces can never hold the wake call open) sleeps for the cadence.
+    wake-capable harnesses park on ``get_my_turn(wait_seconds=)``; every other
+    harness (chat surfaces cannot hold the call open) sleeps for the cadence.
     BE-6013's live-value rule survives: ``interval`` is only the caller-resolved
     first-cycle SEED; the authoritative value each cycle comes from
     ``get_workflow_status().checkin_cadence_minutes``. ``for_conductor`` selects
@@ -702,8 +702,9 @@ Apply it to the chain-drive wait (STEP B of the AUTO-CONTINUE LOOP):
 
   ▸ WAKE-CAPABLE HARNESS — you can hold an MCP tool call open for ~45s
     (verified: Claude Code CLI). Between advance-gate polls, park on
-    await_my_turn(agent_id="<your agent_id>") instead of sleeping — it
-    returns the moment a Hub message or baton lands for you. Still call
+    get_my_turn(agent_id="<your agent_id>", wait_seconds=45) instead of
+    sleeping — it returns the moment a Hub message or baton lands for you.
+    (No wait_seconds = answers at once = polling, not parked.) Still call
     get_workflow_status(project_id=<P_i>) at least every M minutes:
     ready_to_advance flips server-side WITHOUT a Hub post, so the wake
     signal alone will never tell you a project finished.
@@ -730,10 +731,9 @@ cycle. Do NOT ask the user for confirmation.
 FIRST, PICK YOUR WAIT MECHANISM (once per session):
 
   ▸ WAKE-CAPABLE HARNESS — you can hold an MCP tool call open for ~45s
-    (verified: Claude Code CLI). Use PATH A (await_my_turn). If unsure, try
-    ONE await_my_turn call: a normal return (even wake_reason "timeout")
-    means you are wake-capable; if the harness kills or errors the call,
-    use PATH B from then on.
+    (verified: Claude Code CLI). Use PATH A. If unsure, try ONE
+    get_my_turn(wait_seconds=45) call: a normal return (even wake_reason
+    "timeout") means wake-capable; if the harness kills it, use PATH B.
   ▸ NOT WAKE-CAPABLE — chat surfaces (claude.ai / chatgpt.com) can NEVER
     hold the call open; polling is their primary path, permanently. Use
     PATH B (timed sleep).
@@ -754,18 +754,18 @@ PATH A — WAKE LOOP (wake-capable harness):
   1. set_agent_status(status="sleeping", wake_on_signal=true,
      reason="Waiting for Hub activity") — the dashboard then shows you as
      waiting for a wake signal rather than on a timed sleep.
-  2. Call await_my_turn(agent_id="<your agent_id>"). It parks server-side
-     (up to ~45s per call, zero tokens while parked) and returns the moment
-     a Hub message or baton lands for you.
+  2. Call get_my_turn(agent_id="<your agent_id>", wait_seconds=45). It parks
+     server-side (zero tokens while parked) and returns the moment a Hub
+     message or baton lands for you. wait_seconds is what makes it PARK:
+     omit it and the same tool answers at once.
   3. On woken=true: handle the delivered work — get_thread_history() on
      your coordination thread, resolve "blocked" agents, relay messages,
      spawn next-phase work — then report_progress() and re-enter step 2.
-  4. On wake_reason="timeout": re-call await_my_turn immediately. Keep
-     count: once ~M minutes of consecutive timeouts have passed, run one
-     full coordination pass anyway — get_workflow_status(project_id=...) +
-     get_thread_history() + report_progress() — because agent STATUS
-     changes (an agent going blocked or silent without posting) do NOT
-     fire the wake signal.
+  4. On wake_reason="timeout": re-call it immediately. Keep count: once ~M
+     minutes of consecutive timeouts have passed, run one full coordination
+     pass anyway — get_workflow_status(project_id=...) + get_thread_history()
+     + report_progress() — because agent STATUS changes (an agent going
+     blocked or silent without posting) do NOT fire the wake signal.
   5. On wake_reason="waiter_limit": fall back to PATH B for this cycle.
   6. All agents complete → proceed to Closeout (Phase 3).
 

@@ -172,3 +172,125 @@ async def test_unknown_status_is_refused(db_manager, db_session):
 
     with pytest.raises(ValidationError):
         await svc.update_thread(thread_id=tid, status="banana", tenant_key=tenant)
+
+
+# ---------------------------------------------------------------------------
+# FE-9530 — retagging: product_id/clear_product + project_ids (ruling 2's fix
+# for pre-existing untagged threads, since "no migration" leaves them with no
+# other way to ever get a product).
+# ---------------------------------------------------------------------------
+
+
+async def _seed_product(db_session, tenant: str, *, is_active: bool = True) -> str:
+    with tenant_session_context(db_session, tenant):
+        product = Product(
+            id=str(uuid.uuid4()),
+            tenant_key=tenant,
+            name=f"FE-9530 Product {uuid.uuid4().hex[:6]}",
+            description="seeded",
+            is_active=is_active,
+        )
+        db_session.add(product)
+        await db_session.flush()
+    return product.id
+
+
+async def test_retag_a_pre_existing_untagged_thread_with_a_product(db_manager, db_session):
+    """The whole point of Finding 1's fix: an old thread that predates mandatory
+    tagging must be retaggable on touch, since ruling 2 forbids a bulk migration."""
+    tenant = _tk("retag")
+    await _seed(db_session, tenant)
+    product_id = await _seed_product(db_session, tenant)
+    svc = _service(db_manager, db_session)
+    tid = await _standalone(svc, tenant)  # created with NO product (tenant had none yet)
+
+    result = await svc.update_thread(thread_id=tid, product_id=product_id, tenant_key=tenant)
+
+    assert result["product_id"] == product_id
+    assert result["project_ids"] == []  # retagging the product never touches project tags
+
+
+async def test_retag_refuses_a_product_from_another_tenant(db_manager, db_session):
+    tenant = _tk("retagcross")
+    other_tenant = _tk("retagcross_other")
+    await _seed(db_session, tenant)
+    await _seed(db_session, other_tenant)
+    foreign_product_id = await _seed_product(db_session, other_tenant)
+    svc = _service(db_manager, db_session)
+    tid = await _standalone(svc, tenant)
+
+    with pytest.raises(ValidationError):
+        await svc.update_thread(thread_id=tid, product_id=foreign_product_id, tenant_key=tenant)
+
+
+async def test_clear_product_nulls_it_back_out(db_manager, db_session):
+    tenant = _tk("clearproduct")
+    await _seed(db_session, tenant)
+    product_id = await _seed_product(db_session, tenant)
+    svc = _service(db_manager, db_session)
+    thread = await svc.create_thread(subject="tagged", creator_id="agent-a", product_id=product_id, tenant_key=tenant)
+
+    result = await svc.update_thread(thread_id=thread["thread_id"], clear_product=True, tenant_key=tenant)
+
+    assert result["product_id"] is None
+
+
+async def test_product_id_and_clear_product_together_is_refused(db_manager, db_session):
+    tenant = _tk("contradiction")
+    await _seed(db_session, tenant)
+    product_id = await _seed_product(db_session, tenant)
+    svc = _service(db_manager, db_session)
+    tid = await _standalone(svc, tenant)
+
+    with pytest.raises(ValidationError):
+        await svc.update_thread(thread_id=tid, product_id=product_id, clear_product=True, tenant_key=tenant)
+
+
+async def test_project_ids_is_plural_and_full_replace(db_manager, db_session):
+    """Ruling 3: a thread may tag one, several, or none. Full-replace semantics --
+    a second call with a different set REPLACES, it does not accumulate.
+
+    The thread is created FIRST, on a zero-product tenant, so create_thread's own
+    mandatory-resolution logic (FE-9530 ruling 1) has nothing to resolve and the
+    thread starts genuinely untagged -- ``_seed_project`` (called after) seeds its
+    OWN owning product, which must not retroactively affect a thread already made.
+    """
+    tenant = _tk("plural")
+    await _seed(db_session, tenant)
+    svc = _service(db_manager, db_session)
+    tid = await _standalone(svc, tenant)
+    project_a = await _seed_project(db_session, tenant)
+
+    result = await svc.update_thread(thread_id=tid, project_ids=[project_a], tenant_key=tenant)
+    assert result["project_ids"] == [project_a]
+
+    # Full replace with an empty list clears every tag.
+    result = await svc.update_thread(thread_id=tid, project_ids=[], tenant_key=tenant)
+    assert result["project_ids"] == []
+
+
+async def test_project_ids_refuses_a_project_from_another_tenant(db_manager, db_session):
+    tenant = _tk("pcross")
+    other_tenant = _tk("pcross2")
+    await _seed(db_session, tenant)
+    await _seed(db_session, other_tenant)
+    svc = _service(db_manager, db_session)
+    tid = await _standalone(svc, tenant)
+    foreign_project_id = await _seed_project(db_session, other_tenant)
+
+    with pytest.raises(ValidationError):
+        await svc.update_thread(thread_id=tid, project_ids=[foreign_project_id], tenant_key=tenant)
+
+
+async def test_omitted_project_ids_leaves_existing_tags_untouched(db_manager, db_session):
+    """None (omitted) must NOT be read as 'clear the tags' -- that is what [] is for."""
+    tenant = _tk("plural_untouched")
+    await _seed(db_session, tenant)
+    svc = _service(db_manager, db_session)
+    tid = await _standalone(svc, tenant)
+    project_a = await _seed_project(db_session, tenant)
+    await svc.update_thread(thread_id=tid, project_ids=[project_a], tenant_key=tenant)
+
+    result = await svc.update_thread(thread_id=tid, status="active", tenant_key=tenant)
+
+    assert result["project_ids"] == [project_a]

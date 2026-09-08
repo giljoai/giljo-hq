@@ -476,6 +476,19 @@ function openDecisionModal() {
   showDecisionModal.value = true
 }
 
+// FE-9538 (Ask 2): SystemStatusBanner's decision-banner click carries
+// `tab=jobs&decide=1` (the Jobs tab is the ONLY place ProjectStatusBanner --
+// and therefore this DecisionModal's open-decision-modal emit -- is mounted).
+// A one-shot consume, mirroring the existing `via=jobs` pattern above: it
+// opens the modal once on arrival, then strips `decide` from the URL so
+// switching tabs afterward never reopens it.
+if (route.query.decide === '1') {
+  activeTab.value = 'jobs'
+  openDecisionModal()
+  const { decide: _decide, ...rest } = route.query
+  router.replace({ query: rest })
+}
+
 function handleApprovalDecided() {
   showDecisionModal.value = false
   showOrchUnlockedBanner.value = true
@@ -515,6 +528,19 @@ const {
   sortedJobs,
   onComplete: () => emit('project-updated'),
 })
+
+// FE-9548: one-shot `review=1` query flag lets the Jobs board's "Review &
+// close" button land directly on the existing closeout modal, mirroring the
+// `decide=1` pattern above exactly rather than inventing a new review flow.
+// Placed AFTER the useProjectCloseout destructure (unlike decide=1, this one
+// calls openCloseoutModal() immediately, not just from a later click handler,
+// so openCloseoutModal must already be assigned).
+if (route.query.review === '1') {
+  activeTab.value = 'jobs'
+  if (showCloseoutButton.value) openCloseoutModal()
+  const { review: _review, ...rest } = route.query
+  router.replace({ query: rest })
+}
 
 // Auto-clear the unlocked banner when all jobs go terminal or project closes
 watch([allJobsTerminal, projectDoneStatus], ([allTerminal, doneStatus]) => {

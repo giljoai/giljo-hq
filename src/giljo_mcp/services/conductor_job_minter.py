@@ -12,7 +12,16 @@ small server-side helpers specific to it:
 - ``mint_conductor_job``: insert the conductor AgentJob + AgentExecution in the SAME
   transaction that creates the ``sequence_runs`` row, so a run can never exist without
   an addressable conductor (a failed insert rolls the run back; no orphans). The insert
-  mirrors the canonical project-less orchestrator seed at ``install.py``.
+  mirrors the canonical project-less orchestrator seed at ``install.py``. Returns the
+  minted identity (not yet broadcast -- see ``broadcast_conductor_created``).
+- ``broadcast_conductor_created``: emit ``agent:created`` for a freshly minted
+  conductor (BE-9440 Phase 1: the mint previously broadcast nothing, so a new chain
+  conductor appeared on no dashboard until a manual refresh). Deliberately separate
+  from ``mint_conductor_job`` -- the mint runs inside the caller's nested transaction,
+  and TRANSACTION_OWNERSHIP_CONVENTION requires events to emit only after that
+  transaction's outer commit (mirrors ``_ensure_orchestrator_fixture``'s
+  commit-then-broadcast ordering), so the caller invokes this only once its commit
+  has landed.
 - ``projectless_conductor_staging_directive``: the STOP-shaped directive returned when a
   project-less conductor mistakenly calls the staging path (it drives via the runtime
   mission path instead).
@@ -24,6 +33,8 @@ Edition Scope: CE.
 
 from __future__ import annotations
 
+import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +42,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.base import generate_uuid
 from giljo_mcp.schemas.jsonb_validators import validate_agent_job_metadata
+from giljo_mcp.utils.log_sanitizer import sanitize
+
+
+logger = logging.getLogger(__name__)
 
 
 async def mint_conductor_job(
@@ -39,8 +54,8 @@ async def mint_conductor_job(
     tenant_key: str,
     run_id: str,
     conductor_label: str | None = None,
-) -> str:
-    """Insert the project-less conductor AgentJob + AgentExecution; return its agent_id.
+) -> dict[str, str]:
+    """Insert the project-less conductor AgentJob + AgentExecution; return its identity.
 
     Uses the supplied (already tenant-bound) ``session`` so the writes are atomic
     with the caller's run-create transaction; the caller commits once. The job is
@@ -52,6 +67,9 @@ async def mint_conductor_job(
     (the conductor exists only to drive an in-flight run) and ``status="waiting"`` so
     the agent's first ``get_job_mission`` transitions it to ``working`` exactly like
     any other orchestrator.
+
+    Returns ``{"agent_id", "job_id", "execution_id"}`` -- the caller passes this straight
+    to ``broadcast_conductor_created`` once its own commit lands.
     """
     job_id = generate_uuid()
     agent_id = generate_uuid()
@@ -80,7 +98,50 @@ async def mint_conductor_job(
     session.add(conductor_execution)
 
     await session.flush()
-    return agent_id
+    return {"agent_id": agent_id, "job_id": job_id, "execution_id": conductor_execution.id}
+
+
+async def broadcast_conductor_created(
+    websocket_manager: Any | None,
+    *,
+    tenant_key: str,
+    run_id: str,
+    agent_id: str,
+    job_id: str,
+    execution_id: str,
+    conductor_label: str | None = None,
+) -> None:
+    """Broadcast ``agent:created`` for a freshly minted chain conductor (BE-9440 Phase 1).
+
+    Call ONLY after the caller's own transaction has committed (see the module
+    docstring). Fire-and-forget: a failed broadcast never fails the mint, mirroring
+    every other ``agent:created`` emitter in this codebase.
+    """
+    if websocket_manager is None:
+        return
+    try:
+        await websocket_manager.broadcast_to_tenant(
+            tenant_key=tenant_key,
+            event_type="agent:created",
+            data={
+                "project_id": None,
+                "execution_id": execution_id,
+                "agent_id": agent_id,
+                "job_id": job_id,
+                "agent_display_name": "orchestrator",
+                "agent_name": conductor_label or "Chain Conductor",
+                "status": "waiting",
+                "chain_conductor": True,
+                "run_id": run_id,
+                "timestamp": datetime.now(UTC).isoformat(),
+            },
+        )
+    except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
+        logger.warning(
+            "Failed to broadcast agent:created for conductor %s: %s",
+            sanitize(agent_id),
+            ws_error,
+        )
 
 
 def projectless_conductor_staging_directive(job_id: str) -> dict[str, Any]:

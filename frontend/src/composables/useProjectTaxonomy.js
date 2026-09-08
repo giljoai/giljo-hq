@@ -10,12 +10,20 @@
  * @param {import('vue').Ref<Array>} params.projectTypes - Available project types (mutated on handleTypeCreated)
  * @param {import('vue').Ref<object>} params.projectData - Form data ref (project_type_id, series_number, subseries)
  * @param {import('vue').Ref<object|null>} [params.editingProject] - Currently editing project (for exclude ID)
+ * @param {import('vue').Ref<string|null>} [params.productId] - FE-9502c: the
+ *   product to scope series-number lookups to (the viewed tab). Falls back
+ *   to the server's active product when omitted, same as before tabs.
  */
 import { ref, computed, onBeforeUnmount, getCurrentInstance } from 'vue'
 import api from '@/services/api'
 import { RESERVED_TASK_TYPE_ABBR } from '@/utils/constants'
 
-export function useProjectTaxonomy({ projectTypes, projectData, editingProject = ref(null) }) {
+export function useProjectTaxonomy({
+  projectTypes,
+  projectData,
+  editingProject = ref(null),
+  productId = ref(null),
+}) {
   const showAddTypeModal = ref(false)
   const seriesNumberInput = ref('')
   const seriesChecking = ref(false)
@@ -81,7 +89,7 @@ export function useProjectTaxonomy({ projectTypes, projectData, editingProject =
     const currentInput = (seriesNumberInput.value || '').trim()
     if (currentInput !== '' || projectData.value.series_number != null) return
     try {
-      const { data } = await api.projects.getNextSeries(typeId)
+      const { data } = await api.projects.getNextSeries(typeId, productId.value)
       const next = data?.next_series_number
       if (typeof next !== 'number') return
       // Re-check guards after async await — user may have typed meanwhile.
@@ -179,12 +187,14 @@ export function useProjectTaxonomy({ projectTypes, projectData, editingProject =
           projectData.value.subseries,
           excludeId,
           { signal },
+          productId.value,
         ),
         api.projects.usedSubseries(
           requestedTypeId,
           num,
           excludeId,
           { signal },
+          productId.value,
         ),
       ])
       if (projectData.value.project_type_id !== requestedTypeId) return

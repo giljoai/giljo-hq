@@ -309,7 +309,8 @@ import { computed } from 'vue'
 import { getStatusLabel, getStatusColor, isStatusItalic } from '@/utils/statusConfig'
 import { getAgentBadgeStyle } from '@/utils/colorUtils'
 import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
-import { isOrchestrator } from '@/utils/agentDisplay'
+import { isOrchestrator, getPrimaryAgentLabel } from '@/utils/agentDisplay'
+import { formatAgentDuration } from '@/utils/durationFormat'
 
 /**
  * AgentRow — FE-6042a presentational child of JobsTab.
@@ -387,12 +388,6 @@ const prUrl = computed(() => {
 const giljoFaceIcon = '/icons/Giljo_Inactive_Dark.svg'
 const giljoFaceIconActive = '/icons/Giljo_YW_Face.svg'
 
-function getPrimaryAgentLabel(agent) {
-  if (!agent) return ''
-  if (isOrchestrator(agent)) return agent.agent_name || agent.agent_display_name || ''
-  return agent.agent_display_name || agent.agent_name || ''
-}
-
 function getAgentAbbr(displayName) {
   return getAgentInitials(displayName)
 }
@@ -428,28 +423,13 @@ function getMessageBadgeClass(agent) {
  * BE-5107: backend computes duration_seconds; FE ticks locally between WS
  * events using working_started_at as the anchor so the cell doesn't freeze.
  * Terminal statuses trust the backend's frozen duration_seconds.
+ *
+ * FE-9548: the anchor/format logic itself now lives in durationFormat.js so
+ * the Jobs board's compact agent rows render an identical string — this stays
+ * a thin wrapper over the shared helper rather than a second implementation.
  */
 function formatDuration(agent) {
-  const terminal = agent?.status === 'complete' || agent?.status === 'closed'
-  let total = agent?.duration_seconds
-  if (!terminal && agent?.working_started_at) {
-    const anchor = Date.parse(agent.working_started_at)
-    if (!Number.isNaN(anchor)) {
-      total = (props.now - anchor) / 1000
-    }
-  }
-  if (total == null) return '---'
-
-  const seconds = Math.max(0, Math.floor(total))
-  if (seconds < 60) return `${seconds}s`
-  if (seconds < 3600) {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins}m ${secs}s`
-  }
-  const hours = Math.floor(seconds / 3600)
-  const mins = Math.floor((seconds % 3600) / 60)
-  return `${hours}h ${mins}m`
+  return formatAgentDuration(agent, props.now)
 }
 </script>
 
@@ -663,35 +643,9 @@ tbody td {
     color: inherit;
   }
 
-  .msg-badge {
-    display: inline-grid;
-    place-items: center;
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
-    font-size: 0.62rem;
-    font-weight: 600;
-
-    &.zero {
-      background: rgba($color-status-complete, 0.12);
-      color: $color-status-complete;
-    }
-
-    &.has-msgs {
-      background: rgba($color-status-blocked, 0.15);
-      color: $color-status-blocked;
-    }
-
-    // BE-9273: reuses $color-status-staged — the SAME amber statusConfig.js
-    // (STATUS_COLORS.CLOSEOUT) already uses for "Decision Required" on the
-    // status cell, so "needs your action" reads as one consistent signal
-    // across the row rather than a one-off color.
-    &.needs-action {
-      background: rgba($color-status-staged, 0.2);
-      color: $color-status-staged;
-      font-weight: 700;
-    }
-  }
+  // .msg-badge itself is promoted to the shared, unscoped main.scss
+  // (FE-9551) so JobsBoardAgentRow.vue/JobsBoardDetailModal.vue can reuse the
+  // exact same messages-waiting pill instead of a bespoke one.
 
   &.actions-cell {
     text-align: right;
@@ -783,9 +737,12 @@ tbody tr:last-child td {
   }
 }
 
-/* Responsive: portrait / narrow screens — hide extra columns */
+/* Responsive: portrait / narrow screens — hide extra columns.
+   FE-9536: harmonized from a bespoke 768px onto $breakpoint-mobile (600px) --
+   MUST stay identical to JobsTab's thead th.hide-mobile breakpoint below, or
+   headers and cells hide at different widths and the columns misalign. */
 /* DUPLICATED in JobsTab for thead th.hide-mobile; here covers td.hide-mobile */
-@media (max-width: 768px) {
+@media (max-width: $breakpoint-mobile) {
   .hide-mobile {
     display: none;
   }

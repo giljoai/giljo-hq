@@ -40,7 +40,7 @@ _ADAPTER_TOOLS = frozenset(
         "get_agent_result",
         "request_approval",
         "stage_project",
-        "implement_project",
+        "get_implementation_prompt",
         "launch_implementation",
         "update_project_mission",
         "set_agent_status",
@@ -48,7 +48,7 @@ _ADAPTER_TOOLS = frozenset(
         "write_project_closeout",
         "write_memory_entry",
         "get_context",
-        "get_vision_doc",
+        "get_vision_document",
         "update_product_context",
         "list_agent_templates",
         # BE-6225c: renamed from propose_product_context_update (applies tuning directly).

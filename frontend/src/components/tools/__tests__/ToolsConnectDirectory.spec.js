@@ -60,6 +60,13 @@ const globalStubs = {
 const NO_CREDS = { has_valid_api_key: false, has_valid_oauth: false, has_expired_oauth: false }
 const VALID_KEY = { has_valid_api_key: true, has_valid_oauth: false, has_expired_oauth: false }
 const EXPIRED_OAUTH = { has_valid_api_key: false, has_valid_oauth: false, has_expired_oauth: true }
+// FE-9500: a credential is NOT a connection. Per-tool "Configured" now requires a
+// completed MCP handshake, reported as connected_harnesses (backend harness tokens,
+// e.g. 'claude-code' -> tool id 'claude_code'). VALID_KEY alone must light NOTHING.
+const KEY_AND_CLAUDE_CONNECTED = {
+  ...VALID_KEY,
+  connected_harnesses: { 'claude-code': '2026-08-25T02:00:00Z' },
+}
 
 // ToolsConnectDirectory now registers real window listeners (api-key-created /
 // api-key-revoked, FE-9274) on mount. Track every mounted wrapper and unmount it
@@ -146,12 +153,26 @@ describe('ToolsConnectDirectory — FE-9274 durable Configured state', () => {
     expect(wrapper.find('[data-testid="dir-tool-codex_cli"]').text()).toContain('Not set up')
   })
 
-  it('renders Configured (green) on mount when a valid API key already exists — workspace-level, ALL rows', async () => {
+  // FE-9500 INVERSION (was: "renders Configured on ALL rows when a valid API key
+  // exists — workspace-level"). That WAS the defect, pinned as a contract: holding a
+  // credential lit every tool card, so connecting OpenCode showed Claude Code and
+  // Antigravity as connected on machines where neither was installed. The assertion
+  // is inverted rather than deleted — the old expectation is preserved here as the
+  // thing that must never come back.
+  it('a valid API key alone configures NO row — a credential is not a connection', async () => {
     mockCredentialStatus.mockResolvedValue({ data: { ...VALID_KEY } })
     const wrapper = await mountDir()
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"] .dir-rail-dot--configured').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="dir-tool-codex_cli"] .dir-rail-dot--configured').exists()).toBe(false)
+  })
+
+  it('only the tool that completed a handshake renders Configured', async () => {
+    mockCredentialStatus.mockResolvedValue({ data: { ...KEY_AND_CLAUDE_CONNECTED } })
+    const wrapper = await mountDir()
     expect(wrapper.find('[data-testid="dir-tool-claude_code"] .dir-rail-dot--configured').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="dir-tool-codex_cli"] .dir-rail-dot--configured').exists()).toBe(true)
     expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).toContain('Configured')
+    // codex_cli never connected — it must stay dark even though the account holds a key.
+    expect(wrapper.find('[data-testid="dir-tool-codex_cli"] .dir-rail-dot--configured').exists()).toBe(false)
   })
 
   it('renders the amber "Requires re-authentication" state when OAuth expired and no valid key covers it', async () => {
@@ -162,7 +183,7 @@ describe('ToolsConnectDirectory — FE-9274 durable Configured state', () => {
   })
 
   it('CORE BUG FIX: status survives unmount + remount (navigate away and back) instead of reverting to waiting', async () => {
-    mockCredentialStatus.mockResolvedValue({ data: { ...VALID_KEY } })
+    mockCredentialStatus.mockResolvedValue({ data: { ...KEY_AND_CLAUDE_CONNECTED } })
     const wrapper = await mountDir()
     expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).toContain('Configured')
 
@@ -174,22 +195,46 @@ describe('ToolsConnectDirectory — FE-9274 durable Configured state', () => {
     expect(wrapper2.find('[data-testid="dir-tool-claude_code"] .dir-rail-dot--configured').exists()).toBe(true)
   })
 
-  it('refetches and flips to Configured on the generic setup:tool_connected WS event', async () => {
+  // The REFETCH is the invariant here: the directory re-reads durable status rather
+  // than guessing locally from the event. FE-9500 changed WHAT the refetch finds
+  // (per-tool), not that it refetches — and the event now names the harness, so the
+  // legacy 'mcp_connected' literal is kept to prove old payloads still trigger it.
+  it('refetches on the setup:tool_connected WS event and flips only the connected tool', async () => {
     const wrapper = await mountDir()
     expect(wrapper.find('[data-testid="dir-tool-codex_cli"]').text()).toContain('Not set up')
 
-    mockCredentialStatus.mockResolvedValue({ data: { ...VALID_KEY } })
+    mockCredentialStatus.mockResolvedValue({ data: { ...KEY_AND_CLAUDE_CONNECTED } })
     wsHandlers['setup:tool_connected']({ tool_name: 'mcp_connected' })
     await flushPromises()
 
     expect(mockCredentialStatus).toHaveBeenCalledTimes(2)
     expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).toContain('Configured')
-    expect(wrapper.find('[data-testid="dir-tool-codex_cli"]').text()).toContain('Configured')
+    expect(wrapper.find('[data-testid="dir-tool-codex_cli"]').text()).not.toContain('Configured')
+  })
+
+  // FE-9569: FE-9500 changed the backend to emit the RESOLVED harness token
+  // (e.g. 'claude-code'), never the 'mcp_connected' placeholder this handler
+  // used to gate on -- so in production that gate was permanently false and a
+  // real connect never refetched here; the directory only ever updated on its
+  // own mount, api-key-created, or api-key-revoked. Pinned by
+  // tests/unit/test_fe9500_per_harness_connect_truth.py:53 that the literal
+  // is gone from the middleware. This is the SAME dead-code family, one layer
+  // up, in this component's own WS handler.
+  it('refetches on a REAL resolved-harness payload, not just the retired mcp_connected literal', async () => {
+    const wrapper = await mountDir()
+    expect(wrapper.find('[data-testid="dir-tool-codex_cli"]').text()).toContain('Not set up')
+
+    mockCredentialStatus.mockResolvedValue({ data: { ...KEY_AND_CLAUDE_CONNECTED } })
+    wsHandlers['setup:tool_connected']({ tool_name: 'claude-code' })
+    await flushPromises()
+
+    expect(mockCredentialStatus).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).toContain('Configured')
   })
 
   it('refetches on the api-key-created window event', async () => {
     const wrapper = await mountDir()
-    mockCredentialStatus.mockResolvedValue({ data: { ...VALID_KEY } })
+    mockCredentialStatus.mockResolvedValue({ data: { ...KEY_AND_CLAUDE_CONNECTED } })
 
     window.dispatchEvent(new Event('api-key-created'))
     await flushPromises()
@@ -199,7 +244,7 @@ describe('ToolsConnectDirectory — FE-9274 durable Configured state', () => {
   })
 
   it('an api-key-revoked event that leaves no valid credential shows "API key deleted" (in-session only)', async () => {
-    mockCredentialStatus.mockResolvedValue({ data: { ...VALID_KEY } })
+    mockCredentialStatus.mockResolvedValue({ data: { ...KEY_AND_CLAUDE_CONNECTED } })
     const wrapper = await mountDir()
     expect(wrapper.find('[data-testid="dir-tool-claude_code"]').text()).toContain('Configured')
 
@@ -216,8 +261,10 @@ describe('ToolsConnectDirectory — FE-9274 durable Configured state', () => {
     expect(wrapper2.find('[data-testid="dir-tool-claude_code"]').text()).not.toContain('API key deleted')
   })
 
+  // The "deleted" notice is WORKSPACE-scoped (a revoke is an account event), which is
+  // why it still keys off the credential flags and not per-tool status.
   it('an api-key-revoked event that STILL leaves a valid credential does not show "API key deleted"', async () => {
-    mockCredentialStatus.mockResolvedValue({ data: { ...VALID_KEY } })
+    mockCredentialStatus.mockResolvedValue({ data: { ...KEY_AND_CLAUDE_CONNECTED } })
     const wrapper = await mountDir()
 
     window.dispatchEvent(new Event('api-key-revoked'))

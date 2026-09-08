@@ -157,6 +157,13 @@ _TENANT_LEVEL_INVENTORY: list[tuple[str, str, str, str, str]] = [
     # FE-9296b: the account-level check-in cadence, hosted exactly like the
     # silence threshold above (same handler shape, same tenant flow).
     ("settings", "/api/v1/settings", "PUT", "/system/agent-checkin-cadence", "service_injected"),
+    # FE-9555: the account-level execution-mode default behind Tools -> Agents.
+    # Same handler shape and same tenant flow as PUT /general above -- tenant comes
+    # from current_user.tenant_key into SettingsService, category `general`. Unlike
+    # the two system/* rows, there is no CE-vs-SaaS split: `general` is already
+    # tenant-scoped, so one path serves both editions. Only the PUT is listed
+    # because only the PUT is require_admin; the GET is get_current_active_user.
+    ("settings", "/api/v1/settings", "PUT", "/execution-mode-default", "service_injected"),
 ]
 
 

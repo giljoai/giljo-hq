@@ -54,7 +54,7 @@ CANONICAL_ORCHESTRATOR_TOOLS: tuple[str, ...] = (
     # in the SOLO orchestrator's own core coordination loop (Unblock / Broadcast /
     # RECEIVE, orchestrator_body.py) so they stay in the boot bundle -- every
     # orchestrator hits them on its first wake-up, not just a chain role. The
-    # broader Hub roster (create_thread / join_thread / search_threads / get_my_turn)
+    # broader Hub roster (create_thread / join_thread / list_threads / get_my_turn)
     # stays a deliberate ToolSearch add-on for chain roles only (see
     # CH_SUB_ORCHESTRATOR's "ADD ... to your FIRST ToolSearch query" note in
     # chapters_chain.py) rather than a boot-bundle default.
@@ -66,8 +66,8 @@ CANONICAL_ORCHESTRATOR_TOOLS: tuple[str, ...] = (
     f"{_PREFIX}update_project_mission",
     f"{_PREFIX}update_job_mission",
     f"{_PREFIX}complete_job",
-    f"{_PREFIX}close_job",
-    f"{_PREFIX}resolve_reactivation",
+    f"{_PREFIX}finalize_job",
+    f"{_PREFIX}resume_or_dismiss_job",
     f"{_PREFIX}write_memory_entry",
     f"{_PREFIX}write_project_closeout",
     f"{_PREFIX}get_agent_result",

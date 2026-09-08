@@ -70,12 +70,17 @@ async def _seed_project_with_agents(db_session, tenant: str, agents: list[tuple[
     with tenant_session_context(db_session, tenant):
         # BE-9437: a project belongs to a product. Its own, so an active
         # seed cannot collide under idx_project_single_active_per_product.
+        # FE-9530: shown (is_active=True), matching real create_product defaults --
+        # test_standalone_thread_not_auto_enrolled's create_thread call has no
+        # project_id to derive a product from, so it falls to the tenant's
+        # sole-shown-product default; a hidden product with no default set would
+        # 422 there for a reason this file's tests have nothing to do with.
         _owning_product_project = Product(
             id=str(uuid.uuid4()),
             tenant_key=tenant,
             name=f"Owning Product {uuid.uuid4().hex[:6]}",
             description="seeded",
-            is_active=False,
+            is_active=True,
         )
         db_session.add(_owning_product_project)
         project = Project(

@@ -23,8 +23,12 @@ from sqlalchemy import func, select
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
 from giljo_mcp.models.auth import User
+from giljo_mcp.models.products import Product
+from giljo_mcp.models.projects import Project
+from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.models.tasks import Message, MessageAcknowledgment
 from giljo_mcp.services.comm_thread_service import CommThreadService
+from giljo_mcp.services.product_service import ProductAmbiguousError
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
 
@@ -339,7 +343,7 @@ async def test_be9379_user_attribution_is_explicit_never_the_omission_default(db
 async def test_be9037_ad_hoc_lane_id_posts_and_batons(db_manager, db_session):
     """The tonight-critical guarantee: an ad-hoc lane id that is NOT a registered
     template (e.g. BE-9037) still posts, is stored verbatim as the addressing key,
-    self-excludes from its own broadcast, and drives get_my_turn / pass_baton —
+    self-excludes from its own broadcast, and drives get_my_turn / set_next_actor —
     sanitize-and-accept, never reject, never a UUID rewrite."""
     tenant = _tk("be9037_lane")
     await _seed(db_session, tenant)
@@ -357,3 +361,207 @@ async def test_be9037_ad_hoc_lane_id_posts_and_batons(db_manager, db_session):
     assert tid in {t["thread_id"] for t in mine["threads"]}
     handoff = await svc.pass_baton(thread_id=tid, to="SEC-3001b", tenant_key=tenant)
     assert handoff["next_action_owner"] == "SEC-3001b"
+
+
+# ---------------------------------------------------------------------------
+# FE-9530 — an omitted product_id is now RESOLVED, not left NULL.
+# Three carve-outs: sequence_run_id (chain conductor), zero-product tenant
+# (genuinely nothing to resolve to), and project_id (derives from the
+# project's OWN product rather than the tenant's shown/default one).
+# ---------------------------------------------------------------------------
+
+
+async def _seed_product(db_session, tenant: str, *, is_active: bool = True, is_default: bool = False) -> str:
+    with tenant_session_context(db_session, tenant):
+        product = Product(
+            tenant_key=tenant,
+            name=f"FE-9530 create_thread product {tenant}",
+            description="seeded",
+            is_active=is_active,
+            is_default=is_default,
+        )
+        db_session.add(product)
+        await db_session.flush()
+    return product.id
+
+
+async def _seed_sequence_run(db_session, tenant: str) -> str:
+    with tenant_session_context(db_session, tenant):
+        run = SequenceRun(
+            tenant_key=tenant,
+            project_ids=[],
+            resolved_order=[],
+            execution_mode="multi_terminal",
+        )
+        db_session.add(run)
+        await db_session.flush()
+    return run.id
+
+
+async def test_create_thread_on_a_zero_product_tenant_stays_product_less(db_manager, db_session):
+    """Ruling 1's stated exception: 'unless application has no product.'"""
+    tenant = _tk("fe9530_noproduct")
+    await _seed(db_session, tenant)
+    svc = _service(db_manager, db_session)
+
+    thread = await svc.create_thread(subject="first ever thread", creator_id="agent-a", tenant_key=tenant)
+
+    assert thread["product_id"] is None
+
+
+async def test_create_thread_with_a_single_product_resolves_silently(db_manager, db_session):
+    """One product, none named -> resolves to it. Same ergonomics as create_task."""
+    tenant = _tk("fe9530_oneproduct")
+    await _seed(db_session, tenant)
+    product_id = await _seed_product(db_session, tenant, is_active=True)
+    svc = _service(db_manager, db_session)
+
+    thread = await svc.create_thread(subject="sole product", creator_id="agent-a", tenant_key=tenant)
+
+    assert thread["product_id"] == product_id
+
+
+async def test_create_thread_with_multiple_products_and_none_named_is_ambiguous(db_manager, db_session):
+    """Mandatory tagging enforced: several products, none named -> PRODUCT_AMBIGUOUS,
+    not a silently product-less thread."""
+    tenant = _tk("fe9530_ambiguous")
+    await _seed(db_session, tenant)
+    await _seed_product(db_session, tenant, is_active=True)
+    await _seed_product(db_session, tenant, is_active=True)
+    svc = _service(db_manager, db_session)
+
+    with pytest.raises(ProductAmbiguousError):
+        await svc.create_thread(subject="which one", creator_id="agent-a", tenant_key=tenant)
+
+
+async def test_chain_conductor_create_is_exempt_from_mandatory_resolution(db_manager, db_session):
+    """Finding 2: the conductor's Step-0 create_thread carries sequence_run_id and
+    deliberately no project_id -- forcing resolution there would 422 the one call
+    every chain depends on. This must stay product-less even with several products
+    in play, exactly the case that would otherwise raise ProductAmbiguousError."""
+    tenant = _tk("fe9530_conductor")
+    await _seed(db_session, tenant)
+    await _seed_product(db_session, tenant, is_active=True)
+    await _seed_product(db_session, tenant, is_active=True)
+    run_id = await _seed_sequence_run(db_session, tenant)
+    svc = _service(db_manager, db_session)
+
+    thread = await svc.create_thread(subject="Chain: hub", sequence_run_id=run_id, tenant_key=tenant)
+
+    assert thread["product_id"] is None
+    assert thread["sequence_run_id"] == run_id
+
+
+async def test_create_thread_with_explicit_product_id_is_never_overridden(db_manager, db_session):
+    tenant = _tk("fe9530_explicit")
+    await _seed(db_session, tenant)
+    product_a = await _seed_product(db_session, tenant, is_active=True)
+    product_b = await _seed_product(db_session, tenant, is_active=True)
+    svc = _service(db_manager, db_session)
+
+    thread = await svc.create_thread(subject="explicit", creator_id="agent-a", product_id=product_b, tenant_key=tenant)
+
+    assert thread["product_id"] == product_b
+    assert thread["product_id"] != product_a
+
+
+async def test_create_thread_with_project_id_derives_product_from_the_project(db_manager, db_session):
+    """A thread anchored to project P belongs to P's product regardless of which
+    tab is currently shown/default -- verified by seeding a SECOND, shown/default
+    product for the tenant and confirming the thread binds to the project's
+    product, not that other one."""
+    tenant = _tk("fe9530_derive")
+    await _seed(db_session, tenant)
+    project_product = await _seed_product(db_session, tenant, is_active=False)
+    decoy_product = await _seed_product(db_session, tenant, is_active=True, is_default=True)
+    with tenant_session_context(db_session, tenant):
+        project = Project(
+            name="FE-9530 derive project",
+            description="d",
+            mission="m",
+            status="active",
+            tenant_key=tenant,
+            product_id=project_product,
+            series_number=1,
+            execution_mode="claude_code_cli",
+        )
+        db_session.add(project)
+        await db_session.flush()
+        project_id = project.id
+    svc = _service(db_manager, db_session)
+
+    thread = await svc.create_thread(subject="bound", creator_id="agent-a", project_id=project_id, tenant_key=tenant)
+
+    assert thread["product_id"] == project_product
+    assert thread["product_id"] != decoy_product
+
+
+# ---------------------------------------------------------------------------
+# BE-9537 -- a chain-conductor create composed the way a headless conductor
+# actually does (sequence_run_id only, no project_id) now DERIVES the product
+# from the run's head project instead of staying permanently untagged.
+# ---------------------------------------------------------------------------
+
+
+async def _seed_sequence_run_with_head_project(db_session, tenant: str, head_project_id: str) -> str:
+    with tenant_session_context(db_session, tenant):
+        run = SequenceRun(
+            tenant_key=tenant,
+            project_ids=[head_project_id],
+            resolved_order=[head_project_id],
+            execution_mode="multi_terminal",
+        )
+        db_session.add(run)
+        await db_session.flush()
+    return run.id
+
+
+async def test_chain_conductor_create_derives_product_from_the_runs_head_project(db_manager, db_session):
+    """The headless-conductor path: create_thread is composed with ONLY
+    sequence_run_id (no project_id, no product_id) -- exactly how a conductor
+    that builds its own call, rather than copying FE-9530's seed text, produces
+    it. The run's resolved_order[0] names a real project with a real product,
+    so the thread must come back tagged with THAT product, not left null."""
+    tenant = _tk("be9537_head_project")
+    await _seed(db_session, tenant)
+    head_product = await _seed_product(db_session, tenant, is_active=True)
+    decoy_product = await _seed_product(db_session, tenant, is_active=True, is_default=True)
+    with tenant_session_context(db_session, tenant):
+        head_project = Project(
+            name="BE-9537 head project",
+            description="d",
+            mission="m",
+            status="active",
+            tenant_key=tenant,
+            product_id=head_product,
+            series_number=1,
+            execution_mode="claude_code_cli",
+        )
+        db_session.add(head_project)
+        await db_session.flush()
+        head_project_id = head_project.id
+    run_id = await _seed_sequence_run_with_head_project(db_session, tenant, head_project_id)
+    svc = _service(db_manager, db_session)
+
+    thread = await svc.create_thread(subject="Chain: hub", sequence_run_id=run_id, tenant_key=tenant)
+
+    assert thread["product_id"] == head_product
+    assert thread["product_id"] != decoy_product
+    assert thread["sequence_run_id"] == run_id
+
+
+async def test_chain_conductor_create_stays_untagged_when_head_project_is_unresolvable(db_manager, db_session):
+    """Decided case: resolved_order names a project id that no longer resolves
+    (purged/renamed away). Derivation must not raise or 422 the conductor's
+    Step-0 create -- it stays untagged, with FE-9530's seed-text interpolation
+    remaining the fallback for a conductor that copies it faithfully."""
+    tenant = _tk("be9537_purged_head")
+    await _seed(db_session, tenant)
+    await _seed_product(db_session, tenant, is_active=True)
+    run_id = await _seed_sequence_run_with_head_project(db_session, tenant, "nonexistent-purged-project-id")
+    svc = _service(db_manager, db_session)
+
+    thread = await svc.create_thread(subject="Chain: hub", sequence_run_id=run_id, tenant_key=tenant)
+
+    assert thread["product_id"] is None
+    assert thread["sequence_run_id"] == run_id

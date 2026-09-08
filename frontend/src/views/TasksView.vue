@@ -129,17 +129,17 @@
       @update:current-task="onCurrentTaskUpdate"
     />
 
-    <!-- No Active Product Warning Dialog -->
+    <!-- No Product Open Warning Dialog -->
     <BaseDialog
       v-model="showNoProductDialog"
       type="warning"
-      title="No Active Product"
+      title="No Product Open"
       confirm-label="OK"
       cancel-text=""
       @confirm="showNoProductDialog = false"
     >
       <p class="text-body-large">
-        No products are set to active state. Please activate a product before creating or converting tasks.
+        No product is open. Add a product before creating or converting tasks.
       </p>
     </BaseDialog>
 
@@ -157,7 +157,7 @@
         Convert task <strong>"{{ conversionTaskName }}"</strong> to a project?
       </p>
       <p class="text-body-medium text-muted-a11y">
-        This will create a new project in the active product with the task's title and
+        This will create a new project in the viewed product with the task's title and
         description.
       </p>
     </BaseDialog>

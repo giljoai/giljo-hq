@@ -75,40 +75,10 @@ import { useSequenceRunner } from '@/composables/useSequenceRunner'
 import { useSequenceRunStore } from '@/stores/sequenceRunStore'
 import SequenceBulkBar from '@/components/sequence/SequenceBulkBar.vue'
 
-// ---------------------------------------------------------------------------
-// (a): releaseChain and unstageChain call onDissolved on success
-// ---------------------------------------------------------------------------
-describe('FE-6170 (a): releaseChain calls onDissolved callback on success', () => {
-  beforeEach(() => {
-    // FE-6171b: useChainLifecycle now uses useSequenceRunStore; Pinia must be active.
-    setActivePinia(createPinia())
-    vi.clearAllMocks()
-    mockApiRoadmapGet.mockResolvedValue({ data: { items: [] } })
-  })
-
-  it('invokes the onDissolved callback after a successful release', async () => {
-    mockApiRelease.mockResolvedValueOnce({ data: { id: 'run-1', status: 'cancelled' } })
-
-    const { releaseChain } = useChainLifecycle()
-    const onDissolved = vi.fn(() => Promise.resolve())
-    const ok = await releaseChain({ id: 'run-1', status: 'running' }, onDissolved)
-
-    expect(ok).toBe(true)
-    expect(mockApiRelease).toHaveBeenCalledWith('run-1', 'cancel')
-    expect(onDissolved).toHaveBeenCalledTimes(1)
-  })
-
-  it('does NOT invoke onDissolved when release fails', async () => {
-    mockApiRelease.mockRejectedValueOnce(new Error('server error'))
-
-    const { releaseChain } = useChainLifecycle()
-    const onDissolved = vi.fn()
-    const ok = await releaseChain({ id: 'run-1', status: 'running' }, onDissolved)
-
-    expect(ok).toBe(false)
-    expect(onDissolved).not.toHaveBeenCalled()
-  })
-})
+// FE-9503a: the FE-6170 (a) releaseChain/onDissolved describe block was removed
+// here -- releaseChain itself was deleted as zero-caller dead code (dossier in
+// the FE-9503a project record). mockApiRelease stays wired (used below to
+// assert unstageChain does NOT call release).
 
 // FE-6171b REDEFINITION: unstageChain is now UNLOCK (locked=false), NOT dissolve.
 // The old FE-6170 tests expected release(cancel)+onDissolved — those semantics are gone.

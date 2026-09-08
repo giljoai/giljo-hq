@@ -172,6 +172,11 @@ describe('SystemStatusBanner (FE-9202 unified Gil banner)', () => {
       bannerRow({ id: 'c', type: 'system.pending_migrations' }),
     ]
     const ce = await mountBanner({ rows, mode: 'ce' })
+    // FE-9552: never stack -- three eligible rows fold into one strip (qty 3)
+    // and only the top one paints until the chevron expands the rest.
+    expect(ce.findAll('[data-testid="system-banner"]').length).toBe(1)
+    expect(ce.find('[data-testid="banner-fold-qty"]').text()).toBe('3')
+    await ce.find('[data-testid="banner-fold-chevron"]').trigger('click')
     expect(ce.findAll('[data-testid="system-banner"]').length).toBe(3)
 
     setActivePinia(createPinia())
@@ -336,5 +341,55 @@ describe('SystemStatusBanner (FE-9202 unified Gil banner)', () => {
     })
     await wrapper.find('[data-testid="banner-cta-btn"]').trigger('click')
     expect(h.push).toHaveBeenCalledWith({ name: 'Tools' })
+  })
+
+  // ── D17 (Headless S3d): system.tool_rename_notice was emitted by the backend
+  // and never rendered -- missing from CE_SYSTEM_TYPES entirely. ─────────────
+
+  it('D17: renders system.tool_rename_notice in CE mode', async () => {
+    const wrapper = await mountBanner({
+      rows: [
+        bannerRow({
+          id: 'trn1',
+          type: 'system.tool_rename_notice',
+          body: 'GiljoAI updated its tools',
+          cta_route: 'Tools',
+        }),
+      ],
+      mode: 'ce',
+    })
+    const row = wrapper.find('[data-testid="system-banner"]')
+    expect(row.exists()).toBe(true)
+    expect(row.text()).toContain('GiljoAI updated its tools')
+  })
+
+  it('D17: tool_rename_notice is CE-only, absent from the SaaS allowlist', async () => {
+    const wrapper = await mountBanner({
+      rows: [bannerRow({ id: 'trn1', type: 'system.tool_rename_notice' })],
+      mode: 'saas',
+    })
+    expect(wrapper.find('[data-testid="system-banner"]').exists()).toBe(false)
+  })
+
+  // ── D16 (Headless S3d): a resolved banner never disappeared until refresh --
+  // resolve_by_dedupe_key emitted no event, so the store never learned the row
+  // was gone. Reproduced here at the layer this component actually reads:
+  // bannerNotifications is a computed filter over the store's `notifications`
+  // ref, so once the row's resolved_at flips (as notification:resolved's
+  // handler now does), the banner must drop it on its own -- no refetch, no
+  // remount. ──────────────────────────────────────────────────────────────
+  it('D16: a banner disappears live once its notification resolves, no remount', async () => {
+    const wrapper = await mountBanner({
+      rows: [bannerRow({ id: 'r1', type: 'system.skills_drift', body: 'Skills drifted' })],
+    })
+    expect(wrapper.find('[data-testid="system-banner"]').exists()).toBe(true)
+
+    const notif = useNotificationStore()
+    // Mirrors handleWsResolvedNotification's effect (id dropped from the list) --
+    // exercising the store's real contract without wiring the WS mock plumbing.
+    notif.notifications = notif.notifications.filter((n) => n.id !== 'r1')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="system-banner"]').exists()).toBe(false)
   })
 })

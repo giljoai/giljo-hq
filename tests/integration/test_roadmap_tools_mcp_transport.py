@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Transport-layer tests for the ``update_roadmap_metadata`` MCP tool (FE-6022a).
+Transport-layer tests for the ``save_roadmap`` MCP tool (FE-6022a).
 
 Honors the BE-5042 lesson: the FastMCP ``@mcp.tool`` wrapper must be exercised
 through the in-memory transport, not just the service layer. This drives the
@@ -149,7 +149,7 @@ async def test_update_roadmap_metadata_happy_path(roadmap_mcp_client, db_session
 
     async with new_client() as session:
         result = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [
                     {
@@ -177,7 +177,7 @@ async def test_update_roadmap_metadata_bad_enum_surfaces_error(roadmap_mcp_clien
 
     async with new_client() as session:
         result = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {"items": [{"item_type": "project", "project_id": seed["project_id"], "sort_order": 0, "risk": "nuclear"}]},
         )
 
@@ -200,7 +200,7 @@ async def test_update_roadmap_metadata_cross_tenant_project_rejected(roadmap_mcp
     switch.value = tenant_b
     async with new_client() as session:
         result = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {"items": [{"item_type": "project", "project_id": seed_a["project_id"], "sort_order": 0}]},
         )
 
@@ -217,7 +217,7 @@ async def test_get_roadmap_reads_back_through_transport(roadmap_mcp_client, db_s
     async with new_client() as session:
         # Write one item, then read it back through the read tool.
         await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [
                     {
@@ -257,7 +257,7 @@ async def test_update_roadmap_metadata_blocked_and_sort_order_round_trip(roadmap
 
     async with new_client() as session:
         write = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [
                     {
@@ -288,7 +288,7 @@ async def test_update_roadmap_metadata_bad_blocked_type_surfaces_error(roadmap_m
 
     async with new_client() as session:
         result = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {"items": [{"item_type": "project", "project_id": seed["project_id"], "sort_order": 0, "blocked": "yes"}]},
         )
 
@@ -305,7 +305,7 @@ async def test_update_roadmap_metadata_remove_param_evicts_through_transport(roa
 
     async with new_client() as session:
         await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [
                     {"item_type": "project", "project_id": seed["project_id"], "sort_order": 0},
@@ -314,7 +314,7 @@ async def test_update_roadmap_metadata_remove_param_evicts_through_transport(roa
             },
         )
         result = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [],
                 "remove": [{"item_type": "project", "project_id": seed["project_id"]}],
@@ -339,7 +339,7 @@ async def test_update_roadmap_metadata_remove_bad_shape_surfaces_error(roadmap_m
 
     async with new_client() as session:
         result = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {"items": [], "remove": [{"item_type": "epic", "project_id": seed["project_id"]}]},
         )
 

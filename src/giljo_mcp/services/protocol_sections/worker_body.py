@@ -141,6 +141,18 @@ def _build_worker_protocol_body(
     prose then degrades to a banner telling the agent to skip the Hub calls below
     rather than embedding a bogus thread id into a tool example.
     BE-9260: ``tool`` drives the harness-neutral ``task_list_phrase`` wording (was hardcoded "TodoWrite").
+
+    BE-9543: this renderer is only reached for non-orchestrator ``job_type``s
+    (``_generate_agent_protocol`` in ``agent_protocol.py`` branches orchestrator jobs to
+    ``_generate_orchestrator_protocol`` / ``orchestrator_body.py`` before this function is
+    ever called). A "Phase 4 — ORCHESTRATOR ADDENDUM" section describing the closeout
+    call sequence used to render here anyway -- dead prose no real orchestrator ever saw,
+    shown instead to every worker, and wrong on top of that (it told the reader to call
+    ``write_memory_entry`` between ``complete_job`` and ``write_project_closeout``, which
+    double-writes the 360: ``write_project_closeout`` persists its own ``project_closeout``
+    entry via ``_build_and_persist_memory_entry`` in ``tools/project_closeout.py``). The
+    one correct, orchestrator-facing statement of that sequence lives in
+    ``orchestrator_body.py``'s Phase 3 closeout steps -- do not re-add a copy here.
     """
     phase1_step0 = _phase1_step0(preset)
     todo_phrase = task_list_phrase(tool)
@@ -248,32 +260,6 @@ If you call `complete_job()` without meeting these requirements:
 - System will REJECT your completion
 - Response will list specific blockers (unread messages, incomplete TODOs)
 
-#### Phase 4 — ORCHESTRATOR ADDENDUM: Closeout sequence
-
-Orchestrators MUST NOT place `write_memory_entry(...)` or `write_project_closeout(...)`
-on their {todo_phrase}. Those calls execute AFTER `complete_job()` returns success — an
-entry for them there would be unmarkable until after `complete_job` runs, and the
-COMPLETION_BLOCKED gate would then trap you with an unfinished TODO.
-
-Your final pre-completion TODO should read something like
-"Verify all agents complete and prepare closeout summary." Mark it complete IMMEDIATELY
-BEFORE calling `complete_job()` — the act of calling `complete_job()` IS the start of the
-closeout sequence, not a step that follows it.
-
-Canonical post-completion sequence (mirrors `project_closeout.py` required_sequence):
-
-1. `complete_job(job_id=...)` — orchestrator completes itself FIRST
-2. `write_memory_entry(...)` — write the project memory entry
-3. `write_project_closeout(project_id=..., force=False)` — final close after all agents complete
-
-Example ordered calls:
-
-```
-# All agent work verified, all messages read, all pre-closeout TODOs marked complete
-complete_job(job_id="...", result={{"summary": "...", "artifacts": [...]}})  # closeout step 1
-write_memory_entry(project_id="...", ...)                                    # closeout step 2 (post-complete_job)
-write_project_closeout(project_id="...", force=False)                        # closeout step 3
-```
 {git_commit_block}{giljo_block}
 ### Phase 5: ERROR HANDLING & BLOCKED STATUS
 

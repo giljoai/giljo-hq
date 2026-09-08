@@ -28,7 +28,7 @@ is provably another agent's):
 * ``request_approval`` — ZERO calls in 530 sessions. Its classification cannot be
   established by observation at all; what CAN be established is that it does reach the
   hook, since its wrapper forwards ``job_id`` into ``_call_tool``. That is pinned below
-  so the name is not merely decorative the way ``resolve_reactivation`` would have been.
+  so the name is not merely decorative the way ``resume_or_dismiss_job`` would have been.
 
 NOTHING IS RECLASSIFIED, and the evidence for leaving it alone is the load-bearing
 half: session 625057eb's only job-carrying calls on job 5d57e77c are
@@ -154,7 +154,7 @@ async def test_request_approval_reaches_the_hook_at_all(boundary):
 
     It matters because a classified name that never reaches ``_call_tool`` under that
     dispatch string is decoration — the trap ``_silence_scope`` documents for
-    ``resolve_reactivation``, which arrives as ``reactivate_job`` /
+    ``resume_or_dismiss_job``, which arrives as ``reactivate_job`` /
     ``dismiss_reactivation`` and would have been classified under a name that never
     matches. Its wrapper forwards ``job_id`` into the dispatch kwargs, so the hook is
     genuinely live for it, and this pins that it stays so.

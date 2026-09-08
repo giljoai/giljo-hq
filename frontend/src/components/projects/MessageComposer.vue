@@ -134,7 +134,7 @@ async function resolveProjectThread() {
  * Resolve the chain conductor's own coordination thread. The conductor mints
  * this itself as the FIRST action of its protocol (subject "Chain run
  * {run_id} coordination hub", never surfaced on the run record), so the FE
- * finds it the SAME way every sub-orchestrator does: search_threads(run_id).
+ * finds it the SAME way every sub-orchestrator does: list_threads(query=run_id).
  * Returns null if the conductor hasn't created it yet — never fabricated.
  */
 async function resolveConductorThread() {

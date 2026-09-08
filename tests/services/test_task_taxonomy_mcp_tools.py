@@ -566,7 +566,7 @@ async def test_list_tasks_is_scoped_to_active_product(db_session, two_tenant_ser
 
 
 async def test_list_tasks_requires_active_product(db_session, db_manager):
-    """With no active product set, list_tasks_for_mcp raises (parity with list_projects)."""
+    """With no default product set, list_tasks_for_mcp raises (parity with list_projects)."""
     from giljo_mcp.services.task_service import TaskService
     from giljo_mcp.tenant import TenantManager
 
@@ -580,4 +580,5 @@ async def test_list_tasks_requires_active_product(db_session, db_manager):
     with pytest.raises(ValidationError) as excinfo:
         await task_service.list_tasks_for_mcp(tenant_key=tenant_key, mode="summary")
 
-    assert "active product" in str(excinfo.value).lower()
+    # FE-9524: "default product" is the term now (is_active is shown/hidden).
+    assert "default product" in str(excinfo.value).lower()

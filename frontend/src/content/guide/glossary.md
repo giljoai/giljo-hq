@@ -6,7 +6,7 @@ Quick definitions for the terms used throughout Giljo HQ. Terms are grouped by w
 
 | Term | Meaning |
 |---|---|
-| **Product** | The software you are building. A product is the top-level container: every project, task, agent, and memory belongs to one product. It holds your context — description, tech stack, architecture, testing strategy — which agents read at the start of each session. Only one product is active at a time. |
+| **Product** | The software you are building. A product is the top-level container: every project, task, agent, and memory belongs to one product. It holds your context — description, tech stack, architecture, testing strategy — which agents read at the start of each session. You can work on several products at once, each in its own tab. |
 | **Project** | A focused unit of work inside a product, such as a feature, a refactor, or a bug fix. A project is the thing you run: it has a description, an agent team, a mission, and a closeout that writes a 360 Memory entry. |
 | **Task** | A note about work you have identified but not yet scheduled. Tasks live on the Task Board and are for capturing ideas, technical debt, and follow-ups. A task does not run agents; convert it to a project when you are ready to build it. |
 | **Job** | A single agent's assignment within a running project — its role, mission, and to-do list. The Jobs page shows one row per job so you can watch each agent's status and progress. |
@@ -48,7 +48,7 @@ Quick definitions for the terms used throughout Giljo HQ. Terms are grouped by w
 
 | Term | Meaning |
 |---|---|
-| **Roadmap** | A ranked queue, one per active product, of your inactive projects and pending tasks. Your AI agent scores each item for risk and complexity and writes the ranking; you drag to reorder, then Activate a project or Convert a task. |
+| **Roadmap** | A ranked queue, one per product, of your inactive projects and pending tasks. Your AI agent scores each item for risk and complexity and writes the ranking; you drag to reorder, then Activate a project or Convert a task. |
 | **Memory browser** | The search page at **Memory** in the left navigation — full-text search your product's accumulated 360 Memory entries by keyword, tag, or project. |
 | **Vision document** | A file you upload, or one your agent writes for you, describing your product. It feeds your product's context automatically instead of you filling every field by hand. |
 

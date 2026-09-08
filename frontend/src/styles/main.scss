@@ -49,6 +49,10 @@
   // in design-tokens.scss.
   --color-agent-researcher: #5ec48e;      // matches $color-agent-researcher
   --color-agent-reviewer: #ac80cc;        // matches $color-agent-reviewer
+  // FE-9508: SUPERSEDED now uses the orchestrator tan (operator ruling
+  // 2026-08-26) — first project status to use this token, so it had no
+  // mirror here yet.
+  --color-agent-orchestrator: #d4b08a;    // matches $color-agent-orchestrator
 
   // Brand gradients
   --gradient-brand: linear-gradient(45deg, #ffd93d, #6bcf7f);
@@ -557,6 +561,40 @@ body {
   border-radius: $border-radius-default;
   font-size: 0.75rem;
   font-weight: 600;
+}
+
+// ── Message Count Badge (round pill) ────────────────────────────────────
+// Promoted out of AgentRow.vue's own scoped CSS (FE-9551) so the Jobs board
+// can reuse the SAME messages-waiting pill instead of a bespoke .jb-msg.
+// Used by: AgentRow.vue (table cell), JobsBoardAgentRow.vue, JobsBoardDetailModal.vue.
+.msg-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 0.62rem;
+  font-weight: 600;
+
+  &.zero {
+    background: rgba($color-status-complete, 0.12);
+    color: $color-status-complete;
+  }
+
+  &.has-msgs {
+    background: rgba($color-status-blocked, 0.15);
+    color: $color-status-blocked;
+  }
+
+  // BE-9273: reuses $color-status-staged — the SAME amber statusConfig.js
+  // (STATUS_COLORS.CLOSEOUT) already uses for "Decision Required" on the
+  // status cell, so "needs your action" reads as one consistent signal
+  // across the row rather than a one-off color.
+  &.needs-action {
+    background: rgba($color-status-staged, 0.2);
+    color: $color-status-staged;
+    font-weight: 700;
+  }
 }
 
 // ── Shared Component Patterns ──────────────────────────────────────────

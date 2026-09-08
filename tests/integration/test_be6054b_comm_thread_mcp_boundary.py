@@ -15,12 +15,12 @@ Behaviors under test (over the wire):
 - create_thread mints a CHT-#### chat id + registers the creator (baton holder).
 - join_thread + post_to_thread (broadcast) persists a message; get_thread_history
   reads it back WITHOUT acknowledging.
-- get_my_turn returns threads where next_action_owner == me; pass_baton hands it on.
+- get_my_turn returns threads where next_action_owner == me; set_next_actor hands it on.
 - (A) username injection: a USER post stamps the user's display_name as sender.
 - post_to_thread does NOT require project_id (standalone thread) and skips the
   orchestration side-effects.
 - input validation at the boundary -> clean error (empty content; unknown thread).
-- search_threads finds a thread by subject keyword.
+- list_threads finds a thread by subject keyword.
 """
 
 from __future__ import annotations
@@ -219,7 +219,7 @@ async def test_get_my_turn_and_pass_baton(comm_mcp_client):
         assert mine.is_error is False, _error_text(mine)
         assert tid in {t["thread_id"] for t in _payload(mine)["threads"]}
 
-        handoff = await s.call_tool("pass_baton", {"thread_id": tid, "to": "agent-beta"})
+        handoff = await s.call_tool("set_next_actor", {"thread_id": tid, "to": "agent-beta"})
         assert handoff.is_error is False, _error_text(handoff)
         assert _payload(handoff)["next_action_owner"] == "agent-beta"
 
@@ -337,7 +337,7 @@ async def test_search_threads_by_subject(comm_mcp_client):
     new_client, _tk, _uid, _base, _mp = comm_mcp_client
     await _create_thread(new_client, subject="migration rollout plan", creator_id="agent-alpha")
     async with new_client() as s:
-        res = await s.call_tool("search_threads", {"query": "rollout"})
+        res = await s.call_tool("list_threads", {"query": "rollout"})
     assert res.is_error is False, _error_text(res)
     payload = _payload(res)
     assert payload["count"] >= 1
@@ -667,8 +667,8 @@ async def test_be9214_broadcast_and_directed_post_to_64char_agent(comm_mcp_clien
         assert directed.is_error is False, _error_text(directed)
         assert _payload(directed)["recipients"] == [_BE9214_LONG_ID]
 
-        # (d) pass_baton to the 64-char id -> baton column holds it.
-        handoff = await s.call_tool("pass_baton", {"thread_id": tid, "to": _BE9214_LONG_ID})
+        # (d) set_next_actor to the 64-char id -> baton column holds it.
+        handoff = await s.call_tool("set_next_actor", {"thread_id": tid, "to": _BE9214_LONG_ID})
         assert handoff.is_error is False, _error_text(handoff)
         assert _payload(handoff)["next_action_owner"] == _BE9214_LONG_ID
 

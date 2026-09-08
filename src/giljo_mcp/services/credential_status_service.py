@@ -34,8 +34,10 @@ async def get_credential_status(session: AsyncSession, tenant_key: str) -> Crede
     """
     has_valid_api_key = await _auth_repo.has_valid_api_key(session, tenant_key)
     has_valid_oauth, has_expired_oauth = await get_oauth_credential_status(session, tenant_key)
+    connected_harnesses = await _auth_repo.connected_harnesses(session, tenant_key)
     return CredentialStatusResult(
         has_valid_api_key=has_valid_api_key,
         has_valid_oauth=has_valid_oauth,
         has_expired_oauth=has_expired_oauth,
+        connected_harnesses=connected_harnesses,
     )

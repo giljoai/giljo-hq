@@ -377,14 +377,15 @@ class ProductAgentAssignmentService:
         exists. A failure is logged at WARNING and healed by the next activation.
 
         Args:
-            session: Caller-owned session, used only to read the active product.
+            session: Caller-owned session, used only to read the default product
+                (FE-9524: is_default, not is_active -- see get_default_product).
             template_name: Name of the agent, for the warning log.
         """
         from giljo_mcp.repositories.product_repository import ProductRepository
 
         try:
             # eager_load=False: only the id is read, never the detail relations.
-            product = await ProductRepository().get_active_product(session, self._tenant_key, eager_load=False)
+            product = await ProductRepository().get_default_product(session, self._tenant_key, eager_load=False)
             if product is None:
                 return
             await self.assign_all_templates(product.id)
@@ -436,7 +437,8 @@ class ProductAgentAssignmentService:
         that exists.
 
         Args:
-            session: Caller-owned session, used only to read the active product.
+            session: Caller-owned session, used only to read the default product
+                (FE-9524: is_default, not is_active -- see get_default_product).
             template_id: The newly created template's id.
             template_name: Name of the agent, for the warning log.
         """
@@ -444,7 +446,7 @@ class ProductAgentAssignmentService:
 
         try:
             # eager_load=False: only the id is read, never the detail relations.
-            product = await ProductRepository().get_active_product(session, self._tenant_key, eager_load=False)
+            product = await ProductRepository().get_default_product(session, self._tenant_key, eager_load=False)
             if product is None:
                 return
             await self.toggle_assignment(product.id, template_id, is_active=False)

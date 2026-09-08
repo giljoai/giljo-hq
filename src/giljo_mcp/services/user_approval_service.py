@@ -27,12 +27,14 @@ from giljo_mcp.exceptions import (
     ValidationError,
 )
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
-from giljo_mcp.models.user_approval import UserApproval
+from giljo_mcp.models.projects import Project
+from giljo_mcp.models.user_approval import VALID_USER_APPROVAL_STATUSES, UserApproval
 from giljo_mcp.repositories.user_approval_repository import UserApprovalRepository
 from giljo_mcp.schemas.jsonb_validators import (
     validate_user_approval_context,
     validate_user_approval_options,
 )
+from giljo_mcp.schemas.user_approval import UserApprovalRead
 from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.tenant import TenantManager
 
@@ -63,6 +65,36 @@ async def build_awaiting_user_blocker(
         "approval_id": approval_id,
         "suggested_action": f"Resolve approval {approval_id} via POST /api/approvals/{approval_id}/decide.",
     }
+
+
+def _compute_approval_banner_state(*, project: Project | None, execution: AgentExecution | None) -> str:
+    """FE-9511: derive the closed-set banner state from server-tracked state.
+
+    Approval-scoped by design -- this is NOT a
+    product-wide scan for staging-paused projects or blocked executions with
+    no approval attached. It classifies ONE pending approval's own project +
+    execution:
+
+    - ``waiting_at_staging`` -- the approval's project is sitting at the
+      staging pause (implementation not yet launched).
+    - ``blocked`` -- the approval's own requesting execution is blocked.
+    - ``decision_needed`` -- neither of the above: the default, and the
+      overwhelmingly common case (a pending approval already means the agent
+      asked a decision question).
+
+    ``input_needed`` is a reserved catch-all with no server signal today (see
+    VALID_APPROVAL_BANNER_STATES) -- deliberately unreachable here rather than
+    guessed at, per "do not enumerate ten states up front."
+    """
+    if (
+        project is not None
+        and project.staging_status == "staging_complete"
+        and project.implementation_launched_at is None
+    ):
+        return "waiting_at_staging"
+    if execution is not None and execution.status == "blocked":
+        return "blocked"
+    return "decision_needed"
 
 
 class UserApprovalService:
@@ -252,16 +284,28 @@ class UserApprovalService:
         tenant_key: str,
         limit: int = 50,
         offset: int = 0,
-    ) -> tuple[list[UserApproval], int]:
-        """Read-only list of pending approvals scoped to ``tenant_key``.
+        status: str = "pending",
+    ) -> tuple[list[UserApprovalRead], int]:
+        """Read-only list of approvals scoped to ``tenant_key``, by status.
 
         Tenant isolation: the repository query filters by ``tenant_key``.
-        Cross-tenant rows are unreachable. Returns ``(rows, total_count)``.
+        Cross-tenant rows are unreachable. Returns ``(reads, total_count)``.
+
+        BE-9514: ``status`` defaults to ``"pending"`` (the original/only shape)
+        but now accepts any ``VALID_USER_APPROVAL_STATUSES`` value -- decided
+        approvals had no read surface at all, which meant ``decided_via``
+        (and ``decided_by_user_id``) could not be verified end-to-end.
+
+        FE-9511: each row is returned as a fully-built ``UserApprovalRead``
+        carrying the server-derived ``banner_state`` and the project's
+        ``taxonomy_alias`` -- see ``_build_reads_with_banner_context``.
         """
         if limit < 1 or limit > 200:
             raise ValidationError(f"limit must be 1..200 (got {limit})")
         if offset < 0:
             raise ValidationError(f"offset must be >= 0 (got {offset})")
+        if status not in VALID_USER_APPROVAL_STATUSES:
+            raise ValidationError(f"status must be one of {sorted(VALID_USER_APPROVAL_STATUSES)} (got {status!r})")
 
         async with self._get_session(tenant_key) as session:
             rows = await self._repo.list_pending_for_tenant(
@@ -269,12 +313,71 @@ class UserApprovalService:
                 tenant_key=tenant_key,
                 limit=limit,
                 offset=offset,
+                status=status,
             )
             total = await self._repo.count_pending_for_tenant(
                 session,
                 tenant_key=tenant_key,
+                status=status,
             )
-        return rows, total
+            reads = await self._build_reads_with_banner_context(session, tenant_key=tenant_key, rows=rows)
+        return reads, total
+
+    async def _build_reads_with_banner_context(
+        self,
+        session: AsyncSession,
+        *,
+        tenant_key: str,
+        rows: list[UserApproval],
+    ) -> list[UserApprovalRead]:
+        """Attach the FE-9511 banner state + project taxonomy_alias to each row.
+
+        Two batched lookups (not N+1): every distinct project and every
+        distinct requesting execution referenced by ``rows``. Both queries are
+        tenant-scoped, mirroring ``_resolve_execution``/``_verify_job`` above.
+        """
+        if not rows:
+            return []
+
+        project_ids = {row.project_id for row in rows}
+        execution_ids = {row.agent_execution_id for row in rows}
+
+        projects_result = await session.execute(
+            select(Project).where(Project.tenant_key == tenant_key, Project.id.in_(project_ids))
+        )
+        projects_by_id = {p.id: p for p in projects_result.scalars().all()}
+
+        executions_result = await session.execute(
+            select(AgentExecution).where(AgentExecution.tenant_key == tenant_key, AgentExecution.id.in_(execution_ids))
+        )
+        executions_by_id = {e.id: e for e in executions_result.scalars().all()}
+
+        reads = []
+        for row in rows:
+            project = projects_by_id.get(row.project_id)
+            execution = executions_by_id.get(row.agent_execution_id)
+            reads.append(
+                UserApprovalRead(
+                    id=row.id,
+                    tenant_key=row.tenant_key,
+                    agent_execution_id=row.agent_execution_id,
+                    job_id=row.job_id,
+                    project_id=row.project_id,
+                    reason=row.reason,
+                    options=row.options,
+                    context=row.context,
+                    status=row.status,
+                    decided_option_id=row.decided_option_id,
+                    decided_by_user_id=row.decided_by_user_id,
+                    decided_via=row.decided_via,
+                    requested_at=row.requested_at,
+                    decided_at=row.decided_at,
+                    banner_state=_compute_approval_banner_state(project=project, execution=execution),
+                    taxonomy_alias=project.taxonomy_alias if project is not None else None,
+                    product_id=project.product_id if project is not None else None,
+                )
+            )
+        return reads
 
     async def mark_decided(
         self,
@@ -283,6 +386,7 @@ class UserApprovalService:
         approval_id: str,
         option_id: str,
         user_id: str | None,
+        decided_via: str,
     ) -> UserApproval:
         """Atomically resolve a pending approval and resume the awaiting agent.
 
@@ -296,7 +400,21 @@ class UserApprovalService:
         resurrected to ``working``, which used to block its own closeout.
         Cross-tenant access is rejected as ``ResourceNotFoundError`` (do not
         leak existence).
+
+        BE-9514: ``decided_via`` (``"ui"`` | ``"mcp"``) is the ONE place this
+        fact is written -- every caller (the REST ``/decide`` endpoint, the
+        ``decide_approval`` MCP tool, and the dormant MRTR elicitation round-2
+        path) passes its own literal channel here rather than this method
+        trying to infer it from ``user_id``. Inferring from ``user_id`` would
+        be wrong: an MCP session CAN carry a resolved ``user_id`` (a non-legacy,
+        non-API-key session), so "user_id present" does not mean "the UI door
+        was used" -- only the caller genuinely knows which door it is.
+        ``decided_by_user_id`` is untouched by this and keeps meaning exactly
+        what it always has: the resolved person, or NULL when there is none.
         """
+        if decided_via not in ("ui", "mcp"):
+            raise ValidationError(f"decided_via must be 'ui' or 'mcp' (got {decided_via!r})")
+
         async with self._get_session(tenant_key) as session:
             approval = await self._repo.get_by_id(
                 session,
@@ -321,6 +439,7 @@ class UserApprovalService:
                 approval_id=approval_id,
                 decided_option_id=option_id,
                 decided_by_user_id=user_id,
+                decided_via=decided_via,
             )
             if decided is None:
                 # Lost race: another caller flipped status between get and update.

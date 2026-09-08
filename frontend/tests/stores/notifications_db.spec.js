@@ -310,25 +310,35 @@ describe('useNotificationStore (DB-backed)', () => {
   })
 
   // -------------------------------------------------------------------------
-  // 6. badgeColor reflects severity for api_key.expiring_soon (warning)
+  // 6. FE-9553 ruling 2: the bell keeps a quiet unseen-count only.
+  //
+  // This block used to assert badgeColor mapped severity to red/amber for the
+  // bell. That getter is deleted, not renamed: ranking unread rows by urgency
+  // in order to alert on the bell is the exact behaviour the ruling removes,
+  // and urgency now lives in banners exclusively. The count itself is still
+  // pinned -- immediately below -- because that is what the bell is FOR.
+  // Behaviour coverage for the quiet bell lives in
+  // tests/components/navigation/NotificationDropdown.bellquiet.fe9553.spec.js.
   // -------------------------------------------------------------------------
-  describe('badgeColor', () => {
-    it('returns "warning" for unread api_key.expiring_soon notifications', async () => {
+  describe('the quiet counter (FE-9553)', () => {
+    it('counts an unread server notification without expressing any urgency about it', async () => {
       api.notifications.list.mockResolvedValueOnce({ data: [NOTIF_1] })
 
       const store = useNotificationStore()
       await store.fetch()
 
-      expect(store.badgeColor).toBe('warning')
+      expect(store.unreadCount).toBe(1)
+      // The store no longer offers ANY severity-derived signal for the bell.
+      expect(store.badgeColor).toBeUndefined()
     })
 
-    it('returns "error" default when no unread notifications', async () => {
+    it('counts zero when there is nothing unread', async () => {
       api.notifications.list.mockResolvedValueOnce({ data: [] })
 
       const store = useNotificationStore()
       await store.fetch()
 
-      expect(store.badgeColor).toBe('error')
+      expect(store.unreadCount).toBe(0)
     })
   })
 })

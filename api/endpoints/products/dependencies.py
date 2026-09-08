@@ -44,7 +44,10 @@ async def get_product_service(
     Returns:
         ProductService instance configured for the current tenant
     """
-    return ProductService(db_manager=db_manager, tenant_key=tenant_key)
+    from api.app_state import state
+
+    ws_manager = getattr(state, "websocket_manager", None)
+    return ProductService(db_manager=db_manager, tenant_key=tenant_key, websocket_manager=ws_manager)
 
 
 async def get_product_vision_service(

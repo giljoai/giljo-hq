@@ -9,7 +9,9 @@ import { ref, computed } from 'vue'
 
 import { immutableMapSet, immutableMapDelete, immutableObjectPatch } from './immutableHelpers'
 import api from '@/services/api'
+import { useThreadPostAttention } from '@/composables/useThreadPostAttention'
 import { useUserStore } from '@/stores/user'
+import { useProductStore } from '@/stores/products'
 
 // ---------------------------------------------------------------------------
 // Normalization helpers
@@ -63,6 +65,10 @@ function normalizeThread(raw) {
     severity: raw.severity || null,
     product_id: raw.product_id || null,
     project_id: raw.project_id || null,
+    // FE-9530: the plural view -- project_id plus any additional
+    // comm_thread_project_tags rows, deduplicated server-side. Defaults to []
+    // (never null) so a card can always safely read .length / .map.
+    project_ids: Array.isArray(raw.project_ids) ? raw.project_ids : raw.project_id ? [raw.project_id] : [],
     created_at: raw.created_at || null,
     // Derived: use updated_at if provided, else created_at, for activity sort
     last_activity_at: raw.updated_at || raw.last_activity_at || raw.created_at || null,
@@ -83,6 +89,15 @@ function normalizeThread(raw) {
 // Store
 // ---------------------------------------------------------------------------
 
+/**
+ * FE-9586: re-read the thread-post projection after this viewer's read watermark
+ * moves. Resolved lazily inside the action rather than at module scope, so the
+ * store does not construct a composable while Pinia is still being set up.
+ */
+function refreshThreadPostAttention() {
+  return useThreadPostAttention().refresh()
+}
+
 export const useCommHubStore = defineStore('commHub', () => {
   // ----- state -----
   const threadsById = ref(new Map())
@@ -97,6 +112,21 @@ export const useCommHubStore = defineStore('commHub', () => {
     product_id: null,
     project_id: null,
   })
+  /**
+   * FE-9530: FE-9528's viewed-product scoping becomes the DEFAULT filter, not a
+   * hard scope -- one Hub space, every thread reachable, with the viewed product
+   * pre-selected so the everyday view is byte-identical to before this project.
+   *
+   * - 'viewed' (default): unchanged FE-9528 behaviour -- scoped to the viewed
+   *   product tab; product-less threads excluded (reachable via searchThreads,
+   *   same as before).
+   * - 'all': every thread the tenant owns, regardless of product, INCLUDING
+   *   product-less ones -- the explicit widen.
+   * - 'unassigned': only threads with no product tag -- the explicit way to see
+   *   what "no migration" left untagged, so they can be
+   *   retagged via renameThread's sibling, retagThread.
+   */
+  const productScope = ref('viewed')
   const loading = ref(false)
   const error = ref(null)
   // BE-9414: thread_ids with a message-hydration read in flight, and thread_ids
@@ -107,9 +137,38 @@ export const useCommHubStore = defineStore('commHub', () => {
 
   // ----- getters -----
 
-  /** Sorted thread array: newest last_activity_at first */
+  /**
+   * Sorted thread array: newest last_activity_at first.
+   *
+   * FE-9528: threadsById is an upsert cache fed by WS across every product
+   * (FE-9502d's background-tab activity keeps arriving here even while the
+   * operator views a different one), never wholesale-replaced by loadThreads
+   * the way projects.js/tasks.js replace their list. So scoping the FETCH is
+   * not enough — an already-cached other-product thread would stay visible
+   * after switching tabs. Filtered here instead, by each thread's own
+   * product_id against the viewed tab.
+   *
+   * FE-9530: that scoping is now the DEFAULT filter (productScope === 'viewed',
+   * the initial value), not the only option — one Hub space, every thread
+   * reachable via 'all', and 'unassigned' as the explicit way to find what
+   * ruling 2's "no migration" left untagged. The FE-9528 cache-leak fix this
+   * getter exists for applies in EVERY scope: 'all' still reads straight off
+   * threadsById (no re-fetch needed, the cache already holds everything a
+   * scoped fetch plus WS background activity accumulated), so widening never
+   * reopens the leak the getter was built to close.
+   */
   const threadList = computed(() => {
-    const arr = Array.from(threadsById.value.values())
+    const viewedProductId = useProductStore().currentProductId
+    const all = Array.from(threadsById.value.values())
+    let arr
+    if (productScope.value === 'unassigned') {
+      arr = all.filter((t) => t.product_id == null)
+    } else if (productScope.value === 'all' || !viewedProductId) {
+      arr = all
+    } else {
+      arr = all.filter((t) => t.product_id === viewedProductId)
+    }
+    arr = [...arr]
     arr.sort((a, b) => {
       const ta = a.last_activity_at ? new Date(a.last_activity_at).getTime() : 0
       const tb = b.last_activity_at ? new Date(b.last_activity_at).getTime() : 0
@@ -117,6 +176,12 @@ export const useCommHubStore = defineStore('commHub', () => {
     })
     return arr
   })
+
+  /** FE-9530: switch the Hub's product filter ('viewed' | 'all' | 'unassigned'). */
+  function setProductScope(scope) {
+    if (!['viewed', 'all', 'unassigned'].includes(scope)) return
+    productScope.value = scope
+  }
 
   // ----- FE-9012c (D2): two-tab split of the SAME thread list -----
   // "Project comms" = threads bound to a project; "Town square" = standalone.
@@ -222,6 +287,21 @@ export const useCommHubStore = defineStore('commHub', () => {
     error.value = null
     try {
       const params = { ...(filterOverride ?? filters.value) }
+      // FE-9528: scope to the viewed product tab, mirroring projects.js/tasks.js.
+      // The backend filters on strict equality (comm_thread_repository.list_threads),
+      // so this EXCLUDES product-less threads once a tab is viewed — they are legal
+      // (BE-9523b) and stay reachable via searchThreads, which the backend leaves
+      // unscoped by construction (comm_threads.search_threads takes no product_id
+      // at all — the REST handler, not the retired MCP tool of that name).
+      //
+      // FE-9530: only the DEFAULT scope ('viewed') auto-injects it. 'all' and
+      // 'unassigned' fetch unscoped (matching the no-viewed-product fallback this
+      // already had) — the getter above does the narrowing for 'unassigned' from
+      // whatever the unscoped fetch plus the WS-fed cache already hold.
+      if (params.product_id == null && productScope.value === 'viewed') {
+        const productStore = useProductStore()
+        if (productStore.currentProductId) params.product_id = productStore.currentProductId
+      }
       // Strip null/undefined params
       Object.keys(params).forEach((k) => {
         if (params[k] == null) delete params[k]
@@ -314,8 +394,23 @@ export const useCommHubStore = defineStore('commHub', () => {
 
   async function postMessage(id, body) {
     const res = await api.threads.post(id, body)
-    if (isRefusal(res.data)) throw refusalToError(res.data)
-    return res.data
+    const data = res.data
+    if (isRefusal(data)) throw refusalToError(data)
+    // BE-9560: patch the baton locally from the response, same as passBaton below --
+    // a reply that hands off or clears the turn (operator ruling 2026-09-02, "answering
+    // means answering") must drop the your-turn banner in THIS tab immediately, not
+    // wait on the best-effort WS baton broadcast (which covers every OTHER open tab).
+    if (data?.baton_passed || data?.baton_cleared) {
+      const existing = threadsById.value.get(id)
+      if (existing) {
+        threadsById.value = immutableMapSet(
+          threadsById.value,
+          id,
+          immutableObjectPatch(existing, { next_action_owner: data.next_action_owner }),
+        )
+      }
+    }
+    return data
   }
 
   async function passBaton(id, to) {
@@ -352,6 +447,38 @@ export const useCommHubStore = defineStore('commHub', () => {
     if (existing && updated) {
       const patch = { subject: updated.subject ?? subject }
       if ('title' in updated) patch.title = updated.title
+      threadsById.value = immutableMapSet(threadsById.value, id, immutableObjectPatch(existing, patch))
+    }
+    return updated
+  }
+
+  /**
+   * FE-9530 — retag a thread's product and/or project tags via the same PATCH
+   * `renameThread` uses (CommThreadService.update_thread, dual-door with the
+   * MCP update_thread tool). This is the ONLY way an old, pre-existing thread
+   * ever gets a product: operator ruling 2 forbids a bulk migration, so
+   * retagging on touch is the mechanism, not a stopgap.
+   *
+   * `productId` — pass a UUID to set it, `null` to leave it untouched, or the
+   * string `''` to explicitly clear it back to product-less (mirrors the
+   * service's `clear_product` flag). `projectIds` — pass an array to
+   * full-replace the thread's project tags (`[]` clears all), or omit/`null`
+   * to leave them untouched.
+   */
+  async function retagThread(id, { productId, projectIds } = {}) {
+    const body = {}
+    if (productId === '') body.clear_product = true
+    else if (productId != null) body.product_id = productId
+    if (projectIds != null) body.project_ids = projectIds
+    if (Object.keys(body).length === 0) return threadsById.value.get(id) || null
+
+    const res = await api.threads.update(id, body)
+    const updated = res.data
+    const existing = threadsById.value.get(id)
+    if (existing && updated) {
+      const patch = {}
+      if ('product_id' in updated) patch.product_id = updated.product_id
+      if ('project_ids' in updated) patch.project_ids = updated.project_ids
       threadsById.value = immutableMapSet(threadsById.value, id, immutableObjectPatch(existing, patch))
     }
     return updated
@@ -398,9 +525,49 @@ export const useCommHubStore = defineStore('commHub', () => {
     unreadByThreadId.value = immutableMapSet(unreadByThreadId.value, threadId, 0)
   }
 
+  /**
+   * FE-9589: advance the read watermark on SEVERAL threads at once.
+   *
+   * The thread-post banner's multi-entry CTA had no way to clear itself: a
+   * mention stops being reported only once the viewer's watermark passes the
+   * naming post, and the only writer was selectThread() -- which needs a
+   * thread to select. With more than one thread named, the CTA landed on the
+   * Hub list, selected nothing, wrote no watermark, and the row stayed up
+   * forever while agents kept posting.
+   *
+   * Writes local counters first so the strip settles immediately, then the
+   * server writes, then ONE attention re-read for the whole batch rather than
+   * one per thread. allSettled, not all: a thread that fails its write must
+   * not abandon the rest, and the next open retries it.
+   */
+  async function markThreadsRead(ids) {
+    const unique = [...new Set((ids || []).filter(Boolean))]
+    if (!unique.length) return
+    unique.forEach(markThreadRead)
+    await Promise.allSettled(unique.map((id) => api.threads.markRead(id)))
+    refreshThreadPostAttention()
+  }
+
   function selectThread(id) {
     selectedThreadId.value = id
     markThreadRead(id)
+    // FE-9586: tell the SERVER too. markThreadRead above only zeroes a local
+    // counter, so before this the operator had no read watermark at all and the
+    // card's unread flag stayed true forever once anything was posted.
+    //
+    // Fire-and-forget by ruling: a failed watermark write must never delay or break
+    // the thread view, and the next open retries it. Only a genuine open reaches
+    // here — not list hover, not background prefetch.
+    if (id) {
+      api.threads
+        .markRead(id)
+        // FE-9586: the watermark just moved, and no WS event announces it -- it is
+        // this viewer's own state, not the thread's. Without this re-read the
+        // thread-post banner and its popout would sit there until some unrelated
+        // message happened to arrive.
+        .then(() => refreshThreadPostAttention())
+        .catch(() => {})
+    }
   }
 
   // ----- WebSocket handlers -----
@@ -536,6 +703,7 @@ export const useCommHubStore = defineStore('commHub', () => {
     unreadByThreadId.value = new Map()
     selectedThreadId.value = null
     filters.value = { status: null, owner: null, product_id: null, project_id: null }
+    productScope.value = 'viewed'
     loading.value = false
     error.value = null
     _hydratingThreadIds.clear()
@@ -558,6 +726,7 @@ export const useCommHubStore = defineStore('commHub', () => {
     unreadByThreadId,
     selectedThreadId,
     filters,
+    productScope,
     loading,
     error,
 
@@ -577,17 +746,20 @@ export const useCommHubStore = defineStore('commHub', () => {
     hasUserAttention,
 
     // actions
+    setProductScope,
     loadThreads,
     loadThread,
     loadParticipants,
     createThread,
     renameThread,
+    retagThread,
     postMessage,
     passBaton,
     deleteThread,
     searchThreads,
     selectThread,
     markThreadRead,
+    markThreadsRead,
 
     // ws handlers
     handleThreadMessage,

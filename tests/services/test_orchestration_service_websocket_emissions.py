@@ -258,6 +258,9 @@ async def test_complete_job_emits_status_changed_with_duration_seconds(
     todo_result = MagicMock()
     todo_result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
 
+    product_result = MagicMock()
+    product_result.scalar_one_or_none.return_value = SimpleNamespace(product_id="product-test-1")
+
     session.execute.side_effect = [
         _scalar_result(execution),
         _scalar_result(job),
@@ -270,13 +273,18 @@ async def test_complete_job_emits_status_changed_with_duration_seconds(
         _scalar_result(None),  # BE-9153: closeout_mode settings read (no row -> default hitl; clean result -> no gate)
         _scalar_result(None),  # other active executions (none)
         _scalar_result(None),  # find_orchestrator_execution (none — skip auto-message)
+        # BE-9518: _finalize_conductor_chain's OWN find_active_run_for_conductor
+        # check (distinct call site from the guard above; same underlying query).
+        _scalar_result(None),
+        product_result,  # BE-9518: product_id resolution (job -> project) for the completion broadcast
     ]
 
     result = await orchestration_service.complete_job(job_id=job_id, result={"ok": True}, tenant_key=tenant_key)
 
-    # Pinned: 9 execute calls, one more than this 8-entry list feeds. Call 9 is the
-    # conductor-purge, whose broad except swallows the resulting StopIteration.
-    assert session.execute.call_count == 9
+    # Pinned: exactly 10 execute calls, all fed by this list -- the conductor-purge
+    # (complete_chain_run_if_finished) is gated on is_conductor and never fires for
+    # this non-conductor job, so it consumes no execute call.
+    assert session.execute.call_count == 10
 
     # Handover 0731c: Returns CompleteJobResult typed model.
     # BE-9153: a CLEAN orchestrator closeout completes under the default (hitl) mode —
@@ -289,6 +297,8 @@ async def test_complete_job_emits_status_changed_with_duration_seconds(
     assert last_call["event_type"] == "agent:status_changed"
     assert last_call["data"]["status"] == "complete"
     assert 59 <= last_call["data"]["duration_seconds"] <= 61
+    # BE-9518: product_id must ride the completion broadcast too.
+    assert last_call["data"]["product_id"] == "product-test-1"
 
 
 async def test_report_progress_fallback_emits_message_new_event(

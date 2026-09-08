@@ -146,8 +146,8 @@ class TestClientIpProxyAware:
         monkeypatch.setenv(arl._TRUSTED_PROXIES_ENV, "192.0.2.0/24")
         arl._RateLimiterHolder.reset_for_tests()
         limiter = arl.RateLimiter()
-        req = _make_request(client_host="192.0.2.9", cf_connecting_ip="71.241.214.38")
-        assert limiter._get_client_ip(req) == "71.241.214.38"
+        req = _make_request(client_host="192.0.2.9", cf_connecting_ip="203.0.113.38")
+        assert limiter._get_client_ip(req) == "203.0.113.38"
 
     def test_cf_connecting_ip_wins_over_xff_first_hop(self, monkeypatch):
         """When both headers are present (prod shape: XFF first hop = a CF edge IP),
@@ -157,10 +157,10 @@ class TestClientIpProxyAware:
         limiter = arl.RateLimiter()
         req = _make_request(
             client_host="192.0.2.9",
-            cf_connecting_ip="71.241.214.38",
+            cf_connecting_ip="203.0.113.38",
             forwarded_for="172.68.54.64, 198.51.100.1",
         )
-        assert limiter._get_client_ip(req) == "71.241.214.38"
+        assert limiter._get_client_ip(req) == "203.0.113.38"
 
     def test_xff_used_when_no_cf_header(self, monkeypatch):
         """Non-Cloudflare trusted proxy (no CF header): XFF first hop still works."""

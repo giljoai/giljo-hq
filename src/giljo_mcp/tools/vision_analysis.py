@@ -3,13 +3,11 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-MCP Tools: get_vision_doc and update_product_context (Handover 0842c)
+"""MCP Tools: get_vision_doc and update_product_context (Handover 0842c)
 
-Provides vision document retrieval with extraction prompt and structured
-product field writing from AI analysis results.
-
-Called by the user's AI coding agent during vision document analysis workflow.
+Provides vision document retrieval with extraction prompt and structured product
+field writing from AI analysis results. Called by the user's AI coding agent
+during vision document analysis workflow.
 """
 
 import logging
@@ -43,17 +41,16 @@ from giljo_mcp.services._session_helpers import tenant_scoped_session
 from giljo_mcp.services.product_field_map import assemble_update_kwargs
 from giljo_mcp.services.product_vision_service import ProductVisionService
 from giljo_mcp.tools._unknown_keys import split_known
+from giljo_mcp.tools.product_activation import apply_activation_state
 from giljo_mcp.tools.vision_extraction_prompt import VISION_EXTRACTION_PROMPT
 
 
 logger = logging.getLogger(__name__)
 
 
-# VISION_EXTRACTION_PROMPT (the agent-facing extraction brief) is imported above from
-# tools/vision_extraction_prompt.py -- see that module for why it lives beside the tool
-# rather than inside it. get_vision_doc below returns it as extraction_instructions, and
-# the import keeps the long-standing `from ...vision_analysis import VISION_EXTRACTION_PROMPT`
-# path resolving.
+# VISION_EXTRACTION_PROMPT is imported above from tools/vision_extraction_prompt.py (see
+# that module for why); get_vision_doc returns it as extraction_instructions, and the
+# import keeps `from ...vision_analysis import VISION_EXTRACTION_PROMPT` resolving.
 
 
 VALID_TESTING_STRATEGIES = {"TDD", "BDD", "Integration-First", "E2E-First", "Manual", "Hybrid"}
@@ -76,6 +73,7 @@ FIELD_MAP = {
     "architecture_notes": ("architecture", "architecture_notes"),
     "coding_conventions": ("architecture", "coding_conventions"),
     "brand_guidelines": ("products", "brand_guidelines"),
+    "extraction_custom_instructions": ("products", "extraction_custom_instructions"),
     "quality_standards": ("test_config", "quality_standards"),
     "testing_strategy": ("test_config", "test_strategy"),
     "testing_frameworks": ("test_config", "testing_frameworks"),
@@ -252,7 +250,7 @@ async def get_vision_doc(
             base["doc_id"] = only["doc_id"]
             base["content"] = only["content"]
             base["chunk_token_count"] = only["token_count"]
-            base["usage"] = "All content is included above; no further get_vision_doc calls are needed."
+            base["usage"] = "All content is included above; no further get_vision_document calls are needed."
         else:
             # Metadata only — no content, agent should request the chunks.
             base["usage"] = (
@@ -368,7 +366,7 @@ async def create_vision_document(
         "total_tokens": result.total_tokens,
         "product_id": product_id,
         "next_step": "The document is ingested and visible in the dashboard. To populate the product card "
-        "from it, call get_vision_doc then update_product_context (including vision_summaries + consolidated_vision).",
+        "from it, call get_vision_document then update_product_context (including vision_summaries + consolidated_vision).",
     }
 
 
@@ -549,14 +547,13 @@ async def update_product_fields(
     _test_session: AsyncSession | None = None,
     force: bool = False,
     emit_completion: bool = False,
+    is_active: bool | None = None,
     **fields: Any,
 ) -> dict[str, Any]:
-    """
-    Write product fields extracted from vision document analysis.
+    """Write product fields extracted from vision document analysis.
 
     Performs merge-write: only updates fields that are explicitly provided.
     Creates child table rows (tech_stack, architecture, test_config) on first write.
-
     Safe to call in STAGES (FE-9320): each call writes what it carries, and every
     response reports the live completion state so the agent never has to infer
     whether the analysis finished.
@@ -569,17 +566,23 @@ async def update_product_fields(
         emit_completion: Marks this as the FINAL staged call. Re-evaluates the
             completion flag and signals the dashboard even when this call writes no
             fields (the emit is otherwise gated on something having been written).
+        is_active: BE-9502a activate/deactivate -- see product_activation.apply_activation_state.
         **fields: Extracted field key-value pairs
 
     Returns:
         Dict with success, fields_written count, fields list, fields_skipped,
         vision_analysis_complete and missing_for_completion.
-
     Raises:
         ResourceNotFoundError: If product not found for tenant
     """
     if not db_manager and _test_session is None:
         raise ValueError("db_manager is required")
+
+    activation_result: dict[str, Any] = {}
+    if is_active is not None:
+        activation_result = await apply_activation_state(
+            product_id, tenant_key, is_active, db_manager, websocket_manager, _test_session
+        )
 
     vision_summaries_payload, consolidated_vision_payload = _validate_extraction_input(product_id, fields)
 
@@ -587,11 +590,8 @@ async def update_product_fields(
     fields_skipped: list[dict[str, str]] = []
 
     # BE-9322: name back any field this tool cannot map (_build_update_kwargs iterates
-    # FIELD_MAP, not `fields`). DEFENSIVE ONLY -- unreachable in production, kept
-    # deliberately: the reachable set is exactly FIELD_MAP's 21 names, because the grouped
-    # MCP models declare extra="forbid", FastMCP drops unknown top-level args before entry,
-    # and vision_summaries/consolidated_vision are popped above. Relax any of those and the
-    # behaviour is specified, not rediscovered. Neither dead code nor a live feature.
+    # FIELD_MAP, not `fields`). DEFENSIVE ONLY -- unreachable in production (the grouped
+    # MCP models declare extra="forbid", so FastMCP drops unknown top-level args first).
     _mappable, unmappable_fields = split_known(fields, FIELD_MAP)
     _unmappable_hint = f"Valid fields: {', '.join(sorted(FIELD_MAP))}."
     fields_skipped.extend(
@@ -619,10 +619,9 @@ async def update_product_fields(
                 context={"product_id": product_id},
             )
 
-        # BE-9164 / BE-9167: product_name and project_path (the codebase folder) are
-        # user-owned. Skip each incoming value when the product already has a non-empty
-        # one, unless force=True. When the existing value is empty the extracted value
-        # writes normally.
+        # BE-9164 / BE-9167: product_name and project_path (the codebase folder) are user-owned.
+        # Skip each incoming value when the product already has a non-empty one, unless force=True.
+        # When the existing value is empty the extracted value writes normally.
         if not force:
             _skip_user_owned_field("product_name", product.name, fields, fields_skipped, label="product name")
             _skip_user_owned_field(
@@ -640,6 +639,7 @@ async def update_product_fields(
             product_service = ProductService(
                 db_manager=db_manager,
                 tenant_key=tenant_key,
+                websocket_manager=websocket_manager,
                 test_session=_test_session,
             )
             try:
@@ -716,6 +716,7 @@ async def update_product_fields(
         "fields_skipped": fields_skipped,
         "vision_analysis_complete": analysis_complete,
         "missing_for_completion": missing_for_completion,
+        **activation_result,
     }
 
 
@@ -761,7 +762,7 @@ async def _write_vision_summaries(
                 "field": "vision_summaries",
                 "doc_id": entry["doc_id"],
                 "reason": reason,
-                "hint": "Use a doc_id returned by get_vision_doc for THIS product.",
+                "hint": "Use a doc_id returned by get_vision_document for THIS product.",
             }
         )
     if landed:

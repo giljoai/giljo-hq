@@ -108,7 +108,7 @@ describe('TutorialUploadScreen — copying is the user\'s action, never a side e
     const box = wrapper.find('[data-testid="tutorial-analysis-prompt"]')
     expect(box.exists()).toBe(true)
     // The real prompt the agent needs — not a "clipboard blocked" fallback.
-    expect(box.text()).toContain('get_vision_doc(product_id="prod-1")')
+    expect(box.text()).toContain('get_vision_document(product_id="prod-1")')
     expect(wrapper.text()).not.toContain('Clipboard blocked')
   })
 
@@ -125,7 +125,7 @@ describe('TutorialUploadScreen — copying is the user\'s action, never a side e
     await flushPromises()
 
     expect(h.copy).toHaveBeenCalledTimes(1)
-    expect(h.copy.mock.calls[0][0]).toContain('get_vision_doc(product_id="prod-1")')
+    expect(h.copy.mock.calls[0][0]).toContain('get_vision_document(product_id="prod-1")')
     expect(wrapper.find('[data-testid="tutorial-copy-analysis-prompt"]').text()).toContain('Copied')
   })
 

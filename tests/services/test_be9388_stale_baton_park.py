@@ -117,7 +117,7 @@ async def test_b_does_not_narrow_the_named_arm(db_session):
     comm = _comm(db_session)
 
     tid = await _thread(comm, tenant)
-    # Straight to the repo: pass_baton screens unknown targets (BE-9292a), and the
+    # Straight to the repo: set_next_actor screens unknown targets (BE-9292a), and the
     # shape under test is the STORED one — a baton naming someone with no row.
     from giljo_mcp.database import tenant_session_context
 

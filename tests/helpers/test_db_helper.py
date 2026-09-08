@@ -14,15 +14,21 @@ CRITICAL SAFETY: This module includes guards to prevent accidental production da
 
 import asyncio
 import contextlib
+import functools
+import hashlib
+import logging
 import os
 import re
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.models import Base
+
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -78,6 +84,78 @@ DB_CREATE_LOCK_KEY = 7281642
 # no idle connections are retained between checkouts. Under pytest-xdist many
 # worker processes each open an engine; a retained per-engine pool would exhaust
 # PostgreSQL ``max_connections``. NullPool keeps aggregate usage bounded.
+
+
+# =============================================================================
+# MIGRATION-CHAIN FINGERPRINT (INF-9534)
+# =============================================================================
+# BE-9525b dropped ``idx_project_single_active_per_product`` in a migration.
+# Per-worker test databases are bootstrapped by ``Base.metadata.create_all``
+# (BE-3002a), never by running Alembic against them -- so the guard that
+# already existed (BE-9288's ``_missing_columns``, a column-level diff against
+# ``Base.metadata``) could not see this class of drift at all: the dropped
+# index was never part of ``Base.metadata`` to begin with, only ever created
+# by raw SQL inside the migration. Per-worker databases could still carry it
+# after the migration merged, so a test asserting the new behaviour ran
+# against a schema that still physically forbade it -- indistinguishable from
+# xdist flakiness, because nothing said the database itself was stale.
+#
+# The fix generalizes past this one index: fingerprint the WHOLE migration
+# chain (every file under ``migrations/versions/`` and
+# ``migrations/saas_versions/``, by content, not filename) and stamp that
+# fingerprint into each per-worker database. A mismatch on bootstrap means
+# the chain moved since this database was last built and its schema is reset
+# alongside the existing BE-9288 response -- ``create_all`` then rebuilds it
+# against whatever ``Base.metadata`` says *now*. Content (not just revision
+# ids) is hashed deliberately: ``migrations/README.md``'s baseline-parity
+# carve-out lets an already-shipped baseline file be edited in place without
+# a new revision id, and a heads-only fingerprint would miss exactly that
+# edit. ``migrations/archive/`` is excluded -- it is frozen history, not part
+# of the live chain any test database is ever built against.
+# Deliberately NOT in ``public``: BE-9288's guard (``_missing_columns``) scans
+# ``information_schema.columns WHERE table_schema = 'public'``, and its own
+# regression test asserts ``public`` holds exactly zero tables right after a
+# drift reset. A marker table living in ``public`` would satisfy neither --
+# it would show up as an "extra table" in every column diff and break that
+# reset assertion's table count. A private schema keeps it wholly outside
+# both, and survives the ``DROP SCHEMA public CASCADE`` reset unscathed (the
+# marker is re-stamped unconditionally afterward anyway, so nothing depends
+# on that survival -- it's a side benefit, not a requirement).
+SCHEMA_FINGERPRINT_SCHEMA = "giljo_test_meta"
+SCHEMA_FINGERPRINT_TABLE = f'"{SCHEMA_FINGERPRINT_SCHEMA}"."_giljo_test_schema_fingerprint"'
+
+# Roles the shipped app connects as in a real (non-test) install (see
+# ``installer/core/database.py``). Neither is guaranteed to exist on a given
+# Postgres cluster, so every grant below is applied per-role and skipped, not
+# failed, when the role is absent.
+APP_ROLES = ("giljo_owner", "giljo_user")
+
+
+def _migration_chain_paths() -> list[Path]:
+    """Every file in the LIVE migration chain, in a stable order.
+
+    Repo root is three parents up from ``tests/helpers/test_db_helper.py``.
+    Deliberately excludes ``migrations/archive/`` and ``migrations/manual/``
+    -- neither is part of the chain any database (test or real) is built
+    against today.
+    """
+    root = Path(__file__).resolve().parents[2] / "migrations"
+    return sorted((root / "versions").glob("*.py")) + sorted((root / "saas_versions").glob("*.py"))
+
+
+@functools.lru_cache(maxsize=1)
+def compute_schema_fingerprint() -> str:
+    """Hash of the full migration chain's file names + contents.
+
+    Cached per-process: the chain cannot change mid-run, and under xdist each
+    worker is its own process, so a per-process cache neither hides a change
+    within one run nor leaks across runs.
+    """
+    digest = hashlib.sha256()
+    for path in _migration_chain_paths():
+        digest.update(path.name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
 
 
 @contextlib.contextmanager
@@ -333,6 +411,102 @@ class PostgreSQLTestHelper:
         return drift
 
     @staticmethod
+    async def _schema_fingerprint_is_stale(target_db: str, expected: str) -> bool:
+        """True when ``target_db``'s stamped migration-chain fingerprint disagrees
+        with ``expected`` (INF-9534), including when it has never been stamped at
+        all -- a database bootstrapped before this guard existed, or one whose
+        marker table was dropped by an out-of-band reset. Either way, "unknown"
+        is treated as stale rather than trusted: the whole point is that a
+        database must prove it is current, not be assumed so.
+
+        Read-only and on its own engine, mirroring ``_missing_columns`` -- called
+        BEFORE the create-database lock (INF-9406: no I/O on another connection
+        may happen while that cluster-scoped lock is held).
+        """
+        db_url = PostgreSQLTestHelper.get_test_db_url(database=target_db)
+        engine = create_async_engine(db_url, isolation_level="AUTOCOMMIT")
+        try:
+            async with engine.connect() as conn:
+                has_marker = await conn.run_sync(
+                    lambda sync_conn: inspect(sync_conn).has_table(
+                        "_giljo_test_schema_fingerprint", schema=SCHEMA_FINGERPRINT_SCHEMA
+                    )
+                )
+                if not has_marker:
+                    return True
+                row = (await conn.execute(text(f"SELECT fingerprint FROM {SCHEMA_FINGERPRINT_TABLE} LIMIT 1"))).first()
+                return row is None or row[0] != expected
+        finally:
+            await engine.dispose()
+
+    @staticmethod
+    async def _stamp_schema_fingerprint(conn, fingerprint: str) -> None:
+        """(Re)write the single-row fingerprint marker on ``conn``'s database.
+
+        Runs unconditionally (not only on drift) so a database that was already
+        current still ends the bootstrap with a marker -- the self-heal path for
+        every per-worker database that predates this guard, without needing a
+        reset. Idempotent: safe to call every bootstrap, drifted or not.
+        """
+        await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA_FINGERPRINT_SCHEMA}"'))
+        await conn.execute(text(f"CREATE TABLE IF NOT EXISTS {SCHEMA_FINGERPRINT_TABLE} (fingerprint text NOT NULL)"))
+        await conn.execute(text(f"TRUNCATE {SCHEMA_FINGERPRINT_TABLE}"))
+        await conn.execute(
+            text(f"INSERT INTO {SCHEMA_FINGERPRINT_TABLE} (fingerprint) VALUES (:fp)"),
+            {"fp": fingerprint},
+        )
+
+    @staticmethod
+    async def _ensure_app_role_grants(conn, target_db: str) -> None:
+        """Grant the app roles what they need on ``target_db``, and CREATEDB at
+        the role level, every time a per-worker database is (re)provisioned
+        (INF-9534, second gap).
+
+        A lane that pins ``DATABASE_URL`` to connect as ``giljo_owner`` or
+        ``giljo_user`` instead of the ``postgres`` superuser found the per-worker
+        database granted DML to neither role (``DEFAULT_CONFIG`` connects as
+        ``postgres``, and nothing had ever granted the app roles anything on a
+        test database), and found neither role able to create the throwaway
+        scratch databases several suites need (schema-drift guard, pg-parity,
+        SaaS purge, schema-writer bootstrap all require CREATEDB). Neither was
+        mechanised, so a database created later inherited nothing. This makes
+        every (re)provision self-sufficient.
+
+        Runs unconditionally, mirroring ``_stamp_schema_fingerprint`` -- cheap
+        metadata-only statements, and running them every bootstrap self-heals
+        every already-existing per-worker database too, not only ones created
+        after this change ships.
+
+        Per-role and best-effort: a role absent from this cluster (see
+        ``APP_ROLES``) is skipped rather than failing the whole bootstrap, and
+        a permission error on the
+        CREATEDB grant (connecting role lacks CREATEROLE) is logged and
+        swallowed rather than taking down test collection over a step that
+        is not the point of this function.
+        """
+        for role in APP_ROLES:
+            role_exists = bool(
+                (await conn.execute(text("SELECT 1 FROM pg_roles WHERE rolname = :r"), {"r": role})).scalar()
+            )
+            if not role_exists:
+                continue
+            await conn.execute(text(f'GRANT CONNECT ON DATABASE "{target_db}" TO "{role}"'))
+            await conn.execute(text(f'GRANT ALL ON SCHEMA public TO "{role}"'))
+            await conn.execute(text(f'GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "{role}"'))
+            await conn.execute(text(f'GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "{role}"'))
+            await conn.execute(text(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "{role}"'))
+            await conn.execute(text(f'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "{role}"'))
+            try:
+                await conn.execute(text(f'ALTER ROLE "{role}" WITH CREATEDB'))
+            except Exception:
+                logger.warning(
+                    "INF-9534: could not grant CREATEDB to role %r on %r "
+                    "(connecting role likely lacks CREATEROLE) -- DML grants were still applied.",
+                    role,
+                    target_db,
+                )
+
+    @staticmethod
     async def ensure_test_database_exists():
         """
         Ensure the (per-worker) test database exists, create if it doesn't.
@@ -351,6 +525,20 @@ class PostgreSQLTestHelper:
         already exists, its live columns are diffed against ``Base.metadata``
         (``_missing_columns``, narrow by design) and, on drift, its ``public``
         schema is reset so the bootstrap ``create_all`` starts clean.
+
+        MIGRATION-CHAIN FINGERPRINT (INF-9534): ``_missing_columns`` only sees a
+        table that exists losing a column -- it cannot see an index, constraint,
+        or enum value the migration chain dropped or added, because none of
+        those necessarily change ``Base.metadata`` (a raw-SQL migration index is
+        the case that exposed this: a dropped index that per-worker databases
+        still silently carried, indistinguishable from xdist flakiness).
+        ``_schema_fingerprint_is_stale`` closes
+        that gap by hashing the WHOLE migration chain and stamping the result
+        into each per-worker database; a mismatch (including "never stamped")
+        also triggers the reset below, and the fingerprint is re-stamped on
+        every bootstrap regardless of drift. The app-role grants and CREATEDB
+        (``_ensure_app_role_grants``, the second INF-9534 gap) are applied the
+        same unconditional way, right after.
 
         Resetting (rather than failing loudly) is the chosen response because it
         IS race-safe here: the target DB name is per-worker-unique
@@ -425,7 +613,13 @@ class PostgreSQLTestHelper:
                         )
                     ).scalar()
                 )
-                drifted = bool(await PostgreSQLTestHelper._missing_columns(target_db)) if pre_exists else False
+                current_fingerprint = compute_schema_fingerprint()
+                drifted = (
+                    bool(await PostgreSQLTestHelper._missing_columns(target_db))
+                    or await PostgreSQLTestHelper._schema_fingerprint_is_stale(target_db, current_fingerprint)
+                    if pre_exists
+                    else False
+                )
 
                 # Serialize concurrent CREATE DATABASE across xdist workers so
                 # template1 is only copied by one session at a time. That copy
@@ -499,6 +693,14 @@ class PostgreSQLTestHelper:
                     await conn.execute(text("GRANT ALL ON SCHEMA public TO PUBLIC"))
                 # Recreated last: the reset above drops pg_trgm with the schema.
                 await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+
+                # INF-9534: stamp the current migration-chain fingerprint and
+                # (re)apply the app-role grants unconditionally -- both are
+                # idempotent, and running them every bootstrap (not only when
+                # ``drifted``) self-heals a database that predates this guard
+                # without waiting for its next migration to force a reset.
+                await PostgreSQLTestHelper._stamp_schema_fingerprint(conn, current_fingerprint)
+                await PostgreSQLTestHelper._ensure_app_role_grants(conn, target_db)
         finally:
             await db_engine.dispose()
 

@@ -649,12 +649,15 @@ class TestPayloadBudgetStillHolds:
             tenant_key=test_project.tenant_key,
         )
         payload_size = len(json.dumps(result))
-        # 41KB ceiling — raised from 40KB deliberately after BE-6008 added
-        # staged-agent mailbox + mode-gated coordination guidance (real wire
-        # payload ~40.4KB; MCP serializes tool results with indent=2). See
-        # TestTask5PayloadSize in test_ce_0031_orchestrator_polish.py for the
-        # full rationale and the 25KB structural-split goal.
-        assert payload_size < 41_000, (
+        # 41.5KB ceiling — 40KB -> 41KB after BE-6008 added staged-agent mailbox +
+        # mode-gated coordination guidance; 41KB -> 41.5KB in BE-9563, where the
+        # shipped tool names (finalize_job, resume_or_dismiss_job) are 8 bytes longer
+        # than the retired ones they replace and master had only 7 bytes of headroom.
+        # Both raises were deliberate; neither was a trim-avoidance. Real wire payload
+        # ~41.0KB; MCP serializes tool results with indent=2. See TestTask5PayloadSize
+        # in test_ce_0031_orchestrator_polish.py for the full rationale, the measured
+        # before/after, and the 25KB structural-split goal.
+        assert payload_size < 41_500, (
             f"grew the orchestrator identity past the 41KB ceiling ({payload_size} bytes). "
             f"Either trim the added content or raise the ceiling deliberately (and record why)."
         )

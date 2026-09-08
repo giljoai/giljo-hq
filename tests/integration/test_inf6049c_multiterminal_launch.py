@@ -5,7 +5,7 @@
 
 """INF-6049c — MCP-boundary tests for per-agent tool routing + launch_commands.
 
-Drives ``stage_project`` / ``implement_project`` through the in-memory FastMCP
+Drives ``stage_project`` / ``get_implementation_prompt`` through the in-memory FastMCP
 transport (BE-5042 lesson: exercise the @mcp.tool wrapper, not just the service)
 and proves the Phase-3 deliverables:
 
@@ -230,7 +230,7 @@ async def lifecycle_mcp_client(db_manager, db_session, primary_tenant_key, monke
 
 
 # ---------------------------------------------------------------------------
-# implement_project — per-agent tool routing + launch_commands
+# get_implementation_prompt — per-agent tool routing + launch_commands
 # ---------------------------------------------------------------------------
 
 
@@ -251,7 +251,7 @@ async def test_implement_payload_routes_each_agent_to_its_tool_and_carries_launc
     )
 
     async with new_client() as session:
-        result = await session.call_tool("implement_project", {"project_id": project.id})
+        result = await session.call_tool("get_implementation_prompt", {"project_id": project.id})
 
     assert result.is_error is False, _error_text(result)
     payload = _payload(result)
@@ -286,7 +286,7 @@ async def test_implement_payload_routes_each_agent_to_its_tool_and_carries_launc
 async def test_implement_launch_command_is_runnable_with_autonomy_and_loaded_prompt(
     lifecycle_mcp_client, db_session, primary_tenant_key
 ):
-    """BE-6182: the implement_project launch command is RUNNABLE — it carries the
+    """BE-6182: the get_implementation_prompt launch command is RUNNABLE — it carries the
     per-harness autonomy flag and a natural-language loaded prompt (get_job_mission),
     not raw tool-call seed lines. (The ToolSearch bootstrap stays in the prompt-body
     per-terminal seed block, asserted by the sibling test above; it is no longer baked
@@ -303,7 +303,7 @@ async def test_implement_launch_command_is_runnable_with_autonomy_and_loaded_pro
     )
 
     async with new_client() as session:
-        result = await session.call_tool("implement_project", {"project_id": project.id})
+        result = await session.call_tool("get_implementation_prompt", {"project_id": project.id})
     payload = _payload(result)
     by_agent = {e["agent"]: e for e in payload["launch_commands"]}
 
@@ -380,7 +380,7 @@ async def test_multiterminal_role_default_fallback_when_template_id_absent(
     await _seed_team(db_session, primary_tenant_key, project, [("analyzer", None)])
 
     async with new_client() as session:
-        result = await session.call_tool("implement_project", {"project_id": project.id})
+        result = await session.call_tool("get_implementation_prompt", {"project_id": project.id})
 
     assert result.is_error is False, _error_text(result)
     by_agent = {e["agent"]: e for e in _payload(result)["launch_commands"]}
@@ -402,7 +402,7 @@ async def test_multiterminal_template_id_wins_over_role_default(lifecycle_mcp_cl
     await _seed_team(db_session, primary_tenant_key, project, [("implementer", codex_tpl.id)])
 
     async with new_client() as session:
-        result = await session.call_tool("implement_project", {"project_id": project.id})
+        result = await session.call_tool("get_implementation_prompt", {"project_id": project.id})
 
     by_agent = {e["agent"]: e for e in _payload(result)["launch_commands"]}
     assert by_agent["implementer"]["cli_tool"] == "codex"  # template_id wins, not the gemini role-default
@@ -470,7 +470,7 @@ async def test_cli_tool_resolver_is_tenant_isolated(
     await _seed_team(db_session, primary_tenant_key, project, [("implementer", foreign_tpl.id)])
 
     async with new_client() as session:
-        result = await session.call_tool("implement_project", {"project_id": project.id})
+        result = await session.call_tool("get_implementation_prompt", {"project_id": project.id})
     payload = _payload(result)
 
     # Resolver is tenant-filtered -> the cross-tenant template is invisible -> claude.

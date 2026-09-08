@@ -35,7 +35,7 @@ Write a synthesized narrative that explains what the product is and WHY it exist
 developer's purpose, what they are trying to achieve, important callouts, and any proposal
 context worth retaining. This is a product story, not a mechanical extraction.
 - vision_summaries: a list of {doc_id, light, medium} entries -- ONE per active vision
-  document. doc_id is the UUID returned alongside each chunk's content by get_vision_doc.
+  document. doc_id is the UUID returned alongside each chunk's content by get_vision_document.
   Write to these CHARACTER budgets, not to a percentage of the source:
     light  -- about 1200 characters (a short paragraph or two)
     medium -- about 3000 characters
@@ -104,7 +104,7 @@ top-level parameters and not strings. Example call shape:
       quality={"quality_standards": "..."},
       testing={"testing_strategy": "TDD", "testing_frameworks": "...",
                "test_coverage_target": 80},
-      vision_summaries=[{"doc_id": "<uuid from get_vision_doc>", "light": "...",
+      vision_summaries=[{"doc_id": "<uuid from get_vision_document>", "light": "...",
                          "medium": "..."}],
       consolidated_vision={"light": "...", "medium": "..."},
       emit_completion=true,

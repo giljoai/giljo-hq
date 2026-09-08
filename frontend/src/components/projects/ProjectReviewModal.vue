@@ -90,6 +90,16 @@
               <template v-if="projectData.completed_at"> | Completed {{ formatDateTime(projectData.completed_at) }}</template>
             </span>
             <p class="mt-2">{{ projectData.description || 'No description provided.' }}</p>
+
+            <!-- FE-9591: a superseded project says what replaced it. Gated on the
+                 STATUS, not on the pointer, so a superseded project whose successor
+                 was never recorded still says so instead of rendering nothing. Every
+                 other status gains no chrome at all. -->
+            <SupersededSuccessorNotice
+              v-if="projectData.status === 'superseded'"
+              :successor-id="projectData.successor_project_id || null"
+              @navigate="$emit('close')"
+            />
           </div>
 
           <!-- Section 2: Mission -->
@@ -394,6 +404,7 @@ import { useProjectStateStore } from '@/stores/projectStateStore'
 import { useProjectBoundThread } from '@/composables/useProjectBoundThread'
 import { useCommHubStore } from '@/stores/commHubStore'
 import ThreadTimeline from '@/components/hub/ThreadTimeline.vue'
+import SupersededSuccessorNotice from './SupersededSuccessorNotice.vue'
 
 const { formatDateTime } = useFormatDate()
 const projectStateStore = useProjectStateStore()

@@ -437,6 +437,7 @@ class FileStaging:
         tenant_key: str,
         db_session: AsyncSession | None = None,
         platform: str = "claude_code",
+        product_id: str | None = None,
     ) -> tuple[Path | None, str]:
         """
         Stage slash commands AND agent templates in a single ZIP (Handover 0907).
@@ -450,6 +451,13 @@ class FileStaging:
             tenant_key: Tenant identifier
             db_session: Optional DB session override
             platform: Target CLI platform (claude_code, gemini_cli, codex_cli)
+            product_id: BE-9557: the caller's already-resolved product binding
+                (``bootstrap_setup``'s ``_resolve_product_binding``). ``None``
+                resolves the tenant's DEFAULT product instead (see
+                ``product_agent_selection._resolve_default_product_id``) --
+                this used to be silently dropped even when the caller HAD a
+                bound product, so the export followed an arbitrary shown
+                product instead of the one the caller asked for.
 
         Returns:
             Tuple (zip_path|None, message)
@@ -486,6 +494,7 @@ class FileStaging:
                     build_export_context,
                     filter_templates_by_ids,
                     record_product_export,
+                    template_ids_for_product,
                 )
                 from .template_renderer import select_templates_for_packaging
                 from .tools.agent_template_assembler import AgentTemplateAssembler
@@ -499,17 +508,20 @@ class FileStaging:
                         AgentTemplate.deleted_at.is_(None),
                     )
                 )
-                # BE-9385a: the exported set follows the ACTIVE PRODUCT's junction.
+                # BE-9385a/BE-9557: the exported set follows the REQUESTED product's
+                # junction when the caller resolved one, else the DEFAULT product's.
                 # An empty result here is not an error on this path -- the combined
                 # ZIP still ships the slash commands, exactly as it already does for
                 # a tenant with no active templates at all.
-                all_active = filter_templates_by_ids(
-                    result.scalars().all(), await active_product_template_ids(session, tenant_key)
-                )
+                if product_id:
+                    ids = await template_ids_for_product(session, product_id, tenant_key)
+                else:
+                    ids = await active_product_template_ids(session, tenant_key)
+                all_active = filter_templates_by_ids(result.scalars().all(), ids)
 
                 if all_active:
                     selected_templates = select_templates_for_packaging(all_active)
-                    export_context = await build_export_context(session, tenant_key)
+                    export_context = await build_export_context(session, tenant_key, product_id=product_id)
                     assembler = AgentTemplateAssembler()
                     export_data = assembler.assemble(selected_templates, platform, export_context=export_context)
 

@@ -19,13 +19,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from giljo_mcp.branding import PRODUCT_NAME
+
 
 # Kept under ~1-2k tokens on purpose: a fresh agent (no CLAUDE.md, no skills)
 # reads this once to become competent at the project/task tool surface.
-_GUIDE = """\
-# Giljo HQ -- how to drive the project/task tools
+# BE-9543: product naming derives from branding.py (not hand-copied) so a future
+# rename changes one constant instead of a hunt through this string.
+_GUIDE_TEMPLATE = """\
+# {product_name} -- how to drive the project/task tools
 
-You are talking to the GiljoAI dashboard over MCP. This guide is the routing +
+You are talking to the {product_name} dashboard over MCP. This guide is the routing +
 judgment layer for the create/read/update tools. Call it once, then act.
 
 ## 0. Operating principle -- server-authored artifacts are VERBATIM
@@ -40,16 +44,19 @@ break.
 
 ## 1. Project vs task -- pick the right create tool
 
-**First, name your product.** Both create tools take an optional `product_id`. Omit it
-and the new task/project binds to whatever product is ACTIVE at that instant -- and the
-active product is shared, mutable state: another session, or the user switching products
-in the dashboard, changes it under you, and your next create silently follows. **If you
-know which product you are working on -- and a staged orchestrator always does, it is in
-your mission -- PASS `product_id`.** Then the binding is yours and no one can move it.
-A `product_id` that is not one of your own products is refused and nothing is created;
-it never quietly falls back to the active product. Either way the create response tells
-you where it landed (`product_id` + `product_name`) -- read it back and you have caught
-a wrong filing for free.
+**First, name your product.** Both create tools take an optional `product_id`. Omit it and
+a tenant with exactly one product gets the DEFAULT product -- but a tenant with MORE THAN
+ONE product gets a structured `PRODUCT_AMBIGUOUS` rejection instead (carrying the full
+product list to choose from) and nothing is created; it never guesses. **If you know which
+product you are working on -- and a staged orchestrator always does, it is in your
+mission -- PASS `product_id`.** Then the binding is yours, no rejection is possible, and no
+session switching products in the dashboard can move it under you. A `product_id` that is
+not one of your own products is likewise refused with nothing created. Either way the
+create response tells you where it landed (`product_id` + `product_name`) -- read it back
+and you have caught a wrong filing for free. **Working from a repo, long-term?** Run
+`giljo_setup(product_id=...)` once -- it writes a per-repo binding into CLAUDE.md/AGENTS.md
+so every future session in that repo passes `product_id` automatically and never hits
+`PRODUCT_AMBIGUOUS` again.
 
 - **Task** (`create_task`): technical debt, a TODO, a bug, a small fix, a scope-creep
   punt. Every task is auto-tagged the reserved **`TSK`** type -- there is no task
@@ -60,8 +67,8 @@ a wrong filing for free.
   `valid_types`). Numbering is automatic -- omit `series_number`; the serial
   auto-assigns continue-upward on ONE global (tenant+product) line shared by every
   project type AND tasks. Unknown `project_type` is rejected with the list of valid
-  types in the error -- re-map and retry. Projects are created **inactive**; the user
-  activates/launches from the dashboard.
+  types in the error -- re-map and retry. Projects are created **inactive**; starting one
+  is a separate, explicit step through either door (see section 6).
 - **Update**: to change an existing project, `list_projects` to find it, then
   `update_project` with the new values.
 - **A task turned out to be a project? PROMOTE it -- never rebuild it.**
@@ -101,7 +108,7 @@ can't start until step a ships). NOT for independent parallel work.
 routing: when the user asks to RUN / LINK / JOIN / CHAIN two or more EXISTING projects
 into one autonomous back-to-back run (they paste project UUIDs or names), do NOT stage
 them one at a time -- start a chain run:
-  `start_chain_run(project_ids=[...], execution_mode="subagent")`
+  `link_projects(project_ids=[...], execution_mode="subagent")`
 - Resolve any NAMES to UUIDs FIRST via `list_projects` (the tool takes `project_ids`,
   never names). `execution_mode` is REQUIRED -- the two values are `"subagent"` (one
   orchestrator session drives the workers; the normal headless choice) and
@@ -118,6 +125,19 @@ them one at a time -- start a chain run:
   proceed and drive the run project by project, advancing on the `get_workflow_status`
   `ready_to_advance` gate, through to the series-summary finale.
 - A chain is multi-PROJECT, single-user -- it is NOT a Team.
+- **Changed your mind mid-run?** `unlink_projects(run_id=<run_id>)` releases the
+  projects that have not run yet and stops the group. Ones already finished stay
+  finished. There is no separate "mark reviewed" step to remember: a member you
+  finish headlessly is recorded automatically, which is why linking is one call at
+  the start and not a sequence you drive by hand.
+- **The run record is the crash-resume ground truth, not a workflow you drive from
+  memory.** `project_ids` + `resolved_order` (the grouping and the sequence) and
+  `current_index` + `project_statuses` (the progress) are durable on the
+  `sequence_run` row -- if your session dies mid-chain, a fresh session reads
+  `get_context` / the run record and keeps driving from there; it does not
+  re-elect or re-stage. Both doors (this MCP path and the dashboard's Run
+  Sequential button) write that SAME record through the one owning
+  `SequenceRunService` -- never assume you are the only writer touching it.
 
 ## 3. Edition Scope -- mandatory on every project
 Every project description (and every commit it produces) MUST state its edition
@@ -137,10 +157,13 @@ SaaS = hosted/billing/multi-org; Both = ships identically to each.
 - **Search past work ("have we solved X before?")** -> `search_memory(query, tag?)`
   keyword-searches the 360 memory (summaries/outcomes/decisions/tags) and returns
   ranked headlines. Distinct from `get_context(["memory_360"])` (recent-N by recency,
-  not search) and `search_threads` (Hub chat, not memory).
+  not search) and `list_threads` (Hub chat, not memory).
 - **Tasks** -> `list_tasks(mode="summary", filters={...})`; `mode="full"` for bodies.
   Every task is `TSK`, so a non-TSK `task_type` filter returns nothing -- normally
   omit it. `hidden` is UI declutter only; agents see hidden and visible alike.
+- **Roadmap** -> `get_roadmap(product_id?)` reads the ranked board; `save_roadmap
+  (items=[...])` bulk-upserts sort_order/risk/complexity (agent does the ranking, server
+  just validates + stores). `patch_fields=true` touches only the fields you send.
 - **Serials -- the prefix tells task from project:** **`TSK-nnnn` is ALWAYS
   a task** (`create_task` forces the reserved `TSK` tag; every task renders `TSK-nnnn`).
   **A typed non-TSK alias (`BE-`, `FE-`, `INF-`, ...) is ALWAYS a project.** Converting a
@@ -155,30 +178,40 @@ SaaS = hosted/billing/multi-org; Both = ships identically to each.
   `update_project_mission`. **Reads:** `list_projects`, `list_tasks`, `get_context`.
 - **Never pass `tenant_key`** -- the security layer injects it from auth.
 - **Creates need a product; updates do not.** `create_project` / `create_task` accept
-  an explicit `product_id` (prefer it -- see section 1), and a create that omits it
-  binds to the ACTIVE product. The update tools (`update_project`, `update_task`,
-  `update_project_mission`) address one row BY ID inside your tenant and do not read
-  the active product at all -- so switching products, or having none selected, never
-  blocks an edit. The LIST reads (`list_projects`, `list_tasks`) do scope to the active
-  product. If a read or a create reports "No active product", tell the user to activate
-  one in the dashboard rather than retrying.
+  an explicit `product_id` (prefer it -- see section 1). A create that omits it binds
+  to the DEFAULT product when there is only one -- but a tenant with MORE THAN ONE
+  product gets a structured `PRODUCT_AMBIGUOUS` rejection instead, carrying the full
+  product list to choose from; it never silently guesses. The update tools
+  (`update_project`, `update_task`, `update_project_mission`) address one row BY ID
+  inside your tenant and never read any product context at all -- so having several
+  products, or none selected, never blocks an edit. The LIST reads (`list_projects`,
+  `list_tasks`) fall back to the default product when `product_id` is omitted, and
+  never refuse -- pass `product_id` explicitly when you mean a different one.
 - On success, the dashboard updates live via WebSocket -- do NOT fabricate a URL.
 
 ## 6. Lifecycle (orchestrated work)
-create project -> stage it -> **stop at the human gate** (the user reviews the
-dashboard and presses Implement) -> implement -> close the project + write memory
-at completion.
+create project -> stage it -> **stop at the human gate** (a human authorizes: the
+dashboard's Implement button, or `launch_implementation` from the harness) ->
+implement -> close the project + write memory at completion.
 
-Drive it with two tools:
-- `stage_project(project_id, mode)` -- mode is multi_terminal / claude / codex /
-  gemini / antigravity. Returns the orchestrator staging prompt. When it returns,
-  **STOP**: staging never auto-executes. Tell the user to review the staged plan in
-  the dashboard and press Implement.
-- `implement_project(project_id)` -- call this only AFTER the user has pressed
+Drive it with these tools:
+- `stage_project(project_id, mode)` -- **THE ONE STAGING QUESTION:** `mode`
+  is EXECUTION STYLE ONLY -- 'subagent' (one orchestrator session drives worker agents
+  in-session) or 'multi_terminal' (a fresh terminal per agent). Do NOT ask the user which
+  coding tool/harness they're running -- that is auto-detected server-side from your MCP
+  client, never a `mode` choice. ('claude'/'codex'/'gemini'/'antigravity' still work as
+  legacy aliases for older callers, but are not the intended values -- pass 'subagent' or
+  'multi_terminal'.) Returns the orchestrator staging prompt. When it returns, **STOP**:
+  staging never auto-executes. Tell the user to review the staged plan in the dashboard
+  and press Implement.
+- `get_implementation_prompt(project_id)` -- call this only AFTER the user has pressed
   Implement. If the gate has not cleared it returns a structured error
   (status='gate_not_passed') telling you the exact next action: either run
   stage_project first, or ask the user to press Implement in the dashboard. There is
   no bypass -- the human gate is intentional.
+- `launch_implementation(project_id, mission)` -- records the user's goal and their
+  explicit authorization in one call, then opens the implementation gate. Requires human
+  authorization at call time. Idempotent.
 
 **Recovery -- when a project looks wedged, diagnose before you guess.** If a project
 seems stuck (agents blocked/silent, nothing advancing, a gate won't clear, or you
@@ -212,7 +245,12 @@ NOT need to know which phase you are in -- the response tells you via its `phase
   runs the whole archive lifecycle (deactivate, terminal status with the completion date
   stamped, spawned agents moved from `complete` to `closed`) -- the same thing the dashboard's
   Archive button does. A CHAIN MEMBER needs no third step: its closeout already flips the row
-  and the conductor advances the run.
+  and the conductor advances the run. **That third step now REQUIRES the closeout to have
+  actually run first:** archiving without one (no `write_project_closeout` success on this
+  project) is refused with `CLOSEOUT_BLOCKED` naming the same blockers a closeout attempt
+  would report -- resolve them (drain messages, `complete_job`, `write_project_closeout`) and
+  retry, or pass `update_project(status='completed', force=true)` to abandon deliberately
+  without a closeout entry.
 - **deliverable** (`phase='deliverable'`): a worker agent (implementer/tester/...) recording
   its result. No phase magic -- the orchestrator reviews and closes your job.
 
@@ -221,7 +259,7 @@ A tenant-isolated message board for agent<->agent<->user chat that outlives any 
 Use it for cross-session / cross-PC coordination and standalone topics not tied to a
 project. Tenant isolation is automatic (never pass `tenant_key`); every read/write is
 scoped to YOUR tenant -- you cannot see, search, or post to another tenant's threads.
-Eight tools:
+Nine tools:
 - **Start a chat:** `create_thread(subject=..., creator_id=<your agent_id>)` -> returns a
   shareable **`CHT-####` chat id**. Share that id so other agents can join. Pass
   `project_id` to anchor the chat to a project, or omit it for a standalone thread.
@@ -235,16 +273,22 @@ Eight tools:
   participants; add `to_participant=<id>` to direct-message one. Posts are append-only.
   Pass `set_status="resolved"|"closed"` when the conversation is done. Add
   `pass_baton_to=<agent_id|user_id|'all'|'none'>` to hand the turn atomically with the
-  post -- no separate `pass_baton` call needed.
+  post -- no separate `set_next_actor` call needed.
+- **Rename / retag / restatus without posting:** `update_thread(thread_id, subject=...,
+  status=..., product_id=..., clear_product=..., project_ids=...)` -- the ONLY way to give
+  an old thread a product (no bulk migration) or full-replace its project tags.
 - **The baton (`next_action_owner`):** `get_my_turn(agent_id)` lists the chats awaiting
-  YOU; `pass_baton(thread_id, to=<agent_id|user_id|'all'|'none'>)` hands the turn on.
-  AUTO-PASS: a directed action-request (`requires_action=true` + `to_participant`) hands
-  the baton to that participant automatically unless you pass `pass_baton_to='none'`;
-  broadcasts never move the baton unless `pass_baton_to` says so.
+  YOU (or block on `get_my_turn(agent_id, wait_seconds=45)` instead of polling -- the
+  wait_seconds is what makes it park; without it the same call answers immediately -- on a harness that can
+  hold a tool call open); `set_next_actor(thread_id, to=<agent_id|user_id|'all'|'none'>)` hands
+  the turn on. AUTO-PASS: a directed action-request (`requires_action=true` +
+  `to_participant`) hands the baton to that participant automatically unless you pass
+  `pass_baton_to='none'`; broadcasts never move the baton unless `pass_baton_to` says so.
 - **List / catch up:** `list_threads(...)` filters by status/owner/product/project;
-  `get_thread_history(thread_id)` reads the full timeline (read-only -- it does NOT
-  acknowledge anything).
-- **Find a chat:** `search_threads(query)` matches by `CHT-####` serial, subject keyword,
+  `get_thread_history(thread_id)` reads the full timeline (read-only);
+  `get_participant_liveness(thread_id)` shows who is still active/quiet/gone -- check
+  before reassigning a silent agent's work or escalating past a dark orchestrator.
+- **Find a chat:** `list_threads(query)` matches by `CHT-####` serial, subject keyword,
   participant, or message content.
 - **Loop on a chat:** to have addressed agents keep checking a chat until it is
   resolved/closed, post with `loop_directive=true` -- they loop/sleep on their normal
@@ -258,17 +302,23 @@ choice (closeout with deferred findings, an ambiguous decision) -- `options` is 
 - **UI surface:** the dashboard shows a passive "needs input" pill (informational, NOT a
   clickable global banner). The decide buttons render inside the project's CloseoutModal via
   the ApprovalCard component -- users frequently miss this and respond verbally instead.
-- **Clearing the gate:** ONLY `POST /api/approvals/{id}/decide` clears `awaiting_user` (the
-  ApprovalCard button calls this). `set_agent_status` accepts only blocked/idle/sleeping, and
-  `report_progress` does not auto-wake from `awaiting_user` -- neither can clear this gate. If
-  the user responds verbally, guide them to open CloseoutModal and click the ApprovalCard
-  option, or POST to the decide endpoint directly. The MCP server is passive here.
+- **Clearing the gate -- two doors, one write.** `POST /api/approvals/{id}/decide` (the
+  ApprovalCard button) and the `decide_approval(approval_id, option_id)` MCP tool both resolve
+  the SAME approval row through the same service write -- pick whichever door fits your session.
+  `set_agent_status` accepts only blocked/idle/sleeping, and `report_progress` does not
+  auto-wake from `awaiting_user` -- neither can clear this gate.
+- **From the harness:** relay the pending question's `reason` and `options` to the user in your
+  terminal (you already have both -- you sent them), read the option they choose, then call
+  `decide_approval(approval_id, option_id)`. `decide_approval` respects your tenant's
+  approval mode. If it refuses, your tenant requires a human to decide from the dashboard
+  -- change this in Settings.
 - **If your client supports it, you may be asked directly:** on a connection that negotiates
   MCP 2026-07-28 and declares the elicitation capability, `request_approval` ALSO returns the
   choice inline, and answering it resolves the gate through the same decide path. This never
   replaces the parked approval -- the row is created and you are flipped to `awaiting_user`
-  first either way, so the dashboard remains able to clear it. On every other client the
-  behaviour above is unchanged and the wait is yours to manage.
+  first either way, so the dashboard remains able to clear it. In practice very few clients
+  negotiate 2026-07-28 today, so treat inline elicitation as an optional enhancement --
+  `decide_approval` (or the dashboard) is the path to rely on.
 """
 
 
@@ -276,5 +326,10 @@ def build_giljo_guide() -> dict[str, Any]:
     """Return the static cross-tool guide as a JSON-safe dict.
 
     No tenant context or DB access -- the guide is identical for every caller.
+
+    BE-9543: uses ``str.replace`` rather than ``str.format`` -- the guide body has
+    plenty of its OWN literal ``{...}`` (JSON-shaped tool-arg examples like
+    ``filters={...}``), which ``.format()`` would try to interpolate and crash on.
+    ``replace`` only ever touches the one placeholder we put there.
     """
-    return {"guide": _GUIDE}
+    return {"guide": _GUIDE_TEMPLATE.replace("{product_name}", PRODUCT_NAME)}

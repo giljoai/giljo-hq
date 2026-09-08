@@ -13,6 +13,13 @@ api/websocket.WebSocketManager and satisfies this protocol implicitly
 
 Created: 2026-04-18 (Sprint 003a) to break the backward import from
 src/giljo_mcp/monitoring/agent_health_monitor.py into api/websocket.
+
+BE-9518: ``broadcast_agent_auto_failed`` / ``broadcast_health_alert`` moved off
+this protocol when they were extracted to ``agent_health_ws_broadcast.py`` as
+module-level functions (agent_health_monitor.py now imports them directly and
+passes the ``WebSocketBroadcaster`` in as their ``websocket_manager`` arg) --
+the only method this protocol's sole consumer still calls directly is
+``broadcast_event_to_tenant``.
 """
 
 from __future__ import annotations
@@ -24,18 +31,11 @@ from typing import Any, Protocol, runtime_checkable
 class WebSocketBroadcaster(Protocol):
     """Minimal broadcast interface consumed by lower-layer monitoring code."""
 
-    async def broadcast_agent_auto_failed(
+    async def broadcast_event_to_tenant(
         self,
         tenant_key: str,
-        job_id: str,
-        agent_display_name: str,
-        reason: str,
-    ) -> None: ...
-
-    async def broadcast_health_alert(
-        self,
-        tenant_key: str,
-        job_id: str,
-        agent_display_name: str,
-        health_status: Any,
-    ) -> None: ...
+        event: dict[str, Any],
+        exclude_client: str | None = None,
+        *,
+        publish_to_broker: bool = True,
+    ) -> int: ...

@@ -3,7 +3,7 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6184: direct unit tests for the project-less conductor minter helpers.
+"""BE-6184/BE-9440: direct unit tests for the project-less conductor minter helpers.
 
 ``conductor_job_minter`` mints the dedicated, project-less chain conductor's
 AgentJob + AgentExecution (the conductor owns no project). Regression at the
@@ -11,10 +11,17 @@ helper layer:
 
 1. test_mint_conductor_job_creates_projectless_orchestrator
    mint_conductor_job inserts an orchestrator AgentJob with project_id IS NULL +
-   its AgentExecution, and returns the execution agent_id.
+   its AgentExecution, and returns the {agent_id, job_id, execution_id} identity.
 2. test_projectless_conductor_staging_directive_shape
    the staging directive is the STOP-shaped USE_RUNTIME_MISSION payload (never a
    misleading 404), pointing the conductor at get_job_mission.
+3. test_broadcast_conductor_created_emits_agent_created
+   BE-9440 Phase 1: the mint previously broadcast nothing; broadcast_conductor_created
+   now emits agent:created with project_id=None (conductor is project-less) and the
+   minted identity.
+4. test_broadcast_conductor_created_noop_without_websocket_manager
+   no websocket_manager injected -> no-op, never raises (mirrors every other
+   agent:created emitter's fire-and-forget contract).
 
 Parallel-safe: db_session fixture (TransactionalTestContext). Edition Scope: CE.
 """
@@ -27,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.services.conductor_job_minter import (
+    broadcast_conductor_created,
     mint_conductor_job,
     projectless_conductor_staging_directive,
 )
@@ -37,9 +45,13 @@ from giljo_mcp.tenant import TenantManager
 async def test_mint_conductor_job_creates_projectless_orchestrator(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
 
-    agent_id = await mint_conductor_job(db_session, tenant_key=tenant, run_id="run-abc")
+    identity = await mint_conductor_job(db_session, tenant_key=tenant, run_id="run-abc")
 
-    assert agent_id, "mint must return a fresh agent_id"
+    assert identity["agent_id"], "mint must return a fresh agent_id"
+    assert identity["job_id"], "mint must return the job_id"
+    assert identity["execution_id"], "mint must return the execution row id"
+
+    agent_id = identity["agent_id"]
 
     job = (
         await db_session.execute(
@@ -75,3 +87,54 @@ def test_projectless_conductor_staging_directive_shape() -> None:
     assert directive["identity"] == {"job_id": "job-xyz", "project_id": None}
     assert "get_job_mission" in directive["message"]
     assert directive["thin_client"] is True
+
+
+class _RecordingWebsocketManager:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def broadcast_to_tenant(self, *, tenant_key, event_type, data):
+        self.calls.append({"tenant_key": tenant_key, "event_type": event_type, "data": data})
+
+
+@pytest.mark.asyncio
+async def test_broadcast_conductor_created_emits_agent_created() -> None:
+    ws = _RecordingWebsocketManager()
+
+    await broadcast_conductor_created(
+        ws,
+        tenant_key="tenant-1",
+        run_id="run-abc",
+        agent_id="agent-1",
+        job_id="job-1",
+        execution_id="exec-1",
+    )
+
+    assert len(ws.calls) == 1, "a freshly minted conductor must broadcast exactly one agent:created"
+    call = ws.calls[0]
+    assert call["event_type"] == "agent:created"
+    assert call["tenant_key"] == "tenant-1"
+    data = call["data"]
+    assert data["project_id"] is None, "the conductor owns NO project"
+    assert data["agent_id"] == "agent-1"
+    assert data["job_id"] == "job-1"
+    assert data["execution_id"] == "exec-1"
+    assert data["agent_display_name"] == "orchestrator"
+    assert data["agent_name"] == "Chain Conductor"
+    assert data["status"] == "waiting"
+    assert data["chain_conductor"] is True
+    assert data["run_id"] == "run-abc"
+
+
+@pytest.mark.asyncio
+async def test_broadcast_conductor_created_noop_without_websocket_manager() -> None:
+    # Must never raise when no websocket_manager is injected (mirrors every other
+    # agent:created emitter's fire-and-forget contract).
+    await broadcast_conductor_created(
+        None,
+        tenant_key="tenant-1",
+        run_id="run-abc",
+        agent_id="agent-1",
+        job_id="job-1",
+        execution_id="exec-1",
+    )

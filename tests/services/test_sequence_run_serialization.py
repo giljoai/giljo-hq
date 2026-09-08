@@ -51,6 +51,7 @@ def test_serialize_sequence_run_shape() -> None:
         "locked",
         "project_statuses",
         "reviewed_project_ids",
+        "reviewed_via",  # BE-9540: per-member review provenance ({project_id -> "ui" | "harness"})
         "chain_mission",
         "conductor_agent_id",
         "conductor_project_id",
@@ -67,6 +68,8 @@ def test_serialize_sequence_run_shape() -> None:
     assert out["conductor_project_id"] is None
     # BE-9098: unset column (unsaved instance) serializes to [] via the `or []` guard.
     assert out["reviewed_project_ids"] == []
+    # BE-9540: unset column (unsaved instance) serializes to {} via the `or {}` guard.
+    assert out["reviewed_via"] == {}
     # created_at/updated_at are None on an unsaved instance (isoformat-guarded).
     assert out["created_at"] is None
     assert out["updated_at"] is None

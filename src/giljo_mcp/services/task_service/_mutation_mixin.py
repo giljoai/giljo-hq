@@ -581,6 +581,7 @@ class _TaskMutationMixin:
                         "updated_fields": list(updated_fields),
                         "hidden": bool(getattr(task, "hidden", False)),
                         "status": task.status,
+                        "product_id": task.product_id,
                     },
                 )
             except (RuntimeError, ValueError, OSError) as ws_error:

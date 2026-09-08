@@ -59,6 +59,7 @@ def _build_ws_project_data(project) -> dict:
         "description": project.description,
         "status": project.status,
         "mission": project.mission,
+        "product_id": project.product_id,
     }
 
 
@@ -121,6 +122,8 @@ async def mark_staging_complete(
     if websocket_manager is not None:
         payload = {
             "project_id": str(project.id),
+            # BE-9525c: additive -- missing on this emitter (BE-9518 left it out).
+            "product_id": project.product_id,
             "staging_status": "staging_complete",
         }
         if agent_count is not None:
@@ -665,6 +668,23 @@ async def complete_chain_run_if_finished(
                 tenant_key,
             )
             return False
+
+        # BE-9540: headless completion COUNTS as the per-card review (operator
+        # ruling B). Every member just reached a terminal status without ever
+        # going through the dashboard's review flow -- for a per_card run that
+        # would otherwise purge with reviewed_project_ids still empty, silently
+        # bypassing the policy the record itself declares. Auto-mark any member
+        # not already reviewed through the SAME writer the UI review POST uses
+        # (mark_member_reviewed), stamped via="harness" so the provenance map
+        # shows it was satisfied by the harness, never silently skipped. An
+        # auto_close run has no per-card policy to satisfy -- no-op there.
+        if run.get("review_policy") == "per_card":
+            reviewed = set(run.get("reviewed_project_ids") or [])
+            for pid in resolved_order:
+                if pid not in reviewed:
+                    run = await svc.mark_member_reviewed(
+                        run_id=run["id"], project_id=pid, tenant_key=tenant_key, via="harness"
+                    )
 
         await svc.purge_run(run_id=run["id"], tenant_key=tenant_key)
         logger.info(

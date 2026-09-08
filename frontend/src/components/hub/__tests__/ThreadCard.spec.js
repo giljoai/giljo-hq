@@ -230,3 +230,38 @@ describe('ThreadCard', () => {
     expect(w.emitted('open')).toBeFalsy()
   })
 })
+
+// FE-9530: one Hub space shows every product's threads together, so each card
+// states which product it belongs to (or that it has none) and how many
+// additional projects it tags.
+describe('ThreadCard — product/project chips (FE-9530)', () => {
+  it('shows "No product" for a genuinely product-less thread', () => {
+    const w = mountCard({ ...BASE, product_id: null, project_ids: [] })
+    const chip = w.find('[data-testid="thread-card-product-chip"]')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toContain('No product')
+  })
+
+  it('shows a product label (never the raw UUID) when the thread carries a product_id', () => {
+    const w = mountCard({ ...BASE, product_id: 'prod-1', project_ids: [] })
+    const chip = w.find('[data-testid="thread-card-product-chip"]')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text().trim()).not.toBe('')
+    expect(chip.text()).not.toContain('prod-1')
+  })
+
+  it('renders no project-tag chip when project_ids is empty', () => {
+    const w = mountCard({ ...BASE, product_id: null, project_ids: [] })
+    expect(w.find('[data-testid="thread-card-project-chip"]').exists()).toBe(false)
+  })
+
+  it('renders a singular "1 project" chip for one tag', () => {
+    const w = mountCard({ ...BASE, product_id: null, project_ids: ['p1'] })
+    expect(w.find('[data-testid="thread-card-project-chip"]').text()).toContain('1 project')
+  })
+
+  it('renders a plural "N projects" chip for several tags', () => {
+    const w = mountCard({ ...BASE, product_id: null, project_ids: ['p1', 'p2', 'p3'] })
+    expect(w.find('[data-testid="thread-card-project-chip"]').text()).toContain('3 projects')
+  })
+})

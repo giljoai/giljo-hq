@@ -8,7 +8,6 @@
  * - Message queue for offline support
  * - Centralized subscription tracking
  * - Integration with all Pinia stores
- * - Toast notifications
  * - Memory leak prevention
  * - Zero breaking changes
  */
@@ -17,8 +16,6 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { API_CONFIG } from '@/config/api'
 import { getWsBaseUrl } from '@/composables/useApiUrl'
-import { useToast } from '@/composables/useToast'
-import { useNotificationStore } from '@/stores/notifications'
 import { normalizeWebsocketPayload } from '@/utils/normalizeWebsocketPayload'
 import { createReconnectPolicy } from '@/stores/websocketReconnectPolicy'
 
@@ -46,7 +43,6 @@ export const useWebSocketStore = defineStore('websocket', () => {
     pingInterval: 30000, // 30 seconds
     pongTimeout: 10000, // grace after a ping cycle before a silent socket is declared dead
     stabilityResetDelay: 5000, // a connection up this long is "healthy" -> reset backoff. Short so normal Railway edge churn recovers promptly instead of accruing toward the attempt cap.
-    outageNotifyAfterAttempts: 3, // only alarm the user after this many consecutive failed reconnects; brief auto-recovered blips stay silent
     messageQueueSize: 100,
     maxEventHistory: 50,
     debug: API_CONFIG.WEBSOCKET?.debug || false,
@@ -77,11 +73,6 @@ export const useWebSocketStore = defineStore('websocket', () => {
   // Stability gate: only reset the reconnect backoff counter once a connection
   // has stayed up long enough to be considered healthy (prevents flap loops).
   const stableTimer = ref(null)
-
-  // Whether the user has already been alerted about the CURRENT outage. Gates
-  // the "Connection Lost" toast so brief blips that auto-recover in ~1-2s
-  // (intermittent Railway edge resets under load) never spam the user.
-  const outageNotified = ref(false)
 
   // FE-9056: after the fast-retry ladder is exhausted, this policy keeps a slow
   // heartbeat retry alive and re-arms an immediate reconnect on network return
@@ -337,9 +328,8 @@ export const useWebSocketStore = defineStore('websocket', () => {
       stableTimer.value = null
     }
 
-    // Manual disconnect clears any outstanding outage-alert state and stops the
-    // post-cap slow-retry policy (we are disconnecting on purpose).
-    outageNotified.value = false
+    // Manual disconnect stops the post-cap slow-retry policy (we are
+    // disconnecting on purpose).
     reconnectPolicy.disarm()
 
     // Stop heartbeat
@@ -380,10 +370,9 @@ export const useWebSocketStore = defineStore('websocket', () => {
     // Notify listeners
     notifyConnectionListeners('disconnected')
 
-    // NOTE: no toast here. Alerting the user is deferred to attemptReconnect and
-    // gated on a SUSTAINED outage (config.outageNotifyAfterAttempts) so that
-    // brief blips we recover from in ~1-2s stay silent — the intermittent
-    // Railway edge resets under load must not spam "Connection Lost" toasts.
+    // NOTE: no toast here, and since FE-9553 none anywhere in this store.
+    // Connection state is carried by the nav connection orb, which reports the
+    // CURRENT state rather than announcing a past one.
 
     // Attempt reconnect if we haven't exceeded max attempts. FE-9056: once the
     // fast-retry cap is hit, DON'T give up — arm the slow-retry policy so a long
@@ -426,72 +415,31 @@ export const useWebSocketStore = defineStore('websocket', () => {
       delay,
     })
 
-    // Alert the user ONCE, and only for a SUSTAINED outage. Brief blips that
-    // auto-recover within a couple of attempts stay completely silent, so the
-    // intermittent Railway edge resets don't spam "Connection Lost" toasts.
-    if (reconnectAttempts.value >= config.outageNotifyAfterAttempts && !outageNotified.value) {
-      outageNotified.value = true
-      const { showToast } = useToast()
-      showToast({
-        title: 'Connection Lost',
-        message: 'Reconnecting…',
-        color: 'warning',
-        icon: 'mdi-wifi-off',
-        timeout: 5000,
-      })
-      try {
-        useNotificationStore().addNotification({
-          type: 'connection_lost',
-          title: 'Connection Lost',
-          message: 'Lost connection to server. Attempting to reconnect…',
-          timestamp: new Date().toISOString(),
-          read: false,
-          metadata: {
-            reconnectAttempts: reconnectAttempts.value,
-            disconnectedAt: stats.value.disconnectedAt,
-          },
-        })
-      } catch (error) {
-        console.warn('[WebSocket] Failed to add connection_lost notification:', error)
-      }
-    }
+    // FE-9553 ruling 2: connection state belongs on a STATE INDICATOR, not in a
+    // list and not in a toast. A sustained outage used to raise both a
+    // "Connection Lost" toast and an unread bell row; both are gone, and the nav
+    // connection orb (useNavConnectionStatus -> NavigationDrawer) is now the sole
+    // carrier. It already reports disconnected and reconnecting, with the attempt
+    // count in its tooltip, which is strictly more current than a one-shot toast
+    // announcing a state that may have changed since.
+    //
+    // The toast this replaces was itself an incident fix -- "Connection Lost"
+    // spam on intermittent edge resets -- so it is worth being explicit that
+    // removing it cannot regress that incident: the complaint was too many
+    // toasts, and zero is not more than one. The brief-blip guard above it stays
+    // green trivially.
 
     reconnectTimer.value = setTimeout(async () => {
       reconnectTimer.value = null
       try {
         await connect(authCredentials.value)
 
-        // Only celebrate a restore if we actually alerted the user about the
-        // outage — a silent quick blip needs no "restored" toast either.
-        if (outageNotified.value) {
-          const { showToast } = useToast()
-          showToast({
-            title: 'Connection Restored',
-            message: 'Successfully reconnected to server',
-            color: 'success',
-            icon: 'mdi-wifi',
-            timeout: 3000,
-          })
-
-          // Add to notification log only (no badge/ring - mark as already read)
-          try {
-            const notificationStore = useNotificationStore()
-            notificationStore.addNotification({
-              type: 'connection_restored',
-              title: 'Connection Restored',
-              message: `Successfully reconnected after ${reconnectAttempts.value} attempt(s)`,
-              timestamp: new Date().toISOString(),
-              read: true, // Mark as read so it only appears in log, no badge/ring
-              metadata: {
-                reconnectAttempts: reconnectAttempts.value,
-                connectedAt: stats.value.connectedAt,
-              },
-            })
-          } catch (error) {
-            console.warn('[WebSocket] Failed to add connection_restored notification:', error)
-          }
-        }
-        outageNotified.value = false
+        // FE-9553 ruling 2: no "Connection Restored" toast and no bell row
+        // either. A restore is a state CHANGE, and the orb shows the new state
+        // the instant it happens -- announcing "we are connected again" in a
+        // list the operator reads later is the least useful place for it. The
+        // symmetry matters too: if the loss is not announced, celebrating the
+        // recovery would report half a story.
       } catch (error) {
         console.error('WebSocket: Reconnection failed', error)
         // Will trigger handleDisconnect again if needed

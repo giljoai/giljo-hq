@@ -136,17 +136,18 @@ class _TaskQueryMixin:
 
         # Handle special filter types (product-scoped filtering)
         if filter_type == "product_tasks":
-            # Use explicit product_id if provided, otherwise get active product
+            # Use explicit product_id if provided, otherwise fall back to the
+            # tenant's DEFAULT product (FE-9524: not "the shown one" -- several
+            # may be shown at once, is_default is the single-valued fallback).
             if product_id:
                 query = query.where(Task.product_id == product_id)
             else:
-                # Get active product for tenant
-                active_product = await self._repo.get_active_product(session, tenant_key)
+                default_product = await self._repo.get_default_product(session, tenant_key)
 
-                if active_product:
-                    query = query.where(Task.product_id == active_product.id)
+                if default_product:
+                    query = query.where(Task.product_id == default_product.id)
                 else:
-                    # No active product - return empty list
+                    # No default product - return empty list
                     return []
 
         # Apply other filters

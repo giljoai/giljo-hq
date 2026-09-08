@@ -225,7 +225,10 @@ export function generateGeminiOAuthConfig(serverUrl) {
  * Verified against a live OpenCode connect, 2026-08-08.
  */
 export function generateOpenCodeOAuthConfig(serverUrl) {
-  return `opencode mcp add ${MCP_ALIAS} --url ${serverUrl}/mcp && opencode mcp auth ${MCP_ALIAS}`
+  // One command per line, never `&&`: these strings get pasted into whatever
+  // terminal the user has open, and PowerShell 5.1 (the Windows default
+  // shell) rejects `&&` outright. Newlines run fine in every shell.
+  return `opencode mcp add ${MCP_ALIAS} --url ${serverUrl}/mcp\nopencode mcp auth ${MCP_ALIAS}`
 }
 
 /**
@@ -375,13 +378,17 @@ export function generateCodexEnvVar(apiKey, platform) {
   if (platform === 'windows') {
     return `setx GILJO_API_KEY "${key}"\n$env:GILJO_API_KEY="${key}"`
   }
-  return `echo 'export GILJO_API_KEY="${key}"' >> ~/.bashrc && export GILJO_API_KEY="${key}"`
+  // One command per line (see generateOpenCodeOAuthConfig).
+  return `echo 'export GILJO_API_KEY="${key}"' >> ~/.bashrc\nexport GILJO_API_KEY="${key}"`
 }
 
 // ─── Certificate trust commands ───────────────────────────────────
 
 export const CERT_TRUST_WINDOWS = '$env:NODE_OPTIONS = "--use-system-ca"; [System.Environment]::SetEnvironmentVariable(\'NODE_OPTIONS\', \'--use-system-ca\', \'User\')'
-export const CERT_TRUST_UNIX = 'mkdir -p ~/.giljo && cp ~/Downloads/giljo-server-cert.pem ~/.giljo/giljo-server-cert.pem && export NODE_EXTRA_CA_CERTS="$HOME/.giljo/giljo-server-cert.pem"'
+export const CERT_TRUST_UNIX =
+  'mkdir -p ~/.giljo\n' +
+  'cp ~/Downloads/giljo-server-cert.pem ~/.giljo/giljo-server-cert.pem\n' +
+  'export NODE_EXTRA_CA_CERTS="$HOME/.giljo/giljo-server-cert.pem"'
 
 /**
  * @param {'windows'|'unix'} platform

@@ -16,7 +16,7 @@ distinctly from a job that exists but whose latest execution is in the wrong
 status (which also now names the actual status + points at
 diagnose_project_state, matching the disambiguation
 test_be8003b_batch_validation_errors_mcp_boundary.py already proved for
-close_job).
+finalize_job).
 
 Parallel-safety: DB-touching; uses the db_session fixture (TransactionalTestContext,
 rollback at teardown) via each service's test_session injection point, mirroring

@@ -80,4 +80,33 @@ describe('FE-6059 request de-duplication', () => {
     expect(get).toHaveBeenCalledTimes(2)
     expect(ok.data).toEqual([{ id: 2 }])
   })
+
+  // FE-9529: GET /refresh-active (the DEFAULT-product read) has 4 independent
+  // callers that fire near-simultaneously on one page load (DefaultLayout
+  // init, ProjectsView mount, RoadmapView mount, the focus/reconnect
+  // reconciler) -- an operator-observed live startup log showed 5 requests in
+  // 3 seconds. Same fan-out shape as products.list (FE-6059), same fix.
+  it('collapses every independent caller of the default-product read into ONE network request per page load', async () => {
+    const get = vi.spyOn(apiClient, 'get').mockResolvedValue({ data: { has_active_product: false, product: null } })
+
+    // Simulates the 4 real call sites firing concurrently on mount.
+    const results = await Promise.all([
+      api.products.getDefault(), // DefaultLayout -> initializeFromStorage
+      api.products.getDefault(), // ProjectsView.vue onMounted
+      api.products.getDefault(), // RoadmapView.vue onMounted
+      api.products.getDefault(), // ProductsView.vue onMounted (FE-9529)
+    ])
+
+    expect(get).toHaveBeenCalledTimes(1)
+    expect(get).toHaveBeenCalledWith('/api/v1/products/refresh-active')
+    for (const r of results) expect(r.data).toEqual({ has_active_product: false, product: null })
+  })
+
+  it('the default-product read is deduped independently of products.list (different keys)', async () => {
+    const get = vi.spyOn(apiClient, 'get').mockResolvedValue({ data: [] })
+
+    await Promise.all([api.products.list(), api.products.getDefault()])
+
+    expect(get).toHaveBeenCalledTimes(2)
+  })
 })

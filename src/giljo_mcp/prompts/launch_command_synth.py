@@ -62,10 +62,32 @@ SUPPORTED_OSES: tuple[str, ...] = ("windows", "linux", "macos")
 # @-syntax for agent SPAWN, not its autonomy flag).
 # BE-9035c: single source is the HARNESSES table (each harness row carries its
 # autonomy_flag). Keyed by launcher BINARY (the cli_tool->binary map collapses
-# antigravity->agy); a harness with no autonomy flag (opencode) is omitted, so an
-# unknown binary gets "" from autonomy_flag() — a non-runnable-but-inert command
-# beats inventing a flag.
+# antigravity->agy); a harness whose row declares no flag is omitted, so an unknown
+# binary gets "" from autonomy_flag() — a non-runnable-but-inert command beats
+# inventing a flag. BE-9585: opencode used to be the omitted row, on the belief that it
+# had no such flag; `opencode --help` says otherwise (``--auto``), so all five now
+# declare one and this map has no holes.
 AUTONOMY_FLAGS: dict[str, str] = {h.cli_binary: h.autonomy_flag for h in HARNESSES if h.autonomy_flag}
+
+# BE-9585: per-harness PROMPT flag — the classic CLIs take the seed positionally, but
+# opencode seeds a fresh session with ``--prompt <text>`` (the BE-9015 verified launch
+# line the HARNESSES row records). The registry has carried that fact since BE-9035c
+# with no consumer, so a template electing opencode was handed a claude-shaped
+# positional command. Keyed by launcher BINARY, mirroring AUTONOMY_FLAGS; a harness
+# with no prompt flag is omitted, so prompt_flag() returns "" and its command stays
+# byte-identical.
+#
+# The flag values are VERIFIED against the installed binaries' own --help (2026-09-04),
+# because getting them wrong is silent:
+#   - opencode: ``--prompt <string>`` ("prompt to use") seeds the interactive TUI.
+#     ``opencode run`` is the one-shot form and must NOT be used — it exits.
+#     Its autonomy flag is ``--auto``; without it the terminal stalls on first approval.
+#   - agy: ``--prompt-interactive``. NEVER ``--prompt`` — on agy that is an alias for
+#     ``--print`` ("run a single prompt non-interactively"), which exits and kills the
+#     spawned tab. This is the same NEVER -p/--print rule the conductor renderer
+#     documents; BE-9585 made both paths read it from the one registry row.
+#   - claude / codex / gemini: no flag, the seed is positional.
+PROMPT_FLAGS: dict[str, str] = {h.cli_binary: h.launch_prompt_flag for h in HARNESSES if h.launch_prompt_flag}
 
 
 def resolve_binary(cli_tool: str | None) -> str:
@@ -85,6 +107,16 @@ def autonomy_flag(binary: str) -> str:
     interactive approval prompts or it stalls on first tool call.
     """
     return AUTONOMY_FLAGS.get(binary, "")
+
+
+def prompt_flag(binary: str) -> str:
+    """Return the seed-prompt flag for ``binary`` ("" when it takes the prompt positionally).
+
+    BE-9585: opencode is the one harness today whose launcher needs ``--prompt`` before
+    the seed text. Everything else keeps the positional form, so "" is the common case
+    and the classic CLIs' commands are unchanged.
+    """
+    return PROMPT_FLAGS.get(binary, "")
 
 
 def build_loaded_prompt(job_id: str) -> str:
@@ -146,9 +178,13 @@ def _binary_with_flag(binary: str) -> str:
     Preserves the leading ``{binary} `` token the per-OS synthesizers emit (so the
     binary is still the first executable word) while inserting the unattended-autonomy
     flag immediately after it.
+
+    BE-9585: the harness's seed-prompt flag (``--prompt`` for opencode) follows the
+    autonomy flag, so the caller's quoted seed lands as that flag's value. Both flags
+    are static registry tokens carrying no user input, so they are emitted unquoted.
     """
-    flag = autonomy_flag(binary)
-    return f"{binary} {flag} " if flag else f"{binary} "
+    tokens = [binary, autonomy_flag(binary), prompt_flag(binary)]
+    return " ".join(t for t in tokens if t) + " "
 
 
 def windows_command(binary: str, title: str, seed_prompt: str) -> str:
@@ -162,9 +198,12 @@ def windows_command(binary: str, title: str, seed_prompt: str) -> str:
     (no user input) so it is emitted unquoted, before the quoted seed.
     ``Start-Process`` (vs ``wt new-tab``) is deliberate: ``wt`` parses ``;`` as a tab
     delimiter — a footgun for seeds that contain it.
+
+    BE-9585: a harness that seeds via a flag (``opencode --prompt``) gets that flag as
+    its own ``-ArgumentList`` element, immediately before the quoted seed.
     """
-    flag = autonomy_flag(binary)
-    arg_list = f"{flag},{pwsh_single_quote(seed_prompt)}" if flag else pwsh_single_quote(seed_prompt)
+    static_flags = [f for f in (autonomy_flag(binary), prompt_flag(binary)) if f]
+    arg_list = ",".join([*static_flags, pwsh_single_quote(seed_prompt)])
     return f"Start-Process {binary} -ArgumentList {arg_list}"
 
 
@@ -270,11 +309,13 @@ def synthesize_launch_commands(agents: list[dict[str, Any]]) -> list[dict[str, A
 #      chars. VERIFIED end-to-end on Windows 11 (direct wt -> fresh pwsh tab ->
 #      inline multi-word prompt survives). No stale-file class can exist.
 
-# Binaries that seed an INTERACTIVE session via a prompt flag instead of a trailing
-# positional. agy takes --prompt-interactive (verified via `agy --help`); claude /
-# codex / gemini accept the seed positionally. NEVER -p/--print — that runs the
-# harness ONCE and EXITS, killing the spawned tab.
-_INTERACTIVE_PROMPT_FLAG: dict[str, str] = {"agy": "--prompt-interactive"}
+# BE-9585: the interactive prompt flag now comes from the HARNESSES row via
+# prompt_flag() — it used to live in a private map here that the per-agent launch path
+# could not see, so the same binary was seeded one way by the conductor and another way
+# per agent. Unchanged rule, now single-sourced: agy takes --prompt-interactive; claude
+# / codex / gemini accept the seed positionally. NEVER -p/--print (and never agy's
+# ``--prompt``, which is an alias for --print) — that runs the harness ONCE and EXITS,
+# killing the spawned tab.
 
 
 def _ordered_spawn_binaries() -> tuple[str, ...]:
@@ -336,14 +377,8 @@ def _harness_prefix(binary: str) -> str:
     interactively via --prompt-interactive; the others take the prompt positionally.
     NEVER -p/--print (runs once then EXITS — kills the spawned tab).
     """
-    parts = [binary]
-    flag = autonomy_flag(binary)
-    if flag:
-        parts.append(flag)
-    interactive = _INTERACTIVE_PROMPT_FLAG.get(binary)
-    if interactive:
-        parts.append(interactive)
-    return " ".join(parts)
+    parts = [binary, autonomy_flag(binary), prompt_flag(binary)]
+    return " ".join(p for p in parts if p)
 
 
 # Per-OS ONE-LINE spawn command. ``{prefix}`` = server-resolved "<binary> <flags>";

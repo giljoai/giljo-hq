@@ -26,11 +26,20 @@ Five properties are pinned:
 
 * **Explicit wins over ambient** -- a create naming ``product_id`` lands there
   even while a DIFFERENT product is active.
-* **Omitted still follows active** -- the documented default is unchanged
-  (back-compat; no migration, no behavior change for existing callers).
-* **The race itself** -- flipping the active product between two creates in one
-  session leaves the explicit create untouched and carries the default create
-  with it. Both halves are the contract, so both are pinned.
+* **Omitted still follows active, ON A SINGLE-PRODUCT TENANT** -- the documented
+  default is unchanged there (back-compat; no migration, no behavior change for
+  existing callers). BE-9523b narrowed this: on a tenant with MORE THAN ONE
+  product, an omitted ``product_id`` is now a structured ``PRODUCT_AMBIGUOUS``
+  rejection instead of a silent bind to whatever is active -- see
+  ``TestBareCreateIsRejectedWhenAmbiguous`` below, which is the failing-then-fixed
+  pair for that change (the old two-product "follows active" claim this class used
+  to pin was the defect BE-9523b closes).
+* **The race itself, on a single-product tenant** -- flipping the active product
+  between two creates in one session leaves the explicit create untouched; the
+  default create still follows the single active product (no ambiguity to refuse
+  when there is only one product). On a MULTI-product tenant the default half no
+  longer "follows the flip" at all -- BE-9523b refuses it outright, so there is
+  nothing left to race.
 * **A foreign or unknown product_id is REJECTED, never silently absorbed** --
   the membership check is tenant-scoped, and a rejection must write nothing at
   all (in particular it must not quietly fall back to the active product, which
@@ -300,9 +309,13 @@ class TestExplicitProductIdWins:
 
 
 class TestOmittedProductIdFollowsActive:
+    """BE-9523b: this back-compat guarantee now holds only for a SINGLE-product
+    tenant. A tenant with more than one product no longer "follows active" on an
+    omitted product_id -- see ``TestBareCreateIsRejectedWhenAmbiguous``."""
+
     async def test_create_task_without_product_id_uses_the_active_product(self, create_tools_client, db_manager):
         client, tenant_key = create_tools_client
-        (active_id, active_name), _other = await _seed_two_products(db_manager, tenant_key)
+        active_id, active_name = await _seed_product(db_manager, tenant_key, label="only", is_active=True)
 
         try:
             async with client() as mcp_session:
@@ -321,7 +334,7 @@ class TestOmittedProductIdFollowsActive:
 
     async def test_create_project_without_product_id_uses_the_active_product(self, create_tools_client, db_manager):
         client, tenant_key = create_tools_client
-        (active_id, active_name), _other = await _seed_two_products(db_manager, tenant_key)
+        active_id, active_name = await _seed_product(db_manager, tenant_key, label="only", is_active=True)
 
         try:
             async with client() as mcp_session:
@@ -351,9 +364,11 @@ class TestActiveProductFlipRace:
         """One session, two creates, an active-product flip in between.
 
         This is the live incident reproduced end to end. The explicit create must
-        be immune to the flip; the default create must follow it (that is the
-        documented contract, not a bug -- so it is pinned too, and a future change
-        to either half has to come here and say so).
+        be immune to the flip. BE-9523b changed the default half: with two products
+        on the tenant, an omitted product_id is no longer carried by the flip -- it
+        is refused outright (PRODUCT_AMBIGUOUS), flip or no flip, because there is
+        more than one product to be ambiguous between. That refusal IS what closes
+        the race: the old "follows the flip" behavior was the incident, not the fix.
         """
         client, tenant_key = create_tools_client
         (first_active_id, _first_name), (second_id, _second_name) = await _seed_two_products(db_manager, tenant_key)
@@ -375,7 +390,7 @@ class TestActiveProductFlipRace:
 
                 default = await mcp_session.call_tool(
                     "create_task",
-                    {"title": "carried by the flip", "description": "created after the flip, no product_id"},
+                    {"title": "no longer carried by the flip", "description": "created after the flip, no product_id"},
                 )
                 assert default.is_error is False, _content_text(default)
 
@@ -386,10 +401,13 @@ class TestActiveProductFlipRace:
             assert explicit_payload["product_id"] == second_id
             assert await _task_product_id(db_manager, tenant_key, explicit_payload["task_id"]) == second_id
 
-            # Default: follows the flip -- documented behavior, deliberately pinned.
-            assert default_payload["product_id"] == second_id
-            assert default_payload["product_id"] != first_active_id
-            assert await _task_product_id(db_manager, tenant_key, default_payload["task_id"]) == second_id
+            # Default: refused as ambiguous, not silently carried by the flip.
+            assert default_payload.get("success") is False
+            assert default_payload.get("error") == "PRODUCT_AMBIGUOUS"
+            first_tasks, _ = await _count_rows_on_product(db_manager, tenant_key, first_active_id)
+            second_tasks, _ = await _count_rows_on_product(db_manager, tenant_key, second_id)
+            assert second_tasks == 1, "only the earlier EXPLICIT create should have landed on second_id"
+            assert first_tasks == 0, "a refused default create must not fall back to the (now-active) first product"
         finally:
             await _cleanup(db_manager, tenant_key)
 
@@ -540,11 +558,15 @@ class TestPreExistingServicePathIsValidatedToo:
 
 
 class TestResponseEchoesTheBinding:
+    """BE-9523b: exercised on a single-product tenant -- the only case left where an
+    omitted product_id still lands somewhere to echo. The multi-product case now
+    echoes the full product LIST instead (``TestBareCreateIsRejectedWhenAmbiguous``)."""
+
     async def test_create_task_echoes_product_id_and_name_on_the_default_path(self, create_tools_client, db_manager):
         """The default path is the one that misfiled, so it is the one that most
         needs to say where it landed -- an agent can self-check for one field read."""
         client, tenant_key = create_tools_client
-        (active_id, active_name), _other = await _seed_two_products(db_manager, tenant_key)
+        active_id, active_name = await _seed_product(db_manager, tenant_key, label="only", is_active=True)
 
         try:
             async with client() as mcp_session:
@@ -562,7 +584,7 @@ class TestResponseEchoesTheBinding:
 
     async def test_create_project_echoes_product_id_and_name_on_the_default_path(self, create_tools_client, db_manager):
         client, tenant_key = create_tools_client
-        (active_id, active_name), _other = await _seed_two_products(db_manager, tenant_key)
+        active_id, active_name = await _seed_product(db_manager, tenant_key, label="only", is_active=True)
 
         try:
             async with client() as mcp_session:
@@ -575,5 +597,83 @@ class TestResponseEchoesTheBinding:
             payload = _payload(result)
             assert payload["product_id"] == active_id
             assert payload["product_name"] == active_name
+        finally:
+            await _cleanup(db_manager, tenant_key)
+
+
+# ---------------------------------------------------------------------------
+# 6. BE-9523b: a bare create on a multi-product tenant is now REFUSED, not
+#    silently bound to whatever happens to be active.
+# ---------------------------------------------------------------------------
+
+
+class TestBareCreateIsRejectedWhenAmbiguous:
+    """The defect this project closes, verified 2026-08-27: a tenant with more than
+    one product and no product_id on a create used to bind silently to whatever was
+    active. Demonstrated failing-first (see PR body for the pre-fix run showing
+    ``is_error is False`` / a silent bind here); now a structured PRODUCT_AMBIGUOUS
+    rejection carrying the full product list (name, id, is_active) inline."""
+
+    async def test_create_task_without_product_id_is_rejected_on_a_multi_product_tenant(
+        self, create_tools_client, db_manager
+    ):
+        client, tenant_key = create_tools_client
+        (active_id, active_name), (other_id, other_name) = await _seed_two_products(db_manager, tenant_key)
+
+        try:
+            async with client() as mcp_session:
+                result = await mcp_session.call_tool(
+                    "create_task",
+                    {"title": "ambiguous binding", "description": "no product_id supplied, two products exist"},
+                )
+
+            assert result.is_error is False, _content_text(result)
+            payload = _payload(result)
+            assert payload["success"] is False
+            assert payload["error"] == "PRODUCT_AMBIGUOUS"
+            product_ids = {p["id"] for p in payload["products"]}
+            assert product_ids == {active_id, other_id}
+            by_id = {p["id"]: p for p in payload["products"]}
+            assert by_id[active_id]["name"] == active_name
+            assert by_id[active_id]["is_active"] is True
+            assert by_id[other_id]["name"] == other_name
+            assert by_id[other_id]["is_active"] is False
+
+            active_tasks, _ = await _count_rows_on_product(db_manager, tenant_key, active_id)
+            other_tasks, _ = await _count_rows_on_product(db_manager, tenant_key, other_id)
+            assert active_tasks == 0, "a refused create must NOT silently fall back to the active product"
+            assert other_tasks == 0
+        finally:
+            await _cleanup(db_manager, tenant_key)
+
+    async def test_create_project_without_product_id_is_rejected_on_a_multi_product_tenant(
+        self, create_tools_client, db_manager
+    ):
+        client, tenant_key = create_tools_client
+        (active_id, active_name), (other_id, other_name) = await _seed_two_products(db_manager, tenant_key)
+
+        try:
+            async with client() as mcp_session:
+                result = await mcp_session.call_tool(
+                    "create_project",
+                    {"name": "Ambiguous project", "description": "no product_id supplied, two products exist"},
+                )
+
+            assert result.is_error is False, _content_text(result)
+            payload = _payload(result)
+            assert payload["success"] is False
+            assert payload["error"] == "PRODUCT_AMBIGUOUS"
+            product_ids = {p["id"] for p in payload["products"]}
+            assert product_ids == {active_id, other_id}
+            by_id = {p["id"]: p for p in payload["products"]}
+            assert by_id[active_id]["name"] == active_name
+            assert by_id[active_id]["is_active"] is True
+            assert by_id[other_id]["name"] == other_name
+            assert by_id[other_id]["is_active"] is False
+
+            _, active_projects = await _count_rows_on_product(db_manager, tenant_key, active_id)
+            _, other_projects = await _count_rows_on_product(db_manager, tenant_key, other_id)
+            assert active_projects == 0, "a refused create must NOT silently fall back to the active product"
+            assert other_projects == 0
         finally:
             await _cleanup(db_manager, tenant_key)

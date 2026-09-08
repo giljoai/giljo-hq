@@ -24,6 +24,22 @@ MAX_OPTION_ID_LENGTH = 100
 MAX_REASON_LENGTH = 2000
 
 
+# FE-9511: the closed set of canned approval-banner states. Three are derived
+# from server state the caller never supplies (staging pause, execution
+# status, presence of the approval itself); ``input_needed`` is a reserved
+# catch-all not yet reachable from any server signal. ``request_approval``'s
+# signature does NOT grow a parameter for this -- see
+# UserApprovalService._compute_banner_state, the single place that assigns it.
+VALID_APPROVAL_BANNER_STATES = frozenset(
+    {
+        "waiting_at_staging",
+        "decision_needed",
+        "blocked",
+        "input_needed",
+    }
+)
+
+
 class ApprovalOption(BaseModel):
     """A single option presented to the user for an approval decision."""
 
@@ -57,8 +73,30 @@ class RequestApprovalInput(BaseModel):
         return v
 
 
+class DecideApprovalInput(BaseModel):
+    """Validated input for the ``decide_approval`` MCP tool (BE-9499d).
+
+    Mirrors ``ApprovalDecideRequest`` (the REST ``/decide`` body, api/endpoints/
+    approvals.py) so both doors reject malformed input identically before either
+    reaches ``UserApprovalService.mark_decided``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    approval_id: str = Field(..., min_length=1, max_length=36)
+    option_id: str = Field(..., min_length=1, max_length=MAX_OPTION_ID_LENGTH)
+
+
 class UserApprovalRead(BaseModel):
-    """Read-side projection of a user_approvals row."""
+    """Read-side projection of a user_approvals row.
+
+    FE-9511: ``banner_state`` and ``taxonomy_alias`` are NOT columns on
+    ``UserApproval`` -- they are computed by
+    ``UserApprovalService._build_reads_with_banner_context`` from the
+    approval's project and requesting execution, so ``model_validate`` on the
+    bare ORM row no longer produces a complete instance. Construct explicitly
+    from that service method.
+    """
 
     model_config = ConfigDict(extra="forbid", from_attributes=True)
 
@@ -73,8 +111,26 @@ class UserApprovalRead(BaseModel):
     status: str
     decided_option_id: str | None
     decided_by_user_id: str | None
+    decided_via: str | None
     requested_at: datetime
     decided_at: datetime | None
+    # FE-9511: server-derived canned banner state (see VALID_APPROVAL_BANNER_STATES)
+    # and the project's taxonomy_alias for the banner pill -- carried on the
+    # payload so the frontend never needs a store lookup for a project the user
+    # has not opened (FE-9508's trap).
+    banner_state: str
+    taxonomy_alias: str | None = None
+    # BE-9525c: additive, same batched-resolve pattern as taxonomy_alias above --
+    # without it the banner cannot say which PRODUCT an approval belongs to
+    # (product_id is on the project, not the approval row itself).
+    product_id: str | None = None
+
+    @field_validator("banner_state")
+    @classmethod
+    def banner_state_is_valid(cls, v: str) -> str:
+        if v not in VALID_APPROVAL_BANNER_STATES:
+            raise ValueError(f"banner_state must be one of {sorted(VALID_APPROVAL_BANNER_STATES)} (got {v!r})")
+        return v
 
 
 class ApprovalListResponse(BaseModel):

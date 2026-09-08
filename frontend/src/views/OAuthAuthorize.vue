@@ -393,15 +393,16 @@ async function handleLogin() {
   error.value = ''
 
   try {
-    const loginSuccess = await userStore.login(username.value, password.value)
-    if (!loginSuccess) {
-      error.value = 'Invalid credentials.'
-    }
+    // FE-9556: userStore.login() now throws the axios error on failure, so the
+    // status branching below owns every failure path (it was dead code while
+    // login() swallowed the error into a boolean).
+    await userStore.login(username.value, password.value)
   } catch (err) {
     if (err.response?.status === 401) {
       error.value = 'Invalid credentials.'
     } else if (err.response?.status === 429) {
-      error.value = 'Too many login attempts. Please try again later.'
+      // Copy harmonized to PR #1002's approved wording.
+      error.value = 'Too many sign-in attempts. Please wait a minute and try again.'
     } else if (err.code === 'ERR_NETWORK' || !err.response) {
       error.value = 'Network error. Please check your connection and try again.'
     } else {

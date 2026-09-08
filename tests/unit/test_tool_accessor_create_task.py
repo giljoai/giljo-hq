@@ -89,7 +89,12 @@ class TestToolAccessorCreateTaskValidation:
     async def test_raises_validation_error_when_no_active_product(self):
         tool_accessor = _make_tool_accessor()
         # BE-9411: real resolver, nothing active to find -> the real 422 it raises.
-        with patch.object(ProductService, "get_active_product", new_callable=AsyncMock, return_value=None):
+        # BE-9523b: write=True counts products first; zero products is the same
+        # "nothing to be ambiguous between" case as one, so it falls through.
+        with (
+            patch.object(ProductService, "get_default_product", new_callable=AsyncMock, return_value=None),
+            patch.object(ProductService, "list_products", new_callable=AsyncMock, return_value=[]),
+        ):
             with pytest.raises(ValidationError) as exc_info:
                 await tool_accessor._task_service.create_task_for_mcp(
                     title="Test Task",
@@ -97,7 +102,7 @@ class TestToolAccessorCreateTaskValidation:
                     priority="medium",
                     tenant_key="tenant-abc",
                 )
-            assert "active product" in str(exc_info.value).lower()
+            assert "default product" in str(exc_info.value).lower()
 
     @pytest.mark.asyncio
     async def test_uses_tenant_manager_when_tenant_key_not_provided(self):

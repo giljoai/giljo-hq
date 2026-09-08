@@ -9,8 +9,14 @@ Covers:
 - Seeder produces new tool names in user_instructions (fresh installs see new names)
 - refresh_tenant_template_instructions re-renders user_instructions for default-named rows
 - refresh leaves customised / non-default rows untouched
-- render_gemini_agent frontmatter carries new underscored token names
 - Boot notice banner body lists all 8 rename pairs (CE-only, suppressed in SaaS)
+
+BE-9567 removed the ``TestGeminiFrontmatterTokenNames`` class that used to live here:
+render_gemini_agent no longer emits a hardcoded ``tools:`` frontmatter list at all (the
+list had drifted to the pre-rename ``giljo_mcp`` alias with zero live matches), so there
+is no token roster left to assert rename coverage over. See
+tests/unit/test_template_assembler_0836a.py::TestRenderGeminiAgent::test_omits_tools_to_inherit_all
+and tests/unit/test_be9563_prompt_tool_names.py's Layer F for the replacement coverage.
 
 DB tests are parallel-safe: TransactionalTestContext (db_session) + no module globals.
 
@@ -18,12 +24,14 @@ Edition Scope: Both (CE + SaaS). The migration + refresh path run on both; the
 boot NOTICE is CE-only.
 """
 
+import re
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.startup.background_tasks import TOOL_RENAME_NOTICE_PAIRS
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.models import AgentTemplate
 from giljo_mcp.template_refresh import refresh_tenant_template_instructions
@@ -33,26 +41,20 @@ from giljo_mcp.template_seeder import (
 )
 
 
-_OLD_NAMES = [
-    "get_agent_mission",
-    "update_agent_mission",
-    "fetch_context",
-    "write_360_memory",
-    "close_project_and_update_memory",
-    "inspect_messages",
-    "update_product_fields",
-    "submit_tuning_review",
-]
-_NEW_NAMES = [
-    "get_job_mission",
-    "update_job_mission",
-    "get_context",
-    "write_memory_entry",
-    "write_project_closeout",
-    "get_messages",
-    "update_product_context",
-    "propose_product_context_update",
-]
+# BE-9563: DERIVED from the banner's own pairs instead of hand-copied.
+#
+# These were two hand-maintained lists, and they drifted exactly the way the banner
+# did -- `_NEW_NAMES` pinned `get_messages` and `propose_product_context_update`, both
+# of which had since been retired themselves, so this file was asserting that a dead
+# name is PRESENT in customer-facing copy. A pin can only tell you the bytes are
+# intended; it cannot tell you they are true. Deriving removes the second list, which
+# is what allowed the two to disagree in the first place; the truth of the right-hand
+# side is enforced separately against the live registry by
+# tests/unit/test_be9563_prompt_tool_names.py::test_boot_banner_rename_targets_are_live_tools.
+_IDENTIFIER_RE = re.compile(r"[a-z_][a-z0-9_]*")
+
+_OLD_NAMES = [pair.split("\u2192")[0].strip() for pair in TOOL_RENAME_NOTICE_PAIRS]
+_NEW_NAMES = [_IDENTIFIER_RE.findall(pair.split("\u2192")[1])[0] for pair in TOOL_RENAME_NOTICE_PAIRS]
 
 _DEFAULT_TEMPLATE_NAMES = {t["name"] for t in _get_default_templates_v103()}
 
@@ -267,79 +269,6 @@ async def test_refresh_default_templates_match_seeder_source(
 
 
 # ---------------------------------------------------------------------------
-# render_gemini_agent frontmatter token names
-# ---------------------------------------------------------------------------
-
-
-class TestGeminiFrontmatterTokenNames:
-    """render_gemini_agent produces new underscored token names in frontmatter tools list."""
-
-    def _make_template(self, name: str = "orchestrator") -> AgentTemplate:
-        return AgentTemplate(
-            name=name,
-            role=name,
-            description=f"{name} template",
-            system_instructions="",
-            user_instructions="test",
-            model="sonnet",
-            cli_tool="gemini",
-            background_color="#000",
-            tools=None,
-            behavioral_rules=[],
-            success_criteria=[],
-        )
-
-    def test_new_mission_token_present(self):
-        from giljo_mcp.template_renderer import render_gemini_agent
-
-        result = render_gemini_agent(self._make_template())
-        yaml_text = result
-        assert "mcp_giljo_mcp_get_job_mission" in yaml_text
-
-    def test_old_mission_token_absent(self):
-        from giljo_mcp.template_renderer import render_gemini_agent
-
-        result = render_gemini_agent(self._make_template())
-        assert "mcp_giljo_mcp_get_agent_mission" not in result
-
-    def test_new_context_token_present(self):
-        from giljo_mcp.template_renderer import render_gemini_agent
-
-        result = render_gemini_agent(self._make_template())
-        assert "mcp_giljo_mcp_get_context" in result
-
-    def test_old_context_token_absent(self):
-        from giljo_mcp.template_renderer import render_gemini_agent
-
-        result = render_gemini_agent(self._make_template())
-        assert "mcp_giljo_mcp_fetch_context" not in result
-
-    def test_new_memory_token_present(self):
-        from giljo_mcp.template_renderer import render_gemini_agent
-
-        result = render_gemini_agent(self._make_template())
-        assert "mcp_giljo_mcp_write_memory_entry" in result
-
-    def test_old_memory_token_absent(self):
-        from giljo_mcp.template_renderer import render_gemini_agent
-
-        result = render_gemini_agent(self._make_template())
-        assert "mcp_giljo_mcp_write_360_memory" not in result
-
-    def test_new_closeout_token_present(self):
-        from giljo_mcp.template_renderer import render_gemini_agent
-
-        result = render_gemini_agent(self._make_template())
-        assert "mcp_giljo_mcp_write_project_closeout" in result
-
-    def test_old_closeout_token_absent(self):
-        from giljo_mcp.template_renderer import render_gemini_agent
-
-        result = render_gemini_agent(self._make_template())
-        assert "mcp_giljo_mcp_close_project_and_update_memory" not in result
-
-
-# ---------------------------------------------------------------------------
 # Boot notice banner body
 # ---------------------------------------------------------------------------
 
@@ -348,14 +277,14 @@ class TestBootNoticeBannerContent:
     """Boot notice banner body lists all 8 rename pairs."""
 
     def _get_banner_body(self) -> str:
-        """Extract the banner body string without hitting the DB."""
-        import inspect
+        """The rename pairs the banner renders, without hitting the DB.
 
-        from api.startup import background_tasks
-
-        src = inspect.getsource(background_tasks._emit_tool_rename_notice_banner)
-        # The function builds the body string; verify the source contains the pairs.
-        return src
+        BE-9563: was ``inspect.getsource(_emit_tool_rename_notice_banner)``. The pairs
+        moved to a module constant so a registry guard can read them, which broke a
+        helper that was only ever reaching for that data through the function's source
+        text. Reading the constant is what it meant all along.
+        """
+        return "; ".join(TOOL_RENAME_NOTICE_PAIRS)
 
     def test_all_old_names_appear_in_banner_source(self):
         src = self._get_banner_body()

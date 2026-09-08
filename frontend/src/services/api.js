@@ -2,6 +2,9 @@ import axios from 'axios'
 import { API_CONFIG, getDefaultTenantKey } from '@/config/api'
 import { parseErrorResponse, getErrorMessage } from '@/utils/errorMessages'
 import { sequenceRunsApi } from './sequenceRunsApi.js'
+import { executionModeDefaultApi } from './settingsApi.js'
+import { notificationPrefsApi } from './notificationPrefsApi.js'
+import { promptsApi } from './promptsApi.js'
 import { handleAuthFailure, normalizeRejection } from './apiFailureHandling.js'
 
 // Create axios instance with default config
@@ -285,6 +288,9 @@ export function __resetRequestDedupe() {
   _requestDedupeState.clear()
 }
 
+// FE-9502c: shared by the four series/taxonomy helpers below.
+const seriesProductIdParam = (productId) => (productId ? { product_id: productId } : {})
+
 // API Service Methods
 export const api = {
   // Products
@@ -302,7 +308,14 @@ export const api = {
         { ttl: 1500 },
       ),
     get: (id) => apiClient.get(`/api/v1/products/${id}`),
-    getActive: () => apiClient.get('/api/v1/products/refresh-active'),
+    // FE-9529: `refresh-active` resolves the DEFAULT product (ProductService.
+    // get_default_product -- is_default, not is_active) and has 4 independent
+    // callers (DefaultLayout init, ProjectsView mount, RoadmapView mount, the
+    // focus/reconnect reconciler) that fire near-simultaneously on one page
+    // load. Same fan-out shape products.list already had (FE-6059) -- same fix.
+    getDefault: () =>
+      dedupedRequest('products:default', () => apiClient.get('/api/v1/products/refresh-active'), { ttl: 1500 }),
+    setDefault: (id) => apiClient.post(`/api/v1/products/${id}/set-default`),
     create: (data) => {
       const payload = {
         name: data.name,
@@ -393,33 +406,26 @@ export const api = {
     get: (id) => apiClient.get(`/api/v1/projects/${id}`),
     review: (id) => apiClient.get(`/api/v1/projects/${id}/review`),
     getOrchestrator: (id) => apiClient.get(`/api/v1/projects/${id}/orchestrator`),
-    getActive: () => apiClient.get('/api/v1/projects/active'),
+    getActive: (productId) =>
+      apiClient.get('/api/v1/projects/active', { params: productId ? { product_id: productId } : {} }),
     create: (data) => apiClient.post('/api/v1/projects/', data),
     update: (id, data) => apiClient.patch(`/api/v1/projects/${id}`, data),
     delete: (id) => apiClient.delete(`/api/v1/projects/${id}`),
     fetchDeleted: (params) => apiClient.get('/api/v1/projects/deleted', { params }),
-    // Taxonomy helpers (Handover 0440b)
-    getNextSeries: (typeId) =>
-      apiClient.get('/api/v1/projects/next-series', { params: { type_id: typeId } }),
-    getAvailableSeries: (typeId, limit = 5) =>
-      apiClient.get('/api/v1/projects/available-series', { params: { type_id: typeId, limit } }),
-    checkSeries: (typeId, seriesNumber, subseries = null, excludeProjectId = null, options = {}) =>
+    // Taxonomy helpers (Handover 0440b). FE-9502c: `productId` overrides the
+    // backend's active-product fallback -- omitted, behavior is unchanged.
+    getNextSeries: (typeId, productId = null) =>
+      apiClient.get('/api/v1/projects/next-series', { params: { type_id: typeId, ...seriesProductIdParam(productId) } }),
+    getAvailableSeries: (typeId, limit = 5, productId = null) =>
+      apiClient.get('/api/v1/projects/available-series', { params: { type_id: typeId, limit, ...seriesProductIdParam(productId) } }),
+    checkSeries: (typeId, seriesNumber, subseries = null, excludeProjectId = null, options = {}, productId = null) =>
       apiClient.get('/api/v1/projects/check-series', {
-        params: {
-          ...(typeId && { type_id: typeId }),
-          series_number: seriesNumber,
-          subseries,
-          exclude_project_id: excludeProjectId,
-        },
+        params: { ...(typeId && { type_id: typeId }), series_number: seriesNumber, subseries, exclude_project_id: excludeProjectId, ...seriesProductIdParam(productId) },
         ...options,
       }),
-    usedSubseries: (typeId, seriesNumber, excludeProjectId = null, options = {}) =>
+    usedSubseries: (typeId, seriesNumber, excludeProjectId = null, options = {}, productId = null) =>
       apiClient.get('/api/v1/projects/used-subseries', {
-        params: {
-          ...(typeId && { type_id: typeId }),
-          series_number: seriesNumber,
-          exclude_project_id: excludeProjectId,
-        },
+        params: { ...(typeId && { type_id: typeId }), series_number: seriesNumber, exclude_project_id: excludeProjectId, ...seriesProductIdParam(productId) },
         ...options,
       }),
     // Specific action endpoints (Handover 0507: Added force and reason parameters)
@@ -541,6 +547,9 @@ export const api = {
     removeCookieDomain: (domain) =>
       apiClient.delete('/api/v1/user/settings/cookie-domains', { data: { domain } }),
 
+    ...executionModeDefaultApi, // FE-9555: account-wide execution-mode default
+    ...notificationPrefsApi, // FE-9553: per-user notification-model preferences
+
     // BE-9084: account-wide Headless-vs-HITL launch toggle
     getHeadlessLaunch: () => apiClient.get('/api/v1/user/settings/headless-launch'),
     updateHeadlessLaunch: (allow) =>
@@ -622,6 +631,8 @@ export const api = {
   // Connect surface — durable credential status (FE-9274)
   connect: {
     credentialStatus: () => apiClient.get('/api/connect/credential-status'),
+    // BE-9591: forget a tool's stored connection (reasoning: connect.py's endpoint).
+    removeConnection: (harness) => apiClient.delete(`/api/connect/connections/${harness}`),
   },
 
   // Serena MCP Integration
@@ -686,26 +697,8 @@ export const api = {
 
   // Prompts (Handover 0119 Phase 1 - Standardized to /api/v1/prompts)
   // Reference: internal design notes
-  prompts: {
-    staging: (projectId, params) =>
-      apiClient.get(`/api/v1/prompts/staging/${projectId}`, { params }),
-    agentPrompt: (agentJobId) => apiClient.get(`/api/v1/prompts/agent/${agentJobId}`),
-    // Handover 0344: CLI mode implementation prompt for orchestrator play button
-    implementation: (projectId) => apiClient.get(`/api/v1/prompts/implementation/${projectId}`),
-    // Handover 0498: Termination prompt for early project shutdown
-    termination: (projectId) => apiClient.get(`/api/v1/prompts/termination/${projectId}`),
-    // FE-6165f: chain (sequence-run-scoped) kickoff prompts. RUN-scoped (run_id),
-    // distinct from the project-scoped staging/implementation above. BE-6165d
-    // returns ChainPromptResponse { run_id, head_project_id, orchestrator_job_id,
-    // prompt }; the Stage Chain / Implement Chain buttons copy `data.prompt`.
-    chainStaging: (runId) => apiClient.get(`/api/v1/prompts/chain-staging/${runId}`),
-    chainImplementation: (runId) => apiClient.get(`/api/v1/prompts/chain-implementation/${runId}`),
-    // Handover 0396: Orchestrator prompt for copy-to-clipboard (Claude Code or Codex/Gemini)
-    orchestrator: (tool, projectId) =>
-      apiClient.get(`/api/v1/prompts/orchestrator/${tool}`, {
-        params: { project_id: projectId },
-      }),
-  },
+  // Prompts — extracted to promptsApi.js (800-line guardrail).
+  prompts: promptsApi,
 
   system: {
     // BE-9385d: productId picks the rung of the orchestrator override ladder
@@ -744,6 +737,13 @@ export const api = {
   threads: {
     list: (params) => apiClient.get('/api/v1/threads', { params }),
     myTurn: () => apiClient.get('/api/v1/threads/my-turn'),
+    // FE-9586: record that the OPERATOR read this thread. Fire-and-forget on a
+    // genuine open — it advances comm_participants.last_read_at, the cursor the
+    // card's unread flag keys on and which nothing on this side used to advance.
+    markRead: (id) => apiClient.post(`/api/v1/threads/${id}/read`),
+    // FE-9586: the ONE read behind the thread-post banner family --
+    // {mentions, directed_action}. One call, so the family has one loaded state.
+    attention: () => apiClient.get('/api/v1/threads/attention'),
     search: (params) => apiClient.get('/api/v1/threads/search', { params }),
     // FE-9012c: include_recipient_state surfaces per-message junction state
     // (recipients/acked_by/completed_by/pending_for) for the in-thread waiting/read/sent filter.

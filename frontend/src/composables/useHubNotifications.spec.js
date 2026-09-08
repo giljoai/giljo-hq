@@ -2,16 +2,21 @@
  * useHubNotifications.spec.js — FE-6054f
  * Tests for the gated, no-spam alerting composable.
  *
- * Gate rules:
+ * Gate rules (as of FE-9586):
  * - thread_update: next_action_owner === currentUser.id → notify if AWAY
- * - thread_message: requires_action === true → notify if AWAY
- * - thread_message: content mentions user display_name (case-insensitive) → notify if AWAY
+ * - thread_message: requires_action === true AND to_participant === currentUser.id
+ *   (a DIRECTED ask) → notify if AWAY. A BROADCAST requires_action post signals
+ *   NOTHING: BE-9197 rules it "whoever picks it up", obligating nobody in particular.
+ * - MENTIONS come from the server's projection (useThreadPostAttention), not from the
+ *   event. The client no longer inspects post CONTENT at all — it could not see all
+ *   of it, so a mention past the broker's excerpt cut-off was invisible to the reader
+ *   it named. Identity comparisons stay client-side; interpretation moved.
  * - OWN posts (from_agent_id === currentUser.id) → NEVER notify
- * - Presence (isHubPresent=true) → NEVER notify (in-pane cue only)
+ * - Popouts are gated on document.hidden (FE-9553 ruling 4a), not Hub presence.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { ref } from 'vue'
+import { effectScope, nextTick, ref } from 'vue'
 
 // ── mocks ──
 
@@ -53,6 +58,21 @@ vi.mock('@/stores/commHubStore', () => ({
   }),
 }))
 
+// FE-9586: mentions are projected from the server, so the spec drives the projection
+// rather than an event body. `mentions` is null until loaded, exactly as the real
+// composable is -- an empty array would let a test pass that the cold-load guard should
+// catch.
+const mockMentions = ref(null)
+vi.mock('./useThreadPostAttention', () => ({
+  useThreadPostAttention: () => ({
+    mentions: mockMentions,
+    directedAsks: ref(null),
+    loaded: ref(mockMentions.value !== null),
+    ensureLoaded: vi.fn(() => Promise.resolve()),
+    refresh: vi.fn(() => Promise.resolve()),
+  }),
+}))
+
 // FE-9289c: a handover also drops a persistent entry in the notification bell.
 const mockAddNotification = vi.fn()
 vi.mock('@/stores/notifications', () => ({
@@ -72,6 +92,65 @@ function dispatchHubEvent(name, detail) {
   window.dispatchEvent(new CustomEvent(name, { detail }))
 }
 
+/**
+ * Start the composable inside a DISPOSABLE scope.
+ *
+ * FE-9586 needed this and it fixes a leak that predates it. The composable registers
+ * its window listeners with `onScopeDispose`, which only runs `if (getCurrentScope())`
+ * -- and calling it bare from a spec provides no scope, so nothing was ever torn down.
+ * Every test's listeners stayed live for the rest of the file. That was invisible while
+ * each test drove a fresh EVENT (the accumulated listeners fired on a payload the
+ * earlier assertions no longer looked at), and became visible the moment a test drove
+ * shared reactive STATE instead: seven surviving watchers each announced the same
+ * mention, and the count assertion read 7.
+ *
+ * So each instance now lives in its own scope and is stopped after the test.
+ */
+let notificationsScope = null
+
+async function startNotifications() {
+  const { useHubNotifications } = await import('./useHubNotifications')
+  notificationsScope?.stop()
+  notificationsScope = effectScope()
+  notificationsScope.run(() => useHubNotifications())
+}
+
+/**
+ * The server says these posts name you.
+ *
+ * Replaces "dispatch an event whose content contains my name" everywhere below. It is
+ * a await-able state change rather than an event because that is what the projection
+ * is -- the event is only a hint to re-ask.
+ */
+async function projectMentions(entries) {
+  mockMentions.value = entries
+  await nextTick()
+}
+
+/**
+ * FE-9553: what "AWAY" means changed, so this harness has to say it.
+ *
+ * Every away-case below was written against the pre-FE-9553 gate, where away
+ * meant `isHubPresent === false` -- not standing in the Hub pane. Ruling 4(a)
+ * moved the popout gate to Page Visibility: a popout fires only when the app
+ * is HIDDEN, because the old gate fired an OS notification at a window the
+ * operator was already looking at on every page except the Hub.
+ *
+ * jsdom reports document.hidden as false (visible) by default, so without this
+ * the whole away half of the file would be asserting against a visible tab and
+ * expecting popouts the ruling now forbids. The tests' INTENT is unchanged --
+ * "the operator is away, so reach them" -- only the definition of away is.
+ *
+ * Redefined per test rather than once, and configurable, so a later
+ * redefinition cannot be silently swallowed.
+ */
+function setHidden(hidden) {
+  Object.defineProperty(document, 'hidden', {
+    configurable: true,
+    get: () => hidden,
+  })
+}
+
 describe('useHubNotifications', () => {
   // Track registered listeners so we can clean them up manually —
   // onScopeDispose does not fire in plain unit tests (no Vue scope)
@@ -85,9 +164,15 @@ describe('useHubNotifications', () => {
     vi.clearAllMocks()
     resetNotificationMock('granted')
     mockIsHubPresent.value = false
+    // FE-9553: hidden is the new "away" for popout purposes -- see setHidden.
+    setHidden(true)
     mockThreadsById.clear()
     mockMessagesByThreadId.clear()
     mockAddNotification.mockClear()
+    // FE-9586: the projection is module-scoped, like the real one. Back to null (NOT
+    // []) between tests, so a test that never mentions mentions cannot inherit the
+    // previous one's -- and so the unloaded state is what a fresh mount sees.
+    mockMentions.value = null
     mockCurrentUser.value = {
       id: 'user-001',
       display_name: 'Sam Rivera',
@@ -104,6 +189,14 @@ describe('useHubNotifications', () => {
   })
 
   afterEach(() => {
+    notificationsScope?.stop()
+    notificationsScope = null
+  })
+
+  afterEach(() => {
+    // FE-9553: hand the visibility stub back, so a spec that runs after this
+    // file in the same worker sees a normal visible document.
+    setHidden(false)
     // Remove all hub listeners accumulated during this test
     for (const { type, handler } of activeListeners) {
       _origRemoveEventListener(type, handler)
@@ -117,8 +210,11 @@ describe('useHubNotifications', () => {
 
   it('does NOT fire Notification when user is present and baton handed to them', async () => {
     mockIsHubPresent.value = true
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    // FE-9553: being present now means present AND looking -- a visible tab.
+    // Presence alone no longer suppresses a popout, because a HIDDEN tab whose
+    // last route was the Hub is not somewhere the operator can see anything.
+    setHidden(false)
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', {
       thread_id: 'thread-1',
@@ -131,8 +227,8 @@ describe('useHubNotifications', () => {
 
   it('does NOT fire Notification when present and message requires_action', async () => {
     mockIsHubPresent.value = true
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    setHidden(false) // FE-9553: present means present AND visible.
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_message', {
       thread_id: 'thread-1',
@@ -148,17 +244,21 @@ describe('useHubNotifications', () => {
 
   // ── AWAY → toast + Notification ──
 
-  it('fires toast + Notification when AWAY and baton handed to currentUser', async () => {
+  // FE-9553: the toast assertion here inverted deliberately. This test pinned
+  // the pre-FE-9553 contract, where an away baton fired a toast AND a popout;
+  // ruling 6 puts toasts on user-initiated actions only, and ruling 3 puts a
+  // baton on the banner. The popout and the bell row are unchanged, so the
+  // test still asserts the operator is reached -- just not twice.
+  it('fires Notification but NOT a toast when AWAY and baton handed to currentUser', async () => {
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', {
       thread_id: 'thread-1',
       next_action_owner: 'user-001',
     })
 
-    expect(mockShowToast).toHaveBeenCalledOnce()
+    expect(mockShowToast).not.toHaveBeenCalled()
     expect(NotificationConstructorSpy).toHaveBeenCalledOnce()
   })
 
@@ -176,8 +276,7 @@ describe('useHubNotifications', () => {
    */
   it('badges the desktop notification with the avatar, not the wordmark', async () => {
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', {
       thread_id: 'thread-1',
@@ -190,10 +289,9 @@ describe('useHubNotifications', () => {
     expect(options.icon).not.toContain('Giljo_YW.svg')
   })
 
-  it('fires toast + Notification when AWAY and message has requires_action=true', async () => {
+  it('fires a Notification when AWAY and a DIRECTED requires_action post names the operator', async () => {
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_message', {
       thread_id: 'thread-1',
@@ -201,27 +299,173 @@ describe('useHubNotifications', () => {
       from_agent_id: 'agent-x',
       content: 'please review',
       requires_action: true,
+      // FE-9586: the recipient field is now REQUIRED for this to signal. An id
+      // comparison is a question the client can answer exactly, which is why it stays
+      // client-side while content interpretation moved to the server.
+      to_participant: 'user-001',
     })
 
-    expect(mockShowToast).toHaveBeenCalledOnce()
+    // FE-9553: no toast for an agent-initiated actionable signal.
+    expect(mockShowToast).not.toHaveBeenCalled()
     expect(NotificationConstructorSpy).toHaveBeenCalledOnce()
   })
 
-  it('fires toast + Notification when AWAY and message mentions display_name (case-insensitive)', async () => {
+  it('A BROADCAST requires_action post is QUIET, not SILENT: bell row, no popout', async () => {
+    // FE-9586b, and this is a REGRESSION FIX rather than a change of mind.
+    //
+    // FE-9586 aligned the client to BE-9197 -- a broadcast requires_action post is
+    // "whoever picks it up" and obligates nobody in particular, so it must not raise
+    // an actionable banner or popout. Both the docblock and the PR body said, in
+    // those words, that "the post keeps its durable bell row". It did not: the bell
+    // row is written AFTER the signal gate, so returning null from the gate skipped
+    // the bell as well and the post vanished from every surface at once. Documented
+    // intent and shipped behaviour disagreed, and the operator noticed by losing
+    // track of asks his agents were broadcasting.
+    //
+    // The bell is the durable archive (ruling 1: a missed informational event goes
+    // to the bell), so this is what "quiet" has to mean: recorded, not interruptive.
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_message', {
       thread_id: 'thread-1',
-      message_id: 'msg-3',
+      message_id: 'msg-broadcast',
       from_agent_id: 'agent-x',
-      content: 'hey sam rivera, take a look',
-      requires_action: false,
+      content: 'somebody should handle the deploy',
+      requires_action: true,
+      // no to_participant: a broadcast
     })
 
-    expect(mockShowToast).toHaveBeenCalledOnce()
+    // The durable record survives...
+    expect(mockAddNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'approval:msg-broadcast',
+        type: 'hub.approval',
+        metadata: { thread_id: 'thread-1', message_id: 'msg-broadcast' },
+      }),
+    )
+    // ...and nothing interrupts, even though the tab is hidden, which is the case
+    // that would otherwise pop.
+    expect(NotificationConstructorSpy).not.toHaveBeenCalled()
+    expect(mockShowToast).not.toHaveBeenCalled()
+  })
+
+  it('titles a broadcast ask for what it is, not as something the operator owes', async () => {
+    // The bell list is the one place a broadcast ask and a directed ask sit side by
+    // side, and "Needs your approval" on a post nobody in particular owes is the same
+    // false claim FE-9586 removed from the banner. WORDING FLAGGED for the operator's
+    // walkthrough -- it is a one-line change if he wants different copy.
+    mockIsHubPresent.value = false
+    await startNotifications()
+
+    dispatchHubEvent('hub:thread_message', {
+      thread_id: 'thread-1',
+      message_id: 'msg-broadcast',
+      from_agent_id: 'agent-x',
+      content: 'somebody should handle the deploy',
+      requires_action: true,
+    })
+
+    expect(mockAddNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Open ask from an agent' }),
+    )
+  })
+
+  it('THE CONTRAST: a broadcast gets a bell row, an ask aimed at another agent gets nothing', async () => {
+    // The three cases in one test, because collapsing any two of them has already
+    // caused a defect in both directions. FE-9586 collapsed broadcast into "nothing"
+    // and lost the ask entirely. My first FE-9586b attempt collapsed
+    // directed-elsewhere into "quiet" and would have put a bell row in front of the
+    // operator for every directive an orchestrator sent a lane agent -- the exact spam
+    // FE-9546 removed, moved from the popout to the bell. The pre-existing FE-9546
+    // test caught it; this pins the distinction where it is readable.
+    mockIsHubPresent.value = false
+    await startNotifications()
+
+    dispatchHubEvent('hub:thread_message', {
+      thread_id: 'thread-broadcast',
+      message_id: 'msg-b',
+      from_agent_id: 'orchestrator',
+      content: 'somebody should handle the deploy',
+      requires_action: true,
+    })
+    dispatchHubEvent('hub:thread_message', {
+      thread_id: 'thread-elsewhere',
+      message_id: 'msg-e',
+      from_agent_id: 'orchestrator',
+      content: 'CI2, take this one',
+      requires_action: true,
+      to_participant: 'CI2',
+    })
+
+    const bellIds = mockAddNotification.mock.calls.map(([row]) => row.id)
+    expect(bellIds).toContain('approval:msg-b')
+    expect(bellIds).not.toContain('approval:msg-e')
+    expect(NotificationConstructorSpy).not.toHaveBeenCalled()
+  })
+
+  it('a DIRECTED ask still gets the full attention treatment -- the two must not converge', async () => {
+    // The negative control for the change above: if "quiet" leaked onto the directed
+    // path, this suite would still be green on the broadcast test while the signal
+    // the operator actually owes an answer to had gone silent.
+    mockIsHubPresent.value = false
+    await startNotifications()
+
+    dispatchHubEvent('hub:thread_message', {
+      thread_id: 'thread-2',
+      message_id: 'msg-directed',
+      from_agent_id: 'agent-x',
+      content: 'please decide',
+      requires_action: true,
+      to_participant: 'user-001',
+    })
+
+    expect(mockAddNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Needs your approval' }),
+    )
     expect(NotificationConstructorSpy).toHaveBeenCalledOnce()
+  })
+
+  it('fires a Notification but NOT a toast when AWAY and the server reports a mention', async () => {
+    // FE-9586: no content in this test at all. The old version put the operator's name
+    // in the event body and relied on a substring match; the client no longer looks.
+    mockIsHubPresent.value = false
+    await startNotifications()
+
+    await projectMentions([{ thread_id: 'thread-1', chat_id: 'CHT-0001', message_ids: ['msg-3'] }])
+
+    // FE-9553: a mention is actionable and agent-initiated -- banner + bell + popout, no toast.
+    expect(mockShowToast).not.toHaveBeenCalled()
+    expect(NotificationConstructorSpy).toHaveBeenCalledOnce()
+  })
+
+  it('does not announce the same mention twice when the projection is re-read', async () => {
+    // The projection is re-read on every thread event, so it reports the same unread
+    // mention again and again until the operator reads the thread. Announcing per READ
+    // rather than per POST would re-pop the same mention on every unrelated message in
+    // the tenant.
+    mockIsHubPresent.value = false
+    await startNotifications()
+
+    await projectMentions([{ thread_id: 'thread-1', message_ids: ['msg-3'] }])
+    await projectMentions([{ thread_id: 'thread-1', message_ids: ['msg-3'] }])
+
+    expect(NotificationConstructorSpy).toHaveBeenCalledOnce()
+  })
+
+  it('announces a SECOND mention on the same thread -- it is a second thing asked', async () => {
+    // The BELL_ROWS keyOnPost precedent: a second baton is the same standing
+    // obligation, a second mention is not. Tracking announcements per THREAD would
+    // swallow the second one.
+    mockIsHubPresent.value = false
+    await startNotifications()
+
+    await projectMentions([{ thread_id: 'thread-1', message_ids: ['msg-3'] }])
+    await projectMentions([{ thread_id: 'thread-1', message_ids: ['msg-4', 'msg-3'] }])
+
+    const bellIds = mockAddNotification.mock.calls.map(([row]) => row.id)
+    expect(bellIds).toContain('mention:msg-3')
+    expect(bellIds).toContain('mention:msg-4')
   })
 
   // ── FE-9418: the browser notification's click travels the shared route ──
@@ -232,8 +476,7 @@ describe('useHubNotifications', () => {
     // only one still hand-building its route, so it arrived without the baton context
     // and marked nothing.
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', { thread_id: 'thread-1', next_action_owner: 'user-001' })
     expect(NotificationConstructorSpy).toHaveBeenCalledOnce()
@@ -253,16 +496,9 @@ describe('useHubNotifications', () => {
     // mention's OWN reason rather than by carrying no reason at all. Routing a mention
     // through the helper is no longer the defect; routing it as a baton still would be.
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
-    dispatchHubEvent('hub:thread_message', {
-      thread_id: 'thread-1',
-      message_id: 'msg-mention',
-      from_agent_id: 'agent-x',
-      content: 'hey sam rivera, take a look',
-      requires_action: false,
-    })
+    await projectMentions([{ thread_id: 'thread-1', message_ids: ['msg-mention'] }])
     NotificationConstructorSpy.mock.instances[0].onclick()
 
     expect(mockRouterPush.mock.calls[0][0].query.focus).not.toBe('baton')
@@ -278,8 +514,7 @@ describe('useHubNotifications', () => {
     // by a thread-list read; an incoming message bumps last_activity_at and nothing
     // else. The tail fallback resolves the real one from the loaded timeline.
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', { thread_id: 'thread-1', next_action_owner: 'user-001' })
     NotificationConstructorSpy.mock.instances[0].onclick()
@@ -289,31 +524,29 @@ describe('useHubNotifications', () => {
 
   // ── BE-9414: a mention written past the broker's excerpt cut-off ──
 
-  it('still notifies when the mention is past the excerpt the event could carry', async () => {
-    // A post over ~5.8 KB crosses the cross-worker broker as a bounded excerpt
-    // (pg_notify caps a NOTIFY payload at 7999 bytes). Matching the operator's name
-    // against that excerpt would silently drop the bell for anyone named later in a
-    // long post -- they would never learn they had been asked. The store holds the
-    // full body by the time this event is dispatched, so the check reads it there.
+  it('does not inspect post CONTENT at all -- a name in the body raises nothing by itself', async () => {
+    // MEANING INVERTED BY FE-9586, deliberately. This test used to assert that a
+    // mention past the broker's ~5.8 KB excerpt cut-off still notified, via a
+    // store-hydration fallback -- and that fallback's own docblock conceded it read the
+    // excerpt whenever the hydrating read had failed, which is the case it most needed
+    // to cover. The client no longer decides what a mention is, so the honest assertion
+    // is that a name in an event body does nothing on its own. The guarantee the old
+    // test wanted is now enforced server-side, where the content column is simply
+    // readable: see tests/repositories/test_comm_thread_unread_mentions_mixin.py, which
+    // pins a 9,000-character body with the name at the end.
     mockIsHubPresent.value = false
-    mockMessagesByThreadId.set('thread-long', [
-      { message_id: 'msg-long', content: 'a very long post ... and finally, sam rivera, over to you' },
-    ])
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_message', {
       thread_id: 'thread-long',
       message_id: 'msg-long',
       from_agent_id: 'agent-x',
-      content: 'a very long post ...', // the excerpt: the name is NOT in it
-      content_truncated: true,
-      content_length: 53,
+      content: 'and finally, sam rivera, over to you',
       requires_action: false,
     })
 
-    expect(mockShowToast).toHaveBeenCalledOnce()
-    expect(NotificationConstructorSpy).toHaveBeenCalledOnce()
+    expect(NotificationConstructorSpy).not.toHaveBeenCalled()
+    expect(mockAddNotification).not.toHaveBeenCalled()
   })
 
   it('does not invent a mention when neither the excerpt nor the stored body names you', async () => {
@@ -321,8 +554,7 @@ describe('useHubNotifications', () => {
     mockMessagesByThreadId.set('thread-long', [
       { message_id: 'msg-long', content: 'a very long post that names nobody in particular' },
     ])
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_message', {
       thread_id: 'thread-long',
@@ -342,8 +574,7 @@ describe('useHubNotifications', () => {
 
   it('does NOT notify for own posts (from_agent_id === currentUser.id)', async () => {
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_message', {
       thread_id: 'thread-1',
@@ -357,12 +588,60 @@ describe('useHubNotifications', () => {
     expect(mockShowToast).not.toHaveBeenCalled()
   })
 
+  // ── FE-9546: a requires_action post directed at ANOTHER agent is not the
+  // operator's business, no matter the flag. Only BATON_FOCUS (thread_update,
+  // separately gated on next_action_owner) and a requires_action post actually
+  // addressed to the operator (to_participant matches, or a broadcast with no
+  // specific addressee — "all recipients must act") are the operator's approval
+  // signal. Decision, stated: an agent-to-agent directed post drops NO bell row
+  // either — it was never addressed to the operator, so there is nothing to
+  // archive for them, matching how any other not-my-business event is treated. ──
+
+  it('FE-9546: does NOT notify when requires_action post is directed at another agent', async () => {
+    mockIsHubPresent.value = false
+    await startNotifications()
+
+    dispatchHubEvent('hub:thread_message', {
+      thread_id: 'thread-1',
+      message_id: 'msg-6',
+      from_agent_id: 'orchestrator',
+      content: 'please pick this up',
+      requires_action: true,
+      to_participant: 'CI2', // directed at a lane agent, not the operator
+    })
+
+    expect(NotificationConstructorSpy).not.toHaveBeenCalled()
+    expect(mockShowToast).not.toHaveBeenCalled()
+    expect(mockAddNotification).not.toHaveBeenCalled()
+  })
+
+  it('FE-9546: still notifies + drops a bell row when the requires_action post is directed at the operator', async () => {
+    mockIsHubPresent.value = false
+    await startNotifications()
+
+    dispatchHubEvent('hub:thread_message', {
+      thread_id: 'thread-1',
+      message_id: 'msg-7',
+      from_agent_id: 'orchestrator',
+      content: 'need your sign-off',
+      requires_action: true,
+      to_participant: 'user-001', // the operator's own id
+    })
+
+    // FE-9553: the FE-9546 recipient filter is unchanged; only the toast goes.
+    expect(mockShowToast).not.toHaveBeenCalled()
+    expect(NotificationConstructorSpy).toHaveBeenCalledOnce()
+    expect(mockAddNotification).toHaveBeenCalledOnce()
+    // Title stays exactly what it was — this project changes the filter, not the copy.
+    const [title] = NotificationConstructorSpy.mock.calls[0]
+    expect(title).toBe('Needs your approval')
+  })
+
   // ── Non-user-invoked → never notify ──
 
   it('does NOT notify for a plain broadcast with no requires_action and no mention', async () => {
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_message', {
       thread_id: 'thread-1',
@@ -378,8 +657,7 @@ describe('useHubNotifications', () => {
 
   it('does NOT notify for a thread_update where baton goes to someone else', async () => {
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', {
       thread_id: 'thread-1',
@@ -390,30 +668,38 @@ describe('useHubNotifications', () => {
     expect(mockShowToast).not.toHaveBeenCalled()
   })
 
-  // ── Notification.permission denied → no Notification, toast still fires ──
+  // ── Notification.permission denied → no popout; the bell row still lands ──
+  //
+  // FE-9553 rewrote this test rather than inverting it. It used to assert that
+  // a denied permission still reached the operator VIA THE TOAST, and with the
+  // toast gone that reading would leave two bare negatives asserting nothing.
+  // The claim worth pinning is the one ruling 4(b) makes: a popout is
+  // best-effort and never the only carrier, so with permission denied the
+  // durable bell row must still be written. That is what actually protects the
+  // operator here, and it is now what fails if someone breaks it.
 
-  it('fires toast but NOT Notification when permission is denied', async () => {
+  it('writes the bell row but fires no popout and no toast when permission is denied', async () => {
     resetNotificationMock('denied')
     mockIsHubPresent.value = false
 
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', {
       thread_id: 'thread-1',
       next_action_owner: 'user-001',
     })
 
-    expect(mockShowToast).toHaveBeenCalledOnce()
     expect(NotificationConstructorSpy).not.toHaveBeenCalled()
+    expect(mockShowToast).not.toHaveBeenCalled()
+    // The carrier that survives a denied permission.
+    expect(mockAddNotification).toHaveBeenCalledOnce()
   })
 
   // ── FE-9289c: persistent bell entry (survives navigation) ──
 
   it('drops a persistent handover entry on baton, deduped by a stable per-thread id', async () => {
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', { thread_id: 'thread-9', next_action_owner: 'user-001' })
 
@@ -424,8 +710,8 @@ describe('useHubNotifications', () => {
 
   it('records the persistent entry even when the operator IS in the Hub (durable record)', async () => {
     mockIsHubPresent.value = true
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    setHidden(false) // FE-9553: present means present AND visible.
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', { thread_id: 'thread-9', next_action_owner: 'user-001' })
 
@@ -442,8 +728,7 @@ describe('useHubNotifications', () => {
     // uses a genuinely ordinary post. The guarantee it defends is unchanged and is the
     // one that matters: a durable row is raised by the SIGNAL, never by mere traffic.
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_message', {
       thread_id: 'thread-1',
@@ -461,8 +746,7 @@ describe('useHubNotifications', () => {
   it('titles a handover "It\'s your call" and names the thread, not "Message Hub / Your turn"', async () => {
     mockIsHubPresent.value = false
     mockThreadsById.set('thread-1', { thread_id: 'thread-1', subject: 'Laptop interop' })
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', { thread_id: 'thread-1', next_action_owner: 'user-001' })
 
@@ -477,8 +761,7 @@ describe('useHubNotifications', () => {
   it('names the handing agent when the event carries one', async () => {
     mockIsHubPresent.value = false
     mockThreadsById.set('thread-1', { thread_id: 'thread-1', subject: 'Laptop interop' })
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', {
       thread_id: 'thread-1',
@@ -498,8 +781,7 @@ describe('useHubNotifications', () => {
     // render "undefined is waiting on you".
     mockIsHubPresent.value = false
     mockThreadsById.set('thread-1', { thread_id: 'thread-1', subject: 'Laptop interop' })
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', { thread_id: 'thread-1', next_action_owner: 'user-001' })
 
@@ -513,8 +795,7 @@ describe('useHubNotifications', () => {
     // transient toast said, or the operator loses the name on navigation.
     mockIsHubPresent.value = true
     mockThreadsById.set('thread-5', { thread_id: 'thread-5', subject: 'Interop' })
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', {
       thread_id: 'thread-5',
@@ -536,8 +817,7 @@ describe('useHubNotifications', () => {
     // ON the thread — is unchanged and still asserted; only the route it travels moved,
     // and it now comes from the shared helper instead of a literal.
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', { thread_id: 'thread-42', next_action_owner: 'user-001' })
 
@@ -563,16 +843,12 @@ describe('useHubNotifications', () => {
     // resolves to the thread tail. The id was on the wire the whole time and the
     // hand-built route here was discarding it.
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
-    dispatchHubEvent('hub:thread_message', {
-      thread_id: 'thread-7',
-      message_id: 'msg-named',
-      from_agent_id: 'agent-x',
-      content: 'sam rivera, thoughts?',
-      requires_action: false,
-    })
+    // FE-9586: the post id now comes from the PROJECTION rather than the event, which
+    // is why the projection returns message ids at all. A thread-only verdict would
+    // have left this deep-link pointing at the thread tail again.
+    await projectMentions([{ thread_id: 'thread-7', message_ids: ['msg-named'] }])
     NotificationConstructorSpy.mock.instances[0].onclick()
 
     expect(mockRouterPush).toHaveBeenCalledWith({
@@ -583,8 +859,7 @@ describe('useHubNotifications', () => {
 
   it('routes an approval to its own post, under the approval reason', async () => {
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_message', {
       thread_id: 'thread-8',
@@ -592,6 +867,7 @@ describe('useHubNotifications', () => {
       from_agent_id: 'agent-x',
       content: 'ship it or hold?',
       requires_action: true,
+      to_participant: 'user-001', // FE-9586: directed, or it signals nothing
     })
     NotificationConstructorSpy.mock.instances[0].onclick()
 
@@ -606,8 +882,7 @@ describe('useHubNotifications', () => {
     // compile and look right and would pin a STALE post — FE-9418's reasoning, which
     // survives the widening intact.
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', { thread_id: 'thread-9', next_action_owner: 'user-001' })
     NotificationConstructorSpy.mock.instances[0].onclick()
@@ -620,23 +895,17 @@ describe('useHubNotifications', () => {
 
   it('titles each reason for what it is, from one announcer', async () => {
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', { thread_id: 't-a', next_action_owner: 'user-001' })
-    dispatchHubEvent('hub:thread_message', {
-      thread_id: 't-b',
-      message_id: 'm-b',
-      from_agent_id: 'agent-x',
-      content: 'sam rivera, look',
-      requires_action: false,
-    })
+    await projectMentions([{ thread_id: 't-b', message_ids: ['m-b'] }])
     dispatchHubEvent('hub:thread_message', {
       thread_id: 't-c',
       message_id: 'm-c',
       from_agent_id: 'agent-x',
       content: 'approve?',
       requires_action: true,
+      to_participant: 'user-001',
     })
 
     const titles = NotificationConstructorSpy.mock.calls.map(([title]) => title)
@@ -648,10 +917,14 @@ describe('useHubNotifications', () => {
     // browser notification exists for, so it is the common case here rather than an
     // edge one. The old fallback rendered `thread <uuid>` into the toast, the browser
     // notification AND the durable bell row, all from this one string.
+    //
+    // FE-9553: the toast is no longer one of those surfaces, so it is no longer
+    // one of the strings checked. The remaining two are the popout body and the
+    // bell row body — still both fed from the one shared string, so the claim
+    // this test makes is unchanged.
     mockIsHubPresent.value = false
     const THREAD_UUID = '9f8e7d6c-5b4a-4321-9876-0abcdef12345'
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', {
       thread_id: THREAD_UUID,
@@ -661,9 +934,8 @@ describe('useHubNotifications', () => {
     })
 
     const [, opts] = NotificationConstructorSpy.mock.calls[0]
-    const toastArg = mockShowToast.mock.calls[0][0]
     const bellRow = mockAddNotification.mock.calls[0][0]
-    for (const words of [opts.body, toastArg.message, bellRow.body]) {
+    for (const words of [opts.body, bellRow.body]) {
       expect(words).not.toContain(THREAD_UUID)
     }
     // And it says something USEFUL instead: the serial the operator actually quotes.
@@ -673,8 +945,7 @@ describe('useHubNotifications', () => {
   it('prefers the thread NAME over its serial when the store knows one', async () => {
     mockIsHubPresent.value = false
     mockThreadsById.set('thr-named', { thread_id: 'thr-named', subject: 'Laptop interop' })
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', {
       thread_id: 'thr-named',
@@ -689,8 +960,7 @@ describe('useHubNotifications', () => {
     // Never "thread undefined", and never the id. This matches SystemStatusBanner's
     // wording, which the two surfaces are deliberately kept identical on.
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', {
       thread_id: 'thr-unknown',
@@ -710,16 +980,9 @@ describe('useHubNotifications', () => {
     // is the same standing obligation — answer it — so it dedupes to one row. A second
     // mention is a second thing someone asked you, and collapsing them loses one.
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
-    dispatchHubEvent('hub:thread_message', {
-      thread_id: 'thread-3',
-      message_id: 'msg-m1',
-      from_agent_id: 'agent-x',
-      content: 'sam rivera, can you look',
-      requires_action: false,
-    })
+    await projectMentions([{ thread_id: 'thread-3', message_ids: ['msg-m1'] }])
 
     expect(mockAddNotification).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -733,8 +996,7 @@ describe('useHubNotifications', () => {
 
   it('drops a durable bell row for an approval, carrying its own post', async () => {
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_message', {
       thread_id: 'thread-4',
@@ -742,6 +1004,7 @@ describe('useHubNotifications', () => {
       from_agent_id: 'agent-x',
       content: 'approve the rollout?',
       requires_action: true,
+      to_participant: 'user-001',
     })
 
     expect(mockAddNotification).toHaveBeenCalledWith(
@@ -758,16 +1021,10 @@ describe('useHubNotifications', () => {
     // Same rule the hand-off already followed: the dropdown is the DURABLE record
     // regardless of presence, while the interruptive channels stay gated on being away.
     mockIsHubPresent.value = true
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    setHidden(false) // FE-9553: present means present AND visible.
+    await startNotifications()
 
-    dispatchHubEvent('hub:thread_message', {
-      thread_id: 'thread-3',
-      message_id: 'msg-m2',
-      from_agent_id: 'agent-x',
-      content: 'sam rivera?',
-      requires_action: false,
-    })
+    await projectMentions([{ thread_id: 'thread-3', message_ids: ['msg-m2'] }])
 
     expect(mockAddNotification).toHaveBeenCalledOnce()
     expect(NotificationConstructorSpy).not.toHaveBeenCalled()
@@ -778,8 +1035,7 @@ describe('useHubNotifications', () => {
     // The bare `handover` type and the thread-keyed id are pre-FE-9436 and stay: rows
     // already sitting in a browser's localStorage would be orphaned by a rename.
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     dispatchHubEvent('hub:thread_update', { thread_id: 'thread-2', next_action_owner: 'user-001' })
 
@@ -792,8 +1048,7 @@ describe('useHubNotifications', () => {
 
   it('de-dupes: same baton event on same thread does not fire twice', async () => {
     mockIsHubPresent.value = false
-    const { useHubNotifications } = await import('./useHubNotifications')
-    useHubNotifications()
+    await startNotifications()
 
     const payload = { thread_id: 'thread-1', next_action_owner: 'user-001' }
     dispatchHubEvent('hub:thread_update', payload)

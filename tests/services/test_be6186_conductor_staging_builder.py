@@ -256,10 +256,10 @@ def test_ch_chain_staging_includes_hub_thread_step() -> None:
     """BE-6187: the conductor creates the Hub thread itself as Step 0 (create_thread).
 
     BE-9291 DELIBERATELY CHANGED what this asserts. It used to require the chapter to
-    name ``search_threads`` and to carry the run_id "so sub-orchs can find the Hub
+    name ``list_threads`` and to carry the run_id "so sub-orchs can find the Hub
     thread" — because discovery really did work by substring-matching the run_id out of
     the subject. Discovery now runs on ``comm_threads.sequence_run_id``, a real FK, so
-    naming ``search_threads`` here would pin a mechanism that no longer exists.
+    naming ``list_threads`` here would pin a mechanism that no longer exists.
 
     The INTENT is unchanged and still enforced: the chapter must name a discovery path,
     and the run_id must still appear — but now as the value the conductor STAMPS on the
@@ -279,7 +279,7 @@ def test_ch_chain_staging_includes_hub_thread_step() -> None:
     assert "run-test" in chapter, "the run_id must appear as the value to stamp"
     # And the chapter must name the discovery path sub-orchs actually use.
     assert "hub_thread_id" in chapter, "the discovery path (get_context chain) must be named"
-    assert "search_threads" not in chapter, "the retired substring-discovery path must not be re-introduced here"
+    assert "list_threads" not in chapter, "the retired substring-discovery path must not be re-introduced here"
     # Existing prose contracts still hold.
     assert "terminate_chain" not in low, "no TERMINATE_CHAIN prose"
     assert "symmetric" in low and "not special" in low, "head stays symmetric"

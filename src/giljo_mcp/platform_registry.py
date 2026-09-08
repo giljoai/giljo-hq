@@ -88,6 +88,7 @@ EXPORT_CLAUDE_CODE = "claude_code"
 EXPORT_GEMINI_CLI = "gemini_cli"
 EXPORT_CODEX_CLI = "codex_cli"
 EXPORT_ANTIGRAVITY_CLI = "antigravity_cli"
+EXPORT_OPENCODE = "opencode"
 EXPORT_GENERIC = "generic"
 
 
@@ -233,30 +234,31 @@ HARNESSES: tuple[Harness, ...] = (
         ),
         export_platform=EXPORT_ANTIGRAVITY_CLI,
         # BE-6205: agy's real autonomy flag (verified via `agy --help`) is
-        # --dangerously-skip-permissions, NOT Gemini's --yolo. agy shares Gemini's
-        # @-syntax for agent SPAWN, not its autonomy flag.
+        # --dangerously-skip-permissions, NOT Gemini's --yolo -- it shares Gemini's
+        # @-syntax for agent SPAWN, not its autonomy flag. BE-9585: its seed flag is
+        # NOT ``--prompt`` (that aliases ``--print``, which runs once and exits).
         autonomy_flag="--dangerously-skip-permissions",
+        launch_prompt_flag="--prompt-interactive",
     ),
     Harness(
         HARNESS_OPENCODE,
         "opencode",
         "opencode",
         "opencode",
-        # BE-9035c: opencode self-identifies via clientInfo (name=="opencode",
-        # BE-9035 harvest) so it is a FIRST-CLASS detectable harness, terminal-capable.
-        # Its subagent-spawn mechanism is not a documented inline syntax, so the
-        # orchestrator spawns via whatever mechanism its harness provides (the
-        # universal subagent prose covers it). Launch is the BE-9015 verified
-        # ``cmd /k opencode --prompt "<prompt>"`` (cmd wrapper so opencode.cmd resolves
-        # from PATH). NOT an export target (no agent-template install path shipped).
+        # BE-9035c: opencode self-identifies via clientInfo (name=="opencode", BE-9035
+        # harvest) so it is a FIRST-CLASS detectable harness, terminal-capable. Its
+        # subagent-spawn mechanism is not a documented inline syntax, so the orchestrator
+        # spawns via whatever its harness provides (universal subagent prose covers it).
+        # Launch: the BE-9015 verified ``cmd /k opencode --prompt "<prompt>"``.
         spawn_syntax=(
             "Use your harness's own subagent/delegate mechanism to spawn the agent named "
             "by spawn_job (agent_name used as-is); if none exists, self-adopt the role."
         ),
-        template_locations=(),
-        export_platform=None,
+        template_locations=("{project}/.opencode/agents/", "~/.config/opencode/agents/"),
+        export_platform=EXPORT_OPENCODE,
         launch_shell="cmd",
         launch_prompt_flag="--prompt",
+        autonomy_flag="--auto",  # BE-9585: verified in `opencode --help`; was None
     ),
 )
 
@@ -470,11 +472,10 @@ _EXPORT_BY_HARNESS: dict[str, str] = {h.tool_type: h.export_platform for h in HA
 # rows (claude_code / gemini_cli / codex_cli / antigravity_cli) plus the ``generic``
 # pseudo-platform. Byte-compatible with the pre-collapse literals (the downloads
 # Query regex + slash _VALID_PLATFORMS) -- gemini before codex, note.
+# BE-9501: DERIVED, not hand-listed -- a harness declaring an export platform is
+# in this tuple by construction, so it cannot be silently omitted (see test_be9501).
 EXPORT_PLATFORMS: tuple[str, ...] = (
-    _EXPORT_BY_HARNESS[HARNESS_CLAUDE_CODE],
-    _EXPORT_BY_HARNESS[HARNESS_GEMINI],
-    _EXPORT_BY_HARNESS[HARNESS_CODEX],
-    _EXPORT_BY_HARNESS[HARNESS_ANTIGRAVITY],
+    *(h.export_platform for h in HARNESSES if h.export_platform),
     EXPORT_GENERIC,
 )
 

@@ -93,6 +93,7 @@ from .comm import (
     VALID_THREAD_STATUSES,
     CommParticipant,
     CommThread,
+    CommThreadProjectTag,
 )
 
 # Configuration models
@@ -232,6 +233,7 @@ __all__ = [
     "Base",
     "CommParticipant",
     "CommThread",
+    "CommThreadProjectTag",
     # Config
     "Configuration",
     "DownloadToken",

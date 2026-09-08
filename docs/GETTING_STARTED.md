@@ -15,7 +15,7 @@ The **Setup Wizard** opens automatically the first time you sign in (rerun it an
 | **Choose Tools** | Pick one or more AI coding tools: Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, OpenCode, or a generic MCP client. You can add the rest later. |
 | **Connect** | The wizard walks through your chosen tools one at a time, showing a one-command setup for each. The status card flips green by itself the moment a tool connects — there is nothing to click. Already set a tool up? Choose **"I already configured this"** to move on. |
 | **Install** | Ask your tool to run `giljo_setup`. This installs the `/giljo` skill and your agent templates. |
-| **Launch** | You're all set. Three cards let you create your first product, open the dashboard, or read this guide. |
+| **Launch** | You're all set. Four cards let you create your first product, open the dashboard, read this guide, or drive from your terminal instead. |
 
 Each tool's status turns green on its own once it connects. If you'd rather check by hand, run `/mcp` in your CLI tool and confirm `giljo_hq` is listed as Connected.
 
@@ -50,7 +50,7 @@ A Product is the context container for everything you build — all projects and
 
 **Vision analysis is the default path.** When you add a vision document, your AI coding tool analyzes it and populates the product fields for you — the Setup tab walks you through **Stage analysis → Analyzing… → Next**, and the remaining tabs unlock once analysis completes. Analysis also fills in the **Codebase Folder** automatically when it can determine your project path, with a visible way to skip that field. Prefer to type everything yourself? Tick **Skip** to bypass analysis and fill the form by hand.
 
-You do not need to fill every field before saving — start with the name and add context over time. Only one product can be active at a time; activating a product returns you to the Home page.
+You do not need to fill every field before saving — start with the name and add context over time. You can show several products at once, each in its own tab; showing a new product returns you to the Home page.
 
 ---
 

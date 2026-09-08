@@ -47,7 +47,7 @@ describe('useProjectTaxonomy - auto-fill next serial (UI-0004)', () => {
     t.handleTypeChange('type-1')
     await wait()
 
-    expect(api.projects.getNextSeries).toHaveBeenCalledWith('type-1')
+    expect(api.projects.getNextSeries).toHaveBeenCalledWith('type-1', null)
     expect(t.seriesNumberInput.value).toBe('0042')
     expect(projectData.value.series_number).toBe(42)
     expect(api.projects.checkSeries).toHaveBeenCalled()
@@ -127,7 +127,7 @@ describe('useProjectTaxonomy - auto-fill next serial (UI-0004)', () => {
     t.handleTypeCreated(newType)
     await wait()
 
-    expect(api.projects.getNextSeries).toHaveBeenCalledWith('type-2')
+    expect(api.projects.getNextSeries).toHaveBeenCalledWith('type-2', null)
     expect(t.seriesNumberInput.value).toBe('0009')
     expect(projectData.value.series_number).toBe(9)
   })

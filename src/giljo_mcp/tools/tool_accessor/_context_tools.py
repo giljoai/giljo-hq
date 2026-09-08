@@ -166,9 +166,15 @@ class ContextToolsMixin:
         product_id: str,
         tenant_key: str,
         force: bool = False,
+        is_active: bool | None = None,
         **fields: Any,
     ) -> dict[str, Any]:
-        """Write product fields from vision document analysis (Handover 0842c)."""
+        """Write product fields from vision document analysis (Handover 0842c).
+
+        is_active (BE-9502a): optional activate/deactivate/switch, routed through
+        ProductService.activate_product/deactivate_product -- see
+        update_product_fields for why this is not a generic field.
+        """
         from giljo_mcp.tools.vision_analysis import update_product_fields as tool_func
 
         return await tool_func(
@@ -177,5 +183,6 @@ class ContextToolsMixin:
             db_manager=self.db_manager,
             websocket_manager=self._websocket_manager,
             force=force,
+            is_active=is_active,
             **fields,
         )

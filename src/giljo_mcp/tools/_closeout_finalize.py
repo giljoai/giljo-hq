@@ -116,6 +116,7 @@ async def _finalize_chain_member_closeout(
                         "name": project.name,
                         "status": project.status.value if hasattr(project.status, "value") else project.status,
                         "mission": project.mission,
+                        "product_id": project.product_id,
                     },
                     tenant_key=tenant_key,
                 )
