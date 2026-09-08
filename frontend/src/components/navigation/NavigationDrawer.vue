@@ -63,14 +63,14 @@
         <v-icon size="22">mdi-chevron-right</v-icon>
       </div>
 
-      <!-- Active Product (subtitle under logo, expanded only) -->
+      <!-- FE-9502c: viewed-tab product (was the server's single active product). -->
       <router-link
         v-if="!rail"
         :to="{ name: 'Products' }"
         class="nav-product-subtitle"
-        :class="{ 'nav-product-subtitle--inactive': !productsStore.activeProduct }"
+        :class="{ 'nav-product-subtitle--inactive': !productsStore.currentProduct }"
       >
-        {{ productsStore.activeProduct ? productsStore.activeProduct.name : 'No active product' }}
+        {{ productsStore.currentProduct ? productsStore.currentProduct.name : 'No product open' }}
       </router-link>
     </div>
 
@@ -108,14 +108,9 @@
           ></v-img>
           <v-icon v-else>{{ item.icon }}</v-icon>
         </template>
-        <!-- Hub unread count badge -->
-        <template v-if="item.name === 'Hub' && commHub.totalUnread > 0" #append>
-          <span
-            :style="hubUnreadBadgeStyle()"
-            data-testid="nav-hub-unread-badge"
-          >
-            {{ commHub.totalUnread > 99 ? '99+' : commHub.totalUnread }}
-          </span>
+        <!-- One #append per item (Vue forbids two): Hub unread + FE-9501b (D5) badge. -->
+        <template v-if="badgeCount(item) > 0" #append>
+          <span :style="hubUnreadBadgeStyle()" :data-testid="badgeTestId(item)">{{ badgeCount(item) > 99 ? '99+' : badgeCount(item) }}</span>
         </template>
       </v-list-item>
     </v-list>
@@ -218,6 +213,7 @@ import { useUserStore } from '@/stores/user'
 import { useWebSocketStore } from '@/stores/websocket'
 import { useCommHubStore } from '@/stores/commHubStore'
 import { useSequenceRunStore } from '@/stores/sequenceRunStore'
+import { useGlobalActivityStore } from '@/stores/globalActivityStore'
 import { useToast } from '@/composables/useToast'
 import { useNavDrawerAccount } from '@/composables/useNavDrawerAccount'
 import { useNavConnectionStatus } from '@/composables/useNavConnectionStatus'
@@ -261,17 +257,26 @@ const productsStore = useProductStore()
 const userStore = useUserStore()
 const wsStore = useWebSocketStore()
 const commHub = useCommHubStore()
+const globalActivity = useGlobalActivityStore()
+// FE-9501b (D5) / FE-9502d: "Projects" scopes to projectStore.projects (the
+// viewed product's own rows) -- globalActivity is keyed cross-product; the
+// remainder surfaces on the ProductTabStrip per-tab badge instead.
+function badgeCount(item) {
+  if (item.name === 'Hub') return commHub.totalUnread
+  if (item.name === 'Projects') {
+    return projectStore.projects.reduce((sum, p) => sum + globalActivity.getCount(p.id), 0)
+  }
+  return 0
+}
+const badgeTestId = (item) => (item.name === 'Hub' ? 'nav-hub-unread-badge' : 'nav-projects-activity-badge')
 const sequenceRunStore = useSequenceRunStore()
 const { showToast } = useToast()
 
-// Track which nav item is selected
 const selected = ref([])
 
-// Dialogs
 const showConnectionDebug = ref(false)
 const licenseStatus = ref('Licensed')
 
-// Log download state
 const logMenuOpen = ref(false)
 const logArchives = ref([])
 const logArchivesLoading = ref(false)
@@ -303,8 +308,7 @@ function downloadArchive(filename) {
   logMenuOpen.value = false
 }
 
-// Account state via composable (FE-6006)
-// Default 'unknown' (NOT 'ce') so a failed/timed-out config fetch never assumes
+// FE-6006: default 'unknown' (NOT 'ce') so a failed/timed-out config fetch never assumes
 // CE and renders CE-only chrome (the dead admin link) on a SaaS box (FE-6055).
 const giljoMode = ref('unknown')
 const {
@@ -432,17 +436,18 @@ const handleLogout = async () => {
 const jobsIcon = computed(() => resolveJobsNavIcon(route.path, route?.query))
 
 // Navigation items
-const hasProduct = computed(() => !!productsStore.activeProduct)
+// FE-9502c: was the server's single activeProduct; now the viewed tab.
+const hasProduct = computed(() => !!productsStore.currentProduct)
 const hasProject = computed(() => (projectStore.projects?.length ?? 0) > 0)
 
 const navigationItems = computed(() => {
   // FE-6174c: Jobs nav prefers an in-flight chain run (→ the /jobs multi variant
-  // for the chain's head project), else the active solo project, else the launch
-  // page. The old branch C pointed at the retired /mission-control route; it now
-  // resolves to /projects/<headPid>?run=<id> (a live route). Pick the first
-  // active-election run from the hydrated set.
+  // for the chain's head project), else the active project(s), else launch.
+  // Pick the first active-election run from the hydrated set.
   const jobsPath = resolveJobsNavPath({
-    activeProject: projectStore.activeProject,
+    // FE-9525d: the retired singular reader is replaced by activeProjects (plural).
+    activeProject: projectStore.activeProjects[0] ?? null,
+    activeProjects: projectStore.activeProjects,
     activeRun: sequenceRunStore.activeRuns[0] ?? sequenceRunStore.reviewPendingRun ?? null,
   })
 

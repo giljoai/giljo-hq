@@ -26,7 +26,6 @@ from typing import Any
 from sqlalchemy import and_, case, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.models import Message, Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 
@@ -288,32 +287,21 @@ class MessageRepository:
             job_id: AgentJob ID
 
         Returns:
-            Row with job_id, project_id or None
+            Row with job_id, project_id, product_id or None. ``product_id`` is
+            None both when the job carries no project (e.g. a project-less
+            conductor) and when the project itself has none -- the join is a
+            LEFT OUTER JOIN precisely so a null project_id never drops the row
+            (BE-9518).
         """
         result = await session.execute(
-            select(AgentJob.job_id, AgentJob.project_id).where(
+            select(AgentJob.job_id, AgentJob.project_id, Project.product_id)
+            .outerjoin(
+                Project,
+                and_(Project.id == AgentJob.project_id, Project.tenant_key == AgentJob.tenant_key),
+            )
+            .where(
                 AgentJob.job_id == job_id,
                 AgentJob.tenant_key == tenant_key,
             )
         )
         return result.first()
-
-    async def get_active_project(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-    ) -> Project | None:
-        """
-        Get the active project for a tenant.
-
-        Args:
-            session: Active database session
-            tenant_key: Tenant key for isolation
-
-        Returns:
-            Project ORM instance or None
-        """
-        result = await session.execute(
-            select(Project).where(and_(Project.tenant_key == tenant_key, Project.status == ProjectStatus.ACTIVE))
-        )
-        return result.scalar_one_or_none()

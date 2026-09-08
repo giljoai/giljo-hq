@@ -89,6 +89,20 @@
             hide-details
             data-testid="hub-sort"
           />
+          <!-- FE-9530: the viewed-tab scoping is now the DEFAULT filter, not the
+               only option -- "All products" reaches everything, "No product" finds
+               what "no migration" left untagged. -->
+          <v-select
+            v-model="productScopeModel"
+            class="filter-select"
+            :items="productScopeOptions"
+            prepend-inner-icon="mdi-filter-variant"
+            variant="solo"
+            density="compact"
+            flat
+            hide-details
+            data-testid="hub-product-scope"
+          />
           <!-- FE-9368 (B): the icon toolbar ProjectsView already uses (FE-6176). The
                labels moved into the tooltips; the deleted COUNT moved onto the trash
                icon as an alert dot, so the row reads as icons rather than sentences. -->
@@ -201,6 +215,13 @@
               <div v-if="headerAgents.length" class="hub-view__thread-pills" data-testid="thread-header-pills">
                 <AgentPill v-for="a in headerAgents" :key="a.participant_id" :participant="a" />
               </div>
+              <!-- FE-9530: the only way an old thread ever gets a product. -->
+              <ThreadRetagMenu
+                v-if="commHub.selectedThreadId"
+                :product-id="commHub.selectedThread?.product_id"
+                :products="productStore.products"
+                @retag="onRetagProduct"
+              />
               <div class="hub-view__thread-scope" data-testid="thread-header-scope">
                 <v-icon v-if="headerLocked" size="13" class="mr-1">mdi-eye-off-outline</v-icon>
                 {{ headerScopeNote }}
@@ -260,6 +281,7 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCommHubStore } from '@/stores/commHubStore'
 import { useUserStore } from '@/stores/user'
+import { useProductStore } from '@/stores/products'
 import { registerReconnectResync } from '@/stores/websocketEventRouter'
 import { useToast } from '@/composables/useToast'
 import { useClipboard } from '@/composables/useClipboard'
@@ -268,6 +290,7 @@ import ThreadList from '@/components/hub/ThreadList.vue'
 import AgentPill from '@/components/hub/AgentPill.vue'
 import DeletedCountButton from '@/components/common/DeletedCountButton.vue'
 import ThreadTimeline from '@/components/hub/ThreadTimeline.vue'
+import ThreadRetagMenu from '@/components/hub/ThreadRetagMenu.vue'
 import HubComposer from '@/components/hub/HubComposer.vue'
 import HubThreadToolbar from '@/components/hub/HubThreadToolbar.vue'
 import NewThreadDialog from '@/components/hub/NewThreadDialog.vue'
@@ -282,6 +305,7 @@ import { threadDisplayName } from '@/components/hub/threadDisplayName'
 
 const commHub = useCommHubStore()
 const userStore = useUserStore()
+const productStore = useProductStore()
 const route = useRoute()
 const router = useRouter()
 const { showToast } = useToast()
@@ -305,6 +329,17 @@ const sortOptions = [
   { title: 'Newest first', value: 'created' },
   { title: 'Serial', value: 'serial' },
 ]
+
+// FE-9530: exposes commHub.productScope directly -- no second source of truth.
+const productScopeOptions = [
+  { title: 'This product', value: 'viewed' },
+  { title: 'All products', value: 'all' },
+  { title: 'No product', value: 'unassigned' },
+]
+const productScopeModel = computed({
+  get: () => commHub.productScope,
+  set: (val) => commHub.setProductScope(val),
+})
 
 // FE-9368 (D): the in-thread message filter. Cleared whenever the open thread changes,
 // so a query typed in one conversation never silently hides messages in the next one.
@@ -381,6 +416,24 @@ async function saveHeaderRename() {
     showToast({ type: 'success', message: 'Thread renamed.' })
   } catch (err) {
     const msg = err?.response?.data?.detail || err?.message || 'Could not rename this thread.'
+    showToast({ type: 'error', message: msg })
+  }
+}
+
+// ---- FE-9530: retag the open thread's product (ThreadRetagMenu.vue owns the
+// menu itself; this is the write + toast, matching the rename/delete pattern
+// where the child emits and the parent talks to the store). Unlike rename,
+// retagging is NOT locked on a project-bound thread — a bound thread's product
+// still reflects its project by default, but the operator can correct it same
+// as any other. ----
+async function onRetagProduct(productId) {
+  const threadId = commHub.selectedThreadId
+  if (!threadId) return
+  try {
+    await commHub.retagThread(threadId, { productId })
+    showToast({ type: 'success', message: productId ? 'Product updated.' : 'Product cleared.' })
+  } catch (err) {
+    const msg = err?.response?.data?.detail || err?.message || 'Could not retag this thread.'
     showToast({ type: 'error', message: msg })
   }
 }
@@ -670,6 +723,7 @@ async function onRestoreThread(thread) {
       background: rgba(255, 255, 255, 0.08);
     }
   }
+
 
   &__thread-rename {
     flex: 1;

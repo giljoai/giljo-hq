@@ -123,6 +123,29 @@
         {{ overflowLabel }}
       </span>
 
+      <!-- FE-9530: one Hub space now shows threads from every product, so each card
+           states which product (or "No product", for what ruling 2's "no migration"
+           left untagged) and how many additional projects it tags. Reuses the neutral
+           overflow-pill style -- a tag is metadata, not a status, so it earns no color
+           of its own. -->
+      <span
+        class="thread-card__pill thread-card__pill--more smooth-border"
+        :title="productChipTitle"
+        data-testid="thread-card-product-chip"
+      >
+        <v-icon size="12">mdi-cube-outline</v-icon>
+        {{ productChipLabel }}
+      </span>
+      <span
+        v-if="projectTagCount > 0"
+        class="thread-card__pill thread-card__pill--more smooth-border"
+        :title="projectTagTitle"
+        data-testid="thread-card-project-chip"
+      >
+        <v-icon size="12">mdi-folder-outline</v-icon>
+        {{ projectTagCount === 1 ? '1 project' : `${projectTagCount} projects` }}
+      </span>
+
       <!-- Terminal chip rides the pill row (prototype), not the footer. -->
       <!-- FE-9368: the chip explains itself now that the legend is gone. Only the two
            terminal states ever render one; `open` is the default and needs no chip. -->
@@ -167,6 +190,7 @@
 import { ref, computed, nextTick } from 'vue'
 import { getAgentColor } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
+import { useProductStore } from '@/stores/products'
 import AgentPill from '@/components/hub/AgentPill.vue'
 
 const props = defineProps({
@@ -179,6 +203,23 @@ const emit = defineEmits(['open', 'rename', 'copy', 'delete', 'lock-info'])
 // A project-bound thread is named after its project and kept with its 360 memory — it
 // cannot be renamed or deleted here (BE-9289b enforces this server-side too).
 const locked = computed(() => props.thread.project_id != null)
+
+// ---- FE-9530: which product / how many projects this thread tags ----
+// One Hub space shows every product's threads together, so each card names its own
+// -- "No product" is not an error state, it's ruling 1's stated exception (a
+// genuinely product-less thread, or one that predates mandatory tagging and has
+// not been retagged yet).
+const productStore = useProductStore()
+const productChipLabel = computed(() => {
+  const pid = props.thread.product_id
+  if (!pid) return 'No product'
+  return productStore.getProductById(pid)?.name || 'Product'
+})
+const productChipTitle = computed(() =>
+  props.thread.product_id ? `Product: ${productChipLabel.value}` : 'No product tagged',
+)
+const projectTagCount = computed(() => (props.thread.project_ids || []).length)
+const projectTagTitle = computed(() => `Tagged to ${projectTagCount.value} project(s)`)
 
 // ---- title ----
 const MARKERS = new Set(['(project comms)'])

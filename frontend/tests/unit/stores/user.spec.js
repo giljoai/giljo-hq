@@ -197,14 +197,17 @@ describe('User Store', () => {
       expect(api.auth.me).toHaveBeenCalled()
     })
 
-    it('should return false on login failure', async () => {
+    it('should rethrow on login failure after clearing state', async () => {
+      // Re-baselined for FE-9556: login() historically swallowed the axios
+      // error into `return false`, which left every caller's status-branched
+      // catch block dead. The contract is now: throw the original error after
+      // clearing local state (callers own the user-facing copy).
       const store = useUserStore()
 
-      api.auth.login.mockRejectedValue(new Error('Invalid credentials'))
+      const failure = new Error('Invalid credentials')
+      api.auth.login.mockRejectedValue(failure)
 
-      const result = await store.login('admin', 'wrongpassword')
-
-      expect(result).toBe(false)
+      await expect(store.login('admin', 'wrongpassword')).rejects.toBe(failure)
       expect(store.currentUser).toBeNull()
     })
   })
@@ -442,9 +445,10 @@ describe('User Store', () => {
 
       api.auth.login.mockRejectedValue(new Error('Invalid credentials'))
 
-      const result = await store.login('user', 'wrong')
+      // FE-9556: login() now rethrows on failure -- org fields must still be
+      // cleared before the throw.
+      await expect(store.login('user', 'wrong')).rejects.toBeTruthy()
 
-      expect(result).toBe(false)
       expect(store.currentUser).toBeNull()
       expect(store.orgId).toBeNull()
       expect(store.orgName).toBeNull()

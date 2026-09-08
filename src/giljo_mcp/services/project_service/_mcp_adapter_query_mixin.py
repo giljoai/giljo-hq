@@ -50,14 +50,12 @@ from giljo_mcp.services.project_service._mcp_list_bounds import (
     build_list_response,
     mint_next_cursor,
     open_cursor_walk,
-    resolve_row_limit,
-    resolve_search_query,
-    resolve_status_list,
-    validate_project_type_list,
-    validate_taxonomy_alias_prefix,
 )
 from giljo_mcp.services.project_service._mcp_list_diagnostics import log_payload_size_breakdown
-from giljo_mcp.services.project_service._mcp_list_filters import _apply_post_fetch_filters
+from giljo_mcp.services.project_service._mcp_list_filters import (
+    _apply_post_fetch_filters,
+    resolve_list_projects_query_filters,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -444,6 +442,10 @@ class McpAdapterQueryMixin:
         # truncation.next_cursor. Absent = start at the first page, byte-identical to
         # the shipped behaviour.
         cursor: str | None = None,
+        # BE-9499a: explicit product to scope to, validated as tenant-owned. Omitted
+        # -> the active product, byte-identical to pre-existing behaviour. See
+        # ProductService.resolve_binding_product.
+        product_id: str | None = None,
     ) -> dict[str, Any]:
         """List projects via MCP tool with server-side filtering (v1.2.1).
 
@@ -511,34 +513,20 @@ class McpAdapterQueryMixin:
             mode, depth, summary_only, memory_limit
         )
 
-        # ----- Normalize + validate the agent-supplied filters (see _mcp_list_bounds) -----
-        status_list = resolve_status_list(status, self._VALID_FILTER_STATUSES)
-
-        project_type_list: list[str] | None = None
-        if project_type is not None:
-            # BE-6079 (L3) / IMP-6262: TSK is filtered OUT of _get_valid_project_types
-            # because a project can never be CREATED as TSK. Converting a task now STRIPS
-            # the type (the project is born untyped) and the ce_0067 backfill un-typed any
-            # legacy converted projects, so no project is TSK-typed -- this filter value is
-            # a harmless no-op that now matches nothing, kept for back-compat. Create and
-            # retag still reject TSK elsewhere.
-            from giljo_mcp.services.taxonomy_ops import RESERVED_TASK_TYPE_ABBR
-
-            effective_tk_for_types = tenant_key or self.tenant_manager.get_current_tenant()
-            valid_types = await self._get_valid_project_types(effective_tk_for_types)
-            project_type_list = validate_project_type_list(
-                project_type, {t["abbreviation"] for t in valid_types} | {RESERVED_TASK_TYPE_ABBR}
-            )
-
-        validate_taxonomy_alias_prefix(taxonomy_alias_prefix)
-
-        # BE-9468: agent input reaching a SQL predicate and a row cut -- validated at
-        # the boundary. See _mcp_list_bounds for the contract and its reasoning.
-        query = resolve_search_query(query)
-        effective_limit = resolve_row_limit(limit)
-
         effective_tenant_key = tenant_key or self.tenant_manager.get_current_tenant()
         ws = websocket_manager or self._websocket_manager
+
+        # ----- Normalize + validate the agent-supplied filters (see _mcp_list_filters) -----
+        status_list, project_type_list, query, effective_limit = await resolve_list_projects_query_filters(
+            status,
+            project_type,
+            taxonomy_alias_prefix,
+            query,
+            limit,
+            valid_filter_statuses=self._VALID_FILTER_STATUSES,
+            tenant_key=effective_tenant_key,
+            get_valid_project_types=self._get_valid_project_types,
+        )
 
         from giljo_mcp.services.product_service import ProductService
 
@@ -547,12 +535,9 @@ class McpAdapterQueryMixin:
             tenant_key=effective_tenant_key,
             websocket_manager=ws,
         )
-        active_product = await product_service.get_active_product()
-        if not active_product:
-            raise ValidationError(
-                "No active product set. Please activate a product first.",
-                context={"tenant_key": effective_tenant_key, "operation": "list_projects"},
-            )
+        active_product = await product_service.resolve_binding_product(
+            product_id, operation="list_projects", action="listed", write=False
+        )
 
         # Seq 161 + IMP-5036: SQL pushdown for the status filter (see helper).
         # BE-9343 (audit F2): a completion-date bound implies include_completed --

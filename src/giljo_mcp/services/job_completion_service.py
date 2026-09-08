@@ -311,11 +311,18 @@ class JobCompletionService:
                     # (which runs outside the scope) — events emit only after
                     # commit. See TRANSACTION_OWNERSHIP_CONVENTION.md.
                     await session.flush()
+                    product_id_for_broadcast = (
+                        await self._agent_state._resolve_product_id(session, tenant_key, job)
+                        if self._agent_state
+                        else None
+                    )
                 else:
                     await self._raise_for_missing_execution(session, job_id, tenant_key)
 
             if execution:
-                await self._broadcast_completion(tenant_key, job_id, job, execution, old_status, duration_seconds)
+                await self._broadcast_completion(
+                    tenant_key, job_id, job, execution, old_status, duration_seconds, product_id_for_broadcast
+                )
 
             closeout_checklist = None
             # CE-0027 / CE-0032: closeout_checklist (request_approval, deferred
@@ -749,11 +756,13 @@ class JobCompletionService:
             session, tenant_key, job_id, expected_status="active", method="complete_job", db_manager=self.db_manager
         )
 
-    async def _broadcast_completion(self, tenant_key, job_id, job, execution, old_status, duration_seconds):
+    async def _broadcast_completion(
+        self, tenant_key, job_id, job, execution, old_status, duration_seconds, product_id=None
+    ):
         """Delegate to OrchestrationAgentStateService for broadcast."""
         if self._agent_state:
             await self._agent_state._broadcast_completion(
-                tenant_key, job_id, job, execution, old_status, duration_seconds
+                tenant_key, job_id, job, execution, old_status, duration_seconds, product_id
             )
 
     async def _handle_completion_side_effects(self, session, job, execution, result, tenant_key, warnings):

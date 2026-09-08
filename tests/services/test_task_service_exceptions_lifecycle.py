@@ -296,7 +296,7 @@ async def test_convert_to_project_succeeds_onto_an_inactive_product(
     This test's meaning was changed deliberately, not rebaselined. It previously
     asserted ``ValidationError`` / "No active product" when the product was
     deactivated, because conversion resolved its destination from
-    ``get_active_product`` and an inactive product meant "nothing to file
+    ``get_default_product`` and an inactive product meant "nothing to file
     against". Conversion now binds to the task's OWN ``product_id``, so whether
     that product happens to be the active one is irrelevant -- and requiring it
     to be active is exactly the defect BE-9415 removes.

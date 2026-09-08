@@ -470,6 +470,20 @@ export const useAgentJobsStore = defineStore('agentJobsDomain', () => {
     upsertJob(payload)
   }
 
+  // D4 (Headless S3a): job:mission_updated carries only {job_id, job_type,
+  // mission_length, project_id} -- no agent_id, no display identity. Routing it
+  // through the generic upsertJob (as handleUpdated does for its sibling
+  // agent:mission_updated) would let it CREATE a bare, identity-less row for a
+  // job this client has never seen -- the exact ghost-row failure mode the
+  // Handover 0462/0463 guard exists to prevent, just via a different event.
+  // Existing-only, mirroring handleStatusChanged's guard: patch mission_length
+  // onto a job already in the store, never conjure one from this event alone.
+  function handleMissionLengthUpdated(payload) {
+    const existingKey = resolveJobId(payload?.job_id)
+    if (!existingKey) return
+    upsertJob({ job_id: payload.job_id, mission_length: payload.mission_length })
+  }
+
   // Handover 0386: Handle progress updates from job:progress_update WebSocket events
   // Progress is now sent directly via WebSocket, NOT via message system
   // Handover 0388: Conditionally build updates to prevent undefined corruption
@@ -619,6 +633,7 @@ export const useAgentJobsStore = defineStore('agentJobsDomain', () => {
     handleCreated,
     handleUpdated,
     handleStatusChanged,
+    handleMissionLengthUpdated,
     handleProgressUpdate,
 
     // debounce (exposed for testability)

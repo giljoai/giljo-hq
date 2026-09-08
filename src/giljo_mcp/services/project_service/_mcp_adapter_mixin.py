@@ -22,6 +22,7 @@ from giljo_mcp.ctx_bootstrap_template import render_ctx_bootstrap
 from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.exceptions import (
     AlreadyExistsError,
+    CloseoutRequiredError,
     ValidationError,
 )
 from giljo_mcp.repositories.product_repository import ProductRepository
@@ -92,7 +93,9 @@ class McpAdapterMixin:
             websocket_manager=ws,
             test_session=self._test_session,
         )
-        bound_product = await product_service.resolve_binding_product(product_id, operation="create_project")
+        bound_product = await product_service.resolve_binding_product(
+            product_id, operation="create_project", write=True
+        )
         product_id = bound_product.id
         product_name = bound_product.name
 
@@ -261,7 +264,9 @@ class McpAdapterMixin:
         project_type: str | None = None,
         series_number: int | None = None,
         subseries: str | None = None,
+        successor_project_id: str | None = None,
         websocket_manager: Any | None = None,
+        force: bool = False,
     ) -> dict[str, Any]:
         """Update project metadata via MCP tool (validation + tenant-scoped resolution).
 
@@ -271,6 +276,18 @@ class McpAdapterMixin:
         active product plays no part -- it need not match the project's owning
         product, and no product need be active at all. Flipping (or deselecting) the
         active product is ordinary use, so gating an edit on it refused normal work.
+
+        BE-9499b: ``successor_project_id`` carries the supersede pointer.
+        ``status='superseded'`` with no successor (or an ineligible one) is
+        refused as a structured Tier-2 rejection, not raised -- see the
+        ``SUPERSEDE_REQUIRES_SUCCESSOR`` catch below.
+
+        BE-9539: completing a solo project runs the archive lifecycle (below),
+        which defaults to REFUSING when no closeout entry exists yet
+        (``CloseoutRequiredError``, caught below and returned as the structured
+        Tier-2 ``CLOSEOUT_BLOCKED`` rejection -- this door must complete
+        ``write_project_closeout`` first). ``force=True`` opts into archiving
+        without one, mirroring ``write_project_closeout``'s own ``force`` param.
         """
         if not project_id or not project_id.strip():
             raise ValidationError(
@@ -279,7 +296,9 @@ class McpAdapterMixin:
             )
         project_id = project_id.strip()
 
-        if all(v is None for v in (name, description, status, project_type, series_number, subseries)):
+        if all(
+            v is None for v in (name, description, status, project_type, series_number, subseries, successor_project_id)
+        ):
             raise ValidationError(
                 "At least one field must be provided.",
                 context={"operation": "update_project_metadata"},
@@ -325,50 +344,9 @@ class McpAdapterMixin:
         # surface, same write class -- has never carried either one.
         project = await self.get_project(project_id=project_id, tenant_key=effective_tenant_key)
 
-        if project_type is not None:
-            resolved_type = await self.get_project_type_by_label(project_type, effective_tenant_key)
-            if resolved_type:
-                project_type = resolved_type.id
-            else:
-                valid_types = await self._get_valid_project_types(effective_tenant_key)
-                valid_labels = [t["abbreviation"] for t in valid_types]
-                raise ValidationError(
-                    f"Unknown project type '{project_type}'. "
-                    f"Valid types: {', '.join(valid_labels)}. "
-                    "Set project_type to one of these abbreviations or omit it.",
-                    context={"operation": "update_project_metadata", "valid_types": valid_types},
-                )
-
-        if series_number is not None and (series_number < 1 or series_number > 9999):
-            raise ValidationError(
-                f"series_number must be 1-9999, got {series_number}.",
-                context={"operation": "update_project_metadata"},
-            )
-        if subseries is not None and (len(subseries) != 1 or not subseries.isalpha() or not subseries.islower()):
-            raise ValidationError(
-                f"subseries must be a single lowercase letter (a-z), got '{subseries}'.",
-                context={"operation": "update_project_metadata"},
-            )
-
-        # Duplicate taxonomy check when any taxonomy field changes
-        if any(v is not None for v in (project_type, series_number, subseries)):
-            check_type_id = project_type if project_type is not None else project.project_type_id
-            check_series = series_number if series_number is not None else project.series_number
-            check_subseries = subseries if subseries is not None else project.subseries
-            async with self.db_manager.get_session_async() as session:
-                is_dup = await self._repo.check_duplicate_taxonomy(
-                    session,
-                    effective_tenant_key,
-                    project.product_id,
-                    check_type_id,
-                    check_series,
-                    check_subseries,
-                )
-            if is_dup:
-                raise AlreadyExistsError(
-                    message="Taxonomy combination already in use. Please choose a different series number or suffix.",
-                    context={"project_id": project_id},
-                )
+        project_type = await self._validate_taxonomy_for_update(
+            project, project_type, series_number, subseries, effective_tenant_key, project_id
+        )
 
         updates: dict[str, Any] = {}
         if name is not None:
@@ -383,6 +361,8 @@ class McpAdapterMixin:
             updates["series_number"] = series_number
         if subseries is not None:
             updates["subseries"] = subseries
+        if successor_project_id is not None:
+            updates["successor_project_id"] = successor_project_id
 
         # BE-9384: completing a SOLO project runs the full archive lifecycle -- the
         # same one the dashboard's Archive button runs -- instead of the bare status
@@ -421,12 +401,29 @@ class McpAdapterMixin:
                     "project_id": project_id,
                 }
             raise
+        except ValidationError as e:
+            # BE-9499b: a supersede attempt with no successor_project_id, or an
+            # ineligible one, is an EXPECTED, agent-actionable domain rejection
+            # (BE-6081 Tier-2 carve-out) -- same treatment as ANOTHER_PROJECT_ACTIVE
+            # above. Every other ValidationError (bad name length, unknown
+            # project_type, ...) is a genuine client error and keeps raising.
+            if e.error_code == "SUPERSEDE_REQUIRES_SUCCESSOR":
+                return {
+                    "success": False,
+                    "error": "SUPERSEDE_REQUIRES_SUCCESSOR",
+                    "message": e.message,
+                    "project_id": project_id,
+                }
+            raise
 
         message = None
         if runs_archive_lifecycle:
-            archived = await self.archive_project(
-                project_id=project_id, tenant_key=effective_tenant_key, websocket_manager=ws
-            )
+            try:
+                archived = await self.archive_project(
+                    project_id=project_id, tenant_key=effective_tenant_key, websocket_manager=ws, force=force
+                )
+            except CloseoutRequiredError as e:
+                return self._build_closeout_blocked_rejection(project_id, e)
             updated = archived.project
             message = self._build_archive_message(archived)
 
@@ -439,6 +436,62 @@ class McpAdapterMixin:
             "updated_at": updated.updated_at,
             "message": message or f"Project '{updated.name}' updated successfully.",
         }
+
+    async def _validate_taxonomy_for_update(
+        self,
+        project: Any,
+        project_type: str | None,
+        series_number: int | None,
+        subseries: str | None,
+        effective_tenant_key: str,
+        project_id: str,
+    ) -> str | None:
+        """Validate + resolve project_type/series_number/subseries for
+        ``update_project_metadata_for_mcp``, including the duplicate-taxonomy
+        check. Split out to keep that function under the Guardrail-7 200-line
+        cap (BE-9499b). Returns the resolved project_type_id (or None).
+        """
+        if project_type is not None:
+            resolved_type = await self.get_project_type_by_label(project_type, effective_tenant_key)
+            if resolved_type:
+                project_type = resolved_type.id
+            else:
+                valid_types = await self._get_valid_project_types(effective_tenant_key)
+                valid_labels = [t["abbreviation"] for t in valid_types]
+                raise ValidationError(
+                    f"Unknown project type '{project_type}'. "
+                    f"Valid types: {', '.join(valid_labels)}. "
+                    "Set project_type to one of these abbreviations or omit it.",
+                    context={"operation": "update_project_metadata", "valid_types": valid_types},
+                )
+
+        if series_number is not None and (series_number < 1 or series_number > 9999):
+            raise ValidationError(
+                f"series_number must be 1-9999, got {series_number}.",
+                context={"operation": "update_project_metadata"},
+            )
+        if subseries is not None and (len(subseries) != 1 or not subseries.isalpha() or not subseries.islower()):
+            raise ValidationError(
+                f"subseries must be a single lowercase letter (a-z), got '{subseries}'.",
+                context={"operation": "update_project_metadata"},
+            )
+
+        # Duplicate taxonomy check when any taxonomy field changes
+        if any(v is not None for v in (project_type, series_number, subseries)):
+            check_type_id = project_type if project_type is not None else project.project_type_id
+            check_series = series_number if series_number is not None else project.series_number
+            check_subseries = subseries if subseries is not None else project.subseries
+            async with self.db_manager.get_session_async() as session:
+                is_dup = await self._repo.check_duplicate_taxonomy(
+                    session, effective_tenant_key, project.product_id, check_type_id, check_series, check_subseries
+                )
+            if is_dup:
+                raise AlreadyExistsError(
+                    message="Taxonomy combination already in use. Please choose a different series number or suffix.",
+                    context={"project_id": project_id},
+                )
+
+        return project_type
 
     async def _has_active_chain_run(self, project_id: str, tenant_key: str) -> bool:
         """Whether this project is a member of a live chain run (BE-9384 guard).
@@ -458,6 +511,31 @@ class McpAdapterMixin:
         )
         run = await svc.find_active_run_for_project(project_id=project_id, tenant_key=tenant_key)
         return run is not None
+
+    @staticmethod
+    def _build_closeout_blocked_rejection(project_id: str, error: CloseoutRequiredError) -> dict[str, Any]:
+        """BE-9539 (BE-6081 Tier-2 carve-out): an EXPECTED, agent-actionable domain
+        rejection -- resolve the blockers or pass force=true -- mirrors
+        ``write_project_closeout``'s own CLOSEOUT_BLOCKED shape. Extracted so
+        ``update_project_metadata_for_mcp`` stays under the 200-line guardrail.
+        """
+        return {
+            "success": False,
+            "error": "CLOSEOUT_BLOCKED",
+            "message": error.message,
+            "project_id": project_id,
+            "blockers": error.blockers,
+            "required_sequence": [
+                "1. Drain unread messages via get_thread_history(as_participant=<agent_id>)",
+                "2. complete_job(job_id=<job_id>) -- force-complete any agent still working, if needed",
+                "3. write_project_closeout(...) -- should now pass since all agents are complete",
+                "4. Retry update_project(status='completed') -- it will succeed now that a closeout entry exists",
+            ],
+            "hint": (
+                "Resolve the blockers via the sequence above, or pass force=true on this same call "
+                "to archive anyway without a closeout entry."
+            ),
+        }
 
     @staticmethod
     def _build_archive_message(archived: ProjectArchiveResult) -> str:

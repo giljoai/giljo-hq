@@ -122,10 +122,22 @@ async def _seed_execution(
 
 
 def _make_ws() -> MagicMock:
+    """BE-9518: broadcast_agent_auto_failed/broadcast_health_alert moved off
+    WebSocketManager to module-level functions in agent_health_ws_broadcast.py;
+    both now call the manager's broadcast_event_to_tenant, so that is what needs
+    mocking. Use _event_call_count() below to tell the two event types apart.
+    """
     ws = MagicMock()
-    ws.broadcast_agent_auto_failed = AsyncMock()
-    ws.broadcast_health_alert = AsyncMock()
+    ws.broadcast_event_to_tenant = AsyncMock()
     return ws
+
+
+def _event_call_count(ws: MagicMock, event_type: str) -> int:
+    return sum(
+        1
+        for call in ws.broadcast_event_to_tenant.await_args_list
+        if call.kwargs.get("event", {}).get("type") == event_type
+    )
 
 
 def _hs(execution: AgentExecution, *, health_state: str, minutes: float) -> AgentHealthStatus:
@@ -169,8 +181,8 @@ async def test_abandoned_execution_decommissioned_once_and_not_rescanned(db_sess
         assert execution.status == "decommissioned"
         # Decommission fires the auto-failed broadcast EXACTLY once even though
         # both the stalled + heartbeat detectors matched this execution.
-        assert ws.broadcast_agent_auto_failed.await_count == 1
-        assert ws.broadcast_health_alert.await_count == 0
+        assert _event_call_count(ws, "agent:auto_failed") == 1
+        assert _event_call_count(ws, "agent:health_alert") == 0
 
         # Next scan: a decommissioned execution is filtered out of the scan set.
         scan2 = await monitor._scan_tenant_jobs(db_session, tenant)
@@ -179,7 +191,7 @@ async def test_abandoned_execution_decommissioned_once_and_not_rescanned(db_sess
         # And even a (defensive) re-handle produces no further alert.
         for hs in scan1:
             await monitor._handle_unhealthy_job(db_session, hs, tenant)
-        assert ws.broadcast_agent_auto_failed.await_count == 1
+        assert _event_call_count(ws, "agent:auto_failed") == 1
 
 
 @pytest.mark.asyncio
@@ -196,27 +208,27 @@ async def test_recoverable_stall_alerts_on_transition_only_no_repeat(db_session:
     with tenant_session_context(db_session, tenant):
         # First detection: unknown -> warning is a TRANSITION -> one alert.
         await monitor._handle_unhealthy_job(db_session, _hs(execution, health_state="warning", minutes=5), tenant)
-        assert ws.broadcast_health_alert.await_count == 1
+        assert _event_call_count(ws, "agent:health_alert") == 1
 
         # Same 'warning' state across 3 more scans -> NO repeat alert.
         for m in (6.0, 7.0, 8.0):
             await monitor._handle_unhealthy_job(db_session, _hs(execution, health_state="warning", minutes=m), tenant)
-        assert ws.broadcast_health_alert.await_count == 1, "unchanged state must not re-alert across >=3 scans"
+        assert _event_call_count(ws, "agent:health_alert") == 1, "unchanged state must not re-alert across >=3 scans"
 
         # Escalation warning -> critical is a new TRANSITION -> one alert.
         await monitor._handle_unhealthy_job(db_session, _hs(execution, health_state="critical", minutes=9), tenant)
-        assert ws.broadcast_health_alert.await_count == 2
+        assert _event_call_count(ws, "agent:health_alert") == 2
         # ...then unchanged 'critical' across scans -> still no repeat.
         for _ in range(3):
             await monitor._handle_unhealthy_job(db_session, _hs(execution, health_state="critical", minutes=9), tenant)
-        assert ws.broadcast_health_alert.await_count == 2
+        assert _event_call_count(ws, "agent:health_alert") == 2
 
         # Escalation critical -> timeout is a new TRANSITION -> one alert.
         await monitor._handle_unhealthy_job(db_session, _hs(execution, health_state="timeout", minutes=12), tenant)
-        assert ws.broadcast_health_alert.await_count == 3
+        assert _event_call_count(ws, "agent:health_alert") == 3
 
     # A recoverable stall is never auto-failed/decommissioned.
-    assert ws.broadcast_agent_auto_failed.await_count == 0
+    assert _event_call_count(ws, "agent:auto_failed") == 0
     await db_session.refresh(execution)
     assert execution.status == "working"
     # Bookkeeping still advanced every scan (9 handled scans: 1+3+1+3+1).

@@ -67,6 +67,13 @@ class CredentialStatusResult(BaseModel):
     has_valid_oauth: bool
     has_expired_oauth: bool
 
+    # FE-9500: harness token -> ISO timestamp of that tool's most recent connect,
+    # derived from mcp_sessions clientInfo. The three flags above are WORKSPACE-wide
+    # ("this tenant holds a credential") and must never be rendered as per-tool
+    # status -- doing so lit every tool card green the moment one tool connected.
+    # An empty map means no tool has completed an MCP handshake yet.
+    connected_harnesses: dict[str, str] = {}
+
     model_config = ConfigDict(from_attributes=True)
 
 

@@ -168,7 +168,8 @@ class ProjectListItem(BaseModel):
 class ActiveProjectDetail(ProjectBase):
     """Active project detail.
 
-    Fields match ProjectService.get_active_project() output. Inherits
+    Fields match ProjectService.get_active_projects() output (one instance per
+    active project). Inherits
     ``ProjectBase`` and adds the active-project bookkeeping (deleted_at,
     counts, nested type info). Overrides ``alias``/``mission`` defaults
     to empty-string to match the existing wire shape.

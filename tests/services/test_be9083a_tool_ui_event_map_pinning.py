@@ -43,13 +43,13 @@ _REQUIRED_TOOLS = {
     "spawn_job",
     "report_progress",
     "set_agent_status",
-    "close_job",
+    "finalize_job",
     "update_project_mission",
     "request_approval",
     "post_to_thread",
     "stage_project",
     "write_project_closeout",
-    "start_chain_run",
+    "link_projects",
 }
 
 

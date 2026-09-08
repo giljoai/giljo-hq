@@ -293,6 +293,10 @@ const localData = ref({
 
 const projectTypesRef = computed(() => props.projectTypes)
 const editingProjectRef = computed(() => props.editingProject)
+// FE-9502c: scope series-number lookups to the caller-supplied product (the
+// viewed tab, per ProjectsView.vue), not whichever product happens to be
+// server-active.
+const productIdRef = computed(() => props.activeProduct?.id || null)
 
 // The Description hint persists only while the field has content. When the field
 // is empty — the only state where the "Description is required" error fires — the
@@ -317,6 +321,7 @@ const {
   projectTypes: projectTypesRef,
   projectData: localData,
   editingProject: editingProjectRef,
+  productId: productIdRef,
 })
 
 function handleTypeCreated(newType) {
@@ -352,6 +357,8 @@ watch(
               project.project_type_id,
               project.series_number,
               project.id,
+              {},
+              productIdRef.value,
             )
             usedSubseries.value = data.used_subseries || []
           } catch {

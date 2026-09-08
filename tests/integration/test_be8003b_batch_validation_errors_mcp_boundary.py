@@ -189,8 +189,8 @@ async def test_mcp_boundary_surfaces_full_vocab_on_first_tag_failure(autospec_mc
 
 # ---------------------------------------------------------------------------
 # DoD #3/#5 -- "not found" family disambiguation (unknown-ID vs exists-but-
-# wrong-state), driven through close_job. close_job is a TOOL_DISPATCH PURE
-# tool (dispatches straight to OrchestrationAgentStateService.close_job,
+# wrong-state), driven through finalize_job. finalize_job is a TOOL_DISPATCH PURE
+# tool (dispatches straight to OrchestrationAgentStateService.finalize_job,
 # bypassing the ToolAccessor adapter), so it needs a real DB-backed session
 # rather than an autospec accessor.
 # ---------------------------------------------------------------------------
@@ -293,13 +293,13 @@ async def _seed_working_job(db_session, tenant_key: str):
 
 @pytest.mark.asyncio
 async def test_close_job_mcp_boundary_disambiguates_wrong_state(db_backed_client):
-    """close_job on a job that EXISTS but is not 'complete' must say so distinctly
+    """finalize_job on a job that EXISTS but is not 'complete' must say so distinctly
     from an unknown job_id -- naming the actual status and diagnose_project_state."""
     client, tenant_key, session = db_backed_client
     job = await _seed_working_job(session, tenant_key)
 
     async with client() as mcp_session:
-        result = await mcp_session.call_tool("close_job", {"job_id": job.job_id})
+        result = await mcp_session.call_tool("finalize_job", {"job_id": job.job_id})
 
     assert result.is_error is True
     text = _error_text(result)
@@ -310,13 +310,13 @@ async def test_close_job_mcp_boundary_disambiguates_wrong_state(db_backed_client
 
 @pytest.mark.asyncio
 async def test_close_job_mcp_boundary_disambiguates_unknown_job_id(db_backed_client):
-    """close_job on a job_id that does not exist AT ALL must say so distinctly
+    """finalize_job on a job_id that does not exist AT ALL must say so distinctly
     from an exists-but-wrong-state job, not the old ambiguous shared message."""
     client, _tenant_key, _session = db_backed_client
     ghost_job_id = str(uuid4())
 
     async with client() as mcp_session:
-        result = await mcp_session.call_tool("close_job", {"job_id": ghost_job_id})
+        result = await mcp_session.call_tool("finalize_job", {"job_id": ghost_job_id})
 
     assert result.is_error is True
     text = _error_text(result)

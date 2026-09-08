@@ -125,7 +125,7 @@ orchestrator.
   public-facing decision. For those, address the operator DIRECTLY:
       post_to_thread(..., to_participant="user", requires_action=true)
   "user" is a reserved alias the server resolves to the operator; you are not
-  expected to know their id. pass_baton(thread_id, to="user") works the same way.
+  expected to know their id. set_next_actor(thread_id, to="user") works the same way.
   Do NOT write "waiting for you" into a broadcast and hope. A broadcast moves no
   baton, so the request is invisible on the operator's board no matter how the
   prose is worded — the Hub deliberately shows "your turn" only from the baton and
@@ -142,7 +142,7 @@ MESSAGE BOARD (threads) — when you are on a comm thread (a CHT-#### chat):
   user's voice is as_user=true, an explicit act reserved for the operator; never set
   it on your own posts.
 - The BATON is next_action_owner. Poll get_my_turn(agent_id) to find threads
-  awaiting you; when you have replied and it is someone else's turn, pass_baton to
+  awaiting you; when you have replied and it is someone else's turn, set_next_actor to
   them (an agent_id, a user_id, 'all', or 'none').
 - Reply when the baton points at you; read get_thread_history first to catch up
   (it does NOT acknowledge — purely a read).
@@ -181,7 +181,7 @@ them by the names your harness lists.
      under `loop_directive.interval_minutes`. Read N from there — do NOT guess it.
   2. Read with `get_thread_history(thread_id=...)`; reply with
      `post_to_thread(...)` when the baton (next_action_owner) points at you, then
-     `pass_baton(...)` when it is someone else's turn.
+     `set_next_actor(...)` when it is someone else's turn.
   3. Go back to sleep: `set_agent_status(status="sleeping", wake_in_minutes=N, ...)`
      (N is `interval_minutes` from step 1 — a directive armed without an explicit
      cadence is filled server-side with the account-level check-in default, so N

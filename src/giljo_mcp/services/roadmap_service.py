@@ -92,7 +92,7 @@ class RoadmapService:
             self._session,
         )
 
-    async def _resolve_active_product_id(self, tenant_key: str) -> str | None:
+    async def _resolve_default_product_id(self, tenant_key: str) -> str | None:
         from giljo_mcp.services.product_service import ProductService
 
         product_service = ProductService(
@@ -100,8 +100,39 @@ class RoadmapService:
             tenant_key=tenant_key,
             test_session=self._session,
         )
-        product = await product_service.get_active_product(eager_load=False)
+        product = await product_service.get_default_product(eager_load=False)
         return str(product.id) if product else None
+
+    async def _resolve_scoped_product_id(
+        self,
+        tenant_key: str,
+        product_id: str | None = None,
+        *,
+        operation: str,
+        action: str = "read",
+        write: bool,
+    ) -> str:
+        """Resolve the product a roadmap call scopes to (BE-9499a).
+
+        Omitted ``product_id`` -> the active product, byte-identical to the
+        pre-existing ``_resolve_default_product_id`` behaviour. Supplied, it is
+        validated as belonging to this tenant and used regardless of which
+        product is active -- never a silent fallback. See
+        ``ProductService.resolve_binding_product`` (``write`` -- BE-9523b --
+        governs whether an omitted id raises on a multi-product tenant instead
+        of silently binding to the active one; callers must state it).
+        """
+        from giljo_mcp.services.product_service import ProductService
+
+        product_service = ProductService(
+            db_manager=self.db_manager,
+            tenant_key=tenant_key,
+            test_session=self._session,
+        )
+        product = await product_service.resolve_binding_product(
+            product_id, operation=operation, action=action, write=write
+        )
+        return str(product.id)
 
     # ------------------------------------------------------------------
     # Roadmap lazy-create (race-safe)
@@ -139,12 +170,18 @@ class RoadmapService:
         remove: Any = None,
         patch_fields: bool = False,
         tenant_key: str | None = None,
+        product_id: str | None = None,
     ) -> dict[str, Any]:
-        """Bulk upsert roadmap items for the active product's roadmap.
+        """Bulk upsert roadmap items for the active product's roadmap, or an explicit product_id.
 
         Validates every item at the boundary, lazy-creates the roadmap, asserts
-        each referenced project/task belongs to the active product + tenant,
+        each referenced project/task belongs to the target product + tenant,
         then upserts (de-duping on the uq_roadmap_item constraint).
+
+        BE-9499a: ``product_id`` is optional. Omitted, it resolves the active
+        product exactly as before. Supplied, it is validated as belonging to
+        this tenant and the roadmap write targets it regardless of which
+        product is active.
 
         ``patch_fields`` (BE-9477) switches the UPDATE half of that upsert from
         write-every-column to write-only-what-was-sent: an OMITTED metadata key
@@ -170,12 +207,10 @@ class RoadmapService:
             # BE-9474: one rejection covering both lists, naming every bad row.
             validated, validated_remove = validate_upsert_payload(items, remove, patch_fields=patch_fields)
 
-            product_id = await self._resolve_active_product_id(effective_tenant_key)
-            if not product_id:
-                raise ValidationError(
-                    message="No active product set. Please activate a product first.",
-                    context={"operation": "upsert_roadmap_items", "tenant_key": effective_tenant_key},
-                )
+            resolved_product_id = await self._resolve_scoped_product_id(
+                effective_tenant_key, product_id, operation="upsert_roadmap_items", action="written", write=True
+            )
+            product_id = resolved_product_id
 
             async with self._get_session(effective_tenant_key) as session:
                 roadmap = await self._get_or_create_roadmap(session, effective_tenant_key, product_id)
@@ -297,7 +332,7 @@ class RoadmapService:
 
             normalized = validate_reorder(updates)
 
-            product_id = await self._resolve_active_product_id(effective_tenant_key)
+            product_id = await self._resolve_default_product_id(effective_tenant_key)
             if not product_id:
                 raise ResourceNotFoundError(message="No active product set.", context={"operation": "reorder_roadmap"})
 
@@ -436,7 +471,7 @@ class RoadmapService:
             if not item_id:
                 raise ValidationError(message="item_id is required", context={"operation": "remove_roadmap_item"})
 
-            product_id = await self._resolve_active_product_id(effective_tenant_key)
+            product_id = await self._resolve_default_product_id(effective_tenant_key)
             if not product_id:
                 raise ResourceNotFoundError(
                     message="No active product set.", context={"operation": "remove_roadmap_item"}
@@ -507,16 +542,27 @@ class RoadmapService:
     # Read
     # ------------------------------------------------------------------
 
-    async def get_roadmap(self, tenant_key: str | None = None, emit_agent_active: bool = False) -> dict[str, Any]:
-        """Return the active product's roadmap + items joined to display fields.
+    async def get_roadmap(
+        self, tenant_key: str | None = None, emit_agent_active: bool = False, product_id: str | None = None
+    ) -> dict[str, Any]:
+        """Return the active product's roadmap + items joined to display fields, or an explicit product_id's.
 
         Shape: ``{product_id, roadmap: {...}|null, items: [...]}``. Items are
         sorted by sort_order (then created_at). 0006 (HARD AUTO-DROP): terminal
         projects/tasks are EXCLUDED from the active roadmap — this deliberately
         REVERSES the FE-6022c choice to surface them with a badge, because a
         terminal item with no actionable state pins/locks the plan. See
-        ``_build_item_rows`` for the exact drop rule. Raises
-        ResourceNotFoundError when no product is active.
+        ``_build_item_rows`` for the exact drop rule.
+
+        BE-9499a: ``product_id`` is optional. Omitted, this resolves the active
+        product exactly as before (ResourceNotFoundError when none is active).
+        Supplied, it is validated as belonging to this tenant via
+        ``ProductService.resolve_binding_product`` (ValidationError when it
+        does not) and read regardless of which product is active.
+
+        Raises ResourceNotFoundError when no product is active and product_id
+        was omitted; ValidationError when a supplied product_id does not
+        belong to this tenant.
         """
         try:
             effective_tenant_key = tenant_key or (
@@ -525,9 +571,15 @@ class RoadmapService:
             if not effective_tenant_key:
                 raise ValidationError(message="tenant_key is required", context={"operation": "get_roadmap"})
 
-            product_id = await self._resolve_active_product_id(effective_tenant_key)
-            if not product_id:
-                raise ResourceNotFoundError(message="No active product set.", context={"operation": "get_roadmap"})
+            if product_id:
+                resolved_product_id = await self._resolve_scoped_product_id(
+                    effective_tenant_key, product_id, operation="get_roadmap", action="read", write=False
+                )
+            else:
+                resolved_product_id = await self._resolve_default_product_id(effective_tenant_key)
+                if not resolved_product_id:
+                    raise ResourceNotFoundError(message="No active product set.", context={"operation": "get_roadmap"})
+            product_id = resolved_product_id
 
             # FE-6240: the MCP read path (agent's first touch) passes
             # emit_agent_active=True so the Roadmap pane shows its waiting

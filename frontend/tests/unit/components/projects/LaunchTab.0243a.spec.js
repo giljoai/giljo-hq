@@ -125,7 +125,7 @@ describe('LaunchTab.0243a - Design Tokens Extraction', () => {
       expect(fs.existsSync(designTokensPath)).toBe(true)
     })
 
-    it('design-tokens.scss file size is less than 14KB', () => {
+    it('design-tokens.scss file size is less than 15KB', () => {
       // Threshold bumped from 12KB → 13KB after FE-chain-closeout-r3 added
       // $color-status-review token. The guard exists to catch runaway token bloat;
       // single targeted additions that push the file slightly past the old ceiling
@@ -136,10 +136,16 @@ describe('LaunchTab.0243a - Design Tokens Extraction', () => {
       // line is ~50 bytes; the rest is the comment explaining why the existing
       // $shadow-* scale does not cover it. That rationale is the point of the file,
       // so it is not trimmed to fit a byte ceiling — the ceiling moves instead.
+      //
+      // 14KB → 15KB: FE-9536 added a new BREAKPOINT TOKENS section (3 tokens:
+      // $breakpoint-mobile/tablet/compact) plus the rationale for why 3 and not
+      // one-per-file, replacing 5+ scattered magic-number cutoffs across
+      // WelcomeQuickGrid/ToolsView/JobsTab/AgentRow/ProjectsTable with a single
+      // source of truth. Same policy: the rationale stays, the ceiling moves.
       const designTokensPath = getDesignTokensPath()
       if (fs.existsSync(designTokensPath)) {
         const stats = fs.statSync(designTokensPath)
-        expect(stats.size).toBeLessThan(14336)
+        expect(stats.size).toBeLessThan(15360)
       }
     })
 

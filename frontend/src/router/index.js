@@ -139,6 +139,23 @@ export const routes = [
     },
   },
   {
+    // FE-9525d: the sectioned Jobs viewport -- reached when several projects
+    // in the viewed product are in flight at once (single in-flight project
+    // still goes straight to /projects/:projectId, unchanged). NOT `/jobs` --
+    // that bare path is a pre-existing legacy-redirect alias to
+    // /launch?via=jobs (jobsRedirect.spec.js pins it); this route is reached
+    // by NAME (router.push({ name: 'JobsViewport' })), never by literal path,
+    // so the two never collide.
+    path: '/jobs-overview',
+    name: 'JobsViewport',
+    component: () => import('@/views/JobsViewportView.vue'),
+    meta: {
+      layout: 'default',
+      title: 'Jobs',
+      requiresAuth: true,
+    },
+  },
+  {
     path: '/projects/:projectId',
     name: 'ProjectLaunch',
     component: () => import('@/views/ProjectLaunchView.vue'),

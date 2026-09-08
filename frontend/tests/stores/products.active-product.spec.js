@@ -8,7 +8,7 @@ vi.mock('@/services/api', () => ({
     products: {
       list: vi.fn(),
       get: vi.fn(),
-      getActive: vi.fn(),
+      getDefault: vi.fn(),
       deactivate: vi.fn(),
     },
   },
@@ -23,7 +23,7 @@ describe('Product Store - Active Product Behavior', () => {
   })
 
   it('fetchActiveProduct sets activeProduct to null when no active product', async () => {
-    api.products.getActive.mockResolvedValue({
+    api.products.getDefault.mockResolvedValue({
       data: { has_active_product: false, product: null },
     })
 
@@ -34,7 +34,7 @@ describe('Product Store - Active Product Behavior', () => {
 
   it('fetchActiveProduct sets activeProduct when backend reports an active product', async () => {
     const active = { id: 'p1', name: 'Active P', is_active: true }
-    api.products.getActive.mockResolvedValue({
+    api.products.getDefault.mockResolvedValue({
       data: { has_active_product: true, product: active },
     })
 
@@ -48,7 +48,7 @@ describe('Product Store - Active Product Behavior', () => {
     store.activeProduct = active
 
     api.products.deactivate.mockResolvedValue({ data: { ...active, is_active: false } })
-    api.products.getActive.mockResolvedValue({
+    api.products.getDefault.mockResolvedValue({
       data: { has_active_product: false, product: null },
     })
 

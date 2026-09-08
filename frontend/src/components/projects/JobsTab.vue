@@ -86,9 +86,10 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { useToast } from '@/composables/useToast'
 import { useClipboard } from '@/composables/useClipboard'
 import { useProjectStateStore } from '@/stores/projectStateStore'
+import { useNotificationStore } from '@/stores/notifications'
+import { notifyFailure } from '@/utils/notifyFailure'
 import { useAgentJobs } from '@/composables/useAgentJobs'
 import { useJobActions } from '@/composables/useJobActions'
 import { usePlayButton } from '@/composables/usePlayButton'
@@ -125,10 +126,9 @@ const props = defineProps({
     default: null,
   },
 })
-
-const { showToast } = useToast()
 const { copy: clipboardCopy } = useClipboard()
 const projectStateStore = useProjectStateStore()
+const notificationStore = useNotificationStore()
 const { sortedJobs: sortedAgents, loadJobs, store: agentJobsStore } = useAgentJobs()
 
 const projectId = computed(() => props.project?.project_id || props.project?.id)
@@ -275,10 +275,15 @@ async function refreshJobs() {
     await loadJobs(projectId.value)
   } catch (error) {
     console.warn('[JobsTab] Failed to load agent jobs:', error)
-    showToast({
-      message: 'Failed to load agent jobs. Refresh the page or try again.',
-      type: 'error',
-      timeout: 5000,
+    // FE-9553: was a toast. refreshJobs runs from a watch with immediate:true
+    // and from onMounted -- there is no click path to it at all, so a toast
+    // here announces a failure the operator did not cause as though they had.
+    notifyFailure(notificationStore, {
+      operation: 'jobs.load',
+      entityId: projectId.value || 'none',
+      error,
+      fallbackMessage: 'Failed to load agent jobs. Refresh the page or try again.',
+      title: 'Agent jobs unavailable',
     })
   } finally {
     loadingJobs.value = false
@@ -366,8 +371,12 @@ onUnmounted(() => {
     }
   }
 
-  /* Responsive: below 840px — thead th.col-agent-name alignment */
-  @media (max-width: 840px) {
+  /* Responsive: tablet band and below — thead th.col-agent-name alignment.
+     FE-9536: harmonized from a bespoke 840px onto the shared tablet token
+     (ProjectsTable's compact-table step uses $breakpoint-compact = 1280px;
+     this one is about a single header's text-align, not column hiding, so
+     it stays on the narrower tablet band). */
+  @media (max-width: $breakpoint-tablet) {
     .table-container .agents-table {
       thead th.col-agent-name {
         text-align: center;
@@ -375,9 +384,12 @@ onUnmounted(() => {
     }
   }
 
-  /* Responsive: portrait / narrow screens — thead th.hide-mobile */
+  /* Responsive: portrait / narrow screens — thead th.hide-mobile.
+     FE-9536: harmonized from a bespoke 768px onto $breakpoint-mobile (600px),
+     the SAME token ProjectsTable's .project-id-text hide already uses -- two
+     conceptually similar "hide on a small screen" column drops now agree. */
   /* DUPLICATED in AgentRow for td.hide-mobile */
-  @media (max-width: 768px) {
+  @media (max-width: $breakpoint-mobile) {
     .table-container .agents-table {
       .hide-mobile {
         display: none;

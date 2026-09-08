@@ -15,8 +15,6 @@
  * Extracted from api.js (FE-6131e gating fixup) to keep api.js under the
  * 800-line CI guardrail. Import this module directly OR access via
  * api.sequenceRuns (api.js re-exports it on the default export).
- *
- * FE-6171b: added removeMember for granular project removal from a run.
  */
 import { apiClient } from './api.js'
 
@@ -32,12 +30,6 @@ export const sequenceRunsApi = {
   // FE-6178: "Deactivate Chain" back-out — reset all member projects to inactive +
   // dissolve the run (cancelled). The chain equivalent of solo Deactivate.
   deactivate: (runId) => apiClient.post(`/api/v1/sequence-runs/${runId}/deactivate`),
-  // FE-6171b: remove ONE project from a run (Editing tier only).
-  // BE refuses with 422 when run is locked/ultralocked/running.
-  // When removal leaves 1 member the BE dissolves the run (→ cancelled); the lone
-  // project is NOT auto-activated (FE-6174b removed collapse-to-solo).
-  removeMember: (runId, projectId) =>
-    apiClient.delete(`/api/v1/sequence-runs/${runId}/members/${projectId}`),
   // BE-9098: durably record a chain member as reviewed so the Review badge survives
   // refresh/navigation. Append-only + idempotent server-side; returns the updated run.
   markReviewed: (runId, projectId) =>

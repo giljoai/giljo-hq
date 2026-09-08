@@ -34,6 +34,49 @@
           multiple
           @change="onBrowse"
         />
+
+        <!-- The upload did not produce a product this beat can work with. Shown
+             here rather than only as a toast: a toast is seconds long, and the
+             operator is standing on a screen that would otherwise look
+             untouched. It names the possibility that a product WAS created,
+             because retrying blindly would then make a second one. -->
+        <!-- FE-9553c: the same error+retry shape FE-9566 gave door D
+             (tutorial-prompt-error / -retry / -error-manual). Doors A and B
+             never got it, so this beat explained itself and its sibling went
+             quiet; matching the shape means the tour behaves the same way
+             whichever door the operator walked in through.
+
+             The retry is withheld when a product WAS created but could not be
+             bound, because pressing it again would mint a second one. The
+             manual escape is always offered: a failure the operator cannot
+             clear must not be a dead end. -->
+        <div v-if="uploadFailure" class="upload-failure" data-testid="tutorial-upload-failure">
+          <p class="upload-failure-text">
+            <v-icon size="16" class="mr-1">mdi-alert-circle-outline</v-icon>
+            {{ uploadFailure }}
+          </p>
+          <div class="upload-failure-actions">
+            <v-btn
+              v-if="retryIsSafe"
+              variant="text"
+              class="failure-btn"
+              data-testid="tutorial-upload-retry"
+              :disabled="retrying"
+              prepend-icon="mdi-refresh"
+              @click="retryUpload"
+            >
+              {{ retrying ? 'Trying again…' : 'Try again' }}
+            </v-btn>
+            <v-btn
+              variant="text"
+              class="failure-btn"
+              data-testid="tutorial-upload-manual"
+              @click="$emit('manual')"
+            >
+              Fill it in myself instead
+            </v-btn>
+          </div>
+        </div>
       </div>
 
       <!-- Step 2: discovery prompt staged, waiting on the agent's analysis.
@@ -109,6 +152,18 @@ const productStore = useProductStore()
 const fileInput = ref(null)
 const dragOver = ref(false)
 const analysisStarted = ref(false)
+// What to tell the operator when the upload did not produce a usable product.
+// Rendered on the drop-zone beat; null means nothing has gone wrong.
+const uploadFailure = ref(null)
+// FE-9553c: whether the failure above is one a retry can clear.
+//   true  -- nothing was created, pressing again is clean
+//   false -- a product WAS created but could not be bound, so a retry mints a
+//            second one; the button is withheld and the copy says why
+const retryIsSafe = ref(false)
+const retrying = ref(false)
+// The files from the last attempt, so "Try again" repeats it rather than
+// asking the operator to find and drag the same document a second time.
+const lastFiles = ref(null)
 
 // Silent-create refs owned by the caller per the composable contract. GATE F3:
 // a re-entered upload screen (A → back → A) must NOT create a second product —
@@ -136,6 +191,8 @@ onMounted(async () => {
 
 const {
   uploadingVision,
+  visionUploadError,
+  visionUploadRetrySafe,
   uploadVisionFilesOnAttach,
 } = useProductVisionUpload({ editingProduct, autoSavedForAnalysis })
 
@@ -174,13 +231,37 @@ function onVisionCompleteEvent(event) {
 
 async function handleFiles(files) {
   if (!files || files.length === 0) return
+  lastFiles.value = files
   const hadProduct = Boolean(editingProduct.value?.id)
   // Product name defaults to the first file's stem (mirrors the uploaded
   // document_name); the user can rename from the product form afterwards.
   const productName = files[0].name.replace(/\.[^/.]+$/, '')
   await uploadVisionFilesOnAttach({ productName, files })
   const productId = editingProduct.value?.id
-  if (!productId) return
+  if (!productId) {
+    // The upload did not yield a product this screen can work with. It used to
+    // return here in SILENCE, which is the defect: the operator was
+    // left on the drop zone as though nothing had happened, while a product
+    // could already exist server-side named after their file. Two bad halves
+    // from one action, and no way to tell which had occurred.
+    //
+    // The composable publishes what went wrong (including the case where a
+    // product WAS created but could not be bound), so the beat now says so
+    // instead of stranding. Deliberately not advancing: advancing would claim
+    // an analysis is running when none is.
+    uploadFailure.value =
+      visionUploadError.value ||
+      'That upload could not be attached to a product. Check Products before trying again.'
+    // FE-9553c: read the composable's published verdict rather than inferring
+    // it from the copy -- a caller string-matching the message would start
+    // offering the wrong remedy the first time anyone reworded it.
+    // Defaults to withholding the retry when the verdict is unknown: offering a
+    // retry that duplicates work is worse than making the operator go and look.
+    retryIsSafe.value = visionUploadRetrySafe.value === true
+    return
+  }
+  uploadFailure.value = null
+  retryIsSafe.value = false
   // Register a fresh silent-create with the state machine so every later
   // screen (and a re-entry of this one) reuses THE run-owned product.
   if (!hadProduct) emit('product-created', productId)
@@ -188,6 +269,25 @@ async function handleFiles(files) {
   window.addEventListener('vision-analysis-complete', onVisionCompleteEvent)
   await stageAnalysis({ name: editingProduct.value.name || productName }, productId)
   analysisStarted.value = true
+}
+
+/**
+ * Repeat the last attempt.
+ *
+ * Only reachable when the composable said nothing was created, so this cannot
+ * mint a duplicate. It re-drives handleFiles rather than re-implementing the
+ * upload, so the retry path and the first attempt cannot drift -- a separate
+ * retry implementation is how the second attempt ends up subtly different from
+ * the first.
+ */
+async function retryUpload() {
+  if (retrying.value || !lastFiles.value) return
+  retrying.value = true
+  try {
+    await handleFiles(lastFiles.value)
+  } finally {
+    retrying.value = false
+  }
 }
 
 function onDrop(event) {
@@ -274,6 +374,29 @@ onBeforeUnmount(() => {
   font-weight: 600;
   font-size: 15px;
   color: $color-text-primary;
+}
+
+.upload-failure {
+  margin-top: 14px;
+  max-width: 34rem;
+  text-align: center;
+}
+
+.upload-failure-text {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6px;
+  font-size: 0.85rem;
+  color: rgb(var(--v-theme-error));
+}
+
+.upload-failure-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 
 .drop-or {

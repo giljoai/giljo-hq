@@ -166,6 +166,13 @@ async def test_rest_selfheal_complete_project_broadcasts_status_changed_post_com
         assert event["job_id"] == job_id
         assert event["old_status"] == "working"
         assert event["status"] == "decommissioned"
+        # BE-9518: the force-decommission agent:status_changed must carry product_id too.
+        assert event["product_id"] == product.id
+
+        # BE-9518: the project_update broadcast (status_changed -> completed) must
+        # carry product_id so a per-tab WS router can filter on it.
+        mock_ws.broadcast_project_update.assert_awaited_once()
+        assert mock_ws.broadcast_project_update.await_args.kwargs["project_data"]["product_id"] == product.id
     finally:
         await purge_tenant_rows(db_manager, tenant_key)
         TenantManager.clear_current_tenant()

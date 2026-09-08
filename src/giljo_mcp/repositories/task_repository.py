@@ -184,13 +184,20 @@ class TaskRepository:
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_active_product(
+    async def get_default_product(
         self,
         session: AsyncSession,
         tenant_key: str,
     ) -> Product | None:
         """
-        Get the active product for a tenant.
+        Get the tenant's DEFAULT product -- where an unscoped read resolves.
+
+        FE-9524: renamed from
+        ``get_active_product``. Delegates to
+        ``ProductRepository.get_default_product`` (the sole-product fallback
+        + single-row guarantee are documented and maintained in exactly one
+        place -- this used to be a second, drifted copy of that query, which
+        is how it was still reading ``is_active`` after the split).
 
         Args:
             session: Active database session
@@ -199,9 +206,9 @@ class TaskRepository:
         Returns:
             Product ORM instance or None
         """
-        stmt = select(Product).where(and_(Product.tenant_key == tenant_key, Product.is_active))
-        result = await session.execute(stmt)
-        return result.scalar_one_or_none()
+        from giljo_mcp.repositories.product_repository import ProductRepository
+
+        return await ProductRepository().get_default_product(session, tenant_key, eager_load=False)
 
     async def get_product_by_id(
         self,

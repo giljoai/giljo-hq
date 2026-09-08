@@ -181,7 +181,7 @@ def test_multi_terminal_render_is_byte_identical_to_golden() -> None:
 
     BE-9292b: re-frozen for the stalled-agent terminal-state project -- chapters_reference.py
     gained an "ACCEPTING A STALLED AGENT" subsection under CLOSING JOBS, telling the
-    orchestrator to complete_job + close_job a 'silent' agent whose deliverable it verified
+    orchestrator to complete_job + finalize_job a 'silent' agent whose deliverable it verified
     instead of force-decommissioning it (which mislabels accepted work as failed). Purely
     additive: diff-verified as 25 inserted lines and ZERO deletions or modifications.
 
@@ -196,9 +196,16 @@ def test_multi_terminal_render_is_byte_identical_to_golden() -> None:
     now renders CH6 for every non-CLI orchestrator in the IMPLEMENTATION render (the old
     auto_checkin_enabled gate is retired; staging omits it with CH5 under the CE-0033
     payload budget), so the multi_terminal composition gains one ch6_auto_checkin chapter
-    in the IMPL block, carrying the rewritten wake-capability prose (await_my_turn PATH A /
+    in the IMPL block, carrying the rewritten wake-capability prose (get_my_turn PATH A /
     timed-sleep PATH B). diff-verified as 80 inserted lines (one CH6 chapter block) and
-    ZERO deletions or modifications."""
+    ZERO deletions or modifications.
+
+    BE-9554: re-frozen for the final tool-name flip. Three renamed tools appear in this
+    render as agent-facing prose -- resolve_reactivation -> resume_or_dismiss_job (5
+    sites), close_job -> finalize_job (3), await_my_turn -> get_my_turn(wait_seconds=)
+    (3 blocks) -- plus the rewrap those last blocks needed to keep chapters_reference.py
+    under the 800-line file cap. diff-verified as 41 changed lines, every one of them a
+    renamed tool or the rewrap around it, with no other edit."""
     golden = _GOLDEN.read_text(encoding="utf-8")
     assert _multi_terminal_golden_render() == golden
 

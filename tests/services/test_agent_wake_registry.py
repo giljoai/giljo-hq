@@ -3,7 +3,7 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9296a — the in-process waiter registry behind ``await_my_turn``.
+"""BE-9296a — the in-process waiter registry behind ``get_my_turn``.
 
 Pure unit tests for the wake primitive itself; the service behaviour that drives
 it lives in ``test_comm_thread_wake_mixin.py``.
@@ -38,7 +38,7 @@ def _tk(suffix: str) -> str:
 async def test_a_signal_before_the_await_is_not_lost():
     """The lost-wakeup window, which the register-before-read order closes.
 
-    ``await_my_turn`` registers its event BEFORE reading the database, so a write
+    ``get_my_turn`` registers its event BEFORE reading the database, so a write
     committing between the read and the await sets an event that is already armed.
     Were the order reversed, that signal would land on nothing and the waiter
     would block for the whole cap over work that already exists.

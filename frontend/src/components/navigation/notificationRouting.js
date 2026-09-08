@@ -77,19 +77,21 @@ export const CLOSEOUT_NOTIFICATION_TYPES = new Set([
 ])
 
 /**
- * The project id a notification points at. Handover 0259 rows carry it in
- * metadata.project_id; structured-payload rows (BE-9085, TSK-9090) carry it
- * in payload.project_id. Read either so both deep-link to the project.
+ * The project id a notification points at. BE-9525c normalized server rows to
+ * carry it TOP-LEVEL on the envelope (n.project_id); older/legacy shapes still
+ * carry it in metadata.project_id (Handover 0259 rows) or payload.project_id
+ * (structured-payload rows, BE-9085/TSK-9090). Prefer the top-level key,
+ * tolerate both legacy shapes.
  */
-export const projectIdOf = (n) => n?.metadata?.project_id ?? n?.payload?.project_id
+export const projectIdOf = (n) => n?.project_id ?? n?.metadata?.project_id ?? n?.payload?.project_id
 
 /**
- * FE-9222: the product id a context-tuning banner points at. Structured-payload
- * rows carry it in payload.product_id; metadata-style rows in
- * metadata.product_id. Read either, mirroring projectIdOf. Module-local — only
- * the context-tuning route factory below consumes it.
+ * FE-9222: the product id a context-tuning banner points at. BE-9525c added a
+ * top-level n.product_id on server rows; tolerate the older payload/metadata
+ * shapes, mirroring projectIdOf. Module-local — only the context-tuning route
+ * factory below consumes it.
  */
-const productIdOf = (n) => n?.payload?.product_id ?? n?.metadata?.product_id
+const productIdOf = (n) => n?.product_id ?? n?.payload?.product_id ?? n?.metadata?.product_id
 
 /**
  * FE-9289c: the thread id a Message Hub handover points at. Carried in metadata (the

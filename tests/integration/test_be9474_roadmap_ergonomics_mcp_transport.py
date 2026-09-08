@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-BE-9474 -- ``update_roadmap_metadata`` ergonomics, exercised at the MCP boundary.
+BE-9474 -- ``save_roadmap`` ergonomics, exercised at the MCP boundary.
 
 The defect this file pins was found by an agent using the tool, not by a unit test: it
 built a 17-row roadmap, ONE row carried a ~580-char ``blocked_reason``, and the
@@ -211,7 +211,7 @@ async def test_one_overlong_blocked_reason_rejects_every_valid_row(roadmap_mcp_c
     )
 
     async with new_client() as session:
-        result = await session.call_tool("update_roadmap_metadata", {"items": items})
+        result = await session.call_tool("save_roadmap", {"items": items})
         assert result.is_error is True, _payload(result)
 
         after = await session.call_tool("get_roadmap", {})
@@ -239,11 +239,11 @@ async def test_unresolvable_and_foreign_aliases_are_refused_identically(roadmap_
 
     async with new_client() as session:
         nonexistent = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {"items": [{"item_type": "project", "project_id": "BE-9999", "sort_order": 0}]},
         )
         foreign = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {"items": [{"item_type": "project", "project_id": foreign_alias, "sort_order": 0}]},
         )
 
@@ -266,7 +266,7 @@ async def test_unknown_uuid_is_never_retried_as_an_alias(roadmap_mcp_client, db_
 
     async with new_client() as session:
         result = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {"items": [{"item_type": "project", "project_id": stranger, "sort_order": 0}]},
         )
 
@@ -300,9 +300,7 @@ async def test_the_old_all_rows_all_uuids_call_still_works_untouched(roadmap_mcp
     items.append({"item_type": "task", "task_id": seed["task_id"], "sort_order": 99, "risk": "low"})
 
     async with new_client() as session:
-        result = await session.call_tool(
-            "update_roadmap_metadata", {"items": items, "summary": "ship foundations first"}
-        )
+        result = await session.call_tool("save_roadmap", {"items": items, "summary": "ship foundations first"})
         assert result.is_error is False, _error_text(result)
         assert _payload(result)["items_upserted"] == 5
 
@@ -332,7 +330,7 @@ async def test_upsert_leaves_rows_it_was_not_sent_alone(roadmap_mcp_client, db_s
 
     async with new_client() as session:
         first = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [
                     {"item_type": "project", "project_id": seed["project_ids"][0], "sort_order": 0},
@@ -343,7 +341,7 @@ async def test_upsert_leaves_rows_it_was_not_sent_alone(roadmap_mcp_client, db_s
         assert first.is_error is False, _error_text(first)
 
         second = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {"items": [{"item_type": "project", "project_id": seed["project_ids"][2], "sort_order": 2}]},
         )
         assert second.is_error is False, _error_text(second)
@@ -367,7 +365,7 @@ async def test_resending_one_row_without_its_other_fields_clears_them(roadmap_mc
 
     async with new_client() as session:
         seeded = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [
                     {
@@ -385,7 +383,7 @@ async def test_resending_one_row_without_its_other_fields_clears_them(roadmap_mc
         assert seeded.is_error is False, _error_text(seeded)
 
         moved = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {"items": [{"item_type": "project", "project_id": seed["project_ids"][0], "sort_order": 5}]},
         )
         assert moved.is_error is False, _error_text(moved)
@@ -425,7 +423,7 @@ async def test_every_invalid_row_is_named_in_one_response(roadmap_mcp_client, db
     ]
 
     async with new_client() as session:
-        result = await session.call_tool("update_roadmap_metadata", {"items": items})
+        result = await session.call_tool("save_roadmap", {"items": items})
 
     assert result.is_error is True
     text = _error_text(result)
@@ -441,7 +439,7 @@ async def test_alias_resolves_to_the_same_row_as_its_uuid(roadmap_mcp_client, db
 
     async with new_client() as session:
         result = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [
                     {"item_type": "project", "project_id": seed["project_aliases"][0], "sort_order": 0},
@@ -471,8 +469,13 @@ async def test_the_wire_advertises_aliases_and_the_batched_rejection(roadmap_mcp
     async with new_client() as session:
         tools = {t.name: t for t in (await session.list_tools()).tools}
 
-    assert "update_roadmap_metadata" in tools
-    items_description = tools["update_roadmap_metadata"].input_schema["properties"]["items"]["description"]
+    # BE-9554 re-based: the tool is now `save_roadmap` (the old name said "metadata",
+    # but it writes the roadmap itself). THIS TEST DID ITS JOB DURING THAT RENAME -- the
+    # compat shim declares bare params, so the descriptions stopped arriving on the old
+    # name and this went red on CI exactly as its docstring promises. The contract lives
+    # on the renamed tool, so the assertions follow it there.
+    assert "save_roadmap" in tools
+    items_description = tools["save_roadmap"].input_schema["properties"]["items"]["description"]
     # "taxonomy_alias" is the shipped wire vocabulary (list_projects already
     # advertises taxonomy_alias_prefix), and it is also what tells the
     # neutrality guard these serials are the PRODUCT's own handles rather
@@ -483,3 +486,12 @@ async def test_the_wire_advertises_aliases_and_the_batched_rejection(roadmap_mcp
     assert "EVERY bad row" in items_description, items_description
     # The cap has been on the wire since BE-6052e/BE-8003m; keep it there.
     assert "<=500 chars" in items_description, items_description
+
+    # The compat shim is GONE (BE-9554 final names). While it existed this block
+    # asserted it stayed a pointer rather than a second copy of the parameter prose;
+    # now the guarantee is simply that the retired name no longer answers, so there
+    # is exactly one tool carrying this contract.
+    assert "update_roadmap_metadata" not in tools, (
+        "the retired name is back on the wire -- the contract above must have exactly "
+        "one carrier, which is what stopped two tools advertising the same prose"
+    )

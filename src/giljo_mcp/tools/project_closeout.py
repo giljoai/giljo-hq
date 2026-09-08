@@ -27,7 +27,9 @@ from giljo_mcp.services.product_memory_service import (
     ProductMemoryService,
     validate_memory_entry_write,
 )
+from giljo_mcp.services.project_closeout_readiness import shape_readiness_blockers
 from giljo_mcp.services.project_closeout_service import ProjectCloseoutService
+from giljo_mcp.services.protocol_sections.closeout_sequence import build_required_sequence
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.tools._closeout_finalize import _finalize_chain_member_closeout
 from giljo_mcp.tools._closeout_metrics import (
@@ -126,12 +128,13 @@ async def _handle_force_close(
                     "force=true will decommission ALL active agents including the orchestrator. "
                     "Complete your own job first, then the project will close cleanly."
                 ),
-                "required_sequence": [
-                    f"1. complete_job(job_id='{active_orchestrator.job_id}') -- complete yourself first",
-                    "2. write_memory_entry(...) -- write memory entry (if not already written)",
-                    "3. write_project_closeout(force=false) -- should now pass since all agents are complete",
-                ],
-                "hint": "Or use write_memory_entry() + complete_job() and let the frontend handle project archival.",
+                "required_sequence": build_required_sequence(active_orchestrator.job_id),
+                "hint": (
+                    "write_memory_entry() does not stamp the closeout record archiving requires -- "
+                    "only write_project_closeout() does. Complete your own job first, then "
+                    "write_project_closeout(); a solo project is then archived with "
+                    "update_project(status='completed') from here, or from the dashboard."
+                ),
             },
         )
 
@@ -429,7 +432,13 @@ def _build_closeout_blocked_rejection(project_id: str, blockers: list[dict[str, 
         "error": "CLOSEOUT_BLOCKED",
         "project_id": project_id,
         "blockers": blockers,
-        "hint": "Resolve all blockers or pass force=true to auto-decommission remaining agents.",
+        "hint": (
+            "Resolve the blockers above, then retry. If an agent stalled but you ACCEPTED its "
+            "work, complete_job(job_id, result={...}) then finalize_job(job_id) -- that reaches "
+            "closed from any state. force=true is the deliberate ABANDON path: it decommissions "
+            "remaining agents, recording their work as failed. Do not use it to retire work you "
+            "accepted."
+        ),
     }
 
 
@@ -606,6 +615,7 @@ async def close_project_and_update_memory(
             ws,
             tenant_key=tenant_key,
             project_id=project_id,
+            product_id=str(product.id),  # BE-9518
             events=decommission_events if owns_session else (),
         )
 
@@ -640,85 +650,15 @@ async def _check_agent_readiness(
 
     BE-3010c: the readiness GATHERING is unified in
     ``ProjectCloseoutService.evaluate_closeout_readiness`` (the one source of
-    truth shared with ``write_360_memory`` and ``can_close``). This function now
-    only SHAPES that report into the merged-per-agent blocker list + trailing
-    ``_summary`` the closeout gate expects — output is unchanged.
+    truth shared with ``write_360_memory`` and ``can_close``). The SHAPING into
+    the merged-per-agent blocker list + trailing ``_summary`` is unified too
+    (BE-9539) in ``project_closeout_readiness.shape_readiness_blockers``, so
+    ``ProjectService.archive_project``'s closeout gate builds the identical
+    shape without a services -> tools import. Output is unchanged.
     """
     closeout_service = ProjectCloseoutService(None, TenantManager())
     report = await closeout_service.evaluate_closeout_readiness(session, project_id, tenant_key)
-
-    blockers: list[dict[str, Any]] = []
-    summary = {
-        "agents_checked": report.agents_checked,
-        "still_working": 0,
-        "with_unread_messages": 0,
-        "with_incomplete_todos": 0,
-        "awaiting_user_approval": 0,
-    }
-
-    for finding in report.findings:
-        if finding.status == "complete":
-            continue
-
-        if finding.awaiting_user:
-            blockers.append(
-                {
-                    "agent_id": finding.agent_id,
-                    "agent_name": finding.agent_name,
-                    "status": "awaiting_user",
-                    "job_id": finding.job_id,
-                    "issue_type": "awaiting_user_approval",
-                    "approval_id": finding.approval_id,
-                    "suggested_action": (
-                        f"Resolve approval {finding.approval_id} via POST /api/approvals/{finding.approval_id}/decide."
-                    ),
-                }
-            )
-            summary["awaiting_user_approval"] += 1
-            continue
-
-        summary["still_working"] += 1
-        messages_waiting = finding.messages_waiting
-        if messages_waiting > 0:
-            summary["with_unread_messages"] += 1
-
-        incomplete_count = len(finding.incomplete_todos)
-        incomplete_names = finding.incomplete_todos[:5]
-        if incomplete_count > 0:
-            summary["with_incomplete_todos"] += 1
-
-        # Build suggested_action with all relevant remediation steps
-        steps = []
-        if messages_waiting > 0:
-            steps.append(
-                f"Drain {messages_waiting} unread messages via get_thread_history(as_participant='{finding.agent_id}')"
-            )
-        if incomplete_count > 0:
-            steps.append(
-                f"Update {incomplete_count} incomplete TODOs via "
-                f"report_progress(job_id='{finding.job_id}', todo_items=[...]) "
-                f"marking as completed/skipped"
-            )
-        steps.append(f"Force-complete via complete_job(job_id='{finding.job_id}')")
-        suggested_action = ". ".join(steps) + "."
-
-        blockers.append(
-            {
-                "agent_id": finding.agent_id,
-                "agent_name": finding.agent_name,
-                "status": finding.status,
-                "job_id": finding.job_id,
-                "issue_type": "still_working",
-                "messages_waiting": messages_waiting,
-                "incomplete_todo_count": incomplete_count,
-                "incomplete_todo_names": incomplete_names,
-                "suggested_action": suggested_action,
-            }
-        )
-
-    if blockers:
-        blockers.append({"_summary": summary})
-
+    blockers = shape_readiness_blockers(report)
     return (len(blockers) == 0, blockers)
 
 

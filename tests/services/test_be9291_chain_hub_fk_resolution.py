@@ -6,7 +6,7 @@
 """Chain-hub discovery resolves on a real FK, not a subject substring (BE-9291).
 
 A chain hub used to be found by substring-searching its own SUBJECT for the run_id
-(``search_threads(query="{run_id}")``), which made a free-text display field
+(``list_threads(query="{run_id}")``), which made a free-text display field
 load-bearing lookup machinery. When that broke, NOTHING errored: a sub-orchestrator
 simply never found its hub and went quiet.
 

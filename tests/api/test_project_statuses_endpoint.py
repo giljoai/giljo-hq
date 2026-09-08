@@ -83,3 +83,34 @@ async def test_list_project_statuses_requires_auth(api_client: AsyncClient) -> N
     resp = await api_client.get("/api/v1/project-statuses/")
     # Auth dependency rejects without a JWT cookie -- 401 Unauthorized.
     assert resp.status_code == 401, resp.text
+
+
+# FE-9508: TERMINATED and DELETED share `color-agent-analyzer` deliberately --
+# they are semantically adjacent (both are hard-terminal, agent-driven closures)
+# and this pairing predates FE-9508. Grandfathered explicitly rather than
+# silently excluded, per the DoD: raise it if you disagree, do not just widen
+# the allowlist.
+_GRANDFATHERED_COLOR_COLLISIONS: frozenset[frozenset[str]] = frozenset(
+    {frozenset({ProjectStatus.TERMINATED.value, ProjectStatus.DELETED.value})}
+)
+
+
+def test_no_unexpected_color_token_collisions_across_statuses() -> None:
+    """No two PROJECT statuses may share a color token, except the explicitly
+    grandfathered TERMINATED/DELETED pair. Catches the next status addition
+    silently re-colliding (FE-9508: SUPERSEDED used to collide with INACTIVE --
+    the worst possible pairing, not-started-yet vs replaced-and-finished-forever)."""
+
+    by_token: dict[str, list[str]] = {}
+    for status, meta in PROJECT_STATUS_META.items():
+        by_token.setdefault(meta.color_token, []).append(status.value)
+
+    for token, statuses in by_token.items():
+        if len(statuses) < 2:
+            continue
+        pair = frozenset(statuses)
+        assert pair in _GRANDFATHERED_COLOR_COLLISIONS, (
+            f"Unexpected color_token collision on '{token}': {sorted(statuses)}. "
+            "Either assign a distinct token or add an explicit grandfather entry "
+            "with a comment explaining why the collision is acceptable."
+        )

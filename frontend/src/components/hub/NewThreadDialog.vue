@@ -73,6 +73,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useCommHubStore } from '@/stores/commHubStore'
+import { useProductStore } from '@/stores/products'
 import { useToast } from '@/composables/useToast'
 import { useClipboard } from '@/composables/useClipboard'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -92,6 +93,7 @@ const isOpen = computed({
 })
 
 const commHub = useCommHubStore()
+const productStore = useProductStore()
 const { showToast } = useToast()
 const { copy } = useClipboard()
 
@@ -114,7 +116,24 @@ async function onCreate() {
   creating.value = true
   errorMsg.value = null
   try {
-    const thread = await commHub.createThread({ subject: subject.value.trim() })
+    // FE-9588 — carry the viewed product. Since Headless-S4 demoted the active
+    // product to a mere default, a create naming no product on a tenant owning
+    // more than one is refused with PRODUCT_AMBIGUOUS. That refusal is written for
+    // an agent, whose remedy is to retry naming one; a dialog cannot retry, so it
+    // states the product up front. `currentProductId` is the VIEWED TAB (not
+    // `activeProduct`, the tenant-wide default) — the Hub is tabbed by product, so
+    // what the operator is looking at is the unambiguous answer.
+    //
+    // Omitted when there is no viewed tab: a tenant owning zero products is ruling
+    // 1's stated exception and the server resolves it to a standalone thread.
+    // NOT defaulted inside `commHub.createThread`, deliberately — the other caller
+    // (useProjectBoundThread) passes a project_id, and the server derives the
+    // product from THAT project on purpose, "regardless of which tab the caller
+    // happens to be viewing". A store-level default would silently override it.
+    const body = { subject: subject.value.trim() }
+    if (productStore.currentProductId) body.product_id = productStore.currentProductId
+
+    const thread = await commHub.createThread(body)
 
     // The id is the point of the dialog — put it on the clipboard rather than making
     // the operator go and find it. A blocked clipboard is not a failed create, so it

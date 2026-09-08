@@ -25,10 +25,18 @@ both sides of the move.
 Edition Scope: Both.
 """
 
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
 
 from giljo_mcp.domain.project_status import ProjectStatus
+from giljo_mcp.services.project_service._mcp_list_bounds import (
+    resolve_row_limit,
+    resolve_search_query,
+    resolve_status_list,
+    validate_project_type_list,
+    validate_taxonomy_alias_prefix,
+)
 
 
 def _parse_iso_datetime(value: Any) -> datetime | None:
@@ -118,3 +126,49 @@ def _apply_post_fetch_filters(
 
         filtered.append(p)
     return filtered
+
+
+async def resolve_list_projects_query_filters(
+    status: str | list[str] | None,
+    project_type: str | list[str] | None,
+    taxonomy_alias_prefix: str | None,
+    query: str | None,
+    limit: int | None,
+    *,
+    valid_filter_statuses: frozenset[str],
+    tenant_key: str,
+    get_valid_project_types: Callable[[str], Awaitable[list[dict[str, Any]]]],
+) -> tuple[list[str] | None, list[str] | None, str | None, int]:
+    """Normalize + validate list_projects' agent-supplied filters (BE-9499a extraction).
+
+    Extracted out of ``list_projects_for_mcp`` verbatim (same pattern as
+    ``_apply_post_fetch_filters`` above) to keep that function -- and this
+    module's owning file -- inside their length/size budgets. Behavior
+    unchanged. ``get_valid_project_types`` is injected (rather than imported)
+    because it is a tenant-scoped instance method on ``ProjectService``.
+    """
+    status_list = resolve_status_list(status, valid_filter_statuses)
+
+    project_type_list: list[str] | None = None
+    if project_type is not None:
+        # BE-6079 (L3) / IMP-6262: TSK is filtered OUT of _get_valid_project_types
+        # because a project can never be CREATED as TSK. Converting a task now STRIPS
+        # the type (the project is born untyped) and the ce_0067 backfill un-typed any
+        # legacy converted projects, so no project is TSK-typed -- this filter value is
+        # a harmless no-op that now matches nothing, kept for back-compat. Create and
+        # retag still reject TSK elsewhere.
+        from giljo_mcp.services.taxonomy_ops import RESERVED_TASK_TYPE_ABBR
+
+        valid_types = await get_valid_project_types(tenant_key)
+        project_type_list = validate_project_type_list(
+            project_type, {t["abbreviation"] for t in valid_types} | {RESERVED_TASK_TYPE_ABBR}
+        )
+
+    validate_taxonomy_alias_prefix(taxonomy_alias_prefix)
+
+    # BE-9468: agent input reaching a SQL predicate and a row cut -- validated at
+    # the boundary. See _mcp_list_bounds for the contract and its reasoning.
+    query = resolve_search_query(query)
+    effective_limit = resolve_row_limit(limit)
+
+    return status_list, project_type_list, query, effective_limit

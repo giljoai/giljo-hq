@@ -2,6 +2,348 @@
 
 All notable changes to this project are recorded here. This changelog follows the [Keep a Changelog](https://keepachangelog.com/) convention — entries are grouped by change type (Added / Changed / Fixed / Removed / Security). Versions follow `MAJOR.MINOR.PATCH[.HOTFIX]` and tags live on the public repository (`giljoai/giljo-hq`).
 
+## [2.1.0] — 2026-09-06
+
+### Highlights
+
+- **Work several products at once.** The dashboard is now product-tabbed, and every agent tool can name the product it means — no more silent guessing when you have more than one.
+- **Run the whole project lifecycle from your coding agent.** Stage, launch with a goal, answer approvals, un-stage, supersede, revive — the dashboard lights up live while you stay in the terminal.
+- **One notification model.** Banners ask, pop-outs echo when you're away, toasts confirm your own clicks, and the bell remembers everything — with browser pop-ups that now request permission properly.
+- **A connect wizard that tells the truth.** Tool cards flip green the moment your tool really connects, "Remove tool" really forgets it, and reconnecting verifies this machine — plus OpenCode joins the supported tools.
+- 73 fixes across onboarding, the message hub, billing surfaces, and agent plumbing.
+
+### Added
+
+- **A superseded project says what replaced it.** Opening one now shows the
+  project it was replaced by, as a link straight to it.
+- **List, roadmap, and memory-search tools can now target a specific product.** `list_projects`, `list_tasks`, `get_roadmap`, `update_roadmap_metadata`, and `search_memory` accept an optional product to read from or write to, so an agent working across several products no longer has to worry about another session (or you, in the dashboard) switching the active product out from under it mid-task. Leaving it out works exactly as before.
+- A headless agent can now end a linked-project run early (freeing its remaining
+  projects) and mark a finished project reviewed, without needing the dashboard.
+- Your connected coding agent can now list your products by name — useful when it needs to figure out which product an instruction like "work on Yapper" refers to before it can act.
+- **Setup can now bind a repository to a Giljo HQ product.** Running setup
+  with a product id writes a short marker into your project's CLAUDE.md and
+  AGENTS.md, so future actions in that repository know which product they
+  belong to and stop asking. If you have exactly one product it binds
+  automatically; with several, you'll be asked to confirm which one.
+- **Your coding agent can now un-stage, re-stage, or cancel staging on a project**, and revive a completed project to work on it again — no need to switch to the dashboard for these.
+- **Your coding agent can now mark a project as superseded and point it at the project that replaced it**, matching what's already possible from the dashboard.
+- **State your goal and say go, in one call.** Launching implementation from your coding agent now accepts an optional goal — no separate step needed to set it first.
+- **Multi-terminal agents can now get their startup instructions inline** from your coding agent instead of always pointing you back to the dashboard's Copy button.
+- **Answer your agent's pending question without leaving the terminal.** When an
+  agent asks for a decision, you can now reply directly from your coding agent
+  session instead of switching to the dashboard to click a button. The dashboard's
+  approval card still works exactly as before.
+- **Switch, activate, or deactivate products from your coding agent.** `update_product_context` now takes an optional activation flag, so an agent can switch which product it's working on -- or correct a product's platforms, custom extraction instructions, and other fields -- without you clicking through the dashboard first.
+- **Rename a chat thread while posting to it.** Posting a message can now rename the thread in the same step, matching the rename button already in the dashboard.
+- **Approval audit rows now record whether a human or an agent made the decision.** Answering a pending approval from the terminal (MCP) used to leave the "decided by" field completely blank; it now records the channel (dashboard or terminal) alongside the decision, so the history is honest instead of silent.
+- **Open more than one product at a time.** The dashboard now shows a tab
+  strip for every open product — switch between them without losing your
+  place, and create, edit, or browse projects in one product without
+  touching another.
+- **Background product tabs now show a live badge when something happens there.** With multiple products open in tabs, an agent working on a product you're not currently viewing now shows a small counter on that tab instead of being invisible until you switch to it.
+- **New here? The setup wizard and tutorial now show you both ways to work.** Once you finish setup, one of the launch cards points you at driving projects from your terminal instead of the dashboard. Activating your first product in the tutorial also mentions that your connected agent can do that step for you. Neither replaces the other, and you can mix and match any time.
+- **The in-app guide now has a chapter on driving everything from your terminal**, covering products, project staging, and chains, right alongside the dashboard steps for each.
+- **Product cards now have a Default control.** Check the box on any product
+  card to choose where reads go when nothing else is specified (agents must
+  still always name a product when writing). Exactly one product can be the
+  default at a time, and it can be a hidden product too.
+- **See agent activity and questions from anywhere in the app, not just the project you have open.** The "Projects" tab in the sidebar now shows a badge when an agent starts working, changes status, or makes progress on a project you're not currently viewing. When an agent needs a decision from you, a banner now appears on every page — not only when you happen to be looking at that project — so a headless drive never goes silent just because you clicked away.
+- **A banner now tells you when an agent has named you or asked you something in a
+  chat thread.** It appears wherever you are in the app, says which chats are
+  waiting, and clears itself when you read the thread. Desktop notifications for
+  those messages now follow the banner too, so they disappear once you have looked
+  instead of lingering and sending you to a message you already handled.
+
+### Changed
+
+- **Activating a project that lost a race against another activation in the same product now returns a clear "another project is already active" message instead of a generic retry error.**
+- **Creating a project or task without naming a product now asks instead of guessing, once you have more than one product.** Before, a bare create silently landed on whichever product happened to be active — easy to get wrong if you (or another session) had switched tabs. Now it tells you every product you have and asks you to pick. If you only have one product, nothing changes.
+- You can now work on several projects at once inside a single product — activating one no longer pauses another.
+- **Launching and approving work from a connected coding agent is now available.** Whether a connected agent may do this is controlled under Settings → Security.
+- Tool names are now final. The temporary older names that were kept working for one release have been removed, and two more tools are named for what they do: closing out an agent's finished work is now called finalizing it, and fetching a product's vision document uses the full word. Existing sessions keep working until they are restarted; start a new session after updating to see the current tool names.
+- Trimmed the instructions your AI agents read before every action. A note about choosing between message hubs was being repeated on fifteen separate tools, including four that have nothing to do with messaging, when the same note is already delivered once when an agent connects. Guidance about paging through long lists was being explained three times per tool, and the same paragraph about which product to work on appeared four times in four slightly different wordings. The staging tool now offers only the two choices that still mean anything instead of six, four of which it then argued against. Nothing an agent could do before has changed; there is simply less to read first.
+- Two pairs of tools that asked the same question in two ways are now one tool each. Waiting for your turn in a conversation is no longer a separate tool from checking whose turn it is, and searching your chats is no longer separate from listing them. Your agents keep working either way: the old names still respond for now and point at the replacement, so nothing you have already connected breaks.
+- Running several projects back to back is now two plainly named tools instead of one tool with a hidden list of actions. Your agent links the projects it wants to run in order, and later unlinks them if the plan changes. Each project still hands off to the next on its own once it is finished, so there is nothing to drive by hand in between. The old tool name still answers for now and points at the replacements, so anything you have already connected keeps working.
+- The tool that fetches a project's implementation prompt is now called what it does. It was named as though it started the work, sitting beside another tool with a nearly identical name, and neither of them actually ran anything. Your agents keep working either way: the old name still answers and points at the new one.
+- Three tools are now named after what they do. Saving your roadmap was called updating roadmap metadata, which made it sound like it changed notes about the roadmap rather than the roadmap itself. The old names still answer for now and point at the new ones, so anything you have already connected keeps working.
+- **Connecting a tool now confirms the connection you just made.** When you start a
+  connect flow, the tool shows as waiting until it connects to this machine, instead
+  of appearing already connected because you set it up somewhere else earlier. Your
+  tool list still remembers what you have configured, as before.
+- In-app copy and the AI agent guide now describe working on several products at once, instead of talking about a single active product you have to switch between.
+- **The "an agent needs you" banner now shows plain, fixed status text and a project tag instead of freeform wording.** It used to always say the same generic line; it now tells you at a glance whether a project is waiting at staging, an agent is blocked, or a decision is needed, and tags each with its project so you can tell them apart before opening Review.
+- **Products are now Show/Hide, not Activate/Deactivate.** Every product can
+  be shown as a tab at the same time — hiding one never pauses its projects
+  or agent jobs, and showing a new one never hides another. New products are
+  shown by default.
+- With more than one project active at once, Jobs now opens a sectioned overview showing every in-flight project instead of picking one at random.
+- The Projects list no longer greys out a project's Activate button just because another project happens to be active.
+- **The Message Hub is now one space instead of a per-product view.** Every thread you can reach is listed together, with a filter defaulting to the product you're viewing so the everyday view looks the same as before. Switch to "All products" to see everything, or "No product" to find older threads that were never tagged with one.
+- **New threads are tagged with a product automatically** when one can be figured out, so they always show up in the right place. You can also tag (or retag) any thread's product and projects at any time, including older threads that predate this change.
+- **The Jobs board now matches the rest of the product.** Cards use the same
+  colors, badges, and status pills as everywhere else, show each agent's
+  progress and duration at a glance, and explain why a project is waiting for
+  you when it's paused for your go-ahead.
+- **Banners no longer stack.** When more than one notice is waiting at the top of the app, they now fold into a single strip with a count badge and a chevron to expand the full list, instead of piling up as separate bars across the top of the page.
+- **The Roadmap page now focuses purely on ordering your work.** Drag-to-reorder, converting a task to a project, and removing an item are still all there. Launching or managing a chained run has moved to the Projects page and your connected agent — the Roadmap is where you plan the order, not where you start the work.
+- **Each kind of notification now has one job, so nothing announces itself twice.** When an agent hands you a baton, mentions you, or needs a decision, you get one notification instead of a pop-up and a toast at the same moment. The desktop pop-up and the bell entry both stay.
+- **Desktop pop-ups only appear when the app is hidden.** Previously a pop-up could fire at a window you were already looking at. If the app is in front of you, the title-bar banner tells you on its own.
+- **A desktop pop-up now goes away when the thing it was announcing is handled.** Answer a baton and its pop-up closes with it, so you can no longer click a notification for something you already dealt with. Repeats of the same signal replace the earlier pop-up rather than stacking up.
+- **The bell is quiet.** It keeps a count of what you have not seen and no longer pulses red or amber. Anything genuinely waiting on you appears as a banner, which is the one place urgent things live.
+- **Connection problems now show on the connection indicator instead of the bell.** Losing the server no longer drops entries into your notification list or raises a toast; the indicator beside the bell shows the current state, which stays accurate as it changes.
+- Staging now asks how you want a run to work instead of quietly choosing for you. When you drive a project from your coding agent and do not say which way the work should run, staging comes back with both options and their plain-language difference so the agent can put the question to you. If you always want the same answer, set it once under Tools then Agents and you will not be asked again.
+- **A request for action addressed to everyone no longer interrupts you personally.**
+  It still appears in your notification bell, but it no longer raises a banner or a
+  desktop notification claiming you specifically owe an answer, because that kind of
+  request is for whoever picks it up.
+
+### Fixed
+
+- **Every notice at the top of the screen can now be closed.** The raised-hand,
+  chat-mention and "waiting on you" strips each have a dismiss X, and closing
+  one stays closed after a reload. Closing a notice only hides the
+  announcement — the decision, the mention or the handover is still waiting for
+  you in the Message Hub and the bell.
+- **The "you were mentioned" notice no longer sticks around forever.** When
+  several threads named you, its button went to the Message Hub without marking
+  anything read, so the notice could never clear itself. Pressing that button
+  now **marks every thread the notice names as read, including ones you do not
+  open** — that is what lets the notice clear. The messages themselves are not
+  touched and are still there in the Message Hub. If you would rather not mark
+  them, use the dismiss X instead: it only closes the notice and marks nothing.
+- **Browser pop-ups can now actually be turned on.** The settings card said your
+  browser would ask for permission the first time something needed to reach you
+  — but it never could, so anyone who left the pop-up setting on its default
+  never got asked and never saw a pop-up. There is now a **Turn on pop-ups**
+  button that asks straight away, and the card says plainly that nothing pops up
+  until you use it.
+- **Usage metrics no longer occasionally fail to save.** A rare timing issue could cause one server process to briefly fail while recording API and MCP usage counts when another process was doing the same thing at the same moment. Both now save in a consistent order, so this contention can no longer happen.
+- **A project activation that got superseded by a competing activation could report success even though the project stayed inactive.** Racing another activation for the same product now always tells you clearly when yours lost, instead of sometimes claiming it worked.
+- Tool descriptions for creating projects and tasks now explain what actually happens when you own more than one product and skip naming one: the call is refused with a clear list of your products to choose from, instead of silently guessing.
+- The launch-implementation tool description no longer implies it only works from a command-line session — it works from any connected chat client, and clearly states that launching does not activate the project (a separate step).
+- The staging and implement tools now describe both ways to release the implementation gate, not just the dashboard button.
+- Starting a chain run now documents that a project finished by a hands-off run automatically satisfies its review step, so nothing gets stuck waiting on a click that will never come.
+- The setup tool now states plainly that outdated skills are only ever flagged for you to refresh yourself — never rewritten automatically.
+- **Activating a project in one product no longer greys out the Activate button in another product.** With multiple products open in tabs, an active project in Product A was incorrectly treated as "the" active project everywhere, blocking activation in every other product.
+- The notification bell no longer leaves stale entries behind after you finish a project; clearing project notifications now catches every notification shape, not just some of them.
+- When several products exist and an agent creates something without saying which one, the message explaining what to do is now clean. It previously had internal diagnostic details appended to the end.
+- Deleted agent templates that a product had in use are now cleaned up properly instead of being left behind forever. The background tidy-up job also no longer stops early when it hits a single problem row.
+- Launching a project from your AI tool now tells you when the project still needs activating, instead of reporting success while the dashboard shows nothing.
+- Completing a project (or pressing Archive) no longer silently skips its closeout record when there's still unresolved work, such as an unread decision waiting on you. The harness now asks you to finish closing out first, or to explicitly confirm you want to abandon it anyway.
+- **A chain run driven entirely by a CLI agent no longer disappears from the dashboard's review view with a burst of errors.** Headless completion now counts as your per-card review, and an open chain view now shows a clean "this chain has finished" message instead.
+- Launching implementation now always returns a readable timestamp, whether the project was just launched or was already launched, so an agent checking either timestamp field no longer sees a false failure.
+- A project whose agent has finished and closed out no longer shows as 0% progress with an unknown stage; closed agents now count toward completion.
+- **Your AI agent gets clearer, more accurate instructions when it connects.** The
+  built-in routing guide no longer sends closeout steps in a duplicated, contradictory
+  order (which could double-write project history), and now correctly explains when a
+  project needs a product ID, how to permanently link a repo to one, and how to recover
+  from a blocked archive attempt.
+- Corrected tool instructions that told your AI agents the wrong thing. Agents were being told that only one product could be open at a time and that opening one would switch their working context, which stopped being true when several products could be shown at once. They were also told that answering an approval from the terminal needed a setting turned on, when it is on by default. Error messages that appeared when an agent did not name a product now point at something the agent can actually do, instead of suggesting a step that would fail again. The most consequential settings on the project tools are now described and offer their valid choices up front, so an agent picks correctly the first time rather than guessing.
+- **Agent template downloads now follow the right product.** If your account
+  has more than one product, running setup (or downloading agent templates)
+  could sometimes install the wrong product's agents instead of the one you
+  meant. Downloads now always match the product you're working in.
+- **A single long-running request could no longer slow down everyone else's dashboard.** Server requests are now automatically stopped if they run far longer than expected, so one stuck request can't tie up the connections other people's requests need.
+- **Replying in the Message Hub now clears your "waiting on you" banner.** A
+  dashboard reply used to leave the banner up even after you answered, forcing
+  a manual click on the raised-hand button to dismiss it. Now, answering a
+  thread you hold the turn on clears it automatically: a direct reply hands
+  the turn to whoever you addressed, and a plain reply marks it answered for
+  everyone.
+- Every tool now carries its display name in both of the fields the MCP standard defines for it, so connector directories and other clients that read the older field see a proper name instead of blank.
+- The tools reference now matches the tools the server actually registers: entries renamed last release point at their current names, two tools that were never listed are documented, and the counts are correct again.
+- **Agents are no longer told to call tools that were renamed.** The startup
+  instructions every orchestrator loads, and a number of on-screen hints, still
+  named a handful of older tool names. Agents following them would look for a
+  tool that no longer exists and only discover the gap when finishing their
+  work. Every instruction now names the current tool — and where the rename
+  also changed how a tool is called, the instruction says so, so an agent
+  waiting for its turn genuinely waits instead of checking in a loop.
+- **The "GiljoAI updated its tools" notice on a fresh install now points at
+  tools that exist.** Two of the eight renames it listed had themselves been
+  superseded since the notice was written, so anyone following those two rows
+  went looking for something that had been removed.
+- **The tool guide now counts its own chat tools correctly.** It announced eleven
+  and then listed nine — the other two had been folded into the tools beside them
+  in an earlier release, and the sentence introducing the list was never updated.
+- **Agents downloaded for Gemini CLI can now use every connected tool.** Previously, agents exported for Gemini CLI carried a fixed, outdated list of allowed tools that matched none of the currently connected tools, so a downloaded agent could not call any of them. Gemini agents now automatically get access to every connected tool, the same way agents exported for other coding assistants already do.
+- Setup wizard: connecting a **second** coding tool is now detected. The Connect step used to sit on "Waiting for ... to connect" forever if you had already connected any tool before, even though the new tool was working perfectly. The same fix means re-running setup with a tool you already have now flips it green again.
+- **Activating a project from your coding agent now deactivates the other active project for that product, instead of failing.** Previously this only worked from the dashboard.
+- Setup now installs agent templates for OpenCode. Picking OpenCode in the connect wizard previously left you with manual download steps and no agents, because setup did not recognise it as an install target.
+- **Series-number checks no longer look across products when nothing is active.** With no active product selected, checking whether a series number was available, listing used series numbers, or listing used subseries could previously report results based on projects in a *different* product. All four checks now agree and stay scoped correctly.
+- A chain project's coordination hub thread now always shows up under the right product, even when the chain conductor creates it directly instead of through the app's own prompts.
+- When an agent template is set to run under opencode, the multi-terminal launch
+  command now starts opencode the way opencode expects, so that agent's terminal
+  boots with its mission instead of opening an empty session. Templates set to
+  Claude, Codex, Gemini or Antigravity are unchanged.
+- **Your connected tools show up again on the Connect page and in setup.** Newer
+  versions of coding tools greet the server a different way than they used to, and
+  that greeting was not being recorded, so the dashboard could not tell which tools
+  were attached even though they were working normally. The server now recognises
+  both greetings. Nothing about how tools connect or behave changes.
+- **Setup now asks which product to install agents for, instead of picking one.** If
+  you have more than one product, running setup without naming one used to quietly
+  package a product's agents and only mention the ambiguity afterwards. It now stops
+  and lists your products so you can choose. Nothing is downloaded until you have.
+  If you have a single product, setup binds to it without asking, exactly as before.
+- **The setup wizard now notices your tool connecting, without a refresh.** Newer
+  coding tools greet the server a different way, and the wizard was only listening
+  for the older greeting, so "waiting for connection" sat there until you reloaded
+  the page. It now hears both.
+- **"Remove tool" now actually forgets the tool.** Removing a tool used to leave its
+  connection on record, so adding it back showed it connected again from history. It
+  is now properly forgotten and the card returns to waiting.
+- **Pages load lighter after the first visit.** Logos and icons are now cached
+  by your browser for a day instead of being re-checked on every single page
+  you open, so moving around the app takes fewer requests and feels quicker.
+- **Deleting an account no longer leaves usage counts behind.** Usage totals are
+  written in batches every few minutes, and a batch already in flight could
+  write a deleted account's row back into the table minutes after erasure.
+  Batches now skip accounts that no longer exist.
+- Removed two stale exemptions from the edition-placement check so it now covers the files it was added for, and made the check impossible to call in a way that silently reports a file as clean without reading it.
+- **Staging and launch now update the Projects list and Roadmap live, even when driven from your coding agent.** Previously those screens only refreshed when a project's own tab was open, or after a manual page reload. A newly started multi-project conductor also now appears live instead of waiting for a refresh.
+- **Opening a product in one browser tab no longer switches what another tab
+  is showing.** A background sync used to silently jump you to whichever
+  product had just been opened elsewhere — now it only refreshes the status
+  indicator, and the tab you're looking at stays put.
+- **The "Projects" sidebar badge no longer counts activity from other products.** It previously summed activity across every open product, so switching to Product A could show a badge count that only made sense for Product B. It now only counts what's actually in the list you're looking at.
+- **The Message Hub now shows only the threads for the product tab you're viewing.** Switching product tabs used to leave the Hub showing every product's threads mixed together; it now follows the tab the same way Projects and Tasks already did.
+- **The product-refresh network call no longer fires repeatedly on page
+  load.** Several parts of the app used to ask the server the same question
+  in a burst; they now share one answer.
+- **The Jobs pane now notices a project going live without a page reload.** When a project is activated from another window or driven headlessly, the pane updates in place instead of leaving you staring at a stale "No Active Project" screen until you refresh.
+- **The quick-launch card grids on the Welcome and Tools pages no longer collapse to a single narrow column on tablets.** A two-column layout now fills the tablet width band that used to jump straight from three columns to one.
+- A banner now announces at the top of the page when a project is staged, activated, or starts implementation from either the dashboard or your coding agent, with a button straight to that project's jobs view.
+- Clicking the "waiting on your decision" banner now takes you to the actual decision screen, even if you weren't already on that project's page.
+- The chain conductor's empty mission placeholder no longer renders half cut off.
+- The Jobs view now shows each running project's details again. Cards were appearing
+empty, with no project name, status, or agent names.
+- **"Needs your approval" notifications now only fire when it's actually your approval.** Previously, any agent-to-agent request sent through the Hub could pop a "Needs your approval" alert for you even when it was addressed to a different agent. Those notifications are now filtered to the ones actually meant for you.
+- **The sign-in page no longer tells a throttled user their password is wrong.** If you sign in too many times in a short window, the login screen now says you're signing in too fast and to wait a minute, instead of the misleading "check your credentials" message.
+- The Jobs board no longer tells you that headless mode is off when it is on. The
+notice on a waiting project now reflects your actual setting.
+- The Jobs detail window no longer says a project's agents are all finished when
+they are still running.
+- The Jobs board no longer mislabels a newly activated project as "Staged" -- it now shows an honest Activated status until staging actually begins, with its own filter and a Planning status for projects that are mid-staging.
+- The Jobs board's header, agent badges, and message counters now match the rest of the app's look and feel.
+- Sign-in failures now explain what actually happened. A wrong password, an inactive account, a blocked account, a rate limit, and a network problem each show their own message instead of one generic "check your credentials" line.
+- The dashboard's copy-prompt buttons now hand your agent commands it can
+  actually run. After the tool renames in the last release, the Roadmap page
+  and the vision-analysis step were still producing prompts that named tools
+  the server no longer answers to, so pasting one got you "tool not found".
+- The Roadmap prompts now name the product you are looking at. Previously, on
+  an account with more than one product, the agent had to guess which roadmap
+  to save — and the save could be refused outright at the last step.
+- **The onboarding wizard's connect and install checkmarks no longer get stuck.** If your coding tool was already connected, the Connect step now shows it as connected right away instead of waiting forever. The Install step's checkmarks now reliably tick after running the setup command, even if you reload the page or come back to a setup you started earlier.
+- **The "waiting for your agent" indicator is easier to see** while your agent works on your product proposal.
+- **Fixed wrong on-screen instructions** that asked you to come back later. The screen now correctly tells you it will refresh itself.
+- **"Activate product" is gone.** Reviewing your agent's proposal now ends with a simple "Done!" button, and the screen updates live if your agent revises the proposal while you're looking at it.
+- **The finish screen now describes what you'll actually see** on your Home screen next, instead of a placeholder that didn't match.
+- **Product cards on the Products page no longer clip or misalign.** The
+  "Completed" stat no longer splits across two lines, the Default checkbox's
+  label is fully visible instead of being cut short, the Delete button no
+  longer renders as a barely-visible sliver at the card's edge, action
+  buttons now stay aligned along the bottom of every card regardless of how
+  much content it has, and long product names no longer overlap the "Shown"
+  badge.
+- Opening the app no longer sends you back to the sign-in screen while your session is still valid. If the network hiccupped for a moment during start-up, the app treated it as a sign-out and returned you to the login page. It now keeps the session it has already confirmed and checks again on your next move.
+- The onboarding review screen now shows your agent's full product proposal. The description is no longer cut short, and architecture, standards, testing, and the complete tech stack are all on screen before you activate, with anything your agent left empty clearly marked instead of hidden.
+- Setup wizard: the "Install skills & agents" step now keeps **Next** switched off until both the skills and the agent templates have actually arrived. It no longer assumes they are there because you ran setup once before, and it no longer counts skills on their own as finished. "Skip, I'll do this later" is still there if you would rather move on.
+- Setup wizard: a switched-off **Next** button now looks switched off. It used to keep its bright yellow fill, which read as clickable.
+- Your Connect page now shows which tools are actually connected. Previously, connecting a single tool turned every tool green, including ones you had never set up on that machine.
+- **The Tasks list no longer resets your filters every time an agent updates a task.** Your search, status, and priority filters now stay put while agents work in the background.
+- **The Dashboard, Memory Browser, and Products pages now update live.** Stat tiles, recent activity, 360 memory entries, and product cards refresh automatically as your agents work — no more waiting for a page reload to see the latest state.
+- **Answered questions and cleared alerts now disappear on their own.** Status
+  banners used to stay on screen after the thing they were telling you about
+  was already resolved — you had to reload the page to make them go away.
+  They now clear themselves the moment the condition clears.
+- **The "tools were renamed" notice now actually shows up.** A one-time
+  heads-up about renamed commands was being created but never displayed —
+  it now appears for self-hosted admins during the first few restarts after
+  an update.
+- **Superseded projects now get their own badge colour**, instead of looking identical to inactive projects.
+- **The "Mark Superseded" successor picker now shows each project's ID** alongside its name, so you can tell candidates apart at a glance.
+- **Not-yet-started projects can now be picked as a successor** when marking a project superseded — previously only active or completed projects were offered.
+- **Deleting a project now removes it from the Projects list immediately.** Previously a deleted project could keep showing in the list (with a red "Deleted" label) until the page was refreshed. It now leaves right away and shows up in the trash, where it can still be restored.
+- **The guided tour no longer goes quiet if a document upload cannot be attached to a product.** Previously the tour could sit on the upload step as though nothing had happened, while a product had in fact already been created and named after your file, leaving you with something you did not ask for and a tour that looked broken. It now tells you what happened, and says specifically whether a product was created, so you know whether trying again would make a second one.
+- **The guided tour now offers a way forward when a document upload cannot start.** If the product could not be created — because the server was busy, your session had expired, or the request was rate-limited — the tour used to stop with no way to continue. It now explains what happened in terms of that actual reason, offers **Try again** when nothing was created so retrying is safe, and always offers **Fill it in myself instead** so a failure is never a dead end. When something *was* created but the file could not be attached to it, the retry button is withheld on purpose and the message says so, because trying again in that case would leave you with a second product named after the same file.
+- **Your browser is now actually asked for permission to show pop-up notifications.** Before this, the request could only happen while the app was hidden in a background tab — which browsers ignore — so on a new machine or profile the prompt never appeared and pop-ups could never work at all, no matter how long you used the app. Turning pop-ups on in Settings now asks straight away, and the card tells you what your browser answered: allowed, blocked, or not yet asked. Choosing "Nothing" still never asks. If your browser says no, your choice is still saved, because it follows you to your other machines.
+- The onboarding tour's "I have an existing codebase" step now tells you when it
+  could not set up your product card, and offers a Try again button, instead of
+  leaving you on a prompt that quietly had nothing behind it.
+- That step also stops offering its prompt for copying until your product card
+  actually exists, so you can no longer hand your agent a prompt pointing at
+  nothing.
+- Returning to that step now reuses the blank product card it made for you last
+  time instead of trying to make a second one and failing, so the tour keeps
+  working if you come back to it.
+- Leaving the tour part-way no longer strands the blank product card it created
+  behind, so your product list stays clean.
+- **Threads you have read no longer keep saying they have something new.** Opening a
+  thread now records that you read it, so its card stops showing the unread marker.
+  Before this, the marker stayed on for good once anyone posted, because nothing on
+  the dashboard ever told the server you had looked.
+- **Being mentioned in a long message no longer goes unnoticed.** Whether you were
+  named used to be worked out in your browser from a shortened copy of the message,
+  so a mention written near the end of a long post could be missed entirely. The
+  check now happens on the server against the whole message.
+- **Requests an agent sends to the whole thread no longer disappear.** They now show
+  up in your notification bell, listed as an open ask, so you can find them later.
+  They still do not raise a banner or a desktop notification, because that kind of
+  request is not addressed to you in particular. A request aimed at you directly is
+  unchanged and still gets your full attention.
+- **You can create Message Hub threads again when you have more than one product.** The New Thread dialog was not telling the server which product the thread belonged to, so once you owned a second product the server could no longer tell which one you meant and refused to create anything. The dialog now uses the product whose tab you are viewing, and simply creates a standalone thread if you have no products yet.
+- Connection commands shown during onboarding and under Tools now work in every terminal, including the default Windows PowerShell. Multi-step commands are listed one per line instead of being chained together in a form some shells reject.
+- **A filtered thread read no longer claims to mark messages you had already marked.**
+  Reading a thread with a filter — only action-required posts, only posts addressed to
+  you, or only the last few — still marks exactly those posts as read, but it cannot
+  move your "read up to here" marker, so the same posts keep coming back. The count now
+  reflects only what actually changed, and the reply says the marker did not move and
+  which read moves it.
+- **A blocked job completion now tells you where the blocking messages are.** When
+  unread action-required messages stop a job from completing, the message names the
+  thread they are on — which is not always the thread you have been working in — and
+  the exact unfiltered read that clears the block.
+- **Giljo HQ no longer risks exhausting its own database under a traffic burst.**
+  The server now opens far fewer database connections by default, so a busy moment
+  can no longer use up every connection slot and start refusing new ones across the
+  whole app.
+- **Self-hosted installs keep ample room.** A single-user install still gets ten
+  concurrent database sessions, comfortably inside a stock PostgreSQL. If you had
+  already tuned the pool yourself with `GILJO_PG_POOL_SIZE` or
+  `GILJO_PG_MAX_OVERFLOW`, your own settings still take precedence.
+- **The MCP server's health check now reports its current name.** `health_check` was still
+  reporting the retired `giljo_mcp` server identifier after the Giljo HQ rename; it now
+  reports `giljo_hq`, matching what agents actually connect to.
+- **New accounts can now finish setup even if a trial lapses first.** If you signed up but hadn't finished setting up your workspace when your trial ended, "Complete Setup" used to do nothing and leave you stuck. Setup now always completes, and you land in your workspace with a reminder to reactivate your subscription.
+- **Startup no longer fails when several server workers start at once.** A
+  startup race could leave concurrent server workers using inconsistent
+  encryption keys, and a worker that ended up with an unusable one stopped with
+  an unhelpful message. Workers now agree on a single key, and a key file that
+  really is unusable says which file it is and what to do about it.
+- **A mistyped encryption key is reported by name.** Setting
+  `GILJO_MCP_ENCRYPTION_KEY` to a value that is not a valid key now says exactly
+  which setting is wrong and how to generate a correct one, instead of failing
+  with a bare cryptography error.
+- **The encrypted secrets store no longer breaks when several processes start
+  it at once.** With no master key configured in the environment, concurrent
+  processes could end up disagreeing about which key to use. There is now a
+  single agreed key, and a key file that really is unusable says which file it
+  is and what to do about it.
+- **A mistyped secrets key is reported by name.** Setting `GILJO_SECRETS_KEY`
+  to a value that is not a valid key now says exactly which setting is wrong
+  and how to generate a correct one, instead of failing with a bare
+  cryptography error.
+
+### Security
+
+- **Closed a self-declaration gap in how a connected AI client's capability level is determined**, so that value can no longer be used to reach a privileged action — only your own account settings can grant that now.
+
+### Removed
+
+- **Removed an unused "switching products" warning dialog** that no longer
+  matched how multiple products can be shown at once.
+
 ## [2.0.4] — 2026-08-21
 
 ### Highlights

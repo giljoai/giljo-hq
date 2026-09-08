@@ -519,6 +519,8 @@ async def handle_staging_end(
                     event_type="project:implementation_launched",
                     data={
                         "project_id": str(job.project_id),
+                        # BE-9525c: additive -- missing on this emitter (BE-9518 left it out).
+                        "product_id": project.product_id,
                         "implementation_launched_at": launched_at.isoformat(),
                         "source": "mcp",
                     },

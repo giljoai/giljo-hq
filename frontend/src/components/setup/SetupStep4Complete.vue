@@ -42,6 +42,18 @@
             <p>Learn how GiljoAI works.</p>
           </div>
         </div>
+        <!-- FE-9503b: informational only, per ruling 19 -- no toggle, no
+             preference stored, the dashboard cards above stay exactly as
+             they were. Teaches that the harness door exists alongside them. -->
+        <div class="cta" data-testid="launch-cta-terminal">
+          <span class="cta-icon cta-icon--terminal">
+            <v-icon size="18">mdi-console</v-icon>
+          </span>
+          <div class="cta-text">
+            <h4>Drive from your terminal</h4>
+            <p>Ask your connected agent to stage and run a project — no dashboard needed.</p>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -147,6 +159,11 @@
 .cta-icon--lavender {
   background: rgba($color-agent-reviewer, 0.14);
   color: $color-agent-reviewer;
+}
+
+.cta-icon--terminal {
+  background: rgba($color-agent-researcher, 0.14);
+  color: $color-agent-researcher;
 }
 
 .cta-text h4 {

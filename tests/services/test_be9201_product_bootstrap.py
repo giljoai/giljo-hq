@@ -226,5 +226,6 @@ async def test_create_product_adapter_strips_name_and_defaults(db_manager, db_se
     result = await accessor.create_product(name=f"  {name}  ", tenant_key=tenant_a)
     assert result["success"] is True
     assert result["name"] == name
-    assert result["is_active"] is False
+    # FE-9524/D1: a new product is shown by default -- no on/off ceremony.
+    assert result["is_active"] is True
     assert result["target_platforms"] == ["all"]

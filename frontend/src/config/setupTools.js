@@ -20,6 +20,43 @@ export const SETUP_TOOLS = [
   { id: 'generic', name: 'Generic MCP client', logo: '/logo-mcp.svg' },
 ]
 
+// FE-9500: harness token (backend, harness_resolver.py) -> tool id (frontend).
+// TWO VOCABULARIES, ONE SEAM. The backend names a connecting client with its own
+// tokens ('claude-code', 'codex', 'gemini', 'antigravity', 'opencode', 'generic');
+// this file's ids are 'claude_code', 'codex_cli', ... A silent mismatch here means
+// a real connect never lights its card, so tests/unit pins both sides of this map.
+//
+// 'generic' is deliberately mapped: a client that self-identifies with nothing is a
+// REAL connection, and the Generic MCP client card is the honest place to show it.
+// Claude Desktop and claude.ai web cannot be separated at all -- they send
+// byte-identical initialize payloads -- so both land on claude_code.
+const HARNESS_TO_TOOL_ID = {
+  'claude-code': 'claude_code',
+  codex: 'codex_cli',
+  gemini: 'gemini_cli',
+  antigravity: 'antigravity_cli',
+  opencode: 'opencode',
+  generic: 'generic',
+}
+
+/** Tool id for a backend harness token, or null when the token is unknown here. */
+export function toolIdForHarness(harness) {
+  return HARNESS_TO_TOOL_ID[harness] ?? null
+}
+
+// BE-9591: the reverse direction, DERIVED from the same object rather than written
+// out again. "Remove tool" knows a card id and the API takes a harness token, so the
+// mapping is needed both ways -- and a second hand-written literal is exactly how the
+// two would drift into disagreeing about which card a connection belongs to.
+const TOOL_ID_TO_HARNESS = Object.fromEntries(
+  Object.entries(HARNESS_TO_TOOL_ID).map(([harness, toolId]) => [toolId, harness]),
+)
+
+/** Backend harness token for a tool id, or null when the id is unknown here. */
+export function harnessForToolId(toolId) {
+  return TOOL_ID_TO_HARNESS[toolId] ?? null
+}
+
 // Keyed lookup for the connect card / directory.
 export const TOOL_META = Object.fromEntries(SETUP_TOOLS.map((t) => [t.id, t]))
 

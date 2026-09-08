@@ -247,6 +247,18 @@ export const useMemoryStore = defineStore('memory', () => {
     }
   }
 
+  /**
+   * FE-9501c (D8): live-insert a newly written 360 memory entry (product:memory:updated,
+   * emitted by write_memory_entry / project closeout) when this store already has that
+   * product's set loaded -- so an agent's write_memory_entry appears in the Memory
+   * Browser without the user navigating away and back. A no-op for any other loaded
+   * product (or nothing loaded yet); the next fetchMemoryEntries() picks it up fresh.
+   */
+  function handleMemoryEntryWritten(productId, entry) {
+    if (!productId || !entry?.id || loadedProductId.value !== productId) return
+    _upsertEntry(entry)
+  }
+
   function clearFilters() {
     searchText.value = ''
     selectedTags.value = []
@@ -276,6 +288,7 @@ export const useMemoryStore = defineStore('memory', () => {
     // Actions
     fetchMemoryEntries,
     searchMemoryEntries,
+    handleMemoryEntryWritten,
     clearFilters,
     // Exposed for tests / direct upsert (single write path)
     _upsertEntry,

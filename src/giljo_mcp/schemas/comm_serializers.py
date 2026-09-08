@@ -22,7 +22,20 @@ if TYPE_CHECKING:
     from giljo_mcp.models.tasks import Message
 
 
-def thread_dict(thread: CommThread) -> dict[str, Any]:
+def thread_dict(thread: CommThread, *, extra_project_ids: list[str] | None = None) -> dict[str, Any]:
+    """FE-9530: ``project_ids`` is the PLURAL view -- ``thread.project_id`` (the
+    single lifecycle-bound project, unchanged) plus any ``comm_thread_project_tags``
+    rows the caller looked up, de-duplicated with the bound project always first.
+    ``extra_project_ids`` is omitted by callers that have not (yet) fetched tags --
+    the list then degrades to exactly the single ``project_id``, so every existing
+    caller keeps working without a second query it doesn't want.
+    """
+    project_ids: list[str] = []
+    if thread.project_id:
+        project_ids.append(thread.project_id)
+    for pid in extra_project_ids or []:
+        if pid and pid not in project_ids:
+            project_ids.append(pid)
     return {
         "thread_id": thread.id,
         "chat_id": thread.taxonomy_alias,
@@ -32,6 +45,9 @@ def thread_dict(thread: CommThread) -> dict[str, Any]:
         "severity": thread.severity,
         "product_id": thread.product_id,
         "project_id": thread.project_id,
+        # FE-9530: the plural view. Always present, always a list --
+        # [] when the thread is standalone AND untagged, never null.
+        "project_ids": project_ids,
         # BE-9291: non-NULL only on a chain hub. The structural link that replaced
         # substring-searching the run_id out of ``subject``.
         "sequence_run_id": thread.sequence_run_id,

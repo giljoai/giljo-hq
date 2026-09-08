@@ -42,7 +42,9 @@ const h = vi.hoisted(() => {
     products: [leanProduct],
     activeProduct: null,
     fetchProducts: vi.fn().mockResolvedValue(undefined),
+    fetchActiveProduct: vi.fn().mockResolvedValue(true),
     fetchProductById,
+    setDefaultProduct: vi.fn().mockResolvedValue(null),
   }
   return { leanProduct, fullProduct, fetchProductById, showToast, mockStore }
 })
@@ -61,19 +63,11 @@ vi.mock('@/composables/useToast', () => ({ useToast: () => ({ showToast: h.showT
 // `:model-value="showDeletedProductsDialog"` arrives as an object, not a
 // boolean. That produced eleven invalid-prop warnings and, worse, meant any
 // assertion about those children was reading a state the component never has.
-vi.mock('@/composables/useProductActivation', async () => {
-  const { ref } = await import('vue')
-  return {
-    useProductActivation: () => ({
-      showActivationWarning: ref(false),
-      pendingActivation: ref(null),
-      currentActiveProduct: ref(null),
-      toggleProductActivation: vi.fn(),
-      confirmActivation: vi.fn(),
-      cancelActivation: vi.fn(),
-    }),
-  }
-})
+vi.mock('@/composables/useProductActivation', () => ({
+  useProductActivation: () => ({
+    toggleProductActivation: vi.fn(),
+  }),
+}))
 vi.mock('@/composables/useProductSoftDelete', async () => {
   const { ref } = await import('vue')
   return {

@@ -62,8 +62,20 @@ vi.mock('@/services/api', () => {
   return { default: svc, api: svc }
 })
 
+// FE-9564: mutable so a test can drop the viewed product and prove the
+// copy-prompt degrades to the name-only wording instead of emitting
+// product_id="undefined".
+const { productState } = vi.hoisted(() => ({
+  productState: { current: { id: 'prod-1', name: 'Test Product' } },
+}))
+
 vi.mock('@/stores/products', () => ({
   useProductStore: () => ({
+    // FE-9502c: RoadmapView's product label/indicator now reads currentProduct
+    // (the viewed tab), not the server's single activeProduct.
+    get currentProduct() {
+      return productState.current
+    },
     activeProduct: { id: 'prod-1', name: 'Test Product' },
     effectiveProductId: 'prod-1',
     fetchActiveProduct: vi.fn().mockResolvedValue(),
@@ -88,8 +100,13 @@ vi.mock('@/stores/websocketEventRouter', () => ({
   registerReconnectResync: mockRegisterResync,
 }))
 
+// FE-9553: was `showToast: vi.fn()`, a FRESH spy per useToast() call -- so the
+// spy the view called was never the spy a test could see, and no assertion
+// about a toast in this file could pass or fail for the right reason. Shared
+// hoisted spy, matching the pattern in useHubNotifications.spec.js.
+const showToastSpy = vi.hoisted(() => vi.fn())
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ showToast: vi.fn() }),
+  useToast: () => ({ showToast: showToastSpy }),
 }))
 
 vi.mock('@/composables/useTaskCrud', () => ({
@@ -102,10 +119,6 @@ vi.mock('@/composables/useTaskCrud', () => ({
     cancelTask: vi.fn(),
     saveTask: vi.fn().mockResolvedValue(),
   }),
-}))
-
-vi.mock('vue-router', () => ({
-  useRouter: () => ({ push: vi.fn() }),
 }))
 
 // Stub vuedraggable so the suite drives the move via an `update:modelValue`
@@ -171,7 +184,12 @@ beforeEach(() => {
 // Clear the stamp between every test so a persisted spinner never leaks across
 // cases (the per-test beforeEach above already gives a fresh store; this stays
 // as a belt-and-suspenders guard).
-afterEach(() => localStorage.clear())
+afterEach(() => {
+  localStorage.clear()
+  // FE-9564: restore the viewed product so no test inherits another's
+  // override -- each test owns its own setup.
+  productState.current = { id: 'prod-1', name: 'Test Product' }
+})
 
 describe('RoadmapView.vue — reorder persistence', () => {
   beforeEach(() => {
@@ -334,7 +352,7 @@ describe('RoadmapView.vue — empty / no-product states', () => {
   it('shows the no-active-product alert when GET returns 404', async () => {
     mockGet.mockRejectedValue({ response: { status: 404 } })
     const w = await mountView()
-    expect(w.text()).toContain('No active product selected')
+    expect(w.text()).toContain('No product is open')
   })
 
   it('shows the empty-roadmap state when items is empty', async () => {
@@ -364,7 +382,7 @@ describe('RoadmapView.vue — copy-prompt bridge (FE-6022c)', () => {
     expect(prompt).toContain('Build a product roadmap')
     expect(prompt).toContain('Test Product') // active product NAME embedded
     expect(prompt).toContain('host:') // env/host embedded
-    expect(prompt).toContain('update_roadmap_metadata')
+    expect(prompt).toContain('save_roadmap')
     expect(prompt).toContain('get_roadmap') // FE-6240: create now reads first so it trips agent_active
     // FE-6240: copy no longer raises the spinner — the agent's roadmap:agent_active does.
     expect(w.vm.waiting).toBe(false)
@@ -379,6 +397,43 @@ describe('RoadmapView.vue — copy-prompt bridge (FE-6022c)', () => {
     const prompt = mockWriteText.mock.calls[0][0]
     expect(prompt).toContain('Re-rank the roadmap')
     expect(prompt).toContain('get_roadmap')
+  })
+
+  // FE-9564 regression. Both roadmap tools take an optional product_id and both
+  // misbehave without it on a tenant owning more than one product: get_roadmap
+  // silently resolves to whatever product is DEFAULT, and save_roadmap refuses
+  // with PRODUCT_AMBIGUOUS. The page knows exactly which product it is showing,
+  // so the prompt must say so -- otherwise the user pastes a five-step
+  // instruction that fails on step five.
+  it('scopes BOTH roadmap calls to the viewed product id, in create and re-rank modes', async () => {
+    mockGet.mockResolvedValue({ data: { product_id: 'prod-1', roadmap: null, items: [] } })
+    const create = await mountView()
+    await create.vm.copyRoadmapPrompt()
+    const createPrompt = mockWriteText.mock.calls[0][0]
+    expect(createPrompt).toContain('get_roadmap(product_id="prod-1")')
+    expect(createPrompt).toContain('save_roadmap MCP tool with product_id="prod-1" and')
+
+    mockWriteText.mockClear()
+    mockGet.mockResolvedValue({ data: { product_id: 'prod-1', roadmap: null, items: ITEMS.map((i) => ({ ...i })) } })
+    const rerank = await mountView()
+    await rerank.vm.copyRoadmapPrompt()
+    const rerankPrompt = mockWriteText.mock.calls[0][0]
+    expect(rerankPrompt).toContain('get_roadmap(product_id="prod-1")')
+    expect(rerankPrompt).toContain('save_roadmap with product_id="prod-1" and')
+  })
+
+  it('falls back to the unscoped wording when no product is being viewed', async () => {
+    productState.current = null
+    mockGet.mockResolvedValue({ data: { product_id: 'prod-1', roadmap: null, items: [] } })
+    const w = await mountView()
+    await w.vm.copyRoadmapPrompt()
+    const prompt = mockWriteText.mock.calls[0][0]
+    // No id to give, so no half-written argument -- and never the string
+    // "undefined", which is what a naive interpolation would emit.
+    expect(prompt).toContain('Call get_roadmap first')
+    expect(prompt).toContain('save_roadmap MCP tool with')
+    expect(prompt).not.toContain('product_id=')
+    expect(prompt).not.toContain('undefined')
   })
 
   it('does NOT set the waiting indicator when the clipboard copy fails', async () => {
@@ -541,6 +596,43 @@ describe('RoadmapView.vue — WS live refresh + indicator (FE-6022c)', () => {
     expect(w.vm.waiting).toBe(false)
   })
 
+  // D3 (Headless S3a): a project staged/launched entirely via the MCP harness
+  // (no dashboard tab open) never emitted project_update, so the roadmap card's
+  // status badge went stale until the user navigated away and back.
+  it('subscribes to project:staging_complete on mount', async () => {
+    await mountView()
+    expect(mockWsOn).toHaveBeenCalledWith('project:staging_complete', expect.any(Function))
+    expect(typeof wsHandlers['project:staging_complete']).toBe('function')
+  })
+
+  it('subscribes to project:implementation_launched on mount', async () => {
+    await mountView()
+    expect(mockWsOn).toHaveBeenCalledWith('project:implementation_launched', expect.any(Function))
+    expect(typeof wsHandlers['project:implementation_launched']).toBe('function')
+  })
+
+  it('a project:staging_complete event re-fetches (debounced)', async () => {
+    await mountView()
+    mockGet.mockClear()
+    vi.useFakeTimers()
+    wsHandlers['project:staging_complete']({ project_id: 'pa' })
+    vi.advanceTimersByTime(600)
+    vi.useRealTimers()
+    await flushPromises()
+    expect(mockGet).toHaveBeenCalledTimes(1)
+  })
+
+  it('a project:implementation_launched event re-fetches (debounced)', async () => {
+    await mountView()
+    mockGet.mockClear()
+    vi.useFakeTimers()
+    wsHandlers['project:implementation_launched']({ project_id: 'pa' })
+    vi.advanceTimersByTime(600)
+    vi.useRealTimers()
+    await flushPromises()
+    expect(mockGet).toHaveBeenCalledTimes(1)
+  })
+
   it('defers a WS re-fetch while a reorder PATCH is in flight (isPersisting guard)', async () => {
     const w = await mountView()
     mockGet.mockClear()
@@ -685,22 +777,18 @@ describe('RoadmapView.vue — project status-sync from external deactivation', (
     expect(w.vm.items).toBeDefined()
   })
 
-  it('happy-path: deactivate-from-roadmap button still re-fetches after the fix', async () => {
-    // The roadmap-card deactivate button calls projectStore.deactivateProject then
-    // fetchRoadmap directly — this pre-existing path must be unaffected by the new
-    // project_update subscription. The projects mock already includes deactivateProject.
+  // FE-9568 (2026-09-02, operator ruling): the roadmap-card Deactivate button
+  // (and its RoadmapView `deactivate()` handler, which called
+  // projectStore.deactivateProject then fetchRoadmap directly) is REMOVED —
+  // /roadmap only orders work now. A project deactivated from elsewhere
+  // (Projects page, an agent) still reaches this view live via the
+  // project_update subscription pinned by the tests above; this test used to
+  // pin the OTHER path (deactivating FROM /roadmap itself), which no longer
+  // exists, so it is replaced with an absence assertion instead of deleted.
+  it('no longer exposes a deactivate() handler — that control was removed', async () => {
     const w = await mountView()
-    // Seed a fresh GET response for the re-fetch after deactivation.
-    mockGet.mockResolvedValueOnce({
-      data: { product_id: 'prod-1', roadmap: null, items: ACTIVE_ITEMS.map((i) => ({ ...i, status: 'inactive' })) },
-    })
-    const callsBefore = mockGet.mock.calls.length
-
-    await w.vm.deactivate({ project_id: 'pa' })
-    await flushPromises()
-
-    // fetchRoadmap called once more after explicit deactivate (pre-existing behaviour, unchanged).
-    expect(mockGet.mock.calls.length).toBeGreaterThan(callsBefore)
+    expect(w.vm.deactivate).toBeUndefined()
+    expect(w.vm.activate).toBeUndefined()
   })
 })
 
@@ -815,5 +903,56 @@ describe('RoadmapView.vue — waiting-spinner reconciliation (FE-9407)', () => {
     expect(mockGet).toHaveBeenCalled() // the roadmap IS re-read on reconnect
     expect(w.vm.waiting).toBe(true) // ...and the agent is still working
     expect(localStorage.getItem(STAMP_KEY)).not.toBeNull()
+  })
+
+  // ── FE-9553: fetchRoadmap is silent unless a click asked for it ───────────
+  //
+  // This is the worst of the dual-reachable cases: fetchRoadmap runs from
+  // onMounted, from a debounced WebSocket refetch when an agent renames or
+  // deactivates a project, and from four separate user actions. A toast on
+  // either background path announces somebody else's work as though the
+  // operator had just done it.
+  //
+  // Both directions are asserted deliberately. A silence test alone would
+  // pass just as happily if the guard were always off and the toast
+  // unreachable from anywhere.
+  describe('the notify opt-in (FE-9553)', () => {
+    it('says NOTHING when the mount-time load fails', async () => {
+      mockGet.mockRejectedValue(new Error('network'))
+      showToastSpy.mockClear()
+
+      await mountView()
+
+      expect(showToastSpy).not.toHaveBeenCalled()
+    })
+
+    it('says NOTHING when the WS-driven refetch fails', async () => {
+      mockGet.mockResolvedValue(roadmapResponse())
+      const w = await mountView()
+      mockGet.mockRejectedValue(new Error('network'))
+      showToastSpy.mockClear()
+
+      // The bare call is what every background path makes.
+      await w.vm.fetchRoadmap()
+      await flushPromises()
+
+      expect(showToastSpy).not.toHaveBeenCalled()
+    })
+
+    it('DOES speak up when a click asked for the refetch', async () => {
+      // The positive control. Without it the two silences above would be
+      // satisfied by a guard that is simply always off.
+      mockGet.mockResolvedValue(roadmapResponse())
+      const w = await mountView()
+      mockGet.mockRejectedValue(new Error('network'))
+      showToastSpy.mockClear()
+
+      await w.vm.fetchRoadmap({ notify: true })
+      await flushPromises()
+
+      expect(showToastSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'error' }),
+      )
+    })
   })
 })

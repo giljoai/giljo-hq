@@ -491,7 +491,6 @@ console.log('WebSocket Connection:', websocketService.getConnectionInfo())
 
 ## Related Components
 
-- `ActivationWarningDialog.vue` - Product activation warning
 - `ProductCard.vue` - Product list/grid display
 - `ProjectView.vue` - Project detail view (navigation target)
 

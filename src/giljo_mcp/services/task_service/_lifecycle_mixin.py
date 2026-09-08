@@ -90,6 +90,7 @@ class _TaskLifecycleMixin:
                         "updated_fields": ["status"],
                         "hidden": bool(getattr(task, "hidden", False)),
                         "status": task.status,
+                        "product_id": task.product_id,
                     },
                 )
             except (RuntimeError, ValueError, OSError) as ws_error:

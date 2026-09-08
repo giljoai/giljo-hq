@@ -560,6 +560,7 @@ class WebSocketManager:
                 "description": project_data.get("description"),
                 "status": project_data.get("status"),
                 "mission": project_data.get("mission"),
+                "product_id": project_data.get("product_id"),
             },
         )
 
@@ -613,114 +614,7 @@ class WebSocketManager:
             self.disconnect(client_id)
             logger.info(f"Removed inactive connection: {client_id}")
 
-    async def broadcast_agent_update(
-        self,
-        agent_id: str,
-        agent_name: str,
-        project_id: str,
-        tenant_key: str,
-        status: str,
-        context_usage: int,
-        context_delta: int | None = None,
-        current_task: str | None = None,
-        progress_percentage: int | None = None,
-        meta_data: dict | None = None,
-        block_reason: str | None = None,  # Handover 0491: Replaced failure_reason
-    ):
-        """Broadcast real-time status updates during agent execution."""
-        data: dict[str, Any] = {
-            "agent_id": agent_id,
-            "agent_name": agent_name,
-            "project_id": project_id,
-            "tenant_key": tenant_key,
-            "status": status,
-            "context_usage": context_usage,
-            "context_delta": context_delta,
-            "current_task": current_task,
-            "progress_percentage": progress_percentage,
-            "meta_data": meta_data or {},
-            "update_time": datetime.now(UTC).isoformat(),
-        }
-
-        if status in ("blocked", "silent", "idle", "sleeping") and block_reason:
-            data["block_reason"] = block_reason
-
-        event = EventFactory.tenant_envelope(
-            event_type="agent:update",
-            tenant_key=tenant_key,
-            data=data,
-            schema_version="1.0",
-        )
-
-        await self.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
-
-        await self.notify_entity_update("project", project_id, event)
-        await self.notify_entity_update("agent", f"{project_id}:{agent_name}", event)
-
-        logger.debug(f"Broadcast agent:update - {agent_name} (status: {status}, context: {context_usage})")
-
     # Agent Job Event Broadcasts (Handover 0019, 0286, 0362)
-
-    async def broadcast_job_created(
-        self,
-        job_id: str,
-        agent_display_name: str,
-        tenant_key: str,
-        spawned_by: str | None = None,
-        mission_preview: str | None = None,
-        created_at: datetime | None = None,
-        project_id: str | None = None,
-        agent_name: str | None = None,
-        status: str = "waiting",
-        execution_id: str | None = None,  # Handover 0457: Unique row ID for frontend Map key
-        agent_id: str | None = None,  # Handover 0457: Executor UUID
-    ):
-        """Broadcast agent job creation events."""
-        created_ts = (created_at or datetime.now(UTC)).isoformat()
-
-        job_event = EventFactory.tenant_envelope(
-            event_type="agent_job:created",
-            tenant_key=tenant_key,
-            data={
-                "tenant_key": tenant_key,
-                "job_id": job_id,
-                "agent_display_name": agent_display_name,
-                "spawned_by": spawned_by,
-                "mission_preview": mission_preview,
-                "created_at": created_ts,
-                "project_id": project_id,
-                "agent_name": agent_name,
-                "status": status,
-                "execution_id": execution_id,  # Handover 0457
-                "agent_id": agent_id,  # Handover 0457
-            },
-            schema_version="1.0",
-        )
-
-        await self.broadcast_event_to_tenant(tenant_key=tenant_key, event=job_event)
-
-        if project_id:
-            agent_event = EventFactory.tenant_envelope(
-                event_type="agent:created",
-                tenant_key=tenant_key,
-                data={
-                    "tenant_key": tenant_key,
-                    "project_id": project_id,
-                    "execution_id": execution_id,  # Handover 0457: Unique row ID for frontend Map key
-                    "agent_id": agent_id,  # Handover 0457: Executor UUID
-                    "job_id": job_id,
-                    "agent_display_name": agent_display_name,
-                    "agent_name": agent_name,
-                    "status": status,
-                },
-                schema_version="1.0",
-            )
-
-            await self.broadcast_event_to_tenant(tenant_key=tenant_key, event=agent_event)
-
-        logger.info(
-            f"Broadcast agent_job:created - {job_id} (type: {agent_display_name}, spawned_by: {spawned_by}, project_id: {project_id})"
-        )
 
     async def broadcast_job_status_update(
         self,
@@ -729,9 +623,11 @@ class WebSocketManager:
         tenant_key: str,
         old_status: str,
         new_status: str,
+        *,
         updated_at: datetime | None = None,
         duration_seconds: float | None = None,
         project_id: str | None = None,
+        product_id: str | None = None,  # BE-9518
     ):
         """Broadcast agent job status change event.
 
@@ -753,6 +649,8 @@ class WebSocketManager:
         if project_id is not None:
             message_data["project_id"] = project_id
 
+        if product_id is not None:
+            message_data["product_id"] = product_id
         if duration_seconds is not None:
             message_data["duration_seconds"] = duration_seconds
 
@@ -772,72 +670,7 @@ class WebSocketManager:
     # were removed with the bus hard-removal. The Hub (post_to_thread) is
     # deliberately poll-based and has no WebSocket event of its own.
 
-    # Agent Health Monitoring Events (Handover 0106)
-
-    async def broadcast_health_alert(
-        self,
-        tenant_key: str,
-        job_id: str,
-        agent_display_name: str,
-        health_status: Any,
-    ):
-        """Broadcast agent health alert."""
-        message_data: dict[str, Any] = {
-            "tenant_key": tenant_key,
-            "job_id": job_id,
-            "agent_display_name": agent_display_name,
-            "health_state": health_status.health_state,
-            "issue_description": health_status.issue_description,
-            "minutes_since_update": health_status.minutes_since_update,
-            "recommended_action": health_status.recommended_action,
-            "execution_id": health_status.execution_id,
-            "project_id": health_status.project_id,
-            "project_name": health_status.project_name,
-        }
-
-        event = EventFactory.tenant_envelope(
-            event_type="agent:health_alert",
-            tenant_key=tenant_key,
-            data=message_data,
-            schema_version="1.0",
-        )
-
-        await self.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
-
-        logger.warning(
-            "broadcast_health_alert job_id=%s health_state=%s minutes_since_update=%s",
-            job_id,
-            health_status.health_state,
-            round(health_status.minutes_since_update, 1),
-        )
-
-    async def broadcast_agent_auto_failed(
-        self,
-        tenant_key: str,
-        job_id: str,
-        agent_display_name: str,
-        reason: str,
-    ):
-        """Broadcast agent auto-fail event."""
-        message_data: dict[str, Any] = {
-            "tenant_key": tenant_key,
-            "job_id": job_id,
-            "agent_display_name": agent_display_name,
-            "reason": reason,
-            "auto_failed": True,
-        }
-
-        event = EventFactory.tenant_envelope(
-            event_type="agent:auto_failed",
-            tenant_key=tenant_key,
-            data=message_data,
-            schema_version="1.0",
-        )
-
-        await self.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
-
-        logger.error(
-            "broadcast_auto_failed job_id=%s reason=%s",
-            job_id,
-            reason,
-        )
+    # Agent Health Monitoring Events (Handover 0106): broadcast_health_alert /
+    # broadcast_agent_auto_failed extracted to agent_health_ws_broadcast.py
+    # (BE-9518, file-size compliance) -- monitoring/agent_health_monitor.py is
+    # the sole caller and now imports them as module-level functions.

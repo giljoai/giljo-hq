@@ -97,6 +97,9 @@ class OrchestratorFixtureMixin:
                     event_type="agent:created",
                     data={
                         "project_id": project.id,
+                        # BE-9525c: additive -- missing on this emitter (BE-9518 left
+                        # it out).
+                        "product_id": project.product_id,
                         "execution_id": execution_id,  # Handover 0457: Unique row ID for frontend Map key
                         "agent_id": agent_id,
                         "job_id": job_id,
@@ -191,12 +194,17 @@ class OrchestratorFixtureMixin:
         tenant_key: str,
         project_id: str,
         removed: list[dict],
+        product_id: str | None = None,
     ) -> None:
         """BE-6123: broadcast one agent:removed event per deleted never-run
         orchestrator row so an open dashboard drops the agent live (the frontend
         only refetches agent jobs when the active projectId changes). Mirrors the
         agent:created broadcast in _ensure_orchestrator_fixture. WS failure must
-        not fail the deactivate."""
+        not fail the deactivate.
+
+        BE-9525c: ``product_id`` is additive, threaded from the caller's
+        already-loaded project (this emitter never queries for it itself).
+        """
         if not ws_mgr or not removed:
             return
         for row in removed:
@@ -206,6 +214,7 @@ class OrchestratorFixtureMixin:
                     event_type="agent:removed",
                     data={
                         "project_id": project_id,
+                        "product_id": product_id,
                         "agent_id": row["agent_id"],
                         "execution_id": row["execution_id"],
                         "job_id": row["job_id"],

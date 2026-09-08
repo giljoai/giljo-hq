@@ -7,7 +7,8 @@
 
 Live agent instructions contradicted the server (chapters_startup taught the
 retired ``acknowledge_closeout_todo=True`` as REQUIRED; the guide and the
-start_chain_run description taught pre-BE-9035c legacy execution-mode tokens),
+the chain tool's description taught pre-BE-9035c legacy execution-mode tokens;
+BE-9554 retired start_chain_run into link_projects, so the scan anchors on that),
 so agents got no-op advice or kept writing deprecated vocabulary into the DB.
 This test is the structural fix that outlives the prose sweep: any prose
 regression becomes CI-visible.
@@ -111,4 +112,4 @@ def test_registry_scan_actually_sees_tools():
     """The registry scan must never silently pass on an empty tool list."""
     texts = _live_tool_texts()
     assert len(texts) > 20, f"Expected the full MCP tool surface, got only {sorted(texts)}"
-    assert "start_chain_run" in texts, "start_chain_run missing from the registry scan"
+    assert "link_projects" in texts, "link_projects missing from the registry scan"

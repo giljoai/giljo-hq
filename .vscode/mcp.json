@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "giljo_hq": {
+      "type": "http",
+      "url": "http://localhost:7272/mcp"
+    }
+  }
+}

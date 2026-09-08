@@ -14,6 +14,9 @@ TSK-6154: dispatch on the PlatformRegistry export-platform constants (BE-6117)
 rather than bare string literals, so the export-vocabulary lives in one place.
 """
 
+from dataclasses import dataclass, field
+from typing import Literal
+
 from giljo_mcp import branding
 from giljo_mcp.install_targets import INSTALL_PATHS, resolve_install_scope
 from giljo_mcp.platform_registry import (
@@ -22,8 +25,106 @@ from giljo_mcp.platform_registry import (
     EXPORT_CODEX_CLI,
     EXPORT_GEMINI_CLI,
     EXPORT_GENERIC,
+    EXPORT_OPENCODE,
 )
 from giljo_mcp.template_renderer import OWNERSHIP_MARKER_TOKEN
+
+
+@dataclass(frozen=True)
+class ProductBindingContext:
+    """Resolved per-repo product-binding phase for one ``giljo_setup`` call (BE-9523c).
+
+    Computed by ``bootstrap_setup`` (which has DB access via ``ProductService``)
+    and handed down to the pure instruction-string builders in this module, which
+    have none. Three phases, matching the project's phase-aware requirement:
+
+    - ``"bound"`` -- a single product was resolved (explicit ``product_id``, or
+      the tenant owns exactly one). Render the marker block.
+    - ``"zero"`` -- no product exists yet for this tenant. Legal, must not block
+      setup; render a one-line re-run hint instead of a block.
+    - ``"ambiguous"`` -- more than one product and no ``product_id`` supplied.
+      Render the product list and defer to the user; never guess.
+    """
+
+    phase: Literal["bound", "zero", "ambiguous"]
+    product_id: str = ""
+    product_name: str = ""
+    products: tuple[dict, ...] = field(default_factory=tuple)
+
+
+# BE-9523c: the per-REPO product binding, separate from the per-MACHINE PRIMER
+# above -- frozen PRIMER markers never carry this. Wording of the shared phrase
+# ("writes the binding into CLAUDE.md/AGENTS.md so this never asks again") is
+# pinned to agree with ProductAmbiguousError's rejection text (product_service.py)
+# per the BE-9523c DoD -- both lanes must sign the same sentence.
+_PRODUCT_BINDING_START = "<!-- GILJO_PRODUCT_BINDING_START -->"
+_PRODUCT_BINDING_END = "<!-- GILJO_PRODUCT_BINDING_END -->"
+
+
+def _product_binding_block(product_name: str, product_id: str) -> str:
+    return (
+        f"{_PRODUCT_BINDING_START}\n"
+        f'This repo is {branding.PRODUCT_NAME} product "{product_name}" (product_id: {product_id}).\n'
+        "Pass this product_id on every giljo_hq call.\n"
+        f"{_PRODUCT_BINDING_END}\n"
+    )
+
+
+def _product_binding_persist_step(product_name: str, product_id: str) -> str:
+    """Add-or-replace step for the per-repo binding block, mirroring the primer's marker discipline.
+
+    Written to BOTH CLAUDE.md and AGENTS.md (not just one): different clients read
+    different boot files and neither reliably reads the other, so a repo bound
+    only in one is unbound from the other's point of view.
+    """
+    return (
+        "Step Q — Bind this repository to its Giljo HQ product:\n"
+        "Add or replace ONLY the block between the markers below in this repository's "
+        "CLAUDE.md AND AGENTS.md (create either file if it does not exist; touch no "
+        "other content). This writes the binding into CLAUDE.md/AGENTS.md so this "
+        "never asks again. Re-running giljo_setup with product_id replaces this block "
+        "in place -- never append a duplicate copy.\n"
+        f"{_product_binding_block(product_name, product_id)}\n"
+    )
+
+
+def _product_binding_zero_note() -> str:
+    return (
+        "No Giljo HQ product exists yet for this tenant, so this repo was not bound to "
+        "one -- that is expected during onboarding and does not block this setup. "
+        "Re-run giljo_setup with product_id once a product exists to bind this "
+        "repository.\n\n"
+    )
+
+
+def _product_binding_ambiguous_note(products: tuple[dict, ...]) -> str:
+    lines = "\n".join(f"- {p['name']} (id={p['id']}, active={p['is_active']})" for p in products)
+    return (
+        "This tenant has multiple Giljo HQ products, so this repo was NOT bound "
+        "automatically:\n"
+        f"{lines}\n"
+        "Confirm with the user which product this repository belongs to, then re-run "
+        "giljo_setup with that product_id -- it writes the binding into CLAUDE.md/"
+        "AGENTS.md so this never asks again. A binding written to the wrong product "
+        "is worse than no binding: never guess.\n\n"
+    )
+
+
+def _build_product_binding_step(product_binding: ProductBindingContext | None) -> str:
+    """Render the phase-appropriate binding step, or '' when no context was supplied.
+
+    The '' default keeps every pre-existing ``build_setup_instructions`` caller
+    (and its tests) a byte-identical no-op.
+    """
+    if product_binding is None:
+        return ""
+    if product_binding.phase == "bound":
+        return _product_binding_persist_step(product_binding.product_name, product_binding.product_id)
+    if product_binding.phase == "zero":
+        return _product_binding_zero_note()
+    if product_binding.phase == "ambiguous":
+        return _product_binding_ambiguous_note(product_binding.products)
+    return ""  # pragma: no cover - exhaustive Literal, defensive only
 
 
 # BE-9067: the canonical "what Giljo HQ is" primer, persisted into the agent's
@@ -210,7 +311,107 @@ def _user_path(platform: str) -> str:
     return paths.get("user") or paths.get("agent_files") or paths.get("plugin_root") or "~/agents/"
 
 
-def build_setup_instructions(platform: str, download_url: str, harness: str | None = None) -> str:
+def _opencode_instructions(
+    download_url: str, harness: str | None, product_binding: ProductBindingContext | None = None
+) -> str:
+    """opencode install prose, lifted out of build_setup_instructions (BE-9501).
+
+    That dispatcher was already at its shrink-only length budget, and the repo
+    rule is EXTRACT rather than raise a cap. Lifting the newest branch keeps the
+    dispatcher a dispatcher; the other four branches stay put so this change adds
+    no churn to platforms it does not touch.
+    """
+    return (
+        "Install the GiljoAI CLI integration. This is a one-time setup.\n\n"
+        "Step 1 — Download:\n"
+        f"Download: {download_url}\n"
+        "Save the zip to a temp location (do NOT extract the whole zip into "
+        "~/.config/opencode/ yet).\n\n"
+        "Step 2 — Choose install scope:\n"
+        "Ask the user ONCE via AskUserQuestion:\n"
+        '  "What should giljo_setup install or refresh?"\n'
+        "  Options: [Both commands and agents, Commands only, Agents only]\n"
+        "Default to Both for first-time setup. Set INSTALL_COMMANDS=true for Both or "
+        "Commands only. Set INSTALL_AGENTS=true for Both or Agents only.\n\n"
+        "Step 3 — Install commands if INSTALL_COMMANDS=true:\n"
+        "Extract only the commands/ entries from the zip into "
+        "~/.config/opencode/commands/ (create if needed, overwrite existing). The "
+        "directory is PLURAL: opencode never reads ~/.config/opencode/command/, so "
+        "installing there silently does nothing. If INSTALL_COMMANDS=false, do not "
+        "touch ~/.config/opencode/commands/.\n\n"
+        "Step 4 — Install agents if INSTALL_AGENTS=true:\n"
+        f"{build_agent_install_block(EXPORT_OPENCODE, harness)}"
+        "If INSTALL_AGENTS=false, do not touch any agents directory.\n\n"
+        "Step 5 — Clean up:\n"
+        "Delete the downloaded zip.\n\n"
+        "Adapt all commands for the OS you are running on.\n\n"
+        "Step 6 — Tell the user:\n"
+        "Report exactly which scope was installed. If INSTALL_AGENTS=true, agent "
+        "templates were installed to ~/.config/opencode/agents/ as subagents — the "
+        "orchestrator delegates to them; they are not user-selectable primaries.\n"
+        "If INSTALL_COMMANDS=true, this command is now available:\n"
+        "- /giljo — create, read, and update projects and tasks (it loads the GiljoAI "
+        "guide, then acts)\n\n"
+        "Restart opencode after installing commands or agents — both are read at "
+        "startup.\n\n"
+        f"{_primer_persist_step('~/.config/opencode', 'AGENTS.md')}"
+        f"{_build_product_binding_step(product_binding)}"
+        f"{_DOWNLOAD_LINK_NOTE}"
+    )
+
+
+def _antigravity_instructions(download_url: str, product_binding: ProductBindingContext | None = None) -> str:
+    """Antigravity CLI (agy) install prose, lifted out of build_setup_instructions (BE-9523c).
+
+    That dispatcher was already at its shrink-only length budget, and the repo
+    rule is EXTRACT rather than raise a cap (precedent: BE-9501's identical
+    extraction of _opencode_instructions). Lifting this branch keeps the
+    dispatcher a dispatcher; the other branches stay put so this adds no churn
+    to platforms it does not touch.
+    """
+    return (
+        "Install the GiljoAI integration for Antigravity CLI (agy). One-time setup.\n\n"
+        "agy loads agents AND skills only from an installed plugin (never loose files).\n"
+        "The GiljoAI bundle is ONE plugin tree:\n"
+        "  plugins/giljoai/plugin.json\n"
+        "  plugins/giljoai/agents/<name>/agent.json   (nested config.customAgent)\n"
+        "  plugins/giljoai/skills/<name>/SKILL.md\n\n"
+        "Step 1 — Download:\n"
+        f"Download: {download_url}\n"
+        "Save the zip to a temp location.\n\n"
+        "Step 2 — Extract the plugin tree:\n"
+        "Extract the zip so the plugins/giljoai/ tree lands at\n"
+        "~/.gemini/config/plugins/giljoai/ (create ~/.gemini/config/plugins/ if needed).\n"
+        "Keep the nested layout — do NOT flatten agents/<name>/agent.json into loose\n"
+        "files (agy will not load them). Delete the downloaded zip.\n"
+        "Do NOT add experimental.enableAgents to any settings.json — that flag is\n"
+        "Gemini-CLI-only and is ignored by agy.\n\n"
+        "Step 3 — Validate and install the plugin:\n"
+        "  agy plugin validate ~/.gemini/config/plugins/giljoai\n"
+        "  agy plugin install ~/.gemini/config/plugins/giljoai\n"
+        "Expect 'agents : N processed' from validate before installing.\n\n"
+        "Step 4 — Connect agy to the MCP server:\n"
+        "Add the GiljoAI server to ~/.gemini/config/mcp_config.json using the snippet\n"
+        "from your GiljoAI server's Tools -> Connect page (Antigravity CLI).\n"
+        "IMPORTANT — if migrating from Gemini CLI: agy uses the `serverUrl` field, NOT\n"
+        "`url`. A leftover `url` line causes a silent failure (server lists in the UI but\n"
+        "the agent cannot use it). Delete any `url` line.\n\n"
+        "Adapt all commands for the OS you are running on.\n\n"
+        "Step 5 — Restart Antigravity (agy). The GiljoAI agents and the $giljo skill\n"
+        "are now available. To refresh agent templates later, re-run giljo_setup and\n"
+        "choose the Agents only scope.\n\n"
+        f"{_primer_persist_step('~/.gemini', 'GEMINI.md')}"
+        f"{_build_product_binding_step(product_binding)}"
+        f"{_DOWNLOAD_LINK_NOTE}"
+    )
+
+
+def build_setup_instructions(
+    platform: str,
+    download_url: str,
+    harness: str | None = None,
+    product_binding: ProductBindingContext | None = None,
+) -> str:
     """Build a natural-language prompt the LLM will execute to install GiljoAI CLI integration."""
     if platform == EXPORT_CLAUDE_CODE:
         return (
@@ -241,6 +442,7 @@ def build_setup_instructions(platform: str, download_url: str, harness: str | No
             "- /giljo — create, read, and update projects and tasks (it loads the GiljoAI guide, then acts)\n\n"
             "Restart Claude Code after installing commands or agents.\n\n"
             f"{_primer_persist_step('~/.claude', 'CLAUDE.md')}"
+            f"{_build_product_binding_step(product_binding)}"
             f"{_DOWNLOAD_LINK_NOTE}"
         )
     if platform == EXPORT_GEMINI_CLI:
@@ -290,43 +492,13 @@ def build_setup_instructions(platform: str, download_url: str, harness: str | No
             "- /giljo — create, read, and update projects and tasks (it loads the GiljoAI guide, then acts)\n\n"
             "Restart Gemini CLI after installing commands or agents.\n\n"
             f"{_primer_persist_step('~/.gemini', 'GEMINI.md')}"
+            f"{_build_product_binding_step(product_binding)}"
             f"{_DOWNLOAD_LINK_NOTE}"
         )
     if platform == EXPORT_ANTIGRAVITY_CLI:
-        return (
-            "Install the GiljoAI integration for Antigravity CLI (agy). One-time setup.\n\n"
-            "agy loads agents AND skills only from an installed plugin (never loose files).\n"
-            "The GiljoAI bundle is ONE plugin tree:\n"
-            "  plugins/giljoai/plugin.json\n"
-            "  plugins/giljoai/agents/<name>/agent.json   (nested config.customAgent)\n"
-            "  plugins/giljoai/skills/<name>/SKILL.md\n\n"
-            "Step 1 — Download:\n"
-            f"Download: {download_url}\n"
-            "Save the zip to a temp location.\n\n"
-            "Step 2 — Extract the plugin tree:\n"
-            "Extract the zip so the plugins/giljoai/ tree lands at\n"
-            "~/.gemini/config/plugins/giljoai/ (create ~/.gemini/config/plugins/ if needed).\n"
-            "Keep the nested layout — do NOT flatten agents/<name>/agent.json into loose\n"
-            "files (agy will not load them). Delete the downloaded zip.\n"
-            "Do NOT add experimental.enableAgents to any settings.json — that flag is\n"
-            "Gemini-CLI-only and is ignored by agy.\n\n"
-            "Step 3 — Validate and install the plugin:\n"
-            "  agy plugin validate ~/.gemini/config/plugins/giljoai\n"
-            "  agy plugin install ~/.gemini/config/plugins/giljoai\n"
-            "Expect 'agents : N processed' from validate before installing.\n\n"
-            "Step 4 — Connect agy to the MCP server:\n"
-            "Add the GiljoAI server to ~/.gemini/config/mcp_config.json using the snippet\n"
-            "from your GiljoAI server's Tools -> Connect page (Antigravity CLI).\n"
-            "IMPORTANT — if migrating from Gemini CLI: agy uses the `serverUrl` field, NOT\n"
-            "`url`. A leftover `url` line causes a silent failure (server lists in the UI but\n"
-            "the agent cannot use it). Delete any `url` line.\n\n"
-            "Adapt all commands for the OS you are running on.\n\n"
-            "Step 5 — Restart Antigravity (agy). The GiljoAI agents and the $giljo skill\n"
-            "are now available. To refresh agent templates later, re-run giljo_setup and\n"
-            "choose the Agents only scope.\n\n"
-            f"{_primer_persist_step('~/.gemini', 'GEMINI.md')}"
-            f"{_DOWNLOAD_LINK_NOTE}"
-        )
+        return _antigravity_instructions(download_url, product_binding)
+    if platform == EXPORT_OPENCODE:
+        return _opencode_instructions(download_url, harness, product_binding)
     if platform == EXPORT_GENERIC:
         return (
             "Your platform was not identified. To install GiljoAI agent templates\n"
@@ -340,6 +512,7 @@ def build_setup_instructions(platform: str, download_url: str, harness: str | No
             "For platform-specific setup, visit your GiljoAI server's web interface\n"
             "at Tools -> Connect.\n\n"
             f"{_primer_persist_step_generic()}"
+            f"{_build_product_binding_step(product_binding)}"
             f"{_DOWNLOAD_LINK_NOTE}"
         )
     # Fall-through default: EXPORT_CODEX_CLI ("codex_cli").
@@ -420,5 +593,6 @@ def build_setup_instructions(platform: str, download_url: str, harness: str | No
         "Restart Codex CLI. Re-run giljo_setup with the Agents only scope for agent-only refreshes; "
         "run giljo_setup again when GiljoAI skills need updating.\n\n"
         f"{_primer_persist_step('~/.codex', 'AGENTS.md')}"
+        f"{_build_product_binding_step(product_binding)}"
         f"{_DOWNLOAD_LINK_NOTE}"
     )

@@ -91,8 +91,14 @@ class DatabaseConfig:
     # pg_max_overflow are wired straight into DatabaseManager (no more psutil
     # host-RAM heuristic). pg_slot_budget is the deployment-wide connection
     # ceiling the startup sanity check compares workers x (pool+overflow) against.
-    pg_pool_size: int = 10
-    pg_max_overflow: int = 10
+    # INF-9577: sized per POOL-OPENING PROCESS, not per worker. Every process
+    # contributes pool + overflow + the broker's out-of-pool connections against
+    # the database's connection limit, so per-worker sizing must assume several
+    # processes share one database. Single-process CE (with the in-memory broker)
+    # gets 10. Pinned by
+    # tests/unit/test_inf9577_connection_budget_defaults.py.
+    pg_pool_size: int = 5
+    pg_max_overflow: int = 5
     pg_slot_budget: int = 90
 
     def get_connection_string(self, tenant_key: str | None = None) -> str:

@@ -197,10 +197,18 @@ async def _read_back(db_manager, tenant_key: str, project_id: str, execution_id:
     return project, execution
 
 
-async def _call_update_project(client, project_id: str, status: str) -> object:
-    """Invoke the agent-facing ``update_project`` @mcp.tool over the real transport."""
+async def _call_update_project(client, project_id: str, status: str, *, force: bool = False) -> object:
+    """Invoke the agent-facing ``update_project`` @mcp.tool over the real transport.
+
+    ``force=True`` (BE-9539) skips the closeout-required gate -- these seeded
+    projects never ran ``write_project_closeout``, and most of these tests pin
+    the archive-lifecycle mechanics (deactivate/terminal-status/agent-closure),
+    orthogonal to that gate.
+    """
     async with client() as mcp_session:
-        return await mcp_session.call_tool("update_project", {"project_id": project_id, "status": status})
+        return await mcp_session.call_tool(
+            "update_project", {"project_id": project_id, "status": status, "force": force}
+        )
 
 
 class TestSoloCompletionRunsTheArchiveLifecycle:
@@ -215,7 +223,7 @@ class TestSoloCompletionRunsTheArchiveLifecycle:
         project_id, execution_id = await _seed_project_with_completed_agent(db_manager, tenant_key)
 
         try:
-            result = await _call_update_project(client, project_id, "completed")
+            result = await _call_update_project(client, project_id, "completed", force=True)
 
             assert not result.is_error, f"completion must not error. content: {_content_text(result)!r}"
             payload = _payload(result)
@@ -256,7 +264,7 @@ class TestSoloCompletionRunsTheArchiveLifecycle:
         )
 
         try:
-            result = await _call_update_project(client, project_id, "completed")
+            result = await _call_update_project(client, project_id, "completed", force=True)
             assert not result.is_error, _content_text(result)
 
             project, execution = await _read_back(db_manager, tenant_key, project_id, execution_id)
@@ -279,7 +287,7 @@ class TestSoloCompletionRunsTheArchiveLifecycle:
         project_id, execution_id = await _seed_project_with_completed_agent(db_manager, tenant_key, status="inactive")
 
         try:
-            result = await _call_update_project(client, project_id, "completed")
+            result = await _call_update_project(client, project_id, "completed", force=True)
             assert not result.is_error, f"an inactive project must complete cleanly: {_content_text(result)!r}"
 
             project, execution = await _read_back(db_manager, tenant_key, project_id, execution_id)

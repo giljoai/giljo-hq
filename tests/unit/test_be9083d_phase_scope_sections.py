@@ -156,7 +156,7 @@ def test_implementation_chapter_collapses_done_staging_steps() -> None:
     assert "contract line 1 = deliverable detail 1" not in impl, "the contract slice must not re-ship"
     assert "STAGING -- ALREADY COMPLETE" in impl
     # The Hub-thread discovery + escalation seams survive the collapse (load-bearing).
-    # BE-9291 DELIBERATELY CHANGED the discovery probe from `search_threads` to the FK path.
+    # BE-9291 DELIBERATELY CHANGED the discovery probe from `list_threads` to the FK path.
     # The collapsed implementation chapter still names the ToolSearch bootstrap, so the old
     # assertion survived the collapse whether or not the discovery seam did — it could not
     # have caught the very regression this test exists to catch.

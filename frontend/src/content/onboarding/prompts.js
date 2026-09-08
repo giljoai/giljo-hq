@@ -1,4 +1,8 @@
 // Wording APPROVED as-is by the PM (2026-07-18, FE-9200 review closed).
+// FE-9569 (2026-09-03, operator ruling): D.hint replaced -- the old text
+// asked the user to "come back here when your agent reports done", which is
+// impossible (the user sits at this screen; it refreshes itself). Every
+// other line in this file is unchanged.
 // Written against the REAL update_product_context tool signature
 // (api/endpoints/mcp_tools/_context_tools.py) and the product model /
 // ProductForm tabs (Info / Setup / Tech / Arch / Testing).
@@ -23,7 +27,11 @@ export const PROMPT_META = Object.freeze({
     eyebrow: 'Existing codebase · one prompt',
     title: 'Let your agent read the repo and build the product card.',
     sub: 'Copy this into your MCP-connected CLI (Claude Code, Codex, Gemini). No vision document needed — the agent writes one.',
-    hint: 'Paste it into your connected CLI, then watch your product card fill in on the dashboard. Come back here when your agent reports done.',
+    // FE-9569 Part 2: the old copy ("...come back here when your agent
+    // reports done") was impossible -- the user sits at this screen while
+    // the agent works, and the screen refreshes ITSELF the moment the
+    // agent's proposal lands. Operator's literal replacement, 2026-09-03.
+    hint: 'Hold on while the agent is working — this screen will refresh when the agent finishes its proposal.',
   }),
   B: Object.freeze({
     eyebrow: 'New idea · guided interview',

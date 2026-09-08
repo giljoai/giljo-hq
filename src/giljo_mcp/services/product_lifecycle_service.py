@@ -9,15 +9,14 @@ ProductLifecycleService - Product lifecycle state management
 Handover 0950n: Extracted from ProductService to keep all files under 1000 lines.
 
 Responsibilities:
-- Activate / deactivate products (single-active-per-tenant rule)
+- Activate / deactivate products (FE-9524/D1: show/hide a tab; several
+  products may be shown at once, no single-active-per-tenant rule)
 - Soft delete, restore, and hard-purge products
 - Auto-purge expired soft-deleted products on startup
-- WebSocket event emission for lifecycle state changes
 """
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,8 +40,8 @@ class ProductLifecycleService:
     """
     Service for product lifecycle state transitions.
 
-    Handles activation, deactivation, soft delete, restore, hard purge,
-    and automatic expiry purge. Emits WebSocket events for state changes.
+    Handles show/hide (activate/deactivate), soft delete, restore, hard purge,
+    and automatic expiry purge.
 
     Thread Safety: Each instance is session-scoped. Do not share across requests.
     """
@@ -60,7 +59,9 @@ class ProductLifecycleService:
         Args:
             db_manager: Database manager for async database operations
             tenant_key: Tenant key for multi-tenant isolation
-            websocket_manager: Optional WebSocket manager for event emission
+            websocket_manager: Unused by this service (FE-9524 dropped its only
+                caller); kept as a constructor param so ProductService's DI
+                wiring does not need to branch per-service.
             test_session: Optional AsyncSession for tests to share the same transaction
         """
         self.db_manager = db_manager
@@ -74,49 +75,31 @@ class ProductLifecycleService:
         """Yield a tenant-scoped DB session, honoring an injected test session (shared helper, BE-8000d)."""
         return tenant_scoped_session(self.db_manager, self.tenant_key, self._test_session)
 
-    async def _emit_websocket_event(self, event_type: str, data: dict[str, Any]) -> None:
-        """
-        Emit WebSocket event to tenant clients.
-
-        Provides graceful degradation - events are emitted if a WebSocket manager
-        is available, but operations don't fail if it's absent.
-
-        Args:
-            event_type: Event type (e.g., "projects:bulk:deactivated")
-            data: Event payload data
-        """
-        if not self._websocket_manager:
-            self._logger.debug(f"No WebSocket manager available for event: {event_type}")
-            return
-
-        try:
-            event_data_with_timestamp = {
-                **data,
-                "tenant_key": self.tenant_key,
-                "timestamp": datetime.now(UTC).isoformat(),
-            }
-
-            await self._websocket_manager.broadcast_to_tenant(
-                tenant_key=self.tenant_key, event_type=event_type, data=event_data_with_timestamp
-            )
-
-            self._logger.debug(f"WebSocket event emitted: {event_type} for tenant {self.tenant_key}")
-
-        except (RuntimeError, ValueError) as e:
-            self._logger.warning(f"Failed to emit WebSocket event {event_type}: {e}", exc_info=True)
-
     async def activate_product(self, product_id: str) -> Product:
         """
-        Activate a product, deactivating all other products for the tenant.
+        Show a product as a tab (FE-9524/D1: ``activate`` == "show").
 
-        Only one product can be active at a time per tenant. Cascades project
-        and job deactivation to previously active products.
+        Several products may be shown at once -- there is no more sibling
+        deactivation, no more pausing the shown product's own projects/jobs.
+        ``idx_product_single_active_per_tenant`` is dropped (ce_0099); nothing
+        in this method enforces single-active-product any more.
+
+        FE-9529: ``ProductRepository.get_default_product``'s sole-shown-product
+        fallback resolves a default ONLY while exactly one shown product
+        exists and nothing has ``is_default`` persisted. Showing a SECOND
+        product silently erases that fallback -- a tenant who never
+        explicitly set a default would lose a working one the instant they
+        show a second product, with nothing telling them. This is the ONE
+        owning writer for "a product becomes shown" (dual-door rule -- REST
+        and any future MCP tool both land here), so the promotion belongs
+        here, not in a UI-layer caller: a caller that goes straight to this
+        endpoint must get the same guarantee the dashboard does.
 
         Args:
-            product_id: Product UUID to activate
+            product_id: Product UUID to show
 
         Returns:
-            Product ORM model after activation
+            Product ORM model after being shown
 
         Raises:
             ResourceNotFoundError: If product not found
@@ -131,54 +114,35 @@ class ProductLifecycleService:
                         message="Product not found", context={"product_id": product_id, "tenant_key": self.tenant_key}
                     )
 
-                # Deactivate all other products for tenant FIRST
-                # Must flush deactivation before activation due to unique constraint
-                products_to_deactivate = await self._repo.find_other_active_products(
-                    session, self.tenant_key, product_id
-                )
-
-                for p in products_to_deactivate:
-                    p.is_active = False
-                    p.updated_at = datetime.now(UTC)
-
-                deactivated_product_ids = []
-                if products_to_deactivate:
-                    await self._repo.flush(session)
-
-                    deactivated_product_ids = [p.id for p in products_to_deactivate]
-
-                    # Bulk deactivate projects in all deactivated products
-                    await self._repo.bulk_deactivate_projects(session, self.tenant_key, deactivated_product_ids)
-
-                    # Cascade: cancel active jobs under deactivated products
-                    await self._repo.bulk_cancel_jobs(session, self.tenant_key, deactivated_product_ids)
-                    await self._repo.flush(session)
+                # FE-9529: only the 1-shown -> 2+-shown transition can erase the
+                # fallback (0 -> 1 has nothing resolved yet to lose; already
+                # 2+ has already resolved via a real default or already lost
+                # the fallback, neither of which this call can retroactively
+                # fix). Checked BEFORE flipping is_active, and the promotion
+                # (if any) commits in the SAME transaction as the activation
+                # below -- a promotion that committed separately could half-
+                # apply if the activation then failed.
+                if not product.is_active:
+                    currently_shown = await self._repo.count_active_products(session, self.tenant_key)
+                    if currently_shown == 1:
+                        implicit_default = await self._repo.get_default_product(
+                            session, self.tenant_key, eager_load=False
+                        )
+                        if implicit_default is not None and not implicit_default.is_default:
+                            implicit_default.is_default = True
+                            implicit_default.updated_at = datetime.now(UTC)
 
                 product.is_active = True
                 product.updated_at = datetime.now(UTC)
 
                 await session.commit()
 
-                # BE-3006c: emit AFTER the commit is durable. The
-                # projects:bulk:deactivated event previously fired BEFORE this
-                # owner commit -- if the commit then failed, the dashboard showed
-                # phantom "deactivated" state for rows that rolled back.
-                if deactivated_product_ids:
-                    await self._emit_websocket_event(
-                        event_type="projects:bulk:deactivated",
-                        data={
-                            "product_ids": [str(pid) for pid in deactivated_product_ids],
-                            "timestamp": datetime.now(UTC).isoformat(),
-                        },
-                    )
                 # BE-6066 P2: no post-commit refresh. The only HTTP caller discards
                 # this return and re-hydrates via get_product(); sessions use
                 # expire_on_commit=False so the manually-set is_active/updated_at
                 # columns stay readable on the detached product. Dropping the
                 # refresh removes a redundant SELECT + 4 relation selectin loads.
-                self._logger.info(
-                    f"Activated product {sanitize(product_id)} (deactivated {len(products_to_deactivate)} others)"
-                )
+                self._logger.info(f"Showed product {sanitize(product_id)}")
 
                 # Auto-assign all active tenant templates to the newly activated product.
                 # This ensures every product starts with the full agent roster.
@@ -220,13 +184,18 @@ class ProductLifecycleService:
 
     async def deactivate_product(self, product_id: str) -> Product:
         """
-        Deactivate a product and cascade to its active projects and jobs.
+        Hide a product's tab (FE-9524/D1: ``deactivate`` == "hide").
+
+        Hidden never means inaccessible (D2) and never means paused: this no
+        longer touches the product's projects or jobs. Hiding is purely a
+        tab-strip visibility toggle -- background work continues, which is
+        the whole point of several tabs being open at once.
 
         Args:
-            product_id: Product UUID to deactivate
+            product_id: Product UUID to hide
 
         Returns:
-            Product ORM model after deactivation
+            Product ORM model after being hidden
 
         Raises:
             ResourceNotFoundError: If product not found
@@ -244,16 +213,10 @@ class ProductLifecycleService:
                 product.is_active = False
                 product.updated_at = datetime.now(UTC)
 
-                # Cascade: deactivate active projects under this product
-                await self._repo.deactivate_product_projects(session, self.tenant_key, product_id)
-
-                # Cascade: cancel active jobs under this product's projects
-                await self._repo.cancel_product_jobs(session, self.tenant_key, product_id)
-
                 await session.commit()
                 await self._repo.refresh(session, product)
 
-                self._logger.info(f"Deactivated product {sanitize(product_id)} (cascaded to projects and jobs)")
+                self._logger.info(f"Hid product {sanitize(product_id)} (projects and jobs untouched)")
 
                 return product
 
@@ -263,6 +226,89 @@ class ProductLifecycleService:
             self._logger.exception("Failed to deactivate product")
             raise BaseGiljoError(
                 message=f"Failed to deactivate product: {e!s}",
+                context={"product_id": product_id, "tenant_key": self.tenant_key},
+            ) from e
+
+    async def get_default_product(self, *, eager_load: bool = True) -> Product | None:
+        """
+        Get the tenant's DEFAULT product -- where an unscoped read resolves.
+
+        Renamed from ``get_active_product``:
+        "shown" and "default" are two different questions once several
+        products may be shown at once. See
+        ``ProductRepository.get_default_product`` for the full rationale.
+
+        Args:
+            eager_load: BE-6066 P2 — when True (default), eager-load the 4 detail
+                relations for response building. Pass False when only identity/
+                columns are needed (e.g. reading the previously-default product's id
+                during set_default_product) to skip four wasted selectin loads; the
+                caller must not then read those relations off the returned model.
+
+        Returns:
+            Product ORM model if a default is set, None otherwise (legal state)
+
+        Raises:
+            BaseGiljoError: If database operation fails
+        """
+        try:
+            async with self._get_session() as session:
+                return await self._repo.get_default_product(session, self.tenant_key, eager_load=eager_load)
+
+        except Exception as e:  # Broad catch: service boundary, wraps in BaseGiljoError
+            self._logger.exception("Failed to get default product")
+            raise BaseGiljoError(
+                message=f"Failed to get default product: {e!s}", context={"tenant_key": self.tenant_key}
+            ) from e
+
+    async def set_default_product(self, product_id: str) -> Product:
+        """
+        Set the tenant's DEFAULT product, clearing any previous one.
+
+        Independent of shown/hidden (``is_active``) -- D2 means a hidden
+        product is still a fully valid default, so this does not check or
+        touch ``is_active``. Unlike ``activate_product``, this never
+        cascades to projects or jobs; it only ever moves one boolean flag.
+
+        Args:
+            product_id: Product UUID to make the default
+
+        Returns:
+            Product ORM model after being set as default
+
+        Raises:
+            ResourceNotFoundError: If product not found
+            BaseGiljoError: If database operation fails
+        """
+        try:
+            async with self._get_session() as session:
+                product = await self._repo.get_by_id(session, self.tenant_key, product_id)
+                if not product:
+                    raise ResourceNotFoundError(
+                        message="Product not found", context={"product_id": product_id, "tenant_key": self.tenant_key}
+                    )
+
+                others = await self._repo.find_other_default_products(session, self.tenant_key, product_id)
+                for other in others:
+                    other.is_default = False
+                    other.updated_at = datetime.now(UTC)
+                if others:
+                    await self._repo.flush(session)
+
+                product.is_default = True
+                product.updated_at = datetime.now(UTC)
+
+                await session.commit()
+
+                self._logger.info(f"Set default product {sanitize(product_id)}")
+                return product
+
+        except ResourceNotFoundError:
+            raise
+        except Exception as e:  # Broad catch: service boundary, wraps in BaseGiljoError
+            self._logger.exception("Failed to set default product")
+            raise BaseGiljoError(
+                message=f"Failed to set default product: {e!s}",
                 context={"product_id": product_id, "tenant_key": self.tenant_key},
             ) from e
 
@@ -291,6 +337,14 @@ class ProductLifecycleService:
 
                 product.deleted_at = datetime.now(UTC)
                 product.is_active = False
+                # FE-9524: idx_product_single_default_per_tenant has no
+                # deleted_at clause (a deleted row's default flag still
+                # counts), so a deleted default must be cleared here -- else
+                # it permanently blocks any other product from ever becoming
+                # the tenant's default (unique-index violation on the next
+                # set_default_product call, even though reads already
+                # tolerate "no default" via the deleted_at IS NULL filter).
+                product.is_default = False
                 product.updated_at = datetime.now(UTC)
 
                 await session.commit()

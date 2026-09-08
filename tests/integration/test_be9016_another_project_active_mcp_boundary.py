@@ -5,27 +5,36 @@
 
 """BE-9016 (Sentry GILJOAI-BACKEND-A) — MCP-transport boundary regression test.
 
-Symptom: ``update_project_metadata`` let ``status='active'`` through directly
-(unlike the deliberate ``activate_project`` lifecycle path, which deactivates
-the sibling first) and committed blind, so a second activation attempt for the
-same product raised a raw ``IntegrityError`` -- "duplicate key value violates
+Symptom (original, pre-BE-9525b): ``update_project_metadata`` let
+``status='active'`` through directly (unlike the deliberate
+``activate_project`` lifecycle path, which used to deactivate the sibling
+first) and committed blind, so a second activation attempt for the same
+product raised a raw ``IntegrityError`` -- "duplicate key value violates
 unique constraint 'idx_project_single_active_per_product'" -- straight out to
 Sentry as an unhandled 500.
 
-Fix (approach a, chosen): ``_mutation_mixin.update_project`` now catches this
-specific constraint at commit and raises a clean ``AlreadyExistsError``
-(``error_code="ANOTHER_PROJECT_ACTIVE"``); ``update_project_metadata_for_mcp``
-(the MCP-facing adapter) catches that specific rejection and returns it as a
-BE-6081 Tier-2 structured ``{"success": False, "error": "ANOTHER_PROJECT_ACTIVE"}``
-dict instead of letting it raise to isError. Catching at commit (not just a
-pre-check) also covers the race of two agents activating different projects
-for the same product at once.
+Fix (approach a, chosen at the time): ``_mutation_mixin.update_project``
+caught this specific constraint at commit and raised a clean
+``AlreadyExistsError`` (``error_code="ANOTHER_PROJECT_ACTIVE"``);
+``update_project_metadata_for_mcp`` (the MCP-facing adapter) caught that
+specific rejection and returned it as a BE-6081 Tier-2 structured
+``{"success": False, "error": "ANOTHER_PROJECT_ACTIVE"}`` dict instead of
+letting it raise to isError.
+
+BE-9525b (ruling 5 amended, 2026-08-28) retires the invariant this test
+pinned: ``idx_project_single_active_per_product`` is dropped, so a
+PARKED-source activation (IMP-9258's two-way door, which deliberately keeps
+using this plain write, not ``ProjectLifecycleService.activate_project``) no
+longer collides with an already-ACTIVE sibling at all -- it simply succeeds,
+same as every other activation path under the amendment. The catch in
+``_mutation_mixin.py`` is left in place (unreachable-but-harmless, see its own
+comment) rather than deleted here; this test is re-baselined to assert the
+new truth -- both projects end up ACTIVE -- instead of the retired rejection.
 
 Transport: drives the REAL ``@mcp.tool`` transport via
 ``create_connected_server_and_client_session`` (mirrors
 ``tests/integration/test_list_projects_date_filter_mcp_boundary.py`` /
-``test_be6081_mcp_boundary_contract.py``) against the real Postgres test DB so
-the actual partial unique index fires -- no synthetic/planted error.
+``test_be6081_mcp_boundary_contract.py``) against the real Postgres test DB.
 
 Parallel-safe: each test generates a fresh tenant_key + explicitly cleans up
 its own rows in a ``finally`` block (mirrors
@@ -108,9 +117,13 @@ async def another_project_active_client(db_manager, monkeypatch):
 
 
 async def _seed_active_product_with_two_projects(db_manager, tenant_key: str) -> tuple[str, str, str]:
-    """Commit a real active product + one ACTIVE project + one INACTIVE project.
+    """Commit a real active product + one ACTIVE project + one PARKED project.
 
-    Returns (product_id, active_project_id, inactive_project_id).
+    PARKED is IMP-9258's two-way door, which deliberately keeps the plain
+    write (``update_project_metadata``) rather than routing through
+    ``ProjectLifecycleService.activate_project``.
+
+    Returns (product_id, active_project_id, parked_project_id).
     """
     product_id = str(uuid4())
     active_project_id = str(uuid4())
@@ -148,7 +161,7 @@ async def _seed_active_product_with_two_projects(db_manager, tenant_key: str) ->
                 name="Second project",
                 description="the one we try to activate",
                 mission="try to become active too",
-                status="inactive",
+                status="parked",
                 staging_status="staging_complete",
                 series_number=random.randint(9001, 9999),
             )
@@ -166,9 +179,10 @@ async def _cleanup(db_manager, tenant_key: str) -> None:
 
 
 class TestAnotherProjectActiveMcpBoundary:
-    async def test_activating_second_project_returns_structured_rejection_not_iserror(
-        self, another_project_active_client, db_manager
-    ):
+    async def test_activating_second_project_succeeds_both_active(self, another_project_active_client, db_manager):
+        """BE-9525b (ruling 5 amended): N active projects per product is legal,
+        including through IMP-9258's PARKED-source plain-write path -- the
+        ANOTHER_PROJECT_ACTIVE rejection this test used to pin is retired."""
         client, tenant_key = another_project_active_client
         _product_id, active_project_id, inactive_project_id = await _seed_active_product_with_two_projects(
             db_manager, tenant_key
@@ -184,32 +198,20 @@ class TestAnotherProjectActiveMcpBoundary:
                     {"project_id": inactive_project_id, "status": "active"},
                 )
 
-            # BE-6081 Tier 2: a deliberate, agent-actionable domain rejection must
-            # flow through as normal content, NOT isError (this is the exact
-            # symptom fixed -- pre-fix this was a raw IntegrityError -> isError).
-            assert not result.is_error, (
-                "ANOTHER_PROJECT_ACTIVE must be a structured Tier-2 rejection, "
-                f"not isError. content: {_content_text(result)!r}"
-            )
-
+            assert not result.is_error, f"expected a clean success, got: {_content_text(result)!r}"
             payload = _payload(result)
-            assert payload.get("success") is False, f"Expected success==False, got: {payload!r}"
-            assert payload.get("error") == "ANOTHER_PROJECT_ACTIVE", (
-                f"Expected ANOTHER_PROJECT_ACTIVE, got: {payload!r}"
-            )
-            assert "already active" in payload.get("message", "").lower()
+            assert payload.get("success", True) is not False, f"expected success, got: {payload!r}"
 
             # No raw driver/constraint internals leaked to the agent.
             wire_text = _content_text(result)
             assert "idx_project_single_active_per_product" not in wire_text
             assert "IntegrityError" not in wire_text
 
-            # DB state unchanged: verify via a FRESH session/connection (the
-            # session that hit the constraint was rolled back and closed).
+            # DB state: verify via a FRESH session/connection.
             async with db_manager.get_session_async(tenant_key=tenant_key) as verify:
                 active = (await verify.execute(select(Project).where(Project.id == active_project_id))).scalar_one()
                 second = (await verify.execute(select(Project).where(Project.id == inactive_project_id))).scalar_one()
             assert active.status == "active", "the pre-existing active project must be untouched"
-            assert second.status == "inactive", "the rejected activation must not have persisted"
+            assert second.status == "active", "ruling 5 amended: the second activation must persist ACTIVE too"
         finally:
             await _cleanup(db_manager, tenant_key)

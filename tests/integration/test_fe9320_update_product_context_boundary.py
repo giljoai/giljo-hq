@@ -3,7 +3,7 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-9320 — the update_product_context / get_vision_doc changes tested AT the MCP
+"""FE-9320 — the update_product_context / get_vision_document changes tested AT the MCP
 boundary, through the real transport.
 
 Two of FE-9320's changes live in the ``@mcp.tool`` wrapper, not the service:

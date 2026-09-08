@@ -20,6 +20,9 @@ const {
   getProjectStateMock,
   registerResyncMock,
   isReviewedMock,
+  retiredRunNoticeBridge,
+  clearRetiredRunNoticeMock,
+  showToastMock,
 } = vi.hoisted(() => ({
   routeMock: { query: {} },
   fetchRunMock: vi.fn(),
@@ -29,20 +32,47 @@ const {
   registerResyncMock: vi.fn(() => vi.fn()),
   // Defaults to "not reviewed" so completed members show needsReview=true by default.
   isReviewedMock: vi.fn(() => false),
+  // BE-9540: a plain holder (no vue import -- vi.hoisted runs before this file's
+  // own imports resolve) populated with the REAL vue ref() below, inside the
+  // vi.mock factory, which runs lazily after 'vue' has resolved. The test body
+  // mutates `retiredRunNoticeBridge.ref.value` directly to fire the watcher.
+  retiredRunNoticeBridge: {},
+  clearRetiredRunNoticeMock: vi.fn(),
+  showToastMock: vi.fn(),
+}))
+
+const addNotificationMock = vi.hoisted(() => vi.fn())
+vi.mock('@/stores/notifications', () => ({
+  useNotificationStore: () => ({ addNotification: addNotificationMock }),
 }))
 
 vi.mock('vue-router', () => ({
   useRoute: () => routeMock,
 }))
 
-vi.mock('@/stores/sequenceRunStore', () => ({
-  useSequenceRunStore: () => ({
-    fetchRun: fetchRunMock,
-    activeRun: ref(null),
-    isReviewed: isReviewedMock,
-    markReviewed: vi.fn(),
-  }),
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({ showToast: showToastMock }),
 }))
+
+vi.mock('@/stores/sequenceRunStore', () => {
+  const notice = ref(null)
+  retiredRunNoticeBridge.ref = notice
+  return {
+    useSequenceRunStore: () => ({
+      fetchRun: fetchRunMock,
+      activeRun: ref(null),
+      // Mirrors pinia's auto-unwrap of a setup-store ref: each access reads the
+      // CURRENT value, so a later `retiredRunNoticeBridge.ref.value = X` from the
+      // test is visible to any watcher already reading this getter.
+      get retiredRunNotice() {
+        return notice.value
+      },
+      clearRetiredRunNotice: clearRetiredRunNoticeMock,
+      isReviewed: isReviewedMock,
+      markReviewed: vi.fn(),
+    }),
+  }
+})
 
 vi.mock('@/stores/projectStateStore', () => ({
   useProjectStateStore: () => ({
@@ -112,6 +142,7 @@ beforeEach(() => {
   getProjectStateMock.mockReturnValue(null)
   registerResyncMock.mockReturnValue(vi.fn())
   isReviewedMock.mockReturnValue(false) // default: not reviewed
+  retiredRunNoticeBridge.ref.value = null
 })
 
 describe('useChainContext — null contract (deletion test)', () => {
@@ -157,6 +188,56 @@ describe('useChainContext — null contract (deletion test)', () => {
     await flushPromises()
     expect(ctx.run.value).not.toBeNull()
     expect(ctx.projects.value.map((p) => p.id)).toEqual(['p1', 'p3'])
+  })
+
+  // BE-9540: the run vanished out from under an OPEN chain view -- the incident
+  // this closes had the operator's dashboard sitting on a Review card for a run
+  // the headless path had just PURGED. The store detects this (retiredRunNotice)
+  // and this composable must meet it with a designed terminal state, not leave a
+  // stale run.value pointing at a row that no longer exists (which is what would
+  // let a later click storm more 404s against it).
+  // FE-9553: was 'degrades to solo and toasts...'. The degradation claim is
+  // unchanged and still the important half; only the SURFACE moved. This fires
+  // from a watch on a store notice fed by a live event -- the chain finished on
+  // its own and nobody clicked -- so by ruling 6 it is not the toast's to
+  // carry, and being informational rather than actionable it belongs in the
+  // bell. Asserting the bell row rather than deleting the
+  // assertion, so "the operator is still told" stays pinned.
+  it('degrades to solo and records a bell row when the OPEN run is retired mid-view (BE-9540)', async () => {
+    setup()
+    await ctx.loadRun('run-1')
+    await flushPromises()
+    expect(ctx.chainCtx.value).not.toBeNull() // sanity: the chain view is genuinely open
+
+    retiredRunNoticeBridge.ref.value = { runId: 'run-1' }
+    await flushPromises()
+
+    expect(ctx.run.value).toBeNull()
+    expect(ctx.chainCtx.value).toBeNull()
+    expect(ctx.projects.value).toHaveLength(0)
+    expect(showToastMock).not.toHaveBeenCalled()
+    expect(addNotificationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'chain-retired:run-1', severity: 'info' }),
+    )
+    // Acks the notice so it does not re-fire (a real event, not stale reactive state).
+    expect(clearRetiredRunNoticeMock).toHaveBeenCalled()
+  })
+
+  it('ignores a retired-run notice for a DIFFERENT run than the one open', async () => {
+    setup()
+    await ctx.loadRun('run-1')
+    await flushPromises()
+
+    retiredRunNoticeBridge.ref.value = { runId: 'some-other-run' }
+    await flushPromises()
+
+    expect(ctx.run.value).not.toBeNull()
+    expect(showToastMock).not.toHaveBeenCalled()
+    // FE-9553: and no bell row either -- the notice is for another run, so it
+    // must not reach ANY surface. Before this milestone the toast assertion
+    // carried that claim alone; now both surfaces are checked, or moving the
+    // signal would have quietly dropped the coverage.
+    expect(addNotificationMock).not.toHaveBeenCalled()
   })
 })
 

@@ -152,7 +152,7 @@ describe('useVisionAnalysis — copyPromptOnStage opt-out (FE-9320)', () => {
 
     expect(copyMock).not.toHaveBeenCalled()
     // The prompt is still published for an explicit control to copy...
-    expect(analysisPromptText.value).toContain(`get_vision_doc(product_id="${PRODUCT_ID}")`)
+    expect(analysisPromptText.value).toContain(`get_vision_document(product_id="${PRODUCT_ID}")`)
     // ...and no "clipboard blocked" fallback is armed, because nothing was blocked.
     expect(promptFallbackText.value).toBeNull()
     // Staging still did its real work.

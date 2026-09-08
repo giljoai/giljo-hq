@@ -9,7 +9,7 @@ Tests for the orchestrator check-in protocol (Handover 0904/0960, BE-6013, FE-92
 FE-9296b retired the per-project cadence slider and rewrote CH6 around the
 BE-9296a wake mechanism. The contract these tests pin:
 
-1. CH6 branches on harness wake capability: PATH A parks on await_my_turn
+1. CH6 branches on harness wake capability: PATH A parks on get_my_turn
    (wake-capable, verified Claude Code CLI), PATH B is the timed sleep loop
    (everything else; chat surfaces can never hold the wake call open).
 2. The live-value discipline survives the slider: the cadence is re-read each
@@ -38,7 +38,11 @@ class TestCh6WakeCapabilityBranch:
         ch6 = _build_ch6_auto_checkin(interval=10)
         assert "PATH A" in ch6
         assert "PATH B" in ch6
-        assert "await_my_turn" in ch6
+        # BE-9554: get_my_turn merged into get_my_turn(wait_seconds=). The guarantee
+        # is unchanged -- ch6 must teach the BLOCKING wake path. Asserted as both
+        # tokens rather than one literal: the rendered call carries agent_id between
+        # them, so a literal substring would pin formatting instead of behaviour.
+        assert "get_my_turn" in ch6 and "wait_seconds" in ch6
 
     def test_ch6_names_the_verified_wake_harness(self):
         # BE-9296a DoD item 10: the wake was OBSERVED on Claude Code CLI only —
@@ -150,7 +154,11 @@ class TestCh6ConductorVariant:
 
     def test_conductor_variant_branches_on_wake_capability_too(self):
         ch6 = _build_ch6_auto_checkin(interval=10, for_conductor=True)
-        assert "await_my_turn" in ch6
+        # BE-9554: get_my_turn merged into get_my_turn(wait_seconds=). The guarantee
+        # is unchanged -- ch6 must teach the BLOCKING wake path. Asserted as both
+        # tokens rather than one literal: the rendered call carries agent_id between
+        # them, so a literal substring would pin formatting instead of behaviour.
+        assert "get_my_turn" in ch6 and "wait_seconds" in ch6
         assert "Claude Code CLI" in ch6
 
     def test_conductor_variant_keeps_the_advance_gate_poll(self):

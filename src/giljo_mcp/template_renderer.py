@@ -480,15 +480,35 @@ def render_generic_agent(template: AgentTemplate) -> str:
 def render_gemini_agent(template: AgentTemplate) -> str:
     """Render a single AgentTemplate to Gemini CLI-compatible Markdown.
 
-    Gemini CLI uses YAML frontmatter with different schema than Claude Code:
-    - name, description, kind, model, max_turns, tools
+    Gemini CLI uses YAML frontmatter with a different schema than Claude Code:
+    - name, description, kind, model, max_turns
     - kind must be 'local' (not 'agent') — matches built-in agent format
-    - Tool names differ from Claude Code (run_shell_command not shell)
     - No color support (Gemini doesn't support agent colors)
+
+    Deliberately NOT emitted: ``tools``. Verified against the google-gemini/gemini-cli
+    ``main`` branch on 2026-09-03 (packages/core/src/agents/local-executor.ts:247-266):
+    when the frontmatter's ``tools`` key is absent, ``toolConfig`` is ``undefined`` and
+    the executor takes the ``else`` branch -- ``for (const toolName of
+    parentToolRegistry.getAllToolNames()) { registerToolByName(toolName); }`` -- so the
+    subagent inherits every parent tool, MCP servers included. A hand-maintained
+    allowlist can only narrow that, and BE-9567 found it had already silently drifted
+    to zero: entries used the pre-rename ``giljo_mcp`` alias while the live MCP server
+    is ``giljo_hq``, and one entry named a tool BE-9554 retired. Gemini CLI has no
+    registry-aware validation to catch this -- ``isValidToolName``
+    (packages/core/src/tools/tool-names.ts) checks FORM ONLY, and
+    ``registerToolByName``'s ``parentToolRegistry.getTool(toolName)`` lookup is a bare
+    ``if`` with no ``else``, so an unregistered name is silently dropped and the model
+    never learns it existed -- no error surfaces anywhere. Mirrors the reasoning
+    already recorded on ``render_opencode_agent`` below, and the BE-9563
+    slash-command precedent of routing tool access through server-side resolution
+    (or, here, platform inheritance) instead of a shipped roster that can only go
+    stale.
 
     Handover 0836a: Multi-platform agent export.
     Handover 0836d: Fixed kind (local), tool names (run_shell_command), added
-    file/search tools per Gemini CLI documentation.
+    file/search tools per Gemini CLI documentation. Superseded by BE-9567
+    (2026-09-03): the explicit tools list resolved to nothing (see above) and was
+    removed outright rather than repaired.
     """
     description = template.description or (f"Subagent for {template.role}" if template.role else "Subagent")
 
@@ -498,34 +518,50 @@ def render_gemini_agent(template: AgentTemplate) -> str:
         "kind": "local",
         "model": "inherit",
         "max_turns": 50,
-        "tools": [
-            "run_shell_command",
-            "read_file",
-            "write_file",
-            "glob",
-            "grep_search",
-            "list_directory",
-            "read_many_files",
-            "mcp_giljo_mcp_health_check",
-            "mcp_giljo_mcp_get_job_mission",
-            # BE-9012d: send_message/receive_messages (bus, retired) replaced by the
-            # Hub tool set a native-Hub worker protocol actually calls (join_thread /
-            # post_to_thread / get_thread_history — see worker_body.py).
-            "mcp_giljo_mcp_join_thread",
-            "mcp_giljo_mcp_post_to_thread",
-            "mcp_giljo_mcp_get_thread_history",
-            "mcp_giljo_mcp_report_progress",
-            "mcp_giljo_mcp_complete_job",
-            "mcp_giljo_mcp_set_agent_status",
-            "mcp_giljo_mcp_create_task",
-            "mcp_giljo_mcp_get_workflow_status",
-            "mcp_giljo_mcp_get_context",
-            "mcp_giljo_mcp_resolve_reactivation",
-            "mcp_giljo_mcp_spawn_job",
-            "mcp_giljo_mcp_get_agent_result",
-            "mcp_giljo_mcp_write_memory_entry",
-            "mcp_giljo_mcp_write_project_closeout",
-        ],
+    }
+
+    yaml_header = yaml.dump(frontmatter, default_flow_style=False, sort_keys=False).strip()
+
+    body_parts = _build_body_parts(template)
+    body_text = "\n".join(body_parts).rstrip() + "\n"
+    return f"---\n{yaml_header}\n---\n\n{body_text}"
+
+
+def render_opencode_agent(template: AgentTemplate) -> str:
+    """Render a single AgentTemplate to an opencode agent Markdown file.
+
+    opencode reads ``~/.config/opencode/agents/<name>.md`` (PLURAL -- the
+    singular ``agent/`` is never read, and installing there looks successful
+    while doing nothing). The FILENAME is the agent identifier, so the
+    frontmatter carries no ``name`` field, unlike Claude Code and Gemini.
+
+    Frontmatter verified empirically against opencode 1.18.22 on 2026-08-25 --
+    a probe agent in exactly this shape was both DISCOVERED and SPAWNED, and
+    returned its sentinel:
+
+    * ``description`` -- required. opencode advertises this to the model when it
+      decides whether to delegate, so it must read as a capability, not a title.
+    * ``mode`` -- required: ``subagent`` (delegated to), ``primary``
+      (user-selectable) or ``all``. Every Giljo role ships as ``subagent``: the
+      orchestrator delegates to them, which is the whole execution model, and a
+      primary-mode specialist would clutter the picker with roles a human never
+      drives directly.
+    * ``temperature`` -- optional, kept low for determinism, mirroring the other
+      renderers' bias toward reproducible agent behaviour.
+
+    Deliberately NOT emitted: ``model`` (inherit the session's -- a pinned model
+    would fight the user's own provider config, and opencode users commonly run
+    local gateways), ``tools``/``permission`` (opencode has no Giljo-specific
+    tool-name vocabulary to allowlist the way Gemini does, and an incomplete
+    allowlist silently disables MCP tools the worker protocol needs), and
+    ``color`` (no Claude-style palette mapping exists here).
+    """
+    description = template.description or (f"Subagent for {template.role}" if template.role else "Subagent")
+
+    frontmatter: dict[str, object] = {
+        "description": description,
+        "mode": "subagent",
+        "temperature": 0.1,
     }
 
     yaml_header = yaml.dump(frontmatter, default_flow_style=False, sort_keys=False).strip()

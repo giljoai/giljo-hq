@@ -44,22 +44,24 @@ from giljo_mcp.repositories.user_repository import UserRepository
 from giljo_mcp.schemas.comm_serializers import message_dict, thread_dict
 from giljo_mcp.services._comm_thread_baton_mixin import CommThreadBatonMixin
 from giljo_mcp.services._comm_thread_chain_hub_mixin import CommThreadChainHubMixin
+from giljo_mcp.services._comm_thread_create_binding_mixin import CommThreadCreateBindingMixin
 from giljo_mcp.services._comm_thread_edit_mixin import CommThreadEditMixin
 from giljo_mcp.services._comm_thread_liveness_mixin import (
     CommThreadLivenessMixin,
     _build_skipped_recipients_notice,
 )
+from giljo_mcp.services._comm_thread_operator_read_mixin import CommThreadOperatorReadMixin
 from giljo_mcp.services._comm_thread_softdelete_mixin import CommThreadSoftDeleteMixin
 from giljo_mcp.services._comm_thread_wake_mixin import CommThreadWakeMixin
-from giljo_mcp.services.comm_author_identity import resolve_and_register_author
+from giljo_mcp.services.comm_author_identity import resolve_and_register_author, validate_post_author_input
 from giljo_mcp.services.comm_baton_targets import (
+    broadcast_reply_should_clear_baton,
     enrol_addressee,
     post_target_rejection,
     resolve_operator_alias,
 )
 from giljo_mcp.services.comm_post_validation import resolve_loop_interval, validate_post_vocabularies
 from giljo_mcp.tenant import TenantManager
-from giljo_mcp.utils.identity import validate_from_agent
 
 
 logger = logging.getLogger(__name__)
@@ -90,6 +92,8 @@ _NARROWED_MARK_READ_NOTE = (
 
 class CommThreadService(
     CommThreadChainHubMixin,
+    CommThreadOperatorReadMixin,
+    CommThreadCreateBindingMixin,
     CommThreadSoftDeleteMixin,
     CommThreadEditMixin,
     CommThreadBatonMixin,
@@ -162,9 +166,25 @@ class CommThreadService(
 
         ``sequence_run_id`` (BE-9291) marks the thread as THE coordination hub of a
         chain run, which is how ``resolve_chain_hub_thread`` finds it later. The repo
-        verifies the run belongs to this tenant before storing it."""
+        verifies the run belongs to this tenant before storing it. It is also exempt
+        from FE-9530's mandatory product resolution ever REFUSING the create for
+        lacking a product -- the chain conductor is deliberately PROJECT-LESS and its
+        Step-0 hub-thread create must never 422 -- but BE-9537 closed the gap where
+        that exemption left the thread permanently untagged: an omitted
+        ``product_id`` is now DERIVED from the run's head project via
+        ``_resolve_create_product_id`` (never raising for this path; see that
+        method), the same as any other omitted ``product_id``.
+
+        FE-9530: "a thread MUST carry a product, unless
+        application has no product." An omitted ``product_id`` is resolved via
+        ``_resolve_create_product_id`` rather than left NULL by default.
+        """
         tk = self._resolve_tenant(tenant_key)
         async with self._scoped_session(tk) as session:
+            if not product_id:
+                product_id = await self._resolve_create_product_id(
+                    session, tk, product_id=product_id, project_id=project_id, sequence_run_id=sequence_run_id
+                )
             thread = await self._repo.create_thread(
                 session,
                 tk,
@@ -240,6 +260,12 @@ class CommThreadService(
                 "participant_type": participant.participant_type,
             }
 
+    async def _rename_before_post(self, thread_id: str, rename_to: str | None, tenant_key: str) -> None:
+        """BE-9502a: applied before the post via ``update_thread`` (the dashboard's
+        own writer), so a refused rename (project-bound thread) posts nothing."""
+        if rename_to is not None:
+            await self.update_thread(thread_id=thread_id, subject=rename_to, tenant_key=tenant_key)
+
     async def post_to_thread(
         self,
         *,
@@ -254,10 +280,12 @@ class CommThreadService(
         loop_directive: bool = False,
         loop_interval_minutes: int | None = None,
         pass_baton_to: str | None = None,
+        clear_baton_on_broadcast_reply: bool = False,
         user_id: str | None = None,
         as_user: bool = False,
         detected_harness: str | None = None,
         self_reported_status: str | None = None,
+        rename_to: str | None = None,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
         """Post a message to a thread (broadcast to all participants, or direct to
@@ -269,6 +297,8 @@ class CommThreadService(
         'none'/omitted leave it untouched (posting is never clearing). The
         auto-pass default resolves at the MCP boundary, NOT here, so the REST
         and internal callers keep prior behavior unless they pass the param.
+        BE-9560's ``clear_baton_on_broadcast_reply`` is REST-only, never set by
+        the MCP wrapper -- see ``comm_baton_targets.broadcast_reply_should_clear_baton``.
 
         BE-6054c: ``loop_directive=True`` marks the message so addressed agents get
         the "loop/sleep until this thread is resolved/closed" directive in their
@@ -282,35 +312,18 @@ class CommThreadService(
 
         BE-9475: ``self_reported_status`` is the poster's own claim about what it is
         doing, stored on its participant row and served only where ``agent_executions``
-        has nothing to say (validated by comm_post_validation.validate_post_vocabularies)."""
+        has nothing to say (validated by comm_post_validation.validate_post_vocabularies).
+        BE-9502a: ``rename_to`` -- see ``_rename_before_post``."""
         tk = self._resolve_tenant(tenant_key)
         if not content or not content.strip():
             raise ValidationError("content is required", context={"operation": "comm_thread.post"})
         validate_post_vocabularies(set_status, self_reported_status)
+        await self._rename_before_post(thread_id, rename_to, tk)
         interval_to_persist = resolve_loop_interval(loop_directive, loop_interval_minutes)
 
-        # (A) Author attribution (FE-6122 / BE-9037 / BE-9379). An agent self-declares
-        # its identity (its role/lane id) via ``from_agent`` (WINS when present); a
-        # USER post claims the human's voice EXPLICITLY via ``as_user`` — an omitted
-        # from_agent no longer falls back to the authenticated principal (that implicit
-        # fallback let a forgetful agent impersonate the operator, CHT-0483). The value
-        # feeds the FUNCTIONAL identity field (from_agent_id: recipient self-exclusion,
-        # baton/get_my_turn matching, read cursors), so it is hardened at the write
-        # boundary (validate_from_agent: type-check + length-cap + control/zero-width
-        # strip + reject-empty -> clean 422). The Hub keys on the SLUG — from_agent_id
-        # is never rewritten to a UUID (breaks self-exclusion/baton); unknown-but-sane
-        # slugs OK.
-        # RESIDUAL LIMITATION (NOT fixed here — see PR): identity is self-declared; a
-        # caller can still claim any slug because the session carries only tenant_key +
-        # user_id. Impersonation-proofing needs auth-bound agent identity, a separate
-        # effort. This guard stops garbage/corruption, not role impersonation.
-        from_agent = validate_from_agent(from_agent, max_len=_FROM_AGENT_MAX)
-        if as_user and from_agent:
-            raise ValidationError(
-                "from_agent and as_user are mutually exclusive: a post is authored by an "
-                "agent or by the human user, never both.",
-                context={"operation": "comm_thread.post"},
-            )
+        # (A) Author attribution -- see comm_author_identity.validate_post_author_input
+        # for the full rationale (BE-9560 extracted it there to make size-budget room).
+        from_agent = validate_post_author_input(from_agent, as_user, _FROM_AGENT_MAX)
 
         async with self._scoped_session(tk) as session:
             thread = await self._require_thread(session, tk, thread_id)
@@ -341,12 +354,16 @@ class CommThreadService(
             if rejection is not None:
                 return rejection
 
-            # BE-9197: atomic hand-off — written BEFORE the persist so a failed
-            # post provably rolls the baton back (the atomicity test injects one).
-            baton_passed = False
+            # BE-9197/BE-9560: hand-off or clear written BEFORE the persist (rollback-safe).
+            baton_passed = baton_cleared = False
             if pass_baton_to and pass_baton_to != "none":
                 await self._repo.set_next_action_owner(session, tk, thread_id, pass_baton_to)
                 baton_passed = True
+            elif broadcast_reply_should_clear_baton(
+                clear_baton_on_broadcast_reply, to_participant, thread.next_action_owner, user_id
+            ):
+                await self._repo.set_next_action_owner(session, tk, thread_id, None)
+                baton_cleared = True
 
             # BE-9289a: who wrote this, and register them — see comm_author_identity for
             # why the KIND is recorded here rather than inferred by any later reader.
@@ -408,6 +425,7 @@ class CommThreadService(
                 "message_id": message.id,
                 "thread_id": thread_id,
                 "recipients": recipient_ids,
+                "to_participant": to_participant,  # FE-9546: RESOLVED addressee, for the WS filter
                 "from_agent_id": from_agent_id,
                 "from_display_name": from_display_name,
                 # BE-9289a: returned so the WS broadcast can carry the SAME server-
@@ -418,8 +436,9 @@ class CommThreadService(
                 "attribution_warning": attribution_warning,
                 "loop_directive_armed": loop_directive,
                 "loop_interval_minutes": interval_to_persist,
-                # BE-9197 (additive): did THIS post move the baton + owner after.
+                # BE-9197/BE-9560 (additive): did THIS post move or clear the baton.
                 "baton_passed": baton_passed,
+                "baton_cleared": baton_cleared,
                 "next_action_owner": thread.next_action_owner,
                 # Stay-on-the-line (1CZA1D): see _post_advice_entry / POST_ADVICE.
                 **self._post_advice_entry(set_status),

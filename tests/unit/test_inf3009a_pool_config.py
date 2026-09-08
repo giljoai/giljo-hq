@@ -50,8 +50,8 @@ class TestFixedPoolDefaultsNotRamDerived:
 
     def test_default_pool_is_fixed_constant(self):
         mgr = DatabaseManager(FAKE_URL, is_async=True)
-        assert mgr.pool_size == DEFAULT_POOL_SIZE == 10
-        assert mgr.max_overflow == DEFAULT_MAX_OVERFLOW == 10
+        assert mgr.pool_size == DEFAULT_POOL_SIZE == 5
+        assert mgr.max_overflow == DEFAULT_MAX_OVERFLOW == 5
 
     def test_huge_fake_ram_has_no_effect_on_pool(self, monkeypatch):
         """Even with a host reporting 256 GB RAM, the pool stays the fixed default.
@@ -69,8 +69,8 @@ class TestFixedPoolDefaultsNotRamDerived:
         monkeypatch.setattr(psutil, "virtual_memory", _fake_virtual_memory)
 
         mgr = DatabaseManager(FAKE_URL, is_async=True)
-        assert mgr.pool_size == 10
-        assert mgr.max_overflow == 10
+        assert mgr.pool_size == 5
+        assert mgr.max_overflow == 5
 
 
 class TestExplicitConfigHonored:
@@ -88,7 +88,7 @@ class TestExplicitConfigHonored:
         mgr = DatabaseManager(FAKE_URL, is_async=True)
         assert mgr.async_engine is not None
         assert mgr.AsyncSessionLocal is not None
-        assert _pool(mgr).size() == 10
+        assert _pool(mgr).size() == 5
 
 
 class TestConfigKnobIsAuthoritative:
@@ -96,8 +96,10 @@ class TestConfigKnobIsAuthoritative:
 
     def test_new_config_fields_exist_with_defaults(self):
         cfg = DatabaseConfig()
-        assert cfg.pg_pool_size == 10
-        assert cfg.pg_max_overflow == 10
+        # INF-9577 lowered these from 10/10; the deployment arithmetic that forced it
+        # is pinned in tests/unit/test_inf9577_connection_budget_defaults.py.
+        assert cfg.pg_pool_size == 5
+        assert cfg.pg_max_overflow == 5
         assert cfg.pg_slot_budget == 90
 
     def test_env_overrides_pool_knobs(self, monkeypatch):
@@ -120,7 +122,7 @@ class TestConfigKnobIsAuthoritative:
         # fallback. Point at a nonexistent path so the bad env value falls back to
         # the dataclass default (10), deterministically on every machine + CI.
         cfg = ConfigManager(config_path=tmp_path / "nonexistent.yaml", auto_reload=False)
-        assert cfg.database.pg_pool_size == 10  # unchanged, no crash
+        assert cfg.database.pg_pool_size == 5  # unchanged, no crash
 
     def test_create_database_manager_passes_config_pool(self, monkeypatch):
         monkeypatch.setenv("DB_PASSWORD", "x")

@@ -88,6 +88,15 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
   const reviewPendingById = ref(new Map())
   const loading = ref(false)
   const error = ref(null)
+  /**
+   * BE-9540: { runId } | null. Set when handleSequenceUpdated discovers the
+   * OPEN cockpit run is genuinely gone (purged, not merely retired to a
+   * terminal status) -- an open chain view should meet this with a designed
+   * terminal state, not a raw 404 storm from further interaction with a row
+   * that no longer exists. Cleared by the consumer (useChainContext) once
+   * handled; a fresh null->{runId} transition is what the watcher fires on.
+   */
+  const retiredRunNotice = ref(null)
 
   // ----- getters -----
 
@@ -363,7 +372,14 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
         try {
           await fetchRun(runId)
         } catch {
-          /* run may be gone; leave the last-known activeRun in place */
+          // BE-9540: the run is genuinely GONE (purged at conductor-finale time),
+          // not merely retired to a terminal status fetchRun could still return.
+          // Keeping the last-known activeRun would leave the view pointing at a
+          // row that no longer exists. Clear it and raise a notice so the
+          // consumer (useChainContext) can meet this with a designed terminal
+          // state instead.
+          activeRun.value = null
+          retiredRunNotice.value = { runId }
         }
       } else {
         // Run is still active: pull the freshly-hydrated entry into activeRun.
@@ -372,6 +388,11 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
         activeRun.value = runsById.value.get(runId)
       }
     }
+  }
+
+  /** BE-9540: consumer-side ack that a retired-run notice has been handled. */
+  function clearRetiredRunNotice() {
+    retiredRunNotice.value = null
   }
 
   /**
@@ -435,6 +456,7 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     runsById,
     activeRun,
     reviewPendingById,
+    retiredRunNotice,
     loading,
     error,
     // getters
@@ -454,6 +476,7 @@ export const useSequenceRunStore = defineStore('sequenceRun', () => {
     lockRun,
     unlockRun,
     handleSequenceUpdated,
+    clearRetiredRunNotice,
     clearActiveRun,
     markReviewed,
     markReviewedRemote,

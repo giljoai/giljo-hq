@@ -524,7 +524,7 @@ function formatTokens(tokens) {
 
 // 100%-tier token estimate: backend doesn't persist a
 // consolidated_vision_full_tokens column (full depth is per-doc raw
-// concatenation built on demand by get_vision_doc). Sum the raw
+// concatenation built on demand by get_vision_document). Sum the raw
 // original_token_count of each vision doc as a meaningful approximation.
 const fullDepthTokenEstimate = computed(() => {
   const sum = props.visionDocuments.reduce(
@@ -562,7 +562,7 @@ function formatPlatform(platform) {
 async function showConsolidatedSummary(depth) {
   if (depth === 'full') {
     // 100% tier is per-doc raw text concatenated with `# {filename}`
-    // headers. Backend already exposes this via get_vision_doc; here we
+    // headers. Backend already exposes this via get_vision_document; here we
     // synthesize the same shape client-side from cached doc data so the
     // viewer dialog can render without an extra fetch round-trip when
     // possible. If raw vision_document content is not loaded yet, hydrate

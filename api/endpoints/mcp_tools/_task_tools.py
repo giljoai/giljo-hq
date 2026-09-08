@@ -18,15 +18,16 @@ from pydantic import Field
 
 from api.endpoints.mcp_tools import _base
 from api.endpoints.mcp_tools._base import (
+    CURSOR_DESC,
     MCP_DESCRIPTION_MAX,
     MCP_ID_MAX,
     MCP_NAME_MAX,
     MCP_SHORT_TEXT_MAX,
+    READ_PRODUCT_ID_DESC,
     _call_tool,
     mcp,
 )
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
-from giljo_mcp import branding
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.services.task_service._mcp_read_layer import (
     LIST_TASKS_LIMIT_DEFAULT,
@@ -37,13 +38,15 @@ from giljo_mcp.services.task_service._mcp_read_layer import (
 @mcp.tool(
     title="Create Task",
     description=(
-        "Create a new task (technical debt/TODO/bug/small fix). Pass product_id to bind it to a "
-        "specific product; omit it and the task binds to the active product, which another session "
-        "or the user can change under you. Every task is auto-tagged 'TSK' (task_type is "
-        "accepted-but-ignored); the serial auto-assigns in the TSK-nnnn form. The response names "
-        "the product the task landed on. Use create_project instead for actionable multi-step "
-        "work. See get_giljo_guide for the full task-vs-project routing recipe. "
-        f"{branding.TWO_HUB_DISAMBIGUATION}"
+        "Create a new task (technical debt/TODO/bug/small fix). PASS product_id: in a bound repo "
+        "it is already in your boot context, and get_context(categories=['products']) resolves an "
+        "unknown one. Omitting it falls back to the default product only for a single-product "
+        "tenant; a tenant that owns more than one product gets a structured PRODUCT_AMBIGUOUS "
+        "rejection instead (the product list is in the error) -- nothing is created on a bare "
+        "guess. Every task is auto-tagged 'TSK' (task_type is accepted-but-ignored); the serial "
+        "auto-assigns in the TSK-nnnn form. The response names the product the task landed on. "
+        "Use create_project instead for actionable multi-step work. See get_giljo_guide for the "
+        "full task-vs-project routing recipe."
     ),
     annotations=_tool_hints("create_task"),
 )
@@ -74,12 +77,14 @@ async def create_task(
         Field(
             max_length=MCP_ID_MAX,
             description=(
-                "Optional product UUID to bind the task to. Omit to use the active product (the "
-                "default, and what every existing caller gets). PASS IT WHEN YOU KNOW YOUR "
-                "PRODUCT: the active product is shared, mutable state -- another session or the "
-                "user switching products in the dashboard changes it mid-session, and an omitted "
-                "product_id follows that change. A product_id that does not belong to your account "
-                "is rejected and nothing is created; it never falls back to the active product."
+                "Optional product UUID to bind the task to. PASS IT WHEN YOU KNOW YOUR PRODUCT -- "
+                "a bound repo already carries it in your boot context. Omit only for a "
+                "single-product tenant, where it falls back to the default product; a tenant with "
+                "more than one product gets a structured PRODUCT_AMBIGUOUS rejection instead "
+                "(carrying the full product list) rather than a silent guess at the active one, "
+                "which is shared, mutable state another session or the user can change under you. "
+                "A product_id that does not belong to your account is rejected and nothing is "
+                "created; it never falls back to the active or default product."
             ),
         ),
     ] = "",
@@ -102,8 +107,7 @@ async def create_task(
         "fields are written. task_type is immutable ('TSK'). Pass status='completed' to complete "
         "it (stamps completed_at); pass completion_notes to append an audit note as it completes. "
         "Pass convert_to_project=true to PROMOTE the task to a project instead of editing it -- "
-        "same conversion the dashboard wizard runs, and it DELETES the task row. Tenant-scoped. "
-        f"{branding.TWO_HUB_DISAMBIGUATION}"
+        "same conversion the dashboard wizard runs, and it DELETES the task row. Tenant-scoped."
     ),
     # BE-9251: status accepts terminal values (completed/cancelled) -- see _tool_hints docstring.
     annotations=_tool_hints("update_task", destructive=True),
@@ -200,7 +204,7 @@ async def update_task(
 @mcp.tool(
     title="List Tasks",
     description=(
-        "List tasks for the active product. mode='index' (leanest: id, alias, name, status, type, "
+        "List tasks for your default product. mode='index' (leanest: id, alias, name, status, type, "
         "dates), 'summary' (default) or 'full' (all columns; description is untruncated unless "
         "memory_limit is passed). BOUNDED: at most `limit` rows and a response-size ceiling, and "
         "the response always carries `truncated` plus a `truncation` block naming which bound cut "
@@ -215,8 +219,9 @@ async def update_task(
         "find a task by a word in its title, description or TSK-nnnn alias. Every task is tagged "
         "'TSK' -- task_type accepts only 'TSK' (a harmless no-op filter) and refuses any other "
         "value rather than silently matching nothing; normally omit it. hidden is UI declutter "
-        "only (does not affect default visibility). Requires an active product. See "
-        f"get_giljo_guide for read-vs-write routing. {branding.TWO_HUB_DISAMBIGUATION}"
+        "only (does not affect default visibility). Defaults to your default product; pass "
+        "product_id to list a specific product's tasks instead. See "
+        "get_giljo_guide for read-vs-write routing."
     ),
     annotations=_tool_hints("list_tasks"),
 )
@@ -278,15 +283,14 @@ async def list_tasks(
         str,
         Field(
             max_length=MCP_SHORT_TEXT_MAX,
-            description=(
-                "Continue a previous list from where it stopped. Pass back the opaque token from "
-                "that response's truncation.next_cursor, WITH THE SAME FILTERS. Empty = start at "
-                "the first page. Keep passing the newest next_cursor until a response comes back "
-                "with truncated=false and every task will have been returned exactly once. "
-                "Changing any filter mid-walk is REFUSED rather than silently answered from the "
-                "wrong set -- restart without cursor for different filters. Changing limit or "
-                "mode mid-walk is fine."
-            ),
+            description=CURSOR_DESC,
+        ),
+    ] = "",
+    product_id: Annotated[
+        str,
+        Field(
+            max_length=MCP_ID_MAX,
+            description=READ_PRODUCT_ID_DESC.format(what="list tasks for"),
         ),
     ] = "",
     ctx: Context = None,
@@ -330,4 +334,6 @@ async def list_tasks(
         kwargs["query"] = query
     if cursor:
         kwargs["cursor"] = cursor
+    if product_id:
+        kwargs["product_id"] = product_id
     return await _call_tool(ctx, "list_tasks", kwargs)

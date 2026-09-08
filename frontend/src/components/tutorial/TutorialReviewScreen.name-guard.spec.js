@@ -14,6 +14,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { ref } from 'vue'
 
 const h = vi.hoisted(() => ({
   row: null,
@@ -21,31 +22,27 @@ const h = vi.hoisted(() => ({
   toggleProductActivation: vi.fn(async () => {}),
 }))
 
+// FE-9569: a REAL Vue ref so the component's reactive getter-based `product`
+// computed tracks it the same way it tracks the genuine store.
+const cache = ref({})
+
 vi.mock('@/stores/products', () => ({
   useProductStore: () => ({
-    fetchProductById: vi.fn(async () => h.row),
+    fetchProductById: vi.fn(async () => {
+      if (h.row) cache.value = { ...cache.value, [h.row.id]: h.row }
+      return h.row
+    }),
     fetchProducts: vi.fn(async () => []),
     updateProduct: h.updateProduct,
+    getProductById: (id) => (id ? cache.value[id] || null : null),
     activeProduct: null,
   }),
 }))
 
-vi.mock('@/composables/useProductActivation', async () => {
-  const { ref } = await import('vue')
-  return {
-    useProductActivation: () => ({
-      showActivationWarning: ref(false),
-      pendingActivation: ref(null),
-      currentActiveProduct: ref(null),
-      toggleProductActivation: h.toggleProductActivation,
-      confirmActivation: vi.fn(async () => {}),
-      cancelActivation: vi.fn(),
-    }),
-  }
-})
-
-vi.mock('@/components/products/ActivationWarningDialog.vue', () => ({
-  default: { template: '<div />' },
+vi.mock('@/composables/useProductActivation', () => ({
+  useProductActivation: () => ({
+    toggleProductActivation: h.toggleProductActivation,
+  }),
 }))
 
 import TutorialReviewScreen from './TutorialReviewScreen.vue'
@@ -74,8 +71,14 @@ const NAMELESS = { id: 'prod-1', name: '', tech_stack: {}, is_active: false }
 describe('TutorialReviewScreen — a nameless product cannot be activated (FE-9320)', () => {
   beforeEach(() => {
     h.row = NAMED
-    h.updateProduct = vi.fn(async () => ({}))
+    // Mirrors the real store's updateProduct(): write-throughs into the same
+    // reactive cache the component's `product` computed reads.
+    h.updateProduct = vi.fn(async (id, updates) => {
+      cache.value = { ...cache.value, [id]: { ...(cache.value[id] || {}), ...updates } }
+      return cache.value[id]
+    })
     h.toggleProductActivation = vi.fn(async () => {})
+    cache.value = {}
   })
 
   it('a named product activates as before — no prompt, no extra write', async () => {

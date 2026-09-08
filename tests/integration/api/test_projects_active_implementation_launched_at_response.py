@@ -8,7 +8,7 @@
 The execution_mode-lock-on-launch change (5ec00ec99 / 6a3400c57) added
 ``Project.implementation_launched_at`` and the crud.py::get_active_project handler
 reads ``proj.implementation_launched_at`` (crud.py:348) — but ``ActiveProjectDetail``
-(the model ProjectQueryService.get_active_project returns) never carried the field,
+(the model ProjectQueryService.get_active_projects returns) never carried the field,
 so the route 500'd with ``AttributeError: 'ActiveProjectDetail' object has no
 attribute 'implementation_launched_at'``.
 
@@ -48,13 +48,15 @@ class _FakeUser:
 
 class _FakeQuery:
     """Stands in for ProjectService.query — the /active handler calls
-    ``project_service.query.get_active_project()`` (crud.py:328)."""
+    ``project_service.query.get_active_projects(product_id=...)`` (crud.py)."""
 
     def __init__(self, detail: ActiveProjectDetail | None) -> None:
         self._detail = detail
+        self.last_product_id: str | None = "UNCALLED"
 
-    async def get_active_project(self) -> ActiveProjectDetail | None:
-        return self._detail
+    async def get_active_projects(self, product_id: str | None = None) -> list[ActiveProjectDetail]:
+        self.last_product_id = product_id
+        return [self._detail] if self._detail is not None else []
 
 
 class _StubProjectService:
@@ -78,7 +80,7 @@ def _build_app(stub: _StubProjectService) -> FastAPI:
 
 
 def _active_detail(launch_ts: datetime | None) -> ActiveProjectDetail:
-    """Mirror the field set ProjectQueryService.get_active_project() constructs."""
+    """Mirror the field set ProjectQueryService.get_active_projects() constructs."""
     return ActiveProjectDetail(
         id="proj-active-impl",
         alias="ACT",
@@ -105,13 +107,15 @@ async def test_active_endpoint_includes_implementation_launched_at_when_set():
 
     assert resp.status_code == 200, f"expected 200, got {resp.status_code}: {resp.text}"
     body = resp.json()
-    assert "implementation_launched_at" in body, (
+    # BE-9525a: list-shaped from day one (length <= 1 until BE-9525b).
+    assert isinstance(body, list) and len(body) == 1
+    assert "implementation_launched_at" in body[0], (
         "GET /active dropped implementation_launched_at — the ActiveProjectDetail "
         "schema regressed. Check schemas/responses/project.py::ActiveProjectDetail "
         "and services/project_query_service.py construction site."
     )
-    assert body["implementation_launched_at"] is not None
-    assert datetime.fromisoformat(body["implementation_launched_at"]) == launch_ts
+    assert body[0]["implementation_launched_at"] is not None
+    assert datetime.fromisoformat(body[0]["implementation_launched_at"]) == launch_ts
 
 
 async def test_active_endpoint_keeps_implementation_launched_at_when_null():
@@ -121,14 +125,41 @@ async def test_active_endpoint_keeps_implementation_launched_at_when_null():
 
     assert resp.status_code == 200, f"expected 200, got {resp.status_code}: {resp.text}"
     body = resp.json()
-    assert "implementation_launched_at" in body
-    assert body["implementation_launched_at"] is None
+    assert isinstance(body, list) and len(body) == 1
+    assert "implementation_launched_at" in body[0]
+    assert body[0]["implementation_launched_at"] is None
 
 
-async def test_active_endpoint_returns_null_when_no_active_project():
+async def test_active_endpoint_returns_empty_list_when_no_active_project():
     app = _build_app(_StubProjectService(None))
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/api/v1/projects/active")
 
     assert resp.status_code == 200
-    assert resp.json() is None
+    assert resp.json() == []
+
+
+async def test_active_endpoint_forwards_product_id_query_param():
+    """BE-9525a: the live cross-product bug — product_id must reach the query service.
+
+    Before this fix the handler never read a product_id param at all, so a
+    project active in product A was reported as active for every product.
+    """
+    stub = _StubProjectService(None)
+    app = _build_app(stub)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/api/v1/projects/active", params={"product_id": "prod-b"})
+
+    assert resp.status_code == 200
+    assert stub.query.last_product_id == "prod-b"
+
+
+async def test_active_endpoint_omits_product_id_when_not_given():
+    """No product_id in the query string -> the service receives None (tenant-wide fallback)."""
+    stub = _StubProjectService(None)
+    app = _build_app(stub)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/api/v1/projects/active")
+
+    assert resp.status_code == 200
+    assert stub.query.last_product_id is None

@@ -204,16 +204,28 @@ PROJECT_STATUS_META: dict[ProjectStatus, ProjectStatusMeta] = {
     # so it is lifecycle-finished -> hidden from the default agent list view and
     # skipped by 360-context fetches, and immutable -> no further generic
     # update_project() metadata writes once replaced (matches completed/cancelled).
-    # is_user_mutable_via_mcp=False: it is set through the dedicated supersede flow
-    # (REST PATCH carrying successor_project_id), never the generic MCP update tool
-    # (which cannot carry the successor pointer). color-text-muted reads as a
-    # de-emphasized / archived state and is already declared in main.scss.
+    # BE-9499b: is_user_mutable_via_mcp=True -- the MCP update_project tool now
+    # carries successor_project_id (VALID_UPDATE_STATUSES gates the raw status
+    # VALUE, not the pointer; the pointer requirement is enforced separately by
+    # ProjectService.update_project, which refuses status='superseded' with no
+    # successor -- or an ineligible one -- as SUPERSEDE_REQUIRES_SUCCESSOR before
+    # this status ever reaches the row). is_immutable stays True: "reachable FROM
+    # mcp" and "accepts further writes once superseded" are separate properties --
+    # flipping this flag does not weaken that one.
+    # FE-9508: color_token was color-text-muted, identical to INACTIVE -- the worst
+    # available collision (not-started-yet vs replaced-and-finished-forever wearing
+    # the same pill). Operator ruling 2026-08-26: use color-agent-orchestrator
+    # (tan, #d4b08a, WCAG 7.48:1). Pink was rejected (already means failure via
+    # color-status-failed); mint green was rejected (already means completed).
+    # Known/accepted trade-off: tan is also the orchestrator AGENT colour -- free
+    # among project STATUSES, which is the collision that matters. Do not invent a
+    # new palette token to avoid this.
     ProjectStatus.SUPERSEDED: ProjectStatusMeta(
         label="Superseded",
-        color_token="color-text-muted",
+        color_token="color-agent-orchestrator",
         is_lifecycle_finished=True,
         is_immutable=True,
-        is_user_mutable_via_mcp=False,
+        is_user_mutable_via_mcp=True,
     ),
     # IMP-9258: parked is a deliberate two-way door -- NOT lifecycle-finished
     # (stays visible in default project lists / list_projects, unlike

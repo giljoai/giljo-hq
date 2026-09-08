@@ -99,3 +99,55 @@
     justify-content: center;
   }
 }
+
+// ─── FE-9552: the fold strip's chevron + qty badge ─────────────────────────────
+// Shared so any future strip that needs "never stack, fold instead" (e.g.
+// FE-9553's notification-model work) reaches for the same look rather than
+// inventing its own chevron/badge treatment.
+
+@mixin unified-fold-strip {
+  display: flex;
+  align-items: stretch;
+}
+
+@mixin unified-fold-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 12px;
+  flex-shrink: 0;
+  background: var(--banner-bg);
+}
+
+@mixin unified-fold-chevron {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 6px;
+
+  &:hover {
+    opacity: 0.85;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-accent-primary);
+    outline-offset: 2px;
+  }
+}
+
+// Same pill look as the approval/lifecycle project-alias badges -- one
+// count-badge treatment across the whole strip.
+@mixin unified-fold-qty {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--color-accent-primary);
+  background: rgba(255, 255, 255, 0.08);
+}

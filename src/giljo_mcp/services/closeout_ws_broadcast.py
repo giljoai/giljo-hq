@@ -59,6 +59,7 @@ async def broadcast_agent_status_changed(
     tenant_key: str,
     project_id: str | None,
     event: AgentStatusChangeEvent,
+    product_id: str | None = None,  # BE-9518
 ) -> None:
     """Broadcast one ``agent:status_changed`` WS event for a status transition (BE-9246).
 
@@ -93,6 +94,7 @@ async def broadcast_agent_status_changed(
             data={
                 "job_id": event.job_id,
                 "project_id": project_id,
+                "product_id": product_id,
                 "agent_display_name": event.agent_display_name,
                 "agent_name": event.agent_name,
                 "old_status": event.old_status,
@@ -111,6 +113,7 @@ async def broadcast_agent_status_events(
     tenant_key: str,
     project_id: str | None,
     events: Iterable[AgentStatusChangeEvent],
+    product_id: str | None = None,  # BE-9518
 ) -> None:
     """Emit ``broadcast_agent_status_changed`` once per event (BE-9246 POST-COMMIT).
 
@@ -134,4 +137,5 @@ async def broadcast_agent_status_events(
             tenant_key=tenant_key,
             project_id=project_id,
             event=event,
+            product_id=product_id,
         )

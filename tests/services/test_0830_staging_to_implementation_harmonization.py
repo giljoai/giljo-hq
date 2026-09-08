@@ -756,7 +756,7 @@ class TestImplementationPromptGateUsesProjectFlags:
         # from the REST endpoint into the shared core (ThinClientPromptGenerator.
         # implement) + the shared gate fn (ProjectStagingService.
         # check_implementation_allowed), both called by the REST endpoint AND the
-        # implement_project MCP tool. Inspect those — that is where the logic lives.
+        # get_implementation_prompt MCP tool. Inspect those — that is where the logic lives.
         import inspect
 
         from giljo_mcp.services.project_staging_service import ProjectStagingService

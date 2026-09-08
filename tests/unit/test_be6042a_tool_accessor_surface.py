@@ -53,8 +53,9 @@ PUBLIC_TOOL_METHODS = frozenset(
         "implement_project",  # structured gate error (INF-6049b)
         "launch_implementation",  # two-door implement gate CLI door (BE-6115a)
         "start_chain_run",  # headless chain entry: creates run + mints conductor (BE-6221a)
-        # Message adapter
+        # Message adapters
         "request_approval",  # RequestApprovalInput validation before the service
+        "decide_approval",  # BE-9499d: DecideApprovalInput validation before the service
         # Agent Message Hub adapter (BE-6054b)
         "join_thread",  # maps agent_id -> participant_id + participant_type
         # Job lifecycle adapters

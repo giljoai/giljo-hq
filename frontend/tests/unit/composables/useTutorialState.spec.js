@@ -347,13 +347,52 @@ describe('useTutorialState', () => {
       expect(t.s.productId).toBe('draft-1')
     })
 
-    it('never deletes an ACTIVE product, even an empty one', async () => {
-      mockFetchProductById.mockImplementation(async () => emptyDraftRow({ is_active: true }))
+    /**
+     * FE-9566: this case used to read "never deletes an ACTIVE product, even an
+     * empty one", asserting that `emptyDraftRow({ is_active: true })` must be
+     * kept. It was written when `is_active` meant "THE active product", where an
+     * active row really was the user's. FE-9524/D1 redefined `is_active` as
+     * "shown as a tab", and ProductService.create_product sets it True for every
+     * product — so the row that assertion protected became precisely the
+     * nameless door-D draft this hatch exists to clean up, and the tour leaked a
+     * product on every abandoned run.
+     *
+     * It was amended rather than deleted because the behaviour it MEANT to
+     * protect is real and still is: never delete something that is the user's.
+     * What identifies "the user's" is the NAME, not the shown flag — a
+     * user-created product always carries one, and the only way to get a
+     * nameless row at all is the tour's own silent create. So the case is
+     * re-pointed at a named product, shown and hidden alike.
+     *
+     * Amended as a
+     * stale-invariant fix, NOT a re-baseline: the old fixture shape
+     * (is_active:false on a fresh draft) is one create_product no longer
+     * produces. See tests/integration/test_fe9566_door_d_draft_create_contract.py.
+     */
+    it.each([
+      ['shown', true],
+      ['hidden', false],
+    ])('never deletes a NAMED product, %s and empty of everything else', async (_label, isActive) => {
+      mockFetchProductById.mockImplementation(async () =>
+        emptyDraftRow({ name: 'My Real Product', is_active: isActive }),
+      )
       const t = useTutorialState()
       t.setProduct('draft-1')
 
       await expect(t.releaseAbandonedDraft()).resolves.toBe(false)
       expect(mockDeleteProduct).not.toHaveBeenCalled()
+    })
+
+    it('DOES release an untouched nameless draft that is merely SHOWN', async () => {
+      // The shape create_product actually produces since FE-9524/D1. Before
+      // FE-9566 this row was skipped and leaked; it is the whole point of the
+      // hatch that it is now collected.
+      mockFetchProductById.mockImplementation(async () => emptyDraftRow({ is_active: true }))
+      const t = useTutorialState()
+      t.setProduct('draft-1')
+
+      await expect(t.releaseAbandonedDraft()).resolves.toBe(true)
+      expect(mockDeleteProduct).toHaveBeenCalledWith('draft-1')
     })
 
     it('no-ops when the run owns no product', async () => {

@@ -40,6 +40,7 @@ from giljo_mcp.platform_registry import (
     EXPORT_CODEX_CLI,
     EXPORT_GEMINI_CLI,
     EXPORT_GENERIC,
+    EXPORT_OPENCODE,
     VALID_EXPORT_PLATFORMS,
 )
 from giljo_mcp.template_renderer import (
@@ -54,6 +55,7 @@ from giljo_mcp.template_renderer import (
     render_codex_agent,
     render_gemini_agent,
     render_generic_agent,
+    render_opencode_agent,
     render_plugin_manifest,
 )
 
@@ -149,6 +151,7 @@ class AgentTemplateAssembler:
             EXPORT_GEMINI_CLI: self._assemble_gemini,
             EXPORT_CODEX_CLI: self._assemble_codex,
             EXPORT_ANTIGRAVITY_CLI: self._assemble_antigravity,
+            EXPORT_OPENCODE: self._assemble_opencode,
             EXPORT_GENERIC: self._assemble_generic,
         }
         return dispatch[platform](templates, export_context)
@@ -321,6 +324,34 @@ class AgentTemplateAssembler:
             "agents": agents,
             "install_paths": _INSTALL_PATHS["codex_cli"],
             "toml_format_reference": CODEX_TOML_FORMAT_REFERENCE,
+            "template_count": len(agents),
+            "format_version": "1.0",
+        }
+
+    # ------------------------------------------------------------------
+    # opencode -- markdown files, filename IS the agent id (BE-9501)
+    # ------------------------------------------------------------------
+
+    def _assemble_opencode(self, templates: list[AgentTemplate], ctx: ExportContext | None = None) -> dict:
+        """Assemble opencode agent files.
+
+        Unlike Claude Code and Gemini, opencode has no ``name`` in frontmatter --
+        the FILENAME is the agent identifier -- and no colour support, so neither
+        is emitted. Install path is ``agents/`` (plural); see install_targets.
+        """
+        agents = [
+            {
+                "filename": f"{self._export_stem(t, ctx)}.md",
+                "content": self._marked(render_opencode_agent(t), t, ctx),
+                "role": t.role or "agent",
+            }
+            for t in templates
+        ]
+
+        return {
+            "platform": EXPORT_OPENCODE,
+            "agents": agents,
+            "install_paths": _INSTALL_PATHS[EXPORT_OPENCODE],
             "template_count": len(agents),
             "format_version": "1.0",
         }

@@ -50,35 +50,64 @@ async def test_guide_carries_the_consolidated_recipe_sections():
 
     guide = _payload(result)["guide"]
     # (a) project-vs-task routing, (b) chain convention, (c) Edition Scope,
-    # (d) read-vs-write + never-tenant_key + active-product, (e) lifecycle.
+    # (d) read-vs-write + never-tenant_key + product resolution, (e) lifecycle.
     assert "create_task" in guide and "create_project" in guide
     assert "TSK" in guide  # task auto-tag advertising preserved from the slash bodies
     assert "suffix" in guide and "series_number" in guide  # chain convention
     assert "Edition Scope" in guide
     assert "tenant_key" in guide  # never-pass rule
-    assert "active product" in guide.lower()
+    # BE-9543: "binds to the active product" was retired (FE-9524 Show/Hide split;
+    # BE-9523b's PRODUCT_AMBIGUOUS refusal for a multi-product tenant) -- the guide
+    # now teaches the DEFAULT-product-or-refuse model instead.
+    assert "PRODUCT_AMBIGUOUS" in guide
+    assert "default product" in guide.lower()
     assert "get_context" in guide and "list_projects" in guide and "list_tasks" in guide
 
 
 async def test_guide_carries_the_agent_message_hub_recipe():
-    """BE-6054d: the §8 Agent Message Hub recipe surfaces over the wire, names all 8
-    hub tools, and frames every operation as tenant-scoped (no cross-tenant leak)."""
+    """BE-6054d: the §8 Agent Message Hub recipe surfaces over the wire, names all NINE
+    hub tools, and frames every operation as tenant-scoped (no cross-tenant leak).
+
+    BE-9565: was "all 11", and the roster below was PADDED WITH DUPLICATES to reach it.
+    BE-9554 merged three tools away -- await_my_turn into get_my_turn(wait_seconds=),
+    search_threads into list_threads(query=), pass_baton into set_next_actor -- and its
+    sweep rewrote the retired names in this tuple to their survivors, leaving
+    ``get_my_turn`` and ``list_threads`` listed twice. Eleven entries, nine distinct
+    names, and the "Eleven tools" assertion below still passing.
+
+    So this test was HOLDING THE DEFECT IN PLACE: it asserted a false count is present
+    in customer-facing prose, and it read as coverage while doing it. Same shape as
+    BE-9554's own RETIRED_TOOL_NAMES map, whose keys that sweep rewrote into the live
+    set. A rename sweep will happily edit the test that would have caught it.
+
+    The no-duplicates assertion is the fix for the mechanism rather than the instance:
+    padding cannot recreate the illusion, because a repeated name now fails outright.
+    """
     async with create_connected_server_and_client_session(mcp) as session:
         result = await session.call_tool("get_giljo_guide", {})
 
     guide = _payload(result)["guide"]
     assert "Agent Message Hub" in guide
-    # All 8 hub tools (BE-6054b) are discoverable from the guide.
-    for tool_name in (
+    assert "Nine tools" in guide
+    # All nine hub tools are discoverable from the guide.
+    hub_tools = (
         "create_thread",
         "join_thread",
         "post_to_thread",
+        "update_thread",
         "get_my_turn",
-        "pass_baton",
+        "set_next_actor",
         "list_threads",
         "get_thread_history",
-        "search_threads",
-    ):
+        "get_participant_liveness",
+    )
+    assert len(set(hub_tools)) == len(hub_tools), (
+        f"the hub roster repeats a name: {sorted(n for n in hub_tools if hub_tools.count(n) > 1)}. "
+        "A duplicate inflates the count this test claims to verify without adding a tool -- "
+        "which is exactly how the 'Eleven tools' claim survived BE-9554 (see BE-9565)."
+    )
+    assert len(hub_tools) == 9, f"expected 9 hub tools, roster lists {len(hub_tools)}"
+    for tool_name in hub_tools:
         assert tool_name in guide, f"hub tool '{tool_name}' missing from the guide"
     # The shareable chat id + the loop directive (BE-6054c) are taught.
     assert "CHT-" in guide

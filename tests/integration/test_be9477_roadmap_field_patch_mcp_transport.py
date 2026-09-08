@@ -62,7 +62,7 @@ _FULL_ROW = {
 async def _seed_full_row(session, project_id: str) -> None:
     """Save one roadmap row carrying every metadata field (flag OFF, today's path)."""
     result = await session.call_tool(
-        "update_roadmap_metadata",
+        "save_roadmap",
         {"items": [{"item_type": "project", "project_id": project_id, **_FULL_ROW}]},
     )
     assert result.is_error is False, _error_text(result)
@@ -115,7 +115,7 @@ async def test_control_b_flag_unset_still_clears_the_omitted_fields(roadmap_mcp_
         await _seed_full_row(session, seed["project_ids"][0])
 
         moved = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {"items": [{"item_type": "project", "project_id": seed["project_ids"][0], "sort_order": 5}]},
         )
         assert moved.is_error is False, _error_text(moved)
@@ -147,7 +147,7 @@ async def test_patch_mode_keeps_the_fields_the_item_did_not_carry(roadmap_mcp_cl
         await _seed_full_row(session, seed["project_ids"][0])
 
         moved = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [{"item_type": "project", "project_id": seed["project_ids"][0], "sort_order": 5}],
                 "patch_fields": True,
@@ -176,7 +176,7 @@ async def test_explicitly_empty_field_clears_it_in_patch_mode(roadmap_mcp_client
         await _seed_full_row(session, seed["project_ids"][0])
 
         cleared = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [
                     {
@@ -214,7 +214,7 @@ async def test_omitted_and_explicitly_empty_are_different_instructions(roadmap_m
 
     async with new_client() as session:
         seeded = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [
                     {"item_type": "project", "project_id": keeper, **_FULL_ROW},
@@ -225,7 +225,7 @@ async def test_omitted_and_explicitly_empty_are_different_instructions(roadmap_m
         assert seeded.is_error is False, _error_text(seeded)
 
         patched = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [
                     {"item_type": "project", "project_id": keeper, "sort_order": 1},
@@ -259,7 +259,7 @@ async def test_patch_mode_inserts_a_new_row_with_ordinary_defaults(roadmap_mcp_c
 
     async with new_client() as session:
         created = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [{"item_type": "project", "project_id": seed["project_ids"][0], "sort_order": 7}],
                 "patch_fields": True,
@@ -301,21 +301,21 @@ async def test_block_state_and_its_note_must_be_patched_together(roadmap_mcp_cli
         await _seed_full_row(session, pid)
 
         reason_only = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [{"item_type": "project", "project_id": pid, "blocked_reason": "waiting on the auth gate"}],
                 "patch_fields": True,
             },
         )
         blocked_only = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [{"item_type": "project", "project_id": pid, "blocked": False}],
                 "patch_fields": True,
             },
         )
         together = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [
                     {
@@ -353,7 +353,7 @@ async def test_patch_mode_leaves_rows_it_was_not_sent_alone(roadmap_mcp_client, 
 
     async with new_client() as session:
         first = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [
                     {"item_type": "project", "project_id": seed["project_ids"][0], "sort_order": 0},
@@ -364,7 +364,7 @@ async def test_patch_mode_leaves_rows_it_was_not_sent_alone(roadmap_mcp_client, 
         assert first.is_error is False, _error_text(first)
 
         patched = await session.call_tool(
-            "update_roadmap_metadata",
+            "save_roadmap",
             {
                 "items": [{"item_type": "project", "project_id": seed["project_ids"][2], "sort_order": 2}],
                 "patch_fields": True,
@@ -389,7 +389,10 @@ async def test_the_wire_advertises_patch_fields_and_its_contract(roadmap_mcp_cli
     async with new_client() as session:
         listing = await session.list_tools()
 
-    tool = next(t for t in listing.tools if t.name == "update_roadmap_metadata")
+    # BE-9554 re-based: renamed to save_roadmap; the patch_fields contract moved with it.
+    # The old name survives one release as a pointer-only shim that deliberately carries
+    # no parameter prose, so the wire contract is asserted where it actually lives.
+    tool = next(t for t in listing.tools if t.name == "save_roadmap")
     schema = tool.input_schema
     assert "patch_fields" in schema["properties"], "patch_fields must be on the wire"
     assert schema["properties"]["patch_fields"].get("default") is False, "the flag must default OFF on the wire"

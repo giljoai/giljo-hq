@@ -54,6 +54,14 @@ INSTALL_PATHS: dict[str, dict[str, str]] = {
         "agent_files": "~/.codex/agents/",
         "global_config_optional": "~/.codex/config.toml",
     },
+    # BE-9501: paths verified against opencode 1.18.22 on 2026-08-25. Every
+    # directory is PLURAL -- opencode never reads the singular ``agent/`` or
+    # ``command/``, so installing there reports success and does nothing. This is
+    # not a nit: the first agent to attempt this install guessed singular.
+    "opencode": {
+        "project": ".opencode/agents/",
+        "user": "~/.config/opencode/agents/",
+    },
     "generic": {
         "project": "agents/",
         "user": "~/agents/",
@@ -69,6 +77,7 @@ _USER_INSTALL_KEY: dict[str, str] = {
     "claude_code": "user",
     "gemini_cli": "user",
     "generic": "user",
+    "opencode": "user",
     "codex_cli": "agent_files",
     "antigravity_cli": "plugin_root",
 }

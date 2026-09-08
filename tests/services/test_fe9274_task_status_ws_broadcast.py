@@ -111,6 +111,8 @@ class TestChangeStatusBroadcast:
         assert data["task_id"] == str(test_task.id)
         assert data["status"] == "in_progress"
         assert data["updated_fields"] == ["status"]
+        # BE-9518: task:updated must carry product_id like task:created already does.
+        assert data["product_id"] == test_task.product_id
 
     async def test_change_status_without_websocket_manager_does_not_raise(
         self, db_manager, db_session, test_tenant_key, test_task

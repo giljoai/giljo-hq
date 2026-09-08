@@ -20,7 +20,7 @@
       class="ma-4 main-window-reveal main-window-delay-2"
       data-test="memory-no-product"
     >
-      No active product selected. Activate a product to browse its 360 Memory.
+      No product is open. Add a product to browse its 360 Memory.
     </v-alert>
 
     <template v-else>

@@ -15,11 +15,13 @@ configuration generation.
 
 Project 0036: Cookie domain whitelist management for cross-port authentication.
 
-BE-9084: Headless-vs-HITL toggle. An account-wide boolean
-``security.allow_headless_launch`` (default False = HITL) read at the MCP launch
-gate (mcp_sdk_server._launch_gate_blocked). Admin-gated + tenant-scoped like the
-cookie-domain endpoints; the write is a read-modify-write so it never clobbers the
-sibling ``security`` keys (ssl_*, cookie_domain_whitelist, rate_limiting).
+BE-9084 / BE-9542: the account-wide setting controlling whether a connected
+agent may advance the implement gate. See the settings documentation for the
+current default. Admin-gated + tenant-scoped like the cookie-domain endpoints;
+the write is a read-modify-write so it never clobbers the sibling ``security``
+keys (ssl_*, cookie_domain_whitelist, rate_limiting), and it stamps an explicit
+marker so a deliberate write stays distinguishable from an incidental one made by
+another security writer's full-model round-trip (see ``SecuritySettingsData``).
 """
 
 import logging
@@ -120,21 +122,21 @@ class RemoveCookieDomainRequest(BaseModel):
 class HeadlessLaunchResponse(BaseModel):
     """Response model for the account-wide Headless-vs-HITL launch toggle."""
 
-    model_config = ConfigDict(json_schema_extra={"example": {"allow_headless_launch": False}})
+    model_config = ConfigDict(json_schema_extra={"example": {"allow_headless_launch": True}})
 
     allow_headless_launch: bool = Field(
-        description="True = Headless (a trusted CLI/OAuth agent may self-advance the implement gate); "
-        "False = HITL (the human Implement step is enforced). Default False."
+        description="True = Headless (a trusted CLI/OAuth agent may self-advance the implement gate) -- "
+        "the default since BE-9542; False = HITL (the human Implement step is enforced)."
     )
 
 
 class HeadlessLaunchUpdateRequest(BaseModel):
     """Request model for updating the account-wide Headless-vs-HITL launch toggle."""
 
-    model_config = ConfigDict(json_schema_extra={"example": {"allow_headless_launch": False}})
+    model_config = ConfigDict(json_schema_extra={"example": {"allow_headless_launch": True}})
 
     allow_headless_launch: bool = Field(
-        description="True to enable Headless mode (opt-in CLI self-advance); False for HITL (default)."
+        description="True for Headless (the default); False disables it, enforcing the human Implement step."
     )
 
 
@@ -273,15 +275,16 @@ async def remove_cookie_domain(
 async def get_headless_launch(
     current_user: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)
 ) -> HeadlessLaunchResponse:
-    """Get the account-wide Headless-vs-HITL launch toggle.
+    """Get the account-wide setting controlling whether a connected agent may
+    advance the implement gate.
 
-    Default False (HITL) when unset. Admin-gated + tenant-scoped: the value the MCP
-    launch gate reads for this account. Requires admin role.
+    See the settings documentation for the current default. Admin-gated and
+    tenant-scoped. Requires admin role.
     """
     logger.debug("Admin %s retrieving headless-launch toggle", sanitize(current_user.username))
 
     service = SettingsService(db, current_user.tenant_key)
-    allow = await service.get_setting_value("security", "allow_headless_launch", default=False)
+    allow = await service.get_setting_value("security", "allow_headless_launch", default=True)
 
     return HeadlessLaunchResponse(allow_headless_launch=bool(allow))
 
@@ -295,13 +298,14 @@ async def update_headless_launch(
 ) -> HeadlessLaunchResponse:
     """Set the account-wide Headless-vs-HITL launch toggle (admin only).
 
-    HITL (False, the default) means the SERVER refuses to AUTHORIZE implementation
-    early for a jwt/OAuth agent session — the human Implement step is enforced at
-    the MCP launch gate. It cannot, however, stop a non-compliant LOCAL orchestrator
-    from inlining a self-authored mission into an in-process Task() and working off
-    the books; that residual of in-process subagent execution is accepted here and
-    is a separate future detection build (BE-9085). Read-modify-write preserves the
-    sibling ``security`` keys.
+    Headless (True) is the platform default; this endpoint is how a tenant
+    opts OUT into HITL. HITL (False) means the server does not authorize
+    implementation early for a jwt/OAuth agent session — the human Implement step
+    is enforced at the MCP launch gate. This is a server-side authorization
+    control; it does not attempt to constrain client-local execution.
+    Read-modify-write preserves the sibling ``security`` keys, and stamps
+    ``allow_headless_launch_explicit=True`` so this deliberate write is
+    distinguishable from an incidental one made by another security writer.
     """
     logger.info(
         "Admin %s setting headless-launch toggle to %s",
@@ -313,6 +317,7 @@ async def update_headless_launch(
     # Read-modify-write: never clobber ssl_*/cookie_domain_whitelist/rate_limiting.
     security = await service.get_settings("security")
     security["allow_headless_launch"] = request.allow_headless_launch
+    security["allow_headless_launch_explicit"] = True
     await service.update_settings("security", security)
 
     return HeadlessLaunchResponse(allow_headless_launch=request.allow_headless_launch)

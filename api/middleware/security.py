@@ -31,6 +31,22 @@ CSP_STYLE_HASH = "'sha256-pR5eQD+pcfGctW0ZvPpp3UToUJkVDBclZbDZVJBZoBU='"  # Load
 CSP_SCRIPT_HASH_1 = "'sha256-LRJOHmw/kARrWFQNFXTam7BNVjtucN2V1FzuxKtEUg0='"  # API URL configuration (INF-5012c)
 CSP_SCRIPT_HASH_2 = "'sha256-T+y4FnL+BP2aiGWNs6H5HdyLosVMnGaNc9v+5DaNNJM='"  # Splash screen logic
 
+# FE-9581: cache policy for unhashed static media served from the SPA root
+# (brand logos, the icons/ set, agent marks). Vite hashes everything under
+# /assets/*, but these filenames are stable, so they get a moderate max-age
+# rather than the year-long immutable policy: a rebuilt logo under the same
+# filename must still be able to win, and one day is short enough to matter
+# while removing the per-navigation revalidation entirely. A day also covers a
+# returning user's next session, which is what takes these requests off the
+# rate limiter's bill rather than merely turning each into a 304 (the limiter
+# bills a revalidation exactly like a full download).
+STATIC_MEDIA_MAX_AGE_SECONDS = 86400
+STATIC_MEDIA_CACHE_CONTROL = f"public, max-age={STATIC_MEDIA_MAX_AGE_SECONDS}"
+# Matched against the RESPONSE content-type, never the request path — a missing
+# icon falls through to index.html at 200, so only the body can be trusted to
+# say what is actually being sent.
+_STATIC_MEDIA_CONTENT_TYPES = ("image/", "font/")
+
 _EXTRA_CSP_SCRIPT_HASHES: set[str] = set()
 _EXTRA_CSP_STYLE_HASHES: set[str] = set()
 _EXTRA_CSP_STYLE_ORIGINS: set[str] = set()
@@ -393,3 +409,17 @@ class SecurityHeadersMiddleware:
                     response_headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
                     response_headers["Pragma"] = "no-cache"
                     response_headers["Expires"] = "0"
+                elif (
+                    serves_the_asset
+                    and content_type.startswith(_STATIC_MEDIA_CONTENT_TYPES)
+                    and not path.startswith("/api")
+                ):
+                    # FE-9581: unhashed brand/media files served from the SPA
+                    # root shipped etag + last-modified but no cache-control, so
+                    # browsers revalidated every one on every navigation,
+                    # generating avoidable request volume.
+                    #
+                    # /api is excluded because anything served there may be
+                    # tenant-scoped, and `public` would license a shared cache to
+                    # hand one tenant's bytes to another.
+                    response_headers["Cache-Control"] = STATIC_MEDIA_CACHE_CONTROL

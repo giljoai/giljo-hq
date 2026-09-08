@@ -42,6 +42,7 @@ from api.endpoints import (
     database_setup,
     downloads,
     git,
+    master_prompt,
     notifications,
     oauth,
     oauth_register,
@@ -122,6 +123,9 @@ def register_routers(app: FastAPI) -> None:
     # Handover 0107: Job operations (cancel, force-fail, health) at /api/jobs prefix
     app.include_router(agent_jobs.jobs_router)  # Separate prefix for job operations
     app.include_router(prompts.router, prefix="/api/v1/prompts", tags=["prompts"])  # Handover 0109
+    # FE-9555: the board-level "Launch staged..." master prompt. Same prefix, own
+    # module -- prompts.py carries a shrink-only size budget and may not grow.
+    app.include_router(master_prompt.router, prefix="/api/v1/prompts", tags=["prompts"])
     app.include_router(configuration.router, prefix="/api/v1/config", tags=["configuration"])
     app.include_router(system_prompts.router, prefix="/api/v1/system", tags=["system"])
     app.include_router(statistics.router, prefix="/api/v1/stats", tags=["statistics"])

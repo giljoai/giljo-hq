@@ -82,7 +82,6 @@ function mountTable(props = {}) {
       projects: sampleProjects,
       total: sampleProjects.length,
       loading: false,
-      hasActiveProject: false,
       ...props,
     },
     global: { stubs },
@@ -179,7 +178,6 @@ describe('ProjectsTable — election fade (FE-6165a)', () => {
         projects: sampleProjects,
         total: sampleProjects.length,
         loading: false,
-        hasActiveProject: false,
         ...props,
       },
       global: { stubs: rowStubs },
@@ -212,6 +210,23 @@ describe('ProjectsTable — election fade (FE-6165a)', () => {
     await wrapper.find('.play-circle-btn').trigger('click')
     expect(wrapper.emitted('activate-launch')).toBeFalsy()
   })
+
+  // FE-9525d: BE-9525a/b retired the single-active-project-per-product
+  // invariant, so "another project is active" is no longer a reason to grey
+  // out this row's own Activate button -- only per-row reasons (an election
+  // in progress) still do. The `hasActiveProject` prop is gone entirely.
+  it('play button is enabled with no election active (the cross-project grey-out is retired)', () => {
+    const wrapper = mountWithRows({ electionActive: false })
+    const btn = wrapper.find('.play-circle-btn')
+    expect(btn.attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).not.toContain('Another project is active')
+  })
+
+  it('emits activate-launch when clicked with no election active', async () => {
+    const wrapper = mountWithRows({ electionActive: false })
+    await wrapper.find('.play-circle-btn').trigger('click')
+    expect(wrapper.emitted('activate-launch')).toBeTruthy()
+  })
 })
 
 // FE-6178: "Deactivate Chain" kebab item for in-chain projects.
@@ -237,7 +252,7 @@ describe('ProjectsTable — Deactivate Chain (FE-6178)', () => {
 
   function mountWithMenu(props = {}) {
     return mount(ProjectsTable, {
-      props: { projects: sampleProjects, total: 1, loading: false, hasActiveProject: false, ...props },
+      props: { projects: sampleProjects, total: 1, loading: false, ...props },
       global: { stubs: menuStubs },
     })
   }
@@ -314,7 +329,7 @@ describe('ProjectsTable — grey tickbox by membership (FE-6180)', () => {
 
   function mountSel(props = {}) {
     return mount(ProjectsTable, {
-      props: { projects: sampleProjects, total: 1, loading: false, hasActiveProject: false, linkMode: true, ...props },
+      props: { projects: sampleProjects, total: 1, loading: false, linkMode: true, ...props },
       global: { stubs: selStubs },
     })
   }
@@ -354,7 +369,7 @@ describe('ProjectsTable — Archived badge (BE-2002)', () => {
 
   function mountName(projects) {
     return mount(ProjectsTable, {
-      props: { projects, total: projects.length, loading: false, hasActiveProject: false },
+      props: { projects, total: projects.length, loading: false },
       global: { stubs: nameStubs },
     })
   }
@@ -400,7 +415,7 @@ describe('ProjectsTable — Park/Unpark (IMP-9258)', () => {
 
   function mountWithMenu(props = {}) {
     return mount(ProjectsTable, {
-      props: { projects: sampleProjects, total: 1, loading: false, hasActiveProject: false, ...props },
+      props: { projects: sampleProjects, total: 1, loading: false, ...props },
       global: { stubs: menuStubs },
     })
   }

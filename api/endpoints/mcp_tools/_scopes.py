@@ -63,7 +63,7 @@ TOOL_SCOPES: dict[str, str] = {
     # orchestration (stage_project creates the orchestrator job; implement_project
     # exposes the execution prompt gated on agent + launch state).
     "stage_project": SCOPE_AGENT,
-    "implement_project": SCOPE_AGENT,
+    "get_implementation_prompt": SCOPE_AGENT,
     # BE-6115a: CLI door of the two-door implement gate. mcp:agent (privilege
     # surface) — its dispatch-gate scope + its deliberate exclusion from the
     # orchestrator auto-tool bundle (_canonical_tool_list) mean a spawned agent
@@ -72,7 +72,10 @@ TOOL_SCOPES: dict[str, str] = {
     # BE-6221a: headless chain-start (the dashboard "Run Sequential" equivalent).
     # mcp:agent — it mints the project-less conductor + creates a sequence run
     # (an orchestration mutation), so a read/write-only token must not reach it.
-    "start_chain_run": SCOPE_AGENT,
+    # BE-9554: start_chain_run retires into two plainly-named verbs. It stays
+    # registered for one release as a pointer-only shim so bound clients keep working.
+    "link_projects": SCOPE_AGENT,
+    "unlink_projects": SCOPE_AGENT,
     "update_job_mission": SCOPE_AGENT,
     # BE-6167: was SCOPE_READ, but the BE-5122 CTX self-close path inside
     # get_staging_instructions writes project.status=COMPLETED (a terminal
@@ -83,36 +86,41 @@ TOOL_SCOPES: dict[str, str] = {
     # BE-6054b: Agent Message Hub (BBS) thread tools. Writes drive the board
     # (agent callers) = mcp:agent; pure reads = mcp:read (mirrors send/get above).
     "create_thread": SCOPE_AGENT,
+    # FE-9530: retags a thread's product/project(s) or its subject/status --
+    # the same mutation class as create_thread, so the same scope.
+    "update_thread": SCOPE_AGENT,
     "join_thread": SCOPE_AGENT,
     "post_to_thread": SCOPE_AGENT,
-    "pass_baton": SCOPE_AGENT,
+    "set_next_actor": SCOPE_AGENT,
     "get_my_turn": SCOPE_READ,
     # BE-9296a: the blocking form of get_my_turn. Same scope for the same reason —
     # it reads the same baton state and stamps the same liveness column.
-    "await_my_turn": SCOPE_READ,
     # BE-9296a: read-only view over the participant directory a conductor already
     # has REST access to; the derived band is computed, never stored.
     "get_participant_liveness": SCOPE_READ,
     "list_threads": SCOPE_READ,
     "get_thread_history": SCOPE_READ,
-    "search_threads": SCOPE_READ,
     "create_task": SCOPE_WRITE,
     "update_task": SCOPE_WRITE,
     "list_tasks": SCOPE_READ,
-    "update_roadmap_metadata": SCOPE_WRITE,
+    "save_roadmap": SCOPE_WRITE,
     "get_roadmap": SCOPE_READ,
     "request_approval": SCOPE_AGENT,
+    # BE-9499d: the harness-side door that clears awaiting_user. mcp:agent — it is
+    # exactly as consequential as request_approval (which it resolves) and is
+    # additionally fenced by _HITL_FENCED_TOOLS below (BE-9084 semantics).
+    "decide_approval": SCOPE_AGENT,
     "health_check": SCOPE_READ,
     "get_giljo_guide": SCOPE_READ,
     "giljo_setup": SCOPE_WRITE,
     "report_progress": SCOPE_AGENT,
     "complete_job": SCOPE_AGENT,
-    "close_job": SCOPE_AGENT,
+    "finalize_job": SCOPE_AGENT,
     # BE-9012b (BE-6225e): reactivate_job + dismiss_reactivation merged into the single
     # resolve_reactivation tool surface. The two names remain in TOOL_DISPATCH below as
     # internal dispatch targets (resolve_reactivation branches to them by action), but
     # they are no longer agent-facing tools — so they carry no TOOL_SCOPES entry.
-    "resolve_reactivation": SCOPE_AGENT,
+    "resume_or_dismiss_job": SCOPE_AGENT,
     "set_agent_status": SCOPE_AGENT,
     "get_job_mission": SCOPE_AGENT,
     "spawn_job": SCOPE_AGENT,
@@ -127,7 +135,7 @@ TOOL_SCOPES: dict[str, str] = {
     # BE-6225c: renamed from propose_product_context_update (it APPLIES tuning
     # directly, no propose step). Scope unchanged (mcp:write).
     "apply_context_tuning": SCOPE_WRITE,
-    "get_vision_doc": SCOPE_READ,
+    "get_vision_document": SCOPE_READ,
     "update_product_context": SCOPE_WRITE,
     # BE-9201: agent-side product bootstrap (establish the row + write the agent-
     # authored vision doc). Same scope as update_product_context — user-owned
@@ -250,21 +258,20 @@ _STANDARD_PROFILE_TOOLS: frozenset[str] = _CORE_PROFILE_TOOLS | frozenset(
     {
         # Hub / BBS thread suite (post_to_thread is already in core)
         "create_thread",
+        "update_thread",
         "join_thread",
-        "pass_baton",
         "get_my_turn",
-        "await_my_turn",
+        "set_next_actor",
         "get_participant_liveness",
         "list_threads",
         "get_thread_history",
-        "search_threads",
         # Roadmap
         "get_roadmap",
-        "update_roadmap_metadata",
+        "save_roadmap",
         # Product context / vision (BE-9201 added the two bootstrap writes: the
         # onboarding prompts run in the same non-agent-scope session tier that
         # already carries update_product_context)
-        "get_vision_doc",
+        "get_vision_document",
         "update_product_context",
         "apply_context_tuning",
         "create_product",
@@ -279,19 +286,21 @@ PROFILE_ORCHESTRATOR = "orchestrator"
 # BE-9017: the orchestrator profile — the default for an OAuth/JWT session carrying
 # the ``mcp:agent`` scope (Claude Desktop / claude.ai connector / OAuth CLI). It is
 # the FULL surface MINUS the launch-gate tool(s), so a legitimate orchestrator sees
-# everything it needs for the human-ferried flow — health_check, get_staging_
-# instructions, spawn_job, update_project_mission, stage_project — but still cannot
-# unilaterally LAUNCH implementation from the session.
+# everything it needs for the human-ferried flow but cannot unilaterally LAUNCH
+# implementation from the session.
 #
-# Excluded = ``launch_implementation`` ONLY: it is the SOLE MCP door that writes
-# ``implementation_launched_at`` (the sacred human gate). ``implement_project`` is
-# deliberately KEPT IN — it is read-only + already server-gated (returns
-# gate_not_passed until the human presses Implement, never sets the flag, no bypass),
-# so excluding it would add zero security while breaking the post-gate connector flow.
-# ``stage_project`` is reversible prep and stays in (the generic_mcp orchestrator
-# needs it). Computed from TOOL_SCOPES so new tools are auto-included (no roster to rot).
+# Read-only and already-server-gated tools stay in: excluding them would add
+# nothing while breaking the post-gate connector flow. Reversible prep stays in
+# too. Computed from TOOL_SCOPES so new tools are auto-included (no roster to rot).
 _LAUNCH_GATE_TOOLS: frozenset[str] = frozenset({"launch_implementation"})
 _ORCHESTRATOR_PROFILE_TOOLS: frozenset[str] = frozenset(TOOL_SCOPES) - _LAUNCH_GATE_TOOLS
+
+# These tools are fenced by the same runtime tenant check. Deliberately a
+# SEPARATE set from _LAUNCH_GATE_TOOLS, not a rename or a union assigned back
+# onto it: the two sets feed different resolvers, and they differ in which
+# profile allow-sets each tool appears in — see the profile resolver for how
+# each is scoped.
+_HITL_FENCED_TOOLS: frozenset[str] = _LAUNCH_GATE_TOOLS | frozenset({"decide_approval"})
 
 PROFILE_LISTING = "listing"
 
@@ -357,22 +366,57 @@ def _normalize_scopes(scopes: object) -> set[str]:
     return {str(s) for s in scopes}
 
 
+def _auth_derived_profile_toolset_from_state(state: dict) -> frozenset[str] | None:
+    """Resolve the AUTH-DERIVED profile allow-set, ignoring any declaration.
+
+    This is rungs 2+3 of :func:`_profile_toolset_from_state` only — "what would
+    this session's toolset be with no ``tool_profile`` declared at all". Factored
+    out (BE-9499c) so both declaration vehicles — the BE-9253 URL vehicle and the
+    session-DECLARED ``clientInfo`` vehicle — can compute the SAME ceiling a
+    declaration may narrow within and never widen past. See
+    :func:`_profile_toolset_from_state` for the full precedence and SEC-9126
+    fail-closed rationale; this function is that resolver's body minus rung 1.
+    """
+    if state.get("auth_method") == "jwt":
+        # BE-9017: an OAuth/JWT orchestrator token carries mcp:agent by default
+        # (DEFAULT_OAUTH_SCOPE). Keying the default on the SCOPE — not the auth
+        # method alone — is what stops the blanket jwt→standard downgrade from
+        # tool-blocking every legitimate connector orchestrator session.
+        if "mcp:agent" in _normalize_scopes(state.get("scopes")):
+            return TOOL_PROFILES[PROFILE_ORCHESTRATOR]
+        return TOOL_PROFILES[PROFILE_STANDARD]
+    # SEC-9126: api_key is the ONLY recognized signal that resolves to full (no
+    # restriction) — today's operator/CLI behavior, byte-identical.
+    if state.get("auth_method") == "api_key":
+        return TOOL_PROFILES[PROFILE_FULL]
+    # SEC-9126: fail-closed floor for any unknown/absent auth signal.
+    return frozenset()
+
+
 def _profile_toolset_from_state(state: dict) -> frozenset[str] | None:
     """Resolve the effective tool-profile allow-set from a request's ASGI state.
 
     Returns the frozenset of tool names the profile permits, or ``None`` for the
-    ``full`` profile (NO restriction). ``None`` is reachable ONLY for a declared
-    ``full`` profile or an ``api_key`` caller; every other outcome is a bounded
-    allow-set, so the profile axis can never *widen* an unrecognized caller to
-    the full surface.
+    ``full`` profile (NO restriction). ``None`` is reachable ONLY for an
+    ``api_key`` caller (or a jwt session that declared a profile the api_key
+    baseline permits — see below); every other outcome is a bounded allow-set,
+    so the profile axis can never *widen* an unrecognized caller to the full
+    surface.
 
-    Precedence (WO-8003k DoD #2 — declared always wins):
+    Precedence (WO-8003k DoD #2 — declared always wins, but never WIDENS):
       1. explicit selected profile — ``state['tool_profile']``; honored only when
-         it names a known profile. Two middleware stamps write that one slot: the
-         session-DECLARED profile from the (d) client_info capture (WO-8003k —
-         may widen, deliberately, and independently fenced by BE-9084), and the
-         BE-9253 URL vehicle (``/mcp?profile=...``), which is structurally
-         narrow-only and can never reach the ``full`` sentinel.
+         it names a known profile AND does not widen past the AUTH-DERIVED
+         baseline (:func:`_auth_derived_profile_toolset_from_state`, rungs 2+3
+         below). Two middleware stamps write that one slot: the session-DECLARED
+         profile from the (d) client_info capture, and the BE-9253 URL vehicle
+         (``/mcp?profile=...``). BE-9499c: BOTH are narrow-only — a
+         client-authored ``clientInfo`` key is untrusted input, so it can never
+         be the thing that decides a privilege boundary (the ``full`` sentinel
+         is refused outright for a jwt session, exactly like the URL vehicle
+         already refused it). The one exception is the trivial case where the
+         auth-derived baseline is itself unbounded (``None`` — the api_key
+         path): there "widening" is vacuous, so any known declared profile is
+         honored (narrowing an already-full session by declared choice).
       2. auth-derived default (BE-9017 — keys on token SCOPE, not just method):
          * a JWT/OAuth session carrying ``mcp:agent`` ⇒ ``orchestrator`` (Claude
            Desktop / claude.ai connector / OAuth CLI — the human-ferried
@@ -390,24 +434,32 @@ def _profile_toolset_from_state(state: dict) -> frozenset[str] | None:
 
     ADR-009: the default keys on the token's SCOPE (+ tenant_key elsewhere), never
     on per-user identity.
+
+    BE-9499c / the launch-gate admission this closes: since a jwt+mcp:agent
+    session's auth-derived baseline is exactly ``orchestrator`` (full minus
+    ``launch_implementation``), a declared ``full`` for such a session now
+    clamps to that same ``orchestrator`` set — it can no longer resurrect the
+    launch gate. Admission of ``launch_implementation`` into such a session is a
+    SEPARATE, operator-authored channel (the tenant Headless toggle, evaluated
+    at the tools/list filter + tools/call gate in ``mcp_sdk_server``), never a
+    consequence of what a profile happens to resolve to here.
     """
     declared = state.get("tool_profile")
     if isinstance(declared, str) and declared in TOOL_PROFILES:
-        return TOOL_PROFILES[declared]
-    if state.get("auth_method") == "jwt":
-        # BE-9017: an OAuth/JWT orchestrator token carries mcp:agent by default
-        # (DEFAULT_OAUTH_SCOPE). Keying the default on the SCOPE — not the auth
-        # method alone — is what stops the blanket jwt→standard downgrade from
-        # tool-blocking every legitimate connector orchestrator session.
-        if "mcp:agent" in _normalize_scopes(state.get("scopes")):
-            return TOOL_PROFILES[PROFILE_ORCHESTRATOR]
-        return TOOL_PROFILES[PROFILE_STANDARD]
-    # SEC-9126: api_key is the ONLY recognized signal that resolves to full (no
-    # restriction) — today's operator/CLI behavior, byte-identical.
-    if state.get("auth_method") == "api_key":
-        return TOOL_PROFILES[PROFILE_FULL]
-    # SEC-9126: fail-closed floor for any unknown/absent auth signal.
-    return frozenset()
+        candidate = TOOL_PROFILES[declared]
+        baseline = _auth_derived_profile_toolset_from_state(state)
+        if baseline is None:
+            # The api_key path: nothing to widen past, so honor the declaration
+            # (including `full`/None) exactly as before.
+            return candidate
+        if candidate is None or not candidate <= baseline:
+            # `full` (None) or any non-subset candidate would WIDEN a bounded
+            # baseline — refused, exactly like the BE-9253 URL vehicle. Falls
+            # through to the auth-derived default below.
+            pass
+        else:
+            return candidate
+    return _auth_derived_profile_toolset_from_state(state)
 
 
 def _profile_toolset_from_request(request: StarletteRequest | None) -> frozenset[str] | None:

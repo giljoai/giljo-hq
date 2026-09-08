@@ -72,6 +72,11 @@ class UserApproval(Base):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    decided_via = Column(
+        String(10),
+        nullable=True,
+        comment="BE-9514: which door decided this ('ui' | 'mcp'); NULL for legacy rows predating the column",
+    )
 
     requested_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     decided_at = Column(DateTime(timezone=True), nullable=True)
@@ -84,6 +89,12 @@ class UserApproval(Base):
         CheckConstraint(
             "status IN ('pending', 'decided', 'expired', 'cancelled')",
             name="ck_user_approvals_status",
+        ),
+        # BE-9514: NULL tolerated (legacy rows predate this column and never
+        # will know their channel) -- only a non-NULL value is constrained.
+        CheckConstraint(
+            "decided_via IS NULL OR decided_via IN ('ui', 'mcp')",
+            name="ck_user_approvals_decided_via",
         ),
     )
 

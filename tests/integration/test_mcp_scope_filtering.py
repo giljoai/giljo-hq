@@ -731,22 +731,22 @@ class TestS15StateMutatingToolsAreAgentScoped:
         {
             "spawn_job",
             "complete_job",
-            "close_job",
+            "finalize_job",
             # BE-9012b (BE-6225e): reactivate_job + dismiss_reactivation merged.
-            "resolve_reactivation",
+            "resume_or_dismiss_job",
             "report_progress",
             "set_agent_status",
             "update_job_mission",
             "update_project_mission",
             "stage_project",
-            "implement_project",
+            "get_implementation_prompt",
             "launch_implementation",
             "get_staging_instructions",  # BE-6167: mutates via BE-5122 self-close
             # BE-9012d: send_message / receive_messages hard-removed (bus retired).
             "create_thread",
             "join_thread",
             "post_to_thread",
-            "pass_baton",
+            "set_next_actor",
             "request_approval",
             "write_project_closeout",
             "write_memory_entry",

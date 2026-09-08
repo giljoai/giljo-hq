@@ -164,10 +164,15 @@ async def test_close_out_project_broadcasts_sequence_updated(db_session: AsyncSe
         test_session=db_session,
         websocket_manager=mock_ws,
     )
+    project_row = (await db_session.execute(select(Project).where(Project.id == pid))).scalar_one()
     await svc.close_out_project(pid, tenant)
 
     events = _sequence_updated_events(mock_ws)
     assert events, "close_out_project must emit sequence:updated via the threaded websocket_manager"
+
+    # BE-9518: the project_update broadcast (closed) must carry product_id too.
+    mock_ws.broadcast_project_update.assert_awaited_once()
+    assert mock_ws.broadcast_project_update.await_args.kwargs["project_data"]["product_id"] == project_row.product_id
 
 
 # ---------------------------------------------------------------------------

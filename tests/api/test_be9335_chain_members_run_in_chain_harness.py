@@ -152,7 +152,8 @@ async def _seed_divergent_chain(
         session.add(run)
         await session.flush()
 
-        run.conductor_agent_id = await mint_conductor_job(session, tenant_key=tenant_key, run_id=run.id)
+        conductor_identity = await mint_conductor_job(session, tenant_key=tenant_key, run_id=run.id)
+        run.conductor_agent_id = conductor_identity["agent_id"]
 
         # The head project's sub-orchestrator: the agent that actually receives the
         # wrong harness. project_phase="implementation" mirrors a driven member.

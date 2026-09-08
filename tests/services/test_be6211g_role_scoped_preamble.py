@@ -96,7 +96,7 @@ def test_conductor_seams_live_in_ch_chain_drive() -> None:
     # Seam 2 — escalation SINK + Hub-thread discovery.
     #
     # BE-9291 DELIBERATELY CHANGED this probe (it is why this test was red). It used to
-    # assert 'search_threads(query="run-xyz"' because the Hub really WAS discovered by
+    # assert 'list_threads(query="run-xyz"' because the Hub really WAS discovered by
     # substring-matching the run_id out of the thread's own subject. Discovery now runs on
     # the comm_threads.sequence_run_id FK, so that instruction is gone from this chapter
     # and asserting it pinned a mechanism that no longer exists.
@@ -108,11 +108,11 @@ def test_conductor_seams_live_in_ch_chain_drive() -> None:
     assert 'get_context(categories=["chain"])' in chapter, "the discovery CALL must be named, not just its result"
     assert "ESCALATION" in chapter
     # NEGATIVE: the retired substring-discovery path must not be re-introduced here.
-    # Asserted on the `search_threads(query=` FORM rather than the bare tool name, and that
+    # Asserted on the `list_threads(query=` FORM rather than the bare tool name, and that
     # is deliberate: the bare name legitimately survives in THIS render inside the sub-orch
-    # SPAWN COMMAND (launch_command_synth), so `"search_threads" not in chapter` would be
+    # SPAWN COMMAND (launch_command_synth), so `"list_threads" not in chapter` would be
     # false today and would fail for a reason that has nothing to do with discovery.
-    assert "search_threads(query=" not in chapter, "the retired substring-discovery path must not be re-introduced"
+    assert "list_threads(query=" not in chapter, "the retired substring-discovery path must not be re-introduced"
     # Seam 3 — ADVANCE, not complete_job (server refuses a premature finale).
     assert "CONDUCTOR_CHAIN_INCOMPLETE" in chapter
     assert "ADVANCE" in chapter
@@ -136,13 +136,13 @@ def test_suborch_seams_live_in_ch_sub_orchestrator() -> None:
     # user. The discovery half MUST also assert the conductor-not-user escalation redirect —
     # that is the load-bearing half of seam 2 (BE-6214 audit: the redirect was the lost seam).
     #
-    # BE-9291 DELIBERATELY CHANGED the discovery probe from `search_threads` to the FK path.
-    # The old assertion was already known to be weak (its own note said "search_threads alone
+    # BE-9291 DELIBERATELY CHANGED the discovery probe from `list_threads` to the FK path.
+    # The old assertion was already known to be weak (its own note said "list_threads alone
     # is satisfied by the staging-complete post, an unrelated use") and after BE-9291 it went
-    # weaker still: the ONLY surviving `search_threads` in this chapter is the ToolSearch
+    # weaker still: the ONLY surviving `list_threads` in this chapter is the ToolSearch
     # BOOTSTRAP line, a tool-loading hint. So it passed while proving nothing about discovery.
     assert "hub_thread_id" in chapter, "the sub-orch must be told how to RESOLVE the Hub, not merely to load a tool"
-    assert "search_threads(query=" not in chapter, "the retired substring-discovery path must not be re-introduced"
+    assert "list_threads(query=" not in chapter, "the retired substring-discovery path must not be re-introduced"
     low = chapter.lower()
     assert "escalat" in low, "sub-orch must carry the blocker-escalation seam (route to conductor)"
     assert "not the user" in low, "escalation must redirect AWAY from the user to the conductor"

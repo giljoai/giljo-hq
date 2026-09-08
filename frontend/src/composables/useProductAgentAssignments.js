@@ -6,25 +6,28 @@ import { useProductStore } from '@/stores/products'
  * BE-9385a — per-product agent enablement for the Agents screen.
  *
  * The inline Active switch used to write the tenant-wide `agent_templates.is_active`
- * flag, so curating agents while one product was active changed them for every
+ * flag, so curating agents while one product was viewed changed them for every
  * product. It now writes the `product_agent_assignments` junction, scoped to the
- * ACTIVE product, and the row shows `product_active` overlaid on top of the tenant
- * flag.
+ * VIEWED product tab, and the row shows `product_active` overlaid on top of the
+ * tenant flag.
  *
- * Keyed on the store's `activeProduct`, deliberately NOT `effectiveProductId`.
- * `effectiveProductId` prefers `currentProductId` — the product the user is
- * browsing — while the server exports and spawns for the product that is actually
- * ACTIVE (`Product.is_active`). Writing the junction for a browsed-but-inactive
- * product would put the screen and the export back out of step, which is the exact
- * class of defect this project removes.
+ * FE-9524/D1: keyed on `effectiveProductId` (the viewed tab), not the legacy
+ * singular `productStore.activeProduct`. Before D1 retired "active product" as
+ * a global concept, `is_active` was also what the server exported/spawned for,
+ * so this deliberately keyed on it instead of the browsed tab. That is no
+ * longer true (BE-9523 gives every export/spawn an explicit product_id) and
+ * `activeProduct` no longer means "the one product in play" -- several may be
+ * shown at once. Keying on it here would curate agents for whichever product
+ * happens to be MOST RECENTLY shown, not the one on screen: the exact class of
+ * stale-reader bug this project exists to remove (project record finding 3).
  *
  * Tolerance mirrors the server: a template with no junction row shows the tenant
- * flag rather than an "off" the server would not agree with, and with no active
- * product at all the toggle falls back to the tenant-wide write.
+ * flag rather than an "off" the server would not agree with, and with no product
+ * tab viewed at all the toggle falls back to the tenant-wide write.
  */
 export function useProductAgentAssignments(templates, loadActiveCount) {
   const productStore = useProductStore()
-  const activeProductId = computed(() => productStore.activeProduct?.id || null)
+  const activeProductId = computed(() => productStore.effectiveProductId || null)
 
   const loadProductAssignments = async () => {
     const productId = activeProductId.value

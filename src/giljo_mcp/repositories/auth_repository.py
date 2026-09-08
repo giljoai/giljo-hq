@@ -25,7 +25,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import tenant_isolation_bypass
-from giljo_mcp.models.auth import APIKey, User
+from giljo_mcp.models.auth import APIKey, MCPSession, User
 from giljo_mcp.models.config import SetupState
 from giljo_mcp.models.organizations import Organization, OrgMembership
 
@@ -242,6 +242,33 @@ class AuthRepository:
             )
         result = await session.execute(stmt)
         return list(result.scalars().all())
+
+    async def connected_harnesses(self, session: AsyncSession, tenant_key: str) -> dict[str, str]:
+        """Map harness token -> ISO timestamp of its most recent connect (FE-9500).
+
+        Derived on the fly from EXISTING ``mcp_sessions`` rows -- the same
+        no-new-table idiom as :meth:`has_valid_api_key` / FE-9274. Every MCP
+        client records its ``initialize`` clientInfo in ``session_data``; that is
+        the only place the server learns WHICH tool attached, and it is what makes
+        a per-tool Connect status honest instead of painting one workspace-wide
+        credential flag onto every tool card.
+
+        Tenant-scoped (ADR-009). Rows whose clientInfo is absent or unrecognized
+        resolve to ``generic`` -- reported honestly rather than guessed at, and
+        callers must render that as "something connected, harness unknown".
+        """
+        from giljo_mcp.harness_resolver import harness_from_client_info
+
+        stmt = select(MCPSession.session_data, MCPSession.last_accessed).where(MCPSession.tenant_key == tenant_key)
+        result = await session.execute(stmt)
+        seen: dict[str, str] = {}
+        for session_data, last_accessed in result.all():
+            client_info = (session_data or {}).get("client_info") or {}
+            harness = harness_from_client_info(client_info.get("name"), client_info.get("version"))
+            stamp = last_accessed.isoformat() if last_accessed else ""
+            if stamp > seen.get(harness, ""):
+                seen[harness] = stamp
+        return seen
 
     async def has_valid_api_key(self, session: AsyncSession, tenant_key: str) -> bool:
         """True if the tenant has >=1 active, non-expired API key (FE-9274 connect-status).

@@ -14,8 +14,8 @@ vi.mock('@/stores/projects', () => ({
  * Product Store - Active Product (Handover 0049)
  *
  * Post-refactor notes:
- * - fetchActiveProduct uses api.products.getActive() (not api.products.list)
- * - getActive returns { has_active_product: boolean, product: object|null }
+ * - fetchActiveProduct uses api.products.getDefault() (not api.products.list)
+ * - getDefault returns { has_active_product: boolean, product: object|null }
  * - No separate activeProductLoading state (shared loading ref is NOT used by fetchActiveProduct)
  * - fetchActiveProduct catch block does NOT set store.error (only console.error)
  */
@@ -45,7 +45,7 @@ describe('Product Store - Active Product (Handover 0049)', () => {
         is_active: true
       }
 
-      api.products.getActive.mockResolvedValue({
+      api.products.getDefault.mockResolvedValue({
         data: { has_active_product: true, product: mockProduct }
       })
 
@@ -55,19 +55,19 @@ describe('Product Store - Active Product (Handover 0049)', () => {
       expect(store.activeProduct).toEqual(mockProduct)
     })
 
-    it('calls api.products.getActive()', async () => {
-      api.products.getActive.mockResolvedValue({
+    it('calls api.products.getDefault()', async () => {
+      api.products.getDefault.mockResolvedValue({
         data: { has_active_product: false, product: null }
       })
 
       const store = useProductStore()
       await store.fetchActiveProduct()
 
-      expect(api.products.getActive).toHaveBeenCalled()
+      expect(api.products.getDefault).toHaveBeenCalled()
     })
 
     it('sets activeProduct to null when no active products exist', async () => {
-      api.products.getActive.mockResolvedValue({
+      api.products.getDefault.mockResolvedValue({
         data: { has_active_product: false, product: null }
       })
 
@@ -79,7 +79,7 @@ describe('Product Store - Active Product (Handover 0049)', () => {
 
     it('handles API errors by setting activeProduct to null', async () => {
       const error = new Error('API Error')
-      api.products.getActive.mockRejectedValue(error)
+      api.products.getDefault.mockRejectedValue(error)
 
       const store = useProductStore()
       await store.fetchActiveProduct()
@@ -91,7 +91,7 @@ describe('Product Store - Active Product (Handover 0049)', () => {
     it('stores first product from response', async () => {
       const mockProduct = { id: 1, name: 'First Active', is_active: true }
 
-      api.products.getActive.mockResolvedValue({
+      api.products.getDefault.mockResolvedValue({
         data: { has_active_product: true, product: mockProduct }
       })
 
@@ -106,7 +106,7 @@ describe('Product Store - Active Product (Handover 0049)', () => {
     it('clears activeProduct along with other data', async () => {
       const store = useProductStore()
 
-      api.products.getActive.mockResolvedValue({
+      api.products.getDefault.mockResolvedValue({
         data: { has_active_product: true, product: { id: 1, name: 'Active Product' } }
       })
 
@@ -123,7 +123,7 @@ describe('Product Store - Active Product (Handover 0049)', () => {
 
   describe('Integration with existing product functionality', () => {
     it('maintains activeProduct independently from currentProduct', async () => {
-      api.products.getActive.mockResolvedValue({
+      api.products.getDefault.mockResolvedValue({
         data: { has_active_product: true, product: { id: 1, name: 'Product 1', is_active: true } }
       })
 
@@ -155,7 +155,7 @@ describe('Product Store - Active Product (Handover 0049)', () => {
     })
 
     it('both states are independent during product operations', async () => {
-      api.products.getActive.mockResolvedValue({
+      api.products.getDefault.mockResolvedValue({
         data: { has_active_product: true, product: { id: 1, name: 'ActiveProduct' } }
       })
 
@@ -187,7 +187,7 @@ describe('Product Store - Active Product (Handover 0049)', () => {
         config_data: { field1: 'value1' }
       }
 
-      api.products.getActive.mockResolvedValue({
+      api.products.getDefault.mockResolvedValue({
         data: { has_active_product: true, product: mockProduct }
       })
 
@@ -205,7 +205,7 @@ describe('Product Store - Active Product (Handover 0049)', () => {
         is_active: true
       }
 
-      api.products.getActive.mockResolvedValue({
+      api.products.getDefault.mockResolvedValue({
         data: { has_active_product: true, product: minimalProduct }
       })
 

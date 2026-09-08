@@ -106,7 +106,7 @@ async def setup_client(monkeypatch, db_manager):
                 "next_action": {"why": "Download the zip and extract agents/* into ~/.claude/agents/."},
             }
 
-        async def list_agent_templates(self, platform: str):
+        async def list_agent_templates(self, platform: str, **_kwargs):
             requested["templates_platform"] = platform
             return {
                 "platform": platform,

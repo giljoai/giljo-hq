@@ -83,7 +83,7 @@ class TestCreateProjectTypeResolution:
             mock_product = Mock()
             mock_product.id = "prod-123"
             mock_ps_instance = AsyncMock()
-            mock_ps_instance.get_active_product = AsyncMock(return_value=mock_product)
+            mock_ps_instance.get_default_product = AsyncMock(return_value=mock_product)
             mock_ps_cls.return_value = mock_ps_instance
 
             mock_create.return_value = _mock_project()
@@ -123,7 +123,7 @@ class TestCreateProjectTypeResolution:
             mock_product = Mock()
             mock_product.id = "prod-123"
             mock_ps_instance = AsyncMock()
-            mock_ps_instance.get_active_product = AsyncMock(return_value=mock_product)
+            mock_ps_instance.get_default_product = AsyncMock(return_value=mock_product)
             mock_ps_cls.return_value = mock_ps_instance
 
             mock_create.return_value = _mock_project()
@@ -171,7 +171,7 @@ class TestCreateProjectTypeResolution:
             mock_product = Mock()
             mock_product.id = "prod-123"
             mock_ps_instance = AsyncMock()
-            mock_ps_instance.get_active_product = AsyncMock(return_value=mock_product)
+            mock_ps_instance.get_default_product = AsyncMock(return_value=mock_product)
             mock_ps_cls.return_value = mock_ps_instance
 
             with pytest.raises(ValidationError) as exc_info:
@@ -226,7 +226,7 @@ class TestCreateProjectTypeResolution:
             mock_product = Mock()
             mock_product.id = "prod-123"
             mock_ps_instance = AsyncMock()
-            mock_ps_instance.get_active_product = AsyncMock(return_value=mock_product)
+            mock_ps_instance.get_default_product = AsyncMock(return_value=mock_product)
             mock_ps_cls.return_value = mock_ps_instance
 
             with pytest.raises(ValidationError) as exc_info:
@@ -269,7 +269,7 @@ class TestCreateProjectTypeResolution:
             mock_product = Mock()
             mock_product.id = "prod-123"
             mock_ps_instance = AsyncMock()
-            mock_ps_instance.get_active_product = AsyncMock(return_value=mock_product)
+            mock_ps_instance.get_default_product = AsyncMock(return_value=mock_product)
             mock_ps_cls.return_value = mock_ps_instance
 
             mock_create.return_value = _mock_project()
