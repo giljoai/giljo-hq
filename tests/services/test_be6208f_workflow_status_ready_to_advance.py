@@ -169,4 +169,12 @@ async def test_ready_to_advance_is_only_added_field(db_session: AsyncSession) ->
     }
     # BE-8003a added the computed next_action envelope alongside ready_to_advance.
     # FE-9296b added checkin_cadence_minutes (the resolved account-level cadence).
-    assert set(dumped) == pre_be6208f_keys | {"ready_to_advance", "next_action", "checkin_cadence_minutes"}
+    # BE-9541 added closed_agents (a "closed" execution was never counted anywhere,
+    # so a fully-closed solo project read as 0% / Unknown -- additive, counted
+    # alongside completed_agents rather than replacing it).
+    assert set(dumped) == pre_be6208f_keys | {
+        "ready_to_advance",
+        "next_action",
+        "checkin_cadence_minutes",
+        "closed_agents",
+    }

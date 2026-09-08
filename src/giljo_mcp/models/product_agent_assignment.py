@@ -22,7 +22,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import backref, relationship
 from sqlalchemy.sql import func
 
 from .base import Base, generate_uuid
@@ -73,7 +73,16 @@ class ProductAgentAssignment(Base):
 
     # Relationships
     product = relationship("Product", back_populates="agent_assignments")
-    template = relationship("AgentTemplate", backref="product_assignments")
+    # BE-9531: this was a bare backref="product_assignments". With no cascade,
+    # SQLAlchemy's default on parent delete is to load the children and null
+    # their FK -- into template_id's nullable=False. The database FK is already
+    # ON DELETE CASCADE, so passive_deletes hands the work to the database that
+    # was always going to do it correctly. Matches Product.agent_assignments,
+    # which was declared this way from the start and never had the defect.
+    template = relationship(
+        "AgentTemplate",
+        backref=backref("product_assignments", cascade="all, delete-orphan", passive_deletes=True),
+    )
 
     __table_args__ = (
         # BE-8000c: idx_assignment_product dropped — leftmost-covered by

@@ -11,12 +11,13 @@ from giljo_mcp.services.project_helpers import _build_ws_project_data
 
 
 def test_build_ws_project_data_returns_expected_fields():
-    """_build_ws_project_data returns name, description, status, mission."""
+    """_build_ws_project_data returns name, description, status, mission, product_id."""
     project = MagicMock()
     project.name = "Test"
     project.description = "Desc"
     project.status = "active"
     project.mission = "Mission text"
+    project.product_id = "prod-1"  # BE-9518
 
     result = _build_ws_project_data(project)
 
@@ -25,6 +26,7 @@ def test_build_ws_project_data_returns_expected_fields():
         "description": "Desc",
         "status": "active",
         "mission": "Mission text",
+        "product_id": "prod-1",  # BE-9518
     }
 
 

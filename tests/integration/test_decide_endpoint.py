@@ -214,6 +214,7 @@ async def test_decide_round_trip_flips_status_and_resumes_agent(db_manager, db_s
     assert row.status == "decided"
     assert row.decided_option_id == "approve"
     assert row.decided_by_user_id == str(test_user.id)
+    assert row.decided_via == "ui", "BE-9514: the REST /decide door must record decided_via='ui'"
     assert row.decided_at is not None
 
     execution = (
@@ -362,13 +363,46 @@ async def test_list_pending_excludes_other_tenants(db_manager, db_session, test_
 
 
 async def test_list_rejects_unsupported_status(db_manager, db_session, test_user, pending_approval):
-    """Only ``status=pending`` is supported; other values return 422."""
+    """A status outside VALID_USER_APPROVAL_STATUSES returns 422.
+
+    BE-9514 widened this endpoint from a ``status='pending'``-only 422 to any
+    valid status (``pending`` | ``decided`` | ``expired`` | ``cancelled``) --
+    see test_list_decided_status_returns_decided_rows_with_channel below for
+    the newly-supported ``decided`` case.
+    """
     app = _build_app(db_manager, db_session, user=test_user)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.get("/api/approvals/?status=decided")
+        resp = await client.get("/api/approvals/?status=bogus")
 
     assert resp.status_code == 422, f"expected 422, got {resp.status_code}: {resp.text}"
+
+
+async def test_list_decided_status_returns_decided_rows_with_channel(
+    db_manager, db_session, test_user, pending_approval
+):
+    """BE-9514: ``status=decided`` is the read surface for verifying
+    ``decided_via`` end to end -- decided approvals previously had no read
+    surface at all (this endpoint 422'd on anything but 'pending')."""
+    app = _build_app(db_manager, db_session, user=test_user)
+    approval_id = pending_approval["approval"].id
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        decided_resp = await client.post(
+            f"/api/approvals/{approval_id}/decide",
+            json={"option_id": "approve"},
+        )
+        assert decided_resp.status_code == 200
+
+        list_resp = await client.get("/api/approvals/?status=decided")
+
+    assert list_resp.status_code == 200, f"expected 200, got {list_resp.status_code}: {list_resp.text}"
+    body = list_resp.json()
+    items = {item["id"]: item for item in body["items"]}
+    assert approval_id in items, "the decided row must be readable via status=decided"
+    assert items[approval_id]["status"] == "decided"
+    assert items[approval_id]["decided_via"] == "ui", "the REST/dashboard door decided this"
+    assert items[approval_id]["decided_by_user_id"] == str(test_user.id)
 
 
 async def test_list_excludes_decided_rows(db_manager, db_session, test_user, pending_approval):

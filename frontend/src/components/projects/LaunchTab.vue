@@ -207,7 +207,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from '@/composables/useToast'
 import { useAgentJobs } from '@/composables/useAgentJobs'
@@ -348,11 +348,14 @@ function handleMissionUpdated({ jobId, mission }) {
 /**
  * Watchers
  */
-watch(missionText, (next, previous) => {
-  if (next && !previous) {
-    showToast({ message: 'Agent mission generated', type: 'success' })
-  }
-})
+// FE-9553: this watch used to raise a success toast when mission text first
+// appeared. Removed rather than relocated, and the reasoning is worth keeping:
+// the watch fires when the AGENT produces the mission, which ruling 6 puts off
+// the toast entirely -- but it also needs no other surface, because the thing
+// being announced is the mission text becoming visible in the field the
+// operator is already looking at. A notification that something appeared, next
+// to the thing that appeared, is noise on any surface.
+
 </script>
 
 <style scoped lang="scss">

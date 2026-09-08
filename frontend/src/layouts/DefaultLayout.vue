@@ -11,6 +11,27 @@
       @toggle-rail="rail = !rail"
     />
 
+    <!-- FE-9502c: the tabbed product shell — one tab per open product, the
+         viewed tab is a UI-local concept (not the server's single "active
+         product"). Additive: with zero or one product open this renders at
+         most one tab, so the pre-tabs single-product layout is unaffected. -->
+    <v-app-bar
+      v-if="!route.meta.hideDrawer && productStore.openProductTabs.length > 0"
+      flat
+      color="surface"
+      class="product-tab-app-bar"
+      density="compact"
+    >
+      <ProductTabStrip
+        :tabs="tabsWithBadges"
+        :viewed-id="productStore.currentProductId"
+        :addable-products="addableProducts"
+        @select="onProductTabSelect"
+        @close="onProductTabClose"
+        @add="onProductTabAdd"
+      />
+    </v-app-bar>
+
     <v-main>
       <!-- SaaS Trial Expiry Banner (loaded dynamically, absent in CE) -->
       <component :is="TrialBannerComponent" v-if="TrialBannerComponent" />
@@ -55,9 +76,13 @@ import { useWebSocketStore } from '@/stores/websocket'
 import { useProjectStore } from '@/stores/projects'
 import { initWebsocketEventRouter, registerReconnectResync } from '@/stores/websocketEventRouter'
 import { useHubNotifications } from '@/composables/useHubNotifications'
+import { useBannerPopoutLifecycle } from '@/composables/useBannerPopoutLifecycle'
 import { useActiveProductReconciliation } from '@/composables/useActiveProductReconciliation'
+import { withProductActivityBadges } from '@/composables/useProductTabBadges'
+import { useProductActivityStore } from '@/stores/productActivityStore'
 import StarField from '@/components/StarField.vue'
 import NavigationDrawer from '@/components/navigation/NavigationDrawer.vue'
+import ProductTabStrip from '@/components/navigation/ProductTabStrip.vue'
 import ToastManager from '@/components/ToastManager.vue'
 import { defineAsyncComponent } from 'vue'
 const LicensingDialog = defineAsyncComponent(() => import('@/components/LicensingDialog.vue'))
@@ -82,6 +107,7 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const productStore = useProductStore()
+const productActivityStore = useProductActivityStore()
 const projectStatusesStore = useProjectStatusesStore()
 const taskStatusesStore = useTaskStatusesStore()
 const wsStore = useWebSocketStore()
@@ -93,9 +119,20 @@ const projectStore = useProjectStore()
 // initWebsocketEventRouter, below) is already app-wide; this is the one consumer, and
 // it belongs at the same level. Mount it in EXACTLY ONE place: the de-dupe set is
 // per-instance, so a second mount (e.g. re-adding it to HubView) would double-fire
-// every toast + browser notification. useHubPresence keeps it silent while the
-// operator is actually on /hub.
+// every browser notification.
+//
+// FE-9553: it no longer fires a toast at all (rulings 3 and 6 -- these signals are
+// actionable and agent-initiated, so they are the banner's and the bell's, not the
+// toast's), and what keeps it silent is now Page Visibility rather than Hub presence:
+// a popout fires only when the app is HIDDEN, so a visible tab gets the banner alone.
 useHubNotifications()
+
+// FE-9553 ruling 4(c): popouts follow banner state including its death. This is the
+// half that notices the death -- it watches the same your-turn state the banner
+// watches and closes any popout whose banner has gone. Mounted beside its producer
+// and, like it, in exactly one place; a second mount would just reconcile twice
+// against the same registry, but there is no reason to.
+useBannerPopoutLifecycle()
 
 // FE-3007b: unregister fns for the reconnect-resync callbacks this layout owns.
 const resyncUnregisters = []
@@ -115,6 +152,38 @@ function onResize() {
 
 window.addEventListener('resize', onResize)
 const currentUser = ref(null)
+
+// FE-9502c: tab strip wiring. addableProducts is every product NOT currently
+// open as a tab, offered in the strip's "+" add-tab menu.
+const addableProducts = computed(() =>
+  productStore.products.filter((p) => !productStore.openProductIds.includes(p.id)),
+)
+
+// FE-9502d: badge each background tab with its accumulated activity count
+// (productActivityStore, fed by routeProductActivityEvent) so "an agent is
+// working on Product B" reads on Product B's tab while you watch Product A --
+// visualization only, no auto-switching.
+const tabsWithBadges = computed(() =>
+  withProductActivityBadges(
+    productStore.openProductTabs,
+    productStore.currentProductId,
+    productActivityStore.getCount,
+  ),
+)
+
+function onProductTabSelect(productId) {
+  productStore.switchTab(productId)
+  productActivityStore.clearActivity(productId)
+}
+
+function onProductTabClose(productId) {
+  productStore.closeTab(productId)
+}
+
+function onProductTabAdd(productId) {
+  productStore.openTab(productId)
+  productActivityStore.clearActivity(productId)
+}
 
 const loadCurrentUser = async () => {
   try {
@@ -323,5 +392,10 @@ router.afterEach(async (to, from) => {
   :deep(.v-main) {
     padding-top: 48px !important;
   }
+}
+
+/* FE-9502c: product tab strip app bar */
+.product-tab-app-bar {
+  padding: 0 16px;
 }
 </style>

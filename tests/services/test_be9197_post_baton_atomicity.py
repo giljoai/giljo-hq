@@ -7,7 +7,7 @@
 
 ``CommThreadService.post_to_thread`` gains an optional ``pass_baton_to``: the
 message persist and the ``next_action_owner`` update happen in ONE service
-transaction — not a post followed by a separate ``pass_baton`` (the gap that
+transaction — not a post followed by a separate ``set_next_actor`` (the gap that
 left addressees' ``get_my_turn`` blind when the second call was forgotten).
 
 The load-bearing test here is the rollback: a post that FAILS mid-transaction
@@ -20,7 +20,7 @@ Service semantics under test (the tool-level auto-pass default lives at the
 MCP boundary, NOT here — the REST and internal callers keep prior behavior):
 - non-empty ``pass_baton_to`` (not 'none') moves the baton with the post;
 - ``'none'`` / omitted leaves ``next_action_owner`` untouched (unlike
-  ``pass_baton(to='none')``, which CLEARS it — posting is never clearing);
+  ``set_next_actor(to='none')``, which CLEARS it — posting is never clearing);
 - a failed post rolls the baton back (real ``db_manager`` transaction path).
 """
 
@@ -76,7 +76,7 @@ async def test_post_with_baton_moves_owner_in_result_and_db(db_manager, db_sessi
 
 async def test_none_and_omitted_leave_owner_untouched(db_manager, db_session):
     """'none' means post WITHOUT moving the baton — it does NOT clear the owner
-    the way pass_baton(to='none') does. Omitting the param is identical (the
+    the way set_next_actor(to='none') does. Omitting the param is identical (the
     service applies no default; that UX rule lives at the MCP boundary)."""
     tenant = _tk("none")
     await _seed(db_session, tenant)

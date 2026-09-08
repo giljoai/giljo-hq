@@ -5,7 +5,7 @@
 
 """BE-9388 — what may pre-empt a park (``_has_pending_work``), no database.
 
-The gate that decides whether ``await_my_turn`` blocks at all. It shipped as
+The gate that decides whether ``get_my_turn`` blocks at all. It shipped as
 ``bool(count) or bool(directed_action)``, which meant any row the baton query
 returned — including a thread left at ``all`` three weeks earlier, belonging to
 nobody — permanently prevented the park.

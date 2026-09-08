@@ -4,12 +4,12 @@
 # [CE] Community Edition.
 
 """
-Unit tests for ProductService activation flow - specifically get_active_product eager loading.
+Unit tests for ProductService activation flow - specifically get_default_product eager loading.
 
 Handover 0320 Fix: Tests written FIRST following TDD discipline (RED -> GREEN -> REFACTOR).
 Updated 0730d: Exception-based error handling patterns (no success wrappers).
 
-Root Cause: get_active_product() doesn't eager-load vision_documents relationship,
+Root Cause: get_default_product() doesn't eager-load vision_documents relationship,
 causing SQLAlchemy async lazy loading errors when accessing primary_vision_path property.
 """
 
@@ -33,9 +33,12 @@ def mock_db_manager():
     session.flush = AsyncMock()
     session.info = {}  # tenant_session_context save/restore target
 
-    # Create proper async context manager
+    # Create proper async context manager. FE-9524: get_default_product now
+    # lives on ProductLifecycleService, which calls get_session_async(tenant_key=...)
+    # (tenant_scoped_session) rather than ProductService's tenant_context_session
+    # (get_session_async() with no kwarg) -- accept and ignore either shape.
     @asynccontextmanager
-    async def mock_get_session():
+    async def mock_get_session(*_args, **_kwargs):
         yield session
 
     db_manager.get_session_async = mock_get_session
@@ -43,9 +46,9 @@ def mock_db_manager():
 
 
 @pytest.mark.asyncio
-async def test_get_active_product_returns_vision_path_without_lazy_load_error(mock_db_manager):
+async def test_get_default_product_returns_vision_path_without_lazy_load_error(mock_db_manager):
     """
-    Test that get_active_product eager-loads vision_documents to access primary_vision_path.
+    Test that get_default_product eager-loads vision_documents to access primary_vision_path.
 
     This test verifies the fix for the SQLAlchemy async lazy loading error:
     "greenlet_spawn has not been called; can't call await_only() here"
@@ -92,8 +95,8 @@ async def test_get_active_product_returns_vision_path_without_lazy_load_error(mo
     # Mock _get_product_metrics to return empty dict
     service._get_product_metrics = AsyncMock(return_value={})
 
-    # Call get_active_product - should NOT raise MissingGreenlet error
-    result = await service.get_active_product()
+    # Call get_default_product - should NOT raise MissingGreenlet error
+    result = await service.get_default_product()
 
     # Verify success (0731b: returns Product ORM model directly, or None)
     assert result is not None
@@ -103,9 +106,9 @@ async def test_get_active_product_returns_vision_path_without_lazy_load_error(mo
 
 
 @pytest.mark.asyncio
-async def test_get_active_product_no_active_product(mock_db_manager):
+async def test_get_default_product_no_active_product(mock_db_manager):
     """
-    Test get_active_product returns None product when no active product.
+    Test get_default_product returns None product when no active product.
     """
     from giljo_mcp.services.product_service import ProductService
 
@@ -118,16 +121,16 @@ async def test_get_active_product_no_active_product(mock_db_manager):
 
     service = ProductService(db_manager, tenant_key="test-tenant")
 
-    result = await service.get_active_product()
+    result = await service.get_default_product()
 
     # 0731b: Returns None when no active product
     assert result is None
 
 
 @pytest.mark.asyncio
-async def test_get_active_product_multi_tenant_isolation(mock_db_manager):
+async def test_get_default_product_multi_tenant_isolation(mock_db_manager):
     """
-    Test get_active_product only returns products for the correct tenant.
+    Test get_default_product only returns products for the correct tenant.
 
     The query must include tenant_key filter.
     """
@@ -143,7 +146,7 @@ async def test_get_active_product_multi_tenant_isolation(mock_db_manager):
     mock_result.scalar_one_or_none.return_value = None
     session.execute.return_value = mock_result
 
-    result = await service.get_active_product()
+    result = await service.get_default_product()
 
     # Verify session.execute was called (query was built)
     assert session.execute.called
@@ -155,9 +158,9 @@ async def test_get_active_product_multi_tenant_isolation(mock_db_manager):
 
 
 @pytest.mark.asyncio
-async def test_get_active_product_handles_exception(mock_db_manager):
+async def test_get_default_product_handles_exception(mock_db_manager):
     """
-    Test get_active_product raises BaseGiljoError on database failures.
+    Test get_default_product raises BaseGiljoError on database failures.
 
     0730d: Exception-based error handling - raises instead of returning error dict.
     """
@@ -172,15 +175,15 @@ async def test_get_active_product_handles_exception(mock_db_manager):
 
     # 0730d: Should raise BaseGiljoError, not return error dict
     with pytest.raises(BaseGiljoError) as exc_info:
-        await service.get_active_product()
+        await service.get_default_product()
 
     assert "Database connection failed" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
-async def test_get_active_product_with_empty_vision_documents(mock_db_manager):
+async def test_get_default_product_with_empty_vision_documents(mock_db_manager):
     """
-    Test get_active_product works when product has no vision documents.
+    Test get_default_product works when product has no vision documents.
     """
     from giljo_mcp.services.product_service import ProductService
 
@@ -206,7 +209,7 @@ async def test_get_active_product_with_empty_vision_documents(mock_db_manager):
     service = ProductService(db_manager, tenant_key="test-tenant")
     service._get_product_metrics = AsyncMock(return_value={})
 
-    result = await service.get_active_product()
+    result = await service.get_default_product()
 
     # 0731b: Returns Product ORM model directly
     assert result.primary_vision_path == ""

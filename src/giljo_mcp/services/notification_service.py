@@ -245,6 +245,7 @@ class NotificationService:
                 )
                 await session.flush()
                 await session.commit()
+                await self._emit_updated(tenant_key, existing)
                 return existing
 
             notification = Notification(
@@ -288,6 +289,7 @@ class NotificationService:
                 )
                 await session.flush()
                 await session.commit()
+                await self._emit_updated(tenant_key, existing)
                 return existing
 
             await session.refresh(notification)
@@ -302,6 +304,12 @@ class NotificationService:
         Auto-clear hook: e.g. when the underlying API key is regenerated or
         revoked, its expiry notification is resolved. Returns the number of
         rows resolved (0 if none were open).
+
+        D16 (Headless S3d): resolving a row used to emit no event at all, so a
+        banner whose underlying condition already cleared (an answered agent
+        question, a fixed pending-migrations count) stayed on screen until the
+        next full page load. The resolved ids are broadcast as
+        ``notification:resolved`` so the store can drop them live.
         """
         now = datetime.now(UTC)
         async with self._get_session(tenant_key) as session:
@@ -313,10 +321,15 @@ class NotificationService:
                     Notification.resolved_at.is_(None),
                 )
                 .values(resolved_at=now)
+                .returning(Notification.id)
             )
             result = await session.execute(stmt)
+            resolved_ids = [str(row[0]) for row in result.all()]
             await session.commit()
-            return result.rowcount or 0
+
+        if resolved_ids:
+            await self._emit_resolved(tenant_key, resolved_ids)
+        return len(resolved_ids)
 
     async def resolve_open_by_type(
         self, tenant_key: str, notification_type: str, *, keep_dedupe_key: str | None = None
@@ -339,12 +352,17 @@ class NotificationService:
                     Notification.resolved_at.is_(None),
                 )
                 .values(resolved_at=now)
+                .returning(Notification.id)
             )
             if keep_dedupe_key is not None:
                 stmt = stmt.where(Notification.dedupe_key != keep_dedupe_key)
             result = await session.execute(stmt)
+            resolved_ids = [str(row[0]) for row in result.all()]
             await session.commit()
-            return result.rowcount or 0
+
+        if resolved_ids:
+            await self._emit_resolved(tenant_key, resolved_ids)
+        return len(resolved_ids)
 
     async def purge_resolved_older_than(
         self, tenant_key: str, retention_days: int, *, now: datetime | None = None
@@ -546,9 +564,53 @@ class NotificationService:
             return
 
         try:
+            # BE-9525c: top-level project_id/product_id on the envelope so every
+            # reader (FE router, notificationRouting.js, clearForProject) can key
+            # on ONE shape instead of reaching into free-form payload/metadata --
+            # additive, derived from whatever the row's own payload already
+            # carries (never invented). Legacy rows with neither key simply get
+            # None here; readers still fall back to payload/metadata.
+            payload_dict = notification.payload if isinstance(notification.payload, dict) else {}
             await self._websocket_manager.broadcast_to_tenant(
                 tenant_key=tenant_key,
                 event_type="notification:new",
+                data={
+                    "id": str(notification.id),
+                    "user_id": notification.user_id,
+                    "type": notification.type,
+                    "severity": notification.severity,
+                    "title": notification.title,
+                    "body": notification.body,
+                    "payload": notification.payload,
+                    "project_id": payload_dict.get("project_id"),
+                    "product_id": payload_dict.get("product_id"),
+                    "surface": notification.surface,
+                    "role_filter": notification.role_filter,
+                    "cta_label": notification.cta_label,
+                    "cta_route": notification.cta_route,
+                    "dismissible": notification.dismissible,
+                    "created_at": notification.created_at.isoformat() if notification.created_at else None,
+                },
+            )
+        except (RuntimeError, ValueError) as exc:
+            self._logger.warning("Failed to emit notification:new WS event: %s", exc, exc_info=True)
+
+    async def _emit_updated(self, tenant_key: str, notification: Notification) -> None:
+        """Emit a ``notification:updated`` WS event (graceful no-op).
+
+        D16: fired when ``upsert_by_dedupe_key`` refreshes an already-open row
+        in place (e.g. a scanner's "5 pending migrations" → "3 pending
+        migrations"). Same payload shape as ``notification:new`` so a single
+        client handler can normalize either into the store.
+        """
+        if not self._websocket_manager:
+            self._logger.debug("No WebSocket manager available for notification:updated")
+            return
+
+        try:
+            await self._websocket_manager.broadcast_to_tenant(
+                tenant_key=tenant_key,
+                event_type="notification:updated",
                 data={
                     "id": str(notification.id),
                     "user_id": notification.user_id,
@@ -566,4 +628,26 @@ class NotificationService:
                 },
             )
         except (RuntimeError, ValueError) as exc:
-            self._logger.warning("Failed to emit notification:new WS event: %s", exc, exc_info=True)
+            self._logger.warning("Failed to emit notification:updated WS event: %s", exc, exc_info=True)
+
+    async def _emit_resolved(self, tenant_key: str, notification_ids: list[str]) -> None:
+        """Emit a ``notification:resolved`` WS event (graceful no-op).
+
+        D16: the fix for the durable "answered question stays on screen" bug —
+        ``resolve_by_dedupe_key``/``resolve_open_by_type`` used to be silent, so
+        the store never learned a row's underlying condition had cleared until
+        the next full page load. Carries just the resolved ids; the client
+        drops them from its local notification list.
+        """
+        if not self._websocket_manager or not notification_ids:
+            self._logger.debug("No WebSocket manager available for notification:resolved")
+            return
+
+        try:
+            await self._websocket_manager.broadcast_to_tenant(
+                tenant_key=tenant_key,
+                event_type="notification:resolved",
+                data={"ids": notification_ids},
+            )
+        except (RuntimeError, ValueError) as exc:
+            self._logger.warning("Failed to emit notification:resolved WS event: %s", exc, exc_info=True)

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "ai.giljo/hq",
+  "title": "Giljo HQ",
+  "description": "Context engineering for AI coding agents: product context, project missions, and 360 memory.",
+  "version": "2.1.0",
+  "websiteUrl": "https://giljo.ai",
+  "repository": {
+    "url": "https://github.com/giljoai/giljo-hq",
+    "source": "github",
+    "id": "1299879603"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://app.giljo.ai/mcp"
+    }
+  ]
+}

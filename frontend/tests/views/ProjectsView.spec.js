@@ -137,6 +137,10 @@ describe('ProjectsView.vue', () => {
 
     productStore.$patch({
       products: mockProducts,
+      // FE-9502c: ProjectsView now scopes by currentProduct (the viewed tab),
+      // not the server's single activeProduct. Keep both in sync here since
+      // these fixtures aren't testing the divergent-tab case.
+      currentProduct: mockProducts[0],
       activeProduct: mockProducts[0],
     })
 
@@ -448,6 +452,7 @@ describe('ProjectsView.vue', () => {
   describe('Product Integration', () => {
     it('disables New Project button when no active product', async () => {
       productStore.$patch({
+        currentProduct: null,
         activeProduct: null,
       })
 
@@ -460,11 +465,12 @@ describe('ProjectsView.vue', () => {
 
     it('shows alert when no active product', async () => {
       productStore.$patch({
+        currentProduct: null,
         activeProduct: null,
       })
 
       const wrapper = await createWrapper()
-      expect(wrapper.text()).toContain('No active product selected')
+      expect(wrapper.text()).toContain('No product is open')
     })
 
     it('scopes the server page to the active product (product_id added store-side)', async () => {

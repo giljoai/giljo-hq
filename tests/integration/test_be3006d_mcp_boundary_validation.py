@@ -262,7 +262,7 @@ _VALID_CALLS: dict[str, dict[str, Any]] = {
     },
     "create_project": {"name": "P", "description": "d", "project_type": "BE"},
     "update_project": {"project_id": str(uuid4()), "name": "P2"},
-    "update_roadmap_metadata": {"items": [], "summary": "s"},
+    "save_roadmap": {"items": [], "summary": "s"},
     "apply_context_tuning": {"product_id": str(uuid4()), "proposals": []},
     "spawn_job": {
         "agent_display_name": "implementer",

@@ -122,8 +122,13 @@ async def _spawn_orchestrator(session: AsyncSession, tenant_key: str, project_id
     return str(row.scalar_one().agent_id)
 
 
-def _run_svc(session: AsyncSession) -> SequenceRunService:
-    return SequenceRunService(db_manager=None, tenant_manager=TenantManager(), session=session)
+def _run_svc(session: AsyncSession, *, websocket_manager=None) -> SequenceRunService:
+    return SequenceRunService(
+        db_manager=None,
+        tenant_manager=TenantManager(),
+        session=session,
+        websocket_manager=websocket_manager,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +209,46 @@ async def test_conductor_insert_failure_rolls_back_run(db_session: AsyncSession,
         )
     )
     assert jobs.scalars().first() is None, "a failed conductor mint must leave NO orphan conductor job"
+
+
+# ---------------------------------------------------------------------------
+# BE-9440 Phase 1: create() broadcasts agent:created for the freshly minted conductor
+# ---------------------------------------------------------------------------
+
+
+class _RecordingWebsocketManager:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def broadcast_to_tenant(self, *, tenant_key, event_type, data):
+        self.calls.append({"tenant_key": tenant_key, "event_type": event_type, "data": data})
+
+
+async def test_create_broadcasts_agent_created_for_conductor(db_session: AsyncSession) -> None:
+    """create() emits agent:created for the conductor AFTER its commit lands.
+
+    BE-9440 Phase 1: previously the mint broadcast nothing, so a freshly minted
+    chain conductor appeared on no dashboard until a manual refresh.
+    """
+    tenant = TenantManager.generate_tenant_key()
+    p1 = await _seed_project(db_session, tenant)
+    p2 = await _seed_project(db_session, tenant)
+
+    ws = _RecordingWebsocketManager()
+    svc = _run_svc(db_session, websocket_manager=ws)
+    run = await svc.create(
+        project_ids=[p1, p2],
+        resolved_order=[p1, p2],
+        execution_mode="claude_code_cli",
+        tenant_key=tenant,
+    )
+
+    agent_created_calls = [c for c in ws.calls if c["event_type"] == "agent:created"]
+    assert len(agent_created_calls) == 1, "exactly one agent:created for the minted conductor"
+    data = agent_created_calls[0]["data"]
+    assert data["agent_id"] == run["conductor_agent_id"]
+    assert data["project_id"] is None, "the dedicated conductor owns NO project"
+    assert data["chain_conductor"] is True
 
 
 # ---------------------------------------------------------------------------

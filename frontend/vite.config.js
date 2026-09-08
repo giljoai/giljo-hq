@@ -156,6 +156,17 @@ export default defineConfig(({ mode }) => ({
           })
         },
       },
+      // WebSocket upgrades (ADR-001). The backend serves the socket at
+      // /ws/{client_id} on the API root -- NOT under /api -- and in dev
+      // getWsBaseUrl() returns '' so the app dials the Vite origin. Without a
+      // rule here the upgrade matches nothing, hangs with no error, and no
+      // WS-driven UI can be tested locally (INF-9573).
+      '/ws': {
+        target: API_TARGET.replace(/^http/, 'ws'),
+        changeOrigin: true,
+        secure: false,
+        ws: true,
+      },
       // MCP endpoints if used
       '/mcp': {
         target: API_TARGET,

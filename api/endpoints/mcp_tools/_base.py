@@ -15,6 +15,7 @@ acyclic: this module imports neither the wrappers nor the transport.
 Extracted verbatim from the pre-split ``mcp_sdk_server.py`` — behavior unchanged.
 """
 
+import asyncio
 import functools
 import hashlib
 import inspect
@@ -48,9 +49,11 @@ from api.endpoints.mcp_tools._silence_scope import NON_SILENCE_CLEARING_TOOLS, S
 from giljo_mcp import __version__ as _giljo_version
 from giljo_mcp import branding
 from giljo_mcp.exceptions import BaseGiljoError, ValidationError
+from giljo_mcp.services._comm_thread_wake_mixin import MAX_WAIT_SECONDS as _INTENTIONAL_LONGPOLL_MAX_SECONDS
 from giljo_mcp.services._mcp_wire_bounds import CursorRejectedError
 from giljo_mcp.services.debounce import should_run
 from giljo_mcp.services.memory_entry_write_validator import MemoryEntryWriteValidationError
+from giljo_mcp.services.product_service import ProductAmbiguousError
 from giljo_mcp.tenant_guard import TenantIsolationError
 from giljo_mcp.tools.slash_command_templates import SKILLS_VERSION as _SKILLS_VERSION
 
@@ -119,6 +122,40 @@ MCP_DESCRIPTION_MAX = 20_000  # a task/project description blob
 MCP_MISSION_MAX = 100_000  # an orchestrator mission / execution plan
 MCP_LIST_ITEMS_MAX = 100  # recipients list, etc. (per-call item count)
 
+
+# ---------------------------------------------------------------------------
+# BE-9558: held-request ceiling, enforced ONCE at the single dispatch
+# chokepoint instead of depending on every tool author to self-clamp.
+#
+# A dispatch that blocks indefinitely can hold the request -- and whatever
+# pooled resource it acquired -- for the request's lifetime, starving
+# concurrent callers. Before this, the only bounded wait was
+# get_my_turn/await_my_turn's own MAX_WAIT_SECONDS clamp (tool-local
+# self-discipline, not a mechanism); every other tool reaching this dispatch
+# function had no ceiling at all.
+#
+# Set strictly ABOVE _INTENTIONAL_LONGPOLL_MAX_SECONDS (55s), not equal to it.
+# await_my_turn starts its OWN internal `asyncio.wait_for(..., 55)` a few
+# milliseconds after this chokepoint starts its wrapping wait_for around the
+# same call -- so at an EQUAL duration this outer one would always fire
+# first (it started the identical countdown slightly earlier) and clobber
+# await_my_turn's own graceful timeout payload (wake_reason="timeout") with
+# the generic ceiling response below. This is a BACKSTOP for a tool that does
+# NOT self-clamp, not a second timer racing one that already does -- so it
+# needs enough margin to let the intentional 55s clamp always win on its own
+# terms. Still strictly BELOW the ~60s an MCP client SDK aborts a request at
+# (see the wake mixin's own docstring), so a tool this ceiling actually
+# catches still gets a real, parseable response instead of the client's own
+# raw timeout error.
+HELD_TOOL_CEILING_SECONDS = _INTENTIONAL_LONGPOLL_MAX_SECONDS + 3  # 58
+
+TOOL_CEILING_ERROR = "TOOL_CEILING_EXCEEDED"
+_TOOL_CEILING_MESSAGE = (
+    "This tool call was still running after {ceiling}s and was stopped so it could not "
+    "hold the connection pool or the request open indefinitely. It may have partially "
+    "completed -- check its effect via a status/read tool before retrying."
+)
+
 # BE-9083c: per-tool inline-result size hint advertised on tools/list via the
 # SDK ``meta`` kwarg (surfaces as ``_meta["anthropic/maxResultSizeChars"]``).
 # Claude Code reads it to raise its inline-truncation ceiling for THESE heavy read
@@ -129,6 +166,40 @@ MCP_LIST_ITEMS_MAX = 100  # recipients list, etc. (per-call item count)
 # (full_protocol ~25KB + mission up to MCP_MISSION_MAX=100K).
 MCP_MAX_RESULT_SIZE_CHARS = 500_000
 MCP_HEAVY_TOOL_META: dict[str, int] = {"anthropic/maxResultSizeChars": MCP_MAX_RESULT_SIZE_CHARS}
+
+
+# BE-9554: four list/search tools carried 96-99% identical `product_id` prose (~450
+# chars each, ~1,800 total) that all said the same thing four slightly different ways
+# -- and all four said "the active product" long after the resolver moved to
+# is_default, so the same stale claim was stored four times. One constant, one place
+# to be right. `{what}` names what the call operates on ("list projects for",
+# "search", ...) so each tool still reads naturally.
+# BE-9554: byte-identical across write_memory_entry and write_project_closeout (470c
+# each). One source; both writers ask for the same thing in the same shape.
+GIT_COMMITS_DESC = (
+    "Commits from this project's branch. Each entry needs a non-empty title. Pass "
+    "{sha, message, author?, pr_url?} dicts, or tab-separated '<sha>\\t<subject>\\t<author>' "
+    "lines from: git log --format='%H%x09%s%x09%an' <base>..HEAD"
+)
+
+# BE-9554 item 8: list_projects and list_tasks each explained cursor-walking THREE
+# times -- once in the tool description, again on `limit`, again on `cursor` (~1,100
+# chars per tool). Both are in PROFILE_CORE and together were 36% of that bundle, so
+# this is the single biggest readability win available to a small model. Said once,
+# here, in plain words. `{what}` is the row noun ("projects" / "tasks").
+CURSOR_DESC = (
+    "Continue where a previous list stopped: pass back the `next_cursor` from that "
+    "response, with the SAME filters. Keep going until `truncated` is false and every "
+    "row will have been returned exactly once. Changing a filter mid-walk is refused "
+    "rather than silently answered from the wrong set; start over instead."
+)
+
+READ_PRODUCT_ID_DESC = (
+    "Product UUID to {what}. Omit to use your default product. PASS IT WHEN YOU KNOW "
+    "YOUR PRODUCT: the default is shared, mutable state -- another session, or the user "
+    "changing it in the dashboard, moves it mid-session. An id that is not one of your "
+    "own products is rejected; it never falls back to the default."
+)
 
 # BE-6070 (F9): in-process debounce window for the per-call post-hooks
 # (silent-clear probe + heartbeat). A looping agent fires many tool calls in a
@@ -251,6 +322,7 @@ mcp = MCPServer(
 # ---------------------------------------------------------------------------
 from api.endpoints.mcp_tools._scopes import (  # noqa: E402,F401  (re-export surface)
     _CORE_PROFILE_TOOLS,
+    _HITL_FENCED_TOOLS,
     _LAUNCH_GATE_TOOLS,
     _LISTING_PROFILE_TOOLS,
     _ORCHESTRATOR_PROFILE_TOOLS,
@@ -367,6 +439,7 @@ TOOL_DISPATCH: dict[str, ToolResolver] = {
     "get_roadmap": lambda acc: acc._roadmap_service.get_roadmap,
     # Comm-thread (Agent Message Hub) tools
     "create_thread": lambda acc: acc._comm_thread_service.create_thread,
+    "update_thread": lambda acc: acc._comm_thread_service.update_thread,
     "post_to_thread": lambda acc: acc._comm_thread_service.post_to_thread,
     "get_my_turn": lambda acc: acc._comm_thread_service.get_my_turn,
     "await_my_turn": lambda acc: acc._comm_thread_service.await_my_turn,
@@ -400,6 +473,24 @@ def _resolve_tool_func(accessor: Any, method_name: str) -> Callable[..., Awaitab
     if resolver is not None:
         return resolver(accessor)
     return getattr(accessor, method_name)
+
+
+def _held_tool_ceiling_response(method_name: str) -> dict[str, Any]:
+    """BE-9558: the structured Tier-2 rejection for a chokepoint-cancelled dispatch.
+
+    Split out of ``_call_tool`` to keep that function under its 200-line budget
+    -- pure formatting/logging, no control flow of its own.
+    """
+    logger.warning(
+        "MCP tool dispatch '%s' exceeded the %ss held-request ceiling; cancelled",
+        method_name,
+        HELD_TOOL_CEILING_SECONDS,
+    )
+    return {
+        "success": False,
+        "error": TOOL_CEILING_ERROR,
+        "message": _TOOL_CEILING_MESSAGE.format(ceiling=HELD_TOOL_CEILING_SECONDS),
+    }
 
 
 async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> Any:
@@ -454,7 +545,9 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
     #     SQL text + bind params in ``str()`` -> log full detail server-side and
     #     raise a generic, sanitized ToolError that exposes none of it.
     try:
-        result = await tool_func(**kwargs)
+        result = await asyncio.wait_for(tool_func(**kwargs), timeout=HELD_TOOL_CEILING_SECONDS)
+    except TimeoutError:  # BE-9558 -- see HELD_TOOL_CEILING_SECONDS above.
+        return _held_tool_ceiling_response(method_name)
     except CursorRejectedError as exc:
         # BE-9469: a refused continuation cursor is a Tier-2 DELIBERATE REJECTION, not an
         # error -- see the two-tier contract below. It is raised deep in the read layer
@@ -468,6 +561,13 @@ async def _call_tool(ctx: Context, method_name: str, kwargs: dict[str, Any]) -> 
         # can read like any other tool content.
         logger.info("MCP tool '%s' refused a continuation cursor: %s", method_name, exc.code)
         return {"success": False, "error": exc.code, "message": str(exc)}
+    except ProductAmbiguousError as exc:
+        # BE-9523b: a write that omitted product_id on a multi-product tenant.
+        # Same shape as CursorRejectedError above -- the agent fixes this by
+        # retrying with an explicit product_id (carried inline), so it belongs
+        # on the normal tool-content path with a remedy, not as isError.
+        logger.info("MCP tool '%s' refused an ambiguous create: %s", method_name, exc.code)
+        return {"success": False, "error": exc.code, "message": exc.message, "products": exc.products}
     except BaseGiljoError as exc:
         if exc.default_status_code < 500:
             raise

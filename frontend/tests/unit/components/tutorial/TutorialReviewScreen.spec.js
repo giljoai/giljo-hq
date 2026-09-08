@@ -8,8 +8,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createVuetify } from 'vuetify'
+import { ref } from 'vue'
 import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
+
+// FE-9569: a REAL Vue ref backing getProductById, so the component's
+// `computed(() => productStore.getProductById(id))` tracks it the same way
+// it tracks the genuine store's own computed-of-function getter
+// (stores/products.js:55) -- not just a one-shot local snapshot.
+const cache = ref({})
 
 const mockProductStore = {
   products: [
@@ -17,13 +24,18 @@ const mockProductStore = {
   ],
   activeProduct: { id: 'alpha-active', name: 'Alpha' },
   fetchProducts: vi.fn(async () => {}),
-  fetchProductById: vi.fn(async (id) => ({
-    id,
-    name: 'Draft Product',
-    description: 'Proposed by the agent.',
-    is_active: false,
-    tech_stack: {},
-  })),
+  fetchProductById: vi.fn(async (id) => {
+    const row = {
+      id,
+      name: 'Draft Product',
+      description: 'Proposed by the agent.',
+      is_active: false,
+      tech_stack: {},
+    }
+    cache.value = { ...cache.value, [id]: row }
+    return row
+  }),
+  getProductById: (id) => (id ? cache.value[id] || null : null),
 }
 
 vi.mock('@/stores/products', () => ({
@@ -65,14 +77,19 @@ function mountScreen(props = {}) {
 describe('TutorialReviewScreen', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    cache.value = {}
     mockProductStore.activeProduct = { id: 'alpha-active', name: 'Alpha' }
-    mockProductStore.fetchProductById.mockImplementation(async (id) => ({
-      id,
-      name: 'Draft Product',
-      description: 'Proposed by the agent.',
-      is_active: false,
-      tech_stack: {},
-    }))
+    mockProductStore.fetchProductById.mockImplementation(async (id) => {
+      const row = {
+        id,
+        name: 'Draft Product',
+        description: 'Proposed by the agent.',
+        is_active: false,
+        tech_stack: {},
+      }
+      cache.value = { ...cache.value, [id]: row }
+      return row
+    })
   })
 
   it('renders the THREADED product, never products[0] (audit F1)', async () => {
@@ -104,13 +121,17 @@ describe('TutorialReviewScreen', () => {
   })
 
   it('Activate on an ALREADY-ACTIVE product never calls the toggle (deactivation guard)', async () => {
-    mockProductStore.fetchProductById.mockImplementation(async (id) => ({
-      id,
-      name: 'Draft Product',
-      description: 'Activated mid-flow from the Products page.',
-      is_active: true,
-      tech_stack: {},
-    }))
+    mockProductStore.fetchProductById.mockImplementation(async (id) => {
+      const row = {
+        id,
+        name: 'Draft Product',
+        description: 'Activated mid-flow from the Products page.',
+        is_active: true,
+        tech_stack: {},
+      }
+      cache.value = { ...cache.value, [id]: row }
+      return row
+    })
     const wrapper = mountScreen({ productId: 'draft-1' })
     await flushPromises()
 

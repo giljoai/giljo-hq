@@ -358,6 +358,12 @@ async def lifespan(app: FastAPI):
     register_saas_tenant_scoped_models(giljo_mode=GILJO_MODE)
     register_mcp_subscription_gate(giljo_mode=GILJO_MODE)
 
+    # Phase 8.8: OAuth client-cache hydration (BE-9580) — best-effort, and the
+    # ONLY hook that fires; see the gate module for why on_event cannot work here.
+    from api.startup.oauth_hydration_gate import run_saas_oauth_hydration
+
+    await run_saas_oauth_hydration(app)
+
     # Phase 9: Trial reaper (SaaS only)
     # Uses importlib to satisfy CE/SaaS import boundary (no static import from saas/).
     # INF-3009b: also gated on should_run_background_jobs() (default ON) so this

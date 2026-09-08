@@ -34,7 +34,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from giljo_mcp.database import tenant_session_context
+from giljo_mcp.database import DatabaseManager, tenant_session_context
 from giljo_mcp.services._comm_thread_wake_mixin import (
     DEFAULT_WAIT_SECONDS,
     LIVENESS_GONE_AFTER_MINUTES,
@@ -47,6 +47,7 @@ from giljo_mcp.services.agent_wake_registry import get_wake_registry
 from giljo_mcp.services.comm_thread_service import CommThreadService
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.test_db_helper import PostgreSQLTestHelper, purge_tenant_rows
 
 
 # No module-level ``pytest.mark.asyncio``: this file mixes async and plain sync
@@ -335,6 +336,53 @@ async def test_over_the_waiter_cap_declines_to_park_and_says_to_poll(db_manager,
     assert result["woken"] is False
     assert result["wake_reason"] == "waiter_limit"
     assert result["count"] == 0
+
+
+async def test_await_my_turn_holds_zero_pool_connections_while_parked():
+    """BE-9558: locks in a claim the docstring makes but nothing tested.
+
+    ``await_my_turn``'s docstring asserts it "Holds NO database session while
+    parked ... proven under 40 concurrent waiters: pool checkedout stayed at 0
+    throughout" -- found true by reading the code while root-causing the
+    2026-09-01 prod long-poll slowdown (get_my_turn is called twice, straddling
+    the wait, each time opening and closing its OWN session via
+    _scoped_session), but with no regression test anywhere in the suite. This
+    is that test.
+
+    Needs a REAL QueuePool, not the ``db_manager`` fixture the rest of this
+    file shares: that one runs NullPool (deliberately, so parallel xdist
+    workers cannot exhaust Postgres's own max_connections) with ONE session
+    injected into the service for the whole test, reused for every call --
+    which can never show a connection actually returning to a pool. This test
+    builds its own tiny (pool_size=2) QueuePool-backed manager against the same
+    per-worker test database instead.
+    """
+    connection_string = PostgreSQLTestHelper.get_test_db_url()
+    pool_db_manager = DatabaseManager(connection_string, is_async=True, pool_size=2, max_overflow=0)
+    tenant = _tk("poolproof")
+    try:
+        async with pool_db_manager.get_session_async(tenant_key=tenant) as session:
+            with tenant_session_context(session, tenant):
+                await ensure_default_types_seeded(session, tenant)
+
+        svc = CommThreadService(pool_db_manager, TenantManager(), session=None)
+        await _thread_with(svc, tenant, creator="em", joiner="worker-1")
+
+        pool = pool_db_manager.async_engine.pool
+        assert pool.checkedout() == 0, "a connection was already checked out before parking"
+
+        # _park only returns once the waiter's own get_my_turn read has
+        # completed and it has moved on to suspend on the wait event -- the
+        # exact window the docstring's claim is about.
+        task = await _park(svc, tenant, "worker-1", timeout_seconds=1)
+        assert pool.checkedout() == 0, "await_my_turn held a pool connection while parked on the wait event"
+
+        result = await asyncio.wait_for(task, timeout=WAKE_DEADLINE_SECONDS)
+        assert result["wake_reason"] == "timeout"
+        assert pool.checkedout() == 0, "await_my_turn left a connection checked out after returning"
+    finally:
+        await purge_tenant_rows(pool_db_manager, tenant)
+        await pool_db_manager.close_async()
 
 
 # ---------------------------------------------------------------------------

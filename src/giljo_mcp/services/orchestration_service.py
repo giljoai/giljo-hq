@@ -129,6 +129,7 @@ class OrchestrationService:
         context_chunks: list[str] | None = None,
         phase: int | None = None,
         predecessor_job_id: str | None = None,
+        inline_seed: bool = False,
     ) -> SpawnResult:
         """Facade: delegates to JobLifecycleService.
 
@@ -146,6 +147,7 @@ class OrchestrationService:
             context_chunks=context_chunks,
             phase=phase,
             predecessor_job_id=predecessor_job_id,
+            inline_seed=inline_seed,
         )
 
     # ============================================================================

@@ -20,7 +20,7 @@
       </v-tooltip>
     </div>
 
-    <!-- BE-9084: Headless vs HITL launch toggle (account-wide, default HITL) -->
+    <!-- BE-9084 / BE-9542: Headless vs HITL launch toggle (account-wide, default Headless) -->
     <div class="hitl-toggle-bar">
       <v-switch
         v-model="allowHeadless"
@@ -36,7 +36,7 @@
         <template #activator="{ props }">
           <v-icon v-bind="props" size="16" class="hitl-toggle-info">mdi-information-outline</v-icon>
         </template>
-        This governs in-application, server-mediated launches only — the MCP launch_implementation tool that OAuth agent sessions use to advance a project from staging to building. Off (the default) keeps a human in the loop: the server will not authorize that launch until you press Implement. On lets a trusted CLI/OAuth agent self-advance without a click; only enable it for autonomous workflows you trust. It does not gate direct CLI interaction — an agent that reads a project and simply runs it locally never asks the server, so this toggle cannot reach it. Note: HITL guarantees the server will not authorize implementation early, but it cannot stop a non-compliant local orchestrator from inlining its own mission into an in-process subagent and working off the books (an accepted residual of local execution).
+        This governs in-application, server-mediated launches only — the MCP launch_implementation tool that OAuth agent sessions use to advance a project from staging to building. On (the default) lets a trusted CLI/OAuth agent self-advance without a click. Turn it off to keep a human in the loop: the server will then refuse to authorize that launch until you press Implement yourself; only turn it off if you want every launch gated on your own click. It does not gate direct CLI interaction — an agent that reads a project and simply runs it locally never asks the server, so this toggle cannot reach it. Note: HITL guarantees the server will not authorize implementation early, but it cannot stop a non-compliant local orchestrator from inlining its own mission into an in-process subagent and working off the books (an accepted residual of local execution).
       </v-tooltip>
     </div>
   </div>
@@ -73,8 +73,10 @@ const { showToast } = useToast()
 // HITL closeout mode
 const closeoutModeHitl = ref(true)
 
-// BE-9084: account-wide Headless-vs-HITL launch toggle (default false = HITL)
-const allowHeadless = ref(false)
+// BE-9084 / BE-9542: account-wide Headless-vs-HITL launch toggle (default true =
+// Headless, since BE-9542; the server is the source of truth, this is only the
+// pre-load display value).
+const allowHeadless = ref(true)
 
 // HITL closeout mode toggle
 async function toggleCloseoutMode(enabled) {
@@ -82,7 +84,26 @@ async function toggleCloseoutMode(enabled) {
   const previousValue = closeoutModeHitl.value
   closeoutModeHitl.value = enabled
   try {
-    await api.settings.updateGeneral({ closeout_mode: newMode })
+    // FE-9555: send the MERGED category, never just this one key. `PUT
+    // /api/v1/settings/general` REPLACES the whole category
+    // (update_settings("general", request.settings) -- no merge), so a partial
+    // payload here destroyed every sibling key on each flip. Found live: saving
+    // the execution-mode default and then flipping this toggle left the mode gone
+    // from the database while both requests returned 200. The bug predates the
+    // new setting; that setting is just the first sibling visible enough to
+    // notice. Fixed here rather than by making the endpoint merge -- it is the
+    // general-purpose "write the settings dict" verb and other callers may rely
+    // on replacement (museum rule: do not change its observable behaviour).
+    let general = {}
+    try {
+      const currentRes = await api.settings.getGeneral()
+      general = currentRes.data?.settings || {}
+    } catch (readErr) {
+      // A failed read must not drop the change the user just made: write the one
+      // key rather than abandoning it. Worst case is the pre-existing behaviour.
+      console.warn('[OrchestrationToggles] could not read general settings to merge', readErr)
+    }
+    await api.settings.updateGeneral({ ...general, closeout_mode: newMode })
     showToast({
       message: enabled
         ? 'User approval required before project closeout'
@@ -131,7 +152,7 @@ async function loadHeadlessLaunch() {
     const res = await api.settings.getHeadlessLaunch()
     allowHeadless.value = !!res.data?.allow_headless_launch
   } catch {
-    // Default stays false (HITL)
+    // Default stays true (Headless), matching the server default (BE-9542)
   }
 }
 
@@ -148,7 +169,13 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   margin-bottom: 12px;
-  padding-left: 4px;
+  /* FE-9555: 10px, not 4px. Measured in the browser: the v-switch thumb's own
+     left edge sits 6px left of the track, so at 4px the OFF-state thumb rendered
+     2px OUTSIDE this row's box and was visibly clipped, and the whole control sat
+     6px left of the Execution mode select stacked above it. 10px puts the
+     leftmost painted pixel -- the OFF thumb -- exactly on that select's left
+     edge, so the group shares one left margin and nothing overflows. */
+  padding-left: 10px;
 }
 
 .hitl-toggle-label {

@@ -216,7 +216,9 @@ async def test_accept_routes_through_mark_decided(monkeypatch):
     assert out["decided_option_id"] == "approve"
     assert out["surface"] == "inline"
     assert out["approval_id"] == "ap-1"
-    mark.assert_awaited_once_with(tenant_key="tenant-1", approval_id="ap-1", option_id="approve", user_id="user-9")
+    mark.assert_awaited_once_with(
+        tenant_key="tenant-1", approval_id="ap-1", option_id="approve", user_id="user-9", decided_via="mcp"
+    )
 
 
 @pytest.mark.asyncio

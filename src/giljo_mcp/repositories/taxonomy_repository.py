@@ -224,19 +224,25 @@ class TaxonomyRepository:
         type_id: str,
         product_id: str | None = None,
     ) -> set[int]:
-        """Get all used series numbers for a taxonomy type within a product."""
+        """Get all used series numbers for a taxonomy type within a product.
+
+        BE-9515: ``product_id`` is applied UNCONDITIONALLY, matching
+        ``get_next_series_number`` (BE-6079 M1) -- a ``None`` product scopes to
+        the ``product_id IS NULL`` bucket, not every product tenant-wide. Before
+        this fix a caller with no active product saw series numbers used by
+        EVERY product in the tenant, a cross-product read leak pinned by BE-9509.
+        """
         query = (
             select(Project.series_number)
             .where(
                 Project.project_type_id == type_id,
                 Project.tenant_key == tenant_key,
+                Project.product_id == product_id,
                 Project.series_number.is_not(None),
                 Project.deleted_at.is_(None),
             )
             .order_by(Project.series_number)
         )
-        if product_id is not None:
-            query = query.where(Project.product_id == product_id)
         result = await session.execute(query)
         return set(result.scalars().all())
 
@@ -250,14 +256,19 @@ class TaxonomyRepository:
         exclude_project_id: str | None = None,
         product_id: str | None = None,
     ) -> bool:
-        """Check if a series number combination is available within a product."""
+        """Check if a series number combination is available within a product.
+
+        BE-9515: ``product_id`` is applied UNCONDITIONALLY (see
+        ``get_used_series_numbers`` above for the full rationale) -- with no
+        active product this used to report a number unavailable because a
+        DIFFERENT product had used it. Pinned by BE-9509.
+        """
         query = select(Project.id).where(
             Project.tenant_key == tenant_key,
             Project.series_number == series_number,
+            Project.product_id == product_id,
             Project.deleted_at.is_(None),
         )
-        if product_id is not None:
-            query = query.where(Project.product_id == product_id)
         if type_id:
             query = query.where(Project.project_type_id == type_id)
         else:
@@ -283,15 +294,19 @@ class TaxonomyRepository:
         exclude_project_id: str | None = None,
         product_id: str | None = None,
     ) -> list[str]:
-        """Get all used subseries letters for a type + series_number within a product."""
+        """Get all used subseries letters for a type + series_number within a product.
+
+        BE-9515: ``product_id`` is applied UNCONDITIONALLY (see
+        ``get_used_series_numbers`` above for the full rationale). Pinned by
+        BE-9509.
+        """
         query = select(Project.subseries).where(
             Project.tenant_key == tenant_key,
             Project.series_number == series_number,
+            Project.product_id == product_id,
             Project.subseries.isnot(None),
             Project.deleted_at.is_(None),
         )
-        if product_id is not None:
-            query = query.where(Project.product_id == product_id)
         if type_id:
             query = query.where(Project.project_type_id == type_id)
         else:

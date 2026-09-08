@@ -127,11 +127,13 @@ async def test_mark_decided_atomic_flip_resume_and_fields(
         approval_id=pending.id,
         option_id="approve",
         user_id=user_id,
+        decided_via="ui",
     )
 
     assert decided.status == "decided"
     assert decided.decided_option_id == "approve"
     assert decided.decided_by_user_id == user_id
+    assert decided.decided_via == "ui"
     assert decided.decided_at is not None
 
     row = (await db_session.execute(select(UserApproval).where(UserApproval.id == pending.id))).scalar_one()
@@ -154,6 +156,7 @@ async def test_mark_decided_rejects_already_decided(approval_service, approval_s
         approval_id=pending.id,
         option_id="approve",
         user_id=None,
+        decided_via="mcp",
     )
 
     with pytest.raises(ValidationError, match="is not pending"):
@@ -162,6 +165,7 @@ async def test_mark_decided_rejects_already_decided(approval_service, approval_s
             approval_id=pending.id,
             option_id="approve",
             user_id=None,
+            decided_via="mcp",
         )
 
 
@@ -175,6 +179,7 @@ async def test_mark_decided_rejects_invalid_option_id(approval_service, approval
             approval_id=pending.id,
             option_id="not-a-real-option",
             user_id=None,
+            decided_via="mcp",
         )
 
 
@@ -186,6 +191,7 @@ async def test_mark_decided_unknown_id_raises_not_found(approval_service, test_t
             approval_id=str(uuid4()),
             option_id="approve",
             user_id=None,
+            decided_via="mcp",
         )
 
 
@@ -220,6 +226,7 @@ async def test_mark_decided_notifies_orchestrator_via_inbox(
         approval_id=pending.id,
         option_id="rework",
         user_id=str(test_user.id),
+        decided_via="ui",
     )
 
     comm.resolve_or_create_bound_thread.assert_awaited_once()
@@ -268,6 +275,7 @@ async def test_mark_decided_survives_inbox_delivery_failure(
         approval_id=pending.id,
         option_id="approve",
         user_id=str(test_user.id),
+        decided_via="ui",
     )
 
     assert decided.status == "decided"
@@ -297,6 +305,7 @@ async def test_mark_decided_restores_pre_approval_status(approval_service, appro
         approval_id=pending.id,
         option_id="approve",
         user_id=None,
+        decided_via="mcp",
     )
 
     row = (await db_session.execute(select(AgentExecution).where(AgentExecution.id == execution.id))).scalar_one()
@@ -331,6 +340,7 @@ async def test_create_pending_ignores_agent_spoofed_pre_approval_status(
         approval_id=pending.id,
         option_id="approve",
         user_id=None,
+        decided_via="mcp",
     )
     execution = (
         await db_session.execute(select(AgentExecution).where(AgentExecution.id == approval_seed["execution"].id))
@@ -396,6 +406,7 @@ async def test_mark_decided_cross_tenant_returns_not_found(
             approval_id=pending.id,
             option_id="approve",
             user_id=None,
+            decided_via="mcp",
         )
 
     row = (await db_session.execute(select(UserApproval).where(UserApproval.id == pending.id))).scalar_one()

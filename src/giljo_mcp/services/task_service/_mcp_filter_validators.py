@@ -26,6 +26,7 @@ from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.services.task_service._mcp_read_layer import (
     LIST_TASKS_LIMIT_DEFAULT,
     LIST_TASKS_LIMIT_MAX,
+    open_task_cursor_walk,
 )
 from giljo_mcp.services.taxonomy_ops import RESERVED_TASK_TYPE_ABBR
 
@@ -141,9 +142,9 @@ def validate_task_type_filter(task_type: str | None) -> str | None:
 
 
 async def resolve_active_product_for_list_tasks(
-    *, db_manager: Any, websocket_manager: Any, session: Any, tenant_key: str
+    *, db_manager: Any, websocket_manager: Any, session: Any, tenant_key: str, product_id: str | None = None
 ) -> Any:
-    """The active-product lookup ``list_tasks_for_mcp`` scopes every query to.
+    """The product lookup ``list_tasks_for_mcp`` scopes every query to.
 
     BE-9470: extracted verbatim out of ``list_tasks_for_mcp`` (behavior unchanged,
     just moved) to keep that function AND ``_mcp_adapter_mixin.py`` under their
@@ -151,6 +152,11 @@ async def resolve_active_product_for_list_tasks(
     whole tenant's task corpus instead of the active product's, diverging from
     both the UI and ``list_projects_for_mcp`` (Tasks are NOT NULL ``product_id``,
     ``models/tasks.py``).
+
+    BE-9499a: ``product_id`` is optional. Omitted, this resolves the active
+    product exactly as before. Supplied, it is validated as belonging to this
+    tenant via ``ProductService.resolve_binding_product`` and used regardless
+    of which product is active -- never a silent fallback.
     """
     from giljo_mcp.services.product_service import ProductService
 
@@ -160,13 +166,9 @@ async def resolve_active_product_for_list_tasks(
         websocket_manager=websocket_manager,
         test_session=session,
     )
-    active_product = await product_service.get_active_product(eager_load=False)
-    if not active_product:
-        raise ValidationError(
-            message="No active product set. Please activate a product first.",
-            context={"tenant_key": tenant_key, "operation": "list_tasks_for_mcp"},
-        )
-    return active_product
+    return await product_service.resolve_binding_product(
+        product_id, operation="list_tasks_for_mcp", action="listed", write=False
+    )
 
 
 async def resolve_task_type_id(task_type: str | None, *, db_manager: Any, session: Any, tenant_key: str) -> str | None:
@@ -206,3 +208,48 @@ def normalize_task_priority_filter(priority: str | None) -> str | None:
         message=f"Unknown task priority '{priority}'. Valid priorities: {valid}",
         context={"operation": "list_tasks_for_mcp", "valid_priorities": valid},
     )
+
+
+def resolve_list_tasks_filters_and_cursor(
+    *,
+    limit: int | None,
+    status: str | None,
+    priority: str | None,
+    task_type_id: str | None,
+    due_before: Any,
+    hidden: bool | None,
+    query: str | None,
+    cursor: str | None,
+    product_id: str,
+) -> tuple[int, str | None, str | None, str | None]:
+    """Resolve list_tasks' row limit, status/priority filters, and cursor state (BE-9499a extraction).
+
+    Split out of ``list_tasks_for_mcp`` (same pattern as its neighbours in
+    this module) to keep that function -- and ``_mcp_adapter_mixin.py`` --
+    inside their length/size budgets. Behavior unchanged. ``mode`` and
+    ``task_type_id`` are resolved by the CALLER via ``resolve_list_mode`` /
+    ``resolve_task_type_id`` directly (test_be9060_task_service_split pins
+    the mixin importing those two by name), not here.
+    """
+    effective_limit = resolve_task_limit(limit)
+
+    # BE-9469: see _mcp_read_layer's validators -- a typo'd status/priority
+    # used to return matched:0 silently instead of refusing.
+    validate_task_status_filter(status)
+    priority = normalize_task_priority_filter(priority)
+
+    # BE-9469: fingerprint and incoming position resolved together, BEFORE the fetch
+    # so a refused token costs no query. Fingerprinted from RESOLVED values --
+    # task_type_id, not the caller's abbreviation -- so two spellings of one type do
+    # not refuse each other's cursors. See open_task_cursor_walk.
+    cursor_fingerprint, after_key = open_task_cursor_walk(
+        cursor,
+        product_id=product_id,
+        status=status,
+        priority=priority,
+        task_type_id=task_type_id,
+        due_before=due_before,
+        hidden=hidden,
+        query=query,
+    )
+    return effective_limit, priority, cursor_fingerprint, after_key

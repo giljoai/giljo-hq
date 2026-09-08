@@ -184,6 +184,9 @@ describe('ProjectsView - Taxonomy Display (Handover 0440c)', () => {
 
     productStore.$patch({
       products: [mockProduct],
+      // FE-9502c: ProjectsView now scopes by currentProduct (the viewed tab),
+      // not the server's single activeProduct.
+      currentProduct: mockProduct,
       activeProduct: mockProduct,
     })
 

@@ -140,6 +140,17 @@ describe('MessageComposer', () => {
     await wrapper.vm.sendMessage()
     await flushPromises()
 
+    // EXACT match on purpose, and the exactness is the assertion: this create must
+    // carry project_id and NOT product_id. The server derives a bound thread's
+    // product from THAT PROJECT, "regardless of which tab the caller happens to be
+    // viewing", so naming a product here would override a correct binding with
+    // whatever tab happened to be open.
+    //
+    // Said out loud because FE-9588 just taught the opposite lesson one file over:
+    // NewThreadDialog now DOES send the viewed product, since a general thread has
+    // no project to derive from. Anyone tidying the two paths into consistency will
+    // add product_id here and get a red with no explanation — this is the
+    // explanation. The rule is per-path, not global.
     expect(createMock).toHaveBeenCalledWith({ project_id: 'proj-solo', subject: '(project comms)' })
     expect(postMock).toHaveBeenCalledTimes(1)
     expect(postMock.mock.calls[0][0]).toBe('thread-fresh')

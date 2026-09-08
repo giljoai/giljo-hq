@@ -133,6 +133,17 @@ class SequenceRun(Base):
     # Migration: ce_0077 (CE chain).
     reviewed_project_ids = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"), default=list)
 
+    # BE-9540: per-member review PROVENANCE — {project_id -> "ui" | "harness"}.
+    # Mirrors UserApproval.decided_via's "which door" shape, one entry per id in
+    # reviewed_project_ids. Written by the SAME writer (mark_member_reviewed) that
+    # writes reviewed_project_ids -- "ui" for the dashboard's per-card review POST,
+    # "harness" when a headlessly-completed chain member is auto-marked reviewed at
+    # conductor-finale time (see project_helpers.complete_chain_run_if_finished) so
+    # a per_card run never purges with an outstanding review silently bypassed. Non-
+    # gating, exactly like reviewed_project_ids. Non-null with a '{}' server default
+    # so pre-column rows self-heal without a backfill. Migration: ce_0102 (CE chain).
+    reviewed_via = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"), default=dict)
+
     # Cross-project chain plan the dedicated (project-less) conductor owns
     # (BE-6185). There is no head-project mission to reuse, so this is the
     # storage cell. User-EDITABLE before Implement; the SequenceRunService write

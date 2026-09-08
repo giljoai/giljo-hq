@@ -142,7 +142,11 @@ class ProductResponse(BaseModel):
     extraction_custom_instructions: str | None = Field(
         None, description="Custom instructions for vision document extraction"
     )
-    is_active: bool = Field(default=False, description="Whether this product is currently active")
+    is_active: bool = Field(default=False, description="Shown as a tab in the product tab strip (FE-9524/D1)")
+    is_default: bool = Field(
+        default=False,
+        description="The tenant's single default product: where an unscoped read resolves. Independent of is_active/shown (FE-9524).",
+    )
     project_path: str | None = Field(None, description="File system path to product folder (required for agent export)")
     product_memory: dict[str, Any] | None = Field(
         default_factory=lambda: {"git_integration": {}, "sequential_history": [], "context": {}},
@@ -218,7 +222,11 @@ class ProductListResponse(BaseModel):
     description: str | None
     created_at: datetime
     updated_at: datetime | None
-    is_active: bool = Field(default=False, description="Whether this product is currently active")
+    is_active: bool = Field(default=False, description="Shown as a tab in the product tab strip (FE-9524/D1)")
+    is_default: bool = Field(
+        default=False,
+        description="The tenant's single default product: where an unscoped read resolves. Independent of is_active/shown (FE-9524).",
+    )
     project_path: str | None = Field(None, description="File system path to product folder")
     target_platforms: list[str] | None = Field(default=["all"], description="Target platforms - Handover 0425")
     # P1 batched count fields (same semantics as ProductResponse).

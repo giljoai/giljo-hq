@@ -38,6 +38,11 @@ from giljo_mcp.schemas.service_responses import (
     ProjectMissionUpdateResult,
 )
 from giljo_mcp.services.project_helpers import _build_ws_project_data
+from giljo_mcp.services.project_service._lifecycle_redirects import (
+    require_supersede_successor,
+    route_active_inactive_status_transition,
+    validate_supersede_successor,
+)
 from giljo_mcp.services.protocol_survival import build_mission_update_footer
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -631,6 +636,14 @@ class MutationMixin:
 
         """
         tenant_key = self.tenant_manager.get_current_tenant()
+
+        # BE-9499b: activate/revive are dedicated LIFECYCLE actions, not plain
+        # column writes -- see _lifecycle_redirects for the full rationale.
+        # None falls through to the plain write below.
+        redirected = await route_active_inactive_status_transition(self, project_id, updates, websocket_manager)
+        if redirected is not None:
+            return redirected
+
         async with self._get_session(tenant_key) as session:
             # Fetch project
             # Handover 0440a: Eagerly load project_type for taxonomy_alias property
@@ -697,6 +710,13 @@ class MutationMixin:
                         message="Successor project not found or access denied.",
                         context={"project_id": project_id, "successor_project_id": successor_id},
                     )
+                # BE-9499b: successor eligibility must match FE-9508's picker
+                # list exactly -- see _lifecycle_redirects.
+                validate_supersede_successor(project_id, updates, successor)
+
+            # BE-9499b: status='superseded' is meaningless without a successor
+            # pointer in the same call -- see _lifecycle_redirects.
+            require_supersede_successor(project_id, updates)
 
             # BE-9215: name column is String(255). Reject an over-long rename with
             # a clean 422 at the write boundary rather than a DB truncation 500.
@@ -716,15 +736,15 @@ class MutationMixin:
                         message="Taxonomy combination already in use. Please choose a different series number or suffix.",
                         context={"project_id": project_id},
                     ) from e
-                # BE-9016 (Sentry GILJOAI-BACKEND-A): update_project lets status
-                # -> active through directly, unlike the deliberate activate_project
-                # path (api/endpoints/projects/lifecycle.py) which deactivates the
-                # sibling first. Catching here (at commit) also covers the race of
-                # two agents activating different projects for the same product at
-                # once -- a pre-write check alone cannot. Approach-a (clean reject)
-                # is CHOSEN over auto-deactivating the sibling: silently deactivating
-                # a project that may have running agents is a dangerous side effect;
-                # activation stays the deliberate path.
+                # BE-9016 (Sentry GILJOAI-BACKEND-A): covers a race for a
+                # NON-INACTIVE source status (e.g. PARKED -> ACTIVE). An
+                # INACTIVE-source transition is redirected through
+                # _lifecycle_redirects._activate_via_lifecycle ->
+                # ProjectLifecycleService.activate_project BEFORE reaching
+                # this commit; that ordinary INACTIVE->ACTIVE race is caught
+                # by activate_project's own equivalent handler (BE-9502b/
+                # BE-9519). Clean reject over auto-deactivate: silently
+                # deactivating a project with running agents is dangerous.
                 if "idx_project_single_active_per_product" in str(e):
                     raise AlreadyExistsError(
                         message=(

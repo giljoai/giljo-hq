@@ -32,7 +32,9 @@ vi.mock('@/stores/products', () => ({
     activeProduct: null,
     currentProductId: null,
     fetchProducts: h.fetchProducts,
+    fetchActiveProduct: vi.fn(() => Promise.resolve(true)),
     fetchProductById: vi.fn(() => Promise.resolve(null)),
+    setDefaultProduct: vi.fn(() => Promise.resolve(null)),
   }),
 }))
 
@@ -57,19 +59,11 @@ vi.mock('@/composables/useProductVisionUpload', async () => {
   }
 })
 
-vi.mock('@/composables/useProductActivation', async () => {
-  const { ref } = await import('vue')
-  return {
-    useProductActivation: () => ({
-      showActivationWarning: ref(false),
-      pendingActivation: ref(null),
-      currentActiveProduct: ref(null),
-      toggleProductActivation: vi.fn(),
-      confirmActivation: vi.fn(),
-      cancelActivation: vi.fn(),
-    }),
-  }
-})
+vi.mock('@/composables/useProductActivation', () => ({
+  useProductActivation: () => ({
+    toggleProductActivation: vi.fn(),
+  }),
+}))
 
 vi.mock('@/composables/useProductSoftDelete', async () => {
   const { ref } = await import('vue')

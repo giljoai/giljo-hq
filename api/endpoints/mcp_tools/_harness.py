@@ -221,9 +221,7 @@ def get_session_capabilities(ctx: Context) -> dict[str, bool | str | None]:
 # shared by every @mcp.tool wrapper that accepts it, so the advertised values can
 # never drift between wrappers. BE-8003g: moved here from _job_tools.py once
 # giljo_setup (_setup_tools.py) became a second wrapper module resolving it.
-_HARNESS_PARAM_DESCRIPTION = (
-    "Optional session harness preset: web_sandbox|desktop_app|chat (omit for a terminal-capable CLI)."
-)
+_HARNESS_PARAM_DESCRIPTION = "Session type when there is no terminal: web_sandbox | desktop_app | chat. Omit for a CLI."
 
 
 def _resolve_preset_name(harness: str, ctx: Context) -> str | None:

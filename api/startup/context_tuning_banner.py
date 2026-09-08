@@ -82,16 +82,20 @@ async def compute_context_tuning_due(db_manager: DatabaseManager, tenant_key: st
 
     Due iff the reminder preference is on AND the product is stale by the user's
     ``tuning_reminder_threshold`` (``projects_since_tune >= threshold``, computed by
-    the owning tuning service). None means "no banner" — no active product, the
+    the owning tuning service). None means "no banner" — no default product, the
     preference is off, or fewer than ``threshold`` projects have completed since the
     last tune — and drives the resolve path in
     :func:`emit_context_tuning_due_banner`.
+
+    FE-9524: resolves the tenant's DEFAULT
+    product (``is_default``), not "the shown one" -- several products may be
+    shown at once.
     """
     from giljo_mcp.services.product_service import ProductService
     from giljo_mcp.services.product_tuning_service import ProductTuningService
 
     product_service = ProductService(db_manager=db_manager, tenant_key=tenant_key)
-    product = await product_service.get_active_product(eager_load=False)
+    product = await product_service.get_default_product(eager_load=False)
     if product is None:
         return None
 

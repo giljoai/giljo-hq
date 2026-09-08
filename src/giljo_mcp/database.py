@@ -39,8 +39,11 @@ POOL_RECYCLE_SECONDS = 3600  # 1 hour -- recycle stale DB connections
 # against a managed Postgres with ~100 total slots). The authoritative knob is now
 # DatabaseConfig.pg_pool_size / pg_max_overflow (env: GILJO_PG_POOL_SIZE /
 # GILJO_PG_MAX_OVERFLOW); these constants are only the fallback when nothing is set.
-DEFAULT_POOL_SIZE = 10
-DEFAULT_MAX_OVERFLOW = 10
+# INF-9577: kept in step with DatabaseConfig's defaults -- a fallback that disagreed
+# with the configured default would quietly hand any caller that omits the pool args
+# double the connections the deployment budget was computed against.
+DEFAULT_POOL_SIZE = 5
+DEFAULT_MAX_OVERFLOW = 5
 
 
 def _pgbouncer_connect_args() -> dict | None:

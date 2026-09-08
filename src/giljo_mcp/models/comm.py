@@ -180,6 +180,44 @@ class CommThread(Base):
         return f"<CommThread(id={self.id}, alias='{self.taxonomy_alias}', status='{self.status}')>"
 
 
+class CommThreadProjectTag(Base):
+    """A thread's ADDITIONAL project tags (FE-9530 -- ruling 3: plural, optional).
+
+    ``comm_threads.project_id`` stays exactly what it always was: the single
+    lifecycle-shared BINDING a thread has to the one project it is auto-created
+    for (``resolve_or_create_bound_thread``), CASCADE-deleted with that project.
+    That column answers "whose bound thread is this," not "which projects does
+    this conversation touch" -- a thread discussing three projects has ONE
+    answer to the first question (or none) and up to three to the second.
+
+    This table is the second question. Many-to-many, tenant-scoped, CASCADE on
+    both sides: a tag is metadata about a conversation, not a lifecycle link, so
+    deleting either the thread or the tagged project simply drops the tag with
+    no BE-9012d-style "outlives the project" reasoning required. ``thread_dict``
+    reads both this table and ``project_id`` together into one deduplicated
+    ``project_ids`` list -- a caller never needs to know which column answered.
+
+    Edition Scope: CE.
+    """
+
+    __tablename__ = "comm_thread_project_tags"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    tenant_key = Column(String(36), nullable=False)
+    thread_id = Column(String(36), ForeignKey("comm_threads.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("thread_id", "project_id", name="uq_comm_thread_project_tag"),
+        Index("idx_comm_thread_project_tag_thread", "thread_id"),
+        Index("idx_comm_thread_project_tag_project", "tenant_key", "project_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<CommThreadProjectTag(thread_id={self.thread_id}, project_id={self.project_id})>"
+
+
 class CommParticipant(Base):
     """A directory entry: a standalone agent participant OR the user.
 

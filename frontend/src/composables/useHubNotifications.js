@@ -5,19 +5,59 @@
  *
  * Fires ONLY for user-invoked events:
  *   1. thread_update: next_action_owner === currentUser.id  (PRIMARY — baton handed to operator)
- *   2. thread_message: requires_action === true
- *   3. thread_message: content mentions currentUser.display_name (case-insensitive)
+ *   2. thread_message: requires_action === true AND to_participant === currentUser.id —
+ *      a DIRECTED action-request. FE-9546 established that a requires_action post aimed
+ *      at another agent is that agent's business; FE-9586 finished the thought and
+ *      dropped the BROADCAST case too (see below).
+ *   3. MENTIONS no longer come from an event at all — they are projected from the
+ *      server (see the mention section below).
  *
  * Own posts (from_agent_id === currentUser.id) are NEVER signalled.
  *
- * Routing by presence (useHubPresence):
- *   - isHubPresent=true → in-pane cue only, no toast/notification
- *   - isHubPresent=false → toast via useToast + browser Notification (if granted)
+ * WHAT THE CLIENT MAY AND MAY NOT DECIDE (FE-9586). The line is identity versus
+ * interpretation. `to_participant === userId` is an ID COMPARISON against the same
+ * field the server keys on, delivered in the event — the client can do that exactly
+ * right, so it stays here. "Does this post mention me" was an INTERPRETATION of the
+ * post's text, and the client could not even see all of it: a long body reaches
+ * the client as a bounded excerpt, so the client cannot reliably decide whether it
+ * was named. That verdict is resolved server-side against the full body and the
+ * client consumes it.
+ *
+ * A BROADCAST requires_action POST IS QUIET, NOT SILENT. It used to get the full
+ * attention treatment, on the reading that an absent to_participant meant "all
+ * recipients must act". BE-9197 rules the opposite and the server has always agreed —
+ * its directed-action query excludes broadcasts because such a post is "whoever picks
+ * it up" and obligates nobody in particular. So the client is aligned rather than the
+ * invariant: no banner, no popout, no toast.
+ *
+ * FE-9586b: it DOES keep its durable bell row, and this is a regression fix rather
+ * than a new rule. FE-9586 said in this very docblock that the post "keeps its
+ * durable bell row" — and it did not, because the bell row is written AFTER the
+ * signal gate, so returning null from the gate skipped the bell too and the post
+ * vanished from every surface at once. Documented intent and shipped behaviour
+ * disagreed; the operator noticed by losing track of asks his agents broadcast.
+ * The gate now returns a QUIET signal for that case instead of nothing, which is
+ * what ruling 1 means by the bell being the archive for a missed event.
+ *
+ * Routing by VISIBILITY (FE-9553, ruling 4(a)) — was routing by Hub presence:
+ *   - app visible  → the banner alone. No popout, no toast.
+ *   - app hidden   → browser Notification (if granted), carrying a stable tag.
+ *   - either way   → the durable bell row. NOTE it is written after getSignal(), so
+ *                    a signal the gate REJECTS gets no bell row either — which is the
+ *                    FE-9586b bug. A post that should be recorded but not interrupt
+ *                    must come back from the gate as `quiet`, never as null.
+ *
+ * FE-9553 also removed the toast that used to fire alongside the popout: these
+ * signals are actionable and agent-initiated, so they belong to the banner and
+ * the bell, not the toast (rulings 3 and 6). And the gate moved from
+ * `isHubPresent` to `document.hidden`, because those are different questions
+ * and the old one popped an OS notification at a window the operator was
+ * already looking at whenever they were on any page except the Hub.
  *
  * Permission is requested LAZILY on first qualifying away event.
  * De-duplicates: same signal key does not fire twice until the key changes.
  */
-import { onScopeDispose, getCurrentScope } from 'vue'
+import { onScopeDispose, getCurrentScope, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useCommHubStore } from '@/stores/commHubStore'
@@ -29,8 +69,11 @@ import {
   APPROVAL_FOCUS,
 } from '@/components/hub/hubThreadRoute'
 import { threadDisplayName } from '@/components/hub/threadDisplayName'
-import { useHubPresence } from './useHubPresence'
-import { useToast } from './useToast'
+import { popoutTag } from '@/utils/popoutTag'
+import { registerPopout } from '@/utils/popoutRegistry'
+import { useSettingsStore } from '@/stores/settings'
+
+import { useThreadPostAttention } from './useThreadPostAttention'
 
 /**
  * FE-9439: the badge on a desktop (OS-level) notification.
@@ -57,6 +100,18 @@ const ANNOUNCER_TITLES = {
 }
 
 /**
+ * FE-9586b: what a QUIET signal is called in the bell.
+ *
+ * The bell list is the one place a broadcast ask and a directed ask sit side by side,
+ * and "Needs your approval" on a post nobody in particular owes is the same false
+ * claim FE-9586 removed from the banner. Only the bell renders this — a quiet signal
+ * raises no popout, so there is no announcer title to keep in step.
+ */
+const QUIET_BELL_TITLES = {
+  [APPROVAL_FOCUS]: 'Open ask from an agent',
+}
+
+/**
  * FE-9436: the durable bell row each reason drops.
  *
  * `type` is what notificationRouting's TYPE_ROUTE_MAP dispatches on. The hand-off's is
@@ -76,9 +131,11 @@ const BELL_ROWS = {
 }
 
 export function useHubNotifications() {
-  const { showToast } = useToast()
-  const { isHubPresent } = useHubPresence()
   const router = useRouter()
+  const { mentions, ensureLoaded } = useThreadPostAttention()
+
+  // A mention already waiting at page load is announced by nothing else.
+  ensureLoaded()
 
   // FE-9289c: the handover deep-links to its thread. HubView reads ?thread=<id> on
   // mount and selects it, so this works from a COLD page (bell clicked while the app is
@@ -129,24 +186,13 @@ export function useHubNotifications() {
     return threadDisplayName(useCommHubStore().threadsById?.get?.(threadId), payload)
   }
 
-  /**
-   * BE-9414: the body of a long post, not the excerpt the event could carry.
-   *
-   * A post over ~5.8 KB rides the cross-worker broker as a bounded excerpt
-   * (pg_notify caps a NOTIFY payload at 7999 bytes), so testing `payload.content`
-   * for the operator's name would silently stop raising the bell for a mention
-   * written past the cut-off — the reader would never learn they were named.
-   * commHubEventRoutes awaits the store's hydration before dispatching this event,
-   * so by now the store holds the full body; fall back to the excerpt only if the
-   * hydrating read failed, which is still better than nothing to match against.
-   */
-  function messageContent(payload) {
-    if (!payload?.content_truncated) return payload?.content
-    const stored = useCommHubStore()
-      .messagesFor?.(payload.thread_id)
-      ?.find((m) => m.message_id === payload.message_id)
-    return stored?.content ?? payload?.content
-  }
+  // BE-9414's messageContent() helper lived here and is GONE (FE-9586). It existed
+  // to give the mention match the full body rather than the broker's excerpt, and
+  // its own docblock conceded it fell back to the excerpt whenever the hydrating
+  // read had failed — which is the case the mention match most needed it for. The
+  // match moved server-side, where the content column is simply readable, so the
+  // helper has no caller and the failure mode it half-mitigated is gone rather than
+  // narrowed.
 
   // De-dupe: track the last-signalled key so identical back-to-back events don't spam
   const lastSignalledKey = new Set()
@@ -170,6 +216,23 @@ export function useHubNotifications() {
 
   function fireNotification(title, body, threadId, { reason, messageId } = {}) {
     if (typeof Notification === 'undefined') return
+
+    // FE-9553 ruling 5: the operator's popout scope. This is the ONE place the
+    // preference is read, because it is the one place a popout is raised --
+    // gating at the call sites instead would need every future caller to
+    // remember, which is the failure mode the whole project exists to remove.
+    //
+    // 'off' suppresses. 'actionable' admits decisions, batons and mentions,
+    // which is every reason that reaches this function today. 'all' additionally
+    // admits lifecycle, which nothing currently pops -- see the note in
+    // useHubNotifications.popouts.fe9553.spec.js about why those two positions
+    // are indistinguishable until a lifecycle popout exists.
+    //
+    // Permission is NOT requested when the operator has said off: asking a
+    // browser for a capability we have been told not to use is the sort of
+    // prompt that gets a site permanently blocked.
+    if (useSettingsStore().popoutScope === 'off') return
+
     requestPermissionLazy()
     if (Notification.permission !== 'granted') return
     try {
@@ -179,10 +242,29 @@ export function useHubNotifications() {
       // status banner) shows the face. The solid dark-navy PNG is deliberate: notification
       // chrome is a surface we do not control, and the transparent variant loses its light
       // grey eyes against a light-theme OS background.
-      const n = new Notification(title, { body, icon: NOTIFICATION_ICON })
+      // FE-9553 ruling 4(c): a popout follows banner STATE, including its
+      // death, so it needs a name the state can address it by. The tag is
+      // derived from the signal and the thread rather than minted fresh: the
+      // OS replaces a same-tag notification instead of stacking a second one,
+      // and the same derivation lets the state that raised it close it again.
+      // A random tag would dedupe nothing and could never be closed.
+      const tag = popoutTag(reason, threadId)
+      const n = new Notification(title, { body, icon: NOTIFICATION_ICON, tag })
       // FE-9289c: clicking the handover lands on its thread, not just the app.
       // FE-9436: and clicking a mention or an approval lands on its POST.
       n.onclick = () => openThread(threadId, { reason, messageId })
+
+      // FE-9553 ruling 4(c): hand the popout to the registry so the state that
+      // raised it can close it again.
+      //
+      // FE-9586: no state-backed flag any more, because all three reasons are.
+      // The baton follows useYourTurnThreads; a mention and a DIRECTED
+      // action-request follow the server projection in useThreadPostAttention,
+      // both thread-keyed, which is the key this tag carries. The registry's
+      // ten-minute TTL is gone with the distinction — it stood in for state that
+      // did not exist, and a deadline was always the wrong shape for a signal
+      // somebody still owes an answer to.
+      registerPopout(tag, n)
     } catch {
       // Notification constructor can throw in some environments
     }
@@ -204,7 +286,6 @@ export function useHubNotifications() {
    */
   function getSignal(eventName, payload) {
     const userId = useUserStore().currentUser?.id
-    const displayName = useUserStore().currentUser?.display_name
 
     if (eventName === 'hub:thread_update') {
       // Baton handed to operator — PRIMARY signal
@@ -219,27 +300,44 @@ export function useHubNotifications() {
       if (payload.from_agent_id === userId) return null
       const anchor = payload.message_id || null
 
+      // FE-9546: `requires_action` alone is not a recipient test. `to_participant` is
+      // the recipient field, and this asks the exact question the server asks — an id
+      // comparison, not an interpretation, which is why it belongs here.
+      //
+      // FE-9586: the BROADCAST case is gone. An absent to_participant used to count,
+      // read as "all recipients must act". BE-9197 rules that a broadcast
+      // requires_action post is "whoever picks it up" and obligates nobody in
+      // particular, and the server's directed-action query has always excluded them —
+      // so this branch was contradicting the invariant every time an orchestrator
+      // broadcast a directive. Such a post still lands in the bell; it no longer
+      // claims the operator specifically owes an answer.
+      // THREE cases, and collapsing any two of them has already caused a defect:
+      //
+      //   to_participant === userId  -> the operator's own ask. Full treatment.
+      //   to_participant absent      -> a BROADCAST. Quiet: bell row, nothing else.
+      //                                 It obligates nobody in particular (BE-9197),
+      //                                 but it must still be findable (FE-9586b).
+      //   to_participant set to ANY  -> somebody ELSE's ask. NOTHING, not even a bell
+      //   other participant             row. FE-9546: an orchestrator directing dozens
+      //                                 of these at lane agents notified the operator
+      //                                 on every one. Treating this as merely "quiet"
+      //                                 re-creates that spam in the bell instead of
+      //                                 the popout, which is why this is spelled as
+      //                                 three branches rather than one negation.
       if (payload.requires_action === true) {
+        const directedElsewhere = !!payload.to_participant && payload.to_participant !== userId
+        if (directedElsewhere) return null
         return {
           key: `action:${payload.message_id || payload.thread_id}`,
           reason: APPROVAL_FOCUS,
           anchor,
+          quiet: !payload.to_participant,
         }
       }
 
-      // Mention check — conservative case-insensitive includes
-      const content = messageContent(payload)
-      if (
-        displayName &&
-        typeof content === 'string' &&
-        content.toLowerCase().includes(displayName.toLowerCase())
-      ) {
-        return {
-          key: `mention:${payload.message_id || payload.thread_id}`,
-          reason: MENTION_FOCUS,
-          anchor,
-        }
-      }
+      // No mention branch. See the module docblock: the server owns that verdict now,
+      // and it reaches this composable through useThreadPostAttention rather than
+      // through the event.
     }
 
     return null
@@ -248,7 +346,7 @@ export function useHubNotifications() {
   function handleEvent(eventName, payload) {
     const signal = getSignal(eventName, payload)
     if (!signal) return
-    const { key, reason, anchor } = signal
+    const { key, reason, anchor, quiet } = signal
 
     // De-dupe
     if (lastSignalledKey.has(key)) return
@@ -265,7 +363,9 @@ export function useHubNotifications() {
     // apart — which is why they shared one title and one landing. Each now says what it
     // is, and that is the only thing separating the three.
     const isHandover = reason === BATON_FOCUS
-    const title = ANNOUNCER_TITLES[reason]
+    // A quiet signal is only ever read in the bell, so it may be named for what it is
+    // rather than for what the announcer would have said.
+    const title = (quiet && QUIET_BELL_TITLES[reason]) || ANNOUNCER_TITLES[reason]
     // BE-9296a: name WHO is waiting, not just where. "<thread> — waiting on you" told
     // the operator the one thing they could already see; which agent is blocked is the
     // part that decides whether to answer now. The server resolves the name (it is
@@ -304,12 +404,102 @@ export function useHubNotifications() {
       })
     }
 
-    // In the Hub pane: in-pane cues (the yellow strip) cover it — no toast/push.
-    if (isHubPresent.value) return
+    // FE-9586b: a QUIET signal stops here. The durable row above is the whole of it --
+    // no popout whether the tab is hidden or not, and no banner, since the projection
+    // behind the banner excludes broadcasts server-side. Placed AFTER the bell write
+    // and BEFORE the visibility gate on purpose: that ordering is the difference
+    // between "recorded but not interruptive" and the silence this fixes.
+    if (quiet) return
 
-    showToast({ type: 'info', message: body })
+    // FE-9553 ruling 4(a): pop ONLY when the app is HIDDEN. The gate used to be
+    // `isHubPresent` — "am I standing in the Hub pane" — which is a different
+    // question, and the difference was the double notification the ruling
+    // forbids: on any page other than the Hub, with the tab in front of you,
+    // the old code fired an OS popout at a window you were already looking at.
+    // A visible tab gets the banner alone.
+    //
+    // This SUPERSEDES the presence check rather than joining it. A hidden tab is
+    // not "in the pane" in any meaningful sense, so the in-pane suppression is
+    // subsumed by the stricter gate; ANDing the two would only re-open the case
+    // where a hidden tab is silently skipped because the Hub route was last.
+    if (!document.hidden) return
+
+    // FE-9553: no toast here any more. A baton, a mention and an approval are
+    // all agent-initiated and all actionable, which ruling 3 puts on the
+    // banner and ruling 6 keeps off the toast — a toast is past tense about
+    // the user's OWN action, and none of these three are that. The signal is
+    // not lost: the durable bell row above is written before this gate, and
+    // the your-turn banner row is fed independently by useYourTurnThreads out
+    // of commHubStore. What goes away is the duplicate, not the notification.
     fireNotification(title, body, threadId, { reason, messageId: anchor })
   }
+
+  // ── Mentions: announced from the SERVER's verdict, not from the event ──
+
+  /**
+   * Post ids already announced, so a re-read of the projection does not re-announce.
+   *
+   * Keyed on the POST, not the thread: a second mention is a second thing somebody
+   * asked you (the same reason BELL_ROWS sets keyOnPost for this reason), so the
+   * second one must announce even though the thread was already in the set. Keyed on
+   * the post also means the projection can be re-read as often as it likes.
+   */
+  const announcedMentions = new Set()
+
+  /**
+   * Announce mentions as they appear in the projection.
+   *
+   * The event path cannot do this any more: the client no longer decides what counts
+   * as a mention, so it learns about one only when the server says so. In practice
+   * the sequence is: post arrives → useThreadPostAttention re-reads → a new post id
+   * shows up here. That costs a round trip against the old in-event match, and buys
+   * a verdict that is correct for a long body, which the old one was not.
+   *
+   * `immediate` covers the cold load: a mention already waiting when the page opens
+   * is exactly what no live event will ever announce.
+   */
+  watch(
+    mentions,
+    (list) => {
+      if (!list) return
+
+      for (const entry of list) {
+        const threadId = entry?.thread_id
+        if (!threadId) continue
+
+        // Newest first, as the projection returns them.
+        const fresh = (entry.message_ids || []).filter((id) => id && !announcedMentions.has(id))
+        if (!fresh.length) continue
+        for (const id of fresh) announcedMentions.add(id)
+
+        const title = ANNOUNCER_TITLES[MENTION_FOCUS]
+        // The projection carries ids, not prose, and deliberately so — re-adding a
+        // content excerpt to the payload would rebuild the very thing whose
+        // truncation made the client's match unreliable. So the body names the
+        // THREAD, which is what the operator needs in order to decide whether to
+        // look now.
+        const body = `You were mentioned in ${threadLabel(threadId, {})}`
+
+        for (const id of fresh) {
+          useNotificationStore().addNotification({
+            id: `${BELL_ROWS[MENTION_FOCUS].prefix}:${id}`,
+            type: BELL_ROWS[MENTION_FOCUS].type,
+            title,
+            body,
+            metadata: { thread_id: threadId, message_id: id },
+          })
+        }
+
+        // Ruling 4(a): the banner alone when the tab is visible. One popout per
+        // THREAD, because the tag is thread-keyed — a second mention on the same
+        // thread replaces rather than stacks, which is what the OS does anyway.
+        if (document.hidden) {
+          fireNotification(title, body, threadId, { reason: MENTION_FOCUS, messageId: fresh[0] })
+        }
+      }
+    },
+    { immediate: true },
+  )
 
   function onThreadMessage(e) {
     handleEvent('hub:thread_message', e.detail || {})

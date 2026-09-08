@@ -760,7 +760,7 @@ assume a native return value crosses a job. (A subagent MAY use its harness's ow
 child-agent feature for INTERNAL decomposition within its single job.)"""
 
 # SELF-ADOPT rung — capable session (has a shell / no preset resolved). Worded as a
-# GRANTED PERMISSION (mode selection IS the opt-in, mirroring start_chain_run turning
+# GRANTED PERMISSION (mode selection IS the opt-in, mirroring link_projects turning
 # a session into the conductor), never an ambient default that could leak to other modes.
 _CH3_GENERIC_MCP_SELF_ADOPT = """VERIFY FIRST: does your harness have ANY spawn / subagent / delegate mechanism
 (a Task tool, an agent spawner, an @-mention, a delegate command, or the ability to
@@ -775,7 +775,7 @@ git add the specific files you changed; NEVER git add -A) → complete_job(job_i
 to the next job ONLY after the current one is complete. A self-adopted job carries the
 worker's commit duty — you skip committing ONLY for jobs you actually DELEGATED, never for
 work you did yourself. This permission is GRANTED by your choice of subagent mode (it is the
-mode's declared fallback, like start_chain_run turning a session into the conductor); it is
+mode's declared fallback, like link_projects turning a session into the conductor); it is
 NOT an ambient default and never applies in multi_terminal mode. Never batch-start the queue
 — finish and complete_job one job before adopting the next."""
 

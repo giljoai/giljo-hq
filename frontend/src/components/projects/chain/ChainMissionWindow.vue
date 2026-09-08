@@ -7,10 +7,15 @@
       <span>Multi project mission</span>
     </div>
     <div class="chain-mission-window__body scrollbar-standard">
+      <!-- FE-9538 (Ask 3): compact -- this window caps at max-height:180px,
+           and EmptyState's default (full-page) padding+icon budget clipped
+           against that cap. See EmptyState.vue's doc comment for the root
+           cause. -->
       <EmptyState
         v-if="!mission"
         icon="mdi-file-document-outline"
         title="No overarching mission yet"
+        compact
       />
       <template v-else>
         <span class="chain-mission-window__tag">

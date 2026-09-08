@@ -31,7 +31,8 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.endpoints.auth_models import BoundedPassword
-from api.endpoints.dependencies import get_db_manager, get_user_service
+from api.endpoints.dependencies import get_user_service
+from api.endpoints.users_notification_prefs import router as users_notification_prefs_router
 from giljo_mcp.auth.dependencies import (
     enforce_sensitive_account_field_guard,
     get_current_active_user,
@@ -991,44 +992,10 @@ async def update_depth_config(
 
 
 # ---------------------------------------------------------------------------
-# Notification preferences (Handover 0831)
+# Notification preferences (Handover 0831). FE-9553 moved both handlers to
+# users_notification_prefs.py -- this module is on the shrink-only size budget
+# and three new preferences took it over. The sub-router carries no prefix, so
+# the paths are unchanged.
 # ---------------------------------------------------------------------------
 
-
-@router.get("/me/settings/notification-preferences")
-async def get_notification_preferences(
-    current_user: User = Depends(get_current_active_user),
-    db_manager=Depends(get_db_manager),
-) -> dict[str, Any]:
-    """
-    Get the current user's notification preferences.
-
-    Returns default preferences if not yet customized.
-    """
-    from giljo_mcp.config.defaults import DEFAULT_NOTIFICATION_PREFERENCES
-
-    prefs = current_user.notification_preferences or DEFAULT_NOTIFICATION_PREFERENCES
-    return {"notification_preferences": prefs}
-
-
-@router.put("/me/settings/notification-preferences")
-async def update_notification_preferences(
-    payload: dict[str, Any],
-    current_user: User = Depends(get_current_active_user),
-    user_service: UserService = Depends(get_user_service),
-) -> dict[str, Any]:
-    """
-    Update the current user's notification preferences.
-
-    Sprint 003c: Write routed through UserService (no direct session.commit).
-
-    Supported fields:
-    - context_tuning_reminder: bool (default: true)
-    - tuning_reminder_threshold: int (minimum 3, default: 10)
-    """
-    prefs = await user_service.update_notification_preferences(
-        user_id=current_user.id,
-        payload=payload,
-    )
-
-    return {"notification_preferences": prefs}
+router.include_router(users_notification_prefs_router)

@@ -112,18 +112,24 @@ async def init_websocket_broker(state: APIState) -> None:
 async def init_core_services(state: APIState) -> None:
     """Initialize core services: TenantManager, WebSocketManager, ToolAccessor, AuthManager
 
+    Each core service initializer logs the failing service by name and then
+    RE-RAISES: a partially constructed core service is not survivable, so boot
+    aborts rather than serving. The heartbeat task at the end is the exception —
+    it is genuinely optional, and its failure is logged without aborting.
+
     Args:
         state: APIState instance to populate with service managers
 
     Raises:
-        Exception: If any service initialization fails
+        Exception: If TenantManager, WebSocketManager, ToolAccessor or
+            AuthManager fails to initialize. Aborts boot by design.
     """
     # Initialize tenant manager
     try:
         logger.info("Initializing tenant manager...")
         state.tenant_manager = TenantManager()  # TenantManager uses static methods
         logger.info("Tenant manager initialized successfully")
-    except Exception as e:  # Broad catch: startup resilience, non-fatal initialization
+    except Exception as e:  # Broad catch: name the failing service, then abort boot
         logger.error(f"Failed to initialize tenant manager: {e}", exc_info=True)
         raise
 
@@ -137,7 +143,7 @@ async def init_core_services(state: APIState) -> None:
 
         set_websocket_manager(state.websocket_manager)
         logger.info("WebSocket manager initialized successfully")
-    except Exception as e:  # Broad catch: startup resilience, non-fatal initialization
+    except Exception as e:  # Broad catch: name the failing service, then abort boot
         logger.error(f"Failed to initialize WebSocket manager: {e}", exc_info=True)
         raise
 
@@ -151,7 +157,7 @@ async def init_core_services(state: APIState) -> None:
             state.db_manager, state.tenant_manager, websocket_manager=state.websocket_manager
         )
         logger.info("Tool accessor initialized successfully")
-    except Exception as e:  # Broad catch: startup resilience, non-fatal initialization
+    except Exception as e:  # Broad catch: name the failing service, then abort boot
         logger.error(f"Failed to initialize tool accessor: {e}", exc_info=True)
         raise
 
@@ -162,7 +168,7 @@ async def init_core_services(state: APIState) -> None:
         # The db_manager provides sessions, not a single session
         state.auth = AuthManager(state.config, db=None)
         logger.info("Auth manager initialized (mode-independent authentication)")
-    except Exception as e:  # Broad catch: startup resilience, non-fatal initialization
+    except Exception as e:  # Broad catch: name the failing service, then abort boot
         logger.error(f"Failed to initialize auth manager: {e}", exc_info=True)
         raise
 
@@ -186,7 +192,7 @@ async def init_core_services(state: APIState) -> None:
         logger.info("Starting WebSocket heartbeat task...")
         _start_supervised_heartbeat(state, interval=30)
         logger.info("WebSocket heartbeat started (interval: 30s, supervised)")
-    except Exception as e:  # Broad catch: startup resilience, non-fatal initialization
+    except Exception as e:  # Broad catch: genuinely non-fatal -- boot continues without a heartbeat
         logger.error(f"Failed to start heartbeat task: {e}", exc_info=True)
 
 

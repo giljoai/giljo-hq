@@ -390,3 +390,38 @@ describe('memoryStore — FE-5042 normalized owner + client-side search', () => 
     expect(store.serverSearch).toBe(true)
   })
 })
+
+describe('memoryStore — FE-9501c (D8) handleMemoryEntryWritten', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it('upserts the entry live when this product is already loaded', async () => {
+    mockGetMemoryEntries.mockResolvedValue({ data: { entries: [entry({ id: 'e1' })] } })
+    const store = useMemoryStore()
+    await store.fetchMemoryEntries('prod-1')
+    expect(store.entries).toHaveLength(1)
+
+    store.handleMemoryEntryWritten('prod-1', entry({ id: 'e2', summary: 'agent wrote this' }))
+
+    expect(store.entries.map((e) => e.id).sort()).toEqual(['e1', 'e2'])
+    expect(store.byId.get('e2').summary).toBe('agent wrote this')
+  })
+
+  it('is a no-op for a product that is not the currently loaded one', async () => {
+    mockGetMemoryEntries.mockResolvedValue({ data: { entries: [entry({ id: 'e1' })] } })
+    const store = useMemoryStore()
+    await store.fetchMemoryEntries('prod-1')
+
+    store.handleMemoryEntryWritten('prod-OTHER', entry({ id: 'e2' }))
+
+    expect(store.entries.map((e) => e.id)).toEqual(['e1'])
+  })
+
+  it('is a no-op when nothing has been loaded yet', () => {
+    const store = useMemoryStore()
+    store.handleMemoryEntryWritten('prod-1', entry({ id: 'e2' }))
+    expect(store.entries).toHaveLength(0)
+  })
+})

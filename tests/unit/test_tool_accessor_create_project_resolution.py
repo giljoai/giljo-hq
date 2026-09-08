@@ -15,7 +15,7 @@ Test Coverage:
 BE-9411: product resolution moved behind ``ProductService.resolve_binding_product``,
 which validates an explicitly supplied product_id against the tenant instead of
 trusting it. The default (omitted) path is unchanged and these tests now exercise
-the REAL resolver over a stubbed ``get_active_product``. Explicit-id tests stub the
+the REAL resolver over a stubbed ``get_default_product``. Explicit-id tests stub the
 resolver itself -- their subject is mission/status/return-dict forwarding, and the
 validation behavior they used to (wrongly) pin is covered for real against a live DB
 in ``tests/integration/test_be9411_explicit_product_id_on_creates.py``.
@@ -76,12 +76,21 @@ class TestCreateProjectActiveProductResolution:
         # BE-9411: stub only the active-product lookup and let the REAL
         # resolve_binding_product run, so the default path is genuinely covered
         # rather than mocked away.
+        # BE-9523b: resolve_binding_product(write=True) now counts the tenant's
+        # products before falling back to active; stub list_products with a
+        # single-product tenant so that count check is a real no-op (byte-identical
+        # single-product behaviour is the point being tested here).
         with (
             patch.object(
                 ProductService,
-                "get_active_product",
+                "get_default_product",
                 new_callable=AsyncMock,
             ) as mock_get_active,
+            patch.object(
+                ProductService,
+                "list_products",
+                new_callable=AsyncMock,
+            ) as mock_list_products,
             patch.object(
                 tool_accessor._project_service,
                 "create_project",
@@ -91,7 +100,9 @@ class TestCreateProjectActiveProductResolution:
             mock_product = Mock()
             mock_product.id = "prod-123"
             mock_product.name = "Product 123"
+            mock_product.is_active = True
             mock_get_active.return_value = mock_product
+            mock_list_products.return_value = [mock_product]
 
             mock_project = Mock()
             mock_project.id = "proj-456"
@@ -198,11 +209,21 @@ class TestCreateProjectActiveProductResolution:
         )
 
         # Real resolver, no active product to find -> the real 422 it raises.
-        with patch.object(
-            ProductService,
-            "get_active_product",
-            new_callable=AsyncMock,
-            return_value=None,
+        # BE-9523b: write=True counts products first; zero products is the same
+        # "nothing to be ambiguous between" case as one, so it falls through.
+        with (
+            patch.object(
+                ProductService,
+                "get_default_product",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch.object(
+                ProductService,
+                "list_products",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
         ):
             with pytest.raises(ValidationError) as exc_info:
                 await tool_accessor._project_service.create_project_for_mcp(
@@ -211,7 +232,7 @@ class TestCreateProjectActiveProductResolution:
                 )
 
             error_message = str(exc_info.value)
-            assert "active product" in error_message.lower()
+            assert "default product" in error_message.lower()
 
     @pytest.mark.asyncio
     async def test_uses_tenant_manager_when_tenant_key_not_provided(self):

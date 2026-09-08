@@ -21,6 +21,7 @@ from api.endpoints.mcp_tools._base import (
     MCP_ID_MAX,
     MCP_NAME_MAX,
     MCP_SHORT_TEXT_MAX,
+    READ_PRODUCT_ID_DESC,
     _call_tool,
     mcp,
 )
@@ -137,7 +138,13 @@ async def get_context(
     product_id: Annotated[
         str,
         Field(
-            description="Product UUID. Optional when project_id is supplied — the server resolves the product from the project (tenant-scoped)."
+            description=(
+                "Product UUID. Optional when project_id is supplied — the server resolves the "
+                "product from the project (tenant-scoped). Also optional for tenant-scoped-only "
+                "categories (products, threads, project, chain, self_identity, todos) — omit it "
+                "entirely when you have no product_id yet, e.g. calling categories=['products'] "
+                "to resolve one."
+            )
         ),
     ] = "",
     project_id: str = "",
@@ -165,7 +172,10 @@ async def get_context(
                 "chain (the caller's active chain run: run_id, chain_mission, resolved_order — "
                 "requires project_id; empty + error='no_active_chain_run' outside a chain), "
                 "threads (the tenant's Hub threads, read-only, up to 25 most recent; not "
-                "depth-tunable)."
+                "depth-tunable), products (~25 tokens/product: id, name, is_active for every "
+                "product owned by the calling tenant — resolve a product name to its id before "
+                "any product_id-taking call; works even with no product_id/default product set; "
+                "names are NOT guaranteed unique per tenant, so more than one match is possible)."
             )
         ),
     ] = None,
@@ -206,10 +216,11 @@ async def get_context(
         "Search the 360 memory (closeouts/handovers) by keyword to answer 'have we solved X "
         "before?'. Matches summary, key_outcomes, decisions_made, project_name, tags, and "
         "git_commits (a closeout's commit messages -- e.g. 'when did we fix the redirect bug'); "
-        "optional tag narrows to one controlled-vocabulary value. Tenant + active-product scoped "
-        "(never pass tenant_key). Returns relevance-ranked headlines, capped at limit. Distinct "
-        "from get_context(memory_360) (recency, not search) and search_threads (Hub chat, not "
-        "memory)."
+        "optional tag narrows to one controlled-vocabulary value. Tenant-scoped (never pass "
+        "tenant_key); defaults to your default product, pass product_id to search a specific "
+        "product instead. Returns relevance-ranked headlines, capped at limit. Distinct "
+        "from get_context(memory_360) (recency, not search) and list_threads(query=...) (Hub chat, "
+        "not memory)."
     ),
     annotations=_tool_hints("search_memory"),
 )
@@ -236,11 +247,20 @@ async def search_memory(
             description=f"Max headlines to return (default {SEARCH_MEMORY_LIMIT_DEFAULT}, max {SEARCH_MEMORY_LIMIT_MAX}).",
         ),
     ] = SEARCH_MEMORY_LIMIT_DEFAULT,
+    product_id: Annotated[
+        str,
+        Field(
+            max_length=MCP_ID_MAX,
+            description=READ_PRODUCT_ID_DESC.format(what="search"),
+        ),
+    ] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {"query": query, "limit": limit}
     if tag:
         kwargs["tag"] = tag
+    if product_id:
+        kwargs["product_id"] = product_id
     return await _call_tool(ctx, "search_memory", kwargs)
 
 
@@ -320,7 +340,7 @@ async def create_vision_document(
             min_length=1,
             description=(
                 "Full markdown vision document text (same size cap as the UI upload). After "
-                "creating, call get_vision_doc then update_product_context (vision_summaries + "
+                "creating, call get_vision_document then update_product_context (vision_summaries + "
                 "consolidated_vision) to populate the product card."
             ),
         ),
@@ -341,7 +361,7 @@ async def create_vision_document(
 
 
 @mcp.tool(
-    name="get_vision_doc",
+    name="get_vision_document",
     title="Get Vision Document",
     description=(
         "Retrieve a product's vision document with extraction instructions. "
@@ -350,9 +370,9 @@ async def create_vision_document(
         "and side-effect free, so request them in PARALLEL, in any order. Read ALL "
         "chunks before calling update_product_context."
     ),
-    annotations=_tool_hints("get_vision_doc"),
+    annotations=_tool_hints("get_vision_document"),
 )
-async def get_vision_doc(
+async def get_vision_document(
     product_id: str,
     chunk: int | None = None,
     ctx: Context = None,
@@ -390,6 +410,17 @@ async def update_product_context(
                 "working directory); OMIT if you have no filesystem access inside the user's "
                 "repository — never guess. Like product_name, it is user-owned and skipped when "
                 "already set."
+            ),
+        ),
+    ] = "",
+    extraction_custom_instructions: Annotated[
+        str,
+        Field(
+            max_length=MCP_DESCRIPTION_MAX,
+            description=(
+                "Custom instructions steering future vision-document extraction for this "
+                "product (e.g. 'focus on backend architecture'). Same field the dashboard's "
+                "product form writes via PUT /products/{id}."
             ),
         ),
     ] = "",
@@ -447,11 +478,26 @@ async def update_product_context(
         dict | None,
         Field(description="Product-level aggregate summary: {light, medium}."),
     ] = None,
+    is_active: Annotated[
+        bool | None,
+        Field(
+            description=(
+                "Show (true) or hide (false) this product's tab -- the MCP twin of the "
+                "dashboard's show/hide button. Omit to leave it unchanged. SEVERAL products "
+                "may be shown at once and showing one never hides another. This does NOT "
+                "change which product an unscoped read resolves to: that is the separate "
+                "default product, chosen from the dashboard. To work on a specific product, "
+                "pass its product_id to each call rather than showing it here."
+            )
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     # Merge-write: forward only provided, non-empty values. The grouped dicts unpack
     # to the SAME flat kwargs ProductService.update_product() consumes (BE-9118).
     kwargs: dict[str, Any] = {"product_id": product_id}
+    if is_active is not None:
+        kwargs["is_active"] = is_active
     kwargs.update(
         {
             name: value
@@ -460,6 +506,7 @@ async def update_product_context(
                 ("product_description", product_description),
                 ("core_features", core_features),
                 ("project_path", project_path),
+                ("extraction_custom_instructions", extraction_custom_instructions),
             )
             if value
         }

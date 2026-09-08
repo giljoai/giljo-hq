@@ -4,7 +4,7 @@
 # [CE] Community Edition.
 
 """
-Tests for vision analysis MCP tools: get_vision_doc and update_product_context.
+Tests for vision analysis MCP tools: get_vision_document and update_product_context.
 
 Handover 0842c: TDD tests written FIRST before implementation.
 Covers happy paths, tenant isolation, partial writes, and WebSocket emission.
@@ -165,7 +165,7 @@ async def doc_b(db_session: AsyncSession, tenant_b: str, product_b: Product) -> 
 
 
 # ---------------------------------------------------------------------------
-# Tests for get_vision_doc
+# Tests for get_vision_document
 # ---------------------------------------------------------------------------
 
 
@@ -178,9 +178,9 @@ async def test_get_vision_doc_happy_path(
     doc_a: VisionDocument,
 ):
     """Product with vision doc returns content, prompt, and metadata."""
-    from giljo_mcp.tools.vision_analysis import get_vision_doc
+    from giljo_mcp.tools.vision_analysis import get_vision_doc as get_vision_document
 
-    result = await get_vision_doc(
+    result = await get_vision_document(
         product_id=product_a.id,
         tenant_key=tenant_a,
         _test_session=db_session,
@@ -197,7 +197,7 @@ async def test_get_vision_doc_happy_path(
     assert "usage" in result
 
     # Request chunk 1 to get actual content
-    chunk_result = await get_vision_doc(
+    chunk_result = await get_vision_document(
         product_id=product_a.id,
         tenant_key=tenant_a,
         chunk=1,
@@ -216,7 +216,7 @@ async def test_get_vision_doc_not_found(
     """Nonexistent product raises ResourceNotFoundError."""
     from giljo_mcp.database import tenant_session_context
     from giljo_mcp.exceptions import ResourceNotFoundError
-    from giljo_mcp.tools.vision_analysis import get_vision_doc
+    from giljo_mcp.tools.vision_analysis import get_vision_doc as get_vision_document
 
     # Scope the bare test session to tenant_a (mirrors the sibling
     # test_get_vision_doc_tenant_isolation) so the tool's explicit tenant
@@ -224,7 +224,7 @@ async def test_get_vision_doc_not_found(
     # rather than a guard TenantIsolationError.
     with pytest.raises(ResourceNotFoundError):
         with tenant_session_context(db_session, tenant_a):
-            await get_vision_doc(
+            await get_vision_document(
                 product_id=str(uuid.uuid4()),
                 tenant_key=tenant_a,
                 _test_session=db_session,
@@ -243,11 +243,11 @@ async def test_get_vision_doc_tenant_isolation(
     """Cannot read another tenant's product vision documents."""
     from giljo_mcp.database import tenant_session_context
     from giljo_mcp.exceptions import ResourceNotFoundError
-    from giljo_mcp.tools.vision_analysis import get_vision_doc
+    from giljo_mcp.tools.vision_analysis import get_vision_doc as get_vision_document
 
     with pytest.raises(ResourceNotFoundError):
         with tenant_session_context(db_session, tenant_a):
-            await get_vision_doc(
+            await get_vision_document(
                 product_id=product_b.id,
                 tenant_key=tenant_a,
                 _test_session=db_session,
@@ -263,9 +263,9 @@ async def test_get_vision_doc_custom_instructions(
     doc_a: VisionDocument,
 ):
     """Custom extraction instructions are injected into the prompt."""
-    from giljo_mcp.tools.vision_analysis import get_vision_doc
+    from giljo_mcp.tools.vision_analysis import get_vision_doc as get_vision_document
 
-    result = await get_vision_doc(
+    result = await get_vision_document(
         product_id=product_a.id,
         tenant_key=tenant_a,
         _test_session=db_session,
@@ -283,10 +283,10 @@ async def test_get_vision_doc_no_vision_docs(
 ):
     """Product without vision documents raises ResourceNotFoundError."""
     from giljo_mcp.exceptions import ResourceNotFoundError
-    from giljo_mcp.tools.vision_analysis import get_vision_doc
+    from giljo_mcp.tools.vision_analysis import get_vision_doc as get_vision_document
 
     with pytest.raises(ResourceNotFoundError, match="No vision documents found"):
-        await get_vision_doc(
+        await get_vision_document(
             product_id=product_a_no_instructions.id,
             tenant_key=tenant_a,
             _test_session=db_session,
@@ -564,6 +564,36 @@ async def test_write_product_target_platforms(
 
 
 @pytest.mark.asyncio
+async def test_write_product_extraction_custom_instructions(
+    db_session: AsyncSession,
+    db_manager,
+    tenant_a: str,
+    product_a: Product,
+):
+    """BE-9502a: extraction_custom_instructions writes via update_product_context.
+
+    Was previously PUT /products/{id}-only (annex Section D#4) -- ProductService
+    already had the column in its allowlist, but the field was never reachable
+    from FIELD_MAP / product_field_map's PRODUCT_DIRECT_FIELDS, so no MCP path
+    could correct it post-creation.
+    """
+    from giljo_mcp.tools.vision_analysis import update_product_fields
+
+    result = await update_product_fields(
+        product_id=product_a.id,
+        tenant_key=tenant_a,
+        _test_session=db_session,
+        extraction_custom_instructions="Focus on backend architecture.",
+    )
+
+    assert result["success"] is True
+    assert "extraction_custom_instructions" in result["fields"]
+
+    await db_session.refresh(product_a)
+    assert product_a.extraction_custom_instructions == "Focus on backend architecture."
+
+
+@pytest.mark.asyncio
 async def test_write_product_invalid_testing_strategy(
     db_session: AsyncSession,
     db_manager,
@@ -619,9 +649,9 @@ async def test_instructions_only_on_metadata_not_chunk(
     doc_a2: VisionDocument,
 ):
     """extraction_instructions ride only the metadata call, never a chunk response."""
-    from giljo_mcp.tools.vision_analysis import get_vision_doc
+    from giljo_mcp.tools.vision_analysis import get_vision_doc as get_vision_document
 
-    meta = await get_vision_doc(
+    meta = await get_vision_document(
         product_id=product_a.id,
         tenant_key=tenant_a,
         _test_session=db_session,
@@ -630,7 +660,7 @@ async def test_instructions_only_on_metadata_not_chunk(
     assert meta["total_chunks"] == 2
     assert "extraction_instructions" in meta
 
-    chunk = await get_vision_doc(
+    chunk = await get_vision_document(
         product_id=product_a.id,
         tenant_key=tenant_a,
         chunk=1,
@@ -651,9 +681,9 @@ async def test_single_chunk_metadata_inlines_content(
     doc_a: VisionDocument,
 ):
     """Single-chunk doc: metadata call inlines the content, no follow-up call needed."""
-    from giljo_mcp.tools.vision_analysis import get_vision_doc
+    from giljo_mcp.tools.vision_analysis import get_vision_doc as get_vision_document
 
-    meta = await get_vision_doc(
+    meta = await get_vision_document(
         product_id=product_a.id,
         tenant_key=tenant_a,
         _test_session=db_session,
@@ -676,9 +706,9 @@ async def test_multi_chunk_metadata_has_no_inline_content(
     doc_a2: VisionDocument,
 ):
     """Multi-chunk doc: metadata call carries no inline content."""
-    from giljo_mcp.tools.vision_analysis import get_vision_doc
+    from giljo_mcp.tools.vision_analysis import get_vision_doc as get_vision_document
 
-    meta = await get_vision_doc(
+    meta = await get_vision_document(
         product_id=product_a.id,
         tenant_key=tenant_a,
         _test_session=db_session,

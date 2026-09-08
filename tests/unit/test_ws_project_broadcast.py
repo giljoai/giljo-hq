@@ -25,6 +25,7 @@ def test_build_ws_project_data_includes_description():
     project.description = "A test description"
     project.status = "active"
     project.mission = "Test mission"
+    project.product_id = "prod-ws-1"
 
     data = _build_ws_project_data(project)
 
@@ -32,6 +33,10 @@ def test_build_ws_project_data_includes_description():
     assert data["description"] == "A test description"
     assert data["status"] == "active"
     assert data["mission"] == "Test mission"
+    # BE-9518: single source of truth for the 6+ call sites routed through this
+    # helper (project_launch_service, activate/deactivate_project,
+    # project_service._mutation_mixin x2, project_staging_service).
+    assert data["product_id"] == "prod-ws-1"
 
 
 @pytest.mark.asyncio
@@ -50,6 +55,7 @@ async def test_broadcast_project_update_includes_description():
             "description": "Desc1",
             "status": "active",
             "mission": "M1",
+            "product_id": "prod-broadcast-1",
         },
         tenant_key="tk_test",
     )
@@ -59,6 +65,8 @@ async def test_broadcast_project_update_includes_description():
     assert call_kwargs["data"]["description"] == "Desc1"
     assert call_kwargs["data"]["name"] == "P1"
     assert call_kwargs["data"]["mission"] == "M1"
+    # BE-9518: additive envelope field.
+    assert call_kwargs["data"]["product_id"] == "prod-broadcast-1"
 
 
 @pytest.mark.asyncio

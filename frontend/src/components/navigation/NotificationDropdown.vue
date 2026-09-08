@@ -12,7 +12,7 @@
         v-if="compact"
         :content="unreadCount"
         :model-value="unreadCount > 0"
-        :color="badgeColor"
+        :color="QUIET_BADGE_COLOR"
         overlap
         offset-x="2"
         offset-y="2"
@@ -20,7 +20,6 @@
         <div
           v-bind="menuProps"
           class="nav-orb nav-orb--bell"
-          :class="notificationBellClass"
           role="button"
           tabindex="0"
           aria-label="View notifications"
@@ -33,7 +32,7 @@
         v-else
         :content="unreadCount"
         :model-value="unreadCount > 0"
-        :color="badgeColor"
+        :color="QUIET_BADGE_COLOR"
         overlap
         offset-x="4"
         offset-y="4"
@@ -43,7 +42,7 @@
           icon="mdi-bell"
           variant="text"
           aria-label="View notifications"
-          :class="['mr-2', notificationBellClass]"
+          class="mr-2"
         ></v-btn>
       </v-badge>
     </template>
@@ -197,20 +196,21 @@ const userStore = useUserStore()
 const menuOpen = ref(false)
 const expandedIds = ref(new Set())
 let unsubscribeNotification = null
+let unsubscribeNotificationUpdated = null
+let unsubscribeNotificationResolved = null
 
 // Computed properties
 const notifications = computed(() => notificationStore.sortedNotifications || [])
 const unreadCount = computed(() => notificationStore.unreadCount || 0)
-const badgeColor = computed(() => notificationStore.badgeColor || 'error')
-
-// Dynamic bell class based on notification priority
-const notificationBellClass = computed(() => {
-  if (unreadCount.value === 0) return ''
-  const color = badgeColor.value
-  if (color === 'warning') return 'notification-bell--warning'
-  if (color === 'error') return 'notification-bell--error'
-  return 'notification-bell--unread'
-})
+// FE-9553 ruling 2: the bell keeps a QUIET unseen-counter only, and never a
+// red/urgent treatment -- urgency lives in banners exclusively. So the badge
+// carries one fixed, calm colour rather than a severity-derived one, and the
+// severity->pulse-class mapping that used to live here is gone along with the
+// animations it drove.
+//
+// `info` is the theme's lightest blue: legible as a count, quiet as a signal.
+// A theme token rather than a literal, per the styling rules.
+const QUIET_BADGE_COLOR = 'info'
 
 // Get icon based on notification type
 const getNotificationIcon = (type) => {
@@ -381,6 +381,30 @@ const handleNewNotification = (payload) => {
   notificationStore.handleWsNewNotification(eventData)
 }
 
+// D16 (Headless S3d): handle notification:updated WS event -- an already-open
+// row a scanner refreshed in place (content changed, still unresolved).
+// Same broadcast/targeted filtering as notification:new.
+const handleUpdatedNotification = (payload) => {
+  const currentUserId = userStore.currentUser?.id
+  const eventUserId = payload?.user_id ?? payload?.data?.user_id ?? null
+  const eventData = payload?.data ?? payload
+
+  if (eventUserId !== null && eventUserId !== undefined && eventUserId !== currentUserId) {
+    return
+  }
+
+  notificationStore.handleWsUpdatedNotification(eventData)
+}
+
+// D16 (Headless S3d): handle notification:resolved WS event -- the fix for a
+// resolved banner (e.g. an answered agent question) sitting onscreen until
+// refresh. Carries only ids, so no per-user filter is needed: a row this
+// user never had is a no-op drop.
+const handleResolvedNotification = (payload) => {
+  const eventData = payload?.data ?? payload
+  notificationStore.handleWsResolvedNotification(eventData)
+}
+
 // Lifecycle hooks
 // Note: agent:health_alert events are handled by websocketEventRouter.js (Handover 0424)
 onMounted(async () => {
@@ -397,6 +421,19 @@ onMounted(async () => {
   } catch (error) {
     console.warn('[NotificationDropdown] Failed to subscribe to notification:new event:', error)
   }
+
+  // D16 (Headless S3d): subscribe to the two events that keep an already-known
+  // row live -- content refresh (:updated) and off-screen removal (:resolved).
+  try {
+    unsubscribeNotificationUpdated = wsStore.on('notification:updated', handleUpdatedNotification)
+  } catch (error) {
+    console.warn('[NotificationDropdown] Failed to subscribe to notification:updated event:', error)
+  }
+  try {
+    unsubscribeNotificationResolved = wsStore.on('notification:resolved', handleResolvedNotification)
+  } catch (error) {
+    console.warn('[NotificationDropdown] Failed to subscribe to notification:resolved event:', error)
+  }
 })
 
 onUnmounted(() => {
@@ -404,6 +441,12 @@ onUnmounted(() => {
   try {
     if (typeof unsubscribeNotification === 'function') {
       unsubscribeNotification()
+    }
+    if (typeof unsubscribeNotificationUpdated === 'function') {
+      unsubscribeNotificationUpdated()
+    }
+    if (typeof unsubscribeNotificationResolved === 'function') {
+      unsubscribeNotificationResolved()
     }
   } catch (error) {
     console.warn('[NotificationDropdown] Error during cleanup:', error)
@@ -414,41 +457,12 @@ onUnmounted(() => {
 <style lang="scss" scoped>
 @use '../../styles/design-tokens' as *;
 
-/* Pulsing glow animation for error notifications (connection lost, system alerts) */
-@keyframes notification-pulse-error {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(var(--v-theme-error), 0.6);
-  }
-  50% {
-    box-shadow: 0 0 0 12px rgba(var(--v-theme-error), 0);
-  }
-}
-
-/* Pulsing glow animation for warning notifications (agent health) */
-@keyframes notification-pulse-warning {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(var(--v-theme-warning), 0.6);
-  }
-  50% {
-    box-shadow: 0 0 0 12px rgba(var(--v-theme-warning), 0);
-  }
-}
-
-.notification-bell--error {
-  animation: notification-pulse-error 2s ease-in-out infinite;
-  border-radius: 50%;
-}
-
-.notification-bell--warning {
-  animation: notification-pulse-warning 2s ease-in-out infinite;
-  border-radius: 50%;
-}
-
-/* Fallback for other notification types */
-.notification-bell--unread {
-  animation: notification-pulse-error 2s ease-in-out infinite;
-  border-radius: 50%;
-}
+/* FE-9553 ruling 2: the bell never alerts, so it has no pulse animation. The
+   two keyframe blocks and the three severity modifier classes that drove an
+   infinite 2s red or amber glow are deliberately deleted rather than left
+   unapplied -- a defined-but-unused alert class is a one-line change away from
+   coming back, and urgency belongs to banners exclusively. A spec asserts the
+   old names appear nowhere in this file, so naming them here would fail it. */
 
 .notification-dropdown {
   width: 440px;

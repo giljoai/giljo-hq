@@ -649,7 +649,7 @@ class TestSmokeReplay4b57c639:
 
         INF-6049b: the orchestrator query moved from the REST endpoint into the
         shared core ThinClientPromptGenerator.implement (driven by both the REST
-        endpoint and the implement_project MCP tool); inspect it there."""
+        endpoint and the get_implementation_prompt MCP tool); inspect it there."""
         import inspect
 
         from giljo_mcp.thin_prompt_generator import ThinClientPromptGenerator

@@ -1,17 +1,24 @@
 /**
- * products.fe9412.spec.js — FE-9412
+ * products.fe9412.spec.js — FE-9412, demoted by FE-9502c
  *
- * Activating a product in one session must reach every OTHER open session.
+ * Activating a product in one session must reach every OTHER open session's
+ * DISPLAYED active-product value.
  *
  * Two Pinia instances stand in for two browsers on the same tenant. The event
  * is fed through the REAL router (`routeWebsocketEvent` + the real EVENT_MAP),
  * not by hand-calling the handler, so these specs cover the wiring — route
  * table, store lookup, action name — and not merely the function body.
  *
- * The contract under test is the one the LOCAL activation path already
- * satisfies (useProductActivation.js: activate -> fetchActiveProduct ->
- * setCurrentProduct -> reload): a session learning about the activation from
- * the event must end in the SAME state as the session that performed it.
+ * FE-9502c: the old contract — a session learning about an activation
+ * second-hand re-scopes its ENTIRE session (currentProductId, project list,
+ * tasks) to match — was correct for the pre-tabs single-product model, where
+ * currentProductId WAS the server's active product by construction. Under
+ * the tabbed shell, currentProductId is the VIEWED TAB, a UI-local choice;
+ * a live event from a DIFFERENT browser's activation must not silently
+ * switch what THIS session is looking at (ruling 3, no auto-navigation).
+ * Only the displayed `activeProduct` (now a legacy-default value) follows
+ * the event. See useActiveProductReconciliation.spec.js for the matching
+ * focus/reconnect-backstop specs.
  *
  * Edition scope: Both.
  */
@@ -21,7 +28,7 @@ import { setActivePinia, createPinia } from 'pinia'
 const PRODUCT_A = { id: 'prod-hermes', name: 'Hermes' }
 const PRODUCT_B = { id: 'prod-auditor', name: 'Codebase_Auditor' }
 
-const mockGetActive = vi.fn()
+const mockGetDefault = vi.fn()
 const mockGet = vi.fn()
 const mockList = vi.fn()
 
@@ -30,7 +37,7 @@ vi.mock('@/services/api', () => {
     products: {
       list: (...a) => mockList(...a),
       get: (...a) => mockGet(...a),
-      getActive: (...a) => mockGetActive(...a),
+      getDefault: (...a) => mockGetDefault(...a),
     },
     tasks: { list: vi.fn(() => Promise.resolve({ data: [] })) },
   }
@@ -81,7 +88,7 @@ describe('FE-9412 — an activation in one session reaches the others', () => {
     localStorage.clear()
 
     // The server has already flipped: B is active, A is not.
-    mockGetActive.mockResolvedValue({
+    mockGetDefault.mockResolvedValue({
       data: { has_active_product: true, product: PRODUCT_B },
     })
     mockList.mockResolvedValue({ data: [PRODUCT_A, PRODUCT_B] })
@@ -104,35 +111,38 @@ describe('FE-9412 — an activation in one session reaches the others', () => {
     expect(sessionTwo.products.activeProduct).toMatchObject({ id: PRODUCT_B.id })
   })
 
-  it('RE-SCOPES the second session to the newly activated product, not just its header', async () => {
+  it('FE-9502c: does NOT re-scope the second session\'s viewed tab — only the displayed activeProduct follows', async () => {
     const sessionTwo = createSession()
     sessionTwo.products.$patch({
       activeProduct: PRODUCT_A,
       currentProductId: PRODUCT_A.id,
       currentProduct: PRODUCT_A,
+      openProductIds: [PRODUCT_A.id],
     })
 
     await deliverActivationEvent(sessionTwo, PRODUCT_B.id)
 
-    // The selection the whole session is scoped by — the thing the project
-    // list, roadmap and task views read — must follow the activation.
-    expect(sessionTwo.products.currentProductId).toBe(PRODUCT_B.id)
-    expect(sessionTwo.products.currentProduct).toMatchObject({ id: PRODUCT_B.id })
-    expect(sessionTwo.products.effectiveProductId).toBe(PRODUCT_B.id)
+    // activeProduct (display/legacy-default) follows the event...
+    expect(sessionTwo.products.activeProduct).toMatchObject({ id: PRODUCT_B.id })
+    // ...but the tab this session is VIEWING never moves on its own —
+    // reassigning it from a background event would be silent auto-navigation.
+    expect(sessionTwo.products.currentProductId).toBe(PRODUCT_A.id)
+    expect(sessionTwo.products.currentProduct).toMatchObject({ id: PRODUCT_A.id })
   })
 
-  it('refetches the dependent views so the stale project list cannot survive', async () => {
+  it('FE-9502c: does NOT refetch the dependent views — nothing was re-scoped', async () => {
     const sessionTwo = createSession()
     sessionTwo.products.$patch({
       activeProduct: PRODUCT_A,
       currentProductId: PRODUCT_A.id,
       currentProduct: PRODUCT_A,
+      openProductIds: [PRODUCT_A.id],
     })
 
     await deliverActivationEvent(sessionTwo, PRODUCT_B.id)
 
-    expect(sessionTwo.projectStore.fetchProjects).toHaveBeenCalled()
-    expect(sessionTwo.taskStore.fetchTasks).toHaveBeenCalledWith({ product_id: PRODUCT_B.id })
+    expect(sessionTwo.projectStore.fetchProjects).not.toHaveBeenCalled()
+    expect(sessionTwo.taskStore.fetchTasks).not.toHaveBeenCalled()
   })
 
   it('leaves the session that PERFORMED the activation alone (no gratuitous re-scope)', async () => {
@@ -158,6 +168,7 @@ describe('FE-9412 — an activation in one session reaches the others', () => {
       activeProduct: PRODUCT_B,
       currentProductId: PRODUCT_B.id,
       currentProduct: PRODUCT_B,
+      openProductIds: [PRODUCT_B.id],
     })
 
     const sessionTwo = createSession()
@@ -165,12 +176,18 @@ describe('FE-9412 — an activation in one session reaches the others', () => {
       activeProduct: PRODUCT_A,
       currentProductId: PRODUCT_A.id,
       currentProduct: PRODUCT_A,
+      openProductIds: [PRODUCT_A.id],
     })
 
     await deliverActivationEvent(sessionTwo, PRODUCT_B.id)
 
-    expect(sessionTwo.products.currentProductId).toBe(PRODUCT_B.id)
+    // sessionTwo's displayed activeProduct follows the event; its viewed tab
+    // (currentProductId) does not (FE-9502c). sessionOne, an entirely
+    // separate Pinia instance the event was never routed to, is untouched.
+    expect(sessionTwo.products.activeProduct).toMatchObject({ id: PRODUCT_B.id })
+    expect(sessionTwo.products.currentProductId).toBe(PRODUCT_A.id)
     expect(sessionOne.products.currentProductId).toBe(PRODUCT_B.id)
+    expect(sessionOne.products.activeProduct).toMatchObject({ id: PRODUCT_B.id })
     expect(sessionOne.projectStore.fetchProjects).not.toHaveBeenCalled()
   })
 })

@@ -72,29 +72,36 @@ class MemoryToolsMixin:
         tenant_key: str,
         tag: str | None = None,
         limit: int = 10,
+        product_id: str | None = None,
     ) -> dict[str, Any]:
         """BE-6225b: keyword (+ optional tag) search over 360 memory headlines.
 
         The missing 360-memory JTBD: lets an agent ask "have we solved X before?"
-        against accumulated project history. Resolves the ACTIVE product
-        server-side (same contract as list_projects — the agent never passes a
-        product_id or tenant_key), then delegates to the reused
+        against accumulated project history. Resolves the product server-side
+        (the agent never passes tenant_key), then delegates to the reused
         ProductMemoryService search read path (BE-6082 FTS + ILIKE fallback).
+
+        BE-9499a: ``product_id`` is optional. Omitted, this resolves the ACTIVE
+        product exactly as before (same contract as list_projects). Supplied,
+        it is validated as belonging to this tenant via
+        ``ProductService.resolve_binding_product`` and searched regardless of
+        which product is active -- never a silent fallback.
 
         Args:
             query: Case-insensitive keyword/substring search term.
             tenant_key: Tenant isolation key (injected by the dispatch layer).
             tag: Optional exact-tag filter (controlled vocabulary).
             limit: Max headlines to return (server-clamped).
+            product_id: Optional explicit product UUID. Omit for the active product.
 
         Returns:
             ``{"results": [...headlines...], "count": int, "product_id": str,
             "query": str, "tag": str | None}``.
 
         Raises:
-            ValidationError: No active product set for the tenant.
+            ValidationError: No active product set for the tenant, or a
+                supplied product_id does not belong to this tenant.
         """
-        from giljo_mcp.exceptions import ValidationError
         from giljo_mcp.services.product_memory_service import ProductMemoryService
         from giljo_mcp.services.product_service import ProductService
 
@@ -104,12 +111,9 @@ class MemoryToolsMixin:
             websocket_manager=self._websocket_manager,
             test_session=self._test_session,
         )
-        active_product = await product_service.get_active_product()
-        if not active_product:
-            raise ValidationError(
-                "No active product set. Please activate a product first.",
-                context={"tenant_key": tenant_key, "operation": "search_memory"},
-            )
+        bound_product = await product_service.resolve_binding_product(
+            product_id, operation="search_memory", action="searched", write=False
+        )
 
         memory_service = ProductMemoryService(
             db_manager=self.db_manager,
@@ -117,12 +121,12 @@ class MemoryToolsMixin:
             test_session=self._test_session,
         )
         result = await memory_service.search_memory(
-            product_id=active_product.id,
+            product_id=bound_product.id,
             query=query,
             tag=tag,
             limit=limit,
         )
-        result["product_id"] = active_product.id
+        result["product_id"] = bound_product.id
         return result
 
     async def write_memory_entry(

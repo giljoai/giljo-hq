@@ -38,6 +38,36 @@ _LOGGER_NAME = "api.startup.metrics_flushers"
 _IDLE_MESSAGE = "API metrics sync: no API call counts to flush"
 
 
+def _bound_strings(stmt: object) -> list[str]:
+    """Every string bound into ``stmt``, flattening expanding IN parameters.
+
+    ``.in_(keys)`` compiles to a single expanding bindparam whose value is the
+    whole LIST, so a plain ``isinstance(value, str)`` filter over
+    ``compile().params`` silently returns nothing and the probe reads as "no
+    tenant is live".
+    """
+    found: list[str] = []
+    for value in stmt.compile().params.values():
+        if isinstance(value, str):
+            found.append(value)
+        elif isinstance(value, (list, tuple, set, frozenset)):
+            found.extend(item for item in value if isinstance(item, str))
+    return found
+
+
+class _FakeResult:
+    """Minimal stand-in for a SQLAlchemy Result over a single scalar column."""
+
+    def __init__(self, values: list[str]) -> None:
+        self._values = values
+
+    def scalars(self) -> _FakeResult:
+        return self
+
+    def all(self) -> list[str]:
+        return list(self._values)
+
+
 class _FakeSession:
     """Async session stand-in. A MagicMock cannot serve here: its ``commit`` is
     not awaitable, so the loop would land in its own ``except`` branch and the
@@ -46,9 +76,19 @@ class _FakeSession:
     def __init__(self) -> None:
         self.executed: list[object] = []
         self.commits = 0
+        # BE-9582's liveness check opens a tenant_isolation_bypass, which stores
+        # its state here. Without it the bypass raises and the loop swallows it.
+        self.info: dict[str, object] = {}
 
-    async def execute(self, stmt: object) -> None:
+    async def execute(self, stmt: object) -> _FakeResult | None:
+        if getattr(stmt, "is_select", False):
+            # BE-9582 liveness probe. Answer "every tenant you asked about still
+            # exists" so these tests keep exercising log level and flush order
+            # only, and keep it out of ``executed`` so the upsert assertions
+            # below still index the statements they were written against.
+            return _FakeResult(_bound_strings(stmt))
         self.executed.append(stmt)
+        return None
 
     async def commit(self) -> None:
         self.commits += 1

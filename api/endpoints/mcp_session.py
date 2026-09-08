@@ -38,6 +38,7 @@ from giljo_mcp.harness_resolver import preset_from_client_info
 from giljo_mcp.models import MCPSession
 from giljo_mcp.platform_registry import harness_from_client_info
 from giljo_mcp.services.debounce import should_run
+from giljo_mcp.utils.log_sanitizer import sanitize
 
 
 logger = logging.getLogger(__name__)
@@ -284,6 +285,86 @@ class MCPSessionManager:
         logger.info(f"Created new MCP session: {new_session.session_id} (tenant: {tenant_key})")
         return new_session
 
+    async def touch_or_create_client_session(
+        self,
+        *,
+        tenant_key: str,
+        user_id: str | None,
+        api_key_id: str | None = None,
+        client_info: dict[str, Any] | None = None,
+        auth_method: str | None = None,
+        protocol_version: str | None = None,
+        capabilities: dict[str, Any] | None = None,
+    ) -> MCPSession | None:
+        """Record that a client ANNOUNCED itself, one row per client (BE-9586d).
+
+        The ``server/discover`` counterpart to :meth:`create_session`, and deliberately
+        NOT the same semantics. ``initialize`` means "a new connection", so BE-9066 mints
+        a fresh row for each one. ``server/discover`` means "tell me about yourself", our
+        reply advertises ``ttlMs: 0``, and a client is entitled to re-ask as often as it
+        likes -- so minting per call would re-create the unbounded growth BE-3011 and
+        BE-9066 both removed. This TOUCHES the existing row for that client and inserts
+        only when there is none.
+
+        Identity is (tenant_key, user_id, client_info.name): one row per TOOL per
+        principal, which is exactly the grain ``connected_harnesses`` reports, since it
+        groups by resolved harness and keeps the newest ``last_accessed``.
+
+        Returns the row, or ``None`` when the frame named no client -- an anonymous
+        announcement is not something we can attribute to a tool, and inventing a
+        ``generic`` row would put a nameless entry on the Connect page.
+        """
+        name = (client_info or {}).get("name")
+        if not isinstance(name, str) or not name:
+            return None
+
+        self.db.info["tenant_key"] = tenant_key
+
+        existing = (
+            (
+                await self.db.execute(
+                    select(MCPSession).where(
+                        MCPSession.tenant_key == tenant_key,
+                        MCPSession.user_id == user_id,
+                        MCPSession.session_data["client_info"]["name"].astext == name,
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+
+        if existing is not None:
+            # Delegated to the manager's EXISTING writer rather than committing here.
+            # Two reasons, and the second is the load-bearing one:
+            #
+            #   - ``update_session_data`` already does exactly this touch: it refreshes
+            #     ``last_accessed`` (the field ``connected_harnesses`` orders on, and the
+            #     one ``cleanup_expired_sessions`` reaps against) and commits.
+            #   - BE-3006a's single-writer rule forbids NEW direct db writes in
+            #     ``api/endpoints/``. The escape hatch exists, but adding a second commit
+            #     site for a touch this class can already perform would be annotating
+            #     around the policy instead of honouring it. No new write path.
+            #
+            # The client_info patch rides along on purpose: a client that upgrades its
+            # version should have the recorded identity refreshed, and reusing
+            # ``_client_info_patch`` keeps ``resolved_harness`` derived by the one
+            # resolver rather than left stale from the first announcement.
+            patch = _client_info_patch(client_info, protocol_version, capabilities)
+            await self.update_session_data(existing.session_id, patch, merge=True, tenant_key=tenant_key)
+            await self.db.refresh(existing)
+            return existing
+
+        return await self.create_session(
+            tenant_key=tenant_key,
+            user_id=user_id,
+            api_key_id=api_key_id,
+            client_info=client_info,
+            auth_method=auth_method,
+            protocol_version=protocol_version,
+            capabilities=capabilities,
+        )
+
     async def resurrect_session(
         self,
         session_id: str,
@@ -440,6 +521,68 @@ class MCPSessionManager:
 
         logger.debug(f"Updated session data: {session_id}")
         return True
+
+    async def delete_sessions_for_harness(self, *, tenant_key: str, harness: str) -> int:
+        """Delete this tenant's session rows for one HARNESS. Returns the count (BE-9591).
+
+        Backs "Remove tool": ``connected_harnesses`` derives entirely from these rows,
+        so a removal that leaves them behind removes nothing the status actually reads
+        -- the card goes green again from history the moment the tool is re-added.
+
+        MATCHED ON THE RESOLVED HARNESS, NOT THE STORED NAME. The card is keyed by
+        harness token; the row stores whatever clientInfo the client sent, and an
+        unrecognised name (``giljo-qa-harness``) displays on the GENERIC card. A
+        string match on the stored name would leave exactly those rows behind, so the
+        generic card would stay green with nothing the user could do about it.
+        Resolving each row through ``harness_from_client_info`` -- the same resolver
+        ``connected_harnesses`` reads with -- is what stops removal and display
+        disagreeing about which card a row belongs to.
+
+        SCOPE. ``tenant_key`` plus resolved harness, and deliberately no ``user_id``
+        predicate: per ADR-009 tenant_key is per-USER and permanently 1:1, so this IS
+        the user's own rows, while a user_id filter would be NARROWER than the display
+        it mirrors and would strand rows whose ``user_id`` is NULL (the column is
+        nullable) -- ghosts that keep the card green after a removal.
+
+        Deliberately a hard DELETE rather than an expiry stamp: the reaper
+        (``cleanup_expired_sessions``) keys on ``last_accessed``, and
+        ``connected_harnesses`` filters on neither expiry nor activity, so an expired
+        row would still render the card connected. Only absence clears it.
+        """
+        from giljo_mcp.platform_registry import harness_from_client_info
+
+        self.db.info["tenant_key"] = tenant_key
+
+        rows = (await self.db.execute(select(MCPSession).where(MCPSession.tenant_key == tenant_key))).scalars().all()
+
+        doomed = [
+            row
+            for row in rows
+            if harness_from_client_info(
+                ((row.session_data or {}).get("client_info") or {}).get("name"),
+                ((row.session_data or {}).get("client_info") or {}).get("version"),
+            )
+            == harness
+        ]
+        if not doomed:
+            return 0
+
+        for row in doomed:
+            await self.db.delete(row)
+        # MCPSessionManager IS the owning writer for mcp_sessions, and unlike BE-9586d's
+        # touch (which delegated to update_session_data) NO existing writer deletes by
+        # harness -- this is a new capability on the owner, not an endpoint reaching past
+        # a service. The hatch is used deliberately, after checking for a writer to
+        # delegate to, which is what BE-3006a's own guidance asks for.
+        await self.db.commit()  # single-writer-allow: owning manager, no existing delete-by-harness writer
+
+        logger.info(
+            "Removed %d MCP session row(s) for harness=%s (tenant: %s)",
+            len(doomed),
+            sanitize(harness),
+            sanitize(tenant_key),
+        )
+        return len(doomed)
 
     async def cleanup_expired_sessions(self) -> int:
         """Delete sessions inactive beyond SESSION_CLEANUP_THRESHOLD_HOURS.

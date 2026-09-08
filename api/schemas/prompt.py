@@ -21,22 +21,6 @@ from giljo_mcp.platform_registry import SUBAGENT_TOOL_TYPES
 # Prompt Generation Schemas
 
 
-class OrchestratorPromptResponse(BaseModel):
-    """
-    Schema for orchestrator prompt generation response.
-    GET /api/prompts/orchestrator/{tool}
-    """
-
-    prompt: str = Field(..., description="Multi-line bash commands for orchestrator invocation")
-    tool: str = Field(..., description="Tool type: claude-code, codex, gemini")
-    instructions: str = Field(..., description="User-readable instructions for using the prompt")
-    project_name: str = Field(..., description="Project name")
-    project_id: str = Field(..., description="Project ID")
-    agent_count: int = Field(..., description="Number of agents in project")
-
-    model_config = ConfigDict(from_attributes=True)
-
-
 class AgentPromptResponse(BaseModel):
     """
     Schema for agent prompt generation response.

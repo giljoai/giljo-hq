@@ -95,6 +95,34 @@ class ProjectStateError(OrchestrationError):
     default_status_code: int = 409
 
 
+class CloseoutRequiredError(OrchestrationError):
+    """Raised when ``archive_project`` is asked to reach a terminal status without
+    an existing closeout entry and without ``force`` (BE-9539).
+
+    ``update_project(status="completed")`` and the dashboard's Archive button
+    both terminate through ``ProjectService.archive_project`` -- ONE writer, so
+    this gate applies to both doors identically. ``write_project_closeout``
+    stamps ``project.closeout_executed_at`` on success; its absence means the
+    project never closed out cleanly (an unread operator decision, agents still
+    working, etc.) -- exactly the sequence that let a project archive silently
+    with a buried decision. ``blockers`` mirrors the same per-agent shape
+    ``write_project_closeout``'s own CLOSEOUT_BLOCKED rejection carries, built
+    from the SAME ``ProjectCloseoutService.evaluate_closeout_readiness`` source.
+
+    A state conflict, not a server fault -- HTTP 409, same rung as
+    ``ProjectStateError``. The MCP boundary (BE-6081 Tier-2) catches this and
+    returns the structured ``{"success": False, "error": "CLOSEOUT_BLOCKED", ...}``
+    dict instead of letting it raise to ``isError``; the caller resolves the
+    blockers or passes ``force=true``.
+    """
+
+    default_status_code: int = 409
+
+    def __init__(self, message: str, blockers: list[dict], context: dict | None = None):
+        super().__init__(message=message, context=context)
+        self.blockers = blockers
+
+
 class ImplementationNotReadyError(OrchestrationError):
     """Raised when implementation is requested before the human gate has cleared.
 

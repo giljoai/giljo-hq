@@ -80,7 +80,8 @@ dmypy.json
 .ruff_cache/
 
 # IDEs and Editors
-.vscode/
+.vscode/*
+!.vscode/mcp.json
 .idea/
 *.swp
 *.swo

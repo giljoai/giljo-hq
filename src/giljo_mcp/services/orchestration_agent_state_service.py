@@ -35,7 +35,7 @@ from giljo_mcp.schemas.service_responses import (
     ErrorReportResult,
     ReactivationResult,
 )
-from giljo_mcp.services._error_helpers import not_found_or_wrong_state_error
+from giljo_mcp.services._error_helpers import M_CLOSE, M_DISMISS, M_REACTIVATE, not_found_or_wrong_state_error
 from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.services.agent_terminal_cursor_service import resolve_terminal_agent_cursors
 from giljo_mcp.tenant import TenantManager
@@ -101,6 +101,13 @@ class OrchestrationAgentStateService:
             job_repo=self._job_repo,
         )
 
+    async def _resolve_product_id(self, session: AsyncSession, tenant_key: str, job: "AgentJob | None") -> str | None:
+        """Resolve a job's product_id via its project; None if project-less (BE-9518)."""
+        if not job or not job.project_id:
+            return None
+        project = await self._job_repo.get_project_by_id(session, tenant_key, str(job.project_id))
+        return project.product_id if project else None
+
     async def _broadcast_completion(
         self,
         tenant_key: str,
@@ -109,6 +116,7 @@ class OrchestrationAgentStateService:
         execution: "AgentExecution",
         old_status: str | None,
         duration_seconds: float | None,
+        product_id: str | None = None,  # BE-9518
     ) -> None:
         """Broadcast job completion status change via WebSocket."""
         try:
@@ -119,6 +127,7 @@ class OrchestrationAgentStateService:
                     data={
                         "job_id": job_id,
                         "project_id": str(job.project_id) if job.project_id else None,
+                        "product_id": product_id,
                         # BE-6229: ride the chain_conductor flag (mirrors REST serializer).
                         "chain_conductor": bool(
                             (getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)
@@ -273,7 +282,7 @@ class OrchestrationAgentStateService:
                 "instruction": (
                     "You were COMPLETE and a directed, action-required post reactivated you. "
                     "Review the post(s) above, then call "
-                    f'resolve_reactivation(job_id="{execution.job_id}", action="resume" to pick the '
+                    f'resume_or_dismiss_job(job_id="{execution.job_id}", action="resume" to pick the '
                     'work back up | "dismiss" if no action is needed, reason="brief reason").'
                 ),
             }
@@ -304,9 +313,9 @@ class OrchestrationAgentStateService:
             if not tenant_key:
                 tenant_key = self.tenant_manager.get_current_tenant()
             if not tenant_key:
-                raise ValidationError(message="No tenant context available", context={"method": "reactivate_job"})
+                raise ValidationError(message="No tenant context available", context={"method": M_REACTIVATE})
             if not job_id or not job_id.strip():
-                raise ValidationError(message="job_id cannot be empty", context={"method": "reactivate_job"})
+                raise ValidationError(message="job_id cannot be empty", context={"method": M_REACTIVATE})
 
             async with self._get_session(tenant_key) as session:
                 # Find execution in blocked status
@@ -314,17 +323,18 @@ class OrchestrationAgentStateService:
 
                 if not execution:
                     raise await self._not_found_or_wrong_state_error(
-                        session, tenant_key, job_id, expected_status="blocked", method="reactivate_job"
+                        session, tenant_key, job_id, expected_status="blocked", method=M_REACTIVATE
                     )
 
                 # Get job
                 job = await self._job_repo.get_agent_job_by_job_id(session, tenant_key, job_id)
                 if not job:
                     raise ResourceNotFoundError(
-                        message=f"Job {job_id} not found", context={"job_id": job_id, "method": "reactivate_job"}
+                        message=f"Job {job_id} not found", context={"job_id": job_id, "method": M_REACTIVATE}
                     )
 
                 # Check project is not closed out
+                product_id: str | None = None  # BE-9518
                 if job.project_id:
                     project = await self._job_repo.get_project_by_id(session, tenant_key, str(job.project_id))
                     if project and project.status in IMMUTABLE_PROJECT_STATUSES:
@@ -332,6 +342,7 @@ class OrchestrationAgentStateService:
                             message="Cannot reactivate - project is already closed out.",
                             context={"job_id": job_id, "project_status": project.status},
                         )
+                    product_id = project.product_id if project else None
 
                 # Accumulate prior working duration
                 if execution.completed_at and execution.started_at:
@@ -370,6 +381,7 @@ class OrchestrationAgentStateService:
                         data={
                             "job_id": job_id,
                             "project_id": project_id,
+                            "product_id": product_id,
                             # BE-6229: ride the chain_conductor flag (mirrors REST serializer).
                             "chain_conductor": bool(
                                 (getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)
@@ -431,9 +443,9 @@ class OrchestrationAgentStateService:
             if not tenant_key:
                 tenant_key = self.tenant_manager.get_current_tenant()
             if not tenant_key:
-                raise ValidationError(message="No tenant context available", context={"method": "dismiss_reactivation"})
+                raise ValidationError(message="No tenant context available", context={"method": M_DISMISS})
             if not job_id or not job_id.strip():
-                raise ValidationError(message="job_id cannot be empty", context={"method": "dismiss_reactivation"})
+                raise ValidationError(message="job_id cannot be empty", context={"method": M_DISMISS})
 
             async with self._get_session(tenant_key) as session:
                 # Find execution in blocked status
@@ -441,7 +453,7 @@ class OrchestrationAgentStateService:
 
                 if not execution:
                     raise await self._not_found_or_wrong_state_error(
-                        session, tenant_key, job_id, expected_status="blocked", method="dismiss_reactivation"
+                        session, tenant_key, job_id, expected_status="blocked", method=M_DISMISS
                     )
 
                 # Return to complete (restore previous state)
@@ -463,6 +475,7 @@ class OrchestrationAgentStateService:
                 await self._job_repo.flush(session)
 
                 project_id = str(job.project_id) if job and job.project_id else None
+                product_id = await self._resolve_product_id(session, tenant_key, job)  # BE-9518
 
                 self._logger.info("Job %s reactivation dismissed: %s", job_id, reason)
 
@@ -475,6 +488,7 @@ class OrchestrationAgentStateService:
                         data={
                             "job_id": job_id,
                             "project_id": project_id,
+                            "product_id": product_id,
                             # BE-6229: ride the chain_conductor flag (mirrors REST serializer).
                             "chain_conductor": bool(
                                 (getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)
@@ -539,23 +553,25 @@ class OrchestrationAgentStateService:
             if not tenant_key:
                 tenant_key = self.tenant_manager.get_current_tenant()
             if not tenant_key:
-                raise ValidationError(message="No tenant context available", context={"method": "close_job"})
+                raise ValidationError(message="No tenant context available", context={"method": M_CLOSE})
             if not job_id or not job_id.strip():
-                raise ValidationError(message="job_id cannot be empty", context={"method": "close_job"})
+                raise ValidationError(message="job_id cannot be empty", context={"method": M_CLOSE})
 
             project_id = None
+            product_id = None  # BE-9518
             async with self._get_session(tenant_key) as session:
                 execution = await self._job_repo.find_complete_execution_for_job(session, tenant_key, job_id)
 
                 if not execution:
                     raise await self._not_found_or_wrong_state_error(
-                        session, tenant_key, job_id, expected_status="complete", method="close_job"
+                        session, tenant_key, job_id, expected_status="complete", method=M_CLOSE
                     )
 
                 execution.status = "closed"
 
                 job = await self._job_repo.get_agent_job_by_job_id(session, tenant_key, job_id)
                 project_id = str(job.project_id) if job and job.project_id else None
+                product_id = await self._resolve_product_id(session, tenant_key, job)  # BE-9518
 
                 # BE-9242: a closed job is terminal -- "not expected to receive
                 # further work" per this method's own contract above. Any live
@@ -585,6 +601,7 @@ class OrchestrationAgentStateService:
                         data={
                             "job_id": job_id,
                             "project_id": project_id,
+                            "product_id": product_id,
                             # BE-6229: ride the chain_conductor flag (mirrors REST serializer).
                             "chain_conductor": bool(
                                 (getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)
@@ -732,6 +749,7 @@ class OrchestrationAgentStateService:
                 # owner commits on block exit, BEFORE the broadcast below (which
                 # runs outside the scope) — events emit only after commit.
                 await self._job_repo.flush(session)
+                product_id = await self._resolve_product_id(session, tenant_key, job)  # BE-9518
 
             # WebSocket broadcast for real-time UI updates
             try:
@@ -739,6 +757,7 @@ class OrchestrationAgentStateService:
                     ws_data = {
                         "job_id": job_id,
                         "project_id": str(job.project_id) if job and job.project_id else None,
+                        "product_id": product_id,
                         # BE-6229: ride the chain_conductor flag (mirrors REST serializer).
                         "chain_conductor": bool(
                             (getattr(job, "job_metadata", None) or {}).get("chain_conductor", False)

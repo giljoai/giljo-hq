@@ -24,6 +24,9 @@ const VuetifyMock = {
   VAvatar: { template: '<div class="v-avatar"><slot /></div>' },
   VTooltip: { template: '<div class="v-tooltip"><slot /></div>' },
   VDialog: { template: '<div class="v-dialog"><slot /></div>' },
+  // NOTE (FE-9553): default slot ONLY. Anything in a scoped `activator` slot
+  // does not render, so assertions about it pass vacuously — stub v-menu
+  // locally when you need the activator. See the useToast blind-spot note.
   VMenu: { template: '<div class="v-menu"><slot /></div>' },
   VList: { template: '<div class="v-list"><slot /></div>' },
   VListItem: { template: '<div class="v-list-item"><slot /></div>' },
@@ -166,6 +169,9 @@ config.global.stubs = {
   'v-avatar': { template: '<div class="v-avatar"><slot /></div>' },
   'v-tooltip': { template: '<div class="v-tooltip"><slot /></div>' },
   'v-dialog': { template: '<div class="v-dialog"><slot /></div>' },
+  // NOTE (FE-9553): default slot ONLY. Anything in a scoped `activator` slot
+  // does not render, so assertions about it pass vacuously — stub v-menu
+  // locally when you need the activator. See the useToast blind-spot note.
   'v-menu': { template: '<div class="v-menu"><slot /></div>' },
   'v-list': { template: '<div class="v-list"><slot /></div>' },
   'v-list-item': { template: '<div class="v-list-item"><slot /></div>' },
@@ -422,7 +428,10 @@ vi.mock('@/services/api', () => {
     products: {
       list: vi.fn(() => Promise.resolve({ data: [] })),
       get: vi.fn(() => Promise.resolve({ data: {} })),
-      getActive: vi.fn(() => Promise.resolve({ data: [] })),
+      // FE-9529: renamed from getActive -- resolves the DEFAULT product
+      // (is_default), not is_active.
+      getDefault: vi.fn(() => Promise.resolve({ data: [] })),
+      setDefault: vi.fn(() => Promise.resolve({ data: {} })),
       create: vi.fn(() => Promise.resolve({ data: {} })),
       update: vi.fn(() => Promise.resolve({ data: {} })),
       delete: vi.fn(() => Promise.resolve({ data: { success: true } })),
@@ -477,6 +486,11 @@ vi.mock('@/services/api', () => {
       myTurn: vi.fn(() => Promise.resolve({ data: { threads: [] } })),
       search: vi.fn(() => Promise.resolve({ data: { threads: [] } })),
       history: vi.fn(() => Promise.resolve({ data: { thread: null, messages: [] } })),
+      // FE-9586: selectThread persists the operator's read watermark, so every
+      // spec that opens a thread reaches this — including specs that never mention it.
+      markRead: vi.fn(() => Promise.resolve({ data: {} })),
+      // FE-9586: the banner family's read. Empty is the quiet default.
+      attention: vi.fn(() => Promise.resolve({ data: { mentions: [], directed_action: [] } })),
       participants: vi.fn(() => Promise.resolve({ data: { participants: [] } })),
       create: vi.fn(() => Promise.resolve({ data: {} })),
       post: vi.fn(() => Promise.resolve({ data: { message_id: 'mock-message-id' } })),
@@ -510,6 +524,20 @@ vi.mock('@/services/api', () => {
       getActive: vi.fn(() => Promise.resolve({ data: [] })),
       create: vi.fn(() => Promise.resolve({ data: {} })),
       delete: vi.fn(() => Promise.resolve({ data: { success: true } })),
+    },
+    // FE-9274 / FE-9569: durable connect-credential status (Connect surface +
+    // the setup wizard's Connect step). Default = nothing connected yet.
+    connect: {
+      credentialStatus: vi.fn(() =>
+        Promise.resolve({
+          data: {
+            has_valid_api_key: false,
+            has_valid_oauth: false,
+            has_expired_oauth: false,
+            connected_harnesses: {},
+          },
+        }),
+      ),
     },
     orchestrator: {
       launchProject: vi.fn(() => Promise.resolve({ data: { success: true } })),
@@ -617,6 +645,35 @@ vi.mock('@/services/websocket', () => ({
 }))
 
 // Mock useToast composable
+//
+// KNOWN TEST BLIND SPOT (FE-9553) — read before writing a toast assertion.
+//
+// The factory returns a FRESH vi.fn() on every useToast() call, so the spy the
+// code under test calls is never the spy your test can see. A spec that asserts
+// through this global mock is therefore asserting on an object nothing touched:
+// `expect(showToast).not.toHaveBeenCalled()` passes whether or not the code
+// toasts, and `toHaveBeenCalled()` can never pass at all. Any gate added inside
+// useToast.js is likewise invisible to the entire suite.
+//
+// To assert on toasts, mock the module LOCALLY in your spec with a hoisted
+// shared spy — `vi.hoisted(() => vi.fn())` — the way
+// src/composables/useHubNotifications.spec.js and
+// tests/stores/websocket.spec.js do. Deliberately NOT removed here: several
+// hundred specs rely on toasts being harmlessly stubbed, and unmocking globally
+// is its own project.
+//
+// The same shape recurs elsewhere, so treat it as a pattern rather
+// than a quirk of this mock:
+//   1. tests/stores/websocket.spec.js mocked the notification store the same
+//      way, so no test could observe a bell row being written. Fixed there with
+//      a hoisted shared spy.
+//   2. The v-menu stub below renders only the DEFAULT slot, so anything in a
+//      scoped `activator` slot — the notification bell, for one — never renders
+//      at all, and every "does not contain" assertion about it passes
+//      vacuously. Stub v-menu locally when you need the activator.
+// In all three cases the tell was the same: a negative assertion that passed on
+// unchanged code. Pair negatives with a positive control that proves the thing
+// under test actually rendered or ran.
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({
     showToast: vi.fn()

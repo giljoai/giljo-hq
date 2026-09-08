@@ -111,6 +111,92 @@ async def live_action_required_unread_by_agent(
     )
 
 
+def shape_readiness_blockers(report: CloseoutReadinessReport) -> list[dict[str, Any]]:
+    """Shape a :class:`CloseoutReadinessReport` into the merged-per-agent blocker
+    list + trailing ``_summary`` entry every CLOSEOUT_BLOCKED-style rejection
+    uses (BE-3010c / BE-9539).
+
+    Extracted from ``tools/project_closeout.py::_check_agent_readiness`` (which
+    now delegates here) so ``ProjectService.archive_project``'s closeout gate
+    (BE-9539) can build the IDENTICAL blocker shape without a services -> tools
+    import — this module already sits in the service layer. Output is
+    unchanged from the pre-extraction inline version.
+    """
+    blockers: list[dict[str, Any]] = []
+    summary = {
+        "agents_checked": report.agents_checked,
+        "still_working": 0,
+        "with_unread_messages": 0,
+        "with_incomplete_todos": 0,
+        "awaiting_user_approval": 0,
+    }
+
+    for finding in report.findings:
+        if finding.status == "complete":
+            continue
+
+        if finding.awaiting_user:
+            blockers.append(
+                {
+                    "agent_id": finding.agent_id,
+                    "agent_name": finding.agent_name,
+                    "status": "awaiting_user",
+                    "job_id": finding.job_id,
+                    "issue_type": "awaiting_user_approval",
+                    "approval_id": finding.approval_id,
+                    "suggested_action": (
+                        f"Resolve approval {finding.approval_id} via POST /api/approvals/{finding.approval_id}/decide."
+                    ),
+                }
+            )
+            summary["awaiting_user_approval"] += 1
+            continue
+
+        summary["still_working"] += 1
+        messages_waiting = finding.messages_waiting
+        if messages_waiting > 0:
+            summary["with_unread_messages"] += 1
+
+        incomplete_count = len(finding.incomplete_todos)
+        incomplete_names = finding.incomplete_todos[:5]
+        if incomplete_count > 0:
+            summary["with_incomplete_todos"] += 1
+
+        # Build suggested_action with all relevant remediation steps
+        steps = []
+        if messages_waiting > 0:
+            steps.append(
+                f"Drain {messages_waiting} unread messages via get_thread_history(as_participant='{finding.agent_id}')"
+            )
+        if incomplete_count > 0:
+            steps.append(
+                f"Update {incomplete_count} incomplete TODOs via "
+                f"report_progress(job_id='{finding.job_id}', todo_items=[...]) "
+                f"marking as completed/skipped"
+            )
+        steps.append(f"Force-complete via complete_job(job_id='{finding.job_id}')")
+        suggested_action = ". ".join(steps) + "."
+
+        blockers.append(
+            {
+                "agent_id": finding.agent_id,
+                "agent_name": finding.agent_name,
+                "status": finding.status,
+                "job_id": finding.job_id,
+                "issue_type": "still_working",
+                "messages_waiting": messages_waiting,
+                "incomplete_todo_count": incomplete_count,
+                "incomplete_todo_names": incomplete_names,
+                "suggested_action": suggested_action,
+            }
+        )
+
+    if blockers:
+        blockers.append({"_summary": summary})
+
+    return blockers
+
+
 async def pending_approval_ids_by_execution(
     session: Any, agent_execution_ids: list[Any], tenant_key: str
 ) -> dict[Any, Any]:

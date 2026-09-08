@@ -63,7 +63,7 @@ async def lab(db_manager):
     """Committed ACTIVE product + user; torn down afterwards.
 
     The product must be active because ``/active/vision-stats`` resolves its
-    product through ``ProductService.get_active_product()``.
+    product through ``ProductService.get_default_product()``.
     """
     from sqlalchemy import delete
 

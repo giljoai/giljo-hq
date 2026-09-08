@@ -163,7 +163,7 @@ async def test_close_job_clears_informational_cursor_and_forwards_action_require
 
     Seeds a LIVE orchestrator + an implementer about to be closed, with one
     informational unread post and one action-required unread post addressed
-    to the implementer. After close_job:
+    to the implementer. After finalize_job:
       (a) the informational post is acknowledged for the dead implementer
           (its dead cursor is cleared).
       (b) the action-required post is ALSO acknowledged for the dead
@@ -326,13 +326,13 @@ async def test_close_job_forwards_to_successor_when_two_orchestrators_active_dur
     TWO orchestrator executions active at once (predecessor + successor, both
     waiting/working/blocked -- job_lifecycle_service allows the successor to
     spawn while the predecessor is still live). BE-9242 wired
-    find_active_orchestrator_in_project onto the close_job forward path, so an
-    UNRELATED agent's close_job (with one outstanding action-required post)
+    find_active_orchestrator_in_project onto the finalize_job forward path, so an
+    UNRELATED agent's finalize_job (with one outstanding action-required post)
     resolves the live orchestrator during that window.
 
     Before FIX 1 the resolver ran scalar_one_or_none() with no limit(1) and
     raised sqlalchemy.exc.MultipleResultsFound -- crashing the innocent
-    close_job. After FIX 1 it must NOT raise, and must forward to the
+    finalize_job. After FIX 1 it must NOT raise, and must forward to the
     most-recently-STARTED orchestrator (the successor -- the correct live
     forward target during a handover).
     """

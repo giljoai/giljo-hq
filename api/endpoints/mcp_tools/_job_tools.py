@@ -184,25 +184,23 @@ async def complete_job(
 
 
 @mcp.tool(
-    title="Close Job",
+    title="Finalize Job",
     description=(
-        "Mark a completed agent job as closed (final acceptance). "
-        "Called by: ORCHESTRATOR ONLY after verifying deliverables. "
-        "Transition: complete → closed. Closed jobs will not be "
-        "auto-reactivated on new messages. Use 'decommissioned' only "
-        "for failed/replaced/abandoned agents. If the agent stalled and never "
-        "reported (e.g. 'silent'), do not force-decommission it: call "
-        "complete_job(job_id, result=<the deliverable you verified>) yourself "
-        "first — it accepts any non-terminal execution — then close_job again. "
+        "Accept a finished agent's work and seal the job -- the last step, after you "
+        "have reviewed what it produced. Only the orchestrator does this, and only "
+        "after complete_job. A sealed job is not woken again by new messages. If the "
+        "agent went silent and never reported, do NOT decommission it (that records "
+        "its work as failed): call complete_job(job_id, result=<what you verified>) "
+        "yourself first -- that accepts any unfinished state -- then finalize it. "
         "If that complete_job returns COMPLETION_BLOCKED, the stalled agent left "
         "TODOs or unread messages behind: settle its ledger with "
         "report_progress(job_id, todo_items=[...], replace=true) and drain its "
         "action-required messages, then retry."
     ),
     # BE-9251: terminal job-lifecycle transition -- see _tool_hints docstring.
-    annotations=_tool_hints("close_job", destructive=True),
+    annotations=_tool_hints("finalize_job", destructive=True),
 )
-async def close_job(
+async def finalize_job(
     job_id: str,
     ctx: Context = None,
 ) -> dict[str, Any]:
@@ -210,18 +208,17 @@ async def close_job(
 
 
 @mcp.tool(
-    title="Resolve Reactivation",
+    title="Resume Or Dismiss Job",
     description=(
-        "Resolve a post-completion reactivation. A completed agent auto-blocks when a "
-        "directed, action-required message/post arrives for it. Pick ONE action: "
-        "'resume' picks the work back up (blocked -> working; then report_progress with "
-        "todo_append to add new steps, do NOT overwrite completed ones), or 'dismiss' "
-        "acknowledges the message without resuming (blocked -> complete) when it is "
-        "informational and no action is needed. Only works while status is 'blocked'."
+        "A finished job that receives a message needing action is put on hold. Use this to "
+        "say what happens next: 'resume' picks the work back up (then report_progress with "
+        "todo_append to add new steps -- do not overwrite completed ones), or 'dismiss' "
+        "acknowledges the message and leaves the job finished, when it was only for "
+        "information. Only works while the job is on hold."
     ),
-    annotations=_tool_hints("resolve_reactivation"),
+    annotations=_tool_hints("resume_or_dismiss_job"),
 )
-async def resolve_reactivation(
+async def resume_or_dismiss_job(
     job_id: Annotated[str, Field(max_length=MCP_ID_MAX)],
     action: Annotated[
         Literal["resume", "dismiss"],
@@ -272,8 +269,8 @@ async def set_agent_status(
     wake_on_signal: Annotated[
         bool,
         Field(
-            description="For 'sleeping' status: True when you are parked on await_my_turn rather than a "
-            "timed sleep, so the dashboard shows 'Waiting for wake' instead of a countdown. "
+            description="For 'sleeping' status: True when you are parked on get_my_turn(wait_seconds=...) "
+            "rather than a timed sleep, so the dashboard shows 'Waiting for wake' instead of a countdown. "
             "Mutually exclusive with wake_in_minutes (wake_on_signal wins)."
         ),
     ] = False,
@@ -372,7 +369,10 @@ async def get_job_mission(
         "staging to delegate work (Step 4 of workflow). Orchestrator breaks down mission "
         "into agent-specific tasks and spawns agents who EXECUTE the work. Returns job_id "
         "and thin prompt (~10 lines). Agent later calls get_job_mission() to fetch full "
-        "mission. Creates database record linking agent to project."
+        "mission. Creates database record linking agent to project. In multi_terminal mode "
+        "the returned prompt is normally a dashboard-Copy pointer -- pass inline_seed=true "
+        "to get the actual seed text back inline instead (same generator subagent mode "
+        "already uses)."
     ),
     annotations=_tool_hints("spawn_job"),
 )
@@ -430,6 +430,16 @@ async def spawn_job(
             ),
         ),
     ] = "",
+    inline_seed: Annotated[
+        bool,
+        Field(
+            description=(
+                "In multi_terminal mode, return the actual bootstrap seed text inline (like "
+                "subagent modes already do) instead of the dashboard 'Copy prompt' pointer. "
+                "No effect outside multi_terminal mode -- subagent modes always seed inline."
+            )
+        ),
+    ] = False,
     ctx: Context = None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
@@ -442,6 +452,8 @@ async def spawn_job(
         kwargs["phase"] = phase
     if predecessor_job_id:
         kwargs["predecessor_job_id"] = predecessor_job_id
+    if inline_seed:
+        kwargs["inline_seed"] = inline_seed
     return await _call_tool(ctx, "spawn_job", kwargs)
 
 

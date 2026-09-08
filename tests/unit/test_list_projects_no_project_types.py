@@ -74,7 +74,10 @@ class TestListProjectsForMcpDropsProjectTypes:
             patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
             patch.object(service, "_build_mcp_project_list", new_callable=AsyncMock, return_value=[]),
         ):
-            mock_product_svc.return_value.get_active_product = AsyncMock(return_value=mock_product)
+            mock_product_svc.return_value.get_default_product = AsyncMock(return_value=mock_product)
+            # BE-9499a: list_projects_for_mcp resolves through resolve_binding_product now
+            # (byte-identical result for an omitted product_id -- the active product).
+            mock_product_svc.return_value.resolve_binding_product = AsyncMock(return_value=mock_product)
 
             result = await service.list_projects_for_mcp(
                 summary_only=True,
@@ -104,7 +107,10 @@ class TestListProjectsForMcpDropsProjectTypes:
             patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
             patch.object(service, "_build_mcp_project_list", new_callable=AsyncMock, return_value=[]),
         ):
-            mock_product_svc.return_value.get_active_product = AsyncMock(return_value=mock_product)
+            mock_product_svc.return_value.get_default_product = AsyncMock(return_value=mock_product)
+            # BE-9499a: list_projects_for_mcp resolves through resolve_binding_product now
+            # (byte-identical result for an omitted product_id -- the active product).
+            mock_product_svc.return_value.resolve_binding_product = AsyncMock(return_value=mock_product)
 
             result = await service.list_projects_for_mcp(
                 summary_only=False,
@@ -133,7 +139,10 @@ class TestListProjectsForMcpDropsProjectTypes:
             patch.object(service, "_build_mcp_project_list", new_callable=AsyncMock, return_value=[]),
             patch.object(service, "_get_valid_project_types", new_callable=AsyncMock, return_value=[]) as helper,
         ):
-            mock_product_svc.return_value.get_active_product = AsyncMock(return_value=mock_product)
+            mock_product_svc.return_value.get_default_product = AsyncMock(return_value=mock_product)
+            # BE-9499a: list_projects_for_mcp resolves through resolve_binding_product now
+            # (byte-identical result for an omitted product_id -- the active product).
+            mock_product_svc.return_value.resolve_binding_product = AsyncMock(return_value=mock_product)
             await service.list_projects_for_mcp(summary_only=True, tenant_key=_TENANT_A)
 
         helper.assert_not_called()
@@ -156,7 +165,10 @@ class TestListProjectsForMcpDropsProjectTypes:
                 patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
                 patch.object(service, "_build_mcp_project_list", new_callable=AsyncMock, return_value=[]),
             ):
-                mock_product_svc.return_value.get_active_product = AsyncMock(return_value=mock_product)
+                mock_product_svc.return_value.get_default_product = AsyncMock(return_value=mock_product)
+                # BE-9499a: list_projects_for_mcp resolves through resolve_binding_product now
+                # (byte-identical result for an omitted product_id -- the active product).
+                mock_product_svc.return_value.resolve_binding_product = AsyncMock(return_value=mock_product)
                 result = await service.list_projects_for_mcp(
                     summary_only=True,
                     tenant_key=tenant_key,

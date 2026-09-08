@@ -573,6 +573,10 @@ class ProjectStagingService:
                 await self._advance_chain_on_launch(project_id, effective_tenant, websocket_manager=ws)
 
             launched_at_iso = project.implementation_launched_at.isoformat()
+            # BE-9532: read inside the session -- the project object is detached below.
+            project_active = project.status == ProjectStatus.ACTIVE
+            # BE-9525c: same -- read while still attached, used in the WS payload below.
+            product_id = project.product_id
 
             self._logger.info(
                 "[LAUNCH_IMPL] Project %s implementation launched (already_launched=%s) by %s",
@@ -588,6 +592,9 @@ class ProjectStagingService:
         if ws:
             payload = {
                 "project_id": project_id,
+                # BE-9525c: additive -- was missing on this emitter (mirrors the
+                # sibling emitter fixed the same way in job_completion_staging.py).
+                "product_id": product_id,
                 "implementation_launched_at": launched_at_iso,
             }
             # TSK-6219: authoritative event-origin so the FE live-follow can tell a
@@ -604,12 +611,43 @@ class ProjectStagingService:
             except Exception as ws_error:  # noqa: BLE001 — WS resilience
                 self._logger.warning("[LAUNCH_IMPL] WS broadcast failed: %s", ws_error)
 
-        return {
+        # BE-9532: report the activation state, and name the step still required.
+        #
+        # Crossing the launch gate does NOT activate the project, in EITHER door --
+        # the dashboard has its own Activate control and the harness has
+        # update_project(status="active"). That separation is deliberate and is left
+        # alone here. What was missing is that nothing SAID so: a headless drive got
+        # {"success": true} back and then found no active project, with no error
+        # anywhere to explain why.
+        #
+        # Reporting lives in this service because BOTH doors call it, so the REST
+        # response and the MCP tool payload carry the same answer rather than a
+        # second, drifting explanation on the agent-facing side.
+        # BE-9541: BOTH timestamp keys always carry the same value on success.
+        # Previously ``implementation_launched_at`` was populated only on the
+        # first-launch path and ``launched_at`` only on the already-launched
+        # path, so a caller that checked "the wrong one" for whichever path it
+        # happened to take saw None and concluded the launch had failed.
+        # ``already_launched`` remains the one
+        # place that internal distinction is exposed; the old keys are both
+        # kept (REST's ``LaunchImplementationResponse`` still reads them) but
+        # neither is ever null on a successful call.
+        result: dict[str, Any] = {
             "success": True,
-            "implementation_launched_at": None if already_launched else launched_at_iso,
+            "implementation_launched_at": launched_at_iso,
             "already_launched": already_launched,
-            "launched_at": launched_at_iso if already_launched else None,
+            "launched_at": launched_at_iso,
+            "project_active": project_active,
         }
+        if not project_active:
+            result["next_action"] = (
+                "The implementation gate is open, but this project is NOT ACTIVE, so the "
+                "dashboard Jobs view will show 'No Active Project' and no work will surface "
+                "there. Activate it to make the run visible: update_project(project_id, "
+                "status='active') from the harness, or the Activate control on the project "
+                "in the dashboard. Activation is a separate step by design."
+            )
+        return result
 
     async def _advance_chain_on_launch(
         self,

@@ -8,7 +8,7 @@
 CTO ruling Q-08: the product already advertises 46 MCP tools, so a read-shaped
 feature (surfacing the tenant's Hub threads to fetch_context) arrives as a
 CATEGORY of the existing multiplexer, not as new standalone tools
-(list_threads / get_thread_history / search_threads stay OFF the advertised
+(list_threads / get_thread_history / list_threads stay OFF the advertised
 'listing' marketplace-connector profile).
 
 This exercises the fix at the fetch_context dispatch layer: categories=
@@ -37,6 +37,7 @@ from sqlalchemy import delete
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.models.comm import CommThread
 from giljo_mcp.models.products import Product
+from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.services.comm_thread_service import CommThreadService
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
@@ -52,6 +53,7 @@ async def cleanup_tenants(db_manager):
     for tk in tenants:
         async with db_manager.get_session_async(tenant_key=tk) as session:
             await session.execute(delete(CommThread).where(CommThread.tenant_key == tk))
+            await session.execute(delete(SequenceRun).where(SequenceRun.tenant_key == tk))
             await session.execute(delete(Product).where(Product.tenant_key == tk))
             await session.commit()
 
@@ -62,6 +64,22 @@ async def _create_product(db_manager, tenant_key: str) -> str:
         session.add(Product(id=product_id, tenant_key=tenant_key, name="Threads Category Test Product"))
         await session.commit()
     return product_id
+
+
+async def _create_sequence_run(db_manager, tenant_key: str) -> str:
+    """FE-9530: a real chain run to exercise create_thread's conductor exemption --
+    the only way left to get a genuinely product-less thread on a tenant that
+    already owns a product (mandatory tagging otherwise applies, ruling 1)."""
+    async with db_manager.get_session_async(tenant_key=tenant_key) as session:
+        run = SequenceRun(
+            tenant_key=tenant_key,
+            project_ids=[],
+            resolved_order=[],
+            execution_mode="multi_terminal",
+        )
+        session.add(run)
+        await session.commit()
+        return run.id
 
 
 async def _seed_taxonomy(db_manager, tenant_key: str) -> None:
@@ -88,7 +106,7 @@ def test_listing_profile_did_not_grow() -> None:
     none of the standalone thread-suite tools were added to reach it."""
     from api.endpoints.mcp_tools._base import _LISTING_PROFILE_TOOLS
 
-    assert {"list_threads", "get_thread_history", "search_threads"} & _LISTING_PROFILE_TOOLS == set()
+    assert {"list_threads", "get_thread_history"} & _LISTING_PROFILE_TOOLS == set()
 
 
 @pytest.mark.asyncio
@@ -100,7 +118,14 @@ async def test_threads_category_is_tenant_scoped_and_includes_null_product(
     product_id=None); tenant B gets 1. fetch_context(categories=['threads'])
     on A must return exactly A's two thread ids, never B's, and MUST include
     the product_id=None thread (Q-08: tenant-scoped only, never product-scoped
-    -- product-scoping would silently drop it)."""
+    -- product-scoping would silently drop it).
+
+    FE-9530: tenant_a now owns a product, so an omitted product_id
+    on create_thread resolves to it -- mandatory tagging where a product CAN be
+    resolved. The one structural exemption is a chain-conductor create
+    (sequence_run_id set), which is the only way left to seed a genuinely
+    product-less thread on a tenant that owns a product, so thread_a2 uses it.
+    """
     tenant_a = TenantManager.generate_tenant_key()
     tenant_b = TenantManager.generate_tenant_key()
     cleanup_tenants.append(tenant_a)
@@ -110,10 +135,11 @@ async def test_threads_category_is_tenant_scoped_and_includes_null_product(
     product_b = await _create_product(db_manager, tenant_b)
     await _seed_taxonomy(db_manager, tenant_a)
     await _seed_taxonomy(db_manager, tenant_b)
+    run_a = await _create_sequence_run(db_manager, tenant_a)
 
     svc = CommThreadService(db_manager, TenantManager())
     thread_a1 = await svc.create_thread(subject="A product-scoped thread", product_id=product_a, tenant_key=tenant_a)
-    thread_a2 = await svc.create_thread(subject="A standalone thread", product_id=None, tenant_key=tenant_a)
+    thread_a2 = await svc.create_thread(subject="A standalone thread", sequence_run_id=run_a, tenant_key=tenant_a)
     thread_b1 = await svc.create_thread(subject="B thread", product_id=product_b, tenant_key=tenant_b)
 
     response = await fetch_context(

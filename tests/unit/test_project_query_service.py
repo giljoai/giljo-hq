@@ -38,33 +38,36 @@ def query_service(db_session, test_tenant_key):
     )
 
 
-async def _seed_project(session, tenant_key, status="active", **extra):
-    """Seed a project under a product of its OWN.
+async def _seed_project(session, tenant_key, status="active", product=None, **extra):
+    """Seed a project, under its own fresh product unless one is passed in.
 
     BE-9437 made ``product_id`` NOT NULL, so the old note here -- "product_id
     left NULL to avoid the single-active-per-product index" -- describes a state
-    that no longer exists. A fresh product per project achieves the same thing:
-    ``idx_project_single_active_per_product`` permits one ACTIVE project PER
-    PRODUCT, so one product per project can never collide.
+    that no longer exists. BE-9525b (ruling 5 amended) dropped
+    ``idx_project_single_active_per_product`` entirely, so two ACTIVE projects
+    under the SAME product is now a legal state too (see the genuinely-plural
+    test below); a fresh product per project remains the default here only to
+    keep the existing per-product-scoping tests exercising one project each.
     """
-    product = Product(
-        id=str(uuid4()),
-        tenant_key=tenant_key,
-        name=f"Query Product {uuid4().hex[:6]}",
-        description="seeded",
-        is_active=False,
-    )
-    session.add(product)
-    await session.flush()
+    if product is None:
+        product = Product(
+            id=str(uuid4()),
+            tenant_key=tenant_key,
+            name=f"Query Product {uuid4().hex[:6]}",
+            description="seeded",
+            is_active=False,
+        )
+        session.add(product)
+        await session.flush()
 
     project = Project(
         tenant_key=tenant_key,
         product_id=product.id,
-        name="Query Project",
+        name=extra.pop("name", "Query Project"),
         description="seeded",
         mission="seeded mission",
         status=status,
-        series_number=random.randint(1, 9000),
+        series_number=extra.pop("series_number", random.randint(1, 9000)),
         **extra,
     )
     session.add(project)
@@ -88,10 +91,10 @@ def _job(tenant_key, project_id, job_type="implementer"):
 
 
 @pytest.mark.asyncio
-async def test_get_active_project_returns_none_when_no_active(query_service):
-    """get_active_project returns None when no project is active."""
-    result = await query_service.get_active_project()
-    assert result is None
+async def test_get_active_projects_returns_empty_when_no_active(query_service):
+    """get_active_projects returns an empty list when no project is active."""
+    result = await query_service.get_active_projects()
+    assert result == []
 
 
 @pytest.mark.asyncio
@@ -126,7 +129,7 @@ async def test_get_project_messages_returns_empty_for_missing_project(query_serv
 
 
 @pytest.mark.asyncio
-async def test_get_active_project_returns_seeded_project(query_service, db_session, test_tenant_key):
+async def test_get_active_projects_returns_seeded_project(query_service, db_session, test_tenant_key):
     """A seeded active project is returned with correct agent/message counts."""
     with tenant_session_context(db_session, test_tenant_key):
         project = await _seed_project(db_session, test_tenant_key, status="active")
@@ -134,19 +137,58 @@ async def test_get_active_project_returns_seeded_project(query_service, db_sessi
         db_session.add(Message(tenant_key=test_tenant_key, project_id=project.id, content="hi", status="pending"))
         await db_session.flush()
 
-    result = await query_service.get_active_project()
+    result = await query_service.get_active_projects()
 
-    assert result is not None
-    assert result.id == str(project.id)
-    assert result.name == "Query Project"
-    assert result.status == "active"
-    assert result.mission == "seeded mission"
-    assert result.agent_count == 2
-    assert result.message_count == 1
+    assert len(result) == 1
+    active = result[0]
+    assert active.id == str(project.id)
+    assert active.name == "Query Project"
+    assert active.status == "active"
+    assert active.mission == "seeded mission"
+    assert active.agent_count == 2
+    assert active.message_count == 1
 
 
 @pytest.mark.asyncio
-async def test_get_active_project_populates_nested_project_type(query_service, db_session, test_tenant_key):
+async def test_get_active_projects_is_genuinely_plural_within_one_product(query_service, db_session, test_tenant_key):
+    """BE-9525b: two ACTIVE projects under the SAME product must BOTH come back.
+
+    Before BE-9525b, the repository read used ``.limit(1)`` +
+    ``scalar_one_or_none()`` -- safe only because
+    ``idx_project_single_active_per_product`` made a second ACTIVE row in the
+    same product impossible. With that index dropped, an arbitrary single row
+    would be a confidently wrong answer (the BE-9521 failure class); this pins
+    that both rows are returned instead of one being silently dropped.
+    """
+    with tenant_session_context(db_session, test_tenant_key):
+        product = Product(
+            id=str(uuid4()),
+            tenant_key=test_tenant_key,
+            name=f"Plural Query Product {uuid4().hex[:6]}",
+            description="seeded",
+            is_active=False,
+        )
+        db_session.add(product)
+        await db_session.flush()
+        # Explicit, distinct series_number: two untyped (project_type_id=None)
+        # projects in the same product would otherwise risk colliding on
+        # uq_project_taxonomy_active (NULLS NOT DISTINCT) under _seed_project's
+        # default random series_number.
+        project_1 = await _seed_project(
+            db_session, test_tenant_key, status="active", product=product, name="P1", series_number=101
+        )
+        project_2 = await _seed_project(
+            db_session, test_tenant_key, status="active", product=product, name="P2", series_number=102
+        )
+        await db_session.flush()
+
+    result = await query_service.get_active_projects(product_id=product.id)
+
+    assert {p.id for p in result} == {str(project_1.id), str(project_2.id)}
+
+
+@pytest.mark.asyncio
+async def test_get_active_projects_populates_nested_project_type(query_service, db_session, test_tenant_key):
     """BE-9326: the ActiveProjectDetail builder must carry the nested project_type.
 
     The builder listed project_type_id but not project_type, and the field defaults
@@ -167,33 +209,73 @@ async def test_get_active_project_populates_nested_project_type(query_service, d
         project = await _seed_project(db_session, test_tenant_key, status="active", project_type_id=taxonomy_type.id)
         await db_session.flush()
 
-    result = await query_service.get_active_project()
+    result = await query_service.get_active_projects()
 
-    assert result is not None
-    assert result.project_type_id == taxonomy_type.id
-    assert result.project_type is not None, (
-        "get_active_project dropped the nested project_type — GET /api/v1/projects/active "
+    assert len(result) == 1
+    active = result[0]
+    assert active.project_type_id == taxonomy_type.id
+    assert active.project_type is not None, (
+        "get_active_projects dropped the nested project_type — GET /api/v1/projects/active "
         "reports null for a typed project. See project_query_service.py "
         "ActiveProjectDetail construction."
     )
-    assert result.project_type.abbreviation == "BE"
-    assert result.project_type.label == "Backend"
-    assert result.project_type.color == "#1976D2"
-    assert str(project.id) == result.id
+    assert active.project_type.abbreviation == "BE"
+    assert active.project_type.label == "Backend"
+    assert active.project_type.color == "#1976D2"
+    assert str(project.id) == active.id
 
 
 @pytest.mark.asyncio
-async def test_get_active_project_keeps_project_type_null_when_untyped(query_service, db_session, test_tenant_key):
+async def test_get_active_projects_keeps_project_type_null_when_untyped(query_service, db_session, test_tenant_key):
     """A project with no taxonomy type still returns project_type=None, not an error."""
     with tenant_session_context(db_session, test_tenant_key):
         await _seed_project(db_session, test_tenant_key, status="active")
         await db_session.flush()
 
-    result = await query_service.get_active_project()
+    result = await query_service.get_active_projects()
 
-    assert result is not None
-    assert result.project_type_id is None
-    assert result.project_type is None
+    assert len(result) == 1
+    assert result[0].project_type_id is None
+    assert result[0].project_type is None
+
+
+@pytest.mark.asyncio
+async def test_get_active_projects_scopes_to_product_not_tenant(query_service, db_session, test_tenant_key):
+    """BE-9525a: an active project in product A must not surface as active for product B.
+
+    Reproduces the live bug: GET /api/v1/projects/active filtered on tenant_key
+    only, so a project active in product A greyed out product B's Activate
+    button. Two products, one active project in each; querying by product B's
+    id must return product B's own active project, never product A's.
+    """
+    with tenant_session_context(db_session, test_tenant_key):
+        project_a = await _seed_project(db_session, test_tenant_key, status="active")
+        project_b = await _seed_project(db_session, test_tenant_key, status="active")
+        await db_session.flush()
+
+    result_a = await query_service.get_active_projects(product_id=project_a.product_id)
+    result_b = await query_service.get_active_projects(product_id=project_b.product_id)
+
+    assert len(result_a) == 1
+    assert result_a[0].id == str(project_a.id)
+    assert result_a[0].product_id == project_a.product_id
+
+    assert len(result_b) == 1
+    assert result_b[0].id == str(project_b.id)
+    assert result_b[0].product_id == project_b.product_id
+
+
+@pytest.mark.asyncio
+async def test_get_active_projects_scoped_to_product_with_none_active_there(query_service, db_session, test_tenant_key):
+    """Product B has no active project of its own, even though product A does."""
+    with tenant_session_context(db_session, test_tenant_key):
+        await _seed_project(db_session, test_tenant_key, status="active")
+        project_b = await _seed_project(db_session, test_tenant_key, status="inactive")
+        await db_session.flush()
+
+    result_b = await query_service.get_active_projects(product_id=project_b.product_id)
+
+    assert result_b == []
 
 
 @pytest.mark.asyncio

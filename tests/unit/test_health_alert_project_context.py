@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from giljo_mcp.monitoring.health_config import AgentHealthStatus
+from giljo_mcp.services.agent_health_ws_broadcast import broadcast_agent_auto_failed, broadcast_health_alert
 
 
 class TestAgentHealthStatusProjectFields:
@@ -141,9 +142,11 @@ class TestBroadcastHealthAlertProjectContext:
             recommended_action="Check agent",
             project_id="proj-abc",
             project_name="Feature Sprint",
+            product_id="product-abc",
         )
 
-        await ws_manager.broadcast_health_alert(
+        await broadcast_health_alert(
+            ws_manager,
             tenant_key="test-tenant",
             job_id="job-100",
             agent_display_name="implementer",
@@ -167,6 +170,8 @@ class TestBroadcastHealthAlertProjectContext:
         assert data["job_id"] == "job-100"
         assert data["agent_display_name"] == "implementer"
         assert data["health_state"] == "critical"
+        # BE-9518: product_id must ride the payload so a per-tab WS router can filter on it.
+        assert data["product_id"] == "product-abc"
 
     @pytest.mark.asyncio
     async def test_broadcast_health_alert_includes_empty_project_for_orphaned_jobs(self):
@@ -189,7 +194,8 @@ class TestBroadcastHealthAlertProjectContext:
             recommended_action="Manual intervention required",
         )
 
-        await ws_manager.broadcast_health_alert(
+        await broadcast_health_alert(
+            ws_manager,
             tenant_key="test-tenant",
             job_id="job-orphan-200",
             agent_display_name="orchestrator",
@@ -232,7 +238,8 @@ class TestBroadcastHealthAlertProjectContext:
             project_name="Test Project",
         )
 
-        await ws_manager.broadcast_health_alert(
+        await broadcast_health_alert(
+            ws_manager,
             tenant_key="test-tenant",
             job_id="job-300",
             agent_display_name="implementer",
@@ -248,3 +255,48 @@ class TestBroadcastHealthAlertProjectContext:
 
         assert event["type"] == "agent:health_alert"
         assert event["schema_version"] == "1.0"
+
+
+class TestBroadcastAgentAutoFailedProductId:
+    """BE-9518: broadcast_agent_auto_failed must carry product_id when supplied."""
+
+    @pytest.mark.asyncio
+    async def test_broadcast_agent_auto_failed_includes_product_id(self):
+        from api.websocket import WebSocketManager
+
+        ws_manager = WebSocketManager()
+        ws_manager.broadcast_event_to_tenant = AsyncMock()
+
+        await broadcast_agent_auto_failed(
+            ws_manager,
+            tenant_key="test-tenant",
+            job_id="job-400",
+            agent_display_name="implementer",
+            reason="Abandoned",
+            product_id="product-xyz",
+        )
+
+        call_kwargs = ws_manager.broadcast_event_to_tenant.call_args
+        event = call_kwargs.kwargs["event"]
+        assert event["type"] == "agent:auto_failed"
+        assert event["data"]["product_id"] == "product-xyz"
+
+    @pytest.mark.asyncio
+    async def test_broadcast_agent_auto_failed_omits_product_id_when_none(self):
+        """Additive contract: omitted (not null) when the caller has no product_id."""
+        from api.websocket import WebSocketManager
+
+        ws_manager = WebSocketManager()
+        ws_manager.broadcast_event_to_tenant = AsyncMock()
+
+        await broadcast_agent_auto_failed(
+            ws_manager,
+            tenant_key="test-tenant",
+            job_id="job-401",
+            agent_display_name="implementer",
+            reason="Abandoned",
+        )
+
+        call_kwargs = ws_manager.broadcast_event_to_tenant.call_args
+        event = call_kwargs.kwargs["event"]
+        assert "product_id" not in event["data"]

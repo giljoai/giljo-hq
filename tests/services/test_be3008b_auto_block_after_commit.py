@@ -47,6 +47,7 @@ def _build_service(order: list[str], ws_manager) -> MessageRoutingService:
     repo.flush = AsyncMock(side_effect=_flush)
     job_row = Mock()
     job_row.project_id = "proj-1"
+    job_row.product_id = "prod-1"
     repo.get_job_id_and_project_for_execution = AsyncMock(return_value=job_row)
     svc._repo = repo
     return svc
@@ -107,6 +108,8 @@ async def test_auto_block_broadcast_is_scheduled_after_commit():
     assert kwargs["old_status"] == "complete"
     assert kwargs["project_id"] == "proj-1"
     assert kwargs["tenant_key"] == "tk_a"
+    # BE-9518: product_id resolved via the join in get_job_id_and_project_for_execution.
+    assert kwargs["product_id"] == "prod-1"
 
 
 @pytest.mark.asyncio

@@ -60,6 +60,9 @@ const CIRCULAR_ALLOWLIST = new Set([
   'complete-ring',
   'tool-card-ring',
   'hero-check',
+  // FE-9569: the pulsing halo ring around the tutorial prompt screen's
+  // waiting dot -- an indicator (agent-status pulse), never clicked.
+  'waiting-dot-ring',
   // Badges and decorative glows.
   'msg-badge',
   'account-status-badge',

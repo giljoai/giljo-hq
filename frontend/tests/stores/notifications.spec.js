@@ -341,17 +341,23 @@ describe('useNotificationStore', () => {
       expect(store.unreadCount).toBe(0)
     })
 
-    it('recalculates badgeColor after clearing warning notifications', () => {
+    // FE-9553: was 'recalculates badgeColor after clearing warning
+    // notifications'. badgeColor is gone -- ruling 2 removed the bell's
+    // severity treatment entirely -- but this test's real subject was
+    // clearForProject, with badgeColor only as the observable. Re-pointed at
+    // unreadCount so the clearForProject coverage survives the getter it
+    // happened to be measured through.
+    it('recalculates the unseen count after clearing a project\'s notifications', () => {
       store.addNotification({
         type: 'agent_health', title: 'Alert', message: 'msg',
         metadata: { project_id: 'AAA' },
       })
 
-      expect(store.badgeColor).toBe('warning')
+      expect(store.unreadCount).toBe(1)
 
       store.clearForProject('AAA')
 
-      expect(store.badgeColor).toBe('error') // default when no unread
+      expect(store.unreadCount).toBe(0)
     })
 
     it('does not remove notifications with different project_id', () => {
@@ -363,6 +369,37 @@ describe('useNotificationStore', () => {
       store.clearForProject('AAA')
 
       expect(store.notifications).toHaveLength(1)
+    })
+
+    // BE-9525c: the real shape-mismatch bug. A server-shape row (structured
+    // payload, project_id inside payload not metadata) was never cleared
+    // because clearForProject filtered on n.metadata?.project_id only.
+    it('removes a server-shape row whose project_id lives in payload, not metadata', () => {
+      store.handleWsNewNotification({
+        id: 'srv-1',
+        type: 'project.pre_launch_workproduct',
+        title: 'Work committed without launch',
+        payload: { project_id: 'AAA', project_name: 'Test', commit_count: 1 },
+      })
+
+      store.clearForProject('AAA')
+
+      expect(store.notifications).toHaveLength(0)
+    })
+
+    // BE-9525c: the normalized shape -- a server row carrying the id
+    // top-level (post-fix notification:new envelope) must also clear.
+    it('removes a normalized row whose project_id is top-level', () => {
+      store.handleWsNewNotification({
+        id: 'srv-2',
+        type: 'project.pre_launch_workproduct',
+        project_id: 'AAA',
+        title: 'Work committed without launch',
+      })
+
+      store.clearForProject('AAA')
+
+      expect(store.notifications).toHaveLength(0)
     })
   })
 

@@ -68,6 +68,9 @@ vi.mock('@/stores/projects', () => ({
 }))
 vi.mock('@/stores/products', () => ({
   useProductStore: () => ({
+    // FE-9502c: ProjectsView now scopes by the viewed tab (currentProduct),
+    // not the server's single activeProduct.
+    currentProduct: { id: 'prod-1' },
     activeProduct: { id: 'prod-1' },
     fetchProducts: vi.fn().mockResolvedValue(undefined),
     fetchActiveProduct: vi.fn().mockResolvedValue(undefined),

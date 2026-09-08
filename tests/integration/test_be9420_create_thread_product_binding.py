@@ -172,21 +172,79 @@ async def test_a_supplied_product_id_binds_the_thread(thread_product_client, db_
     )
 
 
-async def test_omitting_product_id_leaves_the_thread_unbound(thread_product_client, db_session):
-    """The control, and it is load-bearing.
-
-    Without it, the test above would still pass if threads bound to some ambient
-    product regardless of the argument -- which would make the binding assertion
-    prove nothing about the parameter.
+async def test_omitting_product_id_resolves_to_the_tenants_own_product(thread_product_client, db_session):
+    """SUPERSEDED by FE-9530: "a thread MUST carry
+    a product, unless application has no product." This test used to assert the
+    opposite -- that an omitted product_id left the thread genuinely unbound -- as
+    the control proving the write genuinely depends on the argument rather than
+    binding to some ambient product regardless. Mandatory resolution changes WHAT
+    "no argument" means (resolve, not leave null) without weakening that control:
+    the fixture's tenant owns exactly ONE product (``own_product``, never
+    ``foreign_product``), so asserting the thread lands on THAT one and not the
+    foreign tenant's still proves the resolution is tenant-scoped, not ambient.
+    The genuinely-product-less carve-out (a zero-product tenant) is covered at the
+    MCP boundary immediately below; the ambiguous-tenant and chain-conductor-
+    exemption cases are covered at the service layer in
+    test_be6054b_comm_thread_service.py.
     """
-    new_client, tenant_key, _own, _foreign, _fproj = thread_product_client
+    new_client, tenant_key, own_product_id, _foreign, _fproj = thread_product_client
 
     async with new_client() as session:
         result = await session.call_tool("create_thread", {"subject": "standalone", "creator_id": "agent-alpha"})
     assert result.is_error is False, _error_text(result)
 
     row = await _thread_row(db_session, tenant_key, _payload(result)["thread_id"])
-    assert row.product_id is None, "a thread created without product_id must stay standalone"
+    assert row.product_id == own_product_id, (
+        "a thread created without product_id must resolve to the tenant's own "
+        "product (FE-9530 ruling 1), never stay unbound and never bind to another "
+        "tenant's product"
+    )
+
+
+async def test_omitting_product_id_on_a_zero_product_tenant_stays_unbound(db_manager, db_session, monkeypatch):
+    """FE-9530 ruling 1's stated exception, driven over the real MCP transport:
+    "unless application has no product." A tenant that owns NO product at all has
+    nothing to resolve to, so the thread is created genuinely standalone rather
+    than 422ing a fresh install's very first thread.
+    """
+    from api import app_state
+    from api.endpoints import mcp_sdk_server
+    from api.endpoints.mcp_tools import _base
+    from giljo_mcp.tools.tool_accessor import ToolAccessor
+
+    state = app_state.state
+    prior = (state.tool_accessor, state.tenant_manager, state.db_manager)
+    if state.tenant_manager is None:
+        state.tenant_manager = TenantManager()
+    state.db_manager = db_manager
+
+    tenant_key = TenantManager.generate_tenant_key()
+    suffix = uuid4().hex[:8]
+    db_session.add(Organization(name=f"Org {suffix}", slug=f"org-{suffix}", tenant_key=tenant_key, is_active=True))
+    db_session.add(User(id=str(uuid4()), tenant_key=tenant_key, username=f"be9420_zero_{suffix}"))
+    with tenant_session_context(db_session, tenant_key):
+        await ensure_default_types_seeded(db_session, tenant_key)
+    await db_session.commit()
+
+    state.tool_accessor = ToolAccessor(
+        db_manager=db_manager, tenant_manager=state.tenant_manager, test_session=db_session
+    )
+    monkeypatch.setattr(_base, "_resolve_tenant", lambda ctx: tenant_key)
+    monkeypatch.setattr(_base, "_resolve_user_id", lambda ctx: None)
+
+    try:
+        async with create_connected_server_and_client_session(mcp_sdk_server.mcp) as session:
+            result = await session.call_tool(
+                "create_thread", {"subject": "first ever thread", "creator_id": "agent-alpha"}
+            )
+        assert result.is_error is False, _error_text(result)
+        row = await _thread_row(db_session, tenant_key, _payload(result)["thread_id"])
+        assert row.product_id is None
+    finally:
+        async with db_manager.get_session_async() as cleanup:
+            await cleanup.execute(delete(TaxonomyType).where(TaxonomyType.tenant_key == tenant_key))
+            await cleanup.commit()
+        state.tool_accessor, state.tenant_manager, state.db_manager = prior
 
 
 async def test_another_tenants_product_id_cannot_bind(thread_product_client, db_session):

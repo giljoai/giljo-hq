@@ -51,23 +51,40 @@ import pytest
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 
 
-def _uvicorn_worker(port: int, ready_event: Any) -> None:
+def _uvicorn_worker(port_queue: Any, ready_event: Any) -> None:
     """
     Child-process entry point.
 
     1. Inserts the project root so ``api.run_api`` is importable.
-    2. Loads ``_configure_logging`` and calls it — this wires up the
+    2. Binds its OWN listening socket on an OS-assigned port (port 0) and
+       reports the real port back to the parent via ``port_queue``.
+    3. Loads ``_configure_logging`` and calls it — this wires up the
        QueueHandler.
-    3. Installs a MockStallingStream on the StreamHandler so any log
+    4. Installs a MockStallingStream on the StreamHandler so any log
        line written to stdout stalls for 30 s.
-    4. Starts uvicorn on ``127.0.0.1:<port>`` serving ``api.app:app``.
-    5. Signals the parent via ``ready_event`` once uvicorn is up.
+    5. Starts uvicorn on the already-bound socket, serving ``api.app:app``.
+    6. Signals the parent via ``ready_event`` once uvicorn is up.
+
+    The socket is bound here, in the process that will actually serve on
+    it, before anything is reported to the parent. That closes the
+    check-then-bind race that existed when the parent picked a "free" port
+    with its own throwaway socket and merely handed the bare port number to
+    a not-yet-started child: on a loaded box another process can claim a
+    port in the gap between "looked free" and "child actually binds". A
+    socket that is ours from the moment of allocation has no such gap.
     """
     import logging
+    import socket
     import threading
 
     if _PROJECT_ROOT not in sys.path:
         sys.path.insert(0, _PROJECT_ROOT)
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(128)
+    port_queue.put(sock.getsockname()[1])
 
     # Import and call the new configure function from run_api
     run_api = importlib.import_module("api.run_api")
@@ -105,8 +122,7 @@ def _uvicorn_worker(port: int, ready_event: Any) -> None:
 
     uvicorn.run(
         "api.app:app",
-        host="127.0.0.1",
-        port=port,
+        fd=sock.fileno(),
         log_level="info",
         # Do NOT use reload — it forks again and confuses the fixture
     )
@@ -123,29 +139,37 @@ def stalling_server():
     Start the uvicorn server with a stalling stream handler.
 
     Yields the base URL once the server is ready, then terminates the process.
+
+    The child process binds its own port-0 socket and reports the real port
+    back over ``port_queue`` (see ``_uvicorn_worker``) — the port is ours
+    from the moment it is allocated, so there is no window for another
+    process on a loaded box to steal it between "looked free" and "actually
+    bound". The ``try/finally`` guarantees the child process is always
+    reaped, including when the test body raises or an assertion above fails
+    partway through setup.
     """
-    port = _pick_free_port()
+    import queue as queue_module
+
     ctx = multiprocessing.get_context("spawn")
+    port_queue = ctx.Queue()
     ready = ctx.Event()
-    proc = ctx.Process(target=_uvicorn_worker, args=(port, ready), daemon=True)
+    proc = ctx.Process(target=_uvicorn_worker, args=(port_queue, ready), daemon=True)
     proc.start()
 
-    # Wait up to 15 s for the server to be ready
-    ready.wait(timeout=15)
-    assert proc.is_alive(), "Server process died during startup"
+    try:
+        try:
+            port = port_queue.get(timeout=15)
+        except queue_module.Empty:
+            raise AssertionError("Server process did not report a bound port within 15s") from None
 
-    yield f"http://127.0.0.1:{port}"
+        # Wait up to 15 s for the server to be ready
+        ready.wait(timeout=15)
+        assert proc.is_alive(), "Server process died during startup"
 
-    proc.terminate()
-    proc.join(timeout=5)
-
-
-def _pick_free_port() -> int:
-    import socket
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        proc.terminate()
+        proc.join(timeout=5)
 
 
 # ---------------------------------------------------------------------------

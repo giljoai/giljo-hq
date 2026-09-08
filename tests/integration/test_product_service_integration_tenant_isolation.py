@@ -117,8 +117,12 @@ class TestMultiTenantIsolation:
         get_result = await service1.get_product(product_id)
         assert get_result.name == "Protected Product"
 
-    async def test_activate_product_tenant_isolation(self, db_manager):
-        """Test that activating product in one tenant doesn't affect others"""
+    async def test_set_default_product_tenant_isolation(self, db_manager):
+        """FE-9524: setting one tenant's DEFAULT product must not affect another
+        tenant's default. Rewritten from the pre-split test, which exercised
+        activate_product (shown/hidden) and asserted it moved the single
+        active-product pointer -- that pointer is now set_default_product's
+        job, decoupled from shown/hidden."""
         tenant1_key = str(uuid4())
         tenant2_key = str(uuid4())
 
@@ -130,73 +134,74 @@ class TestMultiTenantIsolation:
         create2 = await service1.create_product(name="Tenant1 Product B")
         create3 = await service2.create_product(name="Tenant2 Product")
 
-        # Activate products in both tenants
-        await service1.activate_product(str(create1.id))
-        await service2.activate_product(str(create3.id))
+        # Set default in both tenants
+        await service1.set_default_product(str(create1.id))
+        await service2.set_default_product(str(create3.id))
 
-        # Verify tenant1 has one active product (0731b: returns Optional[Product])
-        active1 = await service1.get_active_product()
-        assert active1 is not None
-        assert active1.name == "Tenant1 Product A"
+        # Verify tenant1's default
+        default1 = await service1.get_default_product()
+        assert default1 is not None
+        assert default1.name == "Tenant1 Product A"
 
-        # Verify tenant2 has one active product
-        active2 = await service2.get_active_product()
-        assert active2 is not None
-        assert active2.name == "Tenant2 Product"
+        # Verify tenant2's default
+        default2 = await service2.get_default_product()
+        assert default2 is not None
+        assert default2.name == "Tenant2 Product"
 
-        # Activate second product in tenant1 (0731b: returns Product)
-        await service1.activate_product(str(create2.id))
+        # Set a different default in tenant1
+        await service1.set_default_product(str(create2.id))
 
-        # Verify tenant2 product still active (not affected)
-        active2_check = await service2.get_active_product()
-        assert active2_check is not None
-        assert active2_check.name == "Tenant2 Product"
+        # Verify tenant2's default is unaffected
+        default2_check = await service2.get_default_product()
+        assert default2_check is not None
+        assert default2_check.name == "Tenant2 Product"
 
 
 @pytest.mark.asyncio
 class TestSingleActiveProductConstraint:
     """Integration tests for single active product enforcement"""
 
-    async def test_only_one_product_active_per_tenant(self, db_manager):
-        """Test database enforces only one active product per tenant"""
+    async def test_several_products_can_be_shown_at_once(self, db_manager):
+        """FE-9524/D1: is_active is REUSED as 'shown as a tab' -- showing one
+        product never hides another. Rewrite of the old
+        'only one active product per tenant' pin, which asserted exactly the
+        DB + service enforcement D1 retires (idx_product_single_active_per_tenant
+        dropped in ce_0099; ProductLifecycleService no longer deactivates
+        siblings)."""
         tenant_key = str(uuid4())
         service = ProductService(db_manager, tenant_key)
 
-        # Create three products (0731b: returns Product ORM model)
+        # Create three products (0731b: returns Product ORM model).
         create1 = await service.create_product(name="Product A")
         create2 = await service.create_product(name="Product B")
         create3 = await service.create_product(name="Product C")
 
-        # Activate first product (0731b: returns Product ORM model)
-        activate1 = await service.activate_product(str(create1.id))
-        assert activate1.is_active is True
+        # A new product is shown by default (D1).
+        assert create1.is_active is True
+        assert create2.is_active is True
+        assert create3.is_active is True
 
-        # Verify only one active (0731b: returns Optional[Product])
-        active = await service.get_active_product()
-        assert active is not None
-        assert active.name == "Product A"
-
-        # Activate second product
+        # Explicitly activating (showing) B must not hide A or C.
         activate2 = await service.activate_product(str(create2.id))
         assert activate2.is_active is True
 
-        # Verify only Product B is active
-        active = await service.get_active_product()
-        assert active is not None
-        assert active.name == "Product B"
-
-        # Verify Product A is deactivated (0731b: returns Product ORM model)
         get_a = await service.get_product(str(create1.id))
+        get_b = await service.get_product(str(create2.id))
+        get_c = await service.get_product(str(create3.id))
+        assert get_a.is_active is True
+        assert get_b.is_active is True
+        assert get_c.is_active is True
+
+        # Explicitly hiding A must not touch B or C.
+        deactivate1 = await service.deactivate_product(str(create1.id))
+        assert deactivate1.is_active is False
+
+        get_a = await service.get_product(str(create1.id))
+        get_b = await service.get_product(str(create2.id))
+        get_c = await service.get_product(str(create3.id))
         assert get_a.is_active is False
-
-        # Activate third product
-        activate3 = await service.activate_product(str(create3.id))
-        assert activate3.is_active is True
-
-        # Verify only Product C is active
-        active = await service.get_active_product()
-        assert active is not None
-        assert active.name == "Product C"
+        assert get_b.is_active is True
+        assert get_c.is_active is True
 
     async def test_activate_already_active_product(self, db_manager):
         """Test activating an already active product is idempotent"""
@@ -228,5 +233,5 @@ class TestSingleActiveProductConstraint:
         assert deactivate_result.is_active is False
 
         # Verify no active product (0731b: returns None)
-        active = await service.get_active_product()
+        active = await service.get_default_product()
         assert active is None

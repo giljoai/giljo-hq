@@ -36,12 +36,14 @@ from giljo_mcp.models.base import generate_uuid
 from giljo_mcp.models.projects import Project
 from giljo_mcp.models.sequence_runs import CHAIN_TERMINAL_PROJECT_STATUSES, SequenceRun
 from giljo_mcp.schemas.jsonb_validators import (
+    VALID_REVIEWED_VIA,
     validate_sequence_run_project_ids,
     validate_sequence_run_project_statuses,
     validate_sequence_run_reviewed_project_ids,
+    validate_sequence_run_reviewed_via,
 )
 from giljo_mcp.services._session_helpers import optional_tenant_session
-from giljo_mcp.services.conductor_job_minter import mint_conductor_job
+from giljo_mcp.services.conductor_job_minter import broadcast_conductor_created, mint_conductor_job
 from giljo_mcp.services.sequence_run_query_mixin import SequenceRunQueryMixin
 from giljo_mcp.services.sequence_run_serialization import serialize_sequence_run
 from giljo_mcp.services.sequence_run_validation import (
@@ -158,11 +160,12 @@ class SequenceRunService(SequenceRunQueryMixin):
                     session.add(run)
                     await session.flush()
 
-                    conductor_agent_id = await mint_conductor_job(
+                    conductor_identity = await mint_conductor_job(
                         session,
                         tenant_key=effective_tenant_key,
                         run_id=run_id,
                     )
+                    conductor_agent_id = conductor_identity["agent_id"]
                     run.conductor_agent_id = conductor_agent_id
 
                 await session.commit()
@@ -170,10 +173,22 @@ class SequenceRunService(SequenceRunQueryMixin):
                 result = _serialize(run)
 
             # BE-6221a: broadcast sequence:updated on CREATE too (parity with update()).
-            # A headless start_chain_run then lights up the dashboard election tickboxes
+            # A headless link_projects then lights up the dashboard election tickboxes
             # the instant the run is minted, and a multi-tab REST create no longer goes
             # stale until the next update(). No-ops when no websocket_manager is injected.
             await self._broadcast_sequence_updated(run_id, effective_tenant_key)
+
+            # BE-9440 Phase 1: the conductor mint previously broadcast nothing, so it
+            # appeared on no dashboard until a manual refresh. Post-commit only (see
+            # conductor_job_minter's TRANSACTION_OWNERSHIP_CONVENTION note).
+            await broadcast_conductor_created(
+                self._websocket_manager,
+                tenant_key=effective_tenant_key,
+                run_id=run_id,
+                agent_id=conductor_identity["agent_id"],
+                job_id=conductor_identity["job_id"],
+                execution_id=conductor_identity["execution_id"],
+            )
 
             self._logger.info(
                 "Created sequence_run %s (tenant=%s, mode=%s, projects=%d, conductor_agent_id=%s)",
@@ -685,24 +700,20 @@ class SequenceRunService(SequenceRunQueryMixin):
         run_id: str,
         project_id: str,
         tenant_key: str | None = None,
+        via: str = "ui",
     ) -> dict[str, Any]:
-        """Durably record that a chain member has been reviewed (BE-9098).
+        """Durably record that a chain member has been reviewed (BE-9098 / BE-9540).
 
-        Append-only write to ``reviewed_project_ids``, tenant-scoped. This is the
-        persistence the FE was missing: before it, review acknowledgment lived only
-        in a client-side Pinia Map that reset on every refresh, so the Review badge
-        returned on each page load.
+        Append-only write to ``reviewed_project_ids`` (durable Review-badge ack)
+        plus the parallel ``reviewed_via`` provenance map — "ui" (default) for the
+        dashboard's per-card flow, "harness" for a headlessly-auto-marked member
+        (project_helpers.complete_chain_run_if_finished), mirroring
+        UserApproval.decided_via. Membership-validated against VALID_REVIEWED_VIA.
 
-        NON-GATING by construction: writes ONLY ``reviewed_project_ids`` and NEVER
-        ``project_statuses`` — so purge_run and chain advancement (which key on
-        CHAIN_TERMINAL_PROJECT_STATUSES) are wholly unaffected, and the known
-        stale-spread eject risk on project_statuses is avoided.
-
-        Idempotent: marking an already-reviewed project is a clean no-op that returns
-        the current run. Raises ResourceNotFoundError (-> 404) if the run is not found
-        for this tenant, ValidationError (-> 422) if ``project_id`` is empty or is not
-        a member of this run. The SequenceRun owning service is the only writer of this
-        column (no parallel write path).
+        NON-GATING (never touches ``project_statuses``). Idempotent: a re-mark is
+        a no-op that returns the run UNCHANGED (first-recorded provenance wins).
+        Raises ResourceNotFoundError (-> 404) / ValidationError (-> 422) as usual.
+        The SequenceRun owning service is the only writer of these columns.
         """
         try:
             effective_tenant_key = tenant_key or (
@@ -714,6 +725,11 @@ class SequenceRunService(SequenceRunQueryMixin):
                 raise ValidationError(
                     message="project_id must be a non-empty string",
                     context={"field": "project_id"},
+                )
+            if via not in VALID_REVIEWED_VIA:
+                raise ValidationError(
+                    message=f"via must be one of {sorted(VALID_REVIEWED_VIA)}, got {via!r}",
+                    context={"field": "via"},
                 )
 
             async with self._get_session(effective_tenant_key) as session:
@@ -730,13 +746,15 @@ class SequenceRunService(SequenceRunQueryMixin):
 
                 current = list(run.reviewed_project_ids or [])
                 if project_id in current:
-                    # Idempotent no-op — already reviewed.
+                    # Idempotent no-op — already reviewed, provenance unchanged.
                     return _serialize(run)
 
                 current.append(project_id)
-                # Reassign (not in-place mutate) so SQLAlchemy flags the JSONB dirty;
-                # the boundary validator caps length + item shape.
+                # Reassign (not mutate) so SQLAlchemy flags the JSONB dirty.
                 run.reviewed_project_ids = validate_sequence_run_reviewed_project_ids(current)
+                via_map = dict(run.reviewed_via or {})
+                via_map[project_id] = via
+                run.reviewed_via = validate_sequence_run_reviewed_via(via_map)
                 run.updated_at = datetime.now(UTC)
 
                 await session.commit()
@@ -745,8 +763,9 @@ class SequenceRunService(SequenceRunQueryMixin):
 
             await self._broadcast_sequence_updated(run_id, effective_tenant_key)
             self._logger.info(
-                "Marked project %s reviewed in sequence_run %s (tenant=%s, reviewed=%d)",
+                "Marked project %s reviewed (via=%s) in sequence_run %s (tenant=%s, reviewed=%d)",
                 sanitize(project_id),
+                sanitize(via),
                 sanitize(run_id),
                 effective_tenant_key,
                 len(current),

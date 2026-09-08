@@ -565,8 +565,11 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
+/* FE-9569: unified onto the authoritative Waiting token (design-system-
+   sample-v2.html "Status & Brand Colors" -- Waiting #ffd700, its own
+   distinct status, not the disconnected/error red this used to borrow). */
 .hero-dot--waiting {
-  background: $color-indicator-disconnected;
+  background: $color-status-waiting;
   animation: hero-wait 1.6s ease infinite;
 }
 

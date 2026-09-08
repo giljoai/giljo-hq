@@ -158,15 +158,27 @@ describe('agentColorSync', () => {
     const rootVars = parseScssVars(extractRootBlock(source))
     const mirrorKeys = Object.keys(rootVars).filter((k) => k.startsWith('color-agent-'))
 
-    // Deliberate 4-of-6 state (BE-5039/FE-5041) — preserve, do not "complete" it.
+    // This set is NOT "there must be exactly N mirrors" (BE-5039/FE-5041) — it
+    // tracks which agent color tokens a PROJECT STATUS actually uses via
+    // ProjectStatus.color_token (see the backend contract test
+    // tests/contract/test_project_status_color_tokens.py, which requires the
+    // reverse: every status color_token MUST be mirrored here). Together the
+    // two tests say "mirror exactly the tokens statuses use, no more, no
+    // fewer." Grow this set only when a NEW status starts using a token;
+    // do not "complete" it to all six roles just because they exist in
+    // agentColors.js — the remaining unmirrored role(s) stay unmirrored
+    // until a status needs them. FE-9508 added the fifth entry
+    // (color-agent-orchestrator) because ProjectStatus.SUPERSEDED now uses
+    // it (operator ruling 2026-08-26: tan reads as archived/replaced).
     const expectedMirrors = {
       'color-agent-implementer': 'implementer',
       'color-agent-analyzer': 'analyzer',
       'color-agent-researcher': 'documenter',
       'color-agent-reviewer': 'reviewer',
+      'color-agent-orchestrator': 'orchestrator',
     }
 
-    it('has exactly the four historical --color-agent-* mirrors, no more, no fewer', () => {
+    it('has exactly the project-status-used --color-agent-* mirrors, no more, no fewer', () => {
       expect(mirrorKeys.sort()).toEqual(Object.keys(expectedMirrors).sort())
     })
 

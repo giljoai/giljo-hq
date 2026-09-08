@@ -82,7 +82,7 @@
             @connection-error="handleDatabaseError"
           >
             <template #actions>
-              <v-btn variant="text" @click="loadDatabaseSettings">
+              <v-btn variant="text" @click="loadDatabaseSettings({ notify: true })">
                 <v-icon start>mdi-refresh</v-icon>
                 Reload from Config
               </v-btn>
@@ -171,7 +171,19 @@ async function loadNetworkSettings() {
 }
 
 // Database Methods
-async function loadDatabaseSettings() {
+/**
+ * FE-9553: `notify` defaults to FALSE, and the default is the point.
+ *
+ * This function is reachable from a click (the retry button) AND from
+ * onMounted, and a toast is only honest in the first case -- on a page load
+ * nobody asked for this, so an error toast reads as though the operator caused
+ * it. Following HubView's loadDeletedThreads({ notify = false }) precedent
+ * rather than inventing a second convention.
+ *
+ * Silent by default so a new call site cannot add a spurious toast by
+ * forgetting; a caller that genuinely IS a click opts in.
+ */
+async function loadDatabaseSettings({ notify = false } = {}) {
   try {
     // Fetch database config from API
     const response = await fetch(`${getApiBaseURL()}/api/v1/config/database`, {
@@ -180,10 +192,12 @@ async function loadDatabaseSettings() {
     await response.json()
   } catch (error) {
     console.error('Failed to load database settings:', error)
-    showToast({
-      message: 'Failed to load database settings. Check your connection and refresh the page.',
-      type: 'error',
-    })
+    if (notify) {
+      showToast({
+        message: 'Failed to load database settings. Check your connection and refresh the page.',
+        type: 'error',
+      })
+    }
   }
 }
 

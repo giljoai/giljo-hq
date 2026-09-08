@@ -18,10 +18,15 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session, require_admin
+from giljo_mcp.execution_mode_default import (
+    EXECUTION_MODE_DEFAULT_CHOICES,
+    EXECUTION_MODE_DEFAULT_KEY,
+    STAGE_MODE_ASK,
+)
 from giljo_mcp.models import User
 from giljo_mcp.services.settings_service import (
     DEFAULT_AGENT_CHECKIN_CADENCE_MINUTES,
@@ -92,6 +97,32 @@ class AgentCheckinCadenceUpdateResponse(AgentCheckinCadenceResponse):
     """Account-level agent check-in cadence update response."""
 
     message: str
+
+
+class ExecutionModeDefaultResponse(BaseModel):
+    """The account's standing answer to the one question staging asks (FE-9555)."""
+
+    execution_mode_default: str
+
+
+class ExecutionModeDefaultUpdate(BaseModel):
+    """Set the account-level execution-mode default."""
+
+    execution_mode_default: str = Field(
+        description="One of: " + ", ".join(EXECUTION_MODE_DEFAULT_CHOICES),
+    )
+
+    @field_validator("execution_mode_default")
+    @classmethod
+    def _must_be_a_known_choice(cls, value: str) -> str:
+        # Validated against the shared tuple rather than an inline Literal so the
+        # control, the endpoint and the staging reader cannot drift apart. Anything
+        # else is a 422 here rather than a value stored and silently ignored later:
+        # an unrecognised stored default reads as "ask", so a typo would look like it
+        # saved and then quietly keep asking forever.
+        if value not in EXECUTION_MODE_DEFAULT_CHOICES:
+            raise ValueError(f"must be one of {list(EXECUTION_MODE_DEFAULT_CHOICES)}")
+        return value
 
 
 # API Endpoints
@@ -282,3 +313,68 @@ async def get_database_settings(
     settings = await service.get_settings("database")
 
     return SettingsResponse(settings=settings)
+
+
+# TENANT-LEVEL (FE-9555): the account-wide execution-mode default behind the
+# Tools -> Agents control. Hosted on the `general` settings category, which is
+# already tenant-scoped -- so unlike the silence threshold and check-in cadence
+# above, there is no CE-vs-SaaS split to make: it is a per-account preference in
+# both editions, and ADR-009 makes tenant and user the same thing.
+@router.get(
+    "/execution-mode-default",
+    response_model=ExecutionModeDefaultResponse,
+    summary="Get the account execution-mode default",
+    description="Whether staging asks how the work should run every time, or uses a set mode.",
+)
+async def get_execution_mode_default(
+    current_user: User = Depends(get_current_active_user), db: AsyncSession = Depends(get_db_session)
+) -> ExecutionModeDefaultResponse:
+    """Read the account's execution-mode default (all authenticated users).
+
+    Unset means ``ask`` -- the value the staging refusal keys on. Shipping any
+    other default here would put FE-9555's silent pick straight back, just from
+    a different file.
+    """
+    logger.debug("User %s retrieving execution-mode default", sanitize(current_user.username))
+
+    service = SettingsService(db, current_user.tenant_key)
+    stored = await service.get_setting_value("general", EXECUTION_MODE_DEFAULT_KEY, default=STAGE_MODE_ASK)
+
+    # A value stored before this endpoint validated (or by hand) still has to render
+    # as one of the three choices, so the control never shows a state it cannot save.
+    if stored not in EXECUTION_MODE_DEFAULT_CHOICES:
+        stored = STAGE_MODE_ASK
+
+    return ExecutionModeDefaultResponse(execution_mode_default=str(stored))
+
+
+# TENANT-LEVEL (FE-9555): PUT writes it via a read-modify-write.
+@router.put(
+    "/execution-mode-default",
+    response_model=ExecutionModeDefaultResponse,
+    summary="Set the account execution-mode default",
+    description="Set to 'ask' to be asked every staging, or name a mode to stop being asked.",
+)
+async def update_execution_mode_default(
+    request: ExecutionModeDefaultUpdate,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db_session),
+) -> ExecutionModeDefaultResponse:
+    """Set the account's execution-mode default (admin only, like every other write here).
+
+    Read-modify-write, for the same reason the headless toggle does it: the
+    `general` category holds other keys, and a blind category overwrite would
+    drop every one of them.
+    """
+    logger.info(
+        "Admin %s setting execution-mode default to %s",
+        sanitize(current_user.username),
+        sanitize(request.execution_mode_default),
+    )
+
+    service = SettingsService(db, current_user.tenant_key)
+    general = await service.get_settings("general")
+    general[EXECUTION_MODE_DEFAULT_KEY] = request.execution_mode_default
+    await service.update_settings("general", general)
+
+    return ExecutionModeDefaultResponse(execution_mode_default=request.execution_mode_default)

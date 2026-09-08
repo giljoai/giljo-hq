@@ -11,7 +11,10 @@ to follow established service layer pattern.
 
 Responsibilities:
 - CRUD operations for products
-- Product lifecycle management (activate, deactivate, archive, restore)
+- Product lifecycle management (activate/deactivate == show/hide, restore;
+  archive is deferred per the 2026-08-28 multi-product design decision, D10)
+- Default product management (get_default_product/set_default_product --
+  the single per-tenant read-fallback target, independent of shown/hidden)
 - Product metrics and statistics
 - Vision document management
 - Cascade impact analysis
@@ -53,6 +56,34 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 logger = logging.getLogger(__name__)
 
 
+class ProductAmbiguousError(ValidationError):
+    """Raised by ``resolve_binding_product(write=True)`` when a create omits
+    ``product_id`` and the tenant owns more than one product (BE-9523b).
+
+    A ``ValidationError`` subclass so an unexpected path still yields a 4xx --
+    but the MCP tool dispatch chokepoint (``api/endpoints/mcp_tools/_base.py``)
+    catches THIS type specifically and returns the BE-6081 Tier-2 structured
+    rejection instead of letting it surface as ``isError``. The distinction is
+    the point: an agent can fix this by supplying ``product_id`` (the rejection
+    carries the full list to choose from), so it belongs on the normal tool
+    content path with a remedy, not as an opaque error.
+    """
+
+    code = "PRODUCT_AMBIGUOUS"
+
+    def __init__(self, *, products: list[dict[str, Any]], operation: str, tenant_key: str) -> None:
+        lines = "\n".join(f"- {p['name']} (id={p['id']}, active={p['is_active']})" for p in products)
+        message = (
+            "Multiple products exist and none was specified. Your products:\n"
+            f"{lines}\n"
+            "Retry with product_id. In a local repo, persist the binding by calling "
+            "giljo_setup with product_id -- it writes the binding into CLAUDE.md/AGENTS.md "
+            "so this never asks again. In a web session, pass product_id per call."
+        )
+        super().__init__(message, context={"operation": operation, "tenant_key": tenant_key, "products": products})
+        self.products = products
+
+
 # FE-9320: matches the String(500) products.project_path column.
 PROJECT_PATH_MAX_LENGTH = 500
 
@@ -79,7 +110,8 @@ class ProductService:
 
     This service handles all product-related operations including:
     - Creating, reading, updating, deleting products
-    - Product activation/deactivation (single active product per tenant)
+    - Product activation/deactivation (FE-9524/D1: show/hide a tab; several
+      products may be shown per tenant at once)
     - Product metrics and statistics
     - Vision document management
     - Quality standards updates (Handover 0316)
@@ -137,6 +169,23 @@ class ProductService:
     def _get_session(self):
         """Yield a tenant-scoped DB session, honoring an injected test session (shared helper, BE-8000d)."""
         return tenant_context_session(self.db_manager, self.tenant_key, self._test_session)
+
+    async def _emit_websocket_event(self, event_type: str, data: dict[str, Any]) -> None:
+        """Emit a tenant-scoped WebSocket event; graceful no-op if no manager is wired.
+
+        FE-9501c (D10): shared shape with ProductLifecycleService._emit_websocket_event
+        -- best-effort, never raises into the caller's write path.
+        """
+        if not self._websocket_manager:
+            return
+        try:
+            await self._websocket_manager.broadcast_to_tenant(
+                tenant_key=self.tenant_key,
+                event_type=event_type,
+                data={**data, "tenant_key": self.tenant_key},
+            )
+        except (RuntimeError, ValueError) as e:
+            self._logger.warning(f"Failed to emit WebSocket event {event_type}: {e}", exc_info=True)
 
     def _validate_target_platforms(self, target_platforms: list[str]) -> tuple[bool, str | None]:
         """
@@ -355,7 +404,20 @@ class ProductService:
                     brand_guidelines=brand_guidelines,
                     product_memory=validated_memory,
                     target_platforms=target_platforms or ["all"],
-                    is_active=False,
+                    # FE-9524/D1: a new product just exists, shown by default --
+                    # no on/off ceremony. Explicit True (rather than relying on
+                    # the column default) so this stays correct if the ORM
+                    # default is ever changed independently of this call site.
+                    is_active=True,
+                    # is_default is deliberately NOT auto-set here (even for a
+                    # tenant's first product): ProductRepository.get_default_product's
+                    # sole-shown-product fallback already resolves an unscoped
+                    # read correctly whenever exactly one product is shown, so
+                    # auto-defaulting here would just create a row that
+                    # DISAGREES with is_active the moment the product is later
+                    # hidden (default is independent of shown/hidden by design
+                    # -- see set_default_product -- so hiding must not silently
+                    # clear it, but nothing should silently SET it either).
                     created_at=datetime.now(UTC),
                 )
 
@@ -376,6 +438,11 @@ class ProductService:
                 await self._repo.refresh(session, product)
 
                 self._logger.info(f"Created product {product.id} for tenant {self.tenant_key}")
+
+                await self._emit_websocket_event(
+                    event_type="product:created",
+                    data={"product_id": str(product.id), "name": product.name},
+                )
 
                 return product
 
@@ -577,6 +644,14 @@ class ProductService:
                 # memory for a silently-dropped field. The owning write paths
                 # (write_memory_entry / project closeout) emit their own event.
 
+                # FE-9501c (D10): product:updated. This is the ONE owning writer for
+                # both doors (REST PATCH /products/{id} and the update_product_context
+                # MCP tool both route here), so one emit covers both.
+                await self._emit_websocket_event(
+                    event_type="product:updated",
+                    data={"product_id": str(product.id), "name": product.name},
+                )
+
                 return product
 
         except (ResourceNotFoundError, ValidationError):
@@ -593,58 +668,56 @@ class ProductService:
     # ============================================================================
 
     async def activate_product(self, product_id: str) -> Product:
-        """Activate a product (deactivates other products for tenant). Delegated to ProductLifecycleService."""
+        """Show a product's tab (FE-9524/D1). Delegated to ProductLifecycleService."""
         return await self.lifecycle.activate_product(product_id)
 
     async def deactivate_product(self, product_id: str) -> Product:
-        """Deactivate a product. Delegated to ProductLifecycleService."""
+        """Hide a product's tab (FE-9524/D1). Delegated to ProductLifecycleService."""
         return await self.lifecycle.deactivate_product(product_id)
 
     # ============================================================================
-    # Active Product Management
+    # Default Product Management -- delegated to ProductLifecycleService
+    # (FE-9524: read-fallback target, distinct from shown/hidden)
     # ============================================================================
 
-    async def get_active_product(self, *, eager_load: bool = True) -> Product | None:
-        """
-        Get the currently active product for the tenant.
+    async def get_default_product(self, *, eager_load: bool = True) -> Product | None:
+        """Get the tenant's DEFAULT product. Delegated to ProductLifecycleService."""
+        return await self.lifecycle.get_default_product(eager_load=eager_load)
 
-        Args:
-            eager_load: BE-6066 P2 — when True (default), eager-load the 4 detail
-                relations for response building. Pass False when only identity/
-                columns are needed (e.g. reading the previously-active product's id
-                during activate) to skip four wasted selectin loads; the caller must
-                not then read those relations off the returned model.
+    async def set_default_product(self, product_id: str) -> Product:
+        """Set the tenant's DEFAULT product. Delegated to ProductLifecycleService."""
+        return await self.lifecycle.set_default_product(product_id)
 
-        Returns:
-            Product ORM model if active product exists, None otherwise
+    async def resolve_binding_product(
+        self, product_id: str | None, *, operation: str, action: str = "created", write: bool
+    ) -> Product:
+        """Resolve the product an MCP call scopes to (BE-9411, generalized BE-9499a).
 
-        Raises:
-            BaseGiljoError: If database operation fails
-        """
-        try:
-            async with self._get_session() as session:
-                return await self._repo.get_active_product(session, self.tenant_key, eager_load=eager_load)
+        Originally the create-path binder; BE-9499a reuses it for READ tools
+        (list/get/search) too via the ``action`` param, which only changes the
+        not-found error's verb ("nothing was <action>") to match what the
+        caller was actually trying to do -- the resolution + validation logic
+        is identical for both. Existing create callers are unaffected: the
+        default stays ``"created"``, so their error text is byte-identical.
 
-        except Exception as e:  # Broad catch: service boundary, wraps in BaseGiljoError
-            self._logger.exception("Failed to get active product")
-            raise BaseGiljoError(
-                message=f"Failed to get active product: {e!s}", context={"tenant_key": self.tenant_key}
-            ) from e
-
-    async def resolve_binding_product(self, product_id: str | None, *, operation: str) -> Product:
-        """Resolve the product a newly created entity binds to (BE-9411).
-
-        The active product is mutable shared state: another session, or the
-        operator toggling the dashboard, changes it under a running agent. A
+        The default product is mutable shared state: another session, or the
+        operator changing it in the dashboard, moves it under a running agent. A
         create that resolves it at write time therefore lands wherever the
         server happens to be pointing at that instant — which is how a staged
         orchestrator filed a task onto a product that was not its own.
 
         Two paths, and the difference between them is the whole point:
 
-        - ``product_id`` omitted → the active product, exactly as before. This
+        - ``product_id`` omitted → the DEFAULT product (``is_default``; see the
+          FE-9524 note below). This
           keeps every existing caller working and is still subject to the flip;
-          that is documented behavior, not a bug.
+          that is documented behavior, not a bug. **Exception (BE-9523b):** when
+          ``write=True`` and the tenant owns MORE THAN ONE product, an omitted
+          ``product_id`` no longer falls back silently -- it raises
+          :class:`ProductAmbiguousError` carrying the full product list, because
+          a defaulted WRITE is not recoverable the way a defaulted read is. A
+          single-product tenant is never affected: the ambiguity check only
+          fires when there is more than one product to be ambiguous between.
         - ``product_id`` supplied → validated as belonging to THIS tenant and
           returned regardless of which product is active. Agent input is never
           trusted: the lookup is tenant-scoped (``ProductRepository.get_by_id``
@@ -653,32 +726,59 @@ class ProductService:
 
         A supplied id that does not resolve raises ``ValidationError`` — a clean
         422-class rejection that surfaces verbatim to the agent. It must NEVER
-        fall back to the active product: a silent fallback would recreate the
+        fall back to the default product: a silent fallback would recreate the
         exact defect while reporting success.
 
-        Deliberately does not require the target to be *active*. Binding to a
-        product other than the active one is the reason this exists.
+        Deliberately does not require the target to be the *default*. Binding
+        to a product other than the default one is the reason this exists.
+
+        FE-9524: the fallback below resolves the
+        DEFAULT product (``is_default``), not "the shown/active one" --
+        "shown" and "default" are separate columns now that several products
+        may be shown at once. See ``ProductRepository.get_default_product``.
 
         Args:
-            product_id: Explicit product UUID, or None/empty for the active product.
+            product_id: Explicit product UUID, or None/empty for the default product.
             operation: Calling operation name, for the error context.
+            action: Past-tense verb for the not-found error ("nothing was
+                <action>") -- "created" for a write, "read"/"listed"/"searched"
+                for a query. Purely cosmetic; the resolution logic is identical.
+            write: True for a call that BINDS NEW DATA to the resolved product
+                (a create, or a write that lazily creates child rows under it --
+                e.g. ``upsert_roadmap_items``). False for a read/list/search,
+                which keeps the default-product fallback unconditionally. Required
+                (no default) so every call site states its intent explicitly --
+                see the BE-9523b audit in this project's PR body for the full list.
 
         Returns:
             The bound Product (read for its ``id`` and ``name``; detail relations
             are NOT eager-loaded, so callers must not touch them).
 
         Raises:
-            ValidationError: No active product set, or the supplied id does not
+            ValidationError: No default product set, or the supplied id does not
                 belong to this tenant.
+            ProductAmbiguousError: ``write=True``, ``product_id`` omitted, and the
+                tenant owns more than one product.
         """
         if not product_id or not str(product_id).strip():
-            active_product = await self.get_active_product(eager_load=False)
-            if not active_product:
+            if write:
+                products = await self.list_products(include_inactive=True, lean=True)
+                if len(products) > 1:
+                    raise ProductAmbiguousError(
+                        products=[{"id": str(p.id), "name": p.name, "is_active": bool(p.is_active)} for p in products],
+                        operation=operation,
+                        tenant_key=self.tenant_key,
+                    )
+            default_product = await self.get_default_product(eager_load=False)
+            if not default_product:
                 raise ValidationError(
-                    "No active product set. Please activate a product first.",
+                    "No default product is set, so an unscoped read has nowhere to resolve to. "
+                    "Pass product_id explicitly -- get_context(categories=['products']) lists your "
+                    "products and their ids. Choosing which product is the default is a dashboard "
+                    "action; there is no tool for it.",
                     context={"tenant_key": self.tenant_key, "operation": operation},
                 )
-            return active_product
+            return default_product
 
         requested_id = str(product_id).strip()
         async with self._get_session() as session:
@@ -686,9 +786,9 @@ class ProductService:
 
         if product is None:
             raise ValidationError(
-                f"Product '{requested_id}' was not found for this account, so nothing was created. "
-                "Pass the product_id of one of your own products, or omit product_id to bind to "
-                "the active product.",
+                f"Product '{requested_id}' was not found for this account, so nothing was {action}. "
+                "Pass the product_id of one of your own products -- get_context(categories=['products']) "
+                "lists them with their ids.",
                 context={"product_id": requested_id, "tenant_key": self.tenant_key, "operation": operation},
             )
         return product

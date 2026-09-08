@@ -3,7 +3,11 @@
  *
  * Replaces the prior in-memory-only store with a REST-backed implementation.
  * Server is source of truth: fetch() → GET /api/notifications on mount.
- * Real-time updates via notification:new WS event (merged by id).
+ * Real-time updates via notification:new (merged by id), notification:updated
+ * (D16, Headless S3d -- replaces an existing row by id) and
+ * notification:resolved (D16 -- drops resolved ids live, so a banner whose
+ * condition already cleared server-side does not sit onscreen until refresh)
+ * WS events.
  *
  * Preserved from prior store:
  *  - addNotification() — retained as the WS event handler shim (used by
@@ -13,8 +17,6 @@
  *    in-memory callers (agent_health events that predate DB persistence).
  *  - removeNotification() / clearForProject() / clearAll() — preserved.
  *  - type→icon/color mapping lives in NotificationDropdown (component layer).
- *  - badgeColor uses severity field from server response when available,
- *    falling back to type-based heuristics for legacy in-memory notifications.
  *
  * New exports: fetch(), markRead(id), markDismissed(id), handleWsNewNotification(data)
  *
@@ -34,6 +36,9 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api } from '@/services/api'
 import { useUserStore } from '@/stores/user'
+import { projectIdOf } from '@/components/navigation/notificationRouting'
+import { SIGNAL_ADVISORY, classifySignal } from '@/stores/notificationSignalRouter'
+import { useSettingsStore } from '@/stores/settings'
 
 // FE-9241: cap the persisted `_local` row set so localStorage can't grow
 // unbounded from a chatty silence detector.
@@ -101,6 +106,10 @@ function normalizeServerNotif(raw) {
     body: raw.body ?? null,
     message: raw.body ?? raw.message ?? null,
     payload: raw.payload ?? null,
+    // BE-9525c: the normalized top-level ids (server's notification:new/REST
+    // rows carry these now; None on rows from before the change).
+    project_id: raw.project_id ?? null,
+    product_id: raw.product_id ?? null,
     read_at: raw.read_at ?? null,
     dismissed_at: raw.dismissed_at ?? null,
     // IMP-5037b Phase 1 fields — banner surface routing
@@ -131,46 +140,13 @@ export const useNotificationStore = defineStore('notifications', () => {
   // ---------------------------------------------------------------------------
   const unreadCount = computed(() => notifications.value.filter((n) => !n.read).length)
 
-  /**
-   * Badge color based on highest-priority unread notification.
-   * Priority (highest → lowest):
-   *  - severity: 'critical' | type: connection_lost | system_alert → error (red)
-   *  - severity: 'error'                                           → error (red)
-   *  - severity: 'warning' | type: agent_health | api_key.expiring_soon → warning
-   *  - severity: 'info' | type: context_tuning                    → info
-   *  - others                                                      → primary
-   * When no unread → 'error' (default badge; same as prior store behavior).
-   */
-  const badgeColor = computed(() => {
-    const unread = notifications.value.filter((n) => !n.read)
-    if (unread.length === 0) return 'error'
-
-    const hasCritical = unread.some(
-      (n) =>
-        n.severity === 'critical' ||
-        n.type === 'connection_lost' ||
-        n.type === 'system_alert',
-    )
-    if (hasCritical) return 'error'
-
-    const hasError = unread.some((n) => n.severity === 'error')
-    if (hasError) return 'error'
-
-    const hasWarning = unread.some(
-      (n) =>
-        n.severity === 'warning' ||
-        n.type === 'agent_health' ||
-        n.type === 'api_key.expiring_soon',
-    )
-    if (hasWarning) return 'warning'
-
-    const hasContextTuning = unread.some(
-      (n) => n.type === 'context_tuning' || n.severity === 'info',
-    )
-    if (hasContextTuning) return 'info'
-
-    return 'primary'
-  })
+  // FE-9553 ruling 2: there is no badgeColor any more. It ranked unread rows by
+  // severity to pick red / amber / blue for the bell, and the component turned
+  // that colour into an infinitely pulsing glow -- which is precisely the
+  // "bell alerts" behaviour the ruling removes. Urgency lives in banners
+  // exclusively; the bell is the durable archive and keeps a quiet count only.
+  // Deleted rather than left unused: its single consumer is gone, and a
+  // severity ladder sitting here unread is an invitation to wire it back up.
 
   const sortedNotifications = computed(() => {
     const sorted = [...notifications.value]
@@ -192,15 +168,30 @@ export const useNotificationStore = defineStore('notifications', () => {
    *
    * Role-filter enforcement is server-side; components add a defense-in-depth
    * guard via userHasRole(n.role_filter) before rendering.
+   *
+   * FE-9553: also honours the "Advisories in the banner fold" preference. When
+   * it is off, advisory-class rows are excluded HERE rather than in
+   * SystemStatusBanner's own filter -- one decision per preference, read by
+   * every display, instead of a filter per consumer that can drift. Off means
+   * BELL-ONLY, exactly as the settings card words it: the row stays in
+   * `notifications` and still counts toward the unseen counter, it just stops
+   * competing for the banner.
+   *
+   * Actionable rows are deliberately unaffected. Decisions, batons and mentions
+   * are always-on by ruling, so this preference must never become a general
+   * banner switch -- the classifier decides what is advisory, so a new advisory
+   * type is covered automatically and a new actionable one cannot be silenced
+   * by accident.
    */
-  const bannerNotifications = computed(() =>
-    notifications.value.filter(
-      (n) =>
-        (n.surface === 'banner' || n.surface === 'both') &&
-        n.dismissed_at == null &&
-        n.resolved_at == null,
-    ),
-  )
+  const bannerNotifications = computed(() => {
+    const advisoriesAllowed = useSettingsStore().bannerAdvisoriesInFold
+    return notifications.value.filter((n) => {
+      if (n.surface !== 'banner' && n.surface !== 'both') return false
+      if (n.dismissed_at != null || n.resolved_at != null) return false
+      if (advisoriesAllowed) return true
+      return classifySignal(n.type)?.kind !== SIGNAL_ADVISORY
+    })
+  })
 
   /**
    * IMP-6042: Single highest-precedence active banner type.
@@ -359,6 +350,39 @@ export const useNotificationStore = defineStore('notifications', () => {
     notifications.value.push(normalizeServerNotif(data))
   }
 
+  /**
+   * D16 (Headless S3d): handle a notification:updated WS event payload.
+   * Fired when upsert_by_dedupe_key refreshes an already-open row in place
+   * (e.g. a scanner's "5 pending migrations" -> "3 pending migrations").
+   * Replaces the row by id if present; otherwise behaves like a new row, since
+   * an update the client never saw the insert for is indistinguishable from new.
+   */
+  function handleWsUpdatedNotification(data) {
+    if (!data?.id) return
+    const idx = notifications.value.findIndex((n) => n.id === data.id)
+    if (idx === -1) {
+      notifications.value.push(normalizeServerNotif(data))
+      return
+    }
+    notifications.value[idx] = normalizeServerNotif(data)
+  }
+
+  /**
+   * D16 (Headless S3d): handle a notification:resolved WS event payload.
+   * Drops every id in the resolved set from the local list -- a resolved row
+   * is never returned by the default GET /api/notifications (include_resolved
+   * defaults false), so dropping it here mirrors what a fresh fetch() would
+   * already show. This is the fix for "an answered agent question sits on
+   * screen until refresh": the banner it fed (bannerNotifications) is a
+   * computed over `notifications`, so removing the row here clears it live.
+   */
+  function handleWsResolvedNotification(data) {
+    const ids = Array.isArray(data?.ids) ? data.ids : []
+    if (ids.length === 0) return
+    const idSet = new Set(ids)
+    notifications.value = notifications.value.filter((n) => !idSet.has(n.id))
+  }
+
   // ---------------------------------------------------------------------------
   // Legacy in-memory actions (preserved for backward compat)
   // ---------------------------------------------------------------------------
@@ -425,8 +449,13 @@ export const useNotificationStore = defineStore('notifications', () => {
 
   function clearForProject(projectId) {
     if (!projectId) return
+    // BE-9525c: was `n.metadata?.project_id !== projectId` -- rows written in
+    // the payload shape (server structured-payload notifications) were never
+    // cleared, since their project id lives at n.payload.project_id (or, after
+    // this project, the normalized n.project_id). projectIdOf reads all three
+    // shapes, preferring the normalized top-level one.
     notifications.value = notifications.value.filter(
-      (n) => n.metadata?.project_id !== projectId,
+      (n) => projectIdOf(n) !== projectId,
     )
     persistLocalRows()
   }
@@ -459,13 +488,14 @@ export const useNotificationStore = defineStore('notifications', () => {
     sortedNotifications,
     bannerNotifications,
     activeBannerType,
-    badgeColor,
 
     // REST-backed actions
     fetch,
     markRead,
     markDismissed,
     handleWsNewNotification,
+    handleWsUpdatedNotification,
+    handleWsResolvedNotification,
 
     // Legacy in-memory actions (preserved for backward compat)
     addNotification,

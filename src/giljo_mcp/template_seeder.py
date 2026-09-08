@@ -337,7 +337,7 @@ them to rubber-stamp every closeout trains them to ignore the dashboard.
 Verification steps:
 1. `get_workflow_status()` - all agents should be complete
 2. `get_thread_history()` on your coordination thread - drain unread; post-completion informational
-   messages typically resolve via `resolve_reactivation(action="dismiss")`, not re-spawn
+   messages typically resolve via `resume_or_dismiss_job(action="dismiss")`, not re-spawn
 3. Reviewer notes are not user approvals. Fix trivial findings (~10 lines,
    one file) inline; for the rest, `create_task()` and cite the task ID
    in `decisions_made`. Do not route reviewer noise to the user.

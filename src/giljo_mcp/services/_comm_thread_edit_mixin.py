@@ -3,12 +3,15 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Operator edits of a thread — rename and status (BE-9289b).
+"""Operator edits of a thread — rename, status, product + project tags (BE-9289b, FE-9530).
 
-Two capabilities the operator did not have. A thread could only be named at CREATE
-time, which is the top complaint about the Hub; and ``status`` was reachable only as a
+Four capabilities the operator did not have. A thread could only be named at CREATE
+time, which is the top complaint about the Hub; ``status`` was reachable only as a
 side effect of an agent posting, which is why the operator's list is a wall of stale
-"Open".
+"Open"; and — FE-9530 — a thread's ``product_id`` could only be set at create time,
+which combined with "no migration" meant every thread that
+predates mandatory product tagging would be untaggable FOREVER. This is that fix:
+retagging happens here, on touch, rather than via a bulk migration nobody asked for.
 
 Lives in its own module rather than on ``CommThreadService`` because that module is
 pinned at its shrink-only size budget — the same reason ``comm_serializers`` and
@@ -33,7 +36,7 @@ _SUBJECT_MAX = 255
 
 
 class CommThreadEditMixin:
-    """Thread rename + operator-set status. Mixed into CommThreadService."""
+    """Thread rename + operator-set status + product/project tags. Mixed into CommThreadService."""
 
     async def update_thread(
         self,
@@ -41,10 +44,16 @@ class CommThreadEditMixin:
         thread_id: str,
         subject: str | None = None,
         status: str | None = None,
+        product_id: str | None = None,
+        clear_product: bool = False,
+        project_ids: list[str] | None = None,
         settable_statuses: tuple[str, ...] = ("open", "active", "resolved", "closed"),
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
-        """Rename a thread and/or set its status. Returns the updated thread dict.
+        """Rename a thread, set its status, and/or retag its product/projects.
+
+        Returns the updated thread dict (``project_ids`` always freshly read, even
+        when this call didn't touch tags, so the response is never stale).
 
         RENAME IS REFUSED ON A PROJECT-BOUND THREAD, deliberately and readably. Such a
         thread is named after its project and is kept with that project's 360 memory, so
@@ -61,17 +70,35 @@ class CommThreadEditMixin:
 
         Status has no such restriction: resolving or closing a project thread is a
         normal operator action and says nothing about the project's identity.
+
+        ``product_id`` (FE-9530): ``None`` (the default) leaves the thread's product
+        untouched. Pass a UUID to set/change it (validated tenant-owned, mirroring
+        ``create_thread``'s own guard — a supplied id is not a capability). Pass
+        ``clear_product=True`` to explicitly null it back out to genuinely
+        product-less; ``product_id`` and ``clear_product=True`` together are refused
+        as contradictory rather than silently picking one.
+
+        ``project_ids`` (FE-9530, ruling 3 — plural, optional): ``None`` leaves the
+        thread's project TAGS untouched (the ``comm_thread_project_tags`` table, NOT
+        the single lifecycle-bound ``project_id`` column, which this method never
+        writes). An empty list ``[]`` clears every tag. A non-empty list FULL-REPLACES
+        the tag set; each id is validated tenant-owned before anything is written.
         """
         tk = self._resolve_tenant(tenant_key)
-        if subject is None and status is None:
+        if subject is None and status is None and product_id is None and not clear_product and project_ids is None:
             raise ValidationError(
-                "Nothing to update: pass a subject and/or a status.",
+                "Nothing to update: pass a subject, status, product_id/clear_product, and/or project_ids.",
                 context={"operation": "comm_thread.update", "thread_id": thread_id},
             )
         if status is not None and status not in settable_statuses:
             raise ValidationError(
                 f"status must be one of {settable_statuses}, got '{status}'.",
                 context={"operation": "comm_thread.update", "status": status},
+            )
+        if product_id and clear_product:
+            raise ValidationError(
+                "product_id and clear_product=True are contradictory — pass one or the other.",
+                context={"operation": "comm_thread.update", "thread_id": thread_id},
             )
 
         cleaned_subject: str | None = None
@@ -105,5 +132,20 @@ class CommThreadEditMixin:
                 thread.subject = cleaned_subject
             if status is not None:
                 thread.status = status
+            if product_id:
+                # BE-9420-style guard: a supplied id is not a capability. Reuses the
+                # exact check create_thread applies to the same column, via the
+                # repository it already lives on (CommThreadTenantRefsMixin).
+                from giljo_mcp.models.products import Product
+
+                await self._repo._require_owned_reference(
+                    session, tk, model=Product, row_id=product_id, field="product_id"
+                )
+                thread.product_id = product_id
+            elif clear_product:
+                thread.product_id = None
+            if project_ids is not None:
+                await self._repo.set_project_tags(session, tk, thread_id, project_ids)
             await session.flush()
-            return thread_dict(thread)
+            tags = await self._repo.get_project_tags(session, tk, thread_id)
+            return thread_dict(thread, extra_project_ids=tags)

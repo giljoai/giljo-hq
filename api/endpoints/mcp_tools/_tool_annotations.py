@@ -17,6 +17,19 @@ the three behavior hints via a single helper, ``_tool_hints()``, that every
 domain wrapper module imports directly (not through ``_base``, for the same
 file-size reason).
 
+BE-9561 -- BOTH title fields are now populated, and the duplication is
+DELIBERATE: do not "clean it up". MCP carries two of them for compatibility,
+and Anthropic's connector submission portal scans the LEGACY
+``ToolAnnotations.title``, not the canonical ``Tool.title`` -- so BE-9251's
+correct-by-spec choice of the canonical field alone made the portal flag every
+single tool with "Missing annotations: title", blocking submission. The second
+field is NOT hand-maintained at the wrapper call sites (49 titles typed twice
+is a drift generator, the exact defect class BE-9554 spent a night removing):
+``sync_annotation_titles()`` below copies the canonical title into the
+annotation once, after registration, so the two are structurally incapable of
+disagreeing. ``tests/unit/test_be9561_annotation_titles.py`` pins that equality
+on the live wire.
+
 BE-9251 audit finding (F4) -- universal liveness/heartbeat telemetry is
 INTENTIONALLY OUT OF SCOPE for readOnlyHint: ``_call_tool``'s posthook
 (``_base.py``, the ``should_run("mcp_posthooks", ...)`` block) touches
@@ -33,6 +46,9 @@ override set below to cover it, or touching the posthook itself).
 """
 
 from __future__ import annotations
+
+from collections.abc import Iterable
+from typing import Any
 
 from mcp.types import ToolAnnotations
 
@@ -107,3 +123,33 @@ def _tool_hints(name: str, *, destructive: bool = False, open_world: bool = Fals
         destructive_hint=None if read_only else destructive,
         open_world_hint=open_world,
     )
+
+
+def sync_annotation_titles(tools: Iterable[Any]) -> None:
+    """Copy each registered tool's canonical ``Tool.title`` into ``annotations.title``.
+
+    BE-9561. Run ONCE after every ``@mcp.tool`` decorator has fired (see this
+    subpackage's ``__init__``), against the tool objects the registry actually
+    stores -- ``MCPServer.list_tools()`` builds each wire ``mcp.types.Tool`` with
+    ``annotations=`` passed by reference, so a mutation here is what a directory
+    client receives.
+
+    An annotation title that is already set is LEFT ALONE (an explicit override
+    beats the copy), which also makes this idempotent. A tool with no canonical
+    title, or with no annotations block at all, raises rather than syncing
+    silently: the first is a directory-submission defect and the second means the
+    wrapper skipped ``_tool_hints()`` -- both are code errors in this repo that
+    should fail at import, in the same fail-loud spirit as ``TOOL_SCOPES[name]``
+    above.
+    """
+    for tool in tools:
+        annotations = tool.annotations
+        if annotations is None:
+            raise ValueError(
+                f"tool {tool.name!r} has no annotations block -- its wrapper must build one via _tool_hints()"
+            )
+        if not tool.title:
+            raise ValueError(f"tool {tool.name!r} has no title -- pass title= to its @mcp.tool decorator")
+        if annotations.title:
+            continue
+        tool.annotations = annotations.model_copy(update={"title": tool.title})

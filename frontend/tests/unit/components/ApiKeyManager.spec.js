@@ -1,9 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createTestingPinia } from '@pinia/testing'
 import ApiKeyManager from '@/components/ApiKeyManager.vue'
 
 // Mock the API module
+// FE-9553: a local hoisted toast spy. Without it this spec falls through to
+// the global useToast mock in tests/setup.js, which returns a FRESH vi.fn() per
+// call -- so the spy the component calls is never the spy the test sees, and no
+// toast assertion here could pass or fail for the right reason.
+const showToastSpy = vi.hoisted(() => vi.fn())
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({ showToast: showToastSpy }),
+}))
+
 vi.mock('@/services/api', () => ({
   default: {
     apiKeys: {
@@ -100,5 +109,38 @@ describe('ApiKeyManager', () => {
   it('shows "Never" for null timestamps', () => {
     const result = wrapper.vm.humanizeTimestamp(null)
     expect(result).toBe('Never')
+  })
+
+  // ── FE-9553: loadKeys is silent unless a click asked for it ──────────────
+  //
+  // loadKeys runs from onMounted AND from the post-create / post-revoke
+  // refresh. Only the latter follows a click, so only the latter may speak.
+  // Both directions asserted: a silence test alone would be satisfied by a
+  // guard that is simply always off.
+  describe('the notify opt-in (FE-9553)', () => {
+    it('says NOTHING when the mount-time load fails', async () => {
+      api.apiKeys.list.mockRejectedValue({ response: { status: 500 } })
+      showToastSpy.mockClear()
+
+      const w = mount(ApiKeyManager, { global: { plugins: [createTestingPinia({ createSpy: vi.fn })] } })
+      await flushPromises()
+
+      expect(showToastSpy).not.toHaveBeenCalled()
+      w.unmount()
+    })
+
+    it('DOES speak up when a click asked for the refresh', async () => {
+      api.apiKeys.list.mockResolvedValue({ data: [] })
+      const w = mount(ApiKeyManager, { global: { plugins: [createTestingPinia({ createSpy: vi.fn })] } })
+      await flushPromises()
+
+      api.apiKeys.list.mockRejectedValue({ response: { status: 500 } })
+      showToastSpy.mockClear()
+      await w.vm.loadKeys({ notify: true })
+      await flushPromises()
+
+      expect(showToastSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }))
+      w.unmount()
+    })
   })
 })

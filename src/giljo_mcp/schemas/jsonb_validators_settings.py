@@ -83,13 +83,15 @@ class SecuritySettingsData(BaseModel):
     """
 
     cookie_domain_whitelist: list[str] = Field(default_factory=list)
-    # BE-9084: Headless vs HITL toggle. False (default) = HITL — the human
-    # Implement gate is enforced for every jwt/OAuth mcp:agent session, so a CLI
-    # agent cannot self-advance staging->implementation (the default-safe posture).
-    # True = Headless — the tenant opted a trusted CLI/OAuth agent into
-    # self-advancing without a dashboard click. Read at the MCP launch gate
-    # (mcp_sdk_server._launch_gate_blocked). Account/tenant-scoped (ADR-009).
+    # Headless vs human-gated toggle. This model field's own default is NOT the
+    # effective tenant default: that is resolved at the single read site in
+    # SettingsService, not by this field. Read at the MCP launch gate.
+    # Account/tenant-scoped (ADR-009).
     allow_headless_launch: bool = False
+    # Marks whether this category's headless setting was set deliberately rather
+    # than persisted incidentally by a full-model write. Does not affect how the
+    # value above is read.
+    allow_headless_launch_explicit: bool = False
 
 
 # BE-9148: the ``runtime`` category (AgentRuntimeSettings/SessionRuntimeSettings/

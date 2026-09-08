@@ -28,6 +28,7 @@ from giljo_mcp.platform_registry import (
     EXPORT_CODEX_CLI,
     EXPORT_GEMINI_CLI,
     EXPORT_GENERIC,
+    EXPORT_OPENCODE,
     EXPORT_PLATFORMS,
 )
 
@@ -42,8 +43,8 @@ SKILLS_VERSION = "1.1.21"
 # =============================================================================
 
 _GILJO_DESCRIPTION = (
-    "GiljoAI dashboard -- create, read, and update projects and tasks (and chains). "
-    "Loads the server-side routing guide, then acts."
+    f"{branding.PRODUCT_NAME} dashboard -- create, read, and update projects and tasks "
+    "(and chains). Loads the server-side routing guide, then acts."
 )
 
 # Shared instruction body (platform-neutral). Command invocation differs by
@@ -64,8 +65,8 @@ _GILJO_BODY = (
     "   - the staging -> human-gate -> implement lifecycle.\n"
     f"3. Then carry out the user's request with the {branding.PRODUCT_NAME} tools.\n"
     "\n"
-    "To install or refresh GiljoAI agent templates, run the `giljo_setup` tool and choose\n"
-    '"Agents only" -- there is no separate agents command.'
+    f"To install or refresh {branding.PRODUCT_NAME} agent templates, run the `giljo_setup` "
+    'tool and choose "Agents only" -- there is no separate agents command.'
 )
 
 
@@ -77,6 +78,15 @@ description: "{_GILJO_DESCRIPTION}"
 
 {_GILJO_BODY}
 """
+
+
+# BE-9501: opencode's command format is byte-identical in contract to Claude
+# Code's -- ``description`` frontmatter plus a markdown body, filename becomes the
+# command name. Aliased rather than duplicated so the two cannot drift; if
+# opencode ever diverges, give it its own literal here. Verified against a real
+# working command file on an operator machine (the published opencode command
+# docs claim a ``template`` field is required; the working file has none).
+GILJO_OPENCODE_MD = GILJO_CLAUDE_MD
 
 
 GILJO_GEMINI_TOML = f"""description = "{_GILJO_DESCRIPTION}"
@@ -104,44 +114,44 @@ description: "{_GILJO_DESCRIPTION}"
 # BOOTSTRAP PROMPT TEMPLATES (one-time CLI onboarding -> /api/download/bootstrap-prompt)
 # =============================================================================
 
-BOOTSTRAP_CLAUDE_CODE = """Install the GiljoAI CLI command. This is a one-time setup.
+BOOTSTRAP_CLAUDE_CODE = f"""Install the {branding.PRODUCT_NAME} CLI command. This is a one-time setup.
 
 Step 1 — Install the slash command:
-Download: {SLASH_COMMANDS_URL}
+Download: {{SLASH_COMMANDS_URL}}
 Extract to: ~/.claude/commands/ (create if needed, overwrite existing)
 Delete the downloaded zip.
 
 Adapt all commands for the OS you are running on.
 After installation, tell the user:
 One command is now available:
-- /giljo — create/read/update projects and tasks (it loads the GiljoAI guide, then acts)
+- /giljo — create/read/update projects and tasks (it loads the {branding.PRODUCT_NAME} guide, then acts)
 
-To install GiljoAI agent templates, run the giljo_setup tool and choose "Agents only".
+To install {branding.PRODUCT_NAME} agent templates, run the giljo_setup tool and choose "Agents only".
 Restart Claude Code.
 Note: Download link expires in 15 minutes.
 """
 
-BOOTSTRAP_GEMINI_CLI = """Install the GiljoAI CLI command. This is a one-time setup.
+BOOTSTRAP_GEMINI_CLI = f"""Install the {branding.PRODUCT_NAME} CLI command. This is a one-time setup.
 
 Step 1 — Install the custom command:
-Download: {SLASH_COMMANDS_URL}
+Download: {{SLASH_COMMANDS_URL}}
 Extract to: ~/.gemini/commands/ (create if needed, overwrite existing)
 Delete the downloaded zip.
 
 Adapt all commands for the OS you are running on.
 After installation, tell the user:
 One command is now available:
-- /giljo — create/read/update projects and tasks (it loads the GiljoAI guide, then acts)
+- /giljo — create/read/update projects and tasks (it loads the {branding.PRODUCT_NAME} guide, then acts)
 
-To install GiljoAI agent templates, run the giljo_setup tool and choose "Agents only".
+To install {branding.PRODUCT_NAME} agent templates, run the giljo_setup tool and choose "Agents only".
 Restart Gemini CLI.
 Note: Download link expires in 15 minutes.
 """
 
-BOOTSTRAP_CODEX_CLI = """Install the GiljoAI CLI skill. This is a one-time setup.
+BOOTSTRAP_CODEX_CLI = f"""Install the {branding.PRODUCT_NAME} CLI skill. This is a one-time setup.
 
 Step 1 — Install the skill:
-Download: {SKILLS_URL}
+Download: {{SKILLS_URL}}
 Extract to: ~/.codex/skills/ (create if needed, overwrite existing)
 Delete the downloaded zip.
 
@@ -152,29 +162,29 @@ multi_agent or default_mode_request_user_input in ~/.codex/config.toml.
 Adapt all commands for the OS you are running on.
 After installation, tell the user:
 One skill is now available:
-- $giljo — create/read/update projects and tasks (it loads the GiljoAI guide, then acts)
+- $giljo — create/read/update projects and tasks (it loads the {branding.PRODUCT_NAME} guide, then acts)
 
-To install GiljoAI agent templates, run the giljo_setup tool and choose "Agents only".
+To install {branding.PRODUCT_NAME} agent templates, run the giljo_setup tool and choose "Agents only".
 Restart Codex CLI.
 Note: Download link expires in 15 minutes.
 """
 
-BOOTSTRAP_GENERIC = """Your CLI platform was not auto-detected. Visit your GiljoAI server's
-Tools -> Connect page to download the GiljoAI command reference file.
+BOOTSTRAP_GENERIC = f"""Your CLI platform was not auto-detected. Visit your {branding.PRODUCT_NAME} server's
+Tools -> Connect page to download the {branding.PRODUCT_NAME} command reference file.
 Install it according to your tool's documentation. Its job is to call the
 get_giljo_guide tool and follow it (your MCP client may expose it under a
 prefix, e.g. mcp__<server>__get_giljo_guide — use the name your harness lists).
 To install agent templates, run the giljo_setup tool and choose "Agents only".
 """
 
-BOOTSTRAP_ANTIGRAVITY_CLI = """Install the GiljoAI integration for Antigravity CLI (agy). This is a one-time setup.
+BOOTSTRAP_ANTIGRAVITY_CLI = f"""Install the {branding.PRODUCT_NAME} integration for Antigravity CLI (agy). This is a one-time setup.
 
 agy loads agents and skills ONLY from an installed plugin (not loose files). The
-GiljoAI bundle is one plugin tree: plugin.json + agents/<name>/agent.json +
+{branding.PRODUCT_NAME} bundle is one plugin tree: plugin.json + agents/<name>/agent.json +
 skills/<name>/SKILL.md, registered with `agy plugin install`.
 
 Step 1 — Download the plugin bundle:
-Download: {SLASH_COMMANDS_URL}
+Download: {{SLASH_COMMANDS_URL}}
 Extract it so the plugins/giljoai/ tree lands at ~/.gemini/config/plugins/giljoai/
 (create ~/.gemini/config/plugins/ if needed). Keep the nested layout — do NOT
 flatten it. Delete the downloaded zip.
@@ -185,14 +195,14 @@ Step 2 — Validate and install the plugin:
 Do NOT add experimental.enableAgents to any settings file — that flag is
 Gemini-CLI-only and is not used by agy.
 
-Step 3 — Connect agy to the Giljo HQ server:
-Visit your GiljoAI server's Tools -> Connect page, choose Antigravity CLI, and
+Step 3 — Connect agy to the {branding.PRODUCT_NAME} server:
+Visit your {branding.PRODUCT_NAME} server's Tools -> Connect page, choose Antigravity CLI, and
 copy the mcp_config.json snippet into ~/.gemini/config/mcp_config.json.
 IMPORTANT — if migrating an existing config from Gemini CLI: agy uses the
 `serverUrl` field, NOT `url`. A leftover `url` line causes a silent failure
 (the server lists in the UI but the agent cannot use it). Delete any `url` line.
 
-Step 4 — Restart agy. The GiljoAI agents and the $giljo skill are now available.
+Step 4 — Restart agy. The {branding.PRODUCT_NAME} agents and the $giljo skill are now available.
 To refresh agent templates later, run the giljo_setup tool and choose "Agents only".
 Note: Download link expires in 15 minutes.
 """
@@ -219,11 +229,11 @@ def _strip_yaml_frontmatter(content: str) -> str:
 _BUNDLE_NUDGE_LINE = (
     "## Skills bundle freshness (check once per session)\n"
     "\n"
-    f"This skill was generated from GiljoAI skills bundle `bundle_version: {SKILLS_VERSION}`.\n"
+    f"This skill was generated from {branding.PRODUCT_NAME} skills bundle `bundle_version: {SKILLS_VERSION}`.\n"
     f"Any {branding.PRODUCT_NAME} tool response includes `_meta.skills_version` (the version the server "
     f"currently ships). The FIRST time in a chat session that you call a {branding.PRODUCT_NAME} tool, "
     "compare that `_meta.skills_version` to this file's `bundle_version`. If the server's "
-    'version is newer, tell the user once: "Your GiljoAI skills are out of date — run '
+    f'version is newer, tell the user once: "Your {branding.PRODUCT_NAME} skills are out of date — run '
     '/giljo_setup to update." Do not repeat this notice again in the same session, and never '
     "block the user's actual request on it.\n"
 )
@@ -293,7 +303,7 @@ _VALID_PLATFORMS = EXPORT_PLATFORMS
 
 
 def get_all_templates(platform: str = "claude_code") -> dict[str, str]:
-    """Return the GiljoAI command/skill template(s) for the given platform.
+    """Return the command/skill template(s) for the given platform.
 
     INF-6049a: exactly ONE file per platform -- the thin ``/giljo`` command whose
     body calls ``get_giljo_guide`` (bare -- see ``_GILJO_BODY``).
@@ -316,6 +326,7 @@ def get_all_templates(platform: str = "claude_code") -> dict[str, str]:
     # reference markdown (frontmatter stripped).
     templates_by_platform = {
         EXPORT_CLAUDE_CODE: {"giljo.md": GILJO_CLAUDE_MD},
+        EXPORT_OPENCODE: {"giljo.md": GILJO_OPENCODE_MD},
         EXPORT_GEMINI_CLI: {"giljo.toml": GILJO_GEMINI_TOML},
         EXPORT_CODEX_CLI: {"giljo/SKILL.md": GILJO_SKILL_MD},
         EXPORT_ANTIGRAVITY_CLI: {"giljo/SKILL.md": GILJO_SKILL_MD},

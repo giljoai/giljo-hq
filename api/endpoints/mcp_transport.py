@@ -103,6 +103,23 @@ _SUPPORTED_VERSIONS: frozenset[str] = frozenset(MCP_SPEC_VERSIONS_SUPPORTED)
 _DEFAULT_SPEC_VERSION = "2025-03-26"
 _INITIALIZE_METHOD = "initialize"
 
+# BE-9586d: the SECOND way a client announces itself. A 2026-07-28 client opens with
+# ``server/discover``; when the server answers it completely -- ours does -- the client
+# has everything it needs and never sends ``initialize``. Both frames mean "a client is
+# attaching", so both must be recognised, and the set is named rather than spelled at
+# each call site so the next revision adds a member in ONE place.
+_DISCOVER_METHOD = "server/discover"
+_CLIENT_ANNOUNCING_METHODS = frozenset({_INITIALIZE_METHOD, _DISCOVER_METHOD})
+
+# Reserved request-``_meta`` key carrying client identity. Treated as an untrusted
+# display hint, like every other client-supplied identity value.
+_CLIENT_INFO_META_KEY = "io.modelcontextprotocol/clientInfo"
+
+
+def announces_client(method: str | None) -> bool:
+    """True when this frame is a client attaching (initialize or server/discover)."""
+    return method in _CLIENT_ANNOUNCING_METHODS
+
 
 async def _read_full_body(receive: Receive, *, max_bytes: int | None = None) -> bytes:
     """Drain the ASGI request body in full, optionally capping the total size.
@@ -222,7 +239,10 @@ def _peek_jsonrpc_method(body: bytes) -> str | None:
 
 
 def _peek_jsonrpc_client_info(body: bytes) -> dict[str, Any] | None:
-    """Return the JSON-RPC ``params.clientInfo`` dict for an ``initialize`` body, else ``None``.
+    """Return the announcing frame's clientInfo dict, else ``None``.
+
+    Reads ``params.clientInfo`` (initialize) and falls back to
+    ``params._meta["io.modelcontextprotocol/clientInfo"]`` (server/discover, BE-9586d).
 
     Same tolerate-malformed-body policy as :func:`_peek_jsonrpc_method` — a
     parse failure or missing/malformed field yields ``None`` rather than
@@ -242,7 +262,16 @@ def _peek_jsonrpc_client_info(body: bytes) -> dict[str, Any] | None:
     if not isinstance(params, dict):
         return None
     client_info = params.get("clientInfo")
-    return client_info if isinstance(client_info, dict) else None
+    if isinstance(client_info, dict):
+        return client_info
+    # BE-9586d: client identity may also arrive in the reserved metadata envelope.
+    # Checked as a FALLBACK so the existing path keeps its precedence.
+    meta = params.get("_meta")
+    if isinstance(meta, dict):
+        from_meta = meta.get(_CLIENT_INFO_META_KEY)
+        if isinstance(from_meta, dict):
+            return from_meta
+    return None
 
 
 def _peek_jsonrpc_protocol_version(body: bytes) -> str | None:
@@ -373,9 +402,18 @@ def _stamp_declared_profile(scope: Scope, session_row: Any) -> None:
     Reads the declared profile out of the loaded session's
     ``session_data['client_info']`` (the INF-8003d capture) and, when it names a
     known profile, writes it to ``scope['state']['tool_profile']`` so
-    :func:`_profile_toolset_from_request` can honor "declared wins". Best-effort:
-    any missing/malformed field leaves state untouched (falls back to the
-    auth-derived default). Never raises — a bookkeeping hint, not a security gate.
+    :func:`_profile_toolset_from_request` can honor "declared wins" -- subject to
+    the SAME narrow-only invariant :func:`_stamp_url_profile` already enforces for
+    the URL vehicle (BE-9499c). ``clientInfo`` is client-authored and therefore
+    untrusted, so it can never be the thing that WIDENS a privilege
+    boundary -- a declared ``full`` (or any profile the auth-derived baseline does
+    not already permit) is refused here and ``_profile_toolset_from_state``'s own
+    resolver falls back to the auth-derived default. Best-effort: any
+    missing/malformed field leaves state untouched. Never raises -- a bookkeeping
+    hint layered on TOP of a resolver that is itself now widen-proof, not the
+    thing enforcing that property (belt-and-suspenders: the check also lives in
+    ``_profile_toolset_from_state`` so a caller reading ``session_data`` directly,
+    bypassing this stamp, still cannot widen).
     """
     session_data = getattr(session_row, "session_data", None)
     if not isinstance(session_data, dict):
@@ -426,9 +464,10 @@ def _stamp_url_profile(scope: Scope) -> None:
     within it. With no ``profile`` parameter present, state is left untouched and
     resolution is byte-identical to pre-BE-9253.
 
-    Deliberately does NOT touch the pre-existing declared-``full`` widening path
-    (BE-8003k rung 1, fenced independently by BE-9084): that is a separate,
-    load-bearing vehicle. The narrow-only rule governs this URL vehicle alone.
+    BE-9499c: the declared-``clientInfo`` vehicle (rung 1) is now narrow-only
+    too, enforced inside ``_profile_toolset_from_state`` itself rather than here
+    — so this function's own subset test composes correctly with it either way
+    (its baseline read already reflects the clamped declared value).
     """
     from api.endpoints.mcp_tools import _profile_toolset_from_state
 

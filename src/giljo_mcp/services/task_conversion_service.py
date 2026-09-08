@@ -229,11 +229,11 @@ class TaskConversionService:
             )
 
         # NOTE: The new project is created INACTIVE (see below), so promoting a
-        # task must NOT touch the product's currently-active project. The
-        # "only one active project per product" rule (Handover 0050b) is enforced
-        # by the partial unique index ``idx_project_single_active_per_product``
-        # (WHERE status = 'active'); an inactive new row can never collide with it.
-        # Only the user activates/deactivates a project — conversion never does.
+        # task must NOT touch any of the product's currently-active project(s).
+        # BE-9525b (ruling 5 amended) dropped the one-active-project-per-product
+        # limit, so this is no longer index-enforced either way -- it is simply
+        # that conversion never activates anything. Only the user
+        # activates/deactivates a project — conversion never does.
 
         # IMP-6262: a converted project is born UNTYPED. TSK is task-exclusive —
         # copying the task's TSK type onto the project would mint a TSK-typed

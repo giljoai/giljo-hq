@@ -270,7 +270,7 @@ async def test_terminal_status_silences_pending_directive(comm_mcp_client):
 async def test_legacy_baton_shape_unchanged_without_directed_action(comm_mcp_client):
     """DoD-2: with no directed requires_action post, get_my_turn is byte-equivalent
     to the legacy baton behavior — directed_action is empty and the thread is
-    surfaced purely by the baton; after a plain pass_baton it leaves the holder."""
+    surfaced purely by the baton; after a plain set_next_actor it leaves the holder."""
     new_client, _tk = comm_mcp_client
     tid, _chat = await _setup_thread(new_client)  # EM holds the baton
 
@@ -279,7 +279,7 @@ async def test_legacy_baton_shape_unchanged_without_directed_action(comm_mcp_cli
     assert em_turn["directed_action"] == []
 
     async with new_client() as s:
-        handoff = await s.call_tool("pass_baton", {"thread_id": tid, "to": "lane-A"})
+        handoff = await s.call_tool("set_next_actor", {"thread_id": tid, "to": "lane-A"})
         assert handoff.is_error is False, _error_text(handoff)
 
     # Baton moved: EM no longer sees it (no directed post keeps it alive), A does.

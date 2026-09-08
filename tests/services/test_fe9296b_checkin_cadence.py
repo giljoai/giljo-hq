@@ -357,7 +357,7 @@ async def test_set_agent_status_wake_on_signal_stores_signal_marker():
 
 
 async def test_set_agent_status_wake_on_signal_wins_over_timer():
-    # An agent parked on await_my_turn has no timed wake — the timer marker
+    # An agent parked on get_my_turn has no timed wake — the timer marker
     # would lie, so the signal marker must win when both are passed.
     svc, execution = _state_service_with_mocks()
 
@@ -462,7 +462,11 @@ async def test_projectless_conductor_mission_carries_conductor_ch6(db_manager):
 
     assert "CH6: CHECK-IN CADENCE — CHAIN CONDUCTOR" in resp.full_protocol
     assert "25 minutes" in resp.full_protocol
-    assert "await_my_turn" in resp.full_protocol
+    # BE-9554: get_my_turn merged into get_my_turn(wait_seconds=). The guarantee is
+    # unchanged -- ch6 must teach the BLOCKING wake path. Asserted as both tokens
+    # rather than one literal, because the rendered call carries agent_id between
+    # them and a literal substring would pin formatting instead of behaviour.
+    assert "get_my_turn" in resp.full_protocol and "wait_seconds" in resp.full_protocol
 
 
 async def test_cli_chain_conductor_also_gets_conductor_ch6(db_manager):

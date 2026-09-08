@@ -78,7 +78,7 @@ const stubs = {
 
 function mountTable(props = {}) {
   return mount(ProjectsTable, {
-    props: { projects: [], total: 0, loading: false, hasActiveProject: false, ...props },
+    props: { projects: [], total: 0, loading: false, ...props },
     global: { stubs },
   })
 }

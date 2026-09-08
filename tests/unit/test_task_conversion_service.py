@@ -211,7 +211,7 @@ class TestConvertToProject:
         BE-9415 changed this test's meaning deliberately, and it is called out
         rather than quietly rebaselined. It previously asserted ``match="No
         active product"``: conversion resolved its destination from
-        ``get_active_product``, so an empty product lookup meant "nothing is
+        ``get_default_product``, so an empty product lookup meant "nothing is
         active". Conversion now binds to the task's own ``product_id`` and never
         consults the active product at all, so the same empty lookup now means
         "this task's product does not resolve for this tenant" -- a different

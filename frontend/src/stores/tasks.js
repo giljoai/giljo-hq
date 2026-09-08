@@ -13,6 +13,11 @@ export const useTaskStore = defineStore('tasks', () => {
   const loading = ref(false)
   const error = ref(null)
 
+  // FE-9501c (D9): the params of the LAST fetchTasks() call (post auto-product_id),
+  // so a WS-driven refresh can replay the view's current filter instead of a bare
+  // paramless refetch clobbering it. Mirrors _lastListOpts/refreshList in projects.js.
+  let _lastFetchParams = {}
+
   // Actions
   async function fetchTasks(params = {}) {
     // Don't auto-add product_id if filter_type is explicitly set (e.g., 'all_tasks')
@@ -20,6 +25,8 @@ export const useTaskStore = defineStore('tasks', () => {
     if (productStore.currentProductId && !params.product_id && !params.filter_type) {
       params.product_id = productStore.currentProductId
     }
+
+    _lastFetchParams = { ...params }
 
     loading.value = true
     error.value = null
@@ -32,6 +39,16 @@ export const useTaskStore = defineStore('tasks', () => {
     } finally {
       loading.value = false
     }
+  }
+
+  /**
+   * FE-9501c (D9): re-fetch with the SAME params as the last fetchTasks() call,
+   * not the bare default. A WS handler calling a paramless fetchTasks() on every
+   * task:created/task:updated reset the user's product/status filter out from
+   * under them -- this replays it instead.
+   */
+  async function refreshList() {
+    return fetchTasks({ ..._lastFetchParams })
   }
 
   async function fetchTask(id) {
@@ -213,6 +230,7 @@ export const useTaskStore = defineStore('tasks', () => {
 
     // Actions
     fetchTasks,
+    refreshList,
     fetchTask,
     createTask,
     updateTask,

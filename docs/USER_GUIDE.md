@@ -104,7 +104,7 @@ Common banners:
 
 ## Dashboard
 
-The Dashboard shows system-wide statistics for the active product.
+The Dashboard shows system-wide statistics across your account.
 
 ### Stat Pills
 
@@ -209,7 +209,7 @@ The workflow:
 
 The `context_tuning` notification in the bell menu appears after a tuning pass applies changes to a product.
 
-Only one product can be active at a time. Activating a new product while another is active shows a confirmation dialog.
+You can show several products at once, each in its own tab.
 
 ---
 
@@ -217,7 +217,7 @@ Only one product can be active at a time. Activating a new product while another
 
 ### Creating a Project
 
-Click "New Project" to open the project form. Each project belongs to the active product. Fields:
+Click "New Project" to open the project form. Each project belongs to a product: the one you're viewing, or the one you name when you create it. Fields:
 
 - **Name (required):** Free text description of the work.
 - **Description:** What this project delivers.
@@ -272,7 +272,7 @@ Running agents unattended (**headless**) is a separate, account-level switch in 
 On the Staging tab, the stage button walks through its own states as you go: **Stage Project → Staging… → Unstage** (to back out) → **Re-Stage** (to recover a staged-but-not-yet-launched project). It is disabled once implementation has launched. Staging generates the orchestrator prompt (your product context, 360 Memory, project description, and agent template definitions) for you to paste into your connected tool.
 
 - **Staged:** the prompt is ready; the staged indicator shows a green checkmark in the project table.
-- **Active:** the project is currently running. Only one project per product can be active at a time.
+- **Active:** the project is currently running. Several projects can be active in the same product at once.
 
 If a staging orchestrator finishes without spawning any specialist agents, staging is blocked and the project stays re-stageable (the **Implement** button stays disabled) so you can stage it again — it will not be left in a broken state.
 
@@ -288,7 +288,7 @@ Once staging completes and you have chosen a mode, click **Implement** to launch
 
 ## Roadmap
 
-The **Roadmap** (in the left navigation) is a single ranked plan of what to build next for your active product. It pulls together the product's **inactive projects and pending tasks** and orders them, with a risk and complexity score on each. There is one roadmap per active product.
+The **Roadmap** (in the left navigation) is a single ranked plan of what to build next for the product you're viewing. It pulls together the product's **inactive projects and pending tasks** and orders them, with a risk and complexity score on each. There is one roadmap per product.
 
 ### Who Ranks It
 

@@ -20,6 +20,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
@@ -33,6 +34,7 @@ from giljo_mcp.models import (
     AgentExecution,
     AgentJob,
     AgentTodoItem,
+    Project,
 )
 from giljo_mcp.repositories.progress_repository import ProgressRepository
 from giljo_mcp.schemas.service_responses import ProgressResult
@@ -236,6 +238,18 @@ class ProgressService:
                 # query at all.
                 todo_items_payload = await self._resolve_todo_payload(session, tenant_key, job_id, todo_items)
 
+                # BE-9525c: job:progress_update was one of the emitters BE-9518 left
+                # without product_id ("do not reliably carry product_id" per the FE
+                # router's own comment). One cheap extra lookup, on the same open
+                # session, so the broadcast below can carry it. None for a
+                # project-less job (there is no such case for report_progress today,
+                # but the column is nullable on AgentJob in principle).
+                product_id: str | None = None
+                if job and job.project_id:
+                    product_id = await session.scalar(
+                        select(Project.product_id).where(Project.tenant_key == tenant_key, Project.id == job.project_id)
+                    )
+
             if not job:
                 raise ResourceNotFoundError(
                     message=f"Job {job_id} not found after commit",
@@ -252,6 +266,7 @@ class ProgressService:
                 blocked_to_working,
                 old_resting_status=old_resting_status,
                 todo_items_payload=todo_items_payload,
+                product_id=product_id,
             )
         except (ValidationError, ResourceNotFoundError):
             raise
@@ -300,11 +315,15 @@ class ProgressService:
         execution: "AgentExecution",
         progress: dict[str, Any],
         todo_items_payload: list[dict] | None,
+        product_id: str | None = None,
     ) -> None:
         """Broadcast progress update via WebSocket using an in-hand todo payload.
 
         BE-6070 (F8b): the payload is computed by the caller on the request's open
         session, so this method no longer opens a 2nd session to re-SELECT rows.
+
+        BE-9525c: ``product_id`` is additive, resolved by the caller on the same
+        open session (this emitter never queries for it itself).
         """
         # Handover 0386: Direct WebSocket emission for progress updates
         # BE-9012d: MessageService/send_message are retired; this note is historical
@@ -319,6 +338,9 @@ class ProgressService:
                     data={
                         "job_id": job_id,
                         "project_id": str(job.project_id) if job.project_id else None,
+                        # BE-9525c: additive -- was missing on this emitter (BE-9518
+                        # left it out); None for a project-less job, same as project_id.
+                        "product_id": product_id,
                         # BE-6229: ride the chain_conductor flag on the WS payload
                         # (mirrors the REST serializer) so the FE JobsTab filter can
                         # exclude the project-less conductor on the live path too —
@@ -687,6 +709,7 @@ class ProgressService:
         blocked_to_working: bool,
         old_resting_status: str | None = None,
         todo_items_payload: list[dict] | None = None,
+        product_id: str | None = None,
     ) -> ProgressResult:
         """Broadcast WebSocket events and return the progress result with warnings."""
         # Broadcast resting->working AFTER commit succeeds (not before)
@@ -718,7 +741,9 @@ class ProgressService:
                     execution.agent_id,
                 )
 
-        await self._fetch_and_broadcast_progress(tenant_key, job_id, job, execution, progress, todo_items_payload)
+        await self._fetch_and_broadcast_progress(
+            tenant_key, job_id, job, execution, progress, todo_items_payload, product_id=product_id
+        )
 
         # Handover 0406: Reactive warning for missing todo_items
         warnings: list[str] = []

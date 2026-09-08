@@ -598,11 +598,13 @@ async def test_history_after_and_since_mutually_exclusive_returns_400(api_client
 async def test_post_to_a_display_label_is_refused_cleanly_not_a_500(api_client: AsyncClient, db_manager) -> None:
     """BE-9292a-F1 second-order guard at the REST layer.
 
-    This route forwards no baton, so before the ADDRESSEE was screened the service
-    could never refuse it and every ``result["message_id"]`` access below was safe. A
-    directed post naming a display label is declined now, and a rejection carries no
-    ``message_id`` — so without the early return the clean refusal became a KeyError
-    500 on the reactivation hop and the WS fan-out.
+    Before BE-9560 this route forwarded no baton, so before the ADDRESSEE was
+    screened the service could never refuse it and every ``result["message_id"]``
+    access below was safe. A directed post naming a display label is declined
+    (BE-9560 forwards ``pass_baton_to=to_participant`` on every directed reply, so
+    the SAME screening the baton hand-off already ran now runs here too), and a
+    rejection carries no ``message_id`` — so without the early return the clean
+    refusal became a KeyError 500 on the reactivation hop and the WS fan-out.
     """
     seed = await _seed_tenant(db_manager)
     thread = await _create_thread(api_client, seed["headers"])
