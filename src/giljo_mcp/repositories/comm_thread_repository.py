@@ -56,7 +56,9 @@ from giljo_mcp.repositories._comm_thread_keyset import (
 )
 from giljo_mcp.repositories._comm_thread_list_enrichment_mixin import CommThreadListEnrichmentMixin
 from giljo_mcp.repositories._comm_thread_participants_mixin import CommThreadParticipantsMixin
+from giljo_mcp.repositories._comm_thread_project_tags_mixin import CommThreadProjectTagsMixin
 from giljo_mcp.repositories._comm_thread_tenant_refs_mixin import CommThreadTenantRefsMixin
+from giljo_mcp.repositories._comm_thread_unread_mentions_mixin import CommThreadUnreadMentionsMixin
 from giljo_mcp.repositories.taxonomy_repository import TaxonomyRepository
 from giljo_mcp.schemas.comm_jsonb_validators import validate_comm_thread_resolution
 from giljo_mcp.utils.log_sanitizer import sanitize
@@ -70,7 +72,9 @@ class CommThreadRepository(
     CommThreadDirectedActionsMixin,
     CommThreadListEnrichmentMixin,
     CommThreadParticipantsMixin,
+    CommThreadProjectTagsMixin,
     CommThreadTenantRefsMixin,
+    CommThreadUnreadMentionsMixin,
 ):
     """Data access for comm_threads / comm_participants."""
 

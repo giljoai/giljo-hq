@@ -7,7 +7,6 @@
 Prompt Generation API endpoints for Handover 0073: Static Agent Grid.
 
 Provides REST API for generating executable prompts:
-- GET /api/prompts/orchestrator/{tool} - Generate orchestrator prompt
 - GET /api/prompts/agent/{agent_id} - Generate agent prompt
 - GET /api/prompts/staging/{project_id} - Generate comprehensive orchestrator staging prompt (Handover 0079)
 
@@ -16,10 +15,9 @@ All endpoints enforce multi-tenant isolation and authentication.
 
 import logging
 from datetime import UTC, datetime
-from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -30,7 +28,6 @@ from api.schemas.prompt import (
     ChainPromptResponse,
     ImplementationPromptResponse,
     OrchestratorPromptRequest,
-    OrchestratorPromptResponse,
     StagingPromptResponse,
     TerminationPromptResponse,
     ThinOrchestratorPromptResponse,
@@ -66,101 +63,6 @@ router = APIRouter()
 # exactly as the prior inline ``pattern=`` literals were.
 _TOOL_TYPE_PATTERN = tool_type_pattern()
 _EXECUTION_MODE_PATTERN = execution_mode_pattern()
-
-
-@router.get("/orchestrator/{tool}", response_model=OrchestratorPromptResponse)
-async def generate_orchestrator_prompt(
-    tool: Literal["claude-code", "codex-gemini"],
-    project_id: str = Query(..., description="Project ID"),
-    current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db_session),
-):
-    """
-    Generate orchestrator prompt for specified AI tool.
-
-    Generates executable bash commands that invoke the orchestrator with
-    project context and agent coordination. Supports Claude Code and Codex/Gemini.
-
-    Args:
-        tool: AI tool type (claude-code or codex-gemini)
-        project_id: Project ID to orchestrate
-        current_user: Authenticated user (from dependency)
-        db: Database session (from dependency)
-
-    Returns:
-        OrchestratorPromptResponse with prompt, instructions, and metadata
-
-    Raises:
-        404: Project not found or not accessible
-        403: User not authorized to access project
-    """
-    # Get project with tenant isolation
-    stmt = select(Project).where(Project.id == project_id, Project.tenant_key == current_user.tenant_key)
-    result = await db.execute(stmt)
-    project = result.scalar_one_or_none()
-
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"Project {project_id} not found or not accessible"
-        )
-
-    # Count agents in project (via AgentExecution)
-    agent_count_stmt = (
-        select(func.count(AgentExecution.agent_id))
-        .where(AgentExecution.tenant_key == current_user.tenant_key)
-        .join(AgentJob, (AgentJob.job_id == AgentExecution.job_id) & (AgentJob.tenant_key == AgentExecution.tenant_key))
-        .where(AgentJob.project_id == project_id)
-    )
-    agent_count_result = await db.execute(agent_count_stmt)
-    agent_count = agent_count_result.scalar() or 0
-
-    # Default project path
-    project_path = "."
-
-    # Generate prompt based on tool type
-    if tool == "claude-code":
-        prompt = f"""cd {project_path}
-claude-code orchestrate \\
-  --project-id={project.id} \\
-  --mission="{project.mission}" \\
-  --agents={agent_count}"""
-
-        instructions = """Copy the command above and paste it into your terminal.
-Claude Code will orchestrate the project with AI agent coordination.
-
-Prerequisites:
-- Claude Code must be installed and configured
-- You must be in the project directory or use the cd command above
-- Project mission will guide agent collaboration"""
-
-    else:  # codex-gemini
-        prompt = f"""cd {project_path}
-export PROJECT_ID={project.id}
-export MISSION="{project.mission}"
-export AGENTS={agent_count}
-
-# For Codex:
-# codex orchestrate
-
-# For Gemini:
-# gemini orchestrate"""
-
-        instructions = """Copy the export commands and orchestrator invocation to your terminal.
-Choose either Codex or Gemini based on your installed tools.
-
-Prerequisites:
-- Codex or Gemini CLI must be installed
-- Environment variables will be available to the orchestrator
-- Uncomment the appropriate orchestrate command"""
-
-    return OrchestratorPromptResponse(
-        prompt=prompt,
-        tool=tool,
-        instructions=instructions,
-        project_name=project.name,
-        project_id=project.id,
-        agent_count=agent_count,
-    )
 
 
 @router.post("/prompts/orchestrator-thin", response_model=ThinOrchestratorPromptResponse)
@@ -199,7 +101,6 @@ async def generate_orchestrator_prompt_thin(
         project_id = request.project_id
         tool = request.tool or "universal"
 
-        # Create thin prompt generator
         generator = ThinClientPromptGenerator(db, current_user.tenant_key)
 
         # Handover 0840d: Let generate() fetch toggles from user_field_priorities table
@@ -221,6 +122,7 @@ async def generate_orchestrator_prompt_thin(
                 execution_id=result.get("execution_id"),  # no agent_id here -> this IS the store unique_key
                 estimated_tokens=result["estimated_prompt_tokens"],
                 timestamp=datetime.now(UTC).isoformat(),
+                product_id=result.get("product_id"),  # BE-9518
             )
 
         return ThinOrchestratorPromptResponse(
@@ -482,6 +384,7 @@ async def generate_staging_prompt(
                 # agree; full rationale at _IDENTITY_FIELDS in the integration test.
                 execution_id=result.get("execution_id"),
                 tool=tool,
+                product_id=result.get("product_id"),  # BE-9518
             )
             logger.info(
                 "[STAGING PROMPT THIN] WebSocket broadcast sent for orchestrator %s",

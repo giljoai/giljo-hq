@@ -18,7 +18,7 @@ Test Coverage:
 - delete_product: ResourceNotFoundError, DatabaseError
 - restore_product: ResourceNotFoundError, DatabaseError
 - list_deleted_products: DatabaseError
-- get_active_product: DatabaseError
+- get_default_product: DatabaseError
 - get_product_statistics: ResourceNotFoundError, DatabaseError
 - get_cascade_impact: ResourceNotFoundError, DatabaseError
 - upload_vision_document: ResourceNotFoundError, ValidationError, DatabaseError
@@ -320,7 +320,7 @@ class TestQueryMethodExceptions:
         assert "List failed" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_get_active_product_raises_database_error_on_db_failure(self):
+    async def test_get_default_product_raises_database_error_on_db_failure(self):
         """Should raise DatabaseError when database operation fails."""
         db_manager = Mock()
 
@@ -332,7 +332,7 @@ class TestQueryMethodExceptions:
         service = ProductService(db_manager, "test-tenant")
 
         with pytest.raises(BaseGiljoError) as exc_info:
-            await service.get_active_product()
+            await service.get_default_product()
 
         assert "Query failed" in str(exc_info.value)
 

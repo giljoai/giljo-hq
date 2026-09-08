@@ -33,7 +33,7 @@ Behaviors under test (over the wire, the layer the bug lives at per CLAUDE.md):
 - the directed auto-pass to a first-contact recipient still works (that post
   enrols its own target, so the hand-off is deliverable by the time it lands);
 - reserved 'all' / 'none' are untouched;
-- ``pass_baton`` refuses the same undeliverable target.
+- ``set_next_actor`` refuses the same undeliverable target.
 """
 
 from __future__ import annotations
@@ -282,7 +282,7 @@ async def test_pass_baton_tool_refuses_the_same_undeliverable_target(comm_mcp_cl
     new_client, _tk, _sess = comm_mcp_client
     tid = await _thread_with_em(new_client)
 
-    res = await _call(new_client, "pass_baton", {"thread_id": tid, "to": "ghost-conductor"})
+    res = await _call(new_client, "set_next_actor", {"thread_id": tid, "to": "ghost-conductor"})
     assert res.is_error is False, _error_text(res)
     body = _payload(res)
     assert body["success"] is False
@@ -601,11 +601,11 @@ async def test_an_agent_can_hand_the_baton_to_the_operator_by_the_name_user(comm
 
 async def test_pass_baton_accepts_the_operator_alias_too(comm_mcp_client):
     """Both entry points, or the alias is a trap: an agent that learns it from
-    post_to_thread would reasonably try it on pass_baton and strand the turn."""
+    post_to_thread would reasonably try it on set_next_actor and strand the turn."""
     new_client, tenant_key, db_session = comm_mcp_client
     tid = await _thread_with_em(new_client)
 
-    res = await _call(new_client, "pass_baton", {"thread_id": tid, "to": "user"})
+    res = await _call(new_client, "set_next_actor", {"thread_id": tid, "to": "user"})
     assert res.is_error is False, _error_text(res)
 
     operator_id = await _the_operator(db_session, tenant_key)

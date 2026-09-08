@@ -76,13 +76,18 @@ vi.mock('@/stores/user', () => ({
   }),
 }))
 
+// Mutable so FE-9524's "viewed tab wins over the legacy global slot" test
+// (below) can diverge activeProduct from effectiveProductId; every other
+// test leaves both at 'prod-1', matching the pre-existing fixture.
+const productStoreState = {
+  activeProduct: { id: 'prod-1', name: 'Test Product' },
+  hasProducts: true,
+  effectiveProductId: 'prod-1',
+  fetchProducts: vi.fn().mockResolvedValue(),
+}
+
 vi.mock('@/stores/products', () => ({
-  useProductStore: () => ({
-    activeProduct: { id: 'prod-1', name: 'Test Product' },
-    hasProducts: true,
-    effectiveProductId: 'prod-1',
-    fetchProducts: vi.fn().mockResolvedValue(),
-  }),
+  useProductStore: () => productStoreState,
 }))
 
 vi.mock('@/stores/projects', () => ({
@@ -250,10 +255,30 @@ describe('WelcomeView — step-4 template-card bootstrap', () => {
     createProjectMock.mockClear()
     createProjectMock.mockResolvedValue({ id: 'proj-new' })
     showToastMock.mockClear()
+    productStoreState.activeProduct = { id: 'prod-1', name: 'Test Product' }
+    productStoreState.effectiveProductId = 'prod-1'
   })
 
   afterEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('FE-9524/D1: template create uses the VIEWED tab, not the legacy activeProduct slot, when they diverge', async () => {
+    // Several products may be shown at once; activeProduct is now just the
+    // most-recently-shown one, not necessarily the tab on screen.
+    productStoreState.activeProduct = { id: 'prod-other-shown', name: 'Some Other Shown Product' }
+    productStoreState.effectiveProductId = 'prod-1'
+
+    const wrapper = await mountWelcome()
+    await flushPromises()
+
+    const card = wrapper.find(`[data-template-id="${PROJECT_TEMPLATES[0].id}"]`)
+    await card.trigger('click')
+    await flushPromises()
+
+    expect(createProjectMock).toHaveBeenCalledWith(
+      expect.objectContaining({ product_id: 'prod-1' }),
+    )
   })
 
   it('renders three quick-launch cards in order: [newProjectCard, template[0], template[1]]', async () => {

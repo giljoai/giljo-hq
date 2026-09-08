@@ -153,7 +153,30 @@ EXPECTED_ROUTE_SIGNATURES = frozenset(
 # thread could previously only be named at CREATE time, and status moved only as a
 # side effect of an agent posting.
 # FE-9296b: +2 (GET/PUT /api/v1/settings/system/agent-checkin-cadence)
-EXPECTED_ROUTE_COUNT = 249
+# FE-9503a: 249 -> 248 for the deleted zero-caller GET /api/v1/prompts/orchestrator/{tool}
+# FE-9555: 249 -> 252 for three additive routes, all reads or account-scoped writes,
+# none of them replacing or shadowing an existing one:
+#   POST /api/v1/prompts/master -- the board-level "Launch staged..." master prompt.
+#     Mints a prompt and writes NOTHING (ruling 4: the UI door never executes); it
+#     lives in its own module because api/endpoints/prompts.py is on a shrink-only
+#     size budget and may not grow.
+#   GET + PUT /api/v1/settings/execution-mode-default -- the one account default
+#     behind Tools -> Agents, which decides whether staging asks how the
+#     work should run or uses a set mode.
+# FE-9586: 252 -> 253 for the additive POST /api/v1/threads/{thread_id}/read --
+#   the operator's read watermark. comm_participants.last_read_at was advanced
+#   only by agents over MCP, so the dashboard could not record that a human had
+#   read a thread and the card's unread flag stayed true forever. Writes one
+#   viewer's cursor, replaces nothing, shadows nothing.
+# FE-9586: 253 -> 254 for the additive GET /api/v1/threads/attention -- the ONE
+#   read behind the thread-post banner family (unread mentions + pending directed
+#   asks). Read-only, operator-scoped, and deliberately NOT folded into /my-turn,
+#   which is agent-shaped and part of the MCP tool contract.
+# BE-9591: 254 -> 255 for the additive DELETE /api/connect/connections/{harness} --
+#   "Remove tool" forgetting a stored connection. Until this, removal touched
+#   nothing durable, so a removed tool went green again from history the moment it
+#   was re-added. Tenant-scoped from the principal, scoped to one harness's rows.
+EXPECTED_ROUTE_COUNT = 255
 
 # FULL frozen route-signature set — the STRICT set-equality lock. Snapshotted
 # from the UNMODIFIED 1,237-line api/app.py (git HEAD~1, the BE-6042a pilot) and
@@ -194,6 +217,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/auth/register", frozenset({"POST"})),
         ("/api/auth/verify-pin", frozenset({"POST"})),
         ("/api/auth/verify-pin-and-reset-password", frozenset({"POST"})),
+        ("/api/connect/connections/{harness}", frozenset({"DELETE"})),  # BE-9591: remove tool
         ("/api/connect/credential-status", frozenset({"GET"})),
         ("/api/download/agent-templates.zip", frozenset({"GET"})),
         ("/api/download/bootstrap-prompt", frozenset({"GET"})),
@@ -266,6 +290,10 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/products/{product_id}/memory-entries", frozenset({"GET"})),
         ("/api/v1/products/{product_id}/purge", frozenset({"DELETE"})),
         ("/api/v1/products/{product_id}/restore", frozenset({"POST"})),
+        # FE-9524: DEFAULT (read-fallback) is now a separate concept from
+        # SHOWN/HIDDEN -- no UI control calls this yet (operator's own pending
+        # affordance decision), but the capability is complete and testable.
+        ("/api/v1/products/{product_id}/set-default", frozenset({"POST"})),
         ("/api/v1/products/{product_id}/tuning/generate-prompt", frozenset({"POST"})),
         ("/api/v1/products/{product_id}/tuning/sections", frozenset({"GET"})),
         ("/api/v1/products/{product_id}/vision", frozenset({"GET"})),
@@ -305,7 +333,8 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/prompts/chain-implementation/{run_id}", frozenset({"GET"})),
         ("/api/v1/prompts/chain-staging/{run_id}", frozenset({"GET"})),
         ("/api/v1/prompts/implementation/{project_id}", frozenset({"GET"})),
-        ("/api/v1/prompts/orchestrator/{tool}", frozenset({"GET"})),
+        # FE-9555 (see the count note above).
+        ("/api/v1/prompts/master", frozenset({"POST"})),
         ("/api/v1/prompts/prompts/orchestrator-thin", frozenset({"POST"})),
         ("/api/v1/prompts/staging/{project_id}", frozenset({"GET"})),
         ("/api/v1/prompts/termination/{project_id}", frozenset({"GET"})),
@@ -321,6 +350,9 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/sequence-runs/{run_id}/members/{project_id}/review", frozenset({"POST"})),
         ("/api/v1/sequence-runs/{run_id}/release", frozenset({"POST"})),
         ("/api/v1/settings/database", frozenset({"GET"})),
+        # FE-9555 (see the count note above).
+        ("/api/v1/settings/execution-mode-default", frozenset({"GET"})),
+        ("/api/v1/settings/execution-mode-default", frozenset({"PUT"})),
         ("/api/v1/settings/general", frozenset({"GET"})),
         ("/api/v1/settings/general", frozenset({"PUT"})),
         ("/api/v1/settings/system/agent-checkin-cadence", frozenset({"GET"})),
@@ -370,6 +402,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/threads", frozenset({"GET"})),
         ("/api/v1/threads", frozenset({"POST"})),
         ("/api/v1/threads/deleted", frozenset({"GET"})),
+        ("/api/v1/threads/attention", frozenset({"GET"})),  # FE-9586: banner family read
         ("/api/v1/threads/my-turn", frozenset({"GET"})),
         ("/api/v1/threads/search", frozenset({"GET"})),
         ("/api/v1/threads/{thread_id}", frozenset({"GET"})),
@@ -378,6 +411,7 @@ EXPECTED_FULL_ROUTE_SIGNATURES = frozenset(
         ("/api/v1/threads/{thread_id}/baton", frozenset({"POST"})),
         ("/api/v1/threads/{thread_id}/participants", frozenset({"GET"})),
         ("/api/v1/threads/{thread_id}/post", frozenset({"POST"})),
+        ("/api/v1/threads/{thread_id}/read", frozenset({"POST"})),  # FE-9586: operator read watermark
         ("/api/v1/threads/{thread_id}/restore", frozenset({"POST"})),
         ("/api/v1/user/settings/cookie-domains", frozenset({"DELETE"})),
         ("/api/v1/user/settings/cookie-domains", frozenset({"GET"})),

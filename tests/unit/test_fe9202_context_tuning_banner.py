@@ -49,7 +49,7 @@ def _patch_gate(monkeypatch, *, product, user_id="user-1", staleness):
     async def _staleness(_self, *, product_id, user_id):
         return staleness
 
-    monkeypatch.setattr("giljo_mcp.services.product_service.ProductService.get_active_product", _get_active)
+    monkeypatch.setattr("giljo_mcp.services.product_service.ProductService.get_default_product", _get_active)
     monkeypatch.setattr(ctb, "_resolve_active_user_id", _resolve)
     monkeypatch.setattr(
         "giljo_mcp.services.product_tuning_service.ProductTuningService.check_tuning_staleness",
@@ -183,7 +183,7 @@ class TestThresholdGovernsCadence:
             },
         )
 
-        monkeypatch.setattr("giljo_mcp.services.product_service.ProductService.get_active_product", _get_active)
+        monkeypatch.setattr("giljo_mcp.services.product_service.ProductService.get_default_product", _get_active)
         monkeypatch.setattr(ctb, "_resolve_active_user_id", _resolve)
         monkeypatch.setattr(
             "giljo_mcp.repositories.product_repository.ProductRepository.get_by_id",

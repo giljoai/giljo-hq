@@ -3,9 +3,9 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6208b repo-layer regression — search_threads must not 500 on a UUID query.
+"""BE-6208b repo-layer regression — list_threads must not 500 on a UUID query.
 
-Bug: search_threads extracted all digits from the query and cast to int for a
+Bug: list_threads extracted all digits from the query and cast to int for a
 serial-equality match. A 36-char UUID yields a huge integer that overflows the
 serial column's 32-bit cast -> Postgres 500. Fix: only take the serial branch
 when the digit string is a plausible serial length (<= 9 digits).

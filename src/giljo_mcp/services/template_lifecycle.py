@@ -51,9 +51,22 @@ async def purge_expired_deleted_templates(service: Any, tenant_key: str | None =
     ``restore_template`` refuses to recover past). Performs the same hard-delete
     steps the removed ``hard_delete_template`` method used (nullify historical
     AgentJob refs -> delete TemplateArchive version history -> delete the
-    template); those steps are FK-safe for the template's self-references.
-    Returns the count purged; tenant-isolated and idempotent (re-running finds
-    none).
+    template). Returns the count purged; tenant-isolated and idempotent
+    (re-running finds none).
+
+    BE-9531: each template purges inside a SAVEPOINT. The per-template
+    ``except`` below has always been here to stop one bad row ending the sweep,
+    but without a savepoint it did the opposite -- a failed flush leaves the
+    session in a rolled-back state, so the failure took every LATER template
+    with it and reported itself as "this Session's transaction has been rolled
+    back" rather than as its own cause. The savepoint makes the isolation the
+    ``except`` was always written to provide actually exist.
+
+    This docstring used to claim the steps were "FK-safe". They were not --
+    deleting a template still assigned to a product violated
+    ``product_agent_assignments``'s NOT NULL ``template_id``. That claim is
+    removed rather than reworded: the cascade fix on the relationship is what
+    makes the delete safe now.
     """
     effective_tenant_key = tenant_key or service.tenant_manager.get_current_tenant()
     if not effective_tenant_key:
@@ -67,10 +80,11 @@ async def purge_expired_deleted_templates(service: Any, tenant_key: str | None =
                 if not recover_window_expired(template.deleted_at):
                     continue
                 try:
-                    await service._repo.nullify_job_template_refs(session, template.id)
-                    await service._repo.delete_archives(session, template.id)
-                    await service._repo.delete_template(session, template)
-                    await service._repo.flush(session)
+                    async with session.begin_nested():
+                        await service._repo.nullify_job_template_refs(session, template.id)
+                        await service._repo.delete_archives(session, template.id)
+                        await service._repo.delete_template(session, template)
+                        await service._repo.flush(session)
                     purged += 1
                 except Exception:
                     service._logger.exception("Reaper failed to purge template %s", template.id)

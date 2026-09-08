@@ -3,9 +3,9 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9292b / audit F1 — why the close_job recovery hint can be disarmed, characterized.
+"""BE-9292b / audit F1 — why the finalize_job recovery hint can be disarmed, characterized.
 
-AUDIT_9292B found that the ``close_job`` wrong-state recovery hint fires only while the
+AUDIT_9292B found that the ``finalize_job`` wrong-state recovery hint fires only while the
 execution reads literally ``'silent'``, and that ``_base._call_tool``'s ``auto_clear_silent``
 post-hook flips that flag on ANY successful MCP call carrying the job_id — including an
 orchestrator's own read ABOUT the stalled job. The auditor proposed re-gating the hint on

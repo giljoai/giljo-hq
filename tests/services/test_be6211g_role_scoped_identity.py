@@ -81,12 +81,17 @@ _TOOLS = ("multi_terminal", "claude-code", "codex", "gemini", "antigravity")
 # reading the diff: replacing just that one name substring back in the newly
 # composed text reproduces the previous golden EXACTLY for all five tools, which
 # is only possible if nothing else moved.
+# BE-9563 re-base. The seed named `resolve_reactivation`, retired by BE-9554, and
+# the claude-code ToolSearch bundle named `close_job` + `resolve_reactivation` -- so
+# the frozen bytes were freezing a false instruction. The ONLY deltas are the seed
+# line (all five tools) and the ToolSearch line (claude-code only). Nothing else in
+# the identity moved.
 _SOLO_IDENTITY_SHA256 = {
-    "multi_terminal": "3b17f3ff087b11d7a6481695342770f289bb3d9d5b4ae7d4aa3c1255b31eb8e1",
-    "claude-code": "bbfc8c66cd180fdc57ddc2592376b8dc04b0e58b9b36235b02fc4ed4eb966f96",
-    "codex": "3b17f3ff087b11d7a6481695342770f289bb3d9d5b4ae7d4aa3c1255b31eb8e1",
-    "gemini": "3b17f3ff087b11d7a6481695342770f289bb3d9d5b4ae7d4aa3c1255b31eb8e1",
-    "antigravity": "3b17f3ff087b11d7a6481695342770f289bb3d9d5b4ae7d4aa3c1255b31eb8e1",
+    "multi_terminal": "749b71c4ee8f84eecd91e569a799167f21d069d56d79734fed4fb73d28c9cc37",
+    "claude-code": "74dc77be7f5f0315533081007fcbfaf017ecf3d845d1905e473681d73ea50586",
+    "codex": "749b71c4ee8f84eecd91e569a799167f21d069d56d79734fed4fb73d28c9cc37",
+    "gemini": "749b71c4ee8f84eecd91e569a799167f21d069d56d79734fed4fb73d28c9cc37",
+    "antigravity": "749b71c4ee8f84eecd91e569a799167f21d069d56d79734fed4fb73d28c9cc37",
 }
 
 # Verbatim seed anchors the conductor trim removes / retains.

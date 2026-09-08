@@ -148,8 +148,9 @@ async def test_create_product_happy_path(bootstrap_mcp_client, db_session, prima
     assert payload["success"] is True
     assert payload["product_id"]
     assert payload["name"] == name
-    # A bootstrapped product starts INACTIVE — activation is the user's review action.
-    assert payload["is_active"] is False
+    # FE-9524/D1: a bootstrapped product is shown by default -- no on/off
+    # ceremony left for the user to perform.
+    assert payload["is_active"] is True
     assert payload["target_platforms"] == ["all"]
 
     # The row landed tenant-scoped. (tenant_session_context authorizes this

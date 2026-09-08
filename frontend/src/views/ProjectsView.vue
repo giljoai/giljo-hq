@@ -32,9 +32,9 @@
       </v-col>
     </v-row>
 
-    <!-- No Active Product Alert -->
+    <!-- No Product Open Alert -->
     <v-alert v-if="!activeProduct" type="info" variant="tonal" class="ma-4 main-window-reveal main-window-delay-2" closable>
-      No active product selected. Please activate a product to view and manage its projects.
+      No product is open. Add a product to view and manage its projects.
     </v-alert>
 
     <!-- Filter Bar -->
@@ -140,7 +140,6 @@
       :projects="projects"
       :total="projectsTotal"
       :loading="loading"
-      :has-active-project="hasActiveProject"
       :selected-ids="selectedIds"
       :election-active="electionActive"
       :in-chain-ids="sequenceRunStore.activeChainProjectIds"
@@ -406,7 +405,15 @@ const reviewProductId = ref(null)
 const projectTypes = ref([])
 
 // Store computeds
-const activeProduct = computed(() => productStore.activeProduct)
+// FE-9502c: this view scopes project creation/browsing by the VIEWED tab
+// (productStore.currentProduct), not the server's single "active product".
+// Was productStore.activeProduct -- with two tabs open, that would have
+// created/listed projects under whichever product happened to be
+// server-active, not the one the user is actually looking at. Kept the
+// `activeProduct` name (threaded through useProjectFilters + the template
+// below) since it's purely "the product this view is scoped to", which the
+// viewed tab now answers.
+const activeProduct = computed(() => productStore.currentProduct)
 // BE-6076: `projects` is now the current SERVER PAGE; `projectsTotal` the
 // filtered total (X-Total-Count) bound to the table :items-length.
 const projects = computed(() => projectStore.projects)
@@ -414,9 +421,6 @@ const projectsTotal = computed(() => projectStore.projectsTotal)
 const loading = computed(() => projectStore.loading)
 const deletedProjects = computed(() => projectStore.deletedProjects)
 const deletedCount = computed(() => deletedProjects.value.length)
-// BE-6076: the active project may be off the current page, so derive this from
-// the dedicated /projects/active read (store.activeProjectMeta), not the page.
-const hasActiveProject = computed(() => !!projectStore.activeProjectMeta)
 
 // BE-6078/6076: "Show hidden" view toggle. Now drives the server include_hidden
 // param (hidden rows join the page); hiddenProjects only powers the (N) count.

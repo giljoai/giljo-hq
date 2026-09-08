@@ -1,12 +1,14 @@
 /**
- * RoadmapCard.vue — FE-6022b
+ * RoadmapCard.vue — FE-6022b, updated FE-9568 (2026-09-02, operator ruling)
  *
  * Covers the load-bearing, type-dependent behavior + the design-system /
  * accessibility contract:
- *   - Activate renders for a PROJECT (and NOT Convert), Convert renders for a
- *     TASK (and NOT Activate).
- *   - the primary action emits the right intent; the .rm-grip drag handle exists
- *     (drag itself is owned by vuedraggable in RoadmapView).
+ *   - Convert renders for a TASK; a PROJECT renders NO primary action at all
+ *     (Activate/Deactivate were REMOVED by FE-9568 — /roadmap is
+ *     ordering-only now, see RoadmapCard.spec.js in src/components for the
+ *     dedicated removal-coverage file).
+ *   - Convert emits the right intent; the .rm-grip drag handle exists (drag
+ *     itself is owned by vuedraggable in RoadmapView).
  *   - taxonomy_alias chip hides when the alias is empty.
  *   - meta badges use the tinted-badge anatomy (rgba 0.15 tint + 8px radius).
  *   - WCAG AA: every new badge text color clears 4.5:1 on the #12202e panel bg.
@@ -87,25 +89,17 @@ function mountCard(item, rank = 1) {
   return mount(RoadmapCard, { props: { item, rank }, global: { stubs } })
 }
 
-describe('RoadmapCard.vue — type-dependent action rail', () => {
-  it('renders Activate (not Convert) for a PROJECT', () => {
-    const w = mountCard(PROJECT_ITEM)
-    expect(w.text()).toContain('Activate')
-    expect(w.text()).not.toContain('Convert to Project')
-  })
-
-  it('renders Convert to Project (not Activate) for a TASK', () => {
+describe('RoadmapCard.vue — type-dependent action rail (FE-9568: Activate/Deactivate REMOVED)', () => {
+  it('renders Convert to Project for a TASK', () => {
     const w = mountCard(TASK_ITEM)
     expect(w.text()).toContain('Convert to Project')
-    expect(w.text()).not.toContain('Activate')
   })
 
-  it('primary button emits "activate" with the item for a PROJECT', async () => {
+  it('renders no primary action at all for an inactive, non-chain PROJECT', () => {
     const w = mountCard(PROJECT_ITEM)
-    await w.find('.rm-primary-btn').trigger('click')
-    expect(w.emitted('activate')).toBeTruthy()
-    expect(w.emitted('activate')[0][0]).toEqual(PROJECT_ITEM)
-    expect(w.emitted('convert')).toBeFalsy()
+    expect(w.text()).not.toContain('Activate')
+    expect(w.text()).not.toContain('Convert to Project')
+    expect(w.find('.rm-primary-btn').exists()).toBe(false)
   })
 
   it('primary button emits "convert" with the item for a TASK', async () => {
@@ -113,26 +107,14 @@ describe('RoadmapCard.vue — type-dependent action rail', () => {
     await w.find('.rm-primary-btn').trigger('click')
     expect(w.emitted('convert')).toBeTruthy()
     expect(w.emitted('convert')[0][0]).toEqual(TASK_ITEM)
-    expect(w.emitted('activate')).toBeFalsy()
   })
 
-  it('renders Deactivate (not Activate) for an ACTIVATED project', () => {
+  it('renders no Deactivate/Activate button for an ACTIVATED project — only the ACTIVATED status badge', () => {
     const w = mountCard(ACTIVE_PROJECT)
-    expect(w.vm.isActivated).toBe(true)
-    expect(w.text()).toContain('Deactivate')
-  })
-
-  it('Deactivate button is enabled (active is reversible, not terminal-locked)', () => {
-    const w = mountCard(ACTIVE_PROJECT)
-    expect(w.find('.rm-primary-btn').attributes('disabled')).toBeUndefined()
-  })
-
-  it('primary button emits "deactivate" with the item for an ACTIVATED project', async () => {
-    const w = mountCard(ACTIVE_PROJECT)
-    await w.find('.rm-primary-btn').trigger('click')
-    expect(w.emitted('deactivate')).toBeTruthy()
-    expect(w.emitted('deactivate')[0][0]).toEqual(ACTIVE_PROJECT)
-    expect(w.emitted('activate')).toBeFalsy()
+    expect(w.text()).not.toContain('Deactivate')
+    expect(w.text()).not.toContain('Activate')
+    expect(w.find('.rm-primary-btn').exists()).toBe(false)
+    expect(w.text()).toContain('ACTIVATED') // the passive status badge stays
   })
 
   it('exposes the .rm-grip drag handle (drag is owned by vuedraggable)', () => {
@@ -187,9 +169,9 @@ describe('RoadmapCard.vue — terminal-state badges + lock (FE-6022c)', () => {
     expect(w.find('.rm-grip-locked').exists()).toBe(false)
   })
 
-  it('disables Activate on a terminal project', () => {
+  it('renders no primary action for a terminal project (Activate/Deactivate were removed, FE-9568)', () => {
     const w = mountCard(COMPLETED_PROJECT)
-    expect(w.find('.rm-primary-btn').attributes('disabled')).toBeDefined()
+    expect(w.find('.rm-primary-btn').exists()).toBe(false)
   })
 
   it('disables Convert on a terminal task', () => {
@@ -197,8 +179,8 @@ describe('RoadmapCard.vue — terminal-state badges + lock (FE-6022c)', () => {
     expect(w.find('.rm-primary-btn').attributes('disabled')).toBeDefined()
   })
 
-  it('leaves the primary action enabled on a non-terminal item', () => {
-    const w = mountCard(PROJECT_ITEM)
+  it('leaves the primary action (Convert) enabled on a non-terminal task', () => {
+    const w = mountCard(TASK_ITEM)
     expect(w.find('.rm-primary-btn').attributes('disabled')).toBeUndefined()
   })
 })

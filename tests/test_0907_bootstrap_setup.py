@@ -163,6 +163,15 @@ def mock_session(templates):
         scalars_all=templates,
         scalars_first=None,
         first=None,
+        # BE-9557: active_product_template_ids/build_export_context now resolve
+        # via ProductRepository.get_default_product, which reads
+        # scalar_one_or_none() (no default product row) and then, on that miss,
+        # a count() via scalar_one() for its sole-shown-product fallback (zero
+        # shown products in this fixture's product-less DB) -- both "no product"
+        # answers, matching what scalars_first/first=None already modeled for
+        # the old is_active query.
+        scalar_one_or_none=None,
+        scalar_one=0,
     )
     session.execute = AsyncMock(return_value=result)
     session.commit = AsyncMock()
@@ -326,6 +335,9 @@ class TestStageCombinedSetup:
             scalars_all=[_make_template_with_duplicate_bootstrap()],
             scalars_first=None,
             first=None,
+            # BE-9557: see mock_session fixture -- get_default_product's two queries.
+            scalar_one_or_none=None,
+            scalar_one=0,
         )
         session.execute = AsyncMock(return_value=result)
         session.commit = AsyncMock()
@@ -363,6 +375,9 @@ class TestStageCombinedSetup:
             scalars_all=[_make_template_with_compact_duplicate_bootstrap()],
             scalars_first=None,
             first=None,
+            # BE-9557: see mock_session fixture -- get_default_product's two queries.
+            scalar_one_or_none=None,
+            scalar_one=0,
         )
         session.execute = AsyncMock(return_value=result)
         session.commit = AsyncMock()
@@ -398,6 +413,9 @@ class TestStageCombinedSetup:
             scalars_all=[_make_template_with_regex_backslashes()],
             scalars_first=None,
             first=None,
+            # BE-9557: see mock_session fixture -- get_default_product's two queries.
+            scalar_one_or_none=None,
+            scalar_one=0,
         )
         session.execute = AsyncMock(return_value=result)
         session.commit = AsyncMock()
@@ -443,7 +461,13 @@ class TestStageCombinedSetup:
         # product exists; the test passed anyway only because an empty template list
         # makes the outcome the same either way. Silently wrong, accidentally
         # harmless. The honest state for these fixtures is no active product.
-        result = strict_result(scalars_all=[], scalars_first=None)
+        result = strict_result(
+            scalars_all=[],
+            scalars_first=None,
+            # BE-9557: see mock_session fixture -- get_default_product's two queries.
+            scalar_one_or_none=None,
+            scalar_one=0,
+        )
         session.execute = AsyncMock(return_value=result)
 
         staging = FileStaging(db_session=session)

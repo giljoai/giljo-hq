@@ -226,10 +226,22 @@ def _build_ch_chain_staging(
     product_token = product_id or "<your product_id from the identity block>"
     head_pid = resolved_order[0] if resolved_order else "<P_1>"
 
+    # FE-9530 (Finding 3): a chain's hub thread used to carry NO product_id (the
+    # conductor is deliberately project-less) and NO stable link once its
+    # sequence_run_id is nulled by purge_run's ON DELETE SET NULL -- so a completed
+    # chain's thread was structurally unable to ever be tagged. The fix is to
+    # capture the product at CREATE time, before the run exists to be purged, so
+    # nothing downstream has to reconstruct it. When the staging step already knows
+    # a real product_id (the common case -- it is None only when the head project
+    # is gone), the seed instruction passes it straight through; CommThreadService
+    # still exempts a sequence_run_id-bearing create from mandatory resolution as
+    # the fallback for the rare case this token is the placeholder.
+    product_id_kwarg = f', product_id="{product_id}"' if product_id else ""
+
     if agent_id:
         step0_hub_thread = f"""0. STAND UP THE HUB THREAD (your VERY FIRST action, before writing anything):
    create_thread(subject="Chain: <a few words naming what this chain delivers>",
-                 sequence_run_id="{run_id}", creator_id="{agent_id}")
+                 sequence_run_id="{run_id}", creator_id="{agent_id}"{product_id_kwarg})
    sequence_run_id is the ONLY thing marking this thread as this run's hub. Pass it,
    then CHECK it came back set - if null you passed it wrong, and a hub with no link is
    one no sub-orchestrator finds. That failure is SILENT: no error, they never join and
@@ -245,7 +257,7 @@ def _build_ch_chain_staging(
     else:
         step0_hub_thread = f"""0. STAND UP THE HUB THREAD (your VERY FIRST action, before writing anything):
    create_thread(subject="Chain: <a few words naming what this chain delivers>",
-                 sequence_run_id="{run_id}")
+                 sequence_run_id="{run_id}"{product_id_kwarg})
    sequence_run_id is the ONLY thing marking this thread as this run's hub. Pass it,
    then CHECK it came back set - if null you passed it wrong, and a hub with no link is
    one no sub-orchestrator finds. That failure is SILENT: no error, they never join and
@@ -515,8 +527,8 @@ solo protocol tells you to scan for a project to continue, or a duplicate to mer
 it. You are the ESCALATION SINK -- sub-orchestrators surface blockers to YOU on the Hub
 thread (get_context chain -> hub_thread_id), not to the user; escalate to the user only a
 genuine chain-level decision. When YOU post to the Hub, set from_agent to your UNIQUE label
-"Chain Conductor" (never the generic "orchestrator" -- your finale gate self-excludes only
-the unique label, so a generic-name self-post would wrongly arm your own gate). This chapter
+"Chain Conductor" -- the generic "orchestrator" name is already used by your
+sub-orchestrators, so your own posts must stay distinguishable from theirs. This chapter
 wins over any contradicting solo default.
 
 ── YOU ARE ADDRESSABLE: USER DIRECTIVE RELAY ───────────────────────────────
@@ -539,7 +551,7 @@ project B_(i+1..N) -- that sub-orch does not exist yet and the message is droppe
 only the CURRENTLY ACTIVE sub-orch.
 
 NO WORKER-PROTOCOL FORK: your sub-orchestrators and their workers NEVER write comm_threads and
-NEVER call pass_baton or post_to_thread; reporting is IDENTICAL in subagent and multi_terminal
+NEVER call set_next_actor or post_to_thread; reporting is IDENTICAL in subagent and multi_terminal
 mode (only what surfaces to the user differs, never how agents communicate).
 
 ⚠ TOOLS ONLY — NO raw HTTP. Drive the chain with MCP tools (spawn_job, get_workflow_status,
@@ -750,7 +762,7 @@ def _render_ch_sub_orchestrator(*, run_id: str, position: int, n_projects: int, 
    wins over any contradicting solo default.
    TOOLSEARCH BOOTSTRAP (Claude Code): the generic orchestrator bootstrap query OMITS
    the Hub tools you are REQUIRED to use below. ADD join_thread, post_to_thread,
-   get_thread_history (alongside search_threads) to your FIRST ToolSearch query, so you
+   get_thread_history (alongside list_threads) to your FIRST ToolSearch query, so you
    load them in ONE round-trip instead of paying a second ToolSearch mid-staging.
 
 {staging_steps}

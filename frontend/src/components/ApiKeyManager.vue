@@ -181,14 +181,19 @@ function expiryClass(expiresAt) {
 // BE-6147 removed the 5-key cap — keys are unlimited. Show a plain active count.
 const activeKeyCount = computed(() => apiKeys.value.filter((k) => k.is_active).length)
 
-async function loadKeys() {
+/**
+ * FE-9553: `notify` defaults to FALSE. Reachable from onMounted AND from the
+ * post-create / post-revoke refresh, and only the latter follows a click.
+ * HubView's loadDeletedThreads({ notify = false }) is the precedent.
+ */
+async function loadKeys({ notify = false } = {}) {
   loading.value = true
   try {
     const response = await api.apiKeys.list()
     apiKeys.value = response.data
   } catch (err) {
     console.error('[API Keys] Failed to load:', err)
-    if (err.response?.status !== 401) {
+    if (notify && err.response?.status !== 401) {
       showToast({ message: 'Unable to load API keys. Try refreshing the page.', type: 'error' })
     }
   } finally {
@@ -197,7 +202,8 @@ async function loadKeys() {
 }
 
 async function refreshKeys() {
-  await loadKeys()
+  // Reached from the post-mutation refresh, which follows a click.
+  await loadKeys({ notify: true })
 }
 
 function confirmRevoke(key) {
@@ -220,7 +226,8 @@ async function revokeKey() {
     // Optimistically remove from list, then reload to ensure consistency
     const revokedId = keyToRevoke.value.id
     apiKeys.value = apiKeys.value.filter((k) => k.id !== revokedId)
-    await loadKeys()
+    // Post-revoke: follows the operator's own click, so it may speak up.
+    await loadKeys({ notify: true })
 
     // Tell durable-status listeners (Connect directory, FE-9274) a key just went away.
     try {

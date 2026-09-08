@@ -272,13 +272,12 @@ async function handleLogin() {
   error.value = ''
 
   try {
-    // Use user store login method - this will authenticate AND populate currentUser
-    const loginSuccess = await userStore.login(username.value, password.value)
-
-    if (!loginSuccess) {
-      error.value = 'Login failed. Please check your credentials.'
-      return
-    }
+    // Use user store login method - this will authenticate AND populate
+    // currentUser. FE-9556: login() now THROWS the axios error on failure
+    // (after clearing store state), so the status-branched catch block below
+    // owns every failure path -- the old `if (!loginSuccess)` generic branch
+    // was unreachable-correct code's replacement and is gone.
+    await userStore.login(username.value, password.value)
 
     // Check if first login is required (password change or PIN setup)
     try {
@@ -367,7 +366,9 @@ async function handleLogin() {
       }
       error.value = 'Access forbidden. Please contact your administrator.'
     } else if (err.response?.status === 429) {
-      error.value = 'Too many login attempts. Please try again later.'
+      // Copy harmonized to PR #1002's approved wording (it previously lived in
+      // the now-removed boolean branch).
+      error.value = 'Too many sign-in attempts. Please wait a minute and try again.'
     } else if (err.response?.data?.detail) {
       error.value = err.response.data.detail
     } else if (err.code === 'ERR_NETWORK' || !err.response) {

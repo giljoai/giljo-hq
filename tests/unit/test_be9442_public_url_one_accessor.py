@@ -207,7 +207,24 @@ class TestBootstrapSetupDownloadUrl:
     async def _bootstrap(self, monkeypatch) -> dict:
         import giljo_mcp.downloads.token_manager as token_manager_mod
         import giljo_mcp.file_staging as file_staging_mod
+        import giljo_mcp.services.product_service as product_service_mod
         from giljo_mcp.tools.tool_accessor._setup_tools import SetupMiscMixin
+
+        class _FakeProductService:
+            """BE-9523c: bootstrap_setup now resolves a product-binding phase up front.
+
+            This test is scoped to URL normalisation only (see module docstring's
+            "named partial beats a silent gap"), so the product lookup is stubbed
+            to the "zero products" phase -- unrelated to what this test asserts.
+            """
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def list_products(self, include_inactive=False, lean=False):
+                return []
+
+        monkeypatch.setattr(product_service_mod, "ProductService", _FakeProductService)
 
         class _FakeTokenManager:
             def __init__(self, db_session=None):
@@ -243,6 +260,8 @@ class TestBootstrapSetupDownloadUrl:
                 return False
 
         class _Accessor(SetupMiscMixin):
+            db_manager = None
+
             def get_session_async(self):
                 return _FakeSession()
 

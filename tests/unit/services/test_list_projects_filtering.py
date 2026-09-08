@@ -162,7 +162,10 @@ async def _call_with_items(service: ProjectService, items, **kwargs):
             ),
         ),
     ):
-        mock_product_svc.return_value.get_active_product = AsyncMock(return_value=mock_product)
+        mock_product_svc.return_value.get_default_product = AsyncMock(return_value=mock_product)
+        # BE-9499a: list_projects_for_mcp resolves through resolve_binding_product now
+        # (byte-identical result for an omitted product_id -- the active product).
+        mock_product_svc.return_value.resolve_binding_product = AsyncMock(return_value=mock_product)
         result = await service.list_projects_for_mcp(tenant_key=_TENANT_A, **kwargs)
     return result, list_proj_mock
 
@@ -575,7 +578,8 @@ class TestTenantIsolation:
                 patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
                 patch.object(service, "_build_mcp_project_list", new=AsyncMock(return_value=[])),
             ):
-                mock_product_svc.return_value.get_active_product = AsyncMock(return_value=mock_product)
+                mock_product_svc.return_value.get_default_product = AsyncMock(return_value=mock_product)
+                mock_product_svc.return_value.resolve_binding_product = AsyncMock(return_value=mock_product)
                 result = await service.list_projects_for_mcp(tenant_key=tenant_key)
             assert result["product_id"] == product_id
             # tenant_key passed to the inner list_projects call
@@ -1444,7 +1448,10 @@ async def _call_with_items_real_build(service: ProjectService, items, **kwargs):
         patch.object(service, "board_counts", new_callable=AsyncMock, return_value=[]),
         patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
     ):
-        mock_product_svc.return_value.get_active_product = AsyncMock(return_value=mock_product)
+        mock_product_svc.return_value.get_default_product = AsyncMock(return_value=mock_product)
+        # BE-9499a: list_projects_for_mcp resolves through resolve_binding_product now
+        # (byte-identical result for an omitted product_id -- the active product).
+        mock_product_svc.return_value.resolve_binding_product = AsyncMock(return_value=mock_product)
         result = await service.list_projects_for_mcp(tenant_key=_TENANT_A, **kwargs)
     return result, list_proj_mock
 

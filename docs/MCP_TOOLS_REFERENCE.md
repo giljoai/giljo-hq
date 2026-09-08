@@ -1,13 +1,15 @@
 # Giljo HQ: Tools Reference
 
-*Last updated: 2026-08-20*
+*Last updated: 2026-09-02*
 
 ## Overview
 
-Giljo HQ, a GiljoAI product, registers **48 tools**. A connected session is served 47 of
-them by default: `launch_implementation` appears only when headless launch is enabled.
-Every tool requires a valid API key passed as a Bearer token. Tenant isolation is
-enforced server-side; agents cannot cross tenant boundaries.
+Giljo HQ, a GiljoAI product, registers **49 tools**. Two of them —
+`launch_implementation` and `decide_approval` — respect your tenant's approval mode, so
+they may not be served to every session; see Settings. Several older tool names have
+been retired and are no longer registered — only the final names below are. Every tool requires a
+valid API key passed as a Bearer token. Tenant isolation is enforced server-side; agents
+cannot cross tenant boundaries.
 
 Tool names match the exact MCP registrations at the time of the date above. The MCP
 registry itself is roster-locked by
@@ -22,10 +24,10 @@ Every tool carries one of three permission scopes:
 
 | Scope | Meaning | Count |
 |-------|---------|-------|
-| `mcp:read` | Read-only — fetches data, never mutates state. | 15 |
+| `mcp:read` | Read-only — fetches data, never mutates state. | 13 |
 | `mcp:write` | Mutating writes performed by a human/dashboard-driven flow. | 10 |
-| `mcp:agent` | Agent-lifecycle operations used by orchestrators and specialist agents. | 23 |
-| **Total** | | **48** |
+| `mcp:agent` | Agent-lifecycle operations used by orchestrators and specialist agents. | 26 |
+| **Total** | | **49** |
 
 Tools are organized by functional category below; each entry lists its scope.
 
@@ -187,15 +189,18 @@ must not reach.
 
 ---
 
-### implement_project `mcp:agent`
+### get_implementation_prompt `mcp:agent`
 
-**Purpose:** Return the implementation prompt for an already-staged project after the
-user presses Implement. Returns a structured rejection (`action_required`) if the human
-implement gate has not been passed.
+**Purpose:** Fetch the prompt that starts implementation on a project that is staged and
+has been approved to start. This RETURNS a prompt; it does not run anything. Two things
+must already be true: the project finished staging, and a human approved the start (the
+dashboard's Implement button, or `launch_implementation`). If they are not, you get a
+structured refusal naming the exact next step — there is no bypass, the approval is
+deliberate. (Renamed from `implement_project`, which never implemented anything.)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| project_id | str | Yes | ID of the staged project. |
+| project_id | str | Yes | The project to fetch the implementation prompt for. |
 
 ---
 
@@ -212,17 +217,36 @@ cannot self-unlock.
 
 ---
 
-### start_chain_run `mcp:agent`
+### link_projects `mcp:agent`
 
-**Purpose:** Start a chain run (linked multi-project sequential run) from a headless/CLI agent — the MCP equivalent of the dashboard "Run Sequential" button. Validates the projects (each must exist for the tenant, be chainable, and form a chain of >= 2 distinct members), creates the durable `sequence_run`, and mints the dedicated project-less chain conductor that drives all N projects in order (reuses the same engine as the REST path). On success returns the run plus `conductor_agent_id` / `conductor_job_id` and a `next_action` to call `get_staging_instructions(job_id=conductor_job_id)`. Bad input returns a structured `{success:false, error:CODE}` rejection (`PROJECT_NOT_FOUND` / `PROJECT_NOT_CHAINABLE` / `RESOLVED_ORDER_MISMATCH` / `CHAIN_TOO_SMALL`).
+**Purpose:** Link two or more existing projects into one ordered run under a shared goal, from a headless agent — the MCP equivalent of the dashboard "Run Sequential" button. Validates the projects (each must exist for the tenant, be chainable, and form a group of >= 2 distinct members), creates the durable `sequence_run`, and the calling session drives it. Advancement is automatic: a member finished through either door is recorded and the next becomes ready server-side, visible on `get_workflow_status(project_id).ready_to_advance`. Bad input returns a structured `{success:false, error:CODE}` rejection (`PROJECT_NOT_FOUND` / `PROJECT_NOT_CHAINABLE` / `RESOLVED_ORDER_MISMATCH` / `CHAIN_TOO_SMALL`).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| project_ids | list[str] | Yes | Projects to link into the chain (>= 2 distinct), in run order. Capped at the server's MAX_SEQUENCE_PROJECTS. |
-| execution_mode | str | Yes | Uniform execution mode for every project (ADR-010). 2 canonical values: `subagent` (one orchestrator session drives the workers — the normal headless choice) / `multi_terminal` (one terminal per agent). The 5 legacy per-CLI tokens (`claude_code_cli`, `codex_cli`, `gemini_cli`, `antigravity_cli`, `generic_mcp`) are still accepted as aliases and fold onto `subagent` (`platform_registry.ACCEPTED_EXECUTION_MODES`). |
-| resolved_order | list[str] | No | Explicit run order — a permutation of `project_ids`. Defaults to the `project_ids` order. |
-| review_policy | str | No | `per_card` (default, pause for review between projects) or `auto_close`. |
-| chain_mission | str | No | Optional initial cross-project chain plan; the conductor normally authors this during staging. |
+| project_ids | list[str] | Yes | The projects to link, as ids, in the order they should run (>= 2 distinct). Capped at the server's MAX_SEQUENCE_PROJECTS. |
+| execution_mode | str | No | How the work runs: `subagent` (this session drives the worker agents itself — the usual choice) or `multi_terminal` (a separate terminal per agent). The legacy per-CLI tokens are still accepted as aliases and fold onto `subagent`. |
+| mission | str | No | The shared goal for the whole group. Optional — pass it now, or write it later once the work is planned. |
+| ordered | list[str] | No | Only if the run order differs from `project_ids`: the same ids, rearranged. |
+
+---
+
+### unlink_projects `mcp:agent`
+
+**Purpose:** Abandon a linked group part-way — the projects that have not run yet are released and the group stops; ones already finished stay finished. Byte-identical to the dashboard's Terminate control (both reach `SequenceRunService.release(mode="cancel")`).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| run_id | str | Yes | The id of the linked group, returned by `link_projects`. |
+
+---
+
+### start_chain_run — RETIRED, NO LONGER REGISTERED
+
+**Purpose:** Retired in favour of `link_projects` / `unlink_projects`. This name is no
+longer registered and returns "tool not found"; it is listed here as a pointer for
+anyone holding an older prompt. The `mark_reviewed` action is no longer on the agent
+surface — the dashboard review pane keeps its REST door, and a headlessly finished
+member is recorded automatically.
 
 ---
 
@@ -240,7 +264,7 @@ complete/closed/decommissioned first. Triggers a `product_memory_updated` WebSoc
 | decisions_made | list[str] | Yes | Architectural/design decisions made (cite any deferred task/project IDs). |
 | git_commits | list[dict] | No | Commit records associated with the project. |
 | tags | list[str] | No | Classification tags. |
-| force | bool | No | Force-close: auto-decommission remaining agents before closing. Use only when a prior `CLOSEOUT_BLOCKED` response says so (e.g. a leftover "waiting" orchestrator after work ran outside a staged session). Refused while the calling orchestrator itself is still active; a specialist still in flight — including one marked "silent" — is decommissioned (recorded as failed/replaced/abandoned). Do not use it to retire an agent whose work you accepted — `complete_job` then `close_job` that agent instead. Default `false`. |
+| force | bool | No | Force-close: auto-decommission remaining agents before closing. Use only when a prior `CLOSEOUT_BLOCKED` response says so (e.g. a leftover "waiting" orchestrator after work ran outside a staged session). Refused while the calling orchestrator itself is still active; a specialist still in flight — including one marked "silent" — is decommissioned (recorded as failed/replaced/abandoned). Do not use it to retire an agent whose work you accepted — `complete_job` then `finalize_job` that agent instead. Default `false`. |
 
 ---
 
@@ -314,18 +338,20 @@ through it.
 
 ## Roadmap
 
-### update_roadmap_metadata `mcp:write`
+### save_roadmap `mcp:write`
 
-**Purpose:** Persist a roadmap for the active product via bulk upsert of items
-(project/task references with `sort_order`, risk, complexity, blocked state). De-dupes
-and can remove items in the same call.
+**Purpose:** Save the roadmap — the ranked list of what to build next. YOU do the
+ranking; the server only validates and stores it. Items you send are written, replacing
+any earlier entry for the same project or task. Defaults to your default product; pass
+`product_id` for a specific one. (Renamed from `update_roadmap_metadata`.)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| items | list[dict] | Yes | Roadmap items to upsert. |
-| summary | str | No | Roadmap narrative summary. |
-| remove | list[dict] | No | Items to drop from the roadmap. |
-| patch_fields | bool | No | Patch only the fields each item carries; omitted fields keep their stored value, explicitly empty ones are cleared. Default false. |
+| items | list[dict] | Yes | Roadmap items to upsert. Each: `{item_type: 'project'\|'task', project_id OR task_id, sort_order (0-100000), risk?: 'low'\|'med'\|'high', complexity?: 'light'\|'med'\|'heavy', blocked?: bool, blocked_reason?: str (<=500 chars)}`. `project_id` / `task_id` accept either the row id or its taxonomy alias (`BE-0001`, `IMP-0086`), so no lookup call is needed. A rejection names every bad row at once, as a 422, never a DB 500. |
+| summary | str | No | Roadmap narrative summary (the AI insight banner copy). Empty string leaves it unchanged. |
+| remove | list[dict] | No | Items to drop from the roadmap. Each: `{item_type, project_id\|task_id}`. Idempotent; removes the roadmap entry only, never the project/task. |
+| patch_fields | bool | No | Patch only the fields each item carries; omitted fields keep their stored value, explicitly empty ones are cleared. `blocked` and `blocked_reason` patch together. Default false. |
+| product_id | str | No | Product UUID to persist the roadmap for. Omit to use your default product — but pass it when you know it: the default is shared, mutable state another session can move mid-session. |
 
 ---
 
@@ -413,29 +439,34 @@ an implementation orchestrator and deliverable agents close normally.
 
 ---
 
-### close_job `mcp:agent`
+### finalize_job `mcp:agent`
 
-**Purpose:** Mark a completed agent job as `closed` (final acceptance). Transitions
-`complete → closed`; the job will not auto-reactivate on new messages.
+**Purpose:** Accept a finished agent's work and seal the job — the last step, after you
+have reviewed what it produced. Only the orchestrator does this, and only after
+`complete_job`. A sealed job is not woken again by new messages. If the job is not in an
+acceptable state, this returns a structured error naming the outstanding requirement.
+(Renamed from `close_job`, which read as cancel-or-finish ambiguous.)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| job_id | str | Yes | The job ID to close. |
+| job_id | str | Yes | The job ID to seal. |
 
 ---
 
-### resolve_reactivation `mcp:agent`
+### resume_or_dismiss_job `mcp:agent`
 
-**Purpose:** Exit a `blocked` job after a follow-up post. `action="resume"` returns it to
-`working` (continue the work — use `report_progress` with `todo_append` afterward);
-`action="dismiss"` returns it to `complete` (acknowledge an informational post without
-resuming). Only works when status is `blocked` (auto-set when a directed,
-action-required Hub post lands on a completed agent). Merges the former
-`reactivate_job` + `dismiss_reactivation` tools into one (BE-6225e).
+**Purpose:** A finished job that receives a message needing action is put on hold. Use
+this to say what happens next: `resume` picks the work back up (then `report_progress`
+with `todo_append` to add new steps — do not overwrite completed ones), or `dismiss`
+acknowledges the message and leaves the job finished, when it was only for information.
+Only works while the job is on hold — the `blocked` status auto-set when a directed,
+action-required Hub post lands on a completed agent. (Renamed from
+`resolve_reactivation`; merges the former `reactivate_job` + `dismiss_reactivation`
+tools, BE-6225e.)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| job_id | str | Yes | The blocked job's ID. |
+| job_id | str | Yes | The on-hold job's ID. |
 | action | str | Yes | `resume` (→ working) or `dismiss` (→ complete). |
 | reason | str | No | Why work is resuming / no action was taken. |
 
@@ -453,7 +484,7 @@ auto-wake when `report_progress()` is called. Cannot produce `awaiting_user` (on
 | status | str | Yes | `blocked`, `idle`, or `sleeping`. |
 | reason | str | No | Human-readable explanation. |
 | wake_in_minutes | int | No | For `sleeping`: minutes until a timed wake. |
-| wake_on_signal | bool | No | For `sleeping`: pass `true` when you are parked on `await_my_turn` rather than a timed sleep, so the dashboard shows "Waiting for wake" instead of a countdown. Mutually exclusive with `wake_in_minutes` (`wake_on_signal` wins). Default `false`. |
+| wake_on_signal | bool | No | For `sleeping`: pass `true` when you are parked on `get_my_turn(wait_seconds=...)` rather than a timed sleep, so the dashboard shows "Waiting for wake" instead of a countdown. Mutually exclusive with `wake_in_minutes` (`wake_on_signal` wins). Default `false`. |
 
 ---
 
@@ -495,6 +526,24 @@ status (active/completed/blocked/closed/silent/decommissioned/pending) and a
 | reason | str | Yes | Plain-English explanation shown to the user (max 2000 chars). |
 | options | list[dict] | Yes | `{id, label}` option dicts (1-10 items, unique ids). |
 | context | dict | No | Optional structured payload (max 16 KB serialized). |
+
+---
+
+### decide_approval `mcp:agent`
+
+**Purpose:** Answer a pending user approval from the harness — clears `awaiting_user` for
+the orchestrator that called `request_approval`. Relay the pending question's reason and
+options to the user in your terminal, then call this with the option id they chose.
+Routes through the SAME service write the dashboard's decide button uses; there is no
+separate write path. Available by default; a tenant that has switched Settings to HITL
+mode is refused here and decides from the dashboard instead. Behind the default
+human-in-the-loop fence, so a dashboard/JWT session is only served this tool when its
+tenant has enabled headless launch.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| approval_id | str | Yes | The pending approval's id (UUID). |
+| option_id | str | Yes | The id of the option the user chose (must match one of `approval.options`). |
 
 ---
 
@@ -566,33 +615,27 @@ written — attribution never falls back to the human user.
 | loop_interval_minutes | int | No | Auto-check-in cadence in minutes for the loop directive (0-1440), surfaced on `get_my_turn`/`get_thread_history` poll responses so the agent self-schedules its wake. `0` = unset (agent uses its own default). Only meaningful with `loop_directive=true`. |
 | pass_baton_to | str | No | Atomically hand the baton with this post: an `agent_id` \| `user_id` \| `all` \| `none`. An explicit value always wins; `none` posts without moving the baton. When omitted, a directed action-request (`requires_action=true` + `to_participant`) auto-passes the baton to that participant; every other post leaves the baton untouched. |
 | my_status | str | No | What you are doing right now, shown on your status dot in the Hub: one of `working` \| `waiting` \| `blocked` \| `idle` \| `sleeping` \| `complete`. Only useful for a headless/external agent that joined via `join_thread` — a platform-run agent already reports status automatically, and that always wins over this. Omit to leave your current status unchanged. |
+| rename_to | str | No | Rename the thread with this post. Empty leaves it unchanged. Refused on a project-bound thread (it takes its name from that project) — and a refused rename posts nothing, because the rename is applied before the post. |
 
 ---
 
 ### get_my_turn `mcp:read`
 
-**Purpose:** The baton query — list threads where it is your turn
-(`next_action_owner == your agent_id`, plus threads addressed to `all`).
+**Purpose:** The baton query — list the conversations waiting on YOU: threads where you
+hold the turn (`next_action_owner == your agent_id`), plus anything addressed to `all`.
+
+Pass `wait_seconds` to WAIT for the next one instead of returning immediately. The call
+comes back the moment a directed action-request or a baton lands for you, or empty if
+nothing does, and costs nothing while it waits — **waiting beats sleeping and re-asking**.
+Without `wait_seconds` it answers instantly, which means you are polling, not parked.
+Chat surfaces that cannot hold a call open should leave `wait_seconds` at 0 and ask again
+on their own schedule. (This absorbed the retired `await_my_turn` tool, whose
+`timeout_seconds` is now `wait_seconds`.)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | agent_id | str | Yes | Your agent id. |
-
----
-
-### await_my_turn `mcp:read`
-
-**Purpose:** Block until it is your turn, instead of sleeping and re-polling
-`get_my_turn`. Returns the moment a directed action-request or a baton lands for you,
-or empty when the wait window closes — call it again to keep waiting. Costs nothing
-while it waits and delivers in under a second; prefer it over a `get_my_turn` sleep
-loop on any harness that can hold a tool call open. Chat surfaces that cannot hold a
-call open should keep polling `get_my_turn` instead.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| agent_id | str | Yes | | Your agent id. |
-| timeout_seconds | int | No | Server default | How long to block before returning empty (0-55, clamped by the server). This is the re-call cadence, not the delivery latency — a wake still arrives in under a second either way. |
+| wait_seconds | int | No | `0` (default) answers immediately. Above `0`, wait up to this many seconds for something to arrive (capped at 55 by the server). This is how often you re-ask, not how fast a wake arrives — delivery is under a second either way. |
 
 ---
 
@@ -609,22 +652,28 @@ agent, reassign its work, or escalate past an orchestrator that has gone quiet.
 
 ---
 
-### pass_baton `mcp:agent`
+### set_next_actor `mcp:agent`
 
-**Purpose:** Set who acts next on a thread — an `agent_id`, `user_id`, `all`, or `none`.
+**Purpose:** Set who acts next on a chat — an `agent_id`, a `user_id`, `all` (anyone may
+act) or `none` (CLEARS it; nobody is waiting). Whoever you name finds it via
+`get_my_turn`. **Note the difference from `post_to_thread`'s `pass_baton_to` parameter:**
+there, `none` means LEAVE the current actor alone; here it CLEARS them. Clearing is the
+one thing only this tool can do. (Renamed from `pass_baton`.)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| thread_id | str | Yes | The thread. |
-| to | str | Yes | Next actor (`agent_id` / `user_id` / `all` / `none`). |
+| thread_id | str | Yes | The thread UUID. |
+| to | str | Yes | Who acts next: an `agent_id`, a `user_id`, `all`, or `none`. `none` CLEARS the next actor — the one thing only this tool can do; `post_to_thread`'s own `none` leaves the current actor unchanged. |
 | from_agent | str | No | Your agent id — who is handing over. Pass it so the recipient's alert names you, not only the thread. Omit only when handing over as the human user. |
 
 ---
 
 ### list_threads `mcp:read`
 
-**Purpose:** List message-board threads with optional filters (status, owner, product,
-project). Newest first.
+**Purpose:** Find chats. Newest first. Pass `query` to SEARCH by chat id, subject,
+participant or message text; pass any of `status` / `owner` / `product_id` / `project_id`
+to filter; pass nothing to list them all. Filters and query combine. (This absorbed the
+retired `search_threads` tool.)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -632,6 +681,25 @@ project). Newest first.
 | owner | str | No | Filter by `next_action_owner`. |
 | product_id | str | No | Filter by product. |
 | project_id | str | No | Filter by project. |
+| query | str | No | Search text: a `CHT-####` chat id, a word from the subject, a participant, or message text. |
+
+---
+
+### update_thread `mcp:agent`
+
+**Purpose:** Rename a thread, set its status, and/or retag its product and projects. This
+is the ONLY way to give an old, pre-existing thread a product — there is no bulk
+migration. Omit a field to leave it untouched. A rename is refused on a project-bound
+thread (it takes its name from that project).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| thread_id | str | Yes | The thread UUID to update. |
+| subject | str | No | New subject. Omit to leave unchanged. |
+| status | str | No | New status. Omit to leave unchanged. |
+| product_id | str | No | Product UUID to retag the thread with. Omit to leave unchanged. |
+| clear_product | bool | No | Explicitly null the thread's product back to product-less. Default `false`. |
+| project_ids | list[str] | No | Full-replace the thread's project tags (0-50 UUIDs). Omit to leave tags untouched; pass `[]` to clear all. A thread may tag zero, one, or many projects. |
 
 ---
 
@@ -663,17 +731,6 @@ flagged `requires_action`. The four cursor params require `as_participant`;
 
 ---
 
-### search_threads `mcp:read`
-
-**Purpose:** Search threads by `CHT` serial, subject keyword, participant, or message
-content. Tenant-scoped, newest first.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| query | str | Yes | Search query. |
-
----
-
 ## Context & Memory
 
 ### get_context `mcp:read`
@@ -700,7 +757,7 @@ on every call, not tunable via `depth_config`.
 
 ### search_memory `mcp:read`
 
-**Purpose:** Keyword-search the 360 memory (accumulated project closeouts/handovers) to answer "have we solved X before?". Case-insensitive substring/full-text match over each entry's `summary`, `key_outcomes`, `decisions_made`, `project_name` and `tags`, with an optional exact-`tag` filter. Tenant + active-product scoped (never pass `tenant_key`; an active product is required, same contract as `list_projects`). Returns relevance-ranked headlines `[{sequence, project_id, project_alias, project_name, summary, tags, type, score}]`. An empty query or no match returns an empty result, not an error. Distinct from `get_context(['memory_360'])` (recent-N by recency, not search) and `search_threads` (Hub chat, not memory).
+**Purpose:** Keyword-search the 360 memory (accumulated project closeouts/handovers) to answer "have we solved X before?". Case-insensitive substring/full-text match over each entry's `summary`, `key_outcomes`, `decisions_made`, `project_name` and `tags`, with an optional exact-`tag` filter. Tenant + active-product scoped (never pass `tenant_key`; an active product is required, same contract as `list_projects`). Returns relevance-ranked headlines `[{sequence, project_id, project_alias, project_name, summary, tags, type, score}]`. An empty query or no match returns an empty result, not an error. Distinct from `get_context(['memory_360'])` (recent-N by recency, not search) and `list_threads(query=)` (Hub chat, not memory).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -756,7 +813,7 @@ dashboard. Fails if a product with the same name already exists.
 (BE-9201 — the MCP twin of the dashboard's vision-document upload). The document gets
 the identical ingest as a UI upload (inline storage, auto-chunking, auto-consolidation)
 and appears in the dashboard exactly like an uploaded file. Content is size-capped at
-the same limit as the UI upload. After creating the document, call `get_vision_doc`
+the same limit as the UI upload. After creating the document, call `get_vision_document`
 then `update_product_context` (including `vision_summaries` + `consolidated_vision`)
 to populate the product card.
 
@@ -768,16 +825,19 @@ to populate the product card.
 
 ---
 
-### get_vision_doc `mcp:read`
+### get_vision_document `mcp:read`
 
 **Purpose:** Retrieve a product's vision document with extraction instructions. Call
-without `chunk` first for metadata (`total_chunks`, `extraction_instructions`), then
-fetch each chunk one at a time. Read all chunks before calling `update_product_context`.
+WITHOUT `chunk` first for metadata (`total_chunks`, `extraction_instructions`), then
+fetch `chunk=1` through `chunk=total_chunks` — these reads are independent and
+side-effect free, so request them in PARALLEL, in any order. Read ALL chunks before
+calling `update_product_context`. (Renamed from `get_vision_doc`, to match
+`create_vision_document`.)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | product_id | str | Yes | ID of the product whose vision document to retrieve. |
-| chunk | int | No | Chunk index to fetch. Omit on first call for metadata. |
+| chunk | int | No | Chunk index to fetch. Omit on the first call for metadata. |
 
 ---
 
@@ -839,6 +899,7 @@ bundled `SKILLS_VERSION`. Run once after connecting.
 |-----------|------|----------|-------------|
 | platform | str | No | `claude_code`, `codex_cli`, `gemini_cli`, `antigravity_cli`, `generic`. Default auto-detects. |
 | harness | str | No | Optional session harness preset: `web_sandbox`\|`desktop_app`\|`chat` (omit for a terminal-capable CLI). |
+| product_id | str | No | Product UUID to bind this repository to. The returned instructions then include writing a marker block into `CLAUDE.md` and `AGENTS.md`, so later calls from this repo never hit a product-ambiguity rejection. Omit on a tenant with zero or several products; the response says what to do next. |
 
 > **Agent templates:** install them via `giljo_setup` ("Agents only" scope) and read
 > their content via `get_context(categories=['agent_templates'])`. (The standalone
@@ -851,14 +912,14 @@ bundled `SKILLS_VERSION`. Run once after connecting.
 
 | Category | Scope mix | Tools |
 |----------|-----------|-------|
-| Discovery & Health | 2× read | health_check, get_giljo_guide |
+| Discovery & Health | 2 read | health_check, get_giljo_guide |
 | Project Management | 2 write · 2 read · 1 agent | create_project, update_project, list_projects, update_project_mission, diagnose_project_state |
-| Project Lifecycle | 6× agent | stage_project, get_staging_instructions, implement_project, launch_implementation, start_chain_run, write_project_closeout |
+| Project Lifecycle | 7 agent | stage_project, get_staging_instructions, get_implementation_prompt, launch_implementation, link_projects, unlink_projects, write_project_closeout |
 | Tasks | 2 write · 1 read | create_task, update_task, list_tasks |
-| Roadmap | 1 write · 1 read | update_roadmap_metadata, get_roadmap |
-| Agent Jobs & Lifecycle | 11× agent | spawn_job, get_job_mission, update_job_mission, report_progress, complete_job, close_job, resolve_reactivation, set_agent_status, get_agent_result, get_workflow_status, request_approval |
-| Agent Message Hub | 4 agent · 6 read | create_thread, join_thread, post_to_thread, pass_baton, get_my_turn, await_my_turn, get_participant_liveness, list_threads, get_thread_history, search_threads |
+| Roadmap | 1 write · 1 read | save_roadmap, get_roadmap |
+| Agent Jobs & Lifecycle | 12 agent | spawn_job, get_job_mission, update_job_mission, report_progress, complete_job, finalize_job, resume_or_dismiss_job, set_agent_status, get_agent_result, get_workflow_status, request_approval, decide_approval |
+| Agent Message Hub | 5 agent · 5 read | create_thread, join_thread, post_to_thread, set_next_actor, update_thread, get_my_turn, get_participant_liveness, list_threads, get_thread_history |
 | Context & Memory | 2 read · 1 agent | get_context, search_memory, write_memory_entry |
-| Vision & Product Context | 1 read · 4 write | create_product, create_vision_document, get_vision_doc, update_product_context, apply_context_tuning |
+| Vision & Product Context | 1 read · 4 write | create_product, create_vision_document, get_vision_document, update_product_context, apply_context_tuning |
 | Setup | 1 write | giljo_setup |
-| **Total** | **15 read · 10 write · 23 agent** | **48** |
+| **Total** | **13 read · 10 write · 26 agent** | **49** |

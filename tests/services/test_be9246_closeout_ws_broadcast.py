@@ -18,7 +18,7 @@ event, so dashboard agent tiles go stale until a manual refresh:
 Fix contract: both service helpers now additionally return one
 ``AgentStatusChangeEvent`` per transitioned agent (old_status captured BEFORE the
 status overwrite), and the owning caller broadcasts ``agent:status_changed`` (the
-SAME shape ``OrchestrationAgentStateService._broadcast_completion`` / ``close_job``
+SAME shape ``OrchestrationAgentStateService._broadcast_completion`` / ``finalize_job``
 already emit) exactly once per agent, strictly POST-COMMIT.
 
 Tests 1-2 exercise ``close_completed_agents_with_commit`` (owns its own commit
@@ -165,7 +165,16 @@ async def _seed_execution(
 async def test_close_completed_agents_with_commit_broadcasts_post_commit(db_session: AsyncSession) -> None:
     """The fail-first case: today this never emits anything at all."""
     tenant_key = TenantManager.generate_tenant_key()
-    project_id = await _seed_project(db_session, tenant_key)
+    product = Product(
+        id=str(uuid.uuid4()),
+        tenant_key=tenant_key,
+        name=f"BE-9518 product {uuid.uuid4().hex[:8]}",
+        description="Owning product for the BE-9518 product_id assertion.",
+        is_active=False,
+    )
+    db_session.add(product)
+    await db_session.flush()
+    project_id = await _seed_project(db_session, tenant_key, product_id=product.id)
     job_id, _agent_id = await _seed_execution(db_session, tenant_key, project_id, status="complete")
 
     mock_ws = _mock_ws()
@@ -187,6 +196,8 @@ async def test_close_completed_agents_with_commit_broadcasts_post_commit(db_sess
     assert event["old_status"] == "complete"
     assert event["status"] == "closed"
     assert event["agent_display_name"] == "implementer"
+    # BE-9518: product_id must ride the payload so a per-tab WS router can filter on it.
+    assert event["product_id"] == product.id
 
 
 async def test_close_completed_agents_with_commit_never_emits_before_commit(

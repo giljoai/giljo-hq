@@ -3,14 +3,14 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""INF-6049b — tests for the stage_project / implement_project MCP tools.
+"""INF-6049b — tests for the stage_project / get_implementation_prompt MCP tools.
 
 Covers the load-bearing DoD for the two new project-lifecycle tools:
 
 - MCP-transport boundary tests for BOTH tools (regression-at-the-failing-layer;
   the BE-5042 gap — a tool can pass every service test yet fail at the FastMCP
   @mcp.tool wrapper). Driven through ``create_connected_server_and_client_session``.
-- The SACRED human gate: implement_project returns a DISTINGUISHABLE structured
+- The SACRED human gate: get_implementation_prompt returns a DISTINGUISHABLE structured
   error for "staging not complete" vs "press Implement in the dashboard", NEVER
   sets ``implementation_launched_at``, and offers no bypass.
 - Tenant isolation: another tenant's project is not found.
@@ -429,7 +429,7 @@ async def test_stage_project_solo_next_action_is_stop_byte_identical(
     """BE-9015 two-sided guard — SOLO half (load-bearing regression guard). A project with
     NO active chain run keeps the SACRED human Implement gate: stage_project's
     next_action.why is BYTE-IDENTICAL to _STAGING_STOP_INSTRUCTION. This proves the
-    chain-awareness change did NOT disturb the solo gate (CI1-EM2 note 4)."""
+    chain-awareness change did NOT disturb the solo gate."""
     new_client, _switch = lifecycle_mcp_client
     seeded = await _seed_product_project(db_session, primary_tenant_key)
 
@@ -470,7 +470,7 @@ async def test_stage_project_chain_member_continues_not_stop(lifecycle_mcp_clien
 
 
 # ---------------------------------------------------------------------------
-# implement_project — the SACRED human gate (distinguishable structured errors)
+# get_implementation_prompt — the SACRED human gate (distinguishable structured errors)
 # ---------------------------------------------------------------------------
 
 
@@ -479,7 +479,7 @@ async def test_implement_project_gate_staging_incomplete(lifecycle_mcp_client, d
     seeded = await _seed_product_project(db_session, primary_tenant_key, staging_status="staged", launched=False)
 
     async with new_client() as session:
-        result = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
+        result = await session.call_tool("get_implementation_prompt", {"project_id": seeded["project"].id})
 
     assert result.is_error is False, _error_text(result)
     payload = _payload(result)
@@ -498,7 +498,7 @@ async def test_implement_project_gate_not_launched_names_dashboard_action(
     )
 
     async with new_client() as session:
-        result = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
+        result = await session.call_tool("get_implementation_prompt", {"project_id": seeded["project"].id})
 
     assert result.is_error is False, _error_text(result)
     payload = _payload(result)
@@ -509,9 +509,9 @@ async def test_implement_project_gate_not_launched_names_dashboard_action(
     assert "Implement" in payload["next_action"]["why"]
     assert "dashboard" in payload["next_action"]["why"]
 
-    # SACRED gate: implement_project must NOT have stamped implementation_launched_at.
+    # SACRED gate: get_implementation_prompt must NOT have stamped implementation_launched_at.
     row = (await db_session.execute(select(Project).where(Project.id == seeded["project"].id))).scalar_one()
-    assert row.implementation_launched_at is None, "implement_project must NEVER set implementation_launched_at"
+    assert row.implementation_launched_at is None, "get_implementation_prompt must NEVER set implementation_launched_at"
 
 
 async def test_implement_project_happy_path_returns_prompt_with_agent_seed(
@@ -528,7 +528,7 @@ async def test_implement_project_happy_path_returns_prompt_with_agent_seed(
     seeded_team = await _seed_orchestrator_and_agent(db_session, primary_tenant_key, seeded["project"])
 
     async with new_client() as session:
-        result = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
+        result = await session.call_tool("get_implementation_prompt", {"project_id": seeded["project"].id})
 
     assert result.is_error is False, _error_text(result)
     payload = _payload(result)
@@ -556,7 +556,7 @@ async def test_implement_project_subagent_election_never_renders_multi_terminal_
     a project with the canonical UI election ``execution_mode='subagent'`` must NEVER
     receive the multi_terminal per-session seed at implement — the BE-9035c regression
     where subagent fell through to ``multi_terminal_orchestrator``. Driven through the
-    real FastMCP ``implement_project`` tool -> ``_detected_harness(ctx)`` -> implement()
+    real FastMCP ``get_implementation_prompt`` tool -> ``_detected_harness(ctx)`` -> implement()
     -> prompt-type selection -> render. The in-memory client resolves to the generic
     harness floor, so this exercises the harness-neutral subagent builder end-to-end."""
     new_client, _switch = lifecycle_mcp_client
@@ -570,7 +570,7 @@ async def test_implement_project_subagent_election_never_renders_multi_terminal_
     await _seed_orchestrator_and_agent(db_session, primary_tenant_key, seeded["project"])
 
     async with new_client() as session:
-        result = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
+        result = await session.call_tool("get_implementation_prompt", {"project_id": seeded["project"].id})
 
     assert result.is_error is False, _error_text(result)
     payload = _payload(result)
@@ -586,7 +586,7 @@ async def test_implement_project_subagent_election_never_renders_multi_terminal_
 async def test_implement_project_mode_matrix_every_registry_mode_accepted(
     lifecycle_mcp_client, db_session, primary_tenant_key, execution_mode
 ):
-    """BE-9035a regression (design §4 item 1): implement_project must accept EVERY
+    """BE-9035a regression (design §4 item 1): get_implementation_prompt must accept EVERY
     execution_mode the registry knows about. Parametrized over the LIVE registry set
     (not a hand-copied list) so a 7th platform automatically joins this matrix and a
     future omission 400s here instead of shipping. The live bug: generic_mcp was
@@ -605,7 +605,7 @@ async def test_implement_project_mode_matrix_every_registry_mode_accepted(
     await _seed_orchestrator_and_agent(db_session, primary_tenant_key, seeded["project"])
 
     async with new_client() as session:
-        result = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
+        result = await session.call_tool("get_implementation_prompt", {"project_id": seeded["project"].id})
 
     assert result.is_error is False, f"execution_mode={execution_mode!r}: {_error_text(result)}"
     payload = _payload(result)
@@ -627,7 +627,7 @@ async def test_implement_project_cross_tenant_not_found(
     # Tenant B tries to implement tenant A's project -> not found (tenant isolation).
     switch.value = secondary_tenant_key
     async with new_client() as session:
-        result = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
+        result = await session.call_tool("get_implementation_prompt", {"project_id": seeded["project"].id})
 
     assert result.is_error is True, "TENANT LEAK: tenant B must not reach tenant A's project"
     err = _error_text(result).lower()
@@ -642,7 +642,7 @@ async def test_implement_project_cross_tenant_returns_clean_not_found_no_guard_l
     lifecycle_mcp_client, db_session, primary_tenant_key, secondary_tenant_key
 ):
     """BE-3006d regression (at the MCP transport layer): a cross-tenant
-    implement_project trips ``TenantIsolationError`` (a plain RuntimeError) inside
+    get_implementation_prompt trips ``TenantIsolationError`` (a plain RuntimeError) inside
     the accessor. The ``_call_tool`` catch-all must classify it as a KNOWN
     security-boundary rejection and re-raise a CLEAN, fixed "not found" — NOT
     sanitize it to the generic internal-error message (the regression PR #26's CE
@@ -662,7 +662,7 @@ async def test_implement_project_cross_tenant_returns_clean_not_found_no_guard_l
     # Tenant B reaches for tenant A's project.
     switch.value = secondary_tenant_key
     async with new_client() as session:
-        result = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
+        result = await session.call_tool("get_implementation_prompt", {"project_id": seeded["project"].id})
 
     assert result.is_error is True, "TENANT LEAK: tenant B must not reach tenant A's project"
     err = _error_text(result)
@@ -839,6 +839,8 @@ async def test_be9332_mcp_stage_project_emits_orchestrator_prompt_generated(
         assert data.get(field), f"{_PROMPT_EVENT} payload is missing a non-empty {field!r}: {data!r}"
     assert data["project_id"] == seeded["project"].id
     assert data["thin_client"] is True
+    # BE-9518: product_id crosses the generate()->stage()->tool boundary additively.
+    assert data["product_id"] == seeded["product"].id
 
 
 async def test_be9332_rest_and_mcp_prompt_payloads_agree(lifecycle_mcp_client, ws_spy, db_session, primary_tenant_key):
@@ -891,6 +893,9 @@ async def test_be9332_rest_and_mcp_prompt_payloads_agree(lifecycle_mcp_client, w
     # Both broadcast to the same (calling) tenant.
     assert mcp_events[0]["tenant_key"] == rest_events[0]["tenant_key"] == primary_tenant_key
 
+    # BE-9518: product_id must agree across both doors too, and match the seeded product.
+    assert rest_data.get("product_id") == mcp_data.get("product_id") == seeded["product"].id
+
 
 async def test_be9332_rest_orchestrator_thin_still_emits(db_session, primary_tenant_key):
     """Coverage for the OTHER REST emit site: POST /api/prompts/orchestrator-thin.
@@ -932,6 +937,8 @@ async def test_be9332_rest_orchestrator_thin_still_emits(db_session, primary_ten
     # Site A's own fields...
     assert data["estimated_tokens"] >= 0
     assert data["timestamp"]
+    # BE-9518: site A also picked up product_id from the shared generate() plumbing.
+    assert data["product_id"] == seeded["product"].id
     # ...and NOT site B's (pinning the deliberate asymmetry, and the omit-None contract).
     assert "agent_id" not in data
     assert "tool" not in data

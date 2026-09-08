@@ -123,7 +123,11 @@ class ProjectDeletionService:
                     await self._websocket_manager.broadcast_project_update(
                         project_id=project_id,
                         update_type="status_changed",
-                        project_data={"name": project.name, "status": ProjectStatus.DELETED.value},
+                        project_data={
+                            "name": project.name,
+                            "status": ProjectStatus.DELETED.value,
+                            "product_id": project.product_id,
+                        },
                         tenant_key=tenant_key,
                     )
                 except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
@@ -234,6 +238,7 @@ class ProjectDeletionService:
                 )
 
             project_name = project.name
+            project_product_id = project.product_id
 
             # Deactivate project if it's active (to avoid constraint issues)
             if project.status == ProjectStatus.ACTIVE:
@@ -322,6 +327,7 @@ class ProjectDeletionService:
                         project_data={
                             "name": project_name,
                             "deleted_counts": deleted_counts,
+                            "product_id": project_product_id,
                         },
                         tenant_key=tenant_key,
                     )

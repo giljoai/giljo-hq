@@ -157,12 +157,22 @@ $spacing-button-border-radius-small: 6px; // Message composer button radius
 $spacing-table-cell-padding: 16px; // Cell padding
 $spacing-table-header-padding: 12px 16px; // Header cell padding
 
+// Micro spacing (FE-9551: the Jobs board's most-repeated raw small values --
+// 5px appeared 6x and 9px 5x as bare padding/gap literals across its 4 files.
+// Named here rather than left as repeated magic numbers; NOT a full scale --
+// other one-off small values in those files stay literal by design.)
+$spacing-tight: 5px; // compact badge/pill padding, agent-row gap
+$spacing-snug: 9px; // taxonomy pill padding, card-head gap, gate-note padding
+
 // =========================================================================
 // 7. TYPOGRAPHY TOKENS
 // =========================================================================
 
 // Font family
 $typography-font-primary: "Roboto", sans-serif;
+// FE-9551: consolidates the 'IBM Plex Mono', monospace literal repeated
+// across main.scss and the Jobs board components.
+$typography-font-mono: "IBM Plex Mono", monospace;
 
 // Font sizes
 $typography-font-size-header: 1.125rem; // 18px - Panel headers
@@ -274,3 +284,24 @@ $transition-slow:   0.4s;
 $transition-hover:     background $transition-fast, color $transition-fast;
 $transition-transform: transform $transition-normal ease;
 $transition-all-fast:  all $transition-fast ease;
+
+// =========================================================================
+// 14. BREAKPOINT TOKENS (FE-9536)
+// =========================================================================
+//
+// Survey of every ad-hoc `@media (max-width: ...)` cutoff in frontend/src
+// found three real bands in use (599/600, 768/840, 1024/1100/1280) and no
+// case for a fourth — so three tokens, not one-per-file. Use `max-width:
+// $breakpoint-*` directly (plain Sass variables, no interpolation needed).
+//
+// $breakpoint-mobile — phones and the narrowest portrait tablets: single-
+//   column layouts, hide non-essential table columns entirely.
+// $breakpoint-tablet — the tablet band (portrait ~768-834px, 16:9 landscape
+//   ~1024-1194px) that the pre-FE-9536 grids skipped straight over, jumping
+//   3-col -> 1-col with nothing in between. Two-column layouts live here.
+// $breakpoint-compact — the point a data-dense table switches from full
+//   text columns to compact icon/abbreviated columns; wider than the other
+//   two because it is about information density, not device class.
+$breakpoint-mobile:  600px;
+$breakpoint-tablet:  960px;
+$breakpoint-compact: 1280px;

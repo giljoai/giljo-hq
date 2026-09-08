@@ -68,7 +68,6 @@ const commonProps = {
   projects: [INACTIVE_ITEM],
   total: 1,
   loading: false,
-  hasActiveProject: false,
   currentPage: 1,
   itemsPerPage: 10,
   sortBy: [{ key: 'created_at', order: 'desc' }],

@@ -194,7 +194,7 @@ async def test_a_repeated_handover_does_not_stack_rows(db_manager, db_session):
 async def test_the_atomic_post_with_baton_path_also_writes_the_row(db_manager, db_session):
     """The auto-pass is the DEFAULT hand-off, so it must produce the row too.
 
-    Covering only the standalone ``pass_baton`` would leave the common path — a
+    Covering only the standalone ``set_next_actor`` would leave the common path — a
     directed action-request that auto-passes — with no durable record. That is the
     BE-9292a lesson: the default path is the one that goes untested.
     """

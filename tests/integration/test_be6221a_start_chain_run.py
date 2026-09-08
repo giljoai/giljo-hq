@@ -219,7 +219,7 @@ async def test_start_chain_run_happy_path_returns_conductor_and_staging_bootstra
 
     async with new_client() as session:
         result = await session.call_tool(
-            "start_chain_run",
+            "link_projects",
             {"project_ids": [p1, p2], "execution_mode": "claude_code_cli"},
         )
         assert result.is_error is False, _error_text(result)
@@ -253,11 +253,11 @@ async def test_start_chain_run_persists_chain_mission(chain_mcp_client, db_sessi
 
     async with new_client() as session:
         result = await session.call_tool(
-            "start_chain_run",
+            "link_projects",
             {
                 "project_ids": [p1, p2],
                 "execution_mode": "multi_terminal",
-                "chain_mission": "Ship the linked feature across both projects.",
+                "mission": "Ship the linked feature across both projects.",
             },
         )
         assert result.is_error is False, _error_text(result)
@@ -281,7 +281,7 @@ async def test_rejects_nonexistent_project(chain_mcp_client, db_session, primary
 
     async with new_client() as session:
         result = await session.call_tool(
-            "start_chain_run",
+            "link_projects",
             {"project_ids": [p1, ghost], "execution_mode": "claude_code_cli"},
         )
         assert result.is_error is False, _error_text(result)
@@ -301,7 +301,7 @@ async def test_rejects_terminal_project(chain_mcp_client, db_session, primary_te
 
     async with new_client() as session:
         result = await session.call_tool(
-            "start_chain_run",
+            "link_projects",
             {"project_ids": [live, done], "execution_mode": "claude_code_cli"},
         )
         assert result.is_error is False, _error_text(result)
@@ -331,7 +331,7 @@ async def test_rejects_already_enrolled_project(chain_mcp_client, db_session, pr
 
     async with new_client() as session:
         result = await session.call_tool(
-            "start_chain_run",
+            "link_projects",
             {"project_ids": [p1, p3], "execution_mode": "claude_code_cli"},
         )
         assert result.is_error is False, _error_text(result)
@@ -356,7 +356,7 @@ async def test_rejects_member_awaiting_solo_implement(chain_mcp_client, db_sessi
 
     async with new_client() as session:
         result = await session.call_tool(
-            "start_chain_run",
+            "link_projects",
             {"project_ids": [live, parked], "execution_mode": "claude_code_cli"},
         )
         assert result.is_error is False, _error_text(result)
@@ -386,7 +386,7 @@ async def test_rejects_launched_member(chain_mcp_client, db_session, primary_ten
 
     async with new_client() as session:
         result = await session.call_tool(
-            "start_chain_run",
+            "link_projects",
             {"project_ids": [live, launched], "execution_mode": "claude_code_cli"},
         )
         assert result.is_error is False, _error_text(result)
@@ -406,7 +406,7 @@ async def test_rejects_one_member_chain(chain_mcp_client, db_session, primary_te
 
     async with new_client() as session:
         result = await session.call_tool(
-            "start_chain_run",
+            "link_projects",
             {"project_ids": [p1], "execution_mode": "claude_code_cli"},
         )
         assert result.is_error is False, _error_text(result)
@@ -426,8 +426,8 @@ async def test_rejects_non_permutation_resolved_order(chain_mcp_client, db_sessi
 
     async with new_client() as session:
         result = await session.call_tool(
-            "start_chain_run",
-            {"project_ids": [p1, p2], "resolved_order": [p1, stranger], "execution_mode": "claude_code_cli"},
+            "link_projects",
+            {"project_ids": [p1, p2], "ordered": [p1, stranger], "execution_mode": "claude_code_cli"},
         )
         assert result.is_error is False, _error_text(result)
         payload = _payload(result)

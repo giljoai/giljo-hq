@@ -25,6 +25,8 @@ vi.mock('@/services/api', () => ({
       search: (...args) => searchThreadsMock(...args),
       update: (...args) => updateMock(...args),
       delete: (...args) => deleteMock(...args),
+      // FE-9586: opening a card selects the thread, which persists the read watermark.
+      markRead: vi.fn(() => Promise.resolve({ data: {} })),
     },
   },
 }))

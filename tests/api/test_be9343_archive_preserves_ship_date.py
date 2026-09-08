@@ -80,6 +80,13 @@ class _RecordingArchiveService(ArchiveMixin):
         self.closed_for.append(project_id)
         return []
 
+    async def _missing_closeout_blockers(self, project_id: str, tenant_key: str):  # noqa: ARG002
+        # BE-9539: every call in this file passes force=True, which still logs a
+        # warning when a closeout is missing (but never raises) -- return None
+        # (closeout present) so this orthogonal fake never needs a real session/
+        # repo/ProjectCloseoutService to answer that unrelated question.
+        return None
+
 
 _USER = SimpleNamespace(username="patrik", tenant_key="tk")
 
@@ -93,7 +100,10 @@ async def test_archive_does_not_send_completed_at() -> None:
     """
     service = _RecordingArchiveService()
 
-    await service.archive_project(project_id="p-be9343", tenant_key="tk")
+    # BE-9539: force=True skips the (orthogonal) closeout-required gate this
+    # recording double doesn't stub -- these tests pin the completed_at/deactivate/
+    # agent-closure composition, not gate behaviour.
+    await service.archive_project(project_id="p-be9343", tenant_key="tk", force=True)
 
     assert len(service.update_calls) == 1, "archive must issue exactly one update"
     updates = service.update_calls[0]
@@ -108,7 +118,10 @@ async def test_archive_of_an_early_terminated_project_also_sends_no_date() -> No
     """The early-termination branch picks a different status and must not regress either."""
     service = _RecordingArchiveService(early_termination=True)
 
-    await service.archive_project(project_id="p-be9343", tenant_key="tk")
+    # BE-9539: force=True skips the (orthogonal) closeout-required gate this
+    # recording double doesn't stub -- these tests pin the completed_at/deactivate/
+    # agent-closure composition, not gate behaviour.
+    await service.archive_project(project_id="p-be9343", tenant_key="tk", force=True)
 
     assert service.update_calls == [{"status": ProjectStatus.TERMINATED}]
 
@@ -121,7 +134,7 @@ async def test_archive_still_deactivates_a_running_project() -> None:
     """
     service = _RecordingArchiveService(status="active")
 
-    result = await service.archive_project(project_id="p-be9343", tenant_key="tk")
+    result = await service.archive_project(project_id="p-be9343", tenant_key="tk", force=True)
 
     assert service.deactivated == ["p-be9343"], "an active project must still be deactivated first"
     assert result.deactivated is True, "the result must report the step that actually ran"
@@ -131,7 +144,7 @@ async def test_archive_skips_deactivation_for_an_already_terminal_project() -> N
     """The other side of that gate — a completed project must not be deactivated again."""
     service = _RecordingArchiveService(status=ProjectStatus.COMPLETED)
 
-    result = await service.archive_project(project_id="p-be9343", tenant_key="tk")
+    result = await service.archive_project(project_id="p-be9343", tenant_key="tk", force=True)
 
     assert service.deactivated == []
     assert result.deactivated is False
@@ -141,7 +154,10 @@ async def test_archive_closes_completed_agents() -> None:
     """The fourth step. BE-9384: skipping it silently is the defect that created that project."""
     service = _RecordingArchiveService()
 
-    await service.archive_project(project_id="p-be9343", tenant_key="tk")
+    # BE-9539: force=True skips the (orthogonal) closeout-required gate this
+    # recording double doesn't stub -- these tests pin the completed_at/deactivate/
+    # agent-closure composition, not gate behaviour.
+    await service.archive_project(project_id="p-be9343", tenant_key="tk", force=True)
 
     assert service.closed_for == ["p-be9343"], "archive must always run the agent-closure step"
 
@@ -155,8 +171,8 @@ async def test_the_endpoint_delegates_instead_of_keeping_its_own_copy() -> None:
     calls: list[dict] = []
 
     class _DelegatingService:
-        async def archive_project(self, project_id: str, tenant_key: str | None = None):
-            calls.append({"project_id": project_id, "tenant_key": tenant_key})
+        async def archive_project(self, project_id: str, tenant_key: str | None = None, force: bool = False):
+            calls.append({"project_id": project_id, "tenant_key": tenant_key, "force": force})
 
         async def get_project(self, project_id: str, tenant_key: str):  # noqa: ARG002
             return SimpleNamespace(
@@ -192,4 +208,6 @@ async def test_the_endpoint_delegates_instead_of_keeping_its_own_copy() -> None:
 
     await archive_endpoint(project_id="p-be9343", current_user=_USER, project_service=_DelegatingService())
 
-    assert calls == [{"project_id": "p-be9343", "tenant_key": "tk"}]
+    # BE-9539: the endpoint is the dashboard's deliberate one-click abandon path,
+    # so it always forces past the closeout-required gate.
+    assert calls == [{"project_id": "p-be9343", "tenant_key": "tk", "force": True}]

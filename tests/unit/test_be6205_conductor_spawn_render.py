@@ -410,7 +410,7 @@ def test_thin_prompt_is_inline_safe() -> None:
 #
 # The retired convention discovered a chain hub by substring-searching its own
 # SUBJECT for the run id. BE-9291 moved discovery onto ``comm_threads.sequence_run_id``
-# and then removed the run id from new hub subjects — so ``search_threads`` with the
+# and then removed the run id from new hub subjects — so ``list_threads`` with the
 # run id as the query now returns NOTHING. The spawn prompt hands the sub-orch its run
 # id in the same sentence, so naming a search tool without naming its argument is an
 # invitation to search by the one identifier in scope. That is this project's own
@@ -430,12 +430,12 @@ def test_thin_prompt_names_the_fk_hub_discovery_path() -> None:
     assert "hub_thread_id" in prompt, "the spawn prompt must name the FK discovery result"
     assert "get_thread_history" in prompt, "the sub-orch still needs the Hub READ tool"
     # NEGATIVE ON THE FORM, NOT THE BARE NAME — deliberate, and it is not a weaker
-    # assertion by accident. ``search_threads`` is still a legitimate general-purpose
+    # assertion by accident. ``list_threads`` is still a legitimate general-purpose
     # tool whose bare name appears in the CH_SUB_ORCHESTRATOR ToolSearch bootstrap hint.
     # This prompt is embedded VERBATIM into the CH_CHAIN_DRIVE render (once per platform
     # preset), so a bare-name negative copied from here to any render-level test would be
     # false for a reason with nothing to do with discovery. Pin the retired PAIR instead.
-    assert "(search_threads," not in prompt, "the retired subject-search discovery pair must not return"
+    assert "(list_threads," not in prompt, "the retired subject-search discovery pair must not return"
 
 
 @pytest.mark.parametrize("mode", _ALL_MODES)
@@ -445,7 +445,7 @@ def test_spawn_command_ships_the_fk_hub_discovery_path(mode: str) -> None:
     out = render_suborch_spawn_command(mode, _RUN)
     assert "get_context chain" in out
     assert "hub_thread_id" in out
-    assert "(search_threads," not in out, "the retired subject-search discovery pair must not return"
+    assert "(list_threads," not in out, "the retired subject-search discovery pair must not return"
 
 
 # ---------------------------------------------------------------------------

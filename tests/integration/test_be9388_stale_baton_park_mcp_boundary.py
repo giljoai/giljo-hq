@@ -3,12 +3,12 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9388 — ``await_my_turn`` must be able to PARK, across the MCP transport.
+"""BE-9388 — ``get_my_turn`` must be able to PARK, across the MCP transport.
 
 BE-9296a shipped a wake primitive whose blocking path was unreachable. On its
 first live park it returned ``already_pending`` with ``waited_seconds=0``, every
 call, forever, for every agent in the tenant — turning the documented
-``while: await_my_turn()`` loop into a zero-delay spin that reports an
+``while: get_my_turn()`` loop into a zero-delay spin that reports an
 urgent-looking ``woken=true`` each iteration. Three threads left at baton ``all``
 (two ``resolved``, one ``open``, the oldest three weeks old, none belonging to the
 parking agent) were enough to disable the primitive tenant-wide.
@@ -88,7 +88,7 @@ async def _thread(service: CommThreadService, tenant_key: str, *, joiners: tuple
 
 async def _await_turn(client_factory, agent_id: str, *, timeout: int = PARK_SECONDS) -> dict:
     async with client_factory() as client:
-        result = await client.call_tool("await_my_turn", {"agent_id": agent_id, "timeout_seconds": timeout})
+        result = await client.call_tool("get_my_turn", {"agent_id": agent_id, "wait_seconds": timeout})
     assert result.is_error is False
     return _payload(result)
 
@@ -229,7 +229,7 @@ async def test_a_real_all_handoff_still_wakes_a_parked_participant_instantly(wak
 
     (C) stops a standing 'all' baton from pre-empting the park. It must NOT stop a
     FRESH 'all' hand-off from reaching an agent that is already parked — that path
-    runs through the wake registry, which pass_baton signals to every participant,
+    runs through the wake registry, which set_next_actor signals to every participant,
     independent of _has_pending_work. Park first, then hand off, and the wake must
     still arrive in under a second.
 
@@ -253,7 +253,7 @@ async def test_a_real_all_handoff_still_wakes_a_parked_participant_instantly(wak
             return result
 
         service.get_my_turn = _instrumented  # type: ignore[method-assign]
-        call = asyncio.create_task(client.call_tool("await_my_turn", {"agent_id": "worker-1", "timeout_seconds": 10}))
+        call = asyncio.create_task(client.call_tool("get_my_turn", {"agent_id": "worker-1", "wait_seconds": 10}))
         await asyncio.wait_for(read_done.wait(), timeout=WAKE_DEADLINE_SECONDS)
         assert get_wake_registry().waiter_count(tenant_key) >= 1, "waiter read but never parked"
 

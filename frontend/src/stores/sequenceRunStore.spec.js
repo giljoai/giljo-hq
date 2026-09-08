@@ -250,6 +250,25 @@ describe('handleSequenceUpdated — chain eject guard (UI-2)', () => {
     // fetchRun WAS called to give the cockpit the terminal snapshot.
     expect(api.sequenceRuns.get).toHaveBeenCalledWith('r1')
   })
+
+  // BE-9540: the run purged out from under an OPEN cockpit (conductor finale
+  // deleted the row, not just retired its status). Before the fix, fetchRun's
+  // 404 was swallowed with "leave last-known activeRun in place" — the cockpit
+  // kept showing a Review card for a run that no longer exists, and any further
+  // interaction (e.g. clicking review) would storm more 404s against it.
+  it('clears the stale activeRun and raises a retired-run notice when the run is genuinely gone', async () => {
+    const activeRunData = run('r1', ['p1', 'p2'], 'running')
+    store._testSeedRuns([activeRunData])
+    store._testSetActiveRun(activeRunData)
+
+    api.sequenceRuns.list.mockResolvedValueOnce({ data: [] })
+    api.sequenceRuns.get.mockRejectedValueOnce({ response: { status: 404 } })
+
+    await store.handleSequenceUpdated({ run_id: 'r1' })
+
+    expect(store.activeRun).toBeNull()
+    expect(store.retiredRunNotice).toEqual({ runId: 'r1' })
+  })
 })
 
 // FE-6199: chain staging live-fill — conductor writes chain_mission →

@@ -3,7 +3,17 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9296a — ``await_my_turn`` across the MCP transport, not just the service.
+"""BE-9296a — the WAKE PATH across the MCP transport, not just the service.
+
+BE-9554 RE-BASED THIS. ``get_my_turn`` was merged into
+``get_my_turn(agent_id, wait_seconds=)`` -- the wake mixin's own docstring said it
+returned the SAME payload plus ``woken``/``wake_reason``, so two tool names asked one
+question. Every guarantee below is unchanged and simply follows the behaviour to its
+new home: the wake path is advertised, dispatches to the wake service, blocks, wakes
+on a write, refuses a missing agent_id cleanly, and clamps at MAX_WAIT_SECONDS.
+
+The 55s clamp assertion is the one to keep no matter what else moves: MCP clients
+abort at 60s, so a wait that outlives the client budget surfaces as a broken tool.
 
 The service suite (``tests/services/test_be9296a_wake_signal.py``) proves the wake
 semantics. This file proves the thin glue an agent actually calls: the @mcp.tool
@@ -54,7 +64,7 @@ async def wake_mcp_client(db_manager, db_session, monkeypatch):
     """(client_factory, tenant_key, service) with the real CommThreadService bound
     to the rolled-back test session.
 
-    ``await_my_turn`` dispatches to ``acc._comm_thread_service.await_my_turn``
+    ``get_my_turn(wait_seconds=)`` dispatches to ``acc._comm_thread_service.get_my_turn``
     (``_base.TOOL_DISPATCH``), so that one service is rebuilt on ``db_session`` and
     handed to the test as well — the test writes through the SAME instance the tool
     reads through, which is what makes the wake observable here.
@@ -108,13 +118,13 @@ async def test_tool_is_advertised_with_its_documented_shape(wake_mcp_client):
     async with client_factory() as client:
         tools = {t.name: t for t in (await client.list_tools()).tools}
 
-    assert "await_my_turn" in tools, "the wake tool must be advertised"
-    schema = tools["await_my_turn"].input_schema
-    assert sorted(schema["properties"]) == ["agent_id", "timeout_seconds"]
+    assert "get_my_turn" in tools, "the wake tool must be advertised"
+    schema = tools["get_my_turn"].input_schema
+    assert sorted(schema["properties"]) == ["agent_id", "wait_seconds"]
     assert schema["required"] == ["agent_id"]
     # The cap is advertised as a bound, so a client cannot request a wait the
     # edge would kill.
-    assert schema["properties"]["timeout_seconds"]["maximum"] == MAX_WAIT_SECONDS
+    assert schema["properties"]["wait_seconds"]["maximum"] == MAX_WAIT_SECONDS
 
 
 async def test_dispatch_reaches_the_service_and_returns_the_wake_envelope(wake_mcp_client):
@@ -123,7 +133,7 @@ async def test_dispatch_reaches_the_service_and_returns_the_wake_envelope(wake_m
     await _thread_with_worker(service, tenant_key)
 
     async with client_factory() as client:
-        result = await client.call_tool("await_my_turn", {"agent_id": "worker-1", "timeout_seconds": 1})
+        result = await client.call_tool("get_my_turn", {"agent_id": "worker-1", "wait_seconds": 1})
 
     assert result.is_error is False
     body = _payload(result)
@@ -141,7 +151,7 @@ async def test_pending_work_returns_immediately_over_the_transport(wake_mcp_clie
 
     async with client_factory() as client:
         result = await asyncio.wait_for(
-            client.call_tool("await_my_turn", {"agent_id": "worker-1", "timeout_seconds": 30}),
+            client.call_tool("get_my_turn", {"agent_id": "worker-1", "wait_seconds": 30}),
             timeout=WAKE_DEADLINE_SECONDS,
         )
 
@@ -180,7 +190,7 @@ async def test_a_write_wakes_a_waiter_that_is_blocked_on_the_transport(wake_mcp_
             return result
 
         service.get_my_turn = _instrumented  # type: ignore[method-assign]
-        call = asyncio.create_task(client.call_tool("await_my_turn", {"agent_id": "worker-1", "timeout_seconds": 10}))
+        call = asyncio.create_task(client.call_tool("get_my_turn", {"agent_id": "worker-1", "wait_seconds": 10}))
         await asyncio.wait_for(read_done.wait(), timeout=WAKE_DEADLINE_SECONDS)
         assert get_wake_registry().waiter_count(tenant_key) >= 1, "waiter read but never parked"
 
@@ -204,7 +214,7 @@ async def test_missing_agent_id_is_a_clean_boundary_rejection(wake_mcp_client):
     """A required-arg omission must be a 422-style tool error, never a 500."""
     client_factory, _tenant, _svc = wake_mcp_client
     async with client_factory() as client:
-        result = await client.call_tool("await_my_turn", {})
+        result = await client.call_tool("get_my_turn", {})
 
     assert result.is_error is True
     text = "\n".join(b.text for b in result.content if getattr(b, "text", None))
@@ -215,7 +225,7 @@ async def test_an_over_long_wait_is_refused_at_the_boundary(wake_mcp_client):
     """The advertised maximum is enforced, not merely documented."""
     client_factory, _tenant, _svc = wake_mcp_client
     async with client_factory() as client:
-        result = await client.call_tool("await_my_turn", {"agent_id": "w", "timeout_seconds": 100_000})
+        result = await client.call_tool("get_my_turn", {"agent_id": "w", "wait_seconds": 100_000})
 
     assert result.is_error is True
 
@@ -224,19 +234,20 @@ def test_wake_tool_is_read_scoped_and_dispatch_mapped():
     """Fail-closed registries must both know the tool (SEC-9126)."""
     from api.endpoints.mcp_tools._base import TOOL_DISPATCH, TOOL_SCOPES
 
-    assert TOOL_SCOPES["await_my_turn"] == "mcp:read"
-    assert "await_my_turn" in TOOL_DISPATCH
+    assert TOOL_SCOPES["get_my_turn"] == "mcp:read"
+    assert "get_my_turn" in TOOL_DISPATCH
 
 
 def test_wake_tool_is_reachable_from_the_standard_profile():
     """An agent on the standard tier must be able to wait its turn.
 
-    ``get_my_turn`` is standard-tier, and a blocking form that were full-only would
-    leave exactly the mid-tier sessions that poll hardest unable to stop polling.
+    Now that the blocking form IS ``get_my_turn(wait_seconds=)`` rather than a separate
+    tool, this asserts the merged tool stays standard-tier -- a wake that were full-only
+    would leave exactly the mid-tier sessions that poll hardest unable to stop polling.
     """
     from api.endpoints.mcp_tools._base import _STANDARD_PROFILE_TOOLS
 
-    assert "await_my_turn" in _STANDARD_PROFILE_TOOLS
+    assert "get_my_turn" in _STANDARD_PROFILE_TOOLS
     assert "get_my_turn" in _STANDARD_PROFILE_TOOLS
 
 

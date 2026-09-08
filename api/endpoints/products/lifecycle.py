@@ -49,7 +49,8 @@ async def activate_product(
     service: ProductService = Depends(get_product_service),
 ) -> ProductActivationResponse:
     """
-    Activate a product (deactivates other products, auto-pauses their projects).
+    Show a product's tab (FE-9524/D1). No longer deactivates other products or
+    pauses their projects/jobs -- several products may be shown at once.
 
     Uses ProductService.activate_product() for database operations.
     Handover 0503: Updated response to match frontend expectations.
@@ -57,13 +58,16 @@ async def activate_product(
     logger.info("User %s activating product %s", sanitize(current_user.username), sanitize(product_id))
 
     try:
-        # Get currently active product (if any) before activation.
-        # BE-6066 P2: only its id is read here, so fetch it LEAN (eager_load=False)
-        # — skips four wasted selectin loads of relations we never touch.
-        active_product = await service.get_active_product(eager_load=False)
+        # FE-9524: previous_active_product_id now reports the tenant's DEFAULT
+        # product (not "the shown one" -- several may be shown at once), same
+        # as before the split since this response field predates it and no
+        # frontend consumer reads it. BE-6066 P2: only its id is read here, so
+        # fetch it LEAN (eager_load=False) — skips four wasted selectin loads
+        # of relations we never touch.
+        default_product = await service.get_default_product(eager_load=False)
         previous_active_id = None
-        if active_product:
-            previous_active_id = str(active_product.id)
+        if default_product:
+            previous_active_id = str(default_product.id)
 
         # Activate new product (return value discarded; re-hydrated below).
         await service.activate_product(product_id)
@@ -81,8 +85,9 @@ async def activate_product(
         # Build ProductResponse
         product_response = _build_product_response(product, stats, override_active=True)
 
-        # Project deactivation is handled internally by ProductService.activate_product();
-        # the frontend polls project state separately after activation.
+        # FE-9524/D1: activate_product no longer pauses any project -- kept as an
+        # empty list for response-shape compatibility (the frontend polls
+        # project state separately after activation).
         deactivated_projects = []
 
         return ProductActivationResponse(
@@ -118,7 +123,7 @@ async def deactivate_product(
     service: ProductService = Depends(get_product_service),
 ) -> ProductResponse:
     """
-    Deactivate a product.
+    Hide a product's tab (FE-9524/D1). No longer pauses its projects or jobs.
 
     Uses ProductService.deactivate_product() for database operations.
     """
@@ -148,6 +153,34 @@ async def deactivate_product(
                 )
         except Exception as pub_err:  # noqa: BLE001 - fire-and-forget WS event
             logger.warning("Failed to publish product deactivation event: %s", sanitize(str(pub_err)))
+
+
+@router.post("/{product_id}/set-default", response_model=ProductResponse)
+async def set_default_product(
+    product_id: str,
+    current_user: User = Depends(get_current_active_user),
+    service: ProductService = Depends(get_product_service),
+) -> ProductResponse:
+    """
+    Set the tenant's DEFAULT product (FE-9524, operator ruling 2026-08-29):
+    where an unscoped read resolves. Independent of shown/hidden -- does not
+    require the target to be shown (D2: hidden is still a fully valid
+    default), and never touches projects or jobs.
+
+    No UI control calls this endpoint yet -- the operator is separately
+    deciding the exact affordance (e.g. whether the product-card play button
+    becomes a "Default product" checkbox). This exists so the capability is
+    complete and testable ahead of that UI decision.
+
+    Uses ProductService.set_default_product() for database operations.
+    """
+    logger.info("User %s setting default product %s", sanitize(current_user.username), sanitize(product_id))
+
+    await service.set_default_product(product_id)
+
+    product = await service.get_product(product_id)
+    stats = await service.memory.get_product_statistics(str(product.id))
+    return _build_product_response(product, stats)
 
 
 @router.delete("/{product_id}", response_model=ProductDeleteResponse)
@@ -254,18 +287,21 @@ async def refresh_active_product(
     service: ProductService = Depends(get_product_service),
 ) -> ActiveProductRefreshResponse:
     """
-    Refresh active product information.
+    Refresh default-product information (endpoint path/field names predate
+    the FE-9524 split and are left as-is -- no frontend consumer reads
+    ``previous_active_product_id``-style ids here, only ``has_active_product``/
+    ``product``, and the wire shape is unchanged).
 
-    Uses ProductService.get_active_product() for database operations.
+    Uses ProductService.get_default_product() for database operations.
     """
-    logger.debug(f"User {current_user.username} refreshing active product")
+    logger.debug(f"User {current_user.username} refreshing default product")
 
-    product = await service.get_active_product()
+    product = await service.get_default_product()
 
     if not product:
         return ActiveProductRefreshResponse(has_active_product=False, product=None)
 
-    # BE-6066 P1: this endpoint resolves a SINGLE (the active) product — it is not
+    # BE-6066 P1: this endpoint resolves a SINGLE (the default) product — it is not
     # the O(N) per-product loop the products list has. It is routed through the
     # batched stats path anyway so it drops the redundant per-product re-SELECT
     # that get_product_statistics issued. The numbers are identical.
@@ -273,9 +309,13 @@ async def refresh_active_product(
     metrics = stats_map.get(str(product.id))
     stats = _stats_from_metrics(product, metrics) if metrics else None
 
+    # FE-9524: do NOT override_active here. Default and shown are independent
+    # columns now (D2: a hidden product is still a fully valid default) -- the
+    # response must report the product's REAL is_active, not a value forced
+    # true because it happens to be resolved as the default.
     return ActiveProductRefreshResponse(
         has_active_product=True,
-        product=_build_product_response(product, stats, override_active=True),
+        product=_build_product_response(product, stats),
     )
 
 
@@ -287,20 +327,20 @@ async def get_vision_document_stats(
     tenant_key: str = Depends(get_tenant_key),
 ) -> VisionDocumentStatsResponse:
     """
-    Get vision document statistics for active product.
+    Get vision document statistics for the tenant's DEFAULT product.
 
-    Returns token counts and metadata for the active product's vision document.
+    Returns token counts and metadata for the default product's vision document.
     Used by frontend to dynamically display context depth options with actual token counts.
 
     Handover 0345: Dynamic vision document token counts for context depth configuration.
+    FE-9524: resolves is_default, not is_active -- see ProductService.get_default_product.
     """
-    logger.debug(f"User {current_user.username} requesting vision stats for active product")
+    logger.debug(f"User {current_user.username} requesting vision stats for default product")
 
-    # Get active product
-    product = await service.get_active_product()
+    product = await service.get_default_product()
 
     if not product:
-        raise HTTPException(status_code=404, detail="No active product found")
+        raise HTTPException(status_code=404, detail="No default product found")
 
     product_id = str(product.id)
     product_name = product.name

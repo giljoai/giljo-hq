@@ -78,10 +78,11 @@ async def test_none_optional_keys_are_omitted_not_sent_as_null():
         estimated_tokens=None,
         tool=None,
         timestamp=None,
+        product_id=None,
     )
 
     data = spy.calls[0]["data"]
-    for omitted in ("agent_id", "execution_id", "estimated_tokens", "tool", "timestamp"):
+    for omitted in ("agent_id", "execution_id", "estimated_tokens", "tool", "timestamp", "product_id"):
         assert omitted not in data, f"{omitted!r} was None and must be omitted, not sent as null: {data!r}"
 
 
@@ -97,6 +98,7 @@ async def test_supplied_optional_keys_are_included():
         estimated_tokens=931,
         tool="claude-code",
         timestamp="2026-08-02T00:00:00+00:00",
+        product_id="prod-1",
     )
 
     assert spy.calls[0]["data"] == {
@@ -108,6 +110,7 @@ async def test_supplied_optional_keys_are_included():
         "estimated_tokens": 931,
         "tool": "claude-code",
         "timestamp": "2026-08-02T00:00:00+00:00",
+        "product_id": "prod-1",
     }
 
 

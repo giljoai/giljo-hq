@@ -20,11 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.domain.project_status import ProjectStatus
-from giljo_mcp.exceptions import (
-    BaseGiljoError,
-    ResourceNotFoundError,
-    ValidationError,
-)
+from giljo_mcp.exceptions import BaseGiljoError, ResourceNotFoundError, ValidationError
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.projects import Project
 from giljo_mcp.repositories.project_lifecycle_repository import ProjectLifecycleRepository
@@ -42,6 +38,7 @@ from giljo_mcp.services.closeout_ws_broadcast import (
     broadcast_agent_status_events,
     build_agent_status_change_events,
 )
+from giljo_mcp.services.diagnose_staging_hints import compute_stuck_conditions
 from giljo_mcp.services.project_closeout_readiness import (
     AgentReadinessFinding,
     CloseoutReadinessReport,
@@ -161,6 +158,7 @@ class ProjectCloseoutService:
                                 "name": project.name,
                                 "status": ProjectStatus.COMPLETED.value,
                                 "mission": project.mission,
+                                "product_id": project.product_id,
                             },
                             tenant_key=tenant_key,
                         )
@@ -324,13 +322,21 @@ class ProjectCloseoutService:
                 project_id=project_id,
                 tenant_key=tenant_key,
             )
+            # BE-9518: this method never otherwise loads the project row; a cheap
+            # PK lookup before commit is the only source for product_id here.
+            project_for_broadcast = await self._project_repo.get_by_id(session, tenant_key, project_id)
+            product_id = project_for_broadcast.product_id if project_for_broadcast else None
             await session.commit()
 
         # BE-9246 POST-COMMIT: emit only after `session.commit()` above and only
         # after the `async with` block has released the session -- never mid-flush,
         # so a broadcast can never announce a status a rollback could still undo.
         await broadcast_agent_status_events(
-            self._websocket_manager, tenant_key=tenant_key, project_id=project_id, events=status_events
+            self._websocket_manager,
+            tenant_key=tenant_key,
+            project_id=project_id,
+            product_id=product_id,  # BE-9518
+            events=status_events,
         )
 
         return closed_names
@@ -742,26 +748,16 @@ class ProjectCloseoutService:
             # agents AND a pending approval at once) -- collapsing it to a single
             # next_action would drop remedies for every condition but the first.
             # Allowlisted in tests/unit/test_be8003a_next_action_envelope_surface.py.
-            stuck: list[str] = []
-            suggested: list[str] = []
-            if not execution_mode and not is_terminal:
-                stuck.append("execution_mode_not_selected")
-                suggested.append("Pick an execution mode in the dashboard, then stage the project.")
-            if counts["total"] == 0 and not is_terminal:
-                stuck.append("no_agents_spawned")
-            if all_finished and not is_terminal:
-                stuck.append("all_agents_finished_project_still_open")
-                suggested.append(
-                    "All agents are finished — run write_project_closeout to finalize, or review blockers."
-                )
-            if counts["blocked"] > 0:
-                stuck.append("blocked_agents")
-            if counts.get("silent", 0) > 0:
-                stuck.append("silent_agents")
-                suggested.append("Silent agents detected — message them or set_agent_status, then re-check.")
-            if any(f.awaiting_user for f in report.findings):
-                stuck.append("awaiting_user_approval")
-                suggested.append("Resolve pending user approvals (see blockers) via the dashboard.")
+            # BE-9499b: computation moved to diagnose_staging_hints.py (Guardrail-1).
+            stuck, suggested = compute_stuck_conditions(
+                execution_mode=execution_mode,
+                is_terminal=is_terminal,
+                counts=counts,
+                all_finished=all_finished,
+                staging_status=getattr(project, "staging_status", None),
+                any_awaiting_user=any(f.awaiting_user for f in report.findings),
+                status=status,
+            )
 
             blockers = [
                 {
@@ -778,6 +774,7 @@ class ProjectCloseoutService:
 
             return {
                 "project_id": str(getattr(project, "id", project_id)),
+                "product_id": str(getattr(project, "product_id", "")) or None,
                 "name": getattr(project, "name", None),
                 "status": status,
                 "execution_mode": execution_mode,

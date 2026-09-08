@@ -34,8 +34,8 @@ from api.endpoints.mcp_sdk_server import TOOL_SCOPES, mcp
 
 
 # Frozen baseline captured from the unmodified mcp_sdk_server.py (35 tools),
-# plus update_roadmap_metadata added in FE-6022a (36), get_roadmap in FE-6022c (37),
-# get_giljo_guide in INF-6049a (38), stage_project + implement_project in INF-6049b
+# plus save_roadmap added in FE-6022a (36), get_roadmap in FE-6022c (37),
+# get_giljo_guide in INF-6049a (38), stage_project + get_implementation_prompt in INF-6049b
 # (40), 8 renames in INF-6052a (40, names updated), the 8 Agent Message Hub thread
 # tools in BE-6054b (48), launch_implementation in BE-6115a (49), INF-6111b
 # retired generate_download_token + renamed get_staging_context -> get_staging_instructions (48),
@@ -52,7 +52,7 @@ from api.endpoints.mcp_sdk_server import TOOL_SCOPES, mcp
 # search_memory (the missing 360-memory search JTBD) -> 48. BE-6225c hard-renamed
 # propose_product_context_update -> apply_context_tuning (a NAME swap, count
 # unchanged). BE-9012b (BE-6225e) merged reactivate_job + dismiss_reactivation into
-# one resolve_reactivation tool -> 47. BE-9012d (bus retirement, phase d)
+# one resume_or_dismiss_job tool -> 47. BE-9012d (bus retirement, phase d)
 # hard-removed send_message / receive_messages / get_messages -> 44. The count is 44.
 # BE-9197 added the pass_baton_to param to post_to_thread (atomic post-with-baton;
 # param addition only, tool set + count unchanged). BE-9201 added create_product +
@@ -68,7 +68,7 @@ from api.endpoints.mcp_sdk_server import TOOL_SCOPES, mcp
 # a new tool being introduced for the purpose. DELIBERATELY ADMITTED: param addition
 # only, count stays 46 — that is the load-bearing half, since a new tool here would
 # grow the surface of a product about to be submitted to a connector directory.
-# BE-9477 added the patch_fields param to update_roadmap_metadata: editing one
+# BE-9477 added the patch_fields param to save_roadmap: editing one
 # roadmap field used to clear the others, and the fix is an opt-in partial update on
 # the EXISTING tool rather than a second write tool beside it. DELIBERATELY ADMITTED:
 # param addition only, count stays 46. This lock caught it on CI's unit step, which is
@@ -114,6 +114,9 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
             "limit",  # BE-9468 read layer: bounded caller-facing row cap
             "memory_limit",
             "mode",
+            # BE-9499a: explicit product to scope to. Optional -- omitted,
+            # the tool behaves exactly as before (the active product).
+            "product_id",
             "project_type",
             "query",  # BE-9468 read layer: substring search over name/id/alias
             "status",
@@ -125,7 +128,20 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
     },
     "update_project": {
         "fn": "update_project",
-        "params": ["description", "name", "project_id", "project_type", "series_number", "status", "suffix"],
+        # BE-9499b: successor_project_id carries the supersede pointer
+        # (status='superseded' now reachable from MCP -- see project_status.py).
+        # BE-9539: force skips the closeout-required gate on status="completed".
+        "params": [
+            "description",
+            "force",
+            "name",
+            "project_id",
+            "project_type",
+            "series_number",
+            "status",
+            "successor_project_id",
+            "suffix",
+        ],
         "scope": "mcp:write",
     },
     "update_project_mission": {
@@ -136,25 +152,46 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
     # INF-6049b: project-lifecycle driving tools (40 tools).
     "stage_project": {
         "fn": "stage_project",
-        "params": ["mode", "project_id"],
+        # BE-9499b: action is the staging reverse gear (unstage/restage/cancel_staging).
+        # FE-9555: `mission` is an additive OPTIONAL goal-at-staging. It does not make
+        # this tool a second writer -- it routes through update_project_mission, the
+        # same single writer the standalone tool uses. Added because five blind routing
+        # tests across three model families sent mission-authoring here in every case,
+        # including the variant explicitly told another tool owned it.
+        "params": ["action", "mission", "mode", "project_id"],
         "scope": "mcp:agent",
     },
-    "implement_project": {
-        "fn": "implement_project",
+    # BE-9554: renamed to get_implementation_prompt (it returns a prompt; it does not
+    # implement). get_implementation_prompt stays one release as a pointer-only compat shim.
+    "get_implementation_prompt": {
+        "fn": "get_implementation_prompt",
         "params": ["project_id"],
         "scope": "mcp:agent",
     },
     # BE-6115a: CLI door of the two-door implement gate (49 tools). mcp:agent;
     # kept OUT of the orchestrator auto-tool bundle so an agent cannot self-unlock.
+    # BE-9499c: optional `mission` (goal-at-launch, routes through
+    # update_project_mission before stamping the gate).
     "launch_implementation": {
         "fn": "launch_implementation",
-        "params": ["project_id"],
+        "params": ["mission", "project_id"],
         "scope": "mcp:agent",
     },
     # BE-6221a: headless chain-start (Run Sequential equivalent), 50 tools. mcp:agent.
-    "start_chain_run": {
-        "fn": "start_chain_run",
-        "params": ["chain_mission", "execution_mode", "project_ids", "resolved_order", "review_policy"],
+    # BE-9500b added action/run_id/member_project_id (the terminate_remaining /
+    # mark_reviewed reverse-gear verbs, stage_project's action pattern) -- param
+    # addition only, tool set + count unchanged.
+    # BE-9554: start_chain_run's "start" and "terminate_remaining" actions become two
+    # plainly-named verbs. start_chain_run stays one release as a pointer-only shim;
+    # mark_reviewed leaves the agent surface (the UI review pane keeps its REST door).
+    "link_projects": {
+        "fn": "link_projects",
+        "params": ["execution_mode", "mission", "ordered", "project_ids"],
+        "scope": "mcp:agent",
+    },
+    "unlink_projects": {
+        "fn": "unlink_projects",
+        "params": ["run_id"],
         "scope": "mcp:agent",
     },
     # BE-9411: product_id binds the new task to a named product instead of
@@ -199,6 +236,9 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
             "memory_limit",
             "mode",
             "priority",
+            # BE-9499a: explicit product to scope to. Optional -- omitted,
+            # the tool behaves exactly as before (the active product).
+            "product_id",
             "query",
             "status",
             "summary_only",
@@ -212,15 +252,21 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
     # an omitted field keeps its stored value, an explicitly empty one is
     # cleared. Optional and DEFAULT FALSE, so an existing caller takes the
     # identical path it always did.
-    "update_roadmap_metadata": {
-        "fn": "update_roadmap_metadata",
-        "params": ["items", "patch_fields", "remove", "summary"],
+    # BE-9499a: product_id added. Optional -- omitted, the tool
+    # behaves exactly as before (the active product).
+    # BE-9554: renamed to save_roadmap -- the old name said "metadata", but this writes
+    # the roadmap itself (sort order, risk, blocked state). Old name kept one release.
+    "save_roadmap": {
+        "fn": "save_roadmap",
+        "params": ["items", "patch_fields", "product_id", "remove", "summary"],
         "scope": "mcp:write",
     },
     # FE-6022c: Roadmapping Pane read tool.
+    # BE-9499a: product_id added. Optional -- omitted, the tool
+    # behaves exactly as before (the active product).
     "get_roadmap": {
         "fn": "get_roadmap",
-        "params": [],
+        "params": ["product_id"],
         "scope": "mcp:read",
     },
     # BE-6054b: Agent Message Hub (BBS) thread tools (8 new -> 48 total).
@@ -239,6 +285,14 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
         ],
         "scope": "mcp:agent",
     },
+    # FE-9530: retag a thread's product/project(s), or rename/set status -- the
+    # MCP door for what the REST PATCH already did (dual-door rule). ADMITTED
+    # deliberately: tool count +1.
+    "update_thread": {
+        "fn": "update_thread",
+        "params": ["clear_product", "product_id", "project_ids", "status", "subject", "thread_id"],
+        "scope": "mcp:agent",
+    },
     "join_thread": {
         "fn": "join_thread",
         "params": ["agent_id", "display_name", "role", "thread_id"],
@@ -253,6 +307,9 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
         # BE-9475 added my_status: a headless participant's own status claim, the only
         # channel an agent with no agent_executions row has for saying what it is doing.
         # DELIBERATELY ADMITTED — param addition only, tool set + count unchanged.
+        # BE-9502a added rename_to: renames the thread with the post, through the same
+        # owning writer PATCH /threads/{id} uses (annex Section D#5). DELIBERATELY
+        # ADMITTED — param addition only, tool set + count unchanged.
         "params": [
             "as_user",
             "content",
@@ -261,6 +318,7 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
             "loop_interval_minutes",
             "my_status",
             "pass_baton_to",
+            "rename_to",
             "requires_action",
             "set_status",
             "thread_id",
@@ -268,14 +326,12 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
         ],
         "scope": "mcp:agent",
     },
+    # BE-9554: get_my_turn merged INTO get_my_turn as `wait_seconds` -- one question,
+    # one tool. get_my_turn survives for one release as a compat shim whose whole
+    # description is a pointer, so clients already registered against it keep working.
     "get_my_turn": {
         "fn": "get_my_turn",
-        "params": ["agent_id"],
-        "scope": "mcp:read",
-    },
-    "await_my_turn": {
-        "fn": "await_my_turn",
-        "params": ["agent_id", "timeout_seconds"],
+        "params": ["agent_id", "wait_seconds"],
         "scope": "mcp:read",
     },
     "get_participant_liveness": {
@@ -283,17 +339,21 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
         "params": ["thread_id"],
         "scope": "mcp:read",
     },
-    "pass_baton": {
-        "fn": "pass_baton",
-        # BE-9296a added from_agent: the hander's id, so the recipient's alert names
-        # WHO is waiting rather than only the thread. DELIBERATELY ADMITTED — param
-        # addition only, optional, tool set + count unchanged.
+    # BE-9554: renamed to set_next_actor -- "baton" was undefined jargon in the name.
+    # Old name kept one release as a shim that DELEGATES (its WS-broadcast path is not
+    # duplicated). The 'none' collision with post_to_thread.pass_baton_to is DELIBERATE
+    # and is now documented on BOTH tools rather than changed.
+    "set_next_actor": {
+        "fn": "set_next_actor",
         "params": ["from_agent", "thread_id", "to"],
         "scope": "mcp:agent",
     },
+    # BE-9554: list_threads merged INTO list_threads as `query` -- same objects, same
+    # scope, same ordering; searching is a filter. list_threads stays one release as a
+    # pointer-only shim so registered clients keep working.
     "list_threads": {
         "fn": "list_threads",
-        "params": ["owner", "product_id", "project_id", "status"],
+        "params": ["owner", "product_id", "project_id", "query", "status"],
         "scope": "mcp:read",
     },
     "get_thread_history": {
@@ -315,14 +375,15 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
         ],
         "scope": "mcp:read",
     },
-    "search_threads": {
-        "fn": "search_threads",
-        "params": ["query"],
-        "scope": "mcp:read",
-    },
     "request_approval": {
         "fn": "request_approval",
         "params": ["context", "job_id", "options", "project_id", "reason"],
+        "scope": "mcp:agent",
+    },
+    # BE-9499d: the harness-side door that clears awaiting_user (48 -> 49).
+    "decide_approval": {
+        "fn": "decide_approval",
+        "params": ["approval_id", "option_id"],
         "scope": "mcp:agent",
     },
     "get_staging_instructions": {
@@ -349,17 +410,20 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
         "params": ["acknowledge_closeout_todo", "acknowledge_messages_on_complete", "job_id", "result"],
         "scope": "mcp:agent",
     },
-    "close_job": {
-        "fn": "close_job",
+    "finalize_job": {
+        "fn": "finalize_job",
         "params": ["job_id"],
         "scope": "mcp:agent",
     },
     # BE-9012b (BE-6225e): reactivate_job + dismiss_reactivation merged into a single
-    # resolve_reactivation(job_id, action, reason) tool surface (48 -> 47). The two
+    # resume_or_dismiss_job(job_id, action, reason) tool surface (48 -> 47). The two
     # SERVICE methods are kept (project_helpers internal caller) + remain in
     # TOOL_DISPATCH as internal targets; only the agent-facing tool surface is merged.
-    "resolve_reactivation": {
-        "fn": "resolve_reactivation",
+    # BE-9554: renamed to resume_or_dismiss_job -- "reactivation" was internal
+    # state-machine vocabulary; the new name states the two choices. Old name kept
+    # one release as a pointer-only shim.
+    "resume_or_dismiss_job": {
+        "fn": "resume_or_dismiss_job",
         "params": ["action", "job_id", "reason"],
         "scope": "mcp:agent",
     },
@@ -379,7 +443,17 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
     },
     "spawn_job": {
         "fn": "spawn_job",
-        "params": ["agent_display_name", "agent_name", "mission", "phase", "predecessor_job_id", "project_id"],
+        # BE-9499c: optional `inline_seed` -- multi_terminal opt-in to the same
+        # inline bootstrap seed subagent modes already return.
+        "params": [
+            "agent_display_name",
+            "agent_name",
+            "inline_seed",
+            "mission",
+            "phase",
+            "predecessor_job_id",
+            "project_id",
+        ],
         "scope": "mcp:agent",
     },
     "get_agent_result": {
@@ -398,9 +472,11 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
         "scope": "mcp:read",
     },
     # BE-6225b: keyword search over 360 memory (the missing search JTBD), 47 -> 48.
+    # BE-9499a: product_id added. Optional -- omitted, the tool
+    # behaves exactly as before (the active product).
     "search_memory": {
         "fn": "search_memory",
-        "params": ["limit", "query", "tag"],
+        "params": ["limit", "product_id", "query", "tag"],
         "scope": "mcp:read",
     },
     "write_project_closeout": {
@@ -446,8 +522,8 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
         "params": ["content", "document_name", "product_id"],
         "scope": "mcp:write",
     },
-    "get_vision_doc": {
-        "fn": "get_vision_doc",
+    "get_vision_document": {
+        "fn": "get_vision_document",
         "params": ["chunk", "product_id"],
         "scope": "mcp:read",
     },
@@ -458,6 +534,9 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
     # BE-9167: added project_path (11 -> 12) so the vision-analysis agent can fill
     # the product card's "Codebase Folder"; user-owned skip, same style as
     # product_name/product_description.
+    # BE-9502a added is_active (activate/deactivate/switch, annex Section D#1) and
+    # extraction_custom_instructions (was PUT /products/{id}-only, annex Section
+    # D#4). DELIBERATELY ADMITTED — param additions only, tool set + count unchanged.
     "update_product_context": {
         "fn": "update_product_context",
         "params": [
@@ -465,7 +544,9 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
             "consolidated_vision",
             "core_features",
             "emit_completion",
+            "extraction_custom_instructions",
             "force",
+            "is_active",
             "product_description",
             "product_id",
             "product_name",
@@ -492,7 +573,8 @@ EXPECTED_TOOL_SURFACE: dict[str, dict[str, object]] = {
         # BE-8003g: optional session harness preset (web_sandbox|desktop_app|chat;
         # omit for CLI), the harness param's second wrapper after BE-8003f's
         # get_staging_instructions/get_job_mission.
-        "params": ["harness", "platform"],
+        # BE-9523c: added product_id, to bind this repo to a Giljo HQ product.
+        "params": ["harness", "platform", "product_id"],
         "scope": "mcp:write",
     },
     # BE-6225c: renamed from propose_product_context_update (the tool APPLIES tuning
@@ -529,9 +611,9 @@ def test_registered_tool_set_is_exactly_preserved():
     BE-6221a added start_chain_run (headless chain entry point): 46 -> 47.
     BE-6225b added search_memory (the missing 360-memory search JTBD): 47 -> 48.
     BE-9012b (BE-6225e) merged reactivate_job + dismiss_reactivation into
-    resolve_reactivation: 48 -> 47. BE-9012d hard-removed the 3 bus tools:
+    resume_or_dismiss_job: 48 -> 47. BE-9012d hard-removed the 3 bus tools:
     47 -> 44. BE-9201 added create_product + create_vision_document
-    (agent-side product bootstrap): 44 -> 46. BE-9296a added await_my_turn (the
+    (agent-side product bootstrap): 44 -> 46. BE-9296a added get_my_turn (the
     blocking form of get_my_turn — the server wake signal): 46 -> 47, and
     get_participant_liveness (the orchestrator's who-is-still-there read): 47 -> 48.
     BE-9385b added set_agent_export_alias (the install-time "keep both" rename, which
@@ -542,6 +624,24 @@ def test_registered_tool_set_is_exactly_preserved():
     server into chasing it. The install prose now flags the conflict and lets the
     installing LLM resolve it with the user -- the round-trip was the enforcement
     layer, and enforcement was the part that was over-built: 49 -> 48.
+    BE-9499d added decide_approval (the harness-side door that clears
+    awaiting_user, gated by the same BE-9084 fence as launch_implementation):
+    48 -> 49.
+    FE-9530 added update_thread (retag a thread's product/project(s), or
+    rename/set status -- the MCP door for what the REST PATCH already did):
+    49 -> 50.
+    BE-9554 (phase 2, one sprint) reshaped this surface and then SETTLED it:
+    start_chain_run retired into link_projects + unlink_projects; get_my_turn merged
+    into get_my_turn(wait_seconds=); list_threads into list_threads(query=);
+    get_implementation_prompt -> get_implementation_prompt; save_roadmap ->
+    save_roadmap; resume_or_dismiss_job -> resume_or_dismiss_job; set_next_actor ->
+    set_next_actor. Those SEVEN old names shipped one release as pointer-only compat
+    shims and are now DROPPED (operator ruling: the inventory is fetched at session
+    initialize, so only sessions open across the deploy break, once, self-healing).
+    The final-names flip also took finalize_job -> finalize_job and get_vision_document ->
+    get_vision_document, both without shims. launch_implementation deliberately KEEPS
+    its name: its defect was relational (the confusing twin), and renaming the twin
+    dissolved it -- see the closeout. Net: 50 -> 49.
     """
     live_names = {t.name for t in mcp._tool_manager.list_tools()}
     expected_names = set(EXPECTED_TOOL_SURFACE)
@@ -549,7 +649,7 @@ def test_registered_tool_set_is_exactly_preserved():
         f"Tool registry drift. Missing: {sorted(expected_names - live_names)}; "
         f"Unexpected: {sorted(live_names - expected_names)}"
     )
-    assert len(live_names) == 48
+    assert len(live_names) == 49
 
 
 def test_every_tool_fn_params_and_scope_preserved():

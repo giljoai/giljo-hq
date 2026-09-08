@@ -83,7 +83,7 @@ def _make_project(
     return project
 
 
-def _make_service(session, tenant_key=TENANT_KEY):
+def _make_service(session, tenant_key=TENANT_KEY, websocket_manager=None):
     """Create a ProjectLifecycleService with injected test session."""
     db_manager = Mock()
     db_manager.get_session_async = Mock(return_value=session)
@@ -95,6 +95,7 @@ def _make_service(session, tenant_key=TENANT_KEY):
             db_manager=db_manager,
             tenant_manager=tenant_manager,
             test_session=session,
+            websocket_manager=websocket_manager,
         )
 
 
@@ -425,6 +426,38 @@ class TestContinueWorking:
         assert project.completed_at is None
         assert result.message == "Project resumed successfully"
         assert result.agents_resumed == 0
+
+    @pytest.mark.asyncio
+    async def test_continue_completed_broadcasts_product_id(self):
+        """BE-9518: the project_update broadcast must carry product_id."""
+        project = _make_project(status="completed", product_id="prod-continue")
+        session = _make_session()
+
+        mock_project_result = MagicMock()
+        mock_project_result.scalar_one_or_none.return_value = project
+        mock_agents_result = MagicMock()
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = []
+        mock_agents_result.scalars.return_value = mock_scalars
+
+        call_count = 0
+
+        async def side_effect(stmt):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return mock_project_result
+            return mock_agents_result
+
+        session.execute = AsyncMock(side_effect=side_effect)
+
+        mock_ws = AsyncMock()
+        service = _make_service(session, websocket_manager=mock_ws)
+        await service.continue_working(PROJECT_ID, TENANT_KEY)
+
+        mock_ws.broadcast_project_update.assert_awaited_once()
+        call_kwargs = mock_ws.broadcast_project_update.await_args.kwargs
+        assert call_kwargs["project_data"]["product_id"] == "prod-continue"
 
 
 # ---------------------------------------------------------------------------

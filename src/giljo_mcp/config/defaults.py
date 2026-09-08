@@ -79,6 +79,14 @@ DEFAULT_DEPTH_CONFIG: dict[str, Any] = {
 DEFAULT_NOTIFICATION_PREFERENCES: dict[str, Any] = {
     "context_tuning_reminder": True,
     "tuning_reminder_threshold": 10,
+    # FE-9553, the ruled defaults for the one-notification-model surfaces:
+    # lifecycle banners on, advisories in the banner fold on, and popout scope
+    # = everything a banner shows. Lifecycle is ~75% of banner volume on a
+    # multi-lane night, which is why the scope control exists at all rather
+    # than the projection being unconditional.
+    "banner_lifecycle_enabled": True,
+    "banner_advisories_in_fold": True,
+    "popout_scope": "all",
 }
 
 # Section keys that map to tuning-eligible product context fields

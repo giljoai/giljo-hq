@@ -6,7 +6,7 @@
 """BE-9415: converting a task must bind the new project to the TASK's product.
 
 Defect: ``TaskConversionService._convert_to_project_impl`` resolved the
-destination product from ``get_active_product`` -- tenant-global *mutable* state
+destination product from ``get_default_product`` -- tenant-global *mutable* state
 that another session, or the operator switching products in the dashboard,
 changes under a running agent. So promoting a task filed the resulting project
 onto whichever product happened to be active at that instant, not the product

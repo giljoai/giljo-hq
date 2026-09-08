@@ -229,6 +229,78 @@ async def test_spawn_job_multi_terminal_returns_pointer_not_bootstrap(
 
 
 # ============================================================================
+# Test 1b (BE-9499c) — MCP boundary: inline_seed=true returns the seed inline
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_spawn_job_multi_terminal_inline_seed_returns_bootstrap_inline(
+    spawn_mcp_client,
+    db_session,
+):
+    """BE-9499c: passing inline_seed=true through the MCP transport in
+    multi_terminal mode must return the ACTUAL bootstrap seed inline (like
+    subagent mode already does) instead of the dashboard-Copy pointer, via the
+    SAME generator (one prompt engine, ruling 2)."""
+    new_client, tenant_key, session = spawn_mcp_client
+    seed = await _seed_project(session, tenant_key, execution_mode="multi_terminal")
+
+    async with new_client() as mcp_session:
+        result = await mcp_session.call_tool(
+            "spawn_job",
+            {
+                "agent_display_name": "ui-implementer",
+                "agent_name": "implementer",
+                "mission": "Implement the navbar redesign.",
+                "project_id": seed["project"].id,
+                "inline_seed": True,
+            },
+        )
+
+    assert result.is_error is False, f"BE-9499c: spawn_job must succeed; got error: {_error_text(result)}"
+    payload = _payload(result)
+
+    agent_prompt = payload["agent_prompt"]
+    assert "stored server-side" not in agent_prompt, (
+        f"BE-9499c: inline_seed=true must NOT return the dashboard pointer; got: {agent_prompt!r}"
+    )
+    assert "## STARTUP (MANDATORY)" in agent_prompt, (
+        f"BE-9499c: inline_seed=true must return the real bootstrap seed; got: {agent_prompt!r}"
+    )
+    assert payload["agent_prompt_location"] == "inline", (
+        f"BE-9499c: agent_prompt_location must be 'inline' when inline_seed=true; "
+        f"got: {payload['agent_prompt_location']!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_spawn_job_multi_terminal_default_still_returns_pointer(
+    spawn_mcp_client,
+    db_session,
+):
+    """Two-sided: omitting inline_seed (the pre-existing call shape) must stay
+    byte-identical to before this feature — the dashboard pointer, unchanged."""
+    new_client, tenant_key, session = spawn_mcp_client
+    seed = await _seed_project(session, tenant_key, execution_mode="multi_terminal")
+
+    async with new_client() as mcp_session:
+        result = await mcp_session.call_tool(
+            "spawn_job",
+            {
+                "agent_display_name": "ui-implementer",
+                "agent_name": "implementer",
+                "mission": "Implement the navbar redesign.",
+                "project_id": seed["project"].id,
+            },
+        )
+
+    assert result.is_error is False, _error_text(result)
+    payload = _payload(result)
+    assert "stored server-side" in payload["agent_prompt"]
+    assert payload["agent_prompt_location"] == "dashboard"
+
+
+# ============================================================================
 # Test 2 — Protocol assembly: FORBIDDEN banner present per (mode, tool) variant
 # ============================================================================
 

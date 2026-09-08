@@ -237,6 +237,7 @@ async def _decide_inline(ctx: Context, approval_id: str, option_id: str) -> bool
             approval_id=approval_id,
             option_id=option_id,
             user_id=user_id,
+            decided_via="mcp",
         )
         return True
     except (ValidationError, ResourceNotFoundError):

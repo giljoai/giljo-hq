@@ -264,7 +264,7 @@ async def test_get_job_mission_default_and_garbage_harness_degrade_to_cli(mcp_cl
 
 async def _start_chain_and_get_conductor(session, p1: str, p2: str) -> str:
     """Mint a project-less chain conductor via start_chain_run; return its job_id."""
-    result = await session.call_tool("start_chain_run", {"project_ids": [p1, p2], "execution_mode": "claude_code_cli"})
+    result = await session.call_tool("link_projects", {"project_ids": [p1, p2], "execution_mode": "claude_code_cli"})
     assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["success"] is True

@@ -13,12 +13,14 @@ import { setActivePinia, createPinia } from 'pinia'
 const mockGet = vi.fn()
 const mockList = vi.fn()
 const mockTasksList = vi.fn()
+const mockGetMemoryEntries = vi.fn()
 
 vi.mock('@/services/api', () => {
   const apiMock = {
     products: {
       get: (...a) => mockGet(...a),
       list: (...a) => mockList(...a),
+      getMemoryEntries: (...a) => mockGetMemoryEntries(...a),
     },
     tasks: {
       list: (...a) => mockTasksList(...a),
@@ -31,6 +33,7 @@ import { SYSTEM_EVENT_ROUTES } from './systemEventRoutes'
 import { useProductStore } from '../products'
 import { useNotificationStore } from '../notifications'
 import { useTaskStore } from '../tasks'
+import { useMemoryStore } from '../memoryStore'
 
 describe('systemEventRoutes — FE-9121 vision:analysis_complete write-through', () => {
   beforeEach(() => {
@@ -127,5 +130,85 @@ describe('systemEventRoutes — FE-9274 P2 task:updated live refresh', () => {
 
     expect(mockTasksList).toHaveBeenCalledTimes(1)
     expect(taskStore.tasks).toEqual([{ id: 't-1', status: 'in_progress' }])
+  })
+})
+
+describe('systemEventRoutes — FE-9501c (D9) task events replay the filter, not a bare fetch', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    mockTasksList.mockResolvedValue({ data: [] })
+  })
+
+  it('task:created replays the last fetchTasks() params instead of refetching paramless', async () => {
+    const taskStore = useTaskStore()
+    await taskStore.fetchTasks({ status: 'blocked', priority: 'high' })
+    mockTasksList.mockClear()
+
+    await SYSTEM_EVENT_ROUTES['task:created'].handler({})
+
+    expect(mockTasksList).toHaveBeenCalledWith({ status: 'blocked', priority: 'high' })
+  })
+
+  it('task:updated replays the last fetchTasks() params instead of refetching paramless', async () => {
+    const taskStore = useTaskStore()
+    await taskStore.fetchTasks({ filter_type: 'all_tasks' })
+    mockTasksList.mockClear()
+
+    await SYSTEM_EVENT_ROUTES['task:updated'].handler({ task_id: 't-1' })
+
+    expect(mockTasksList).toHaveBeenCalledWith({ filter_type: 'all_tasks' })
+  })
+})
+
+describe('systemEventRoutes — FE-9501c (D8) product:memory:updated also feeds memoryStore', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    mockGetMemoryEntries.mockResolvedValue({ data: { entries: [] } })
+  })
+
+  it('upserts the written entry into memoryStore when that product is loaded', async () => {
+    mockGetMemoryEntries.mockResolvedValueOnce({ data: { entries: [{ id: 'e1', summary: 'existing' }] } })
+    const memoryStore = useMemoryStore()
+    await memoryStore.fetchMemoryEntries('prod-1')
+
+    await SYSTEM_EVENT_ROUTES['product:memory:updated'].handler({
+      product_id: 'prod-1',
+      entry: { id: 'e2', summary: 'new write' },
+    })
+
+    expect(memoryStore.entries.map((e) => e.id).sort()).toEqual(['e1', 'e2'])
+  })
+
+  it('does not touch memoryStore for a product it has not loaded', async () => {
+    const memoryStore = useMemoryStore()
+
+    await SYSTEM_EVENT_ROUTES['product:memory:updated'].handler({
+      product_id: 'prod-unloaded',
+      entry: { id: 'e2', summary: 'new write' },
+    })
+
+    expect(memoryStore.entries).toHaveLength(0)
+  })
+})
+
+describe('systemEventRoutes — FE-9501c (D10) product:created / product:updated', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    mockList.mockResolvedValue({ data: [] })
+    mockGet.mockResolvedValue({ data: { id: 'p-1', name: 'Renamed' } })
+  })
+
+  it('product:created refreshes the products list', async () => {
+    await SYSTEM_EVENT_ROUTES['product:created'].handler({ product_id: 'p-1', name: 'New Product' })
+    expect(mockList).toHaveBeenCalledTimes(1)
+  })
+
+  it('product:updated refreshes both the list and the specific product', async () => {
+    await SYSTEM_EVENT_ROUTES['product:updated'].handler({ product_id: 'p-1' })
+    expect(mockList).toHaveBeenCalledTimes(1)
+    expect(mockGet).toHaveBeenCalledWith('p-1')
   })
 })

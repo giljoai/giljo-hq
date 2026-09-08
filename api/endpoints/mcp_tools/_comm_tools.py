@@ -36,8 +36,8 @@ from api.endpoints.mcp_tools._base import (
     _detected_harness,
     mcp,
 )
+from api.endpoints.mcp_tools._comm_broadcast_helpers import broadcast_thread_metadata_update
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
-from giljo_mcp import branding
 from giljo_mcp.models.comm import VALID_SELF_REPORTED_STATUSES
 from giljo_mcp.services._comm_thread_wake_mixin import MAX_WAIT_SECONDS
 
@@ -129,7 +129,11 @@ def _post_refusal(from_agent: str, as_user: bool, my_status: str) -> dict[str, A
         "chat id to share so other agents can join_thread. Threads are standalone by "
         "default; pass project_id to anchor one to a project. The creator is registered "
         "as the first participant and holds the baton (next_action_owner). "
-        f"{branding.TWO_HUB_DISAMBIGUATION}"
+        "An omitted product_id is resolved for you (the same rule create_task/"
+        "create_project already follow) -- a single-product tenant binds silently, several "
+        "with none named comes back as PRODUCT_AMBIGUOUS naming the list to retry with. "
+        "The only thread that stays product-less on an omitted product_id is one created by "
+        "a chain conductor (sequence_run_id set) or on a tenant with zero products."
     ),
     annotations=_tool_hints("create_thread"),
 )
@@ -143,10 +147,10 @@ async def create_thread(
         Field(
             max_length=MCP_ID_MAX,
             description=(
-                "Optional product UUID to file the thread under -- pass the product you are "
-                "working under. This is what list_threads(product_id=...) filters on, so a "
-                "thread created without it can never be found that way. Omit for a thread "
-                "that belongs to no product."
+                "Product UUID to file the thread under -- pass the product you are working "
+                "under. This is what list_threads(product_id=...) filters on. Omit to let the "
+                "server resolve it for you; it only stays unset for a chain-"
+                "conductor create or a tenant with no products at all."
             ),
         ),
     ] = "",
@@ -216,8 +220,7 @@ async def create_thread(
     description=(
         "Join a message-board thread by its thread_id, declaring/claiming your agent_id. "
         "Collision-safe (re-joining is a no-op). Registers you in the participant directory "
-        "so broadcast posts reach you. "
-        f"{branding.TWO_HUB_DISAMBIGUATION}"
+        "so broadcast posts reach you."
     ),
     annotations=_tool_hints("join_thread"),
 )
@@ -250,8 +253,7 @@ async def join_thread(
         "Post a message to a thread (append-only) -- the canonical agent-to-agent messaging "
         "tool. Requires from_agent (or an explicit as_user=true for a post in the human "
         "user's voice). Broadcasts by default; see to_participant, set_status, and "
-        "pass_baton_to for DM, status, and atomic baton hand-off. "
-        f"{branding.TWO_HUB_DISAMBIGUATION}"
+        "pass_baton_to for DM, status, and atomic baton hand-off."
     ),
     annotations=_tool_hints("post_to_thread"),
 )
@@ -307,9 +309,9 @@ async def post_to_thread(
         str,
         Field(
             max_length=MCP_ID_MAX,
-            description="Atomically hand the baton (next_action_owner) with this post: an agent_id "
-            "| user_id | 'all' | 'none'. Explicit value always wins; 'none' posts WITHOUT moving "
-            "the baton. DEFAULT when omitted: a directed action-request (requires_action=true + "
+            description="Hand the turn on with this post: an agent_id | user_id | 'all' | 'none'. "
+            "Explicit value always wins; 'none' posts WITHOUT changing who acts next -- NOTE that "
+            "set_next_actor uses 'none' the OTHER way round, where it CLEARS the actor. DEFAULT when omitted: a directed action-request (requires_action=true + "
             "to_participant) auto-passes the baton to that participant; every other post leaves "
             "the baton untouched.",
         ),
@@ -324,6 +326,15 @@ async def post_to_thread(
             "poll loop. Only useful if you are a headless/external agent that joined with "
             "join_thread: agents the platform runs already report status automatically and that "
             "always wins over this. Omit to leave your current status unchanged.",
+        ),
+    ] = "",
+    rename_to: Annotated[
+        str,
+        Field(
+            max_length=MCP_NAME_MAX,
+            description="Rename this thread with this post. Empty = unchanged. REFUSED on a "
+            "project-bound thread (it's named after its project) -- rename the project instead. "
+            "Applied BEFORE the post: a refused rename posts nothing.",
         ),
     ] = "",
     ctx: Context = None,
@@ -354,6 +365,8 @@ async def post_to_thread(
         kwargs["loop_interval_minutes"] = loop_interval_minutes
     if my_status:
         kwargs["self_reported_status"] = my_status
+    if rename_to:
+        kwargs["rename_to"] = rename_to
     # BE-9197: the auto-pass rule lives in _resolve_pass_baton_to (module top).
     effective_baton_to = _resolve_pass_baton_to(pass_baton_to, requires_action, to_participant)
     if effective_baton_to:
@@ -413,92 +426,71 @@ async def post_to_thread(
                 priority="normal",
                 requires_action=requires_action,
                 project_id=None,
+                # FE-9546: the service-RESOLVED addressee, not the raw tool parameter — an
+                # agent addresses the operator via the "user" alias, which only the service
+                # can expand to the real id (see comm_thread_service.post_to_thread).
+                to_participant=result.get("to_participant"),
             )
     except Exception:  # noqa: BLE001 - WS failure is non-fatal; result is already committed
         logger.debug("MCP post_to_thread WS broadcast failed (non-fatal)", exc_info=True)
-    # BE-9197: when this post atomically moved the baton, push the SAME live
-    # thread_update a standalone pass_baton pushes (update_type="baton", same
-    # payload shape — parity is boundary-tested) so the Hub UI reflects the
-    # hand-off identically whichever path moved it. Emitted after the message
-    # event, mirroring the post-then-pass two-call sequence.
+    # BE-9197: parity with standalone pass_baton's thread_update (boundary-tested).
     if result.get("baton_passed"):
-        try:
-            from api.app_state import state as _state
-
-            if _state.websocket_manager:
-                tenant_key = _base._resolve_tenant(ctx)
-                accessor = _base._get_tool_accessor()
-                history = await accessor._comm_thread_service.get_thread_history(
-                    thread_id=thread_id, tenant_key=tenant_key
-                )
-                t = history["thread"]
-                await broadcast_thread_update(
-                    _state.websocket_manager,
-                    tenant_key,
-                    thread_id=thread_id,
-                    chat_id=t["chat_id"],
-                    status=t["status"],
-                    next_action_owner=result.get("next_action_owner"),
-                    update_type="baton",
-                    # BE-9296a: the post already resolved its author server-side, so the
-                    # hand-off names the same identity the message itself carries.
-                    from_display_name=result.get("from_display_name"),
-                    from_kind=result.get("from_kind"),
-                )
-        except Exception:  # noqa: BLE001 - WS failure is non-fatal; result is already committed
-            logger.debug("MCP post_to_thread baton WS broadcast failed (non-fatal)", exc_info=True)
+        await broadcast_thread_metadata_update(
+            ctx,
+            thread_id,
+            update_type="baton",
+            next_action_owner=result.get("next_action_owner"),
+            from_display_name=result.get("from_display_name"),  # BE-9296a
+            from_kind=result.get("from_kind"),
+        )
+    if rename_to:  # BE-9502a: live title update for anyone with the thread open.
+        await broadcast_thread_metadata_update(ctx, thread_id, update_type="updated", include_subject=True)
     return result
 
 
 @mcp.tool(
     title="Get My Turn",
     description=(
-        "The baton query: list threads where it is YOUR turn (next_action_owner == your "
-        "agent_id, plus threads addressed to 'all'). Poll this to find conversations awaiting you. "
-        f"{branding.TWO_HUB_DISAMBIGUATION}"
+        "List the conversations waiting on YOU -- threads where you hold the turn, plus "
+        "anything addressed to everyone. Pass wait_seconds to WAIT for the next one "
+        "instead of returning immediately: the call comes back the moment something "
+        "arrives for you, or empty if nothing does, and costs nothing while it waits. "
+        "Waiting beats sleeping and re-asking. Chat surfaces that cannot hold a call "
+        "open should leave wait_seconds at 0 and ask again on their own schedule."
     ),
     annotations=_tool_hints("get_my_turn"),
 )
 async def get_my_turn(
     agent_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Your agent_id.")],
-    ctx: Context = None,
-) -> dict[str, Any]:
-    return await _call_tool(ctx, "get_my_turn", {"agent_id": agent_id})
-
-
-@mcp.tool(
-    title="Await My Turn",
-    description=(
-        "BLOCK until it is your turn, instead of sleeping and re-polling. Returns the "
-        "moment a directed action-request or a baton lands for you, or empty when the "
-        "wait window closes -- just call it again to keep waiting. Costs no tokens while "
-        "waiting and delivers in under a second, so prefer it over a get_my_turn sleep "
-        "loop on any harness that can hold a tool call open. Chat surfaces that end the "
-        "turn cannot; there, keep polling get_my_turn. "
-        f"{branding.TWO_HUB_DISAMBIGUATION}"
-    ),
-    annotations=_tool_hints("await_my_turn"),
-)
-async def await_my_turn(
-    agent_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Your agent_id.")],
-    timeout_seconds: Annotated[
+    wait_seconds: Annotated[
         int,
         Field(
             ge=0,
             le=MAX_WAIT_SECONDS,
             description=(
-                "How long to block before returning empty. Omit for the default; the "
-                "server clamps it. This is the re-call cadence, not the delivery "
-                "latency -- a wake still arrives in under a second either way."
+                "0 (default) answers immediately. Above 0, wait up to this many seconds "
+                f"for something to arrive (capped at {MAX_WAIT_SECONDS}). This is how "
+                "often you re-ask, not how fast a wake arrives -- delivery is under a "
+                "second either way."
             ),
         ),
     ] = 0,
     ctx: Context = None,
 ) -> dict[str, Any]:
+    """List whose turn it is, optionally waiting (BE-9554 merge of await_my_turn, which
+    returned the SAME payload). THE CAP IS LOAD-BEARING, NOT STYLE. ``MAX_WAIT_SECONDS`` is 55 because standard
+    MCP client SDKs abort any request at 60s and FastMCP runs ``json_response=True``,
+    so nothing reaches the wire until the tool returns and the whole wait counts
+    against that budget. Measured live 2026-08-20: a 57s hold returns normally, a 60s
+    hold is killed by the client and surfaces as a raw tool error. A previous 60s
+    default failed EVERY default call and agents abandoned the loop believing the tool
+    was broken (project 1CZA1D). Do not raise this to "give agents longer waits".
+    """
     kwargs: dict[str, Any] = {"agent_id": agent_id}
-    if timeout_seconds:
-        kwargs["timeout_seconds"] = timeout_seconds
-    return await _call_tool(ctx, "await_my_turn", kwargs)
+    if wait_seconds:
+        kwargs["timeout_seconds"] = wait_seconds
+        return await _call_tool(ctx, "await_my_turn", kwargs)
+    return await _call_tool(ctx, "get_my_turn", kwargs)
 
 
 @mcp.tool(
@@ -507,8 +499,7 @@ async def await_my_turn(
         "Who on this thread is still there. Returns each participant with when they were "
         "last seen and a coarse state -- active, quiet, gone, or unknown for someone who "
         "has joined but not yet acted. Use it before deciding whether to keep waiting on "
-        "an agent, reassign its work, or escalate past an orchestrator that has gone dark. "
-        f"{branding.TWO_HUB_DISAMBIGUATION}"
+        "an agent, reassign its work, or escalate past an orchestrator that has gone dark."
     ),
     annotations=_tool_hints("get_participant_liveness"),
 )
@@ -520,17 +511,29 @@ async def get_participant_liveness(
 
 
 @mcp.tool(
-    title="Pass Baton",
+    title="Set Next Actor",
     description=(
-        "Pass the baton: set who acts next on a thread. 'to' is an agent_id, a user_id, "
-        "'all' (anyone), or 'none' (no one waiting). The recipient finds it via get_my_turn. "
-        f"{branding.TWO_HUB_DISAMBIGUATION}"
+        "Set who acts next on a chat. Give an agent_id, a user_id, 'all' (anyone may act) "
+        "or 'none' (CLEARS it -- nobody is waiting). Whoever you name finds it via "
+        "get_my_turn. NOTE the difference from post_to_thread's pass_baton_to parameter: "
+        "there, 'none' means LEAVE the current actor alone. Here it CLEARS them. Clearing "
+        "is the one thing only this tool can do."
     ),
-    annotations=_tool_hints("pass_baton"),
+    annotations=_tool_hints("set_next_actor"),
 )
-async def pass_baton(
+async def set_next_actor(
     thread_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="The thread UUID.")],
-    to: Annotated[str, Field(max_length=MCP_ID_MAX, description="Next owner: an agent_id | user_id | 'all' | 'none'.")],
+    to: Annotated[
+        str,
+        Field(
+            max_length=MCP_ID_MAX,
+            description=(
+                "Who acts next: an agent_id, a user_id, 'all', or 'none'. 'none' CLEARS "
+                "the next actor -- the one thing only this tool can do; post_to_thread's "
+                "own 'none' leaves the current actor unchanged."
+            ),
+        ),
+    ],
     from_agent: Annotated[
         str,
         Field(
@@ -583,9 +586,9 @@ async def pass_baton(
 @mcp.tool(
     title="List Threads",
     description=(
-        "List message-board threads with optional filters: status, owner (next_action_owner), "
-        "product_id, project_id. Newest first. "
-        f"{branding.TWO_HUB_DISAMBIGUATION}"
+        "Find chats. Newest first. Pass query to search by chat id, subject, participant "
+        "or message text; pass any of status / owner / product_id / project_id to filter; "
+        "pass nothing to list them all. Filters and query combine."
     ),
     annotations=_tool_hints("list_threads"),
 )
@@ -594,8 +597,18 @@ async def list_threads(
     owner: Annotated[str, Field(max_length=MCP_ID_MAX, description="Filter by next_action_owner. Optional.")] = "",
     product_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Filter by product UUID. Optional.")] = "",
     project_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Filter by project UUID. Optional.")] = "",
+    query: Annotated[
+        str,
+        Field(
+            max_length=MCP_SHORT_TEXT_MAX,
+            description="Search text: a CHT-#### chat id, a word from the subject, a participant, or message text.",
+        ),
+    ] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
+    """List chats, optionally searching (BE-9554 merge of search_threads; same objects)."""
+    if query:
+        return await _call_tool(ctx, "search_threads", {"query": query})
     kwargs: dict[str, Any] = {}
     if status:
         kwargs["status"] = status
@@ -613,8 +626,7 @@ async def list_threads(
     description=(
         "Read a thread's message timeline, oldest-first. READ-ONLY by default (does NOT "
         "acknowledge; pass mark_read=true to do so). See tail/after_message_id/since for "
-        "polling and as_participant for the persistent per-participant read cursor. "
-        f"{branding.TWO_HUB_DISAMBIGUATION}"
+        "polling and as_participant for the persistent per-participant read cursor."
     ),
     meta=MCP_HEAVY_TOOL_META,  # BE-9083c: raise Claude Code's inline-truncation ceiling
     # BE-9251 audit F2: read-scoped for auth (TOOL_SCOPES=mcp:read) but
@@ -755,21 +767,3 @@ async def get_thread_history(
         except Exception:  # noqa: BLE001 - WS failure is non-fatal; the drain already committed
             logger.debug("MCP get_thread_history mark_read WS broadcast failed (non-fatal)", exc_info=True)
     return result
-
-
-@mcp.tool(
-    title="Search Threads",
-    description=(
-        "Search threads by CHT serial, subject keyword, participant, or message content. "
-        "Tenant-scoped, newest first. Used by /giljo to find a chat. "
-        f"{branding.TWO_HUB_DISAMBIGUATION}"
-    ),
-    annotations=_tool_hints("search_threads"),
-)
-async def search_threads(
-    query: Annotated[
-        str, Field(max_length=MCP_SHORT_TEXT_MAX, description="CHT-#### serial, subject keyword, participant, or text.")
-    ],
-    ctx: Context = None,
-) -> dict[str, Any]:
-    return await _call_tool(ctx, "search_threads", {"query": query})

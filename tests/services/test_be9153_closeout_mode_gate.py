@@ -210,6 +210,7 @@ async def test_decide_resumes_and_recall_completes(db_manager, db_session):
         approval_id=approval.id,
         option_id=option_id,
         user_id=None,
+        decided_via="mcp",
     )
 
     execution = await _reload_execution(db_session, tenant_key, seed["execution"].id)

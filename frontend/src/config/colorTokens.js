@@ -26,6 +26,10 @@ export const TEXT_MUTED_MATERIAL = '#9e9e9e'
  *  SetupStep2Connect and SetupStep3Commands as the "loading/muted" progress indicator. */
 export const TEXT_MUTED_BLUE = '#8f97b7'
 
+/** $color-text-secondary (#999): labels/headers on dark panels. FE-9548: the Jobs
+ *  board's Staged lifecycle edge/pill color. */
+export const TEXT_SECONDARY = '#999'
+
 // ---------------------------------------------------------------------------
 // Status: semantic project / agent status colors
 // ---------------------------------------------------------------------------

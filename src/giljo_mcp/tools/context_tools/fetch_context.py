@@ -34,6 +34,7 @@ from giljo_mcp.tools.context_tools.get_git_history import get_git_history, parse
 
 # Internal tools (NOT exposed via MCP)
 from giljo_mcp.tools.context_tools.get_product_context import get_product_context
+from giljo_mcp.tools.context_tools.get_products import get_products
 from giljo_mcp.tools.context_tools.get_project import get_project
 from giljo_mcp.tools.context_tools.get_self_identity import get_self_identity
 from giljo_mcp.tools.context_tools.get_tasks import get_tasks
@@ -62,6 +63,7 @@ CATEGORY_TOOLS = {
     "todos": get_todos,
     "chain": get_chain_context,
     "threads": get_threads,
+    "products": get_products,
 }
 
 # Derive from canonical source (defaults.py) - single source of truth (Handover 0823)
@@ -82,9 +84,19 @@ DEFAULT_DEPTHS = {
     "todos": None,
     "chain": None,
     "threads": None,
+    "products": None,
 }
 
 ALL_CATEGORIES = list(CATEGORY_TOOLS.keys())
+
+# BE-9523a: categories whose dispatch never reads product_id (project/chain
+# key off project_id, self_identity off agent_name, todos off job_id,
+# threads/products are tenant-scoped only). A request made ENTIRELY of these
+# skips the mandatory active-product resolution in _resolve_missing_product_id
+# below -- "products" must work with no active product set (every product
+# starts inactive at creation), so it can't be forced through a lookup that
+# raises when none is active.
+_CATEGORIES_NOT_REQUIRING_PRODUCT_ID = {"project", "chain", "self_identity", "threads", "todos", "products"}
 
 
 # DB key -> internal key mapping for depth_config normalization (Handover 0823b).
@@ -113,7 +125,17 @@ async def _is_category_enabled(
         True if enabled or no toggle exists, False if explicitly disabled.
     """
     # Categories that are always on (no toggle)
-    always_on = {"product_core", "project", "self_identity", "agent_templates", "tasks", "todos", "chain", "threads"}
+    always_on = {
+        "product_core",
+        "project",
+        "self_identity",
+        "agent_templates",
+        "tasks",
+        "todos",
+        "chain",
+        "threads",
+        "products",
+    }
     if category in always_on:
         return True
 
@@ -315,24 +337,67 @@ async def _resolve_product_id_from_project(
     return str(project.product_id)
 
 
-async def _resolve_active_product_id(tenant_key: str, db_manager: DatabaseManager) -> str:
-    """Resolve the tenant's ACTIVE product_id (BE-6211c / C-3.3).
+async def _resolve_default_product_id(tenant_key: str, db_manager: DatabaseManager) -> str:
+    """Resolve the tenant's DEFAULT product_id (BE-6211c / C-3.3).
 
     A PROJECT-LESS chain conductor is handed neither product_id nor project_id, so the
     project->product resolution above cannot help. Reuse the SAME tenant-scoped lookup
-    ``list_projects`` uses (``ProductService.get_active_product``); ADR-009 keeps it to
-    the caller's own active product. Raises ValidationError when none is set.
+    ``list_projects`` uses (``ProductService.get_default_product``); ADR-009 keeps it to
+    the caller's own default product. Raises ValidationError when none is set.
+
+    FE-9524: resolves ``is_default``, not
+    ``is_active`` -- several products may be shown at once, so "shown" is no
+    longer a single-valued fallback.
     """
     from giljo_mcp.services.product_service import ProductService
 
     product_service = ProductService(db_manager=db_manager, tenant_key=tenant_key)
-    active_product = await product_service.get_active_product(eager_load=False)  # only id needed
-    if active_product is None:
+    default_product = await product_service.get_default_product(eager_load=False)  # only id needed
+    if default_product is None:
         raise ValidationError(
-            "No active product set. Please activate a product first.",
-            context={"tenant_key": tenant_key, "operation": "fetch_context"},
+            "No default product set. Please set a default product first.",
+            context={"tenant_key": tenant_key, "operation": "accessor.fetch_context"},
         )
-    return str(active_product.id)
+    return str(default_product.id)
+
+
+async def _resolve_missing_product_id(
+    categories: list[str | None],
+    project_id: str | None,
+    tenant_key: str,
+    db_manager: DatabaseManager | None,
+) -> str:
+    """Resolve product_id when the caller omitted it (BE-6208e / BE-6211c / BE-9523a).
+
+    A project_id is ALWAYS resolved when present -- _resolve_product_id_from_project
+    doubles as the tenant-isolation check for it (raises ResourceNotFoundError on a
+    cross-tenant project_id; see test_fetch_context_cross_tenant_does_not_resolve).
+
+    With no project_id, the active-product FALLBACK is skipped when every requested
+    category is tenant-scoped-only (_CATEGORIES_NOT_REQUIRING_PRODUCT_ID) -- else a
+    tenant with zero active products (normal right after creation) could never call
+    categories=['products'] to discover one. Otherwise raises ValidationError when
+    product_id cannot be resolved.
+    """
+    if project_id and db_manager:
+        product_id = await _resolve_product_id_from_project(project_id, tenant_key, db_manager)
+        logger.info(
+            "fetch_context_resolved_product_id project_id=%s product_id=%s tenant_key=%s",
+            project_id,
+            product_id,
+            tenant_key,
+        )
+        return product_id
+
+    if not db_manager:
+        raise ValidationError("product_id is required (or pass project_id so it can be resolved).")
+
+    if set(categories) <= _CATEGORIES_NOT_REQUIRING_PRODUCT_ID:
+        return ""
+
+    product_id = await _resolve_default_product_id(tenant_key, db_manager)
+    logger.info("fetch_context_resolved_default_product product_id=%s tenant_key=%s", product_id, tenant_key)
+    return product_id
 
 
 def _reject_unknown_depth_keys(depth_config: dict[str, Any] | None) -> None:
@@ -387,7 +452,7 @@ async def fetch_context(
         categories: List of categories to fetch, or ["all"] for all categories
                    Valid: product_core, vision_documents, tech_stack, architecture,
                           testing, memory_360, git_history, agent_templates, project,
-                          self_identity, chain
+                          self_identity, chain, tasks, todos, threads, products
         depth_config: Override depth settings, keyed by CATEGORY name. If None, reads
                      from DB. Unknown keys raise ValidationError (BE-9322) -- pass
                      'memory_360', not the DB column name 'memory_last_n_projects'.
@@ -427,6 +492,8 @@ async def fetch_context(
         - project: ~300 tokens; self_identity: ~1-3K tokens (Handover 0430)
         - chain: ~100-2K tokens (the caller's active chain run: run_id, chain_mission,
           resolved_order; empty + error="no_active_chain_run" outside a chain)
+        - products: ~25 tokens per product (id/name/is_active only); a typical
+          1-10 product tenant is ~25-250 tokens total (BE-9523a)
 
     Example:
         # Fetch all context with defaults (tenant_key auto-injected server-side)
@@ -484,33 +551,13 @@ async def fetch_context(
 
     _reject_unknown_depth_keys(depth_config)
 
-    # BE-6208e: a combined-chain sub-orchestrator gets a project_id but no
-    # product_id. When product_id is absent/empty and a project_id is present,
-    # resolve it server-side via a tenant-scoped lookup. The explicit-product_id
-    # path (solo) is unchanged.
     if not product_id:
-        if project_id and db_manager:
-            product_id = await _resolve_product_id_from_project(project_id, tenant_key, db_manager)
-            logger.info(
-                "fetch_context_resolved_product_id project_id=%s product_id=%s tenant_key=%s",
-                project_id,
-                product_id,
-                tenant_key,
-            )
-        elif db_manager:
-            # BE-6211c (C-3.3): a PROJECT-LESS conductor has neither product_id nor
-            # project_id, so the resolution above cannot help. Fall back to the
-            # session's active product exactly as list_projects does — reusing the
-            # existing tenant-scoped ProductService.get_active_product. Strictly
-            # additive on the previously-erroring path.
-            product_id = await _resolve_active_product_id(tenant_key, db_manager)
-            logger.info(
-                "fetch_context_resolved_active_product product_id=%s tenant_key=%s",
-                product_id,
-                tenant_key,
-            )
-        else:
-            raise ValidationError("product_id is required (or pass project_id so it can be resolved).")
+        product_id = await _resolve_missing_product_id(
+            categories=categories,
+            project_id=project_id,
+            tenant_key=tenant_key,
+            db_manager=db_manager,
+        )
 
     # Resolve effective depth settings (Handover 0823b)
     effective_depths = DEFAULT_DEPTHS.copy()
@@ -724,14 +771,12 @@ async def _fetch_category(
         if depth and isinstance(depth, int):
             kwargs["limit"] = depth
 
-    elif category == "threads":
+    elif category in {"threads", "products"}:
         kwargs["tenant_key"] = tenant_key
-        # Q-08: tenant-scoped only -- no product_id kwarg (see get_threads.py
-        # docstring: 38/419 production threads have product_id=None, so
-        # product-scoping would return [] on a tenant holding hundreds of
-        # threads). No depth param either -- the cap is fixed in
-        # get_threads.THREADS_CATEGORY_CAP, not tunable via depth_config
-        # (mirrors the architecture/testing precedent above, BE-9322).
+        # Q-08 (threads) / BE-9523a (products): tenant-scoped only -- no
+        # product_id kwarg (see get_threads.py docstring for why; "products"
+        # exists to resolve product_id, so it can't require one) and no depth
+        # param. See _CATEGORIES_NOT_REQUIRING_PRODUCT_ID.
 
     elif category == "todos":
         # INF-5077: TODO read-back. Requires job_id (the agent job whose

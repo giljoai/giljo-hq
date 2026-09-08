@@ -7,8 +7,8 @@
 Tests for Handover 0435b: Add 'closed' Agent Lifecycle Status.
 
 Tests cover:
-1. close_job transitions complete → closed
-2. close_job rejects non-complete status
+1. finalize_job transitions complete → closed
+2. finalize_job rejects non-complete status
 3. _auto_block_completed_recipients skips closed agents
 4. Project closeout transitions complete → closed (not decommissioned)
 5. _SKIP_STATUSES includes 'closed'
@@ -24,12 +24,12 @@ from giljo_mcp.exceptions import ResourceNotFoundError
 
 
 # ---------------------------------------------------------------------------
-# 1. close_job: complete → closed transition
+# 1. finalize_job: complete → closed transition
 # ---------------------------------------------------------------------------
 
 
 class TestCloseJobTransition:
-    """Verify close_job only works on 'complete' agents and transitions to 'closed'."""
+    """Verify finalize_job only works on 'complete' agents and transitions to 'closed'."""
 
     @pytest.fixture
     def state_service(self):
@@ -48,7 +48,7 @@ class TestCloseJobTransition:
 
     @pytest.mark.asyncio
     async def test_close_job_requires_complete_status(self, state_service):
-        """close_job should raise ResourceNotFoundError (wrong-state) if the job exists
+        """finalize_job should raise ResourceNotFoundError (wrong-state) if the job exists
         but its latest execution is not 'complete' (BE-8003b disambiguation)."""
         mock_session = AsyncMock()
         mock_session.info = {}  # tenant_session_context save/restore target
@@ -65,7 +65,7 @@ class TestCloseJobTransition:
 
     @pytest.mark.asyncio
     async def test_close_job_unknown_job_id_raises_not_found(self, state_service):
-        """close_job should raise a distinct 'unknown job_id' error when the job_id
+        """finalize_job should raise a distinct 'unknown job_id' error when the job_id
         does not exist in this tenant at all (BE-8003b disambiguation)."""
         mock_session = AsyncMock()
         mock_session.info = {}  # tenant_session_context save/restore target
@@ -81,7 +81,7 @@ class TestCloseJobTransition:
 
     @pytest.mark.asyncio
     async def test_close_job_empty_job_id_rejected(self, state_service):
-        """close_job should raise ValidationError for empty job_id."""
+        """finalize_job should raise ValidationError for empty job_id."""
         from giljo_mcp.exceptions import ValidationError
 
         with pytest.raises(ValidationError, match="job_id cannot be empty"):
@@ -89,7 +89,7 @@ class TestCloseJobTransition:
 
     @pytest.mark.asyncio
     async def test_close_job_sets_closed_status(self, state_service):
-        """close_job should set execution.status to 'closed' when in 'complete'."""
+        """finalize_job should set execution.status to 'closed' when in 'complete'."""
         mock_execution = MagicMock()
         mock_execution.status = "complete"
         mock_execution.agent_display_name = "implementer"
@@ -100,20 +100,26 @@ class TestCloseJobTransition:
         mock_job = MagicMock()
         mock_job.project_id = "proj-456"
 
+        mock_project = MagicMock()
+        mock_project.product_id = "product-456"
+
         mock_session = AsyncMock()
         mock_session.info = {}  # tenant_session_context save/restore target
 
-        # First call returns execution, second returns job, third is the
-        # BE-9242 dead-cursor-resolution lookup (no live unread messages to
-        # resolve for this closing agent -- resolve_terminal_agent_cursors
-        # returns without any further queries).
+        # First call returns execution, second returns job, third is BE-9518's
+        # product_id resolution (job -> project), fourth is the BE-9242
+        # dead-cursor-resolution lookup (no live unread messages to resolve for
+        # this closing agent -- resolve_terminal_agent_cursors returns without
+        # any further queries).
         exec_result = MagicMock()
         exec_result.scalar_one_or_none.return_value = mock_execution
         job_result = MagicMock()
         job_result.scalar_one_or_none.return_value = mock_job
+        project_result = MagicMock()
+        project_result.scalar_one_or_none.return_value = mock_project
         undrained_result = MagicMock()
         undrained_result.scalars.return_value.all.return_value = []
-        mock_session.execute = AsyncMock(side_effect=[exec_result, job_result, undrained_result])
+        mock_session.execute = AsyncMock(side_effect=[exec_result, job_result, project_result, undrained_result])
         mock_session.flush = AsyncMock()
 
         state_service._get_session = MagicMock(return_value=_async_ctx(mock_session))

@@ -125,7 +125,7 @@ async def test_sub_orch_runtime_gets_ch_sub_orchestrator(db_manager):
     assert _BASE_PROTOCOL in out, "base protocol preserved, chapter appended"
     # Position 2 of 2 (p2 is index 1 in resolved_order) and the Hub discovery path.
     # BE-9291 DELIBERATELY CHANGED the probe: discovery moved off the run_id subject
-    # substring onto the comm_threads.sequence_run_id FK, and the bare `search_threads`
+    # substring onto the comm_threads.sequence_run_id FK, and the bare `list_threads`
     # name now survives here only as a ToolSearch bootstrap hint.
     assert "project 2 of 2" in out
     assert "hub_thread_id" in out

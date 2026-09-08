@@ -45,6 +45,7 @@ from .models import (
     ApiMetrics,
     CommParticipant,
     CommThread,
+    CommThreadProjectTag,
     DownloadToken,
     MCPContextIndex,
     MCPSession,
@@ -131,6 +132,11 @@ _CE_TENANT_SCOPED_MODELS = frozenset(
         ApiMetrics,
         CommParticipant,
         CommThread,
+        # FE-9530: CommThreadProjectTag's only writer (CommThreadProjectTagsMixin.
+        # set_project_tags in _comm_thread_project_tags_mixin.py) already filters
+        # tenant_key on every select/delete/insert -- audited clean the same way
+        # CommThread/CommParticipant were in SEC-9272.
+        CommThreadProjectTag,
         DownloadToken,
         MCPSession,
         MCPContextIndex,

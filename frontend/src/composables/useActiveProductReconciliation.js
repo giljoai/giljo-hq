@@ -1,7 +1,7 @@
 /**
- * useActiveProductReconciliation.js — FE-9412
+ * useActiveProductReconciliation.js — FE-9412, demoted by FE-9502c
  *
- * The staleness backstop for the active product.
+ * The staleness backstop for the DISPLAYED server-active product.
  *
  * `product:status:changed` reaches every session whose socket is alive. A
  * session whose socket died, slept with the tab, or dropped the frame never
@@ -11,8 +11,13 @@
  * So the live event is never trusted alone. Whenever the session comes back
  * into play — the tab becomes visible, the window takes focus, or the socket
  * reconnects — it re-validates against persisted server state with one
- * lightweight GET and re-scopes if it was wrong. Same reconciliation rule as
- * FE-9407/FE-9166.
+ * lightweight GET. Same reconciliation rule as FE-9407/FE-9166.
+ *
+ * FE-9502c: it no longer re-scopes the session. Under the tabbed shell,
+ * `currentProductId` is the VIEWED TAB (UI-local), not the server's active
+ * product — a background focus/reconnect event silently switching it would
+ * be auto-navigation. Only `productStore.activeProduct` (now a
+ * display value / legacy-default) is kept fresh.
  *
  * Returns `stop` because callers mount this from onMounted, where the
  * component's effect scope is no longer current and onScopeDispose cannot fire.

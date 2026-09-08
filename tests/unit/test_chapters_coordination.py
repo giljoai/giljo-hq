@@ -58,7 +58,10 @@ def test_ch_messaging_includes_board_reply_protocol() -> None:
     rendered = _build_ch_messaging()
     assert "MESSAGE BOARD" in rendered
     assert "get_my_turn" in rendered
-    assert "pass_baton" in rendered
+    # BE-9554: set_next_actor -> set_next_actor ("baton" was undefined jargon in a tool
+    # name). The guarantee is unchanged -- the messaging chapter must still teach the
+    # tool that hands the turn on -- so the pin follows the prose to the new name.
+    assert "set_next_actor" in rendered
     assert "append-only" in rendered.lower()
 
 

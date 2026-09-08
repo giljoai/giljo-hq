@@ -1,14 +1,23 @@
 /**
- * useActiveProductReconciliation.spec.js — FE-9412
+ * useActiveProductReconciliation.spec.js — FE-9412, demoted by FE-9502c
  *
- * The staleness backstop for a DEAD socket.
+ * The staleness backstop for a DEAD socket, scoped to the DISPLAYED
+ * server-active product only.
  *
  * The live `product:status:changed` event only helps a session whose socket is
- * alive. The session in the incident sat stale for over an hour because its
- * socket never delivered the event and nothing on the client ever re-asked.
- * These specs pin the reconciliation half: on tab focus / visibilitychange —
- * and on a WS reconnect — the session re-validates the active product against
- * persisted server state with one lightweight GET, and corrects itself.
+ * alive. The session in the original FE-9412 incident sat stale for over an
+ * hour because its socket never delivered the event and nothing on the client
+ * ever re-asked. These specs pin the reconciliation half: on tab focus /
+ * visibilitychange — and on a WS reconnect — the session re-reads the active
+ * product against persisted server state with one lightweight GET, and
+ * corrects `activeProduct` if it was stale.
+ *
+ * FE-9502c: this no longer re-scopes `currentProductId` (the viewed tab).
+ * Under the tabbed shell that would be silent auto-navigation off a
+ * background event — a session with two tabs open must not have
+ * its viewed tab reassigned just because some OTHER session activated a
+ * different product on the server. The specs below assert the NEGATIVE
+ * explicitly: currentProductId never moves, no matter what activeProduct does.
  *
  * Mirrors the FE-9407/FE-9166 rule: never trust the live event alone.
  *
@@ -21,7 +30,7 @@ import { effectScope } from 'vue'
 const PRODUCT_A = { id: 'prod-hermes', name: 'Hermes' }
 const PRODUCT_B = { id: 'prod-auditor', name: 'Codebase_Auditor' }
 
-const mockGetActive = vi.fn()
+const mockGetDefault = vi.fn()
 const mockGet = vi.fn()
 const mockList = vi.fn()
 
@@ -30,7 +39,7 @@ vi.mock('@/services/api', () => {
     products: {
       list: (...a) => mockList(...a),
       get: (...a) => mockGet(...a),
-      getActive: (...a) => mockGetActive(...a),
+      getDefault: (...a) => mockGetDefault(...a),
     },
     tasks: { list: vi.fn(() => Promise.resolve({ data: [] })) },
   }
@@ -55,7 +64,7 @@ function setVisibility(state) {
   })
 }
 
-/** A session that has been sitting on PRODUCT_A while the server moved on. */
+/** A session VIEWING product A's tab while the server's active product is stale/unknown to it. */
 function createStaleSession() {
   const projectStore = useProjectStore()
   projectStore.fetchProjects = vi.fn(() => Promise.resolve())
@@ -67,11 +76,12 @@ function createStaleSession() {
     activeProduct: PRODUCT_A,
     currentProductId: PRODUCT_A.id,
     currentProduct: PRODUCT_A,
+    openProductIds: [PRODUCT_A.id],
   })
   return { products, projectStore, taskStore }
 }
 
-describe('FE-9412 — a session whose socket missed the event heals on focus', () => {
+describe('FE-9412/FE-9502c — activeProduct heals on focus, the viewed tab never moves', () => {
   let scope
 
   beforeEach(() => {
@@ -80,8 +90,8 @@ describe('FE-9412 — a session whose socket missed the event heals on focus', (
     localStorage.clear()
     setVisibility('visible')
 
-    // Server truth: B is active. The session below still believes A.
-    mockGetActive.mockResolvedValue({
+    // Server truth: B is active. The session below still displays A.
+    mockGetDefault.mockResolvedValue({
       data: { has_active_product: true, product: PRODUCT_B },
     })
     mockList.mockResolvedValue({ data: [PRODUCT_A, PRODUCT_B] })
@@ -96,17 +106,28 @@ describe('FE-9412 — a session whose socket missed the event heals on focus', (
     scope?.stop()
   })
 
-  it('corrects a stale session when the tab becomes visible again', async () => {
+  it('refreshes the displayed activeProduct when the tab becomes visible again', async () => {
     const session = createStaleSession()
     scope.run(() => useActiveProductReconciliation())
 
     setVisibility('visible')
     document.dispatchEvent(new Event('visibilitychange'))
-    await vi.waitFor(() => expect(session.products.currentProductId).toBe(PRODUCT_B.id))
+    await vi.waitFor(() => expect(session.products.activeProduct).toMatchObject({ id: PRODUCT_B.id }))
 
-    expect(mockGetActive).toHaveBeenCalled()
-    expect(session.products.activeProduct).toMatchObject({ id: PRODUCT_B.id })
-    expect(session.projectStore.fetchProjects).toHaveBeenCalled()
+    expect(mockGetDefault).toHaveBeenCalled()
+  })
+
+  it('does NOT reassign the viewed tab (currentProductId) even though activeProduct diverges', async () => {
+    const session = createStaleSession()
+    scope.run(() => useActiveProductReconciliation())
+
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.waitFor(() => expect(session.products.activeProduct).toMatchObject({ id: PRODUCT_B.id }))
+
+    // The user is still looking at A's tab -- a background reconciliation
+    // must never silently switch what's on screen.
+    expect(session.products.currentProductId).toBe(PRODUCT_A.id)
+    expect(session.projectStore.fetchProjects).not.toHaveBeenCalled()
   })
 
   it('re-validates on window focus', async () => {
@@ -114,9 +135,10 @@ describe('FE-9412 — a session whose socket missed the event heals on focus', (
     scope.run(() => useActiveProductReconciliation())
 
     window.dispatchEvent(new Event('focus'))
-    await vi.waitFor(() => expect(session.products.currentProductId).toBe(PRODUCT_B.id))
+    await vi.waitFor(() => expect(session.products.activeProduct).toMatchObject({ id: PRODUCT_B.id }))
 
-    expect(mockGetActive).toHaveBeenCalled()
+    expect(mockGetDefault).toHaveBeenCalled()
+    expect(session.products.currentProductId).toBe(PRODUCT_A.id)
   })
 
   it('does not re-validate when the tab goes HIDDEN', async () => {
@@ -127,7 +149,7 @@ describe('FE-9412 — a session whose socket missed the event heals on focus', (
     document.dispatchEvent(new Event('visibilitychange'))
     await Promise.resolve()
 
-    expect(mockGetActive).not.toHaveBeenCalled()
+    expect(mockGetDefault).not.toHaveBeenCalled()
   })
 
   it('re-validates on a WebSocket reconnect (the other way a session learns it missed something)', async () => {
@@ -138,28 +160,15 @@ describe('FE-9412 — a session whose socket missed the event heals on focus', (
     const resync = mockRegisterReconnectResync.mock.calls[0][0]
     await resync()
 
-    expect(mockGetActive).toHaveBeenCalled()
-    expect(session.products.currentProductId).toBe(PRODUCT_B.id)
-  })
-
-  it('leaves an already-current session alone — one GET, no gratuitous reload', async () => {
-    mockGetActive.mockResolvedValue({
-      data: { has_active_product: true, product: PRODUCT_A },
-    })
-    const session = createStaleSession()
-    scope.run(() => useActiveProductReconciliation())
-
-    document.dispatchEvent(new Event('visibilitychange'))
-    await vi.waitFor(() => expect(mockGetActive).toHaveBeenCalledTimes(1))
-
+    expect(mockGetDefault).toHaveBeenCalled()
+    expect(session.products.activeProduct).toMatchObject({ id: PRODUCT_B.id })
     expect(session.products.currentProductId).toBe(PRODUCT_A.id)
-    expect(session.projectStore.fetchProjects).not.toHaveBeenCalled()
   })
 
-  it('a FAILED re-validation leaves the session exactly as it was', async () => {
+  it('a FAILED re-validation leaves the displayed activeProduct exactly as it was', async () => {
     // This fires on every tab focus, so a laptop waking before its network
-    // does must not blank the header or move the user off their product.
-    mockGetActive.mockRejectedValue(new Error('network down'))
+    // does must not blank the header.
+    mockGetDefault.mockRejectedValue(new Error('network down'))
     const session = createStaleSession()
     scope.run(() => useActiveProductReconciliation())
 
@@ -170,7 +179,7 @@ describe('FE-9412 — a session whose socket missed the event heals on focus', (
     // the second passes on its first poll before anything has happened. Drain
     // to a macrotask instead: every pending microtask in the reconcile chain
     // has run by then.
-    await vi.waitFor(() => expect(mockGetActive).toHaveBeenCalled())
+    await vi.waitFor(() => expect(mockGetDefault).toHaveBeenCalled())
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     // The header is the assertion that matters: fetchActiveProduct nulls it in
@@ -190,7 +199,7 @@ describe('FE-9412 — a session whose socket missed the event heals on focus', (
     window.dispatchEvent(new Event('focus'))
     await Promise.resolve()
 
-    expect(mockGetActive).not.toHaveBeenCalled()
+    expect(mockGetDefault).not.toHaveBeenCalled()
     expect(mockUnregisterResync).toHaveBeenCalledTimes(1)
   })
 })

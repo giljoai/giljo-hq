@@ -20,6 +20,7 @@ import { setActivePinia, createPinia } from 'pinia'
 const mockGet = vi.fn()
 const mockList = vi.fn()
 const mockUpdate = vi.fn()
+const mockGetActive = vi.fn()
 
 vi.mock('@/services/api', () => {
   const apiMock = {
@@ -27,12 +28,14 @@ vi.mock('@/services/api', () => {
       get: (...a) => mockGet(...a),
       list: (...a) => mockList(...a),
       update: (...a) => mockUpdate(...a),
+      getActive: (...a) => mockGetActive(...a),
     },
   }
   return { api: apiMock, default: apiMock }
 })
 
 import { useProjectStore } from './projects'
+import { useProductStore } from '@/stores/products'
 
 describe('projects store — FE-3007a normalized entity owner (byId)', () => {
   beforeEach(() => {
@@ -126,7 +129,7 @@ describe('projects store — FE-3007a normalized entity owner (byId)', () => {
 
     const params = mockList.mock.calls.at(-1)[0]
     expect(params.limit === undefined || params.limit <= REST_LIMIT_MAX).toBe(true)
-    expect(params.statuses).toEqual(['active', 'completed'])
+    expect(params.statuses).toEqual(['active', 'completed', 'inactive'])
   })
 
   it('fetchSuccessorCandidates excludes the project being superseded from the result', async () => {
@@ -141,5 +144,58 @@ describe('projects store — FE-3007a normalized entity owner (byId)', () => {
     const result = await store.fetchSuccessorCandidates('proj-self')
 
     expect(result).toEqual([{ id: 'proj-other', name: 'Other' }])
+  })
+
+  // FE-9508: `inactive` was originally swept up with the terminal statuses
+  // this filter meant to exclude (cancelled/terminated/deleted) — an inactive
+  // project is planned-and-not-yet-started and is frequently the exact thing
+  // that replaces older work. `superseded` must stay excluded (a superseded
+  // successor could loop the pointer chain).
+  it('fetchSuccessorCandidates requests inactive projects as eligible successors', async () => {
+    const store = useProjectStore()
+    mockList.mockResolvedValue({ data: [] })
+
+    await store.fetchSuccessorCandidates('proj-self')
+
+    const params = mockList.mock.calls.at(-1)[0]
+    expect(params.statuses).toContain('inactive')
+    expect(params.statuses).not.toContain('cancelled')
+    expect(params.statuses).not.toContain('terminated')
+    expect(params.statuses).not.toContain('deleted')
+    expect(params.statuses).not.toContain('superseded')
+  })
+
+  // BE-9525a: fetchActiveProject used to call getActive() with no product scope
+  // at all, so a project active in product A made hasActiveProject true while
+  // viewing product B — incorrectly greying out product B's Activate button.
+  describe('fetchActiveProject — per-product scoping (BE-9525a)', () => {
+    it('scopes the read to the viewed product via effectiveProductId', async () => {
+      const store = useProjectStore()
+      const productStore = useProductStore()
+      productStore.currentProductId = 'product-b'
+      mockGetActive.mockResolvedValue({ data: [] })
+
+      await store.fetchActiveProject()
+
+      expect(mockGetActive).toHaveBeenCalledWith('product-b')
+    })
+
+    it('consumes the list response shape, taking the first entry', async () => {
+      const store = useProjectStore()
+      mockGetActive.mockResolvedValue({ data: [{ id: 'p1', status: 'active' }] })
+
+      await store.fetchActiveProject()
+
+      expect(store.activeProjectMeta).toEqual({ id: 'p1', status: 'active' })
+    })
+
+    it('clears activeProjectMeta when the list is empty (no active project in scope)', async () => {
+      const store = useProjectStore()
+      mockGetActive.mockResolvedValue({ data: [] })
+
+      await store.fetchActiveProject()
+
+      expect(store.activeProjectMeta).toBeNull()
+    })
   })
 })

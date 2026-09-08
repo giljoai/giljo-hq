@@ -132,18 +132,26 @@ async def test_apply_context_tuning_in_live_tool_surface():
     assert "apply_context_tuning" in live
     assert "propose_product_context_update" not in live
     # BE-9012b (BE-6225e) merged reactivate_job + dismiss_reactivation into one
-    # resolve_reactivation tool, so the whole surface was 47 (was 48). BE-9012d
+    # resume_or_dismiss_job tool, so the whole surface was 47 (was 48). BE-9012d
     # (bus retirement, phase d) hard-removed send_message / receive_messages /
     # get_messages (-> 44). BE-9201 added create_product + create_vision_document
     # (agent-side product bootstrap), so the whole surface is 46. BE-9296a added
-    # await_my_turn (the server wake signal) -> 47, and get_participant_liveness
+    # get_my_turn (the server wake signal) -> 47, and get_participant_liveness
     # (the orchestrator's who-is-still-there read) -> 48.
     # BE-9385b added set_agent_export_alias (the install-time "keep both" rename,
     # which must round-trip to the server or spawn-by-name stops resolving) -> 49.
     # BE-9396 retracted it unreleased: giljo_setup guarantees server -> disk only,
     # so the install prose now flags a conflict for the LLM and the user to resolve
     # instead of the server enforcing a rename -> 48.
-    assert len(live) == 48
+    # BE-9499d added decide_approval (the harness-side door that clears
+    # awaiting_user) -> 49.
+    # FE-9530 added update_thread (retag a thread's product/project(s), or
+    # rename/set status) -> 50.
+    # BE-9554 final-names flip: the seven one-release compat shims are dropped and
+    # finalize_job/get_vision_document renamed, so the surface SETTLES at 49. Kept rather than
+    # deleted -- the roster-lock owns the authoritative count, but this project pinned
+    # it too and removing another project's assertion is not this one's call.
+    assert len(live) == 49
 
 
 @pytest.mark.asyncio

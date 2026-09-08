@@ -23,6 +23,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config_manager import get_config
+from .secret_files import claim_or_read_secret_file, is_valid_fernet_key
 
 
 logger = logging.getLogger(__name__)
@@ -95,34 +96,40 @@ class AuthManager:
 
         # Fall back to file-based secret
         secret_file = Path.home() / ".giljo-mcp" / "jwt_secret"
-        secret_file.parent.mkdir(parents=True, exist_ok=True)
-
-        if secret_file.exists():
-            return secret_file.read_text().strip()
-        secret = secrets.token_urlsafe(32)
-        secret_file.write_text(secret)
-        return secret
+        secret = claim_or_read_secret_file(
+            secret_file,
+            generate=lambda: secrets.token_urlsafe(32).encode(),
+            is_valid=lambda data: bool(data.strip()),
+            description="JWT signing secret",
+        )
+        return secret.decode().strip()
 
     def _get_or_create_encryption_key(self) -> bytes:
         """Get or create Fernet encryption key for API key storage"""
         # Check environment variable first
         env_key = os.getenv("GILJO_MCP_ENCRYPTION_KEY")
         if env_key:
+            key = env_key.encode()
+            if not is_valid_fernet_key(key):
+                raise ValueError(
+                    "GILJO_MCP_ENCRYPTION_KEY is set but is not a valid Fernet key. "
+                    "It must be 32 url-safe base64-encoded bytes (a 44-character "
+                    "value ending in '='), as produced by: python -c "
+                    '"from cryptography.fernet import Fernet; '
+                    'print(Fernet.generate_key().decode())". Unset the variable to '
+                    "let Giljo HQ generate and store one instead."
+                )
             logger.info("Using encryption key from environment variable")
-            return env_key.encode()
+            return key
 
         # Fall back to file-based key
         key_file = Path.home() / ".giljo-mcp" / "encryption_key"
-        key_file.parent.mkdir(parents=True, exist_ok=True)
-
-        if key_file.exists():
-            return key_file.read_bytes()
-
-        # Generate new Fernet key
-        key = Fernet.generate_key()
-        key_file.write_bytes(key)
-        logger.info(f"Generated new encryption key stored at: {key_file}")
-        return key
+        return claim_or_read_secret_file(
+            key_file,
+            generate=Fernet.generate_key,
+            is_valid=is_valid_fernet_key,
+            description="API-key encryption key",
+        )
 
     def validate_api_key(self, api_key: str) -> dict[str, Any] | None:
         """Validate an API key for LAN mode"""

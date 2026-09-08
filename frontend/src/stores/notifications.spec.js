@@ -204,3 +204,91 @@ describe('notifications store — FE-9241 `_local` row persistence + dismiss/rea
     expect(nextSessionStore.notifications.some((n) => n.id === 'local-6')).toBe(false)
   })
 })
+
+describe('notifications store — D16 (Headless S3d) live resolve/update WS handlers', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    mockList.mockResolvedValue({ data: [] })
+  })
+
+  it('handleWsResolvedNotification drops every resolved id from the local list', async () => {
+    const store = useNotificationStore()
+    store.notifications = [
+      { id: 'n1', type: 'system.skills_drift', surface: 'banner', dismissed_at: null, resolved_at: null },
+      { id: 'n2', type: 'system.pending_migrations', surface: 'banner', dismissed_at: null, resolved_at: null },
+      { id: 'n3', type: 'system.context_tuning_due', surface: 'banner', dismissed_at: null, resolved_at: null },
+    ]
+
+    store.handleWsResolvedNotification({ ids: ['n1', 'n3'] })
+
+    expect(store.notifications.map((n) => n.id)).toEqual(['n2'])
+    // The point of D16: bannerNotifications (what SystemStatusBanner reads) is
+    // a computed filter over `notifications` -- dropping the row here is what
+    // makes the banner disappear live, no refetch/remount required.
+    expect(store.bannerNotifications.some((n) => n.id === 'n1')).toBe(false)
+  })
+
+  it('handleWsResolvedNotification is a no-op for ids not currently known', () => {
+    const store = useNotificationStore()
+    store.notifications = [{ id: 'n1', type: 'system.skills_drift', surface: 'banner', dismissed_at: null, resolved_at: null }]
+
+    store.handleWsResolvedNotification({ ids: ['does-not-exist'] })
+
+    expect(store.notifications.map((n) => n.id)).toEqual(['n1'])
+  })
+
+  it('handleWsResolvedNotification ignores a malformed/empty payload', () => {
+    const store = useNotificationStore()
+    store.notifications = [{ id: 'n1', type: 'system.skills_drift', surface: 'banner', dismissed_at: null, resolved_at: null }]
+
+    store.handleWsResolvedNotification({})
+    store.handleWsResolvedNotification(null)
+    store.handleWsResolvedNotification({ ids: [] })
+
+    expect(store.notifications.map((n) => n.id)).toEqual(['n1'])
+  })
+
+  it('handleWsUpdatedNotification replaces an existing row by id in place', () => {
+    const store = useNotificationStore()
+    store.notifications = [
+      {
+        id: 'n1',
+        type: 'system.pending_migrations',
+        title: '5 database migrations pending',
+        surface: 'banner',
+        dismissed_at: null,
+        resolved_at: null,
+      },
+    ]
+
+    store.handleWsUpdatedNotification({
+      id: 'n1',
+      type: 'system.pending_migrations',
+      title: '3 database migrations pending',
+      surface: 'banner',
+      dismissible: true,
+    })
+
+    expect(store.notifications).toHaveLength(1)
+    expect(store.notifications[0].title).toBe('3 database migrations pending')
+  })
+
+  it('handleWsUpdatedNotification adds the row when the id is not yet known', () => {
+    const store = useNotificationStore()
+    store.notifications = []
+
+    store.handleWsUpdatedNotification({ id: 'n9', type: 'system.skills_drift', title: 'Drift', surface: 'banner' })
+
+    expect(store.notifications.map((n) => n.id)).toEqual(['n9'])
+  })
+
+  it('handleWsUpdatedNotification ignores a payload with no id', () => {
+    const store = useNotificationStore()
+    store.notifications = []
+
+    store.handleWsUpdatedNotification({ title: 'no id here' })
+
+    expect(store.notifications).toEqual([])
+  })
+})

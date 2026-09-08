@@ -272,7 +272,9 @@ const osList = [
 const osCommands = {
   windows: 'certutil -addstore -f "ROOT" %USERPROFILE%\\Downloads\\giljo-server-cert.pem',
   macos: 'sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/Downloads/giljo-server-cert.pem',
-  linux: 'sudo cp ~/Downloads/giljo-server-cert.pem /usr/local/share/ca-certificates/giljo-server-cert.crt && sudo update-ca-certificates',
+  linux:
+    'sudo cp ~/Downloads/giljo-server-cert.pem /usr/local/share/ca-certificates/giljo-server-cert.crt\n' +
+    'sudo update-ca-certificates',
 }
 
 const nodeCommand = computed(() => {
@@ -280,7 +282,9 @@ const nodeCommand = computed(() => {
     return '$env:NODE_OPTIONS = "--use-system-ca"; [System.Environment]::SetEnvironmentVariable(\'NODE_OPTIONS\', \'--use-system-ca\', \'User\')'
   }
   const rcFile = activeOs.value === 'macos' ? '~/.zshrc' : '~/.bashrc'
-  return `mkdir -p ~/.giljo && cp ~/Downloads/giljo-server-cert.pem ~/.giljo/giljo-server-cert.pem && echo 'export NODE_EXTRA_CA_CERTS="$HOME/.giljo/giljo-server-cert.pem"' >> ${rcFile} && export NODE_EXTRA_CA_CERTS="$HOME/.giljo/giljo-server-cert.pem"`
+  // One command per line, never `&&` — the block renders pre-wrap and every
+  // shell (bash, zsh, PowerShell 5.1) runs pasted lines sequentially.
+  return `mkdir -p ~/.giljo\ncp ~/Downloads/giljo-server-cert.pem ~/.giljo/giljo-server-cert.pem\necho 'export NODE_EXTRA_CA_CERTS="$HOME/.giljo/giljo-server-cert.pem"' >> ${rcFile}\nexport NODE_EXTRA_CA_CERTS="$HOME/.giljo/giljo-server-cert.pem"`
 })
 
 async function downloadCert() {

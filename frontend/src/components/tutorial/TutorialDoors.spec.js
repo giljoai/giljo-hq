@@ -99,4 +99,46 @@ describe('TutorialDoneScreen — the finish state has a way out (FE-9320)', () =
     await wrapper.find('[data-testid="tutorial-done-close"]').trigger('click')
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
+
+  // FE-9569 Part 4: the old screen (1) rendered a lookalike card that
+  // mismatched the real Home card the user then went looking for, and (2)
+  // promised "four read-only audits that seed your 360 Memory" as though
+  // that already happened -- it had not. Reconciled against the REAL Home
+  // quick-launch logic (WelcomeView.vue's quickCards computed): right after
+  // this tour finishes (active product, zero projects), Home shows
+  // newProjectCard + PROJECT_TEMPLATES' two cards -- "New Project",
+  // "Bootstrap a new product" (new_product_bootstrap), "Import an existing
+  // product" (existing_product_bootstrap) -- exactly three, exactly those
+  // titles (frontend/src/composables/projectTemplates.js).
+  it('ships the operator\'s literal copy, not the old lookalike-card promise', () => {
+    const wrapper = mount(TutorialDoneScreen, {
+      props: { routerChoice: 'D' },
+      global: { stubs },
+    })
+    const text = wrapper.text()
+    expect(text).toContain('Great work, you just added a product. Time to put your agents to work.')
+    expect(text).toContain('Your Home screen will now show three cards')
+    expect(text).toContain('create your first project')
+    expect(text).toContain('bootstrap a new product')
+    expect(text).toContain('import an existing product')
+    expect(text).toContain('We suggest Import an existing product')
+    expect(text).toContain('writes your first 360 memories')
+    // The old, now-inaccurate promise is gone.
+    expect(text).not.toContain('four read-only audits that seed your 360 Memory')
+    expect(text).not.toContain('Product active. Time for a mission.')
+  })
+
+  it('no longer renders a lookalike card that could mismatch the real one', () => {
+    const wrapper = mount(TutorialDoneScreen, {
+      props: { routerChoice: 'D' },
+      global: { stubs },
+    })
+    expect(wrapper.find('[data-testid="tutorial-spotlight-card"]').exists()).toBe(false)
+  })
+
+  it('the copy is identical regardless of which door the user took (no per-door lookalike)', () => {
+    const wrapperD = mount(TutorialDoneScreen, { props: { routerChoice: 'D' }, global: { stubs } })
+    const wrapperB = mount(TutorialDoneScreen, { props: { routerChoice: 'B' }, global: { stubs } })
+    expect(wrapperD.text()).toBe(wrapperB.text())
+  })
 })

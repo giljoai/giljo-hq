@@ -250,12 +250,17 @@ import RecentMemoriesList from '@/components/dashboard/RecentMemoriesList.vue'
 import ProjectReviewModal from '@/components/projects/ProjectReviewModal.vue'
 import { useRouter } from 'vue-router'
 import { useProductStore } from '@/stores/products'
+import { useNotificationStore } from '@/stores/notifications'
+import { notifyFailure } from '@/utils/notifyFailure'
+import { useDashboardRealtime } from '@/composables/useDashboardRealtime'
 import api from '@/services/api'
 import setupService from '@/services/setupService'
 import { useToast } from '@/composables/useToast'
 
 const router = useRouter()
 const productStore = useProductStore()
+const notificationStore = useNotificationStore()
+
 const { showToast } = useToast()
 
 // Product filter
@@ -455,12 +460,16 @@ const fetchCallCounts = async () => {
     }
   } catch (error) {
     console.error('Failed to fetch call counts:', error)
-    showToast({ message: 'Unable to load activity counts.', type: 'error' })
+    // FE-9553: bell, not toast -- interval- and visibility-driven, never a click.
+    notifyFailure(notificationStore, { operation: 'dashboard.callCounts', error, fallbackMessage: 'Unable to load activity counts.', title: 'Activity counts unavailable' })
   }
 }
 
 // Re-fetch dashboard when product filter changes
 watch(selectedProductId, () => fetchDashboardData())
+
+// FE-9501c (D7): live-refresh on project_update/agent:created/task:updated.
+useDashboardRealtime(fetchDashboardData)
 
 // Poll cadence for live counters (Agent Roles, API Calls, MCP Calls).
 // 60s is plenty; the WebSocket broker pushes events for everything else.
@@ -500,7 +509,7 @@ const checkSetupStatus = async () => {
     setupStatus.value = status
   } catch (error) {
     console.error('Failed to check setup status:', error)
-    showToast({ message: 'Unable to check setup status.', type: 'warning' })
+    notifyFailure(notificationStore, { operation: 'dashboard.setupStatus', error, fallbackMessage: 'Unable to check setup status.', title: 'Setup status unavailable' })
     setupStatus.value.requires_setup = false
   }
 }

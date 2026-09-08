@@ -70,7 +70,8 @@ MIN_WAIT_SECONDS = 1
 # rides on that payload rather than living only in protocol prose the agent may
 # have scrolled past hours ago.
 TIMEOUT_ADVICE = (
-    "Nothing landed. Call await_my_turn again to keep holding the line. Stop only on "
+    "Nothing landed. Call get_my_turn(agent_id, wait_seconds=45) again to keep holding the line -- "
+    "without wait_seconds it answers immediately and you are polling, not parked. Stop only on "
     "an explicit dismissal addressed to you, or when your own post is logically the "
     "final word on every thread you are part of."
 )
@@ -82,8 +83,9 @@ TIMEOUT_ADVICE = (
 # paragraph here would out-shout the payload it decorates. Posts that set a
 # terminal status (resolved/closed) are the conversation ENDING and do not carry it.
 POST_ADVICE = (
-    "Expect a response: park on await_my_turn (your agent_id) to catch it, unless this "
-    "post is a dismissal or logically the final word."
+    "Expect a response: park on get_my_turn(your agent_id, wait_seconds=45) to catch it -- "
+    "without wait_seconds it returns at once and you are polling. Unless this post is a "
+    "dismissal or logically the final word."
 )
 
 # Liveness bands. "Quiet" deliberately REUSES the agent-silence threshold rather

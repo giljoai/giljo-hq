@@ -30,7 +30,7 @@ Two mandatory regression tests (spec DoD):
    for a conductor, and is absent from a solo orchestrator (no chain_ctx).
 
 2. ``test_worker_protocol_never_calls_pass_baton_or_writes_comm_threads_directly``:
-   Pin: the worker 5-phase protocol body NEVER instructs calling ``pass_baton``
+   Pin: the worker 5-phase protocol body NEVER instructs calling ``set_next_actor``
    (a conductor/baton-holder concept) or writing the ``comm_threads`` table
    directly. Workers' reporting is IDENTICAL in subagent and multi-terminal
    mode; the only difference is what is surfaced to the user. This is a CI
@@ -79,9 +79,9 @@ _INBOX_POLL_CURSOR_MARKER = "unread_only=true"
 
 # Worker protocol calls that must NEVER appear (Appendix A2 mandate). BE-9012d:
 # `post_to_thread` dropped from this list — workers now use it (via the Hub) for
-# BLOCKER/HANDOVER/REQUEST_CONTEXT reporting; `pass_baton` (baton-holder-only) and
+# BLOCKER/HANDOVER/REQUEST_CONTEXT reporting; `set_next_actor` (baton-holder-only) and
 # a direct `comm_threads` table write remain worker-forbidden.
-_FORBIDDEN_WORKER_CALLS = ("pass_baton", "comm_threads")
+_FORBIDDEN_WORKER_CALLS = ("set_next_actor", "comm_threads")
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +297,7 @@ def test_ch_conductor_chapter_content() -> None:
 
 
 def test_worker_protocol_never_calls_pass_baton_or_writes_comm_threads_directly() -> None:
-    """The worker 5-phase protocol body NEVER instructs calling pass_baton or
+    """The worker 5-phase protocol body NEVER instructs calling set_next_actor or
     writing the comm_threads table directly.
 
     Workers' protocol is IDENTICAL in subagent and multi-terminal mode — no
@@ -325,7 +325,7 @@ def test_worker_protocol_never_calls_pass_baton_or_writes_comm_threads_directly(
         for forbidden in _FORBIDDEN_WORKER_CALLS:
             assert forbidden not in protocol, (
                 f"Worker protocol for execution_mode={mode!r} must NOT mention "
-                f"{forbidden!r}. Workers never call pass_baton or write comm_threads "
+                f"{forbidden!r}. Workers never call set_next_actor or write comm_threads "
                 f"directly (Appendix A2 / A3 mandate; BE-6131c pin)."
             )
         assert "post_to_thread" in protocol, (

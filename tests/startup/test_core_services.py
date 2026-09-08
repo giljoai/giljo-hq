@@ -246,3 +246,38 @@ async def test_init_core_services_correct_initialization_order():
 
         # Verify order
         assert call_order == ["tenant", "websocket", "tool_accessor", "auth"]
+
+
+@pytest.mark.asyncio
+async def test_auth_manager_failure_aborts_boot_and_leaves_state_auth_unset():
+    """SEC-9572: the four core-service blocks are FATAL by design, not "non-fatal".
+
+    Their comments used to read "startup resilience, non-fatal initialization"
+    while the bodies re-raised. Production proved the code right and the comment
+    wrong -- a worker whose AuthManager raised did not degrade, it died, and took
+    the uvicorn parent with it. This pins the behaviour so the comment cannot
+    drift back: a half-built AuthManager must abort boot, because ``state.auth``
+    stays None and AuthMiddleware is wired with a callable that never reaches its
+    own not-configured guard.
+    """
+    from api.startup.core_services import init_core_services
+
+    state = APIState()
+    state.db_manager = MagicMock()
+    state.config = MagicMock()
+
+    with (
+        patch("api.startup.core_services.TenantManager"),
+        patch("api.startup.core_services.WebSocketManager"),
+        patch("api.startup.core_services.ToolAccessor"),
+        patch(
+            "api.startup.core_services.AuthManager",
+            side_effect=ValueError("Fernet key must be 32 url-safe base64-encoded bytes."),
+        ),
+        patch("api.startup.core_services.asyncio.create_task"),
+        patch.dict(os.environ, {}, clear=True),
+        pytest.raises(ValueError, match="Fernet key"),
+    ):
+        await init_core_services(state)
+
+    assert state.auth is None

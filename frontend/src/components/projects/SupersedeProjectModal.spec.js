@@ -19,7 +19,7 @@ import api from '@/services/api'
 const vuetify = createVuetify()
 
 const PROJECT_ID = 'proj-be9157'
-const OTHER_PROJECT = { id: 'proj-other', name: 'Other Active Project' }
+const OTHER_PROJECT = { id: 'proj-other', name: 'Other Active Project', taxonomy_alias: 'FE-9501a' }
 
 async function mountModal(props = {}) {
   const pinia = createPinia()
@@ -73,7 +73,46 @@ describe('SupersedeProjectModal.vue', () => {
 
     const select = wrapper.findComponent('[data-testid="successor-select"]')
     expect(select.exists()).toBe(true)
-    expect(wrapper.vm.successorOptions).toEqual([{ title: OTHER_PROJECT.name, value: OTHER_PROJECT.id }])
+    expect(wrapper.vm.successorOptions).toHaveLength(1)
+    expect(wrapper.vm.successorOptions[0].value).toBe(OTHER_PROJECT.id)
+  })
+
+  // FE-9508 defect 2: options rendered only `p.name`, so the operator could not
+  // tell candidates apart (four options, none identifiable by serial). This
+  // assertion checks the alias is IN the title, not just that a title exists —
+  // a missing `taxonomy_alias` field renders as an empty string rather than
+  // throwing, which is exactly the false-green risk called out in the DoD.
+  it('renders the taxonomy alias alongside the name for each successor option', async () => {
+    const { wrapper } = await mountModal()
+
+    expect(wrapper.vm.successorOptions[0].title).toContain(OTHER_PROJECT.taxonomy_alias)
+    expect(wrapper.vm.successorOptions[0].title).toContain(OTHER_PROJECT.name)
+  })
+
+  // FE-9508 defect 2 fallback: a candidate with no alias yet must still render
+  // (bare name), not blow up or produce a blank option.
+  it('falls back to the bare name when a candidate has no taxonomy alias', async () => {
+    api.projects.list = vi.fn().mockResolvedValue({
+      data: [{ id: 'proj-no-alias', name: 'Unaliased Project' }, { id: PROJECT_ID, name: 'Old Project' }],
+    })
+    const { wrapper } = await mountModal()
+
+    expect(wrapper.vm.successorOptions).toEqual([{ title: 'Unaliased Project', value: 'proj-no-alias' }])
+  })
+
+  // FE-9508 defect 3: `inactive` candidates were swept up with the terminal
+  // statuses this dialog meant to exclude. The store now requests `inactive`
+  // too — assert the modal surfaces one when the store returns it (does not
+  // filter it back out client-side).
+  it('surfaces an inactive candidate as a selectable successor', async () => {
+    const INACTIVE_PROJECT = { id: 'proj-inactive', name: 'Inactive Candidate', status: 'inactive', taxonomy_alias: 'BE-9499c' }
+    api.projects.list = vi.fn().mockResolvedValue({
+      data: [OTHER_PROJECT, INACTIVE_PROJECT, { id: PROJECT_ID, name: 'Old Project' }],
+    })
+    const { wrapper } = await mountModal()
+
+    const values = wrapper.vm.successorOptions.map((o) => o.value)
+    expect(values).toContain(INACTIVE_PROJECT.id)
   })
 
   it('disables the confirm button until a successor is chosen', async () => {

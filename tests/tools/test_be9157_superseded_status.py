@@ -130,7 +130,10 @@ async def _run_list(accessor, repo_rows, **kwargs):
         patch.object(svc, "_get_valid_project_types", new=AsyncMock(return_value=[])),
         patch(_PRODUCT_SERVICE_PATH) as mock_ps,
     ):
-        mock_ps.return_value.get_active_product = AsyncMock(return_value=mock_product)
+        mock_ps.return_value.get_default_product = AsyncMock(return_value=mock_product)
+        # BE-9499a: list_projects_for_mcp resolves through resolve_binding_product now
+        # (byte-identical result for an omitted product_id -- the active product).
+        mock_ps.return_value.resolve_binding_product = AsyncMock(return_value=mock_product)
         result = await svc.list_projects_for_mcp(tenant_key="tenant-be9157", **kwargs)
     return result, captured["status"]
 
@@ -268,6 +271,24 @@ async def test_update_supersede_allowed_from_completed_immutable_status(supersed
     # the supersede transition must still be permitted from there).
     victim.status = ProjectStatus.COMPLETED
     await svc._test_session.flush()
+
+    result = await svc.update_project(
+        project_id=victim.id,
+        updates={"status": "superseded", "successor_project_id": successor.id},
+    )
+    assert result.status == ProjectStatus.SUPERSEDED
+    assert result.successor_project_id == successor.id
+
+
+@pytest.mark.asyncio
+async def test_update_accepts_inactive_successor(superseding_setup):
+    """FE-9508: the successor-picker FE filter now offers `inactive` projects
+    (an inactive project is frequently the exact not-yet-started work that
+    replaces older work). Verify the backend write path agrees end-to-end
+    rather than assuming it from the FE change -- `_proj()` seeds both fixture
+    projects as `inactive` by default, so this exercises exactly that status."""
+    svc, victim, successor, _tk = superseding_setup
+    assert successor.status == "inactive"
 
     result = await svc.update_project(
         project_id=victim.id,

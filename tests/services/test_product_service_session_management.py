@@ -165,7 +165,7 @@ async def test_multiple_operations_do_not_recurse():
         await product_service.list_products(tenant_key)
 
         # Operation 2: Get active product (no tenant_key param - uses self.tenant_key)
-        await product_service.get_active_product()
+        await product_service.get_default_product()
 
         # Operation 3: List products again
         await product_service.list_products(tenant_key)

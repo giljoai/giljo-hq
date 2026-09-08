@@ -151,6 +151,11 @@
     "ce_0094_per_product_export_staleness",
     "ce_0095_be9431_task_index_nnd",
     "ce_0096_pme_fts_git_commits_be9469",
-    "ce_0097_be9475_participant_self_reported_status"
+    "ce_0097_be9475_participant_self_reported_status",
+    "ce_0098_be9514_approval_decided_via_channel",
+    "ce_0099_fe9524_drop_single_active_product",
+    "ce_0100_be9525b_drop_single_active_project",
+    "ce_0101_fe9530_comm_thread_project_tags",
+    "ce_0102_be9540_sequence_run_reviewed_via"
   ]
 }

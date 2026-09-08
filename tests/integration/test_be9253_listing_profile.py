@@ -95,7 +95,13 @@ class TestListingProfileRoster:
             result = await session.list_tools()
 
         advertised = {t.name for t in result.tools}
-        for hidden in ("spawn_job", "stage_project", "implement_project", "launch_implementation", "start_chain_run"):
+        for hidden in (
+            "spawn_job",
+            "stage_project",
+            "get_implementation_prompt",
+            "launch_implementation",
+            "start_chain_run",
+        ):
             assert hidden not in advertised, f"listing profile leaked orchestration tool {hidden}"
 
     def test_listing_roster_matches_the_source_constant(self):
@@ -445,7 +451,8 @@ class TestExistingProfilesUnaffected:
             _profile_toolset_from_state({"auth_method": "jwt", "scopes": ["mcp:agent"]}) == _ORCHESTRATOR_PROFILE_TOOLS
         )
         assert _profile_toolset_from_state({}) == frozenset()
-        # The declared-profile widening path (BE-8003k/BE-9084) is deliberate and
-        # stays exactly as it was — this change adds a vehicle, it does not alter
-        # that rung.
-        assert _profile_toolset_from_state({"auth_method": "jwt", "tool_profile": "full"}) is None
+        # A client-declared profile may only narrow a session's auth-derived
+        # toolset, never widen it. See test_be8003k_tool_profiles.TestProfileResolverPrecedence
+        # for the full regression; this URL-vehicle test only needs to confirm
+        # the BE-9253 addition did not change that rung's behavior further.
+        assert _profile_toolset_from_state({"auth_method": "jwt", "tool_profile": "full"}) == _STANDARD_PROFILE_TOOLS

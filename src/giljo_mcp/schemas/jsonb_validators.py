@@ -26,6 +26,7 @@ Updated: BE-9000h — rewrote AgentJobMetadata to the ACTUAL job_metadata key
 from __future__ import annotations
 
 import re
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -41,6 +42,21 @@ from giljo_mcp.schemas.jsonb_notification_payloads import (  # noqa: F401
     UpdateAvailablePayload,
     register_notification_payload_validators,
     validate_notification_payload,
+)
+
+# SequenceRun (sequence_runs) JSONB columns were extracted to a sibling module
+# (BE-9540 cleanup) to keep this file under the 800-line guardrail. Re-exported
+# here so existing imports keep working unchanged.
+from giljo_mcp.schemas.jsonb_validators_sequence_runs import (  # noqa: F401
+    VALID_REVIEWED_VIA,
+    SequenceRunProjectIds,
+    SequenceRunProjectStatuses,
+    SequenceRunReviewedProjectIds,
+    SequenceRunReviewedVia,
+    validate_sequence_run_project_ids,
+    validate_sequence_run_project_statuses,
+    validate_sequence_run_reviewed_project_ids,
+    validate_sequence_run_reviewed_via,
 )
 
 # Settings.settings_data category-specific schemas were extracted to a
@@ -279,17 +295,41 @@ class SetupSelectedTools(BaseModel):
 # --- User.notification_preferences ---
 
 
+# FE-9553: the popout scope control can only ever answer "how much of the
+# banner do I project" -- there is deliberately no independent category matrix,
+# which is what stops the settings grid growing back. Declared as a tuple so
+# the validator and the reader cannot drift apart.
+POPOUT_SCOPE_ALL = "all"
+POPOUT_SCOPE_ACTIONABLE = "actionable"
+POPOUT_SCOPE_OFF = "off"
+POPOUT_SCOPE_CHOICES = (POPOUT_SCOPE_ALL, POPOUT_SCOPE_ACTIONABLE, POPOUT_SCOPE_OFF)
+
+
 class NotificationPreferences(BaseModel):
     """Validates users.notification_preferences JSONB.
 
-    Known schema with two fields. No extra fields allowed —
-    the schema is fully defined by DEFAULT_NOTIFICATION_PREFERENCES.
+    No extra fields allowed — the schema is fully defined by
+    DEFAULT_NOTIFICATION_PREFERENCES.
+
+    FE-9553 added the three notification-model preferences. Every one carries a
+    default, so a row written before they existed still validates: that is the
+    old-shape answer for this column (tolerance, not a migration). Note that
+    the defaults here are what makes a legacy row VALID; what makes it read back
+    COMPLETE is the merge in the GET endpoint.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     context_tuning_reminder: bool = True
     tuning_reminder_threshold: int = Field(default=10, ge=3, le=1000)
+
+    # Decisions, your-turn and mentions are deliberately NOT represented here.
+    # They are always-on by ruling -- a settings menu must never unplug the
+    # doorbell for decisions the system blocks on -- so the settings card states
+    # that in text rather than offering a switch that must never be flipped.
+    banner_lifecycle_enabled: bool = True
+    banner_advisories_in_fold: bool = True
+    popout_scope: Literal["all", "actionable", "off"] = POPOUT_SCOPE_ALL
 
 
 # --- APIKey.permissions ---
@@ -671,93 +711,8 @@ def validate_consolidated_vision(data: dict | None) -> dict | None:
 
 
 # --- SequenceRun JSONB columns (BE-6131a) ---
-
-
-class SequenceRunProjectIds(BaseModel):
-    """Validates sequence_runs.project_ids — ordered list of project_id strings."""
-
-    items: list[str] = Field(default_factory=list, max_length=5)
-
-    @field_validator("items")
-    @classmethod
-    def validate_items(cls, v: list[str]) -> list[str]:
-        for item in v:
-            if not isinstance(item, str):
-                raise TypeError(f"project_ids items must be strings, got {type(item).__name__}")
-            if len(item) > 36:
-                raise ValueError(f"project_id exceeds 36 characters: {item[:36]!r}")
-        return v
-
-
-class SequenceRunProjectStatuses(BaseModel):
-    """Validates sequence_runs.project_statuses — dict of project_id -> status string.
-
-    Field names match actual DB key shape: arbitrary project_id strings as keys.
-    extra='allow' because the keyset is dynamic (one key per project in the run).
-    Status values are membership-validated against VALID_PROJECT_STATUSES.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    @classmethod
-    def validate_map(cls, data: dict) -> dict:
-        from giljo_mcp.models.sequence_runs import VALID_PROJECT_STATUSES
-
-        for project_id, status in data.items():
-            if not isinstance(project_id, str):
-                raise TypeError(f"project_statuses keys must be strings, got {type(project_id).__name__}")
-            if len(project_id) > 36:
-                raise ValueError(f"project_id key exceeds 36 characters: {project_id[:36]!r}")
-            if status not in VALID_PROJECT_STATUSES:
-                raise ValueError(
-                    f"project_statuses[{project_id!r}]: invalid status {status!r}. "
-                    f"Valid: {sorted(VALID_PROJECT_STATUSES)}"
-                )
-        return data
-
-
-class SequenceRunReviewedProjectIds(BaseModel):
-    """Validates sequence_runs.reviewed_project_ids — list of reviewed member project_ids.
-
-    A reviewed set is a subset of the run's members (cap MAX_SEQUENCE_PROJECTS=5),
-    so it is length-capped identically to project_ids. Items are project-id strings
-    (<= 36 chars). BE-9098.
-    """
-
-    items: list[str] = Field(default_factory=list, max_length=5)
-
-    @field_validator("items")
-    @classmethod
-    def validate_items(cls, v: list[str]) -> list[str]:
-        for item in v:
-            if not isinstance(item, str):
-                raise TypeError(f"reviewed_project_ids items must be strings, got {type(item).__name__}")
-            if len(item) > 36:
-                raise ValueError(f"reviewed project_id exceeds 36 characters: {item[:36]!r}")
-        return v
-
-
-def validate_sequence_run_project_ids(data: list | None) -> list | None:
-    """Validate sequence_runs.project_ids at the service write boundary."""
-    if data is None:
-        return None
-    return SequenceRunProjectIds(items=data).items
-
-
-def validate_sequence_run_reviewed_project_ids(data: list | None) -> list | None:
-    """Validate sequence_runs.reviewed_project_ids at the service write boundary."""
-    if data is None:
-        return None
-    return SequenceRunReviewedProjectIds(items=data).items
-
-
-def validate_sequence_run_project_statuses(data: dict | None) -> dict | None:
-    """Validate sequence_runs.project_statuses at the service write boundary."""
-    if data is None:
-        return None
-    if not isinstance(data, dict):
-        raise TypeError("project_statuses must be a dict")
-    return SequenceRunProjectStatuses.validate_map(data)
+# Extracted to jsonb_validators_sequence_runs.py (BE-9540 cleanup, 800-line
+# guardrail) — see the re-export block near the top of this file.
 
 
 # --- AccountDeletionRequest.billing_cancel_response (SEC-5105b / BE-5108) ---

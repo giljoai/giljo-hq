@@ -167,7 +167,7 @@
 
     <!--
       FE-6130h: Backup & restore self-service (SaaS-only). Extracted into its own
-      saas/ component to keep DangerPage under the 800-line Guardrail-1 limit and
+      saas/ component to keep DangerPage under the 800-line file-size limit and
       to keep the /api/saas/account/* path strings + request-restore dialog out of
       the CE bundle. Lazy-glob loaded (CE export strips saas/ → glob empties → the
       component stays null and never renders), gated SaaS-only.

@@ -86,7 +86,7 @@ async def giljo_setup_client(monkeypatch, db_manager):
                 "next_action": {"why": "Download the zip and extract agents/* into ~/.claude/agents/."},
             }
 
-        async def list_agent_templates(self, platform: str):
+        async def list_agent_templates(self, platform: str, **_kwargs):
             return {
                 "platform": platform,
                 "agents": [{"filename": "implementer.md", "content": "# Implementer\nDo the thing."}],
@@ -145,6 +145,11 @@ async def test_giljo_setup_no_filesystem_harness_returns_inline_mode(giljo_setup
     blob = json.dumps(payload)
     for marker in _OS_WRITE_MARKERS:
         assert marker not in blob, f"inline mode ({harness}) leaked OS-write instruction {marker!r}"
+
+    # BE-9523c: no repo to write a binding block into on this branch -- identity
+    # comes from product_id per call instead, and the message says so plainly.
+    assert "GILJO_PRODUCT_BINDING" not in blob, f"inline mode ({harness}) must never emit a binding block"
+    assert "product_id" in payload["message"], f"inline mode ({harness}) missing the product_id identity note"
 
 
 async def test_giljo_setup_desktop_app_harness_keeps_filesystem_path(giljo_setup_client):

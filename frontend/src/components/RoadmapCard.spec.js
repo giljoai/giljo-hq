@@ -1,13 +1,16 @@
 /**
- * RoadmapCard.spec.js — FE-6165a
+ * RoadmapCard.spec.js
  *
- * Regression for the sequential-run checkbox-stick fix + the Activate fade:
- *  - the `:selected` binding renders the checkbox ticked (the bug was that the
- *    selection never reflected because the Map was keyed by the roadmap_item PK
- *    while this binding reads project_id — this pins the card side of that fix);
- *  - toggling emits `toggle-select` with the full item (so the parent keys it by
- *    project_id);
- *  - while an election is active the per-card Activate button is faded + disabled.
+ * FE-9568 (2026-09-02, operator ruling — scope reversal, NOT a defect fix):
+ * /roadmap became an ordering-only screen. This file used to assert that the
+ * sequential-run selection checkbox, the Activate/Deactivate launch buttons,
+ * and the "In chain" pill's click-through to /projects rendered and behaved
+ * correctly (FE-6165a / FE-6176 / FE-6180). Those controls are now REMOVED, so
+ * this file asserts their ABSENCE instead — a silently deleted assertion is
+ * how a control creeps back in. The "In chain" pill itself STAYS as a
+ * read-only membership badge (operator decision): see the second describe
+ * block. The kept controls (Convert / Open / Demote / Remove) get minimal
+ * emit coverage in the third block.
  *
  * Edition scope: CE.
  */
@@ -20,21 +23,11 @@ const vBtnStub = {
   template: '<button class="v-btn" :disabled="disabled" v-bind="$attrs"><slot /></button>',
   props: ['disabled'],
 }
-const vCheckboxStub = {
-  template: '<input type="checkbox" :checked="modelValue" v-bind="$attrs" @click="$emit(\'update:model-value\', !modelValue)" />',
-  props: ['modelValue'],
-}
 
 const stubs = {
   'v-btn': vBtnStub,
-  'v-checkbox-btn': vCheckboxStub,
   'v-icon': { template: '<i class="v-icon"><slot /></i>' },
-  'v-chip': { template: '<span class="v-chip"><slot /></span>' },
   'v-tooltip': { template: '<div class="v-tooltip"><slot name="activator" :props="{}" /><slot /></div>' },
-  'v-menu': { template: '<div class="v-menu"><slot name="activator" :props="{}" /><slot /></div>' },
-  'v-list': { template: '<div class="v-list"><slot /></div>' },
-  'v-list-item': { template: '<div class="v-list-item" @click="$emit(\'click\')"><slot /></div>', props: ['title'] },
-  'v-spacer': { template: '<span />' },
 }
 
 const inactiveProject = {
@@ -46,6 +39,15 @@ const inactiveProject = {
   id: 'rm-item-pk',
 }
 
+const pendingTask = {
+  item_type: 'task',
+  status: 'pending',
+  title: 'Write onboarding copy',
+  taxonomy_alias: '',
+  task_id: 'task-1',
+  id: 'rm-item-pk-2',
+}
+
 function mountCard(props = {}) {
   return mount(RoadmapCard, {
     props: { item: inactiveProject, rank: 1, ...props },
@@ -53,73 +55,84 @@ function mountCard(props = {}) {
   })
 }
 
-const checkbox = (w) => w.find('[data-testid^="roadmap-select-checkbox"]')
-const activateBtn = (w) => w.find('.rm-primary-btn')
-
-// FE-6176: the selection checkbox moved out of the rank rail into the action
-// rail and now renders ONLY in link mode (it replaces the Activate button).
-// These tests therefore mount with linkMode: true.
-describe('RoadmapCard — selection binding (FE-6165a / FE-6176)', () => {
-  it('renders no selection checkbox outside link mode', () => {
-    const wrapper = mountCard({ selected: false })
-    expect(checkbox(wrapper).exists()).toBe(false)
+describe('RoadmapCard — launch/selection controls REMOVED (FE-9568, 2026-09-02)', () => {
+  it('never renders a selection checkbox — link mode no longer exists', () => {
+    const wrapper = mountCard()
+    expect(wrapper.find('[data-testid^="roadmap-select-checkbox"]').exists()).toBe(false)
   })
 
-  it('renders the checkbox UNticked when not selected (link mode)', () => {
-    const wrapper = mountCard({ selected: false, linkMode: true })
-    expect(checkbox(wrapper).exists()).toBe(true)
-    expect(checkbox(wrapper).element.checked).toBe(false)
+  it('never renders an Activate button for an inactive project', () => {
+    const wrapper = mountCard()
+    expect(wrapper.find('.rm-primary-btn').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Activate')
   })
 
-  it('renders the checkbox TICKED when selected (the stick fix, card side)', () => {
-    const wrapper = mountCard({ selected: true, linkMode: true })
-    expect(checkbox(wrapper).element.checked).toBe(true)
+  it('never renders a Deactivate button for an activated project', () => {
+    const wrapper = mountCard({ item: { ...inactiveProject, status: 'active' } })
+    expect(wrapper.text()).not.toContain('Deactivate')
   })
 
-  it('force-ticks the checkbox for an in-chain project (link mode)', () => {
-    const wrapper = mountCard({ selected: false, inChain: true, linkMode: true })
-    expect(checkbox(wrapper).element.checked).toBe(true)
-  })
-
-  it('emits toggle-select with the full item (carrying project_id) on click', async () => {
-    const wrapper = mountCard({ selected: false, linkMode: true })
-    await checkbox(wrapper).trigger('click')
-    const ev = wrapper.emitted('toggle-select')
-    expect(ev).toBeTruthy()
-    expect(ev[0][0]).toMatchObject({ project_id: 'proj-1' })
-  })
-
-  it('replaces the Activate button with the checkbox in link mode', () => {
-    const wrapper = mountCard({ linkMode: true })
-    expect(checkbox(wrapper).exists()).toBe(true)
-    expect(activateBtn(wrapper).exists()).toBe(false)
-  })
-
-  // FE-6180: /roadmap does NO chain management — an in-chain card greys its tickbox
-  // and clicking it navigates to /projects (emits open-chain) instead of editing.
-  it('disables the tickbox + emits open-chain (not toggle-select) when in a chain', async () => {
-    const wrapper = mountCard({ inChain: true, linkMode: true })
-    expect(checkbox(wrapper).attributes('disabled')).toBeDefined()
-    await wrapper.find('.rm-link-wrap').trigger('click')
-    expect(wrapper.emitted('open-chain')).toBeTruthy()
-    expect(wrapper.emitted('open-chain')[0][0]).toMatchObject({ project_id: 'proj-1' })
+  it('does not emit activate, deactivate, or toggle-select — those events no longer exist on the component', () => {
+    const wrapper = mountCard({ inChain: true })
+    expect(wrapper.emitted('activate')).toBeFalsy()
+    expect(wrapper.emitted('deactivate')).toBeFalsy()
     expect(wrapper.emitted('toggle-select')).toBeFalsy()
+  })
+
+  it('ignores the retired selected/electionActive/linkMode/lockedInChain props (no crash, no residual UI)', () => {
+    const wrapper = mountCard({
+      selected: true,
+      electionActive: true,
+      linkMode: true,
+      lockedInChain: true,
+    })
+    expect(wrapper.find('[data-testid^="roadmap-select-checkbox"]').exists()).toBe(false)
+    expect(wrapper.find('.rm-primary-btn').exists()).toBe(false)
   })
 })
 
-describe('RoadmapCard — Activate fade on election (FE-6165a)', () => {
-  it('Activate is enabled + unfaded when no election is active', () => {
-    const wrapper = mountCard({ electionActive: false })
-    const btn = activateBtn(wrapper)
-    expect(btn.exists()).toBe(true)
-    expect(btn.attributes('disabled')).toBeUndefined()
-    expect(btn.classes()).not.toContain('rm-primary-btn--election-faded')
+describe('RoadmapCard — "In chain" pill is a read-only badge (FE-9568 kept membership indicator)', () => {
+  it('shows the pill for an in-chain project with no click handler wired', async () => {
+    const wrapper = mountCard({ inChain: true })
+    const pill = wrapper.find('[data-testid="roadmap-in-chain-pill"]')
+    expect(pill.exists()).toBe(true)
+    await pill.trigger('click')
+    expect(wrapper.emitted('open-chain')).toBeFalsy()
   })
 
-  it('fades + disables Activate while an election is active', () => {
-    const wrapper = mountCard({ electionActive: true })
-    const btn = activateBtn(wrapper)
-    expect(btn.attributes('disabled')).toBeDefined()
-    expect(btn.classes()).toContain('rm-primary-btn--election-faded')
+  it('does not render the pill when not in a chain', () => {
+    const wrapper = mountCard({ inChain: false })
+    expect(wrapper.find('[data-testid="roadmap-in-chain-pill"]').exists()).toBe(false)
+  })
+
+  it('does not render the pill for a task even if in-chain is somehow set', () => {
+    const wrapper = mountCard({ item: pendingTask, inChain: true })
+    expect(wrapper.find('[data-testid="roadmap-in-chain-pill"]').exists()).toBe(false)
+  })
+})
+
+describe('RoadmapCard — kept controls (Convert / Open / Demote / Remove)', () => {
+  it('renders Convert to Project for a task and emits convert on click', async () => {
+    const wrapper = mountCard({ item: pendingTask })
+    const convertBtn = wrapper.find('.rm-convert-btn')
+    expect(convertBtn.exists()).toBe(true)
+    await convertBtn.trigger('click')
+    expect(wrapper.emitted('convert')).toBeTruthy()
+    expect(wrapper.emitted('convert')[0][0]).toMatchObject({ task_id: 'task-1' })
+  })
+
+  it('never renders Convert to Project for a project', () => {
+    const wrapper = mountCard()
+    expect(wrapper.find('.rm-convert-btn').exists()).toBe(false)
+  })
+
+  it('emits open, demote, and remove for the icon action row', async () => {
+    const wrapper = mountCard()
+    await wrapper.find('[aria-label="Open project"]').trigger('click')
+    await wrapper.find('[aria-label="Demote to bottom"]').trigger('click')
+    await wrapper.find('[aria-label="Remove Fix login from the roadmap"]').trigger('click')
+    expect(wrapper.emitted('open')).toBeTruthy()
+    expect(wrapper.emitted('demote')).toBeTruthy()
+    expect(wrapper.emitted('remove')).toBeTruthy()
   })
 })

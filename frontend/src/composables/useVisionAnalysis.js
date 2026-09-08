@@ -121,7 +121,7 @@ export function useVisionAnalysis(patchProductForm, { copyPromptOnStage = true }
     const customInstructions = (productForm.extractionCustomInstructions || '').trim()
 
     // Persist custom instructions BEFORE copying so the agent (which fetches the
-    // product via get_vision_doc) sees the latest text. Non-blocking on failure —
+    // product via get_vision_document) sees the latest text. Non-blocking on failure —
     // the user's primary action is copying the prompt, not waiting for an API.
     if (customInstructions) {
       try {
@@ -134,12 +134,12 @@ export function useVisionAnalysis(patchProductForm, { copyPromptOnStage = true }
     }
 
     // BE-9164: the detailed two-role analysis brief now lives server-side in
-    // VISION_EXTRACTION_PROMPT and is returned by get_vision_doc as
+    // VISION_EXTRACTION_PROMPT and is returned by get_vision_document as
     // extraction_instructions (single source of truth). This wizard prompt only
     // points the agent at that flow.
     let prompt =
       `Analyze the vision documents for product "${productName}".\n` +
-      `1. Call get_vision_doc(product_id="${productId}") and FOLLOW the extraction_instructions embedded in the response.\n` +
+      `1. Call get_vision_document(product_id="${productId}") and FOLLOW the extraction_instructions embedded in the response.\n` +
       `2. Write the results with update_product_context(product_id="${productId}") — the per-document and consolidated summaries plus the product card fields. It is a merge-write and is SAFE TO CALL IN STAGES: split the work across several calls rather than sending one large one, and set emit_completion=true on your final call to unlock the rest of the setup wizard. Every response reports vision_analysis_complete and missing_for_completion, so you never have to guess whether you are done.`
 
     if (customInstructions) {

@@ -84,7 +84,6 @@
       :model-value="showSetupOverlay && setupOverlayMode === 'setup'"
       :current-step="setupStep"
       :selected-tools="setupSelectedTools"
-      :setup-step-completed="setupStepCompleted"
       :is-rerun="forceSetupMode"
       :mode="setupOverlayMode"
       @update:model-value="showSetupOverlay = $event"
@@ -388,10 +387,17 @@ const templateCards = computed(() =>
 
 async function createFromTemplate(tmpl) {
   if (busyTemplateId.value) return
-  const productId = productStore.activeProduct?.id || productStore.effectiveProductId
+  // FE-9524/D1 (project record finding 3): the VIEWED tab wins over the
+  // legacy singular slot -- several products may be shown at once, so
+  // `activeProduct` no longer means "the one product in play". Preferring it
+  // here would create the project under whichever product happens to be
+  // MOST RECENTLY shown rather than the one on screen. effectiveProductId
+  // already falls back to activeProduct when no tab is viewed, so this is
+  // the whole priority chain.
+  const productId = productStore.effectiveProductId
   if (!productId) {
     showToast({
-      message: 'No active product — activate a product before creating a project.',
+      message: 'No product is open. Add a product before creating a project.',
       color: 'error',
     })
     return

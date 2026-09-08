@@ -94,10 +94,19 @@ async def broadcast_thread_message(
     requires_action: bool,
     project_id: str | None,
     from_kind: str = "agent",
+    to_participant: str | None = None,
 ) -> None:
     """Broadcast a new thread message event to all clients in a tenant.
 
     Caller MUST check ``if state.websocket_manager:`` before calling.
+
+    FE-9546: ``to_participant`` is the resolved addressee (None for a broadcast to
+    the whole thread). Before this, the event carried only the derived
+    ``message_type`` ("direct"/"broadcast"), which told a receiver THAT the post
+    was directed but not AT WHOM — so the operator's approval-notification filter
+    could not tell a `requires_action` post aimed at another agent from a genuine
+    one aimed at them. Both callers already resolve this value before invoking
+    this helper; it was simply never forwarded onto the wire.
 
     BE-9289a: ``from_kind`` carries the SERVER-resolved author kind onto the live
     event, so a message that arrives over the socket renders identically to the same
@@ -126,6 +135,7 @@ async def broadcast_thread_message(
             "priority": priority,
             "requires_action": requires_action,
             "project_id": project_id,
+            "to_participant": to_participant,
             "update_type": "new",
             # Always present, so "no flag" can never be mistaken for "not truncated"
             # by a client reading an event from a worker that predates this field.
