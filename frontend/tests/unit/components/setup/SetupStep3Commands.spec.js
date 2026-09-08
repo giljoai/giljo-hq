@@ -43,6 +43,15 @@ function mountStep3(props = {}) {
 // --- Tests ---
 
 describe('SetupStep3Commands', () => {
+  // Fire the pair of events a real giljo_setup run produces for one tool:
+  // skills first, then the agent templates. Both are needed to clear the gate.
+  function fireInstalled(toolName) {
+    mockWsOn.mock.calls.find((call) => call[0] === 'setup:commands_installed')[1]({
+      tool_name: toolName,
+    })
+    mockWsOn.mock.calls.find((call) => call[0] === 'setup:agents_downloaded')[1]({})
+  }
+
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -170,7 +179,7 @@ describe('SetupStep3Commands', () => {
       expect(events[0]).toEqual([false])
     })
 
-    it('emits can-proceed true when commands are installed for at least 1 tool', async () => {
+    it('stays false when only the skills landed (FE-9497: agents count too)', async () => {
       const wrapper = mountStep3()
       await flushPromises()
 
@@ -178,6 +187,18 @@ describe('SetupStep3Commands', () => {
         (call) => call[0] === 'setup:commands_installed',
       )
       cmdCall[1]({ tool_name: 'claude_code' })
+      await flushPromises()
+
+      const events = wrapper.emitted('can-proceed')
+      const lastEmit = events[events.length - 1]
+      expect(lastEmit).toEqual([false])
+    })
+
+    it('emits can-proceed true once skills AND agents land for at least 1 tool', async () => {
+      const wrapper = mountStep3()
+      await flushPromises()
+
+      fireInstalled('claude_code')
       await flushPromises()
 
       const events = wrapper.emitted('can-proceed')
@@ -218,11 +239,7 @@ describe('SetupStep3Commands', () => {
       const wrapper = mountStep3()
       await flushPromises()
 
-      const cmdCall = mockWsOn.mock.calls.find(
-        (call) => call[0] === 'setup:commands_installed',
-      )
-
-      cmdCall[1]({ tool_name: 'claude_code' })
+      fireInstalled('claude_code')
       await flushPromises()
 
       const events = wrapper.emitted('step-data')
@@ -233,24 +250,93 @@ describe('SetupStep3Commands', () => {
   })
 
   // -------------------------------------------------------------------
-  // previouslyCompleted prop
+  // No pre-fill (FE-9497). The step used to take a previouslyCompleted prop
+  // and tick both boxes for anyone who had finished setup before, which let a
+  // repeat user past Next without installing anything. A past run tells us
+  // nothing about the current machine, so only observed events tick a box.
   // -------------------------------------------------------------------
-  describe('previouslyCompleted prop', () => {
-    it('pre-fills checkmark when previouslyCompleted is true', async () => {
+  describe('No pre-fill from a previous run', () => {
+    it('ignores a legacy previouslyCompleted prop and stays unticked', async () => {
       const wrapper = mountStep3({ previouslyCompleted: true })
       await flushPromises()
 
-      expect(wrapper.findAll('.checklist-text--done')).toHaveLength(2)
+      expect(wrapper.findAll('.checklist-text--done')).toHaveLength(0)
     })
 
-    it('emits can-proceed true immediately when previouslyCompleted is true', async () => {
+    it('keeps can-proceed false for a repeat user until something installs', async () => {
       const wrapper = mountStep3({ previouslyCompleted: true })
       await flushPromises()
 
       const events = wrapper.emitted('can-proceed')
       expect(events).toBeTruthy()
       const lastEmit = events[events.length - 1]
-      expect(lastEmit).toEqual([true])
+      expect(lastEmit).toEqual([false])
+    })
+  })
+
+  // -------------------------------------------------------------------
+  // FE-9569 detector 2. `toolStatus` used to be built ONCE at component setup
+  // from the initial `connectedTools` prop (Object.fromEntries(...)) and never
+  // re-keyed. Detector 1 (the connect step's credential-status seeding) is
+  // async, so a connectedTools prop that starts empty and populates a beat
+  // later (or any other timing where this step mounts before the parent's
+  // connectedTools settles) left toolStatus permanently `{}` — every
+  // WS-driven tick handler guards on `if (toolStatus[id])`, which is false
+  // forever for a key that was never added, and the checklist looks
+  // permanently stuck even though a real setup:bootstrap_complete arrives.
+  // Confirmed at runtime (FE-9569 thread): setup:bootstrap_complete ALREADY
+  // fires unconditionally on every giljo_setup call (see
+  // api/endpoints/mcp_tools/_setup_tools.py:198-214) — re-running installs
+  // that were already present still ticks both boxes once toolStatus has the
+  // key. This is the one thing that needed a genuine fix on this component.
+  // -------------------------------------------------------------------
+  describe('Recovers when connectedTools populates AFTER mount (FE-9569 detector 2 cascade)', () => {
+    it('mounting with an empty connectedTools then receiving the real list still ticks on bootstrap_complete', async () => {
+      const wrapper = mountStep3({ connectedTools: [] })
+      await flushPromises()
+
+      await wrapper.setProps({ connectedTools: ['claude_code'] })
+      await flushPromises()
+
+      const bootstrapCall = mockWsOn.mock.calls.find((call) => call[0] === 'setup:bootstrap_complete')
+      bootstrapCall[1]({})
+      await flushPromises()
+
+      expect(wrapper.findAll('.checklist-text--done')).toHaveLength(2)
+      const events = wrapper.emitted('can-proceed')
+      expect(events[events.length - 1]).toEqual([true])
+    })
+
+    it('re-keys the active tool too, so the panel is not stuck showing the wrong/empty tool', async () => {
+      const wrapper = mountStep3({ connectedTools: [] })
+      await flushPromises()
+
+      await wrapper.setProps({ connectedTools: ['codex_cli'] })
+      await flushPromises()
+
+      const bootstrapCall = mockWsOn.mock.calls.find((call) => call[0] === 'setup:bootstrap_complete')
+      bootstrapCall[1]({})
+      await flushPromises()
+
+      expect(wrapper.text()).toContain('Ask your Codex CLI to run:')
+      expect(wrapper.findAll('.checklist-text--done')).toHaveLength(2)
+    })
+
+    it('a later-arriving second tool gets its own key too (no stomping the first)', async () => {
+      const wrapper = mountStep3({ connectedTools: ['claude_code'] })
+      await flushPromises()
+      const bootstrapCall = mockWsOn.mock.calls.find((call) => call[0] === 'setup:bootstrap_complete')
+      bootstrapCall[1]({})
+      await flushPromises()
+      expect(wrapper.findAll('.checklist-text--done')).toHaveLength(2)
+
+      // A second tool connects later (multi-tool walk) -- its own status must
+      // start fresh, not reuse or clobber the first tool's completed state.
+      await wrapper.setProps({ connectedTools: ['claude_code', 'codex_cli'] })
+      await flushPromises()
+      await wrapper.find('.tool-tab:last-child').trigger('click')
+      await flushPromises()
+      expect(wrapper.findAll('.checklist-text--done')).toHaveLength(0)
     })
   })
 
@@ -307,18 +393,14 @@ describe('SetupStep3Commands', () => {
       expect(tabs[1].classes()).toContain('tool-tab--active')
     })
 
-    it('emits can-proceed when one tool has commands installed in multi-tool setup', async () => {
+    it('emits can-proceed when one tool is fully installed in multi-tool setup', async () => {
       const wrapper = mountStep3({
         selectedTools: ['claude_code', 'codex_cli'],
         connectedTools: ['claude_code', 'codex_cli'],
       })
       await flushPromises()
 
-      const cmdCall = mockWsOn.mock.calls.find(
-        (call) => call[0] === 'setup:commands_installed',
-      )
-
-      cmdCall[1]({ tool_name: 'claude_code' })
+      fireInstalled('claude_code')
       await flushPromises()
 
       const events = wrapper.emitted('can-proceed')

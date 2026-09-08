@@ -99,11 +99,13 @@
                   <ProductCard
                     :product="product"
                     :is-active="isProductActive(product)"
+                    :is-default="isProductDefault(product)"
                     @info="showProductDetails"
                     @tune="showProductTuning"
                     @toggle-activation="toggleProductActivation"
                     @edit="editProduct"
                     @delete="confirmDelete"
+                    @set-default="setDefaultProduct"
                   />
                 </v-col>
               </v-row>
@@ -187,15 +189,6 @@
       @purge="purgeDeletedProduct"
       @purge-all="purgeAllDeletedProducts"
     />
-
-    <!-- Handover 0050: Activation Warning Dialog -->
-    <ActivationWarningDialog
-      v-model="showActivationWarning"
-      :new-product="pendingActivation || {}"
-      :current-active="currentActiveProduct || {}"
-      @confirm="confirmActivation"
-      @cancel="cancelActivation"
-    />
   </v-container>
 </template>
 
@@ -210,7 +203,6 @@ import { useProductSoftDelete } from '@/composables/useProductSoftDelete'
 import { useProductVisionUpload } from '@/composables/useProductVisionUpload'
 import api from '@/services/api'
 import { parseErrorResponse } from '@/utils/errorMessages'
-import ActivationWarningDialog from '@/components/products/ActivationWarningDialog.vue'
 import ProductDeleteDialog from '@/components/products/ProductDeleteDialog.vue'
 import ProductDetailsDialog from '@/components/products/ProductDetailsDialog.vue'
 import ProductTuningDialog from '@/components/products/ProductTuningDialog.vue'
@@ -263,14 +255,7 @@ const {
   resetUploadState,
 } = useProductVisionUpload({ editingProduct, autoSavedForAnalysis })
 
-const {
-  showActivationWarning,
-  pendingActivation,
-  currentActiveProduct,
-  toggleProductActivation,
-  confirmActivation,
-  cancelActivation,
-} = useProductActivation(() => loadProducts())
+const { toggleProductActivation } = useProductActivation(() => loadProducts())
 
 const {
   showDeletedProductsDialog,
@@ -304,13 +289,12 @@ const filteredProducts = computed(() => {
     )
   }
 
-  // Sort products - ACTIVE PRODUCTS FIRST (leftmost/top)
+  // Sort products - SHOWN PRODUCTS FIRST (leftmost/top)
   const sorted = [...products]
 
-  // Primary sort: Active products first
+  // Primary sort: shown products first
   sorted.sort((a, b) => {
-    // If one is active and the other isn't, active comes first
-    // Use isProductActive for single source of truth (Handover 0320)
+    // If one is shown and the other isn't, shown comes first
     const aActive = isProductActive(a)
     const bActive = isProductActive(b)
     if (aActive && !bActive) return -1
@@ -350,9 +334,40 @@ const productStats = computed(() => {
   }
 })
 
-// Methods — Handover 0320: Single source of truth — uses activeProduct.id not product.is_active
+// Methods — FE-9524/D1: single source of truth is the product's OWN is_active
+// field ("shown as a tab"), not the legacy singular productStore.activeProduct
+// -- several products may be shown at once, so comparing against one id was
+// the exact stale reader the operator hit in prod (BE-9525a's sibling bug).
 function isProductActive(product) {
-  return productStore.activeProduct?.id === product.id
+  return !!product.is_active
+}
+
+// FE-9529: compares against the RESOLVED default (productStore.activeProduct,
+// from GET /refresh-active -> ProductService.get_default_product), NOT the
+// product's raw is_default column. A tenant's sole product can be the real
+// fallback target while its own column is still false (never auto-set on
+// create) -- comparing the raw column would show an unticked box on a
+// tenant whose reads plainly work.
+function isProductDefault(product) {
+  return !!productStore.activeProduct && productStore.activeProduct.id === product.id
+}
+
+async function setDefaultProduct(product) {
+  try {
+    await productStore.setDefaultProduct(product.id)
+    showToast({
+      message: `${product.name} set as default`,
+      type: 'success',
+      timeout: 3000,
+    })
+  } catch (error) {
+    console.error('Failed to set default product:', error)
+    showToast({
+      message: 'Failed to set default product. Try again or refresh the page.',
+      type: 'error',
+      timeout: 5000,
+    })
+  }
 }
 
 // Handover 0320: Handler for ProductForm remove-vision event (delete existing document)
@@ -518,9 +533,9 @@ async function saveProduct(payload) {
 
     const wasCreating = !editingProduct.value
     showToast({
-      message: wasCreating
-        ? 'Product created — activate it with the play button to start using it'
-        : 'Product updated successfully',
+      // FE-9524/D1: a new product is shown by default -- no activation step
+      // left to prompt for.
+      message: wasCreating ? 'Product created' : 'Product updated successfully',
       type: 'success',
       timeout: wasCreating ? 6000 : 3000,
     })
@@ -532,8 +547,9 @@ async function saveProduct(payload) {
     console.error('Failed to save product:', error)
     // Surface the real backend message instead of a generic
     // "check your connection" toast. The server returns a structured
-    // {error_code, message} payload (e.g. duplicate active-product name)
-    // that the user needs verbatim to know what to fix.
+    // {error_code, message} payload (a duplicate product name, unconditional
+    // per tenant -- not scoped to shown/hidden) that the user needs verbatim
+    // to know what to fix.
     const parsed = parseErrorResponse(error)
     const isDuplicateName =
       parsed?.message && /already exists/i.test(parsed.message)
@@ -541,7 +557,7 @@ async function saveProduct(payload) {
       // Modal beats a toast for blocking errors that require user action,
       // and avoids any visual confusion with the WebSocket-driven toast
       // surface. Form stays open behind the modal with all fields intact.
-      duplicateNameMessage.value = `${parsed.message}. Pick a different name, or activate or rename the existing product.`
+      duplicateNameMessage.value = `${parsed.message}. Pick a different name, or rename the existing product.`
       showDuplicateNameModal.value = true
     } else {
       showToast({
@@ -633,7 +649,13 @@ async function closeDialog() {
 async function loadProducts() {
   loading.value = true
   try {
-    await productStore.fetchProducts()
+    // FE-9529: the Default checkbox needs the RESOLVED default
+    // (productStore.activeProduct), not just the raw list -- fetch it here
+    // rather than assume DefaultLayout's app-boot fetch has already landed
+    // by the time this view mounts (child components mount before their
+    // parent's onMounted runs). Deduped/short-TTL at the api.js layer
+    // (FE-9529), so this is not a new independent network call in practice.
+    await Promise.all([productStore.fetchProducts(), productStore.fetchActiveProduct()])
     await loadDeletedProducts()
   } finally {
     loading.value = false

@@ -132,6 +132,7 @@ import userGuideMd from '../../../docs/USER_GUIDE.md?raw'
 // glossary / chains / decision-guidance coverage gaps in the shared guide.
 import decisionGuideMd from '../content/guide/decision-guide.md?raw'
 import chainsMd from '../content/guide/chains.md?raw'
+import headlessFlowMd from '../content/guide/headless-flow.md?raw'
 import glossaryMd from '../content/guide/glossary.md?raw'
 
 // ADR-004: SaaS-only docs loaded via import.meta.glob so the CE bundle never
@@ -163,8 +164,11 @@ const combinedMarkdown = computed(() => {
   // TSK-8055: decision guidance + chains follow the first-day flow; the User
   // Guide reference then follows; the Glossary closes as a reference appendix
   // (before the SaaS billing chapter, which stays last).
+  // FE-9503b: headless-flow follows chains (drives from the same lifecycle,
+  // and references the chain conductor) and precedes the User Guide reference.
   parts.push(decisionGuideMd)
   parts.push(chainsMd)
+  parts.push(headlessFlowMd)
   parts.push(userGuideMd)
   parts.push(glossaryMd)
 

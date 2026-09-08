@@ -62,6 +62,7 @@ from giljo_mcp.models.templates import AgentTemplate
 from giljo_mcp.repositories.product_agent_assignment_repository import (
     ProductAgentAssignmentRepository,
 )
+from giljo_mcp.repositories.product_repository import ProductRepository
 
 
 logger = logging.getLogger(__name__)
@@ -131,31 +132,42 @@ async def template_ids_for_product(
     return await ProductAgentAssignmentRepository().get_active_template_ids_for_product(session, product_id, tenant_key)
 
 
+async def _resolve_default_product_id(session: AsyncSession, tenant_key: str) -> str | None:
+    """The tenant's DEFAULT product id, or ``None`` (shared resolver, BE-9557).
+
+    Delegates to :meth:`ProductRepository.get_default_product` -- the single
+    query that reads ``is_default`` (not ``is_active``) and is still backed by
+    a real per-tenant partial unique index (``idx_product_single_default_per_tenant``).
+
+    BE-9557: the three callers below used to run their OWN ``.first()`` query
+    on ``Product.is_active``, under a docstring claiming exactly one product
+    per tenant can be active. That index (``idx_product_single_active_per_tenant``)
+    was dropped in ce_0100 (BE-9525b/FE-9524) -- several products may be shown
+    at once, so ``.first()`` returned whichever row the planner returned
+    first: arbitrary, and silently wrong on any multi-shown tenant. Do NOT
+    reintroduce a bare ``is_active`` query here; resolve through this one
+    shared function so the rule cannot drift across its callers again.
+    """
+    with tenant_session_context(session, tenant_key):
+        product = await ProductRepository().get_default_product(session, tenant_key, eager_load=False)
+    return str(product.id) if product is not None else None
+
+
 async def active_product_template_ids(
     session: AsyncSession,
     tenant_key: str,
 ) -> set[str] | None:
-    """Template ids active for the tenant's ACTIVE product, or ``None``.
+    """Template ids active for the tenant's DEFAULT product, or ``None``.
 
     The export paths (``giljo_setup``, the staged ZIPs, the REST bundle) carry a
-    tenant but no product, so they resolve the active product here. Exactly one
-    product per tenant can be active -- enforced by the partial unique index
-    ``idx_product_single_active_per_tenant`` -- so this is a single-row lookup and
-    not an ambiguous choice.
+    tenant but no product, so they resolve the DEFAULT product here (FE-9524:
+    "default" is a single per-tenant column, independent of is_active/shown,
+    and is what an unscoped read resolves to) -- see :func:`_resolve_default_product_id`.
 
-    A tenant with no active product yields ``None`` (tenant-wide behaviour,
-    unchanged), which is also what a brand-new tenant sees before it activates
-    anything.
+    A tenant with no default product yields ``None`` (tenant-wide behaviour,
+    unchanged), which is also what a brand-new tenant sees before it sets one.
     """
-    stmt = select(Product.id).where(
-        and_(
-            Product.tenant_key == tenant_key,
-            Product.is_active.is_(True),
-            Product.deleted_at.is_(None),
-        )
-    )
-    with tenant_session_context(session, tenant_key):
-        product_id = (await session.execute(stmt)).scalars().first()
+    product_id = await _resolve_default_product_id(session, tenant_key)
 
     if not product_id:
         return None
@@ -163,20 +175,29 @@ async def active_product_template_ids(
     return await template_ids_for_product(session, product_id, tenant_key)
 
 
-async def build_export_context(session: AsyncSession, tenant_key: str):
-    """The active product's export identity, or ``None`` (BE-9385b).
+async def build_export_context(session: AsyncSession, tenant_key: str, product_id: str | None = None):
+    """The export identity for ``product_id``, or the DEFAULT product's (BE-9385b).
 
-    Returns an ``ExportContext`` carrying the tenant and the active product's id
+    Returns an ``ExportContext`` carrying the tenant and the resolved product's id
     and slug -- everything the assembler needs to produce product-qualified
-    filenames and ownership markers. ``None`` when the tenant has no active
-    product, which keeps the export byte-identical to its pre-BE-9385b shape
+    filenames and ownership markers. ``None`` when there is no product to
+    resolve to, which keeps the export byte-identical to its pre-BE-9385b shape
     rather than inventing an owner.
+
+    Args:
+        session: Active database session.
+        tenant_key: Tenant key for isolation.
+        product_id: Explicit product to export as (BE-9557: giljo_setup's
+            resolved binding). Falsy resolves the tenant's DEFAULT product
+            instead (see :func:`_resolve_default_product_id`) -- the same
+            fallback ``active_product_template_ids`` uses, so the two
+            resolutions of "whose export is this" cannot disagree.
 
     Lives beside the selection helpers on purpose: the export sites already call
     into this module to answer "which agents", and "whose export is this" is the
-    same question with the same active-product lookup. Splitting them would mean
-    two resolutions of the active product per export, which is how two answers
-    start to disagree.
+    same question with the same product lookup. Splitting them would mean two
+    resolutions of the product per export, which is how two answers start to
+    disagree.
 
     Slug tolerance: a product created before ce_0092 (or by a path that bypassed
     ``ProductService``) can still carry ``slug IS NULL``. Rather than skip the
@@ -187,10 +208,14 @@ async def build_export_context(session: AsyncSession, tenant_key: str):
     from giljo_mcp.product_slug import slugify_product_name
     from giljo_mcp.tools.agent_template_assembler import ExportContext
 
+    resolved_id = product_id or await _resolve_default_product_id(session, tenant_key)
+    if not resolved_id:
+        return None
+
     stmt = select(Product.id, Product.name, Product.slug).where(
         and_(
+            Product.id == resolved_id,
             Product.tenant_key == tenant_key,
-            Product.is_active.is_(True),
             Product.deleted_at.is_(None),
         )
     )
@@ -200,11 +225,11 @@ async def build_export_context(session: AsyncSession, tenant_key: str):
     if row is None:
         return None
 
-    product_id, product_name, product_slug = row
+    row_product_id, product_name, product_slug = row
 
     return ExportContext(
         tenant_key=tenant_key,
-        product_id=str(product_id),
+        product_id=str(row_product_id),
         product_slug=product_slug or slugify_product_name(product_name),
     )
 
@@ -267,15 +292,15 @@ async def active_product_export_timestamps(session: AsyncSession, tenant_key: st
 
     The read half of :func:`record_product_export`, and the one the Agents screen
     needs: the staleness badge is asking "when did *the product I am in* last
-    export this agent?". Resolves the active product the same single-row way
-    :func:`active_product_template_ids` does -- one active product per tenant,
-    enforced by ``idx_product_single_active_per_tenant``.
+    export this agent?". Resolves the DEFAULT product the same way
+    :func:`active_product_template_ids` does -- see
+    :func:`_resolve_default_product_id`.
 
     Keyed on MEMBERSHIP: a template ABSENT from the mapping has no junction row
     and falls back to the tenant-wide value, while a template PRESENT with a
     ``None`` value has not been exported by this product and must NOT fall back.
     See ``models.templates.effective_last_exported_at`` for why that distinction
-    is the whole fix. A tenant with no active product yields an empty mapping, so
+    is the whole fix. A tenant with no default product yields an empty mapping, so
     every lookup falls back and the display is exactly what it was before this
     project.
 
@@ -284,17 +309,9 @@ async def active_product_export_timestamps(session: AsyncSession, tenant_key: st
         tenant_key: Tenant key for isolation.
 
     Returns:
-        Mapping of template id -> the active product's last export time.
+        Mapping of template id -> the default product's last export time.
     """
-    stmt = select(Product.id).where(
-        and_(
-            Product.tenant_key == tenant_key,
-            Product.is_active.is_(True),
-            Product.deleted_at.is_(None),
-        )
-    )
-    with tenant_session_context(session, tenant_key):
-        product_id = (await session.execute(stmt)).scalars().first()
+    product_id = await _resolve_default_product_id(session, tenant_key)
 
     if not product_id:
         return {}

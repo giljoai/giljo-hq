@@ -8,10 +8,10 @@
 Regression: ``TaskConversionService`` previously deactivated the product's
 currently-active project before creating the new (inactive) project, leaving the
 product with ZERO active projects after a promotion. The new project is created
-INACTIVE and the "one active project per product" rule is DB-enforced by the
-partial unique index ``idx_project_single_active_per_product`` (WHERE
-status='active'), so there is nothing to make room for. Only the user
-activates/deactivates a project — conversion never does.
+INACTIVE, so there is nothing to make room for regardless of how many other
+projects in the product are active (BE-9525b dropped the one-active-per-product
+limit; this was never index-enforced from conversion's side even before that —
+only the user activates/deactivates a project, conversion never does).
 """
 
 from uuid import uuid4

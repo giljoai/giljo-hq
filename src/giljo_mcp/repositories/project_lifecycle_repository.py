@@ -80,37 +80,6 @@ class ProjectLifecycleRepository:
         )
         return result.scalar_one_or_none()
 
-    async def find_active_in_product(
-        self,
-        session: AsyncSession,
-        tenant_key: str,
-        product_id: str,
-        exclude_project_id: str,
-    ) -> Project | None:
-        """
-        Find an active project in a product, excluding a specific project.
-
-        Args:
-            session: Active database session
-            tenant_key: Tenant key for isolation
-            product_id: Product UUID
-            exclude_project_id: Project ID to exclude
-
-        Returns:
-            Active Project instance or None
-        """
-        result = await session.execute(
-            select(Project).where(
-                and_(
-                    Project.product_id == product_id,
-                    Project.status == ProjectStatus.ACTIVE,
-                    Project.id != exclude_project_id,
-                    Project.tenant_key == tenant_key,
-                )
-            )
-        )
-        return result.scalar_one_or_none()
-
     async def find_existing_orchestrator(
         self,
         session: AsyncSession,

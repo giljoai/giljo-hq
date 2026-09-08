@@ -123,10 +123,18 @@ async def test_product_statistics_same_tenant_counts_correctly(two_tenant_produc
 
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
-async def test_deactivate_product_cascade_filters_project_and_job_tenant(db_session, two_tenant_products):
-    """Product deactivation cascades only to rows in the product owner's tenant."""
+async def test_deactivate_product_touches_no_project_or_job_of_either_tenant(db_session, two_tenant_products):
+    """FE-9524/D1: hiding a product no longer cascades to projects/jobs at all
+    (not just tenant-filtered -- gone entirely). Rewrite of the old
+    tenant-filtered-cascade pin, which asserted the cascade D1 retires. Kept as
+    a tenant-isolation regression: a reintroduced cascade that forgot to filter
+    by tenant would still show up here as a foreign-row status flip."""
     data = two_tenant_products
-    data["project_a"].status = ProjectStatus.INACTIVE
+    data["project_a"].status = ProjectStatus.ACTIVE
+    # idx_project_single_active_per_product (BE-9525b's, unrelated to this
+    # project) forbids two ACTIVE projects under the same product_id, so the
+    # foreign row starts INACTIVE -- the point here is that it stays exactly
+    # where it started either way, proving no cascade reached across tenants.
     foreign_project = Project(
         id=str(uuid4()),
         name="Tenant B Stray Project",
@@ -134,7 +142,7 @@ async def test_deactivate_product_cascade_filters_project_and_job_tenant(db_sess
         mission="Tenant B mission",
         tenant_key=data["tenant_b"],
         product_id=data["product_a"].id,
-        status=ProjectStatus.ACTIVE,
+        status=ProjectStatus.INACTIVE,
         series_number=987001,
     )
     foreign_job = AgentJob(
@@ -155,32 +163,40 @@ async def test_deactivate_product_cascade_filters_project_and_job_tenant(db_sess
         test_session=db_session,
     )
 
-    await service.deactivate_product(data["product_a"].id)
+    result = await service.deactivate_product(data["product_a"].id)
 
     await db_session.refresh(data["project_a"])
     await db_session.refresh(data["job_a"])
     await db_session.refresh(foreign_project)
     await db_session.refresh(foreign_job)
 
-    assert data["project_a"].status == ProjectStatus.INACTIVE
-    assert data["job_a"].status == "cancelled"
-    assert foreign_project.status == ProjectStatus.ACTIVE
+    assert result.is_active is False
+    assert data["project_a"].status == ProjectStatus.ACTIVE
+    assert data["job_a"].status == "active"
+    assert foreign_project.status == ProjectStatus.INACTIVE
     assert foreign_job.status == "active"
 
 
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
-async def test_activate_product_bulk_cascade_filters_project_and_job_tenant(db_session, two_tenant_products):
-    """Product activation bulk cascades only to rows in the current tenant."""
+async def test_activate_product_touches_no_project_or_job_of_either_tenant(db_session, two_tenant_products):
+    """FE-9524/D1: showing a product no longer bulk-cascades to any other
+    product's projects/jobs, in this tenant or another. Rewrite of the old
+    tenant-filtered-bulk-cascade pin, which asserted the sibling-deactivate
+    cascade D1 retires."""
     data = two_tenant_products
-    data["project_a"].status = ProjectStatus.INACTIVE
+    data["project_a"].status = ProjectStatus.ACTIVE
     new_product = Product(
         id=str(uuid4()),
         name="Tenant A New Product",
-        description="Replacement active product",
+        description="A second shown product",
         tenant_key=data["tenant_a"],
         is_active=False,
     )
+    # idx_project_single_active_per_product (BE-9525b's, unrelated to this
+    # project) forbids two ACTIVE projects under the same product_id, so the
+    # foreign row starts INACTIVE -- the point is it stays exactly where it
+    # started, proving no cascade reached across tenants.
     foreign_project = Project(
         id=str(uuid4()),
         name="Tenant B Stray Project For Bulk",
@@ -188,7 +204,7 @@ async def test_activate_product_bulk_cascade_filters_project_and_job_tenant(db_s
         mission="Tenant B mission",
         tenant_key=data["tenant_b"],
         product_id=data["product_a"].id,
-        status=ProjectStatus.ACTIVE,
+        status=ProjectStatus.INACTIVE,
         series_number=987002,
     )
     foreign_job = AgentJob(
@@ -209,14 +225,15 @@ async def test_activate_product_bulk_cascade_filters_project_and_job_tenant(db_s
         test_session=db_session,
     )
 
-    await service.activate_product(new_product.id)
+    result = await service.activate_product(new_product.id)
 
     await db_session.refresh(data["project_a"])
     await db_session.refresh(data["job_a"])
     await db_session.refresh(foreign_project)
     await db_session.refresh(foreign_job)
 
-    assert data["project_a"].status == ProjectStatus.INACTIVE
-    assert data["job_a"].status == "cancelled"
-    assert foreign_project.status == ProjectStatus.ACTIVE
+    assert result.is_active is True
+    assert data["project_a"].status == ProjectStatus.ACTIVE
+    assert data["job_a"].status == "active"
+    assert foreign_project.status == ProjectStatus.INACTIVE
     assert foreign_job.status == "active"

@@ -10,9 +10,30 @@ import api, { setTenantKey } from '@/services/api'
 import { setSentryTenantKey } from '@/sentry'
 import { useTaskStore } from '@/stores/tasks'  // FE-9151: static (was a dynamic import); usage stays function-level
 
+// FE-9583: a refresh that returns no authoritative verdict is treated as
+// inconclusive rather than as a logout, so a transient failure cannot discard
+// a session the router guard has already verified. Authorization itself
+// remains server-side; this only governs how the client interprets an
+// inconclusive refresh. The router guard's own check is not covered by this
+// tolerance and keeps failing closed.
+function isIndeterminateAuthError(error) {
+  const status = error?.response?.status
+  if (status === undefined || status === null) return true
+  return status === 429 || status >= 500
+}
+
 export const useUserStore = defineStore('user', () => {
   // State
   const currentUser = ref(null)
+
+  // FE-9546 fold-in: the HTTP status of the most recent FAILED login attempt.
+  // login() below has always swallowed the axios error and returned a bare
+  // boolean, so a caller could never tell "bad password" from "rate-limited"
+  // apart -- both rendered the same "check your credentials" copy, which
+  // misled a throttled user into thinking their password was wrong. Reset to
+  // null at the start of every attempt so a stale status never survives past
+  // the next login.
+  const lastLoginErrorStatus = ref(null)
 
   // Org state (Handover 0424h)
   const orgId = ref(null)
@@ -72,6 +93,27 @@ export const useUserStore = defineStore('user', () => {
 
       return true
     } catch (error) {
+      // FE-9583: fetchCurrentUser() is a refresh, not the gate. It runs after
+      // the router guard has already verified the session, and treating an
+      // inconclusive answer here as a proven logout could discard a session
+      // the guard had just verified.
+      //
+      // The tolerance is conditional on there being a verified session to
+      // preserve, which is what keeps this from being a relaxation: with
+      // currentUser null nothing has been verified, so the original hard-fail
+      // path below runs unchanged and protected content is still denied. We
+      // preserve a success that actually happened; we never fabricate one.
+      if (currentUser.value && isIndeterminateAuthError(error)) {
+        console.warn(
+          '[UserStore] Current-user refresh indeterminate, keeping the verified session:',
+          error?.response?.status ?? error?.code ?? error?.message,
+        )
+        // Drop the checkAuth TTL so the next navigation re-verifies over the
+        // network rather than being answered from a cached pass.
+        _checkAuthAt = 0
+        return true
+      }
+
       console.error('[UserStore] Failed to fetch current user:', error)
       currentUser.value = null
       clearOrgFields()
@@ -80,6 +122,7 @@ export const useUserStore = defineStore('user', () => {
   }
 
   async function login(username, password) {
+    lastLoginErrorStatus.value = null
     try {
       await api.auth.login(username, password)
       // After successful login, fetch the user data
@@ -89,7 +132,13 @@ export const useUserStore = defineStore('user', () => {
       console.error('[UserStore] Login failed:', error)
       currentUser.value = null
       clearOrgFields()
-      return false
+      lastLoginErrorStatus.value = error?.response?.status ?? null
+      // FE-9556: rethrow instead of returning false. Swallowing the error made
+      // every caller's status-branched catch block (401 detail branching, 403,
+      // 429, network) dead code, so all failures rendered one generic message.
+      // Local state is already cleared and lastLoginErrorStatus (PR #1002)
+      // recorded above; callers own the user-facing copy in their catch.
+      throw error
     }
   }
 
@@ -147,6 +196,15 @@ export const useUserStore = defineStore('user', () => {
         useNotificationStore().clearAll(outgoingUserId)
       } catch (e) {
         console.warn('[UserStore] Notification store cleanup skipped:', e)
+      }
+      try {
+        // FE-9589: banner dismissals are per-user localStorage; drop the
+        // outgoing user's so a second account on this browser is announced
+        // everything it has not itself seen.
+        const { useBannerDismissStore } = await import('@/stores/bannerDismissStore')
+        useBannerDismissStore().clear(outgoingUserId)
+      } catch (e) {
+        console.warn('[UserStore] Banner dismissal cleanup skipped:', e)
       }
       try {
         const { useProductStore } = await import('@/stores/products')
@@ -268,6 +326,7 @@ export const useUserStore = defineStore('user', () => {
   return {
     // State
     currentUser,
+    lastLoginErrorStatus,
     // Org state (Handover 0424h)
     orgId,
     orgName,

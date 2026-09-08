@@ -378,7 +378,7 @@ def test_onboarding_prompt_only_references_live_update_product_context_params():
     a removed flat param would cause silent data loss.
 
     BE-9164 superseded the BE-5118-era wizard prompt as that authority: the wizard
-    prompt (useVisionAnalysis.js) is now a slim pointer at get_vision_doc's
+    prompt (useVisionAnalysis.js) is now a slim pointer at get_vision_document's
     extraction_instructions, and VISION_EXTRACTION_PROMPT (server-side, in
     giljo_mcp.tools.vision_analysis) is the single source of truth for the param
     shape. So the guard splits in two:
@@ -404,7 +404,7 @@ def test_onboarding_prompt_only_references_live_update_product_context_params():
     leaked = sorted(name for name in _REMOVED_FLAT_PARAMS if name in region)
     assert not leaked, f"wizard prompt references removed flat param(s) (regrouped in BE-9118): {leaked}"
     assert "extraction_instructions" in region, (
-        "wizard prompt must defer to get_vision_doc's extraction_instructions (BE-9164) instead of naming params itself"
+        "wizard prompt must defer to get_vision_document's extraction_instructions (BE-9164) instead of naming params itself"
     )
 
     # -- Server prompt (VISION_EXTRACTION_PROMPT): the real instruction authority.

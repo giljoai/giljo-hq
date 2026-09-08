@@ -68,6 +68,32 @@ from giljo_mcp.tenant import TenantManager
 logger = logging.getLogger(__name__)
 
 
+# Handover 0966 / BE-9563: the tool roster get_job_mission hands the orchestrator as
+# its awareness list. Module-level so a guard can assert every entry against the live
+# registry -- BE-9554's rename left `close_job` and `resolve_reactivation` here,
+# advertising two tools the server no longer answers to.
+ORCHESTRATOR_AVAILABLE_TOOLS: tuple[str, ...] = (
+    "health_check",
+    "get_context",
+    "spawn_job",
+    "get_job_mission",
+    "post_to_thread",
+    "get_thread_history",
+    "report_progress",
+    "set_agent_status",
+    "get_workflow_status",
+    "update_project_mission",
+    "update_job_mission",
+    "complete_job",
+    "finalize_job",
+    "resume_or_dismiss_job",
+    "write_memory_entry",
+    "write_project_closeout",
+    "get_agent_result",
+    "create_task",
+)
+
+
 class MissionOrchestrationService:
     """
     Service for building orchestrator instructions.
@@ -659,26 +685,7 @@ class MissionOrchestrationService:
             "agent_templates": template_list,
             "phase_filter_note": phase_filter_note,
             # Handover 0966: Comprehensive tool list for orchestrator awareness
-            "mcp_tools_available": [
-                "health_check",
-                "get_context",
-                "spawn_job",
-                "get_job_mission",
-                "post_to_thread",
-                "get_thread_history",
-                "report_progress",
-                "set_agent_status",
-                "get_workflow_status",
-                "update_project_mission",
-                "update_job_mission",
-                "complete_job",
-                "close_job",
-                "resolve_reactivation",
-                "write_memory_entry",
-                "write_project_closeout",
-                "get_agent_result",
-                "create_task",
-            ],
+            "mcp_tools_available": list(ORCHESTRATOR_AVAILABLE_TOOLS),
             "field_toggles": field_toggles,
             "thin_client": True,
             "architecture": "toggle_based",

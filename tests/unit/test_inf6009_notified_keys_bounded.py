@@ -3,55 +3,53 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""INF-6009 #7 — MCPAuthMiddleware._notified_keys must stay bounded.
+"""INF-6009 #7 — MCPAuthMiddleware must hold no unbounded per-principal memo.
 
-The setup:tool_connected de-dup memo previously grew without bound (one entry
-per distinct ``tenant:principal``), a slow memory leak for long-lived SaaS
-workers. It is now a bounded, insertion-ordered ordered-set: over the cap it
-evicts the oldest-inserted key while still suppressing repeat notifications for
-any key still resident. These tests pin both properties at the middleware layer.
+History. The ``setup:tool_connected`` de-dup memo once grew without bound (one
+entry per distinct ``tenant:principal``), a slow memory leak for long-lived SaaS
+workers. INF-6009 bounded it into an insertion-ordered ordered-set with
+oldest-first eviction, and these tests pinned that cap.
+
+BE-9498 removed the memo outright rather than bounding it. Keying on
+``tenant:api_key_id or user_id`` carried no client identity, so the first client
+a user connected consumed the announcement and every client after it was
+silenced -- connect a second tool and the setup wizard waited forever. The emit
+is now gated on the JSON-RPC ``initialize`` handshake, which the protocol sends
+once per client connection and therefore needs no de-dup state at all.
+
+INF-6009's INVARIANT still stands and is what these tests now pin: this
+middleware accumulates no unbounded per-principal state. Deleting the container
+is a stronger guarantee than capping it. If a future change reintroduces a memo
+here, these fail and INF-6009's bounding requirement applies to it again.
 """
 
 from api.endpoints.mcp_sdk_server import MCPAuthMiddleware
 
 
 def _middleware() -> MCPAuthMiddleware:
-    # _mark_notified does not touch the wrapped app, so a sentinel is fine.
+    # The middleware's __init__ does not touch the wrapped app, so a sentinel is fine.
     return MCPAuthMiddleware(app=object())
 
 
-def test_set_does_not_exceed_cap_under_many_distinct_keys():
-    """Inserting far more than the cap leaves the memo capped, not unbounded."""
-    mw = _middleware()
-    mw._NOTIFIED_KEYS_MAX = 100  # instance override keeps the test fast
-
-    for i in range(10 * mw._NOTIFIED_KEYS_MAX):
-        mw._mark_notified(f"tenant-{i}:principal-{i}")
-
-    assert len(mw._notified_keys) <= mw._NOTIFIED_KEYS_MAX
-
-
-def test_first_sight_returns_true_repeat_returns_false():
-    """De-dup behavior intact: first sight emits, an immediate repeat suppresses."""
+def test_middleware_holds_no_notified_keys_memo():
+    """The unbounded-growth container is gone, not merely capped."""
     mw = _middleware()
 
-    assert mw._mark_notified("t1:p1") is True  # first sight -> emit
-    assert mw._mark_notified("t1:p1") is False  # repeat -> suppress
-    assert mw._mark_notified("t2:p2") is True  # different key -> emit
+    assert not hasattr(mw, "_notified_keys"), (
+        "A per-principal notify memo reappeared on MCPAuthMiddleware. It silences "
+        "every client after a user's first (BE-9498) and grows without bound "
+        "unless capped (INF-6009). Gate on the initialize handshake instead."
+    )
+    assert not hasattr(mw, "_mark_notified")
 
 
-def test_eviction_is_oldest_first():
-    """Over the cap, the oldest-inserted key is evicted; newest is retained."""
+def test_instance_carries_no_unbounded_accumulator():
+    """No instance attribute is a growable container that requests could fill.
+
+    Guards the INF-6009 leak shape generally, not just the one attribute name it
+    was originally reported under.
+    """
     mw = _middleware()
-    mw._NOTIFIED_KEYS_MAX = 3
 
-    mw._mark_notified("k1")
-    mw._mark_notified("k2")
-    mw._mark_notified("k3")
-    assert set(mw._notified_keys) == {"k1", "k2", "k3"}
-
-    mw._mark_notified("k4")  # over cap -> evict oldest (k1)
-    assert "k1" not in mw._notified_keys
-    assert set(mw._notified_keys) == {"k2", "k3", "k4"}
-    # An evicted key is treated as first-sight again (acceptable: it re-emits).
-    assert mw._mark_notified("k1") is True
+    growable = {name: value for name, value in vars(mw).items() if isinstance(value, (dict, list, set))}
+    assert growable == {}, f"unbounded-growth candidates on the middleware instance: {sorted(growable)}"

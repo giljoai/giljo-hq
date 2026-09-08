@@ -117,12 +117,33 @@ class Product(Base):
         nullable=True,
         comment="Timestamp when product was soft deleted (NULL for active products)",
     )
-    # Product status (Handover 0049)
+    # Product status (Handover 0049; reused by FE-9524/D1 — no longer "the one
+    # active product". Now: shown as a tab in the product tab strip. Several
+    # products may be shown at once; there is no per-tenant uniqueness left to
+    # enforce (idx_product_single_active_per_tenant dropped in ce_0099).
     is_active = Column(
         Boolean,
-        default=False,
+        default=True,
         nullable=False,
-        comment="Active product for token estimation and mission planning (one per tenant)",
+        comment="Shown as a tab in the product tab strip (FE-9524/D1). A new product is shown by default.",
+    )
+
+    # FE-9524: is_active/"shown" and "default"
+    # are two different questions and must be two different columns. Default
+    # answers ONE thing: where an unscoped READ resolves when the caller
+    # names no product_id (ProductService.get_default_product). Exactly one
+    # per tenant, enforced by idx_product_single_default_per_tenant --
+    # the single-row guarantee the old idx_product_single_active_per_tenant
+    # used to give get_active_product, moved onto this column so it stays
+    # honest once several products can be shown at once. Writes never
+    # default (BE-9523b's PRODUCT_AMBIGUOUS refusal) -- this exists for the
+    # read fallback only, which is recoverable when wrong.
+    is_default = Column(
+        Boolean,
+        default=False,
+        server_default=text("false"),
+        nullable=False,
+        comment="The single per-tenant default product: where an unscoped read resolves. Independent of is_active/shown.",
     )
 
     # Core features (extracted from config_data in 0840c)
@@ -226,6 +247,16 @@ class Product(Base):
             "idx_products_deleted_at", "deleted_at", postgresql_where=text("deleted_at IS NOT NULL")
         ),  # Soft delete support
         Index("idx_products_consolidated_at", "consolidated_at"),  # Handover 0377: Consolidated vision index
+        # FE-9524 (2026-08-29 operator ruling): exactly one default product per
+        # tenant -- the read-fallback guarantee moved off idx_product_single_active_per_tenant
+        # (dropped, ce_0099) onto this column so get_default_product's
+        # single-row read stays honest once several products can be shown.
+        Index(
+            "idx_product_single_default_per_tenant",
+            "tenant_key",
+            unique=True,
+            postgresql_where=text("is_default = true"),
+        ),
         # Handover 0128e: Removed CheckConstraint for deprecated vision_type field
         # Handover 0425: Validate target_platforms field
         CheckConstraint(
@@ -235,10 +266,6 @@ class Product(Base):
         CheckConstraint(
             "NOT ('all' = ANY(target_platforms) AND array_length(target_platforms, 1) > 1)",
             name="ck_product_target_platforms_all_exclusive",
-        ),
-        # Handover 0050: Enforce single active product per tenant (defense in depth)
-        Index(
-            "idx_product_single_active_per_tenant", "tenant_key", unique=True, postgresql_where=text("is_active = true")
         ),
         # BE-9385b: exported filenames are qualified by this slug, so a duplicate
         # within a tenant would mean two products' agents racing for one path. The

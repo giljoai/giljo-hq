@@ -65,6 +65,8 @@ _ALL_LIST_PROJECTS_PARAMS = (
     "query",
     "limit",
     "cursor",
+    # BE-9499a: explicit product to scope to.
+    "product_id",
 )
 
 
@@ -78,8 +80,10 @@ class TestListProjectsWireDeliversAllParameterDocs:
                 return tool.parameters
         raise AssertionError("list_projects not found in the live tool registry")
 
-    def test_registry_still_declares_exactly_the_same_eighteen_parameters(self):
-        """U71-F1: no parameter added, removed or renamed by this fix."""
+    def test_registry_still_declares_exactly_the_same_nineteen_parameters(self):
+        """U71-F1: no parameter added, removed or renamed by this fix (BE-9499a's
+        product_id is accounted for in _ALL_LIST_PROJECTS_PARAMS above, so this
+        still locks the surface -- it just locks 19, not 18)."""
         schema = self._list_projects_schema()
         assert set(schema["properties"]) == set(_ALL_LIST_PROJECTS_PARAMS), (
             "the live registry's parameter NAME set must stay exactly what it was -- "

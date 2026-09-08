@@ -27,7 +27,6 @@ from api.endpoints.mcp_tools._base import (
     mcp,
 )
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
-from giljo_mcp import branding
 from giljo_mcp.platform_registry import (
     EXPORT_GENERIC,
     EXPORT_PLATFORMS,
@@ -44,7 +43,7 @@ from giljo_mcp.services.product_tuning_service import (
 
 @mcp.tool(
     title="Health Check",
-    description=f"Check MCP server health status. {branding.TWO_HUB_DISAMBIGUATION}",
+    description="Check MCP server health status.",
     annotations=_tool_hints("health_check"),
 )
 async def health_check(ctx: Context = None) -> dict[str, Any]:
@@ -78,9 +77,21 @@ async def get_giljo_guide(ctx: Context = None) -> dict[str, Any]:
     description=(
         "First-time setup: installs the /giljo command/skill and agent templates. Run once after "
         "connecting; re-run with the 'Agents only' scope to refresh templates later. Pass platform "
-        "identifying your CLI tool ('claude_code'|'gemini_cli'|'codex_cli'|'antigravity_cli'). On a "
+        "identifying your CLI tool ('claude_code'|'gemini_cli'|'codex_cli'|'antigravity_cli'|"
+        "'opencode'). NAME YOUR OWN TOOL rather than accepting the default: the wrong platform "
+        "installs that platform's file format into its directories, which your tool never reads, "
+        "and nothing errors. On a "
         "session with no home directory (web sandbox / pure chat), pass harness to get templates "
-        "and guidance returned inline instead of file-install instructions."
+        "and guidance returned inline instead of file-install instructions. Pass product_id "
+        "to bind this repository to a Giljo HQ product: the returned instructions "
+        "include writing a per-repo marker block into CLAUDE.md and AGENTS.md so future calls "
+        "never hit a PRODUCT_AMBIGUOUS rejection for this repo again. Omit it on a tenant with "
+        "zero or multiple products -- the response tells you what to do next (re-run once a "
+        "product exists, or confirm with the user which of several to bind). Every tool response "
+        "carries `_meta.skills_version` (the server's current bundle). When it is ahead of what "
+        "was installed here, TELL the user their Giljo skills are outdated and OFFER to re-run "
+        "this tool -- NEVER rewrite their local skill/agent files without that ask; this call "
+        "only ever installs on an explicit, deliberate invocation."
     ),
     annotations=_tool_hints("giljo_setup"),
 )
@@ -89,9 +100,19 @@ async def giljo_setup(
     # literal that would silently drift if a new export platform were added).
     platform: Literal[EXPORT_PLATFORMS] = "claude_code",
     harness: Annotated[str, Field(max_length=MCP_ID_MAX, description=_HARNESS_PARAM_DESCRIPTION)] = "",
+    product_id: Annotated[
+        str,
+        Field(
+            max_length=MCP_ID_MAX,
+            description=(
+                "Optional Giljo HQ product UUID to bind this repository to. Omit on a "
+                "tenant with zero or multiple products -- never guess which one to bind."
+            ),
+        ),
+    ] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
-    logger.info("giljo_setup called with platform=%s harness=%s", platform, harness)
+    logger.info("giljo_setup called with platform=%s harness=%s product_id=%s", platform, harness, product_id)
 
     # HO 1028: pass authenticated user_id so the staging layer can stamp the
     # installed skills version through UserService (single write path).
@@ -114,7 +135,10 @@ async def giljo_setup(
         # ``filename`` for a file it has nowhere to write. The override is
         # unconditional inside this branch because the branch condition IS "this
         # session has no filesystem", which no declared platform can change.
-        result = await _call_tool(ctx, "list_agent_templates", {"platform": EXPORT_GENERIC})
+        # BE-9557: forward the caller's product_id -- this used to be dropped
+        # here entirely, so a chat/web-sandbox session's export followed an
+        # arbitrary shown product regardless of what was passed.
+        result = await _call_tool(ctx, "list_agent_templates", {"platform": EXPORT_GENERIC, "product_id": product_id})
         result.pop("install_paths", None)
         # AUDIT-9327 F1: strip the per-agent ``filename`` only for a session with NO
         # filesystem at all. This branch is entered by web_sandbox too, but that preset
@@ -132,7 +156,10 @@ async def giljo_setup(
             "GiljoAI setup runs fully inline: there is no slash-command/skill install step here. "
             "The agent templates below are returned directly in this response instead of files "
             "written to a local path. For ongoing project/task routing guidance (the equivalent of "
-            "the /giljo command), call get_giljo_guide on demand."
+            "the /giljo command), call get_giljo_guide on demand. There is no repo to write a "
+            "product binding block into either: this session's product identity comes "
+            "from passing product_id on every giljo_hq call, and from the active session, not from "
+            "a file."
         )
         # BE-9067: teach the connecting agent the platform mental model durably --
         # this session has no file to write, so route to memory or keep in-context.
@@ -143,7 +170,12 @@ async def giljo_setup(
         result = await _call_tool(
             ctx,
             "bootstrap_setup",
-            {"platform": platform, "user_id": user_id, "harness": _resolve_preset_name(harness, ctx)},
+            {
+                "platform": platform,
+                "user_id": user_id,
+                "harness": _resolve_preset_name(harness, ctx),
+                "product_id": product_id,
+            },
         )
 
     # IMP-6038: record THIS tenant's acknowledgement of the bundled

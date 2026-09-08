@@ -170,6 +170,11 @@ class TestMcpTerminalTransitionStamp:
             project_id=project_id,
             status=terminal_status,
             tenant_key=tenant_key,
+            # BE-9539: this fixture never runs write_project_closeout, so the
+            # archive lifecycle's closeout-required gate would otherwise refuse
+            # the "completed" case -- orthogonal to what this test pins
+            # (completed_at stamping), so bypass it explicitly.
+            force=True,
         )
         after = datetime.now(UTC)
 
@@ -202,6 +207,7 @@ class TestMcpTerminalTransitionStamp:
             project_id=project_id,
             status="completed",
             tenant_key=tenant_key,
+            force=True,  # BE-9539: no closeout ever ran in this fixture; orthogonal to this test.
         )
 
         window_start = datetime.now(UTC) - timedelta(hours=1)
@@ -252,6 +258,7 @@ class TestMcpTerminalTransitionStamp:
             project_id=project_id,
             status="completed",
             tenant_key=tenant_key,
+            force=True,  # BE-9539: no closeout ever ran in this fixture; orthogonal to this test.
         )
 
         # Note the ABSENCE of include_completed — this is the bare call shape.
@@ -297,6 +304,7 @@ class TestMcpTerminalTransitionStamp:
             project_id=project_id,
             status="completed",
             tenant_key=tenant_key,
+            force=True,  # BE-9539: no closeout ever ran in this fixture; orthogonal to this test.
         )
 
         listing = await service.list_projects_for_mcp(

@@ -108,9 +108,10 @@ async def test_e2e_full_analysis_flow(
     vision_doc: VisionDocument,
 ):
     """Round-trip: get vision doc, write across 4 tables + per-doc/aggregate summaries."""
-    from giljo_mcp.tools.vision_analysis import get_vision_doc, update_product_fields
+    from giljo_mcp.tools.vision_analysis import get_vision_doc as get_vision_document
+    from giljo_mcp.tools.vision_analysis import update_product_fields
 
-    get_result = await get_vision_doc(
+    get_result = await get_vision_document(
         product_id=product.id,
         tenant_key=tenant_key,
         _test_session=db_session,
@@ -123,7 +124,7 @@ async def test_e2e_full_analysis_flow(
     assert get_result["doc_ids"] == [str(vision_doc.id)]
     assert "extraction_instructions" in get_result
 
-    chunk1 = await get_vision_doc(
+    chunk1 = await get_vision_document(
         product_id=product.id,
         tenant_key=tenant_key,
         chunk=1,
@@ -347,9 +348,9 @@ async def test_e2e_custom_instructions(
     vision_doc: VisionDocument,
 ):
     """Custom instructions appear in extraction prompt; clearing them removes the section."""
-    from giljo_mcp.tools.vision_analysis import get_vision_doc
+    from giljo_mcp.tools.vision_analysis import get_vision_doc as get_vision_document
 
-    result_with = await get_vision_doc(
+    result_with = await get_vision_document(
         product_id=product.id,
         tenant_key=tenant_key,
         _test_session=db_session,
@@ -360,7 +361,7 @@ async def test_e2e_custom_instructions(
     product.extraction_custom_instructions = None
     await db_session.flush()
 
-    result_without = await get_vision_doc(
+    result_without = await get_vision_document(
         product_id=product.id,
         tenant_key=tenant_key,
         _test_session=db_session,
@@ -369,13 +370,13 @@ async def test_e2e_custom_instructions(
     assert "Focus on mobile architecture" not in result_without["extraction_instructions"]
     assert "{custom_instructions}" not in result_without["extraction_instructions"]
 
-    chunk_with = await get_vision_doc(
+    chunk_with = await get_vision_document(
         product_id=product.id,
         tenant_key=tenant_key,
         chunk=1,
         _test_session=db_session,
     )
-    chunk_without = await get_vision_doc(
+    chunk_without = await get_vision_document(
         product_id=product.id,
         tenant_key=tenant_key,
         chunk=1,

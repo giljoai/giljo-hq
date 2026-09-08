@@ -201,6 +201,7 @@ class MessageRoutingService:
                             "old_status": old_status,
                             "new_status": "blocked",
                             "project_id": str(job_row.project_id) if job_row else None,
+                            "product_id": str(job_row.product_id) if job_row and job_row.product_id else None,
                         }
                     )
 

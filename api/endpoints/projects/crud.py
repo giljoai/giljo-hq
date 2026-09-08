@@ -442,42 +442,48 @@ async def get_deleted_projects(
     ]
 
 
-@router.get("/active", response_model=ProjectResponse | None)
+@router.get("/active", response_model=list[ProjectResponse])
 async def get_active_project(
+    product_id: str | None = None,
     current_user: User = Depends(get_current_active_user),
     project_service: ProjectService = Depends(get_project_service),
-) -> ProjectResponse | None:
+) -> list[ProjectResponse]:
     """
-    Get the currently active project for the user's tenant.
+    Get the active project(s) for the user's tenant, scoped to product_id.
 
-    Returns the active project (status='active') or None if no project is active.
+    Returns a list — empty if no project is active in scope. BE-9525a: the read
+    used to be tenant-wide with no product filter, so a project active in
+    product A would show up as "the" active project while viewing product B
+    (e.g. incorrectly greying out product B's Activate button). ``product_id``
+    scopes the read to one product; omitting it keeps the prior tenant-wide
+    read for callers with no product context.
 
-    Follows Single Active Project architecture (Handover 0050b):
-    - Only ONE project can be active per product at any time
-    - Database enforces this via partial unique index
+    List-shaped from day one (BE-9525a); genuinely plural as of BE-9525b, which
+    dropped the one-active-project-per-product limit (ruling 5 amended) — this
+    response shape does not change again for that unlock.
 
     Args:
+        product_id: Optional product ID to scope the read
         current_user: Authenticated user (from dependency)
         project_service: Project service (from dependency)
 
     Returns:
-        ProjectResponse with active project details, or None if no active project
+        List of ProjectResponse for the active project(s) in scope
     """
-    logger.debug(f"User {current_user.username} fetching active project")
+    logger.debug(f"User {current_user.username} fetching active project (product={sanitize(str(product_id))})")
 
-    # Get active project via ProjectService (raises exceptions on error, returns None if no active project)
-    proj = await project_service.query.get_active_project()
+    # Get active projects via ProjectService (raises exceptions on error, empty list if none active)
+    projects = await project_service.query.get_active_projects(product_id=product_id)
 
-    # No active project is OK - return None
-    if not proj:
-        logger.info(f"No active project found for tenant {current_user.tenant_key}")
-        return None
+    if not projects:
+        logger.info(f"No active projects found for tenant {current_user.tenant_key}")
+        return []
 
-    logger.info(f"Retrieved active project {proj.name} for tenant {current_user.tenant_key}")
+    logger.info(f"Retrieved {len(projects)} active project(s) for tenant {current_user.tenant_key}")
 
     # NOTE: proj.deleted_at is not a ProjectResponse field (Pydantic v2 default
     # extra="ignore" already made passing it here a silent no-op).
-    return _to_project_response(proj)
+    return [_to_project_response(proj) for proj in projects]
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)

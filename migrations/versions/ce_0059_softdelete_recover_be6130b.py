@@ -36,7 +36,7 @@ import sqlalchemy as sa
 from alembic import op
 
 
-# Chains after CI1's ce_0058_sequence_runs (BE-6131a) so the CE chain stays linear:
+# Chains after ce_0058_sequence_runs (BE-6131a) so the CE chain stays linear:
 # ce_0057_comm_thread_soft_delete -> ce_0058_sequence_runs -> ce_0059.
 revision = "ce_0059_softdelete_recover_be6130b"
 down_revision = "ce_0058_sequence_runs"

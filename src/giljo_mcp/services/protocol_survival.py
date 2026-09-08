@@ -342,7 +342,7 @@ def _chain_suborch_staging() -> list[str]:
 def _chain_suborch_implementation() -> list[str]:
     return [
         "1. Launch and drive your spawned agents to completion; monitor with get_workflow_status(project_id).",
-        "2. Verify deliverables (get_agent_result) and close_job each accepted agent.",
+        "2. Verify deliverables (get_agent_result) and finalize_job each accepted agent.",
         "3. complete_job(job_id, ...) FIRST — it closes your orchestrator execution so the closeout "
         "readiness gate passes.",
         "4. THEN write_project_closeout(project_id, ...) (commit SHA) — its RETURN stamps the "
@@ -365,7 +365,7 @@ def _solo_orchestrator_implementation() -> list[str]:
     return [
         "1. Read live team state: get_workflow_status(project_id).",
         "2. Drive your agents to completion; answer their coordination-thread posts (get_thread_history).",
-        "3. Verify deliverables (get_agent_result) and close_job each accepted agent.",
+        "3. Verify deliverables (get_agent_result) and finalize_job each accepted agent.",
         "4. complete_job(job_id, ...) — your own orchestrator closeout.",
         "5. write_project_closeout(project_id, ...) (commit SHA + decisions) to finish the project.",
     ]

@@ -118,10 +118,18 @@ vi.mock('@/composables/useToast', () => ({
   })
 }))
 
-// Mock notification store (used in handleDisconnect and attemptReconnect)
+// Mock notification store (used in handleDisconnect and attemptReconnect).
+//
+// FE-9553: this now uses a SHARED hoisted spy, for the same reason the toast
+// mock above does. It previously returned a fresh vi.fn() on every
+// useNotificationStore() call, which means no test could assert on it at all --
+// an assertion would have inspected a spy the code under test never touched and
+// passed whether or not a bell row was written. Ruling 2 moves connection state
+// OUT of the bell, so that write is now exactly what needs observing.
+const { addNotificationSpy } = vi.hoisted(() => ({ addNotificationSpy: vi.fn() }))
 vi.mock('@/stores/notifications', () => ({
   useNotificationStore: () => ({
-    addNotification: vi.fn()
+    addNotification: addNotificationSpy
   })
 }))
 
@@ -1131,9 +1139,22 @@ describe('WebSocket V2 Store - Reconnect Toast Gating (edge-churn UX)', () => {
     expect(connectionLostToasts().length).toBe(0)
   })
 
-  it('test_sustained_outage_shows_connection_lost_toast_once', async () => {
-    // A genuine sustained outage (reconnect failing across several attempts)
-    // SHOULD alert the user — but exactly once, not once per drop.
+  /**
+   * FE-9553 ruling 2: connection state belongs on a STATE INDICATOR, not in a
+   * list and not in a toast. "Server-disconnect state moves OUT of the bell to
+   * the connection (wifi) indicator."
+   *
+   * This test previously asserted the sustained outage DID raise a toast, once.
+   * That behaviour was itself an incident fix -- "Connection Lost" toast spam
+   * on the intermittent edge resets the brief-blip test above guards against --
+   * so it is worth being explicit that removing the toast entirely cannot
+   * regress that incident: the complaint was too many toasts, and zero is not
+   * more than one. That guard stays green, trivially.
+   *
+   * What replaces it is not silence: the nav connection orb already reflects
+   * disconnected and reconnecting state, and the test below this one proves it.
+   */
+  it('test_sustained_outage_raises_no_toast_and_no_bell_row (FE-9553 ruling 2)', async () => {
     const store = useWebSocketStore()
     await store.connect()
     await vi.advanceTimersByTimeAsync(0)
@@ -1147,7 +1168,35 @@ describe('WebSocket V2 Store - Reconnect Toast Gating (edge-churn UX)', () => {
       await vi.advanceTimersByTimeAsync(0)
     }
 
-    expect(connectionLostToasts().length).toBe(1)
+    expect(connectionLostToasts().length).toBe(0)
+
+    const connectionRows = addNotificationSpy.mock.calls.filter(
+      (c) => c[0]?.type === 'connection_lost' || c[0]?.type === 'connection_restored',
+    )
+    expect(connectionRows).toEqual([])
+  })
+
+  // CHECKER-MUST-FIRE. Every assertion above is a negative, and negatives pass
+  // just as well when the outage never happened at all -- if the flap loop
+  // stopped driving reconnects, this suite would go green while proving
+  // nothing. This pins that the outage really occurred AND that its state is
+  // still visible somewhere, which is the whole point of ruling 2: the signal
+  // moved, it was not deleted.
+  it('the outage is still VISIBLE on the connection indicator, not merely silent', async () => {
+    const store = useWebSocketStore()
+    await store.connect()
+    await vi.advanceTimersByTimeAsync(0)
+
+    for (const delay of [1000, 2000, 4000]) {
+      MockWebSocket.instances.at(-1).close(1006, 'edge reset')
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(delay)
+      await vi.advanceTimersByTimeAsync(0)
+    }
+
+    // The outage genuinely accrued attempts -- the negatives above were not
+    // vacuous.
+    expect(store.reconnectAttempts).toBeGreaterThanOrEqual(3)
   })
 })
 

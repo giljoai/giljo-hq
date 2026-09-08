@@ -17,6 +17,7 @@ from mcp.server.mcpserver import Context
 from pydantic import Field
 
 from api.endpoints.mcp_tools._base import (
+    GIT_COMMITS_DESC,
     MCP_ID_MAX,
     _call_tool,
     mcp,
@@ -99,17 +100,7 @@ async def write_project_closeout(
     ],
     git_commits: Annotated[
         list[dict | str] | None,
-        Field(
-            description=(
-                "Git commits from the project branch. Every entry MUST carry a non-empty "
-                "commit title -- a titleless entry is rejected with GIT_COMMIT_TITLE_REQUIRED. "
-                "Pass a list of {sha, message, author?, pr_url?} dicts (preferred), OR "
-                "tab-delimited porcelain strings '<sha>\\t<subject>\\t<author>' (author "
-                "optional) -- run: git log --format='%H%x09%s%x09%an' <base>..HEAD. Optional "
-                "dict fields: date (ISO 8601), files_changed (int), lines_added (int), "
-                "pr_url (freeform, stored verbatim)."
-            )
-        ),
+        Field(description=GIT_COMMITS_DESC),
     ] = None,
     tags: Annotated[
         list[str] | None,
@@ -140,7 +131,7 @@ async def write_project_closeout(
                 "as failed/replaced/abandoned. So never reach for force to "
                 "retire an agent whose work you ACCEPTED: call "
                 "complete_job(job_id, result={...}) on it and then "
-                "close_job(job_id), which reaches 'closed' from any "
+                "finalize_job(job_id), which reaches 'closed' from any "
                 "non-terminal status, 'silent' included. If that complete_job "
                 "returns COMPLETION_BLOCKED, the stalled agent left TODOs or "
                 "unread messages behind: settle its ledger with "
@@ -217,17 +208,7 @@ async def write_memory_entry(
     ] = "",
     git_commits: Annotated[
         list[dict | str] | None,
-        Field(
-            description=(
-                "Git commits from the project branch. Every entry MUST carry a non-empty "
-                "commit title -- a titleless entry is rejected with GIT_COMMIT_TITLE_REQUIRED. "
-                "Pass a list of {sha, message, author?, pr_url?} dicts (preferred), OR "
-                "tab-delimited porcelain strings '<sha>\\t<subject>\\t<author>' (author "
-                "optional) -- run: git log --format='%H%x09%s%x09%an' <base>..HEAD. Optional "
-                "dict fields: date (ISO 8601), files_changed (int), lines_added (int), "
-                "pr_url (freeform, stored verbatim)."
-            )
-        ),
+        Field(description=GIT_COMMITS_DESC),
     ] = None,
     tags: Annotated[
         list[str] | None,

@@ -246,7 +246,14 @@ export function useTutorialState() {
     } catch {
       return false // can't verify emptiness — keep the draft
     }
-    if (!row || row.is_active || !isDraftUntouched(row)) return false
+    // FE-9566: this also required `!row.is_active`, written when is_active meant
+    // "THE active product". FE-9524/D1 redefined it as "shown as a tab", and
+    // create_product sets it True for every product — including the nameless
+    // draft this hatch exists to clean up — so the check skipped every draft it
+    // was written for and each abandoned run leaked a product permanently.
+    // isDraftUntouched is what actually protects the user's data: it keeps
+    // anything named, described, or written to, whether shown or hidden.
+    if (!row || !isDraftUntouched(row)) return false
     try {
       await productStore.deleteProduct(id)
     } catch {

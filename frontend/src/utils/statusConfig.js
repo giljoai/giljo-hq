@@ -113,7 +113,9 @@ export const isAwaitingUser = (status) => {
 
 // FE-9296b: structured markers set_agent_status stores in block_reason. The
 // service builds these (never free prose), so matching them is mechanism, not
-// string-guessing: `wake_mode=signal` = parked on await_my_turn (BE-9296a wake);
+// string-guessing: `wake_mode=signal` = parked on get_my_turn(wait_seconds=...)
+// (BE-9296a wake) — without wait_seconds that call answers immediately, so the
+// agent is polling rather than parked and no signal marker is set;
 // `wake_in_minutes=N` = timed sleep of N minutes.
 const WAKE_SIGNAL_MARKER = /\bwake_mode=signal\b/
 const WAKE_TIMER_MARKER = /\bwake_in_minutes=(\d+)\b/

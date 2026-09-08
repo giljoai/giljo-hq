@@ -52,7 +52,7 @@ _EXPECTED_CORE = frozenset(
 
 # The three implement-gate tools that must be server-excluded from core AND
 # standard (WO-8003k DoD #3 — turning the advisory exclusion into an enforced one).
-_IMPLEMENT_GATE_TOOLS = ("stage_project", "implement_project", "launch_implementation")
+_IMPLEMENT_GATE_TOOLS = ("stage_project", "get_implementation_prompt", "launch_implementation")
 
 
 @pytest_asyncio.fixture
@@ -293,12 +293,44 @@ class TestProfileResolverPrecedence:
         state = {"auth_method": "jwt", "tool_profile": "core"}
         assert _profile_toolset_from_state(state) == _CORE_PROFILE_TOOLS
 
-    def test_declared_full_widens_a_jwt_session(self):
+    def test_declared_full_no_longer_widens_a_jwt_session(self):
+        """A client-declared profile may only NARROW a session's auth-derived
+        toolset, never widen it -- `clientInfo` is client-authored and untrusted, so
+        a declared `full` must clamp to the auth-derived baseline rather than reach
+        the unrestricted sentinel. This holds for every profile tier."""
+        from api.endpoints.mcp_tools._base import _STANDARD_PROFILE_TOOLS, _profile_toolset_from_state
+
+        # jwt without mcp:agent: baseline is standard: full-declared clamps to it.
+        state = {"auth_method": "jwt", "tool_profile": "full"}
+        assert _profile_toolset_from_state(state) == _STANDARD_PROFILE_TOOLS
+
+    def test_declared_full_clamps_a_jwt_agent_session_to_orchestrator(self):
+        """A jwt+mcp:agent session declaring `full` must clamp to the
+        `orchestrator` baseline: the declaration cannot widen it. Admission of the
+        launch gate is a separate, setting-driven channel."""
+        from api.endpoints.mcp_tools._base import _ORCHESTRATOR_PROFILE_TOOLS, _profile_toolset_from_state
+
+        state = {"auth_method": "jwt", "scopes": ["mcp:read", "mcp:write", "mcp:agent"], "tool_profile": "full"}
+        resolved = _profile_toolset_from_state(state)
+        assert resolved == _ORCHESTRATOR_PROFILE_TOOLS
+        assert "launch_implementation" not in resolved
+
+    def test_declared_full_still_widens_an_api_key_session(self):
+        """The api_key baseline is already unbounded (None), so declaring `full`
+        there is a no-op widen -- unaffected by the BE-9499c narrow-only rule, and
+        an api_key declaring a KNOWN narrower profile (e.g. core) still narrows."""
         from api.endpoints.mcp_tools._base import _profile_toolset_from_state
 
-        # The operator widening path: a jwt session that declares full -> None.
-        state = {"auth_method": "jwt", "tool_profile": "full"}
-        assert _profile_toolset_from_state(state) is None
+        assert _profile_toolset_from_state({"auth_method": "api_key", "tool_profile": "full"}) is None
+
+    def test_declared_orchestrator_does_not_widen_a_standard_jwt_session(self):
+        """A jwt session WITHOUT mcp:agent (baseline standard) declaring the wider
+        `orchestrator` profile must clamp back to standard -- the same narrow-only
+        rule applies to every profile pair, not just full."""
+        from api.endpoints.mcp_tools._base import _STANDARD_PROFILE_TOOLS, _profile_toolset_from_state
+
+        state = {"auth_method": "jwt", "tool_profile": "orchestrator"}
+        assert _profile_toolset_from_state(state) == _STANDARD_PROFILE_TOOLS
 
     def test_garbage_declared_profile_degrades_to_auth_default(self):
         # A garbage declared profile still degrades to the AUTH-DERIVED default
@@ -372,7 +404,7 @@ _ORCHESTRATOR_MUST_SEE = (
     "spawn_job",
     "update_project_mission",
     "stage_project",
-    "implement_project",  # kept IN: read-only + already gate-gated (BE-9017 fork)
+    "get_implementation_prompt",  # kept IN: read-only + already gate-gated (BE-9017 fork)
 )
 
 
@@ -387,7 +419,7 @@ class TestOrchestratorProfileSet:
         # read tools stay in (fork decision — they cannot flip the gate).
         assert "launch_implementation" not in _ORCHESTRATOR_PROFILE_TOOLS
         assert "stage_project" in _ORCHESTRATOR_PROFILE_TOOLS
-        assert "implement_project" in _ORCHESTRATOR_PROFILE_TOOLS
+        assert "get_implementation_prompt" in _ORCHESTRATOR_PROFILE_TOOLS
 
     def test_orchestrator_is_registered_in_the_profiles_map(self):
         from api.endpoints.mcp_tools._base import (

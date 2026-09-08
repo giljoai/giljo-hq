@@ -29,6 +29,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from api.endpoints.mcp_tools import logger
 from api.endpoints.mcp_transport import (
+    _DISCOVER_METHOD,
     _INITIALIZE_METHOD,
     _MAX_MCP_BODY_BYTES,
     _BodyTooLargeError,
@@ -49,6 +50,7 @@ from api.endpoints.mcp_transport import (
     _unauthenticated_response,
     _validate_protocol_version,
     _wrap_send_with_session_id,
+    announces_client,
 )
 from giljo_mcp.auth.jwt_manager import JWTAudienceMismatchError, JWTManager
 from giljo_mcp.http.url_resolver import get_canonical_mcp_resource_uri_from_scope
@@ -134,35 +136,54 @@ class MCPAuthMiddleware:
     metadata document (RFC 6750 + RFC 9728).
     """
 
-    # Cap on the setup:tool_connected de-dup memo. One entry per distinct
-    # tenant:principal; an unbounded set is a slow leak for long-lived SaaS
-    # workers. Beyond this we evict oldest-inserted (the de-dup window still
-    # suppresses repeats for any key still resident).
-    _NOTIFIED_KEYS_MAX = 10_000
+    # BE-9498 + INF-6009: this middleware deliberately holds no per-principal
+    # state. See _announce_client_connected for why the notify memo is gone.
 
     def __init__(self, app: ASGIApp):
         self.app = app
-        # dict (insertion-ordered) used as a bounded ordered-set so we can
-        # evict oldest-first once over _NOTIFIED_KEYS_MAX. Keys we've already
-        # emitted setup:tool_connected for.
-        self._notified_keys: dict[str, None] = {}
 
-    def _mark_notified(self, notify_key: str) -> bool:
-        """Record that we've emitted setup:tool_connected for ``notify_key``.
+    @staticmethod
+    async def _announce_client_connected(
+        tenant_key: str | None, user_id: str | None, client_info: dict | None = None
+    ) -> None:
+        """Broadcast setup:tool_connected so the wizard's Connect step can flip.
 
-        Returns ``True`` if this is the FIRST time we've seen the key (caller
-        should emit), ``False`` if it was already notified (suppress repeat).
-        The memo is bounded at ``_NOTIFIED_KEYS_MAX``; once over, the
-        oldest-inserted key is evicted so memory cannot grow without bound on
-        long-lived workers.
+        Called on the JSON-RPC ``initialize`` handshake -- the one message that
+        means "a new client is attaching", and which the protocol sends once per
+        client connection.
+
+        BE-9498: gating on ``initialize`` is what makes this correct for every
+        client. The protocol sends it once per client connection, so no de-dup
+        state is needed and none is kept. Do not reintroduce a memo.
+
+        Fire-and-forget: never let a broadcast failure affect the auth result.
         """
-        if notify_key in self._notified_keys:
-            return False
-        self._notified_keys[notify_key] = None
-        if len(self._notified_keys) > self._NOTIFIED_KEYS_MAX:
-            # Evict oldest-inserted to keep the memo bounded.
-            self._notified_keys.pop(next(iter(self._notified_keys)))
-        return True
+        try:
+            from api.app_state import state as app_state
+
+            ws_manager = getattr(app_state, "websocket_manager", None)
+            if ws_manager and tenant_key:
+                from giljo_mcp.events.schemas import EventFactory
+
+                # FE-9500: name the harness that actually connected. The resolver
+                # already exists (BE-9035b) and client_info is in scope here, so the
+                # old hardcoded "mcp_connected" placeholder was discarding an answer
+                # we had. It degrades to "generic" for a client that self-identifies
+                # with nothing, and CANNOT separate Claude Desktop from claude.ai web
+                # -- those send byte-identical initialize payloads (measured against
+                # production 2026-08-16). Consumers must treat "generic" as
+                # "something connected, harness unknown", never as a tool id.
+                from giljo_mcp.harness_resolver import harness_from_client_info
+
+                harness = harness_from_client_info((client_info or {}).get("name"), (client_info or {}).get("version"))
+                event = EventFactory.setup_tool_connected(
+                    tenant_key=tenant_key,
+                    user_id=str(user_id) if user_id else "unknown",
+                    tool_name=harness,
+                )
+                await ws_manager.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
+        except (OSError, RuntimeError, ValueError, TypeError, AttributeError, ImportError):
+            pass  # Fire-and-forget, non-blocking
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send):
         if scope["type"] != "http":
@@ -362,25 +383,19 @@ class MCPAuthMiddleware:
                 await resp(scope, receive, send)
                 return
 
-        # Handover 0855b: Emit setup:tool_connected on FIRST MCP auth per key
-        # (replaces emission from deleted mcp_http.py after 0846 SDK migration)
-        notify_key = f"{tenant_key}:{api_key_id or user_id}"
-        if self._mark_notified(notify_key):
-            try:
-                from api.app_state import state as app_state
-
-                ws_manager = getattr(app_state, "websocket_manager", None)
-                if ws_manager and tenant_key:
-                    from giljo_mcp.events.schemas import EventFactory
-
-                    event = EventFactory.setup_tool_connected(
-                        tenant_key=tenant_key,
-                        user_id=str(user_id) if user_id else "unknown",
-                        tool_name="mcp_connected",
-                    )
-                    await ws_manager.broadcast_event_to_tenant(tenant_key=tenant_key, event=event)
-            except (OSError, RuntimeError, ValueError, TypeError, AttributeError, ImportError):
-                pass  # Fire-and-forget, non-blocking
+        # Handover 0855b / BE-9498: tell the setup wizard a client just attached.
+        #
+        # BE-9590: gated on the NAMED SET, not on ``initialize`` alone. A 2026-07-28
+        # client attaches with ``server/discover`` and never initializes, so the wizard
+        # heard nothing while it was open -- the operator saw "waiting for connection"
+        # sit there and go green only after a refresh. BE-9586d had already fixed the
+        # durable half (the session row the reload reads); this is the live half.
+        #
+        # Sharing ``announces_client()`` with the session-row gate is the point: the two
+        # places that answer "is a client attaching?" were allowed to drift once, and
+        # one named set is what stops it happening again.
+        if announces_client(method):
+            await self._announce_client_connected(tenant_key, user_id, client_info)
 
         # API-0021j Phase 2: Mcp-Session-Id lifecycle.
         send = await self._apply_session_lifecycle(
@@ -457,7 +472,10 @@ class MCPAuthMiddleware:
         receive = _replay_receive(buffered_body, original_receive)
         method = _peek_jsonrpc_method(buffered_body)
         is_initialize = method == _INITIALIZE_METHOD
-        client_info = _peek_jsonrpc_client_info(buffered_body) if is_initialize else None
+        # BE-9586d: a ``server/discover`` frame announces a client too, and carries its
+        # identity in the reserved ``_meta`` envelope. Peeking only on initialize is what
+        # left every modern client unrecorded.
+        client_info = _peek_jsonrpc_client_info(buffered_body) if announces_client(method) else None
         # INF-9371: capture the requested revision at the one point a client states it,
         # and ride the scope state the session-mint paths already read from -- rather than
         # widening this guard's return tuple and MCPAuthMiddleware.__call__ with it.
@@ -516,6 +534,26 @@ class MCPAuthMiddleware:
         threaded to the JWT session mint so it lands in ``session_data``
         alongside the API-key path's capture.
         """
+        # BE-9586d: a modern client announces itself with ``server/discover`` and then
+        # never initializes, so this is the only frame that will ever record it. Sited
+        # here rather than in either auth branch because BOTH reach this method -- one
+        # writer covering API-key and OAuth alike.
+        #
+        # No ``Mcp-Session-Id`` is wrapped onto the response: the live server does not
+        # send one on a discover reply, the client is not running a session-based flow,
+        # and handing it an id it never asked for invites it to echo an id we would then
+        # have to validate. The row is bookkeeping; the client needs nothing.
+        if method == _DISCOVER_METHOD:
+            await self._record_announced_client(
+                tenant_key=tenant_key,
+                user_id=user_id,
+                api_key_id=api_key_id,
+                auth_method=auth_method,
+                client_info=client_info,
+                **_initialize_capture(request.scope),
+            )
+            return send
+
         if method == _INITIALIZE_METHOD:
             session_id = mcp_session_id or await self._ensure_jwt_initialize_session(
                 tenant_key=tenant_key,
@@ -604,6 +642,48 @@ class MCPAuthMiddleware:
                 session_row.extend_expiration(MCPSessionManager.DEFAULT_SESSION_LIFETIME_HOURS)
                 await db.commit()  # single-writer-allow: MCP transport session bookkeeping (BE-6070 debounce; pre-existing exception site relocated by hot-path refactor)
         return send
+
+    async def _record_announced_client(
+        self,
+        *,
+        tenant_key: str,
+        user_id: str | None,
+        api_key_id: str | None = None,
+        auth_method: str | None = None,
+        client_info: dict[str, Any] | None = None,
+        protocol_version: str | None = None,
+        capabilities: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a ``server/discover`` announcement, one row per client (BE-9586d).
+
+        Touch-or-insert, NOT mint: see
+        :meth:`MCPSessionManager.touch_or_create_client_session` for why the discover
+        grain differs from initialize's one-row-per-connection.
+
+        Best-effort and never fatal. This is connect-status bookkeeping; a client whose
+        discovery succeeded must not have its request fail because we could not write a
+        render hint.
+        """
+        if not tenant_key:
+            return
+        from api.app_state import state
+        from api.endpoints.mcp_session import MCPSessionManager
+
+        if not state.db_manager:
+            return
+        try:
+            async with state.db_manager.get_session_async() as db:
+                await MCPSessionManager(db).touch_or_create_client_session(
+                    tenant_key=tenant_key,
+                    user_id=user_id,
+                    api_key_id=api_key_id,
+                    client_info=client_info,
+                    auth_method="oauth_jwt" if auth_method == "jwt" else auth_method,
+                    protocol_version=protocol_version,
+                    capabilities=capabilities,
+                )
+        except (OSError, RuntimeError, ValueError, KeyError, TypeError):
+            logger.warning("BE-9586d: could not record announced client (non-fatal)", exc_info=True)
 
     async def _ensure_jwt_initialize_session(
         self,

@@ -493,8 +493,13 @@ async def archive_project(
     # ProjectService.archive_project so the MCP terminal transition runs the SAME
     # code instead of reaching the status write alone. Behavior here is unchanged;
     # this endpoint is one of that service method's two callers, not its owner.
+    # BE-9539: this endpoint IS the dashboard's deliberate one-click abandon path
+    # (see the docstring above -- "wants to archive it without continuing work"),
+    # so it always passes force=True: a human just explicitly pressed Archive,
+    # which is consent enough. The MCP door defaults force=False instead, so an
+    # agent must complete closeout first or opt in explicitly.
     # (raises exceptions on error)
-    await project_service.archive_project(project_id=project_id, tenant_key=current_user.tenant_key)
+    await project_service.archive_project(project_id=project_id, tenant_key=current_user.tenant_key, force=True)
 
     logger.info("Archived project %s", sanitize(project_id))
 

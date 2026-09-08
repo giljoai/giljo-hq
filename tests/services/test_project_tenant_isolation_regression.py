@@ -20,9 +20,10 @@ Test Strategy:
 Follows patterns from: test_tenant_isolation_services.py (Handover 0325)
 """
 
-import random
+import re
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -68,13 +69,31 @@ async def two_tenant_projects(db_session, db_manager):
     # Create active projects
     active_a = Project(
         id=str(uuid.uuid4()),
+        # SERIALS ARE DETERMINISTIC AND DISTINCT, and that is load-bearing.
+        #
+        # These four were `random.randint(1, 9000)`, which collided in CI on
+        # 2026-09-04: two of them drew 8171 and the insert died with
+        # UniqueViolationError on `uq_project_taxonomy_active`.
+        #
+        # That index is
+        #   UNIQUE (tenant_key, product_id, project_type_id, series_number, subseries)
+        #   NULLS NOT DISTINCT WHERE deleted_at IS NULL
+        # so "Tenant B Active" and "Tenant B Cancelled" share a scope: same
+        # tenant, same product, both with deleted_at NULL (cancelled is not
+        # deleted). Two independent draws from 9000 in one scope collide about
+        # once in 9000 runs -- rare enough to read as infra flake, common enough
+        # to keep happening. "Tenant A Deleted" is outside the index because of
+        # the partial predicate, which is why only one pair is exposed.
+        #
+        # Distinct literals remove the dice entirely. Keep them distinct if you
+        # add a seeded project here.
         name="Tenant A Active",
         description="Active project A desc",
         mission="Active project A",
         tenant_key=tenant_a,
         product_id=product_a.id,
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=8101,
     )
     active_b = Project(
         id=str(uuid.uuid4()),
@@ -84,7 +103,7 @@ async def two_tenant_projects(db_session, db_manager):
         tenant_key=tenant_b,
         product_id=product_b.id,
         status="active",
-        series_number=random.randint(1, 9000),
+        series_number=8102,
     )
 
     # Create soft-deleted project for tenant A
@@ -97,7 +116,7 @@ async def two_tenant_projects(db_session, db_manager):
         product_id=product_a.id,
         status="deleted",
         deleted_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=8103,
     )
 
     # Create cancelled project for tenant B (restore target)
@@ -110,7 +129,7 @@ async def two_tenant_projects(db_session, db_manager):
         product_id=product_b.id,
         status="cancelled",
         completed_at=datetime.now(UTC),
-        series_number=random.randint(1, 9000),
+        series_number=8104,
     )
 
     db_session.add_all([active_a, active_b, deleted_a, cancelled_b])
@@ -294,3 +313,39 @@ async def test_project_service_cross_tenant_audit(db_session, two_tenant_project
     assert len(violations) == 0, "CRITICAL: Tenant isolation violated!\nViolations:\n" + "\n".join(
         f"- {v}" for v in violations
     )
+
+
+def test_seeded_serials_are_deterministic_and_distinct():
+    """The fixture must not draw its taxonomy serials at random.
+
+    This is the regression guard for the 2026-09-04 CI failure. The defect was
+    probabilistic -- roughly one run in 9000 -- so a behavioural test would have
+    passed 8999 times out of 9000 and told us nothing. What CAN be asserted
+    deterministically is the property that made it possible: serials drawn from
+    a random source, in a scope a partial unique index forbids duplicates in.
+
+    Reintroducing `random.randint` here would fail this immediately rather than
+    once a quarter on somebody else's PR, which is where the original landed.
+    """
+    source = Path(__file__).read_text(encoding="utf-8")
+
+    # Known-positive first: prove the read reached the fixture, so an empty or
+    # renamed file cannot pass this by having nothing to find.
+    assert "series_number=" in source, "fixture no longer assigns series_number -- update this guard"
+
+    # Matched as an ASSIGNMENT, not as the bare word. My first version asserted
+    # `"random.randint" not in source` and failed on its own explanation -- the
+    # comment above names the thing it forbids, and the guard reads the whole
+    # file including that comment. A checker that cannot survive being described
+    # is a checker that will be silenced by the next person who documents it.
+    assert re.search(r"series_number\s*=\s*random", source) is None, (
+        "taxonomy serials must be deterministic literals: two seeded projects "
+        "sharing a tenant and product fall in the same scope of "
+        "uq_project_taxonomy_active, and independent random draws collide"
+    )
+
+    # And the literals actually used must be distinct, which is the property the
+    # index cares about -- deterministic but duplicated would fail exactly the
+    # same way.
+    serials = re.findall(r"series_number=(\d+)", source)
+    assert len(serials) == len(set(serials)), f"seeded serials must be distinct, got {serials}"

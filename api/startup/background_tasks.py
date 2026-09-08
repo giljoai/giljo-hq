@@ -288,6 +288,26 @@ async def _get_tool_rename_boot_count(db_manager: DatabaseManager) -> int:
         return await SystemSettingsService(session).get_tool_rename_boot_count()
 
 
+# The rename pairs the CE first-boots migration banner shows a self-hoster.
+#
+# BE-9563: module-level so a startup guard can assert every TARGET name against the
+# live registry -- a hardcoded roster that nothing re-checks silently goes stale, and
+# this one is read by a human.
+#
+# The LEFT side is history and must not be edited -- it records what those names used to
+# be. Only the right side is a live claim.
+TOOL_RENAME_NOTICE_PAIRS: tuple[str, ...] = (
+    "get_agent_mission → get_job_mission",
+    "update_agent_mission → update_job_mission",
+    "fetch_context → get_context",
+    "write_360_memory → write_memory_entry",
+    "close_project_and_update_memory → write_project_closeout",
+    "inspect_messages → get_thread_history (the message bus was removed)",
+    "update_product_fields → update_product_context",
+    "submit_tuning_review → apply_context_tuning",
+)
+
+
 async def _emit_tool_rename_notice_banner(
     service: NotificationService, tenant_key: str, boot_count: int | None
 ) -> None:
@@ -302,17 +322,7 @@ async def _emit_tool_rename_notice_banner(
     if boot_count is None or not (1 <= boot_count <= TOOL_RENAME_NOTICE_MAX_BOOTS):
         await service.resolve_by_dedupe_key(tenant_key, _TOOL_RENAME_NOTICE_DEDUPE_KEY)
         return
-    rename_pairs = (
-        "get_agent_mission → get_job_mission",
-        "update_agent_mission → update_job_mission",
-        "fetch_context → get_context",
-        "write_360_memory → write_memory_entry",
-        "close_project_and_update_memory → write_project_closeout",
-        "inspect_messages → get_messages",
-        "update_product_fields → update_product_context",
-        "submit_tuning_review → propose_product_context_update",
-    )
-    rename_list = "; ".join(rename_pairs)
+    rename_list = "; ".join(TOOL_RENAME_NOTICE_PAIRS)
     await service.upsert_by_dedupe_key(
         tenant_key=tenant_key,
         user_id=None,

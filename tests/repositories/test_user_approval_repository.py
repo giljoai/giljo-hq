@@ -186,10 +186,12 @@ async def test_mark_decided(repo, db_session, test_tenant_key):
         approval_id=approval.id,
         decided_option_id="a",
         decided_by_user_id=None,
+        decided_via="mcp",
     )
     assert decided is not None
     assert decided.status == "decided"
     assert decided.decided_option_id == "a"
+    assert decided.decided_via == "mcp"
     assert decided.decided_at is not None
 
 
@@ -213,6 +215,7 @@ async def test_mark_decided_idempotent_on_already_decided(repo, db_session, test
         approval_id=approval.id,
         decided_option_id="a",
         decided_by_user_id=None,
+        decided_via="mcp",
     )
     again = await repo.mark_decided(
         db_session,
@@ -220,5 +223,6 @@ async def test_mark_decided_idempotent_on_already_decided(repo, db_session, test
         approval_id=approval.id,
         decided_option_id="a",
         decided_by_user_id=None,
+        decided_via="mcp",
     )
     assert again is None

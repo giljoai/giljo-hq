@@ -36,20 +36,34 @@ class ProjectEnrichmentReadsMixin:
     # Read Operations — ProjectQueryService
     # ============================================================================
 
-    async def get_active_project(
+    async def get_active_projects(
         self,
         session: AsyncSession,
         tenant_key: str,
-    ) -> Project | None:
-        """Get the currently active project for a tenant."""
+        product_id: str | None = None,
+    ) -> list[Project]:
+        """Get every currently active project for a tenant, optionally scoped to one product.
+
+        BE-9525a product-scoped this read; BE-9525b (ruling 5 amended) dropped
+        ``idx_project_single_active_per_product``, so more than one project can
+        legitimately be ACTIVE in the same product now. A ``.limit(1)`` +
+        ``scalar_one_or_none()`` here would be the same arbitrary-but-stable
+        wrong-answer class BE-9521 fixed for a different read (FE-9524 hit it
+        again on ``ProductRepository.get_active_product``) -- there is no
+        single-row guarantee left to lean on, so this returns every match,
+        deterministically ordered, instead of picking one.
+        """
+        conditions = [Project.tenant_key == tenant_key, Project.status == ProjectStatus.ACTIVE]
+        if product_id is not None:
+            conditions.append(Project.product_id == product_id)
         stmt = (
             select(Project)
             .options(selectinload(Project.project_type))
-            .where(and_(Project.tenant_key == tenant_key, Project.status == ProjectStatus.ACTIVE))
-            .limit(1)
+            .where(and_(*conditions))
+            .order_by(Project.created_at)
         )
         result = await session.execute(stmt)
-        return result.scalar_one_or_none()
+        return list(result.scalars().all())
 
     async def count_agent_jobs(
         self,

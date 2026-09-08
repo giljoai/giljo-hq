@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import debounce from 'lodash-es/debounce'
 import { api } from '@/services/api'
 import { useProductStore } from '@/stores/products'
 import { useProjectStateStore } from '@/stores/projectStateStore'
@@ -19,9 +20,13 @@ export const useProjectStore = defineStore('projects', () => {
   // the X-Total-Count response header, bound to the table's :items-length.
   const projectsTotal = ref(0)
   // BE-6076: with pagination the active project may be off the current page, so
-  // `hasActiveProject` can no longer be derived from `projects`. Track it from a
-  // dedicated /projects/active read instead (single-active-project invariant).
+  // it can no longer be derived from `projects`. Track it from a dedicated
+  // /projects/active read instead. FE-9525d: `activeProjectMeta` is the first
+  // entry (kept for existing single-project callers); `activeProjectsMeta` is
+  // the full list (BE-9525a/b: several active projects per product is now a
+  // real case, not an error).
   const activeProjectMeta = ref(null)
+  const activeProjectsMeta = ref([])
   const loading = ref(false)
   const error = ref(null)
 
@@ -48,11 +53,6 @@ export const useProjectStore = defineStore('projects', () => {
 
   // Getters
   const activeProjects = computed(() => projects.value.filter((p) => p.status === 'active'))
-
-  // Product/Project State Fix: Track THE active project (singular) for nav links
-  const activeProject = computed(() => {
-    return projects.value.find((p) => p.status === 'active' && !p.deleted_at) || null
-  })
 
   // FE-3007a: prefer the complete entity in byId; fall back to the trimmed
   // list row when an entity has only been seen in a list fetch.
@@ -218,17 +218,46 @@ export const useProjectStore = defineStore('projects', () => {
     _lastListOpts = {}
   }
 
+  // D1/D2/D14/D15 (Headless S3a): a burst of lifecycle events (staging complete,
+  // implementation launched, the vestigial launch-project endpoint, a product
+  // activation bulk-deactivating sibling projects) can each fire independently
+  // within the same headless drive. Debounce so that burst collapses into ONE
+  // refreshList() call, mirroring the pattern RoadmapView's onRoadmapUpdated
+  // already uses for the same class of problem.
+  const debouncedRefreshList = debounce(() => {
+    refreshList()
+  }, 400)
+
   /**
-   * BE-6076: read THE active project (single-active-project invariant) so the
-   * Projects page can disable "Activate" even when the active row is off the
-   * current paginated page. A 404/None response clears it.
+   * BE-6076: read THE active project (single-active-project-PER-PRODUCT
+   * invariant) so the Projects page can disable "Activate" even when the
+   * active row is off the current paginated page. An empty response clears it.
+   *
+   * BE-9525a: this read used to be tenant-wide with no product scope — a
+   * project active in product A made this look active for product B too,
+   * incorrectly greying out product B's Activate button. Scoped to the
+   * viewed product (effectiveProductId falls back to the tenant's active
+   * product when no tab is selected, same as every other product-scoped
+   * fetch in this store). The endpoint returns a list -- BE-9525a/b retired
+   * the single-active-project-per-product invariant, so several rows are a
+   * real, expected response now, not an error case.
+   *
+   * FE-9525d: `activeProjectMeta` (the FIRST entry) is kept for existing
+   * single-project callers -- unchanged shape, byte-identical when there is
+   * exactly one active project. `activeProjectsMeta` (the FULL list) is the
+   * new plural read the Jobs sectioning / redirect logic needs to tell "one"
+   * from "several" without a second endpoint.
    */
   async function fetchActiveProject() {
     try {
-      const response = await api.projects.getActive()
-      activeProjectMeta.value = response.data || null
+      const productStore = useProductStore()
+      const response = await api.projects.getActive(productStore.effectiveProductId)
+      const list = response.data || []
+      activeProjectsMeta.value = list
+      activeProjectMeta.value = list[0] || null
     } catch (err) {
       // No active project (or transient error) → treat as none; non-fatal.
+      activeProjectsMeta.value = []
       activeProjectMeta.value = null
       console.error('Failed to fetch active project:', err)
     }
@@ -469,20 +498,25 @@ export const useProjectStore = defineStore('projects', () => {
 
   /**
    * BE-9157: candidate successor projects for the Mark Superseded picker.
-   * Pulls active+completed projects (a project can only be superseded BY a
-   * still-relevant project, not a cancelled/terminated/deleted one), scoped to
-   * the active product like every other list read, and excludes the project
-   * being superseded (it can't be its own successor). FE-9485: `limit` is
-   * intentionally omitted rather than paginated — GET /api/v1/projects/ caps
-   * `limit` at 200 (BE-6076's deliberate page-size bound), and per that
-   * endpoint's own docstring, omitting `limit` returns the full set, which is
-   * what the picker needs (unlike the paginated `projects` array, which only
-   * holds the current page).
+   * Pulls active+completed+inactive projects (a project can only be superseded
+   * BY a still-relevant project, not a cancelled/terminated/deleted/superseded
+   * one), scoped to the active product like every other list read, and excludes
+   * the project being superseded (it can't be its own successor). FE-9485:
+   * `limit` is intentionally omitted rather than paginated — GET
+   * /api/v1/projects/ caps `limit` at 200 (BE-6076's deliberate page-size
+   * bound), and per that endpoint's own docstring, omitting `limit` returns the
+   * full set, which is what the picker needs (unlike the paginated `projects`
+   * array, which only holds the current page).
+   * FE-9508: `inactive` was originally swept up with the terminal statuses this
+   * filter meant to exclude, but an inactive project is planned-and-not-yet-
+   * started -- frequently the exact thing that replaces older work. Added here;
+   * `cancelled`/`terminated`/`deleted`/`superseded` stay excluded (a superseded
+   * successor could loop the pointer chain).
    */
   async function fetchSuccessorCandidates(excludeProjectId) {
     const productStore = useProductStore()
     const params = {
-      statuses: ['active', 'completed'],
+      statuses: ['active', 'completed', 'inactive'],
       include_completed: true,
     }
     if (productStore.currentProductId) {
@@ -598,6 +632,15 @@ export const useProjectStore = defineStore('projects', () => {
   }
 
 
+  // FE-9510: statuses the default Projects list never shows (the trashcan
+  // owns `deleted`; `superseded` has no list surface at all). A lifecycle
+  // event that lands a project in one of these must REMOVE the list row —
+  // patching it in place (the old behavior) leaves a soft-deleted/superseded
+  // project sitting in the list wearing its status pill until a manual
+  // refresh, because the entity still exists server-side and fetchProject
+  // upserts rather than deletes.
+  const LIST_EXCLUDED_STATUSES = new Set(['deleted', 'superseded'])
+
   // Handle real-time updates from WebSocket
   //
   // FE-3007a: full-refetch-on-event. Instead of hand-copying a name/status/
@@ -605,7 +648,7 @@ export const useProjectStore = defineStore('projects', () => {
   // with the API shape and shipped two stale-state bugs), we re-pull the
   // affected entity from the API through the single write path. The payload's
   // job is now only to tell us WHICH project changed, not to carry its fields.
-  function handleRealtimeUpdate(data) {
+  async function handleRealtimeUpdate(data) {
     const { project_id, update_type } = data
     if (!project_id) return
 
@@ -621,7 +664,34 @@ export const useProjectStore = defineStore('projects', () => {
     // deactivated/...) → refetch the complete entity. fetchProject upserts
     // byId and syncs the list row when present, so every view that reads the
     // store reflects the change with zero whitelist code.
-    fetchProject(project_id)
+    const updated = await fetchProject(project_id)
+
+    // FE-9510: the fetch path (GET /api/v1/projects/) already excludes these
+    // statuses; the live-update path must match it. Keep byId populated (a
+    // detail view/deep-link still resolves) and drop only the list row.
+    if (updated && LIST_EXCLUDED_STATUSES.has(updated.status)) {
+      projects.value = projects.value.filter((p) => p.id !== project_id)
+    }
+
+    // FE-9533: 'status_changed' is what activate_project/deactivate_project
+    // actually broadcast (project_lifecycle_service, both branches). The entity
+    // refetch above patches `projects`/`byId` for a row already resident in the
+    // CURRENT client's list -- exactly why the Projects list page (which has
+    // fetched that list) appeared to "update live". `activeProjectMeta` is a
+    // SEPARATE dedicated /projects/active read (BE-6076: pagination means the
+    // active project can be off-page, or — the Jobs pane's actual case — the
+    // list was never fetched by this view at all) and until now was refreshed
+    // ONLY by the two local, self-triggered actions (activateProject/
+    // deactivateProject in THIS tab). A project activated from another session,
+    // another tab, or headlessly over MCP never re-ran fetchActiveProject() on
+    // this client, so any view keyed off activeProjectMeta (LaunchRedirectView's
+    // Jobs-pane redirect; ProjectsView's hasActiveProject) stayed stale until a
+    // manual reload. Re-derive it from the same authoritative endpoint on every
+    // status_changed, regardless of whether the changed project is this tenant's
+    // new active project, the one being deactivated, or neither.
+    if (update_type === 'status_changed') {
+      fetchActiveProject()
+    }
   }
 
   return {
@@ -631,17 +701,18 @@ export const useProjectStore = defineStore('projects', () => {
     hiddenProjects,
     projectsTotal,
     activeProjectMeta,
+    activeProjectsMeta,
     loading,
     error,
 
     // Getters
     activeProjects,
-    activeProject,  // Product/Project State Fix: Singular active project for nav
     projectById,
 
     // Actions
     fetchProjects,
     refreshList,
+    debouncedRefreshList,
     clearListQuery,
     fetchActiveProject,
     fetchHiddenProjects,

@@ -5,7 +5,7 @@
 
 """MCP-transport boundary tests for BE-9197 — atomic post-with-baton.
 
-Agents repeatedly post a question but forget the separate ``pass_baton`` call,
+Agents repeatedly post a question but forget the separate ``set_next_actor`` call,
 leaving the addressee's ``get_my_turn`` blind (live incident 2026-07-16: two
 workers idled 60+/25+ minutes past their ACCEPTED broadcasts because
 ``next_action_owner`` never moved). ``post_to_thread`` now takes an optional
@@ -19,7 +19,7 @@ Behaviors under test (over the wire):
 - an explicit ``pass_baton_to`` beats the auto-pass default;
 - ``pass_baton_to='none'`` posts WITHOUT moving the baton (suppresses the default);
 - a broadcast without the param keeps today's behavior (baton untouched);
-- the atomic path emits a thread_update byte-identical to pass_baton's emission;
+- the atomic path emits a thread_update byte-identical to set_next_actor's emission;
 - the emit is best-effort: a WS manager that raises never fails the post.
 """
 
@@ -328,7 +328,7 @@ async def test_broadcast_without_param_unchanged(comm_mcp_client_ws):
 
 
 async def test_emission_parity_with_pass_baton(comm_mcp_client_ws):
-    """The atomic path's thread_update must be byte-identical to pass_baton's:
+    """The atomic path's thread_update must be byte-identical to set_next_actor's:
     same thread, same target, same hander => the two event payloads compare equal.
     Also asserts ORDER: the atomic path emits the message event first, then the
     baton update — mirroring the post-then-pass two-call sequence.
@@ -348,7 +348,7 @@ async def test_emission_parity_with_pass_baton(comm_mcp_client_ws):
         )
         assert res.is_error is False, _error_text(res)
     async with new_client() as s:
-        res = await s.call_tool("pass_baton", {"thread_id": tid, "to": "beta", "from_agent": "alpha"})
+        res = await s.call_tool("set_next_actor", {"thread_id": tid, "to": "beta", "from_agent": "alpha"})
         assert res.is_error is False, _error_text(res)
 
     baton_events = _baton_events(ws)

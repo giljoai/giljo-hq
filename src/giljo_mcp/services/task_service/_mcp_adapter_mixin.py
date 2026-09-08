@@ -40,19 +40,16 @@ from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.models import Task
 from giljo_mcp.services._mcp_wire_bounds import worst_case_cursor_charge
 from giljo_mcp.services.task_service._mcp_filter_validators import (
-    normalize_task_priority_filter,
     resolve_active_product_for_list_tasks,
     resolve_list_mode,
-    resolve_task_limit,
+    resolve_list_tasks_filters_and_cursor,
     resolve_task_type_id,
-    validate_task_status_filter,
 )
 from giljo_mcp.services.task_service._mcp_read_layer import (
     TASK_CURSOR_AXIS,
     apply_bounds,
     apply_task_filters,
     mint_task_next_cursor,
-    open_task_cursor_walk,
     task_counts,
     task_keyset_after,
     task_to_index_row,
@@ -137,7 +134,7 @@ class McpAdapterMixin:
             websocket_manager=websocket_manager,
             test_session=self._session,
         )
-        bound_product = await product_service.resolve_binding_product(product_id, operation="create_task")
+        bound_product = await product_service.resolve_binding_product(product_id, operation="create_task", write=True)
         product_id = bound_product.id
         product_name = bound_product.name
 
@@ -492,8 +489,11 @@ class McpAdapterMixin:
         # truncation.next_cursor. Absent = start at the first page, byte-identical to
         # the shipped behaviour.
         cursor: str | None = None,
+        # BE-9499a: explicit product to scope to, validated as tenant-owned. Omitted
+        # -> the active product, byte-identical to pre-existing behaviour.
+        product_id: str | None = None,
     ) -> dict[str, Any]:
-        """List tasks for the active product, bounded and honest about it.
+        """List tasks for the active product, or an explicit product_id, bounded and honest about it.
 
         Phase D of agent-parity. Three projection modes:
 
@@ -563,19 +563,15 @@ class McpAdapterMixin:
             websocket_manager=self._websocket_manager,
             session=self._session,
             tenant_key=effective_tenant_key,
+            product_id=product_id,
         )
 
-        # Projection mode and row limit -- resolved in _mcp_read_layer with the rest of this
-        # surface's input handling. BE-9470: an explicit mode now WINS over summary_only
-        # (copied from list_projects); summary_only still wins when mode is omitted, which
-        # is what keeps every pre-mode caller byte-identical.
+        # Projection mode -- resolved here (not delegated) so this module keeps a
+        # direct import of resolve_list_mode -- test_be9060_task_service_split pins
+        # that. BE-9470: an explicit mode now WINS over summary_only (copied from
+        # list_projects); summary_only still wins when mode is omitted, which is
+        # what keeps every pre-mode caller byte-identical.
         mode = resolve_list_mode(mode, summary_only, _VALID_LIST_MODES)
-        effective_limit = resolve_task_limit(limit)
-
-        # BE-9469: see _mcp_read_layer's validators -- a typo'd status/priority
-        # used to return matched:0 silently instead of refusing.
-        validate_task_status_filter(status)
-        priority = normalize_task_priority_filter(priority)
 
         # TSK-9177: the @mcp.tool wrapper delivers due_before as an ISO string;
         # parse at the boundary (same class as TSK-9163) so the impl compares
@@ -584,24 +580,22 @@ class McpAdapterMixin:
             due_before = _parse_due_date(due_before, operation="list_tasks_for_mcp", field="due_before")
 
         # BE-9470 (finding 5): task_type's only legal value is the reserved 'TSK'
-        # tag -- see resolve_task_type_id / validate_task_type_filter for why.
+        # tag -- see resolve_task_type_id / validate_task_type_filter for why. Also
+        # resolved here directly -- test_be9060_task_service_split pins this import too.
         task_type_id = await resolve_task_type_id(
             task_type, db_manager=self.db_manager, session=self._session, tenant_key=effective_tenant_key
         )
 
-        # BE-9469: fingerprint and incoming position resolved together, BEFORE the fetch
-        # so a refused token costs no query. Fingerprinted from RESOLVED values --
-        # task_type_id, not the caller's abbreviation -- so two spellings of one type do
-        # not refuse each other's cursors. See open_task_cursor_walk.
-        cursor_fingerprint, after_key = open_task_cursor_walk(
-            cursor,
-            product_id=active_product.id,
+        effective_limit, priority, cursor_fingerprint, after_key = resolve_list_tasks_filters_and_cursor(
+            limit=limit,
             status=status,
             priority=priority,
             task_type_id=task_type_id,
             due_before=due_before,
             hidden=hidden,
             query=query,
+            cursor=cursor,
+            product_id=active_product.id,
         )
 
         async with self._get_session(effective_tenant_key) as session:

@@ -137,7 +137,8 @@ async def _seed(db_manager, *, run_mode: str = "claude_code_cli") -> dict:
         # not mint one, so mint it here (the create() path can't be used for the
         # empty-mode case below — it rejects an unset execution_mode). This keeps each
         # scenario's run shape intact while giving the endpoint an orchestrator to find.
-        run.conductor_agent_id = await mint_conductor_job(session, tenant_key=tenant_key, run_id=run.id)
+        conductor_identity = await mint_conductor_job(session, tenant_key=tenant_key, run_id=run.id)
+        run.conductor_agent_id = conductor_identity["agent_id"]
         await session.commit()
 
         token = JWTManager.create_access_token(

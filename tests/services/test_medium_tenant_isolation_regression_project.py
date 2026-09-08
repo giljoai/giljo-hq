@@ -113,7 +113,7 @@ async def test_get_project_same_tenant_includes_agents(two_tenant_products):
 
 
 # ============================================================================
-# Fix 8: ProjectService.get_active_project — COUNT queries with tenant_key
+# Fix 8: ProjectService.get_active_projects — COUNT queries with tenant_key
 # ============================================================================
 
 
@@ -121,7 +121,7 @@ async def test_get_project_same_tenant_includes_agents(two_tenant_products):
 @pytest.mark.asyncio
 async def test_get_active_project_counts_only_own_tenant(two_tenant_products):
     """
-    REGRESSION: get_active_project() COUNT queries for AgentJob and Message
+    REGRESSION: get_active_projects() COUNT queries for AgentJob and Message
     must include tenant_key filter.
 
     Previously filtered by project.id only, which is safe when the project
@@ -137,13 +137,13 @@ async def test_get_active_project_counts_only_own_tenant(two_tenant_products):
         test_session=data["db_session"],
     )
 
-    result = await service.query.get_active_project()
+    result = await service.query.get_active_projects()
 
     # Should return tenant A's active project with correct counts
-    assert result is not None
-    assert result.id == str(data["project_a"].id)
-    assert result.agent_count >= 0
-    assert result.message_count >= 0
+    assert len(result) == 1
+    assert result[0].id == str(data["project_a"].id)
+    assert result[0].agent_count >= 0
+    assert result[0].message_count >= 0
 
 
 # ============================================================================

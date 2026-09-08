@@ -1,8 +1,14 @@
 /**
- * RoadmapCard.vue — FE-6165f (locked "In chain" checkbox merge)
+ * RoadmapCard.vue — FE-6165f (locked "In chain" checkbox merge), updated
+ * FE-9568 (2026-09-02, operator ruling — scope reversal).
  *
- * Verifies the inChain prop behavior on top of the existing election-fade
- * behavior (FE-6165a), WITHOUT modifying the existing RoadmapCard.spec.js.
+ * FE-6165f merged the "In chain" pill with a locked link-mode checkbox
+ * (inChain force-ticks + disables it) and the FE-6165a election-fade on the
+ * per-card Activate button. FE-9568 removed the link-mode checkbox and the
+ * Activate/Deactivate buttons entirely — /roadmap only orders work now. This
+ * file is kept (not deleted) to record that reversal and assert the checkbox
+ * + election-fade mechanism is genuinely gone; the "In chain" pill itself
+ * SURVIVES as a plain read-only badge, so its render/non-render tests stay.
  *
  * Edition Scope: CE
  */
@@ -19,11 +25,6 @@ const stubs = {
   'v-tooltip': {
     props: ['text'],
     template: '<div class="v-tooltip" :data-text="text"><slot name="activator" :props="{}" /></div>',
-  },
-  'v-checkbox-btn': {
-    inheritAttrs: false,
-    props: ['modelValue', 'disabled'],
-    template: '<input type="checkbox" :checked="modelValue" :disabled="disabled" class="v-checkbox-btn" v-bind="$attrs" />',
   },
 }
 
@@ -47,25 +48,10 @@ function mountCard(extraProps = {}) {
   })
 }
 
-describe('RoadmapCard.vue — FE-6165f inChain prop', () => {
-  it('renders the checkbox ticked AND disabled when inChain=true (FE-6180: disabled = inChain membership, back-out via kebab)', () => {
-    // FE-6180: disabled is driven by inChain membership, not lockedInChain.
-    // Any in-chain project is force-ticked + disabled. Back-out via kebab (Deactivate Chain).
-    // linkMode=true is required for the checkbox to render (it replaces the Activate button).
+describe('RoadmapCard.vue — FE-6165f inChain prop (checkbox mechanism REMOVED by FE-9568)', () => {
+  it('never renders a select checkbox, in-chain or not, even if legacy link-mode props are passed', () => {
     const w = mountCard({ linkMode: true, inChain: true, lockedInChain: true })
-    const cb = w.find('[data-testid="roadmap-select-checkbox-rmi-1"]')
-    expect(cb.exists()).toBe(true)
-    expect(cb.element.checked).toBe(true)
-    expect(cb.element.disabled).toBe(true)
-  })
-
-  it('renders the checkbox ticked AND disabled when inChain=true and lockedInChain=false (FE-6180: in-chain => force-ticked + disabled, back-out via kebab)', () => {
-    // FE-6180: there is no "Editing tier" exception. inChain alone drives disable.
-    // The "unlocked → enabled so user can untick" premise no longer exists.
-    const w = mountCard({ linkMode: true, inChain: true, lockedInChain: false })
-    const cb = w.find('[data-testid="roadmap-select-checkbox-rmi-1"]')
-    expect(cb.element.checked).toBe(true)
-    expect(cb.element.disabled).toBe(true)
+    expect(w.find('[data-testid="roadmap-select-checkbox-rmi-1"]').exists()).toBe(false)
   })
 
   it('renders the "In chain" pill when inChain=true', () => {
@@ -80,31 +66,19 @@ describe('RoadmapCard.vue — FE-6165f inChain prop', () => {
     expect(w.find('[data-testid="roadmap-in-chain-pill"]').exists()).toBe(false)
   })
 
-  it('renders the checkbox ticked but NOT disabled when selected=true and inChain=false', () => {
-    const w = mountCard({ linkMode: true, selected: true, inChain: false })
-    const cb = w.find('[data-testid="roadmap-select-checkbox-rmi-1"]')
-    expect(cb.element.checked).toBe(true)
-    expect(cb.element.disabled).toBe(false)
-  })
-
-  it('checkbox is ticked (selected || inChain) — inChain alone forces ticked', () => {
-    const w = mountCard({ linkMode: true, selected: false, inChain: true })
-    const cb = w.find('[data-testid="roadmap-select-checkbox-rmi-1"]')
-    expect(cb.element.checked).toBe(true)
-  })
-
-  it('chain member shows the In-chain badge in place of the Activate button (FE-6170)', () => {
-    // FE-6170: for a chain member the action-rail Activate button is REPLACED by
-    // the "In chain" badge (v-if/v-else-if), so there is no faded Activate button.
+  it('chain member shows the In-chain badge with no Activate button behind it (FE-6170)', () => {
+    // FE-6170: for a chain member the action-rail Activate button was REPLACED
+    // by the "In chain" badge. FE-9568 then removed Activate entirely, so there
+    // is no Activate button for ANY project state, faded or otherwise.
     const w = mountCard({ inChain: true, electionActive: true })
     expect(w.find('[data-testid="roadmap-in-chain-pill"]').exists()).toBe(true)
     expect(w.find('.rm-primary-btn--election-faded').exists()).toBe(false)
+    expect(w.find('.rm-primary-btn').exists()).toBe(false)
   })
 
-  it('election-fade applies to the Activate button for a NON-chain card when election active (FE-6170)', () => {
-    // A non-chain, activatable project keeps its Activate button, faded while an
-    // election is active so the only launch affordance is Run Sequential.
+  it('election-fade no longer applies to anything — the Activate button it faded is gone (FE-6170/FE-9568)', () => {
     const w = mountCard({ inChain: false, electionActive: true })
-    expect(w.find('.rm-primary-btn--election-faded').exists()).toBe(true)
+    expect(w.find('.rm-primary-btn--election-faded').exists()).toBe(false)
+    expect(w.find('.rm-primary-btn').exists()).toBe(false)
   })
 })

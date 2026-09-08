@@ -74,17 +74,21 @@ class UserApprovalRepository:
         tenant_key: str,
         limit: int,
         offset: int,
+        status: str = "pending",
     ) -> list[UserApproval]:
-        """List pending approvals for a tenant, newest first.
+        """List approvals for a tenant by status, newest first.
 
         Backed by ``ix_user_approvals_tenant_status`` (tenant_key, status).
+        ``status`` defaults to ``"pending"`` (the original/only caller shape);
+        BE-9514 widened this to any status so a decided row's ``decided_via``
+        can be read back for verification.
         """
         with tenant_session_context(session, tenant_key):
             result = await session.execute(
                 select(UserApproval)
                 .where(
                     UserApproval.tenant_key == tenant_key,
-                    UserApproval.status == "pending",
+                    UserApproval.status == status,
                 )
                 .order_by(UserApproval.requested_at.desc())
                 .limit(limit)
@@ -97,6 +101,7 @@ class UserApprovalRepository:
         session: AsyncSession,
         *,
         tenant_key: str,
+        status: str = "pending",
     ) -> int:
         from sqlalchemy import func
 
@@ -104,7 +109,7 @@ class UserApprovalRepository:
             result = await session.execute(
                 select(func.count(UserApproval.id)).where(
                     UserApproval.tenant_key == tenant_key,
-                    UserApproval.status == "pending",
+                    UserApproval.status == status,
                 )
             )
         return int(result.scalar_one() or 0)
@@ -134,6 +139,7 @@ class UserApprovalRepository:
         approval_id: str,
         decided_option_id: str,
         decided_by_user_id: str | None,
+        decided_via: str,
     ) -> UserApproval | None:
         approval = await self.get_by_id(
             session,
@@ -145,6 +151,7 @@ class UserApprovalRepository:
         approval.status = "decided"
         approval.decided_option_id = decided_option_id
         approval.decided_by_user_id = decided_by_user_id
+        approval.decided_via = decided_via
         approval.decided_at = datetime.now(UTC)
         await session.flush()
         return approval

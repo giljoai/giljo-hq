@@ -30,6 +30,7 @@ from giljo_mcp.models import Project
 from giljo_mcp.models.agent_identity import TERMINAL_EXECUTION_STATUSES, AgentExecution, AgentJob
 from giljo_mcp.monitoring.health_config import AgentHealthStatus, HealthCheckConfig
 from giljo_mcp.protocols.websocket import WebSocketBroadcaster
+from giljo_mcp.services.agent_health_ws_broadcast import broadcast_agent_auto_failed, broadcast_health_alert
 
 
 logger = logging.getLogger(__name__)
@@ -252,6 +253,7 @@ class AgentHealthMonitor:
                 recommended_action="Check if agent received job, manual intervention may be required",
                 project_id=str(execution.job.project.id) if execution.job.project else "",
                 project_name=execution.job.project.name if execution.job.project else "",
+                product_id=str(execution.job.project.product_id) if execution.job.project else "",
             )
             for execution in executions
         ]
@@ -305,6 +307,7 @@ class AgentHealthMonitor:
                         recommended_action="Check agent logs, may need manual restart",
                         project_id=str(project.id) if project else "",
                         project_name=project.name if project else "",
+                        product_id=str(project.product_id) if project else "",
                     )
                 )
 
@@ -353,6 +356,7 @@ class AgentHealthMonitor:
                         recommended_action="Auto-fail job or manual intervention required",
                         project_id=str(project.id) if project else "",
                         project_name=project.name if project else "",
+                        product_id=str(project.product_id) if project else "",
                     )
                 )
 
@@ -432,11 +436,14 @@ class AgentHealthMonitor:
                     "abandon_after_minutes": self.config.abandon_after_minutes,
                 },
             )
-            await self.ws.broadcast_agent_auto_failed(
+            await broadcast_agent_auto_failed(
+                self.ws,
                 tenant_key=tenant_key,
                 job_id=health_status.job_id,
                 agent_display_name=health_status.agent_display_name,
                 reason=f"Abandoned {health_status.minutes_since_update:.0f}m — auto-decommissioned",
+                product_id=health_status.product_id or None,
+                project_id=health_status.project_id or None,
             )
             await session.commit()
             return
@@ -469,15 +476,19 @@ class AgentHealthMonitor:
             execution.block_reason = f"Auto-detected timeout: {health_status.issue_description}"
 
             # Broadcast auto-silent event
-            await self.ws.broadcast_agent_auto_failed(
+            await broadcast_agent_auto_failed(
+                self.ws,
                 tenant_key=tenant_key,
                 job_id=health_status.job_id,
                 agent_display_name=health_status.agent_display_name,
                 reason=health_status.issue_description,
+                product_id=health_status.product_id or None,
+                project_id=health_status.project_id or None,
             )
         else:
             # Broadcast health alert
-            await self.ws.broadcast_health_alert(
+            await broadcast_health_alert(
+                self.ws,
                 tenant_key=tenant_key,
                 job_id=health_status.job_id,
                 agent_display_name=health_status.agent_display_name,

@@ -62,6 +62,36 @@
 
       <!-- Agents -->
       <v-window-item value="agents">
+        <!-- FE-9555: the ONE account default for the staging
+             execution-mode question. It belongs on THIS tab, not with the
+             notification/monitoring knobs: the headless EXECUTION_MODE_REQUIRED
+             refusal tells the user in so many words to set it under Tools ->
+             Agents, so anywhere else makes the product's own instruction wrong. -->
+        <!-- FE-9555 (operator direction 2026-09-04): the account-wide agent policy
+             controls grouped under one heading, ABOVE the template roster. The
+             execution-mode default and the two orchestration switches all answer
+             "how do agents behave", which the template roster below does not --
+             OrchestrationToggles was only ever inside TemplateManager because that
+             tab had room, as its own docstring says. Heading mirrors Agent Template
+             Manager's own title + help-tooltip pattern so the two read as peers. -->
+        <div class="tab-header mb-4 d-flex align-center">
+          <h2 class="text-title-large">Agent Behaviour Settings</h2>
+          <v-tooltip location="bottom" max-width="360">
+            <template #activator="{ props: behaviourTipProps }">
+              <v-icon v-bind="behaviourTipProps" size="small" class="ml-2" color="medium-emphasis"
+                >mdi-help-circle-outline</v-icon
+              >
+            </template>
+            <span>Settings that modify how agents operate in the application</span>
+          </v-tooltip>
+        </div>
+        <ExecutionModeDefaultSelect />
+        <!-- FE-9553: relocated out of Notifications. These tune how agents
+             behave, not how notifications display, and this is the group for
+             exactly that class of control. -->
+        <AgentTimingSettings class="mb-4" />
+        <OrchestrationToggles class="mb-6" />
+
         <TemplateManager />
       </v-window-item>
 
@@ -109,97 +139,23 @@
         </div>
       </v-window-item>
 
-      <!-- Notification Settings -->
+      <!-- Notification Settings — FE-9553: four cards, one per surface.
+           Each card is its own component: this file is at the 800-line
+           guardrail, and the model reads better as four named surfaces than as
+           one wall of controls. Order follows the record: the surface that asks
+           you for something first, the medium that delivers it second, feedback
+           third, the archive last. -->
       <v-window-item value="notifications">
         <div class="tab-header mb-4">
-          <h2 class="text-title-large">Notification Display</h2>
-          <p class="text-body-medium text-muted-a11y mt-1">Configure where and how long notifications appear</p>
+          <h2 class="text-title-large">Notifications</h2>
+          <p class="text-body-medium text-muted-a11y mt-1">
+            Each surface has one job. Choose how much of each you want.
+          </p>
         </div>
-        <v-card variant="flat" class="smooth-border settings-card" data-test="notification-settings">
-          <v-card-text>
-            <v-select
-              v-model="settings.notifications.position"
-              :items="[
-                { title: 'Top Left', value: 'top-left' },
-                { title: 'Top Center', value: 'top-center' },
-                { title: 'Top Right', value: 'top-right' },
-                { title: 'Bottom Left', value: 'bottom-left' },
-                { title: 'Bottom Center', value: 'bottom-center' },
-                { title: 'Bottom Right', value: 'bottom-right' },
-              ]"
-              label="Position"
-              variant="outlined"
-              data-test="notification-position-select"
-            />
-            <v-slider
-              v-model="settings.notifications.duration"
-              :min="2"
-              :max="10"
-              :step="1"
-              label="Display duration (seconds)"
-              thumb-label
-              color="primary"
-              class="mt-4"
-            />
-
-            <div data-test="agent-monitoring-settings">
-              <v-divider class="my-4" />
-              <h3 class="text-body-large mb-2">Agent Monitoring</h3>
-              <v-text-field
-                v-model.number="agentSilenceThresholdMinutes"
-                type="number"
-                label="Agent Silence Threshold (minutes)"
-                hint="Time without communication before an agent is marked as silent. Raise this for slow-inference models so they aren't falsely flagged."
-                persistent-hint
-                variant="outlined"
-                :min="1"
-                :max="1440"
-                :rules="[
-                  v => (v >= 1 && v <= 1440) || 'Must be between 1 and 1440 minutes',
-                  v => Number.isInteger(v) || 'Must be a whole number',
-                ]"
-                data-test="silence-threshold-input"
-                class="mt-2"
-                style="max-width: 400px;"
-              />
-              <!-- FE-9296b: the account-level check-in cadence that replaced the
-                   per-project auto check-in slider. -->
-              <v-text-field
-                v-model.number="agentCheckinCadenceMinutes"
-                type="number"
-                label="Agent Check-in Cadence (minutes)"
-                hint="How often waiting agents check in for new work. Agents on a harness with live wake signals use this as a heartbeat; all others sleep this long between checks."
-                persistent-hint
-                variant="outlined"
-                :min="1"
-                :max="1440"
-                :rules="[
-                  v => (v >= 1 && v <= 1440) || 'Must be between 1 and 1440 minutes',
-                  v => Number.isInteger(v) || 'Must be a whole number',
-                ]"
-                data-test="checkin-cadence-input"
-                class="mt-2"
-                style="max-width: 400px;"
-              />
-            </div>
-          </v-card-text>
-          <v-card-actions>
-            <v-spacer />
-            <v-btn
-              variant="text"
-              data-test="reset-notification-btn"
-              @click="resetNotificationSettings"
-              >Reset</v-btn
-            >
-            <v-btn
-              color="primary"
-              variant="flat"
-              data-test="save-notification-btn"
-              @click="saveNotificationSettings"
-              >Save Changes</v-btn
-            >
-          </v-card-actions>
-        </v-card>
+        <BannerPreferencesCard class="mb-4" />
+        <PopoutPreferencesCard class="mb-4" />
+        <ToastPreferencesCard class="mb-4" />
+        <BellPreferencesCard />
       </v-window-item>
 
       <!-- Connect (formerly Integrations + API Keys folded in as Credentials) -->
@@ -308,10 +264,8 @@
 
 <script setup>
 import { ref, provide, onMounted, onUnmounted, watch } from 'vue'
-import { useSettingsStore } from '@/stores/settings'
 import { useRouter } from 'vue-router'
 import { useWebSocketStore } from '@/stores/websocket'
-import { useToast } from '@/composables/useToast'
 import TemplateManager from '@/components/TemplateManager.vue'
 import ApiKeyManager from '@/components/ApiKeyManager.vue'
 import { PRODUCT_NAME } from '@/branding'
@@ -326,13 +280,18 @@ import setupService from '@/services/setupService'
 import { isCeModeValue } from '@/composables/useGiljoMode'
 import CertTrustModal from '@/components/setup/CertTrustModal.vue'
 import { recordCertTrustDismissal } from '@/utils/certTrustPreference'
+import AgentTimingSettings from '@/components/settings/AgentTimingSettings.vue'
+import BannerPreferencesCard from '@/components/settings/BannerPreferencesCard.vue'
+import BellPreferencesCard from '@/components/settings/BellPreferencesCard.vue'
+import PopoutPreferencesCard from '@/components/settings/PopoutPreferencesCard.vue'
+import ToastPreferencesCard from '@/components/settings/ToastPreferencesCard.vue'
+import ExecutionModeDefaultSelect from '@/components/settings/ExecutionModeDefaultSelect.vue'
+import OrchestrationToggles from '@/components/templates/OrchestrationToggles.vue'
 // Stores and Theme
-const settingsStore = useSettingsStore()
 const router = useRouter()
 
 // WebSocket for real-time Git integration updates
 const { on, off } = useWebSocketStore()
-const { showToast } = useToast()
 
 // State
 const activeTab = ref('connect')
@@ -348,9 +307,6 @@ const isCe = ref(false)
 const showCertModal = ref(false)
 const serenaEnabled = ref(false)
 const toggling = ref(false)
-const agentSilenceThresholdMinutes = ref(10)
-// FE-9296b: account-level agent check-in cadence (replaced the per-project slider)
-const agentCheckinCadenceMinutes = ref(10)
 
 // Git Integration state (system-level like Serena)
 // This state is shared with ContextPriorityConfig via props
@@ -362,45 +318,7 @@ const templateExportEvent = ref(null)
 provide('templateExportEvent', templateExportEvent)
 const togglingGit = ref(false)
 
-// Settings object
-const settings = ref({
-  general: {
-    // Handover 0052: Removed unused projectName field (had broken save function)
-  },
-  notifications: {
-    position: 'bottom-right',
-    duration: 5,
-  },
-})
-
 // Methods
-async function saveNotificationSettings() {
-  try {
-    const notifications = {
-      position: settings.value.notifications.position,
-      duration: settings.value.notifications.duration,
-    }
-    await settingsStore.updateSettings({ notifications })
-    // FE-9241: the silence threshold now saves in both editions (CE writes the
-    // deployment-wide default; SaaS writes a per-tenant override) — same API path.
-    await settingsStore.updateAgentSilenceThreshold(agentSilenceThresholdMinutes.value)
-    // FE-9296b: same dual-edition hosting for the check-in cadence.
-    await settingsStore.updateAgentCheckinCadence(agentCheckinCadenceMinutes.value)
-  } catch (error) {
-    console.error('Failed to save notification settings:', error)
-    showToast({ message: 'Failed to save notification settings. Please try again.', type: 'error' })
-  }
-}
-
-function resetNotificationSettings() {
-  settings.value.notifications = {
-    position: 'bottom-right',
-    duration: 5,
-  }
-  agentSilenceThresholdMinutes.value = 10
-  agentCheckinCadenceMinutes.value = 10
-}
-
 async function loadEditionMode() {
   try {
     const status = await setupService.checkEnhancedStatus()
@@ -455,16 +373,10 @@ onMounted(async () => {
   await checkSerenaStatus()
   await loadEditionMode()
 
-  // Load settings from store
-  await settingsStore.loadSettings()
-  // Apply stored notification settings to local state
-  if (settingsStore.settings.notifications) {
-    settings.value.notifications = { ...settings.value.notifications, ...settingsStore.settings.notifications }
-  }
-  // FE-9241: the silence threshold now loads in both editions (see saveNotificationSettings).
-  agentSilenceThresholdMinutes.value = await settingsStore.loadAgentSilenceThreshold()
-  // FE-9296b: the check-in cadence loads the same way.
-  agentCheckinCadenceMinutes.value = await settingsStore.loadAgentCheckinCadence()
+  // FE-9553: the notification and agent-timing loads that used to live here
+  // moved into the cards that own those controls. They were unguarded awaits in
+  // this hook, so either one failing aborted every load after it -- including
+  // loadGitSettings below, which has nothing to do with notifications.
 
   // Load git integration settings (system-level)
   await loadGitSettings()
@@ -653,7 +565,15 @@ function handleTemplateExportEvent(data) {
   line-height: 1.4;
 }
 
-@media (max-width: 599px) {
+/* FE-9536: same tablet-band gap as WelcomeQuickGrid's .quick-grid (this
+   mirrors it, per the comment above) -- add the missing 2-col step. */
+@media (max-width: $breakpoint-tablet) {
+  .startup-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: $breakpoint-mobile) {
   .startup-cards {
     grid-template-columns: 1fr;
   }

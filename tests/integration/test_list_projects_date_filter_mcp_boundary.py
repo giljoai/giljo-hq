@@ -157,7 +157,7 @@ async def date_filter_mcp_client(db_manager, monkeypatch):
     - A monkeypatched ``_resolve_tenant`` so the in-memory transport has a
       synthetic tenant_key (no auth middleware in the in-process MCP fixture).
     - A patched ``ProductService`` (as seen from the ProjectService module)
-      whose ``get_active_product()`` returns a canned product — so the
+      whose ``get_default_product()`` returns a canned product — so the
       ``no active product`` validation gate doesn't block dispatch.
     - A patched ``ProjectService.list_projects`` returning canned
       ``ProjectListItem`` rows with tz-aware ``created_at`` / ``completed_at``
@@ -234,7 +234,10 @@ async def date_filter_mcp_client(db_manager, monkeypatch):
     )
 
     mock_product_svc = product_svc_patch.start()
-    mock_product_svc.return_value.get_active_product = AsyncMock(return_value=product)
+    mock_product_svc.return_value.get_default_product = AsyncMock(return_value=product)
+    # BE-9499a: list_projects_for_mcp resolves through resolve_binding_product now
+    # (byte-identical result for an omitted product_id -- the active product).
+    mock_product_svc.return_value.resolve_binding_product = AsyncMock(return_value=product)
     list_proj_patch.start()
     build_list_patch.start()
 

@@ -61,7 +61,7 @@ from tests.helpers.mcp_session_fixture import create_connected_server_and_client
 # Frozen coverage roster (the DoD gate). 49 registered tools — kept identical
 # to the registry-surface lock's EXPECTED_TOOL_SURFACE.keys(). A new @mcp.tool
 # added without an entry here fails ``test_smoke_coverage_is_the_full_registry``.
-# (INF-6049b added stage_project + implement_project; BE-6054b added 8 Hub thread
+# (INF-6049b added stage_project + get_implementation_prompt; BE-6054b added 8 Hub thread
 # tools; BE-6115a added launch_implementation; INF-6111b retired
 # generate_download_token + renamed get_staging_context -> get_staging_instructions;
 # BE-6111c added diagnose_project_state; BE-6225a retired get_pending_jobs,
@@ -80,26 +80,28 @@ EXPECTED_SMOKE_TOOLS: frozenset[str] = frozenset(
         "update_task",
         "list_tasks",
         "get_roadmap",
-        "update_roadmap_metadata",
+        "save_roadmap",
         "request_approval",
+        # BE-9499d: the harness-side door that clears awaiting_user. 48 -> 49.
+        "decide_approval",
         # Agent Message Hub thread tools (BE-6054b): 40 -> 48.
         "create_thread",
+        # FE-9530: retag a thread's product/project(s), or rename/set status.
+        "update_thread",
         "join_thread",
         "post_to_thread",
         "get_my_turn",
-        "await_my_turn",
         "get_participant_liveness",
-        "pass_baton",
+        "set_next_actor",
         "list_threads",
         "get_thread_history",
-        "search_threads",
         "get_staging_instructions",
         "update_job_mission",
         "report_progress",
         "complete_job",
-        "close_job",
+        "finalize_job",
         # BE-9012b (BE-6225e): reactivate_job + dismiss_reactivation merged into one.
-        "resolve_reactivation",
+        "resume_or_dismiss_job",
         "set_agent_status",
         "get_job_mission",
         "spawn_job",
@@ -110,7 +112,7 @@ EXPECTED_SMOKE_TOOLS: frozenset[str] = frozenset(
         "search_memory",
         "write_project_closeout",
         "write_memory_entry",
-        "get_vision_doc",
+        "get_vision_document",
         "update_product_context",
         # BE-9201: agent-side product bootstrap (44 -> 46).
         "create_product",
@@ -121,10 +123,13 @@ EXPECTED_SMOKE_TOOLS: frozenset[str] = frozenset(
         # BE-6225c: renamed from propose_product_context_update (applies tuning directly).
         "apply_context_tuning",
         "stage_project",
-        "implement_project",
+        "get_implementation_prompt",
         "launch_implementation",
         # BE-6221a: headless chain-start (Run Sequential equivalent). 49 -> 50.
-        "start_chain_run",
+        # BE-9554: start_chain_run's action-enum retired into two plainly-named verbs.
+        # start_chain_run itself stays one release as a pointer-only compat shim.
+        "link_projects",
+        "unlink_projects",
     }
 )
 

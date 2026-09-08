@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.harness_resolver import GENERIC_HARNESS
+from giljo_mcp.utils.identity import validate_from_agent
 
 
 # BE-9379: an anonymous post (neither from_agent nor as_user) NEVER attributes to the
@@ -41,6 +42,35 @@ _LABEL_COLLISION_WARNING = (
     "that display name. Post and hand the baton under the registered ID: get_my_turn matches the id, "
     "so a hand-off addressed to the label reaches nobody."
 )
+
+
+def validate_post_author_input(from_agent: str | None, as_user: bool, max_len: int) -> str | None:
+    """(A) Author attribution (FE-6122 / BE-9037 / BE-9379), extracted from
+    ``post_to_thread`` to keep that method within its size budget. An agent
+    self-declares its identity (its role/lane id) via ``from_agent`` (WINS when
+    present); a USER post claims the human's voice EXPLICITLY via ``as_user`` —
+    an omitted ``from_agent`` no longer falls back to the authenticated principal
+    (that implicit fallback let a forgetful agent impersonate the operator,
+    CHT-0483). The value feeds the FUNCTIONAL identity field (from_agent_id:
+    recipient self-exclusion, baton/get_my_turn matching, read cursors), so it is
+    hardened here (``validate_from_agent``: type-check + length-cap + control/
+    zero-width strip + reject-empty -> clean 422). The Hub keys on the SLUG —
+    from_agent_id is never rewritten to a UUID (breaks self-exclusion/baton);
+    unknown-but-sane slugs OK.
+
+    RESIDUAL LIMITATION (not fixed here): identity is self-declared; a caller
+    can still claim any slug because the session carries only tenant_key +
+    user_id. Impersonation-proofing needs auth-bound agent identity, a separate
+    effort. This guard stops garbage/corruption, not role impersonation.
+    """
+    from_agent = validate_from_agent(from_agent, max_len=max_len)
+    if as_user and from_agent:
+        raise ValidationError(
+            "from_agent and as_user are mutually exclusive: a post is authored by an "
+            "agent or by the human user, never both.",
+            context={"operation": "comm_thread.post"},
+        )
+    return from_agent
 
 
 def registered_id_for_label(participants, label: str | None) -> str | None:

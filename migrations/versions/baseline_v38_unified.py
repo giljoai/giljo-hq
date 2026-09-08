@@ -1105,7 +1105,7 @@ def upgrade() -> None:
                 "is_active",
                 sa.Boolean(),
                 nullable=False,
-                comment="Active product for token estimation and mission planning (one per tenant)",
+                comment="Shown as a tab in the product tab strip (FE-9524/D1). A new product is shown by default.",
             ),
             sa.Column(
                 "product_memory",
@@ -1626,8 +1626,22 @@ def upgrade() -> None:
             sa.Column("decided_by_user_id", sa.String(length=36), nullable=True),
             sa.Column("requested_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
             sa.Column("decided_at", sa.DateTime(timezone=True), nullable=True),
+            # BE-9514: declared LAST, matching physical column order -- Postgres
+            # ALTER TABLE ADD COLUMN (the incremental migration path) always
+            # appends at the end regardless of source declaration order, and
+            # test_inf5060_squash_baseline_v38.py's parity check compares
+            # column ORDER between the two paths, not just names/types.
+            sa.Column(
+                "decided_via",
+                sa.String(length=10),
+                nullable=True,
+                comment="BE-9514: which door decided this ('ui' | 'mcp'); NULL for legacy rows predating the column",
+            ),
             sa.CheckConstraint(
                 "status IN ('pending', 'decided', 'expired', 'cancelled')", name="ck_user_approvals_status"
+            ),
+            sa.CheckConstraint(
+                "decided_via IS NULL OR decided_via IN ('ui', 'mcp')", name="ck_user_approvals_decided_via"
             ),
             sa.PrimaryKeyConstraint("id", name="user_approvals_pkey"),
         )
@@ -1988,7 +2002,6 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_product_memory_gin ON public.products USING gin (product_memory)",
     "CREATE INDEX IF NOT EXISTS idx_product_name ON public.products USING btree (name)",
     "CREATE INDEX IF NOT EXISTS idx_product_org_id ON public.products USING btree (org_id)",
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_product_single_active_per_tenant ON public.products USING btree (tenant_key) WHERE (is_active = true)",
     "CREATE INDEX IF NOT EXISTS idx_product_tech_stacks_tenant ON public.product_tech_stacks USING btree (tenant_key)",
     "CREATE INDEX IF NOT EXISTS idx_product_tech_stacks_tenant_updated ON public.product_tech_stacks USING btree (tenant_key, updated_at)",
     "CREATE INDEX IF NOT EXISTS idx_product_tenant ON public.products USING btree (tenant_key)",
@@ -1997,7 +2010,6 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_products_consolidated_at ON public.products USING btree (consolidated_at)",
     "CREATE INDEX IF NOT EXISTS idx_products_deleted_at ON public.products USING btree (deleted_at) WHERE (deleted_at IS NOT NULL)",
     "CREATE INDEX IF NOT EXISTS idx_products_tenant_updated ON public.products USING btree (tenant_key, updated_at)",
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_project_single_active_per_product ON public.projects USING btree (product_id) WHERE (status = 'active'::public.project_status)",
     "CREATE INDEX IF NOT EXISTS idx_project_status ON public.projects USING btree (status)",
     "CREATE INDEX IF NOT EXISTS idx_project_tenant ON public.projects USING btree (tenant_key)",
     "CREATE INDEX IF NOT EXISTS idx_projects_closeout_executed ON public.projects USING btree (closeout_executed_at) WHERE (closeout_executed_at IS NOT NULL)",

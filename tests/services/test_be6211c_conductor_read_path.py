@@ -12,7 +12,7 @@ and learn the protocol etag on its first call:
   the caller had neither product_id NOR project_id. The dedicated conductor owns no
   project, so BE-6208e's project_id->product_id resolution can't help. Fall back to
   the session's active product exactly as list_projects does, reusing the existing
-  ProductService.get_active_product (no new service, no new table). Additive on the
+  ProductService.get_default_product (no new service, no new table). Additive on the
   previously-erroring path; cross-tenant isolation preserved (ProductService is
   tenant-scoped, ADR-009).
 
@@ -49,26 +49,26 @@ fc = importlib.import_module("giljo_mcp.tools.context_tools.fetch_context")
 
 
 @pytest.mark.asyncio
-async def test_resolve_active_product_id_returns_active_product() -> None:
-    """The helper reuses ProductService.get_active_product and returns its id."""
+async def test_resolve_default_product_id_returns_active_product() -> None:
+    """The helper reuses ProductService.get_default_product and returns its id."""
     db_manager = MagicMock()
     fake_product = SimpleNamespace(id="prod-6211c")
     with patch("giljo_mcp.services.product_service.ProductService") as svc_cls:
         instance = svc_cls.return_value
-        instance.get_active_product = AsyncMock(return_value=fake_product)
-        resolved = await fc._resolve_active_product_id("tk_6211c", db_manager)
+        instance.get_default_product = AsyncMock(return_value=fake_product)
+        resolved = await fc._resolve_default_product_id("tk_6211c", db_manager)
     assert resolved == "prod-6211c"
 
 
 @pytest.mark.asyncio
-async def test_resolve_active_product_id_raises_when_none() -> None:
+async def test_resolve_default_product_id_raises_when_none() -> None:
     """No active product for the tenant -> ValidationError (not a silent None)."""
     db_manager = MagicMock()
     with patch("giljo_mcp.services.product_service.ProductService") as svc_cls:
         instance = svc_cls.return_value
-        instance.get_active_product = AsyncMock(return_value=None)
+        instance.get_default_product = AsyncMock(return_value=None)
         with pytest.raises(ValidationError):
-            await fc._resolve_active_product_id("tk_6211c", db_manager)
+            await fc._resolve_default_product_id("tk_6211c", db_manager)
 
 
 @pytest.mark.asyncio
@@ -97,7 +97,7 @@ async def test_fetch_context_no_ids_falls_back_to_active_product(monkeypatch) ->
         # answer meaningfully.
         return {}
 
-    monkeypatch.setattr(fc, "_resolve_active_product_id", _fake_resolve)
+    monkeypatch.setattr(fc, "_resolve_default_product_id", _fake_resolve)
     monkeypatch.setattr(fc, "_is_category_enabled", _fake_enabled)
     monkeypatch.setattr(fc, "_load_user_depth_config", _fake_depths)
     monkeypatch.setattr(fc, "_fetch_category", _fake_fetch_category)

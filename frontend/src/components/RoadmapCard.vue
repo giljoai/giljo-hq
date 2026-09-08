@@ -25,10 +25,12 @@
         <v-icon icon="mdi-lock-outline" size="14" />
       </div>
       <span class="rm-num">{{ rank }}</span>
-      <!-- FE-6176: the rank-rail selection checkbox was REMOVED. Selection now
-           happens only in link mode, via the checkbox that replaces the Activate
-           button in the action rail (see below) — matching the /projects "Linked"
-           column model. The rank rail is just the grip + number now. -->
+      <!-- FE-6176: the rank-rail selection checkbox was REMOVED THEN, moved into
+           the action rail as a link-mode checkbox (see below, superseded next).
+           FE-9568 (2026-09-02, operator ruling) removed that link-mode checkbox
+           too: /roadmap is an ordering-only screen now, with no selection or
+           launch control anywhere on the card. The rank rail is just the grip +
+           number. -->
     </div>
 
     <!-- Body -->
@@ -72,7 +74,7 @@
 
       <!-- Blocked dependency row (FE-6022d): its own row under the badge row.
            Red label, NO icon, with the agent's free-text dependency note. Only
-           shown when the agent flagged this item blocked via update_roadmap_metadata. -->
+           shown when the agent flagged this item blocked via save_roadmap. -->
       <div v-if="item.blocked" class="rm-blocked-row">
         <span class="rm-blocked-label">Blocked</span>
         <span v-if="item.blocked_reason" class="rm-blocked-reason">reason: {{ item.blocked_reason }}</span>
@@ -81,80 +83,32 @@
 
     <!-- Action rail (type-dependent) -->
     <div class="rm-actions">
-      <!-- FE-6176: link mode — a checkbox replaces the Activate button for every
-           runnable project (inactive, incl. in-chain). Force-ticked when already
-           in a chain run (selected || inChain); disabled when the run is locked
-           (Staged tier). Untick at Editing tier calls removeMember via the parent.
-           This mirrors the /projects "Linked" column exactly. -->
-      <!-- FE-6180: /roadmap is plan+launch only. Once linked (any active-chain member),
-           the tickbox greys and clicking it navigates to /projects (management lives there);
-           reset/modify is NOT done on /roadmap. Non-chain rows tick freely. -->
-      <v-tooltip
-        v-if="linkMode && isProject && !isTerminal && !isActivated"
-        :disabled="!inChain"
-        text="Linked in a chain — reset or modify on the Projects page"
-        location="top"
-      >
-        <template #activator="{ props: ttProps }">
-          <span v-bind="ttProps" class="rm-link-wrap" @click.stop="inChain && $emit('open-chain', item)">
-            <v-checkbox-btn
-              :model-value="selected || inChain"
-              :disabled="inChain"
-              :style="inChain ? 'pointer-events: none' : undefined"
-              density="compact"
-              hide-details
-              class="rm-link-mode-check"
-              :aria-label="`Link ${displayTitle} to the chain`"
-              :data-testid="`roadmap-select-checkbox-${item.id || item.project_id}`"
-              @click.stop
-              @update:model-value="$emit('toggle-select', item)"
-            />
-          </span>
-        </template>
-      </v-tooltip>
-      <!-- FE-6170: outside link mode, a chain member shows an "In chain" badge in
-           place of the Activate button so membership is visible in context. -->
+      <!-- Chain membership indicator — history + FE-9568 reversal:
+           FE-6170 added this "In chain" badge so a chain member is visible in
+           context. FE-6176 then added a link-mode checkbox here (replacing the
+           Activate button) so a project could be selected into a chain run
+           straight from /roadmap. FE-6180 made an already-linked row's tickbox
+           grey + click through to /projects instead of editing it here
+           ("/roadmap is plan+launch only... reset/modify is NOT done on
+           /roadmap").
+           FE-9568 (2026-09-02, operator ruling) REVERSES plan+launch: /roadmap
+           is an ordering mechanism only — an agent builds the priority order, a
+           human reads it, and implementation starts elsewhere. The link-mode
+           checkbox, the Activate/Deactivate buttons, and the pill's
+           click-through to /projects are all REMOVED. This pill is now a plain
+           read-only membership badge: no click target, no emit. Chain launch
+           itself is NOT removed — it still exists via /projects and the
+           headless conductor path; only its /roadmap door is gone. -->
       <span
-        v-else-if="isProject && inChain"
+        v-if="isProject && inChain"
         class="rm-badge rm-in-chain-pill"
         data-testid="roadmap-in-chain-pill"
       >
         <span class="mdi mdi-link-variant" aria-hidden="true" style="font-size: 11px; margin-right: 3px;" />
         In chain
       </span>
-      <!-- Activated projects toggle to a Deactivate action (returns the project
-           to inactive — same effect as the Projects-list hamburger "Deactivate").
-           Only the live `active` status is reversible here; the truly terminal
-           statuses (completed / cancelled / deleted) keep Activate disabled. -->
       <v-btn
-        v-else-if="isProject && isActivated"
-        color="warning"
-        variant="tonal"
-        size="small"
-        prepend-icon="mdi-rocket-launch-outline"
-        class="rm-primary-btn"
-        :aria-label="`Deactivate project ${displayTitle}`"
-        @click="$emit('deactivate', item)"
-      >
-        Deactivate
-      </v-btn>
-      <v-btn
-        v-else-if="isProject"
-        color="primary"
-        variant="flat"
-        size="small"
-        prepend-icon="mdi-rocket-launch"
-        class="rm-primary-btn"
-        :class="{ 'rm-primary-btn--election-faded': electionActive }"
-        :disabled="isTerminal || electionActive"
-        :title="electionActive ? 'Projects are elected — use Run Sequential to launch them' : ''"
-        :aria-label="`Activate project ${displayTitle}`"
-        @click="$emit('activate', item)"
-      >
-        Activate
-      </v-btn>
-      <v-btn
-        v-else
+        v-else-if="!isProject"
         variant="tonal"
         size="small"
         color="info"
@@ -222,6 +176,12 @@
  * emits intents; the parent (RoadmapView) owns fetch, reorder persistence,
  * and dialog wiring.
  *
+ * FE-9568 (2026-09-02, operator ruling): /roadmap is an ORDERING mechanism
+ * only. Selection, Activate/Deactivate, and the chain-membership click-through
+ * that FE-6176/FE-6170/FE-6180 added here were removed — see the inline
+ * comments at the "In chain" pill for the full history. Only convert / open /
+ * demote / remove (plus drag-to-reorder in the parent) remain.
+ *
  * Color discipline (CLAUDE.md "NO hardcoded hex"): badge colors come from the
  * sanctioned JS color sources — getAgentColor() and colorTokens — fed through
  * hexToRgba(hex, 0.15) to build the tinted-badge style (rgba background + full
@@ -246,48 +206,22 @@ const props = defineProps({
     type: Number,
     required: true,
   },
-  // FE-6131e: whether this card is checked for a sequential run.
-  selected: {
-    type: Boolean,
-    default: false,
-  },
-  // FE-6165a: true while ANY project is elected for a sequential run. Fades +
-  // disables this card's Activate button so the only launch affordance is Run
-  // Sequential (you don't solo-activate a project mid-election).
-  electionActive: {
-    type: Boolean,
-    default: false,
-  },
   // FE-6165f: true when this project is a member of an active (in-flight)
-  // sequential run. Checkbox is force-ticked + locked (disabled), and an
-  // "In chain" pill is rendered so the user knows why.
+  // chain run — drives the read-only "In chain" pill so membership stays
+  // visible in context. FE-9568 (2026-09-02, operator ruling): /roadmap no
+  // longer selects, activates, or manages chain membership — it only orders
+  // work — so the `selected` / `electionActive` / `lockedInChain` / `linkMode`
+  // props that used to drive the removed selection checkbox and Activate /
+  // Deactivate buttons were removed along with them.
   inChain: {
-    type: Boolean,
-    default: false,
-  },
-  // FE-6171b: true when the run containing this project is in the Staged (locked) tier.
-  // Drives tickbox disable: Editing tier (inChain=true, lockedInChain=false) keeps the
-  // tickbox enabled for removeMember. Staged/Ultralocked disables it.
-  lockedInChain: {
-    type: Boolean,
-    default: false,
-  },
-  // FE-6176: link/chain mode — checkbox moves from rm-rank to the action rail,
-  // replacing the Activate button for inactive non-terminal projects.
-  linkMode: {
     type: Boolean,
     default: false,
   },
 })
 
-defineEmits(['activate', 'deactivate', 'convert', 'open', 'demote', 'remove', 'toggle-select', 'open-chain'])
+defineEmits(['convert', 'open', 'demote', 'remove'])
 
 const isProject = computed(() => props.item.item_type === 'project')
-
-// A project still in the live `active` status — the Activate button toggles to
-// Deactivate (reversible back to inactive). Distinct from the truly terminal
-// statuses (completed / cancelled / deleted) which stay disabled.
-const isActivated = computed(() => isProject.value && props.item.status === 'active')
 
 // taxonomy_alias can be '' in the contract — hide the chip when empty.
 const aliasShown = computed(() => !!(props.item.taxonomy_alias && props.item.taxonomy_alias.trim()))
@@ -366,7 +300,7 @@ const complexityBadge = computed(() => {
 })
 
 // Exposed for unit tests.
-defineExpose({ isProject, isActivated, aliasShown, aliasStyle, typeLabel, riskBadge, complexityBadge, statusBadge, isTerminal, linkMode: computed(() => props.linkMode) })
+defineExpose({ isProject, aliasShown, aliasStyle, typeLabel, riskBadge, complexityBadge, statusBadge, isTerminal })
 </script>
 
 <style lang="scss" scoped>
@@ -438,13 +372,9 @@ defineExpose({ isProject, isActivated, aliasShown, aliasStyle, typeLabel, riskBa
   color: var(--color-accent-primary);
 }
 
-/* FE-6176: link-mode checkbox in the action rail (replaces Activate button). */
-.rm-link-mode-check {
-  align-self: center;
-  margin: 0 auto;
-}
-
-/* FE-6165f: "In chain" locked-checkbox pill (tinted badge — implementer blue). */
+/* FE-6165f: "In chain" pill (tinted badge — implementer blue). FE-9568
+   (2026-09-02): read-only membership indicator now — the link-mode checkbox
+   this used to sit alongside (.rm-link-mode-check) was removed. */
 .rm-in-chain-pill {
   background-color: rgba(109, 179, 228, 0.15); /* var(--color-agent-implementer) at 15% */
   color: var(--color-agent-implementer);
@@ -543,11 +473,6 @@ defineExpose({ isProject, isActivated, aliasShown, aliasStyle, typeLabel, riskBa
   text-transform: none;
   letter-spacing: 0;
   font-weight: 700;
-}
-
-/* FE-6165a: fade the per-card Activate while a sequential election is active. */
-.rm-primary-btn--election-faded {
-  opacity: 0.3;
 }
 
 .rm-act-row {

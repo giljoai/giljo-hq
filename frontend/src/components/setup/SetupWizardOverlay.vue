@@ -161,7 +161,6 @@
                   v-else-if="currentStep === 2"
                   :selected-tools="localSelectedTools"
                   :connected-tools="step2ConnectedTools"
-                  :previously-completed="props.setupStepCompleted >= 3"
                   @can-proceed="step3CanProceed = $event"
                   @step-data="step3Data = $event"
                 />
@@ -261,6 +260,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import configService from '@/services/configService'
 import { SETUP_TOOLS, methodTag, toolName } from '@/config/setupTools'
+import { useConnectedToolsResumeSeed } from '@/composables/useConnectedToolsResumeSeed'
 import { PRODUCT_NAME } from '@/branding'
 import SetupStep2Connect from './SetupStep2Connect.vue'
 import SetupStep3Commands from './SetupStep3Commands.vue'
@@ -293,10 +293,6 @@ const props = defineProps({
   selectedTools: {
     type: Array,
     default: () => [],
-  },
-  setupStepCompleted: {
-    type: Number,
-    default: 0,
   },
   isRerun: {
     type: Boolean,
@@ -337,6 +333,14 @@ async function loadEdition() {
   }
 }
 onMounted(loadEdition)
+
+// FE-9569 detector 2: a wizard resumed DIRECTLY onto Install leaves
+// connectedTools empty forever (see the composable's doc comment).
+useConnectedToolsResumeSeed({
+  currentStep: () => props.currentStep,
+  selectedTools: () => localSelectedTools.value,
+  step2Data,
+})
 
 function toolMethodTag(toolId) {
   return methodTag(toolId, isCe.value)
@@ -1023,9 +1027,13 @@ function handleDismiss() {
   color: $color-on-brand-ink !important;
 }
 
-// Preserve Vuetify's disabled dimming for the gradient Next button.
+// A disabled Next must NOT read as the live brand pill (FE-9497): drop the
+// gradient for a flat muted surface so "you cannot continue yet" is legible.
 .footer-next-btn.v-btn--disabled {
-  opacity: 0.4;
+  background: $elevation-elevated !important;
+  color: $color-text-muted !important;
+  box-shadow: none !important;
+  opacity: 1;
 }
 
 .footer-skip {

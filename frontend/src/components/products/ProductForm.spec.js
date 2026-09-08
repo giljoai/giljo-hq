@@ -723,7 +723,7 @@ describe('ProductForm.vue — FE-6088 three-path onboarding gate', () => {
 
 // BE-9164 superseded the BE-5118 expanded prompt template: the detailed
 // two-role extraction brief now lives server-side in VISION_EXTRACTION_PROMPT
-// (returned by get_vision_doc as extraction_instructions) so it can't drift
+// (returned by get_vision_document as extraction_instructions) so it can't drift
 // out of sync with the update_product_context schema. This wizard prompt is
 // now a slim pointer at that single source of truth. The single-call
 // instruction MUST survive the modal refactor.
@@ -733,7 +733,7 @@ describe('useVisionAnalysis — BE-9164 slim single-source prompt', () => {
     vi.resetModules()
   })
 
-  it('points the agent at get_vision_doc + extraction_instructions and teaches staged update_product_context calls', async () => {
+  it('points the agent at get_vision_document + extraction_instructions and teaches staged update_product_context calls', async () => {
     vi.doUnmock('@/composables/useVisionAnalysis')
     const copyMock = vi.fn(() => Promise.resolve(true))
     vi.doMock('@/composables/useClipboard', () => ({
@@ -746,7 +746,7 @@ describe('useVisionAnalysis — BE-9164 slim single-source prompt', () => {
 
     expect(copyMock).toHaveBeenCalledTimes(1)
     const prompt = copyMock.mock.calls[0][0]
-    expect(prompt).toContain('get_vision_doc(product_id="prod-xyz")')
+    expect(prompt).toContain('get_vision_document(product_id="prod-xyz")')
     expect(prompt).toMatch(/extraction_instructions/)
     expect(prompt).toContain('update_product_context')
     // FE-9320: this asserted "ONE single call". That mandate is the defect — a real

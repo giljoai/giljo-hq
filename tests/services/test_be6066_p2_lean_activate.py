@@ -22,9 +22,12 @@ behavior or response bytes:
 These tests gate the load-bearing correctness properties the collapse must
 preserve:
 
-1. **≤1 active product + cascade** — activating flips the target active AND
-   deactivates the prior active (one-active-per-tenant invariant), and the
-   project + job cascade still fires for the deactivated product.
+1. **Several products may be shown at once, no cascade** — FE-9524/D1 dropped
+   the one-active-per-tenant invariant and its project/job pause cascade.
+   Activating (showing) a product no longer touches any other product, or
+   that product's own projects/jobs. This is a rewrite of the old
+   "≤1 active + cascade" pin, which asserted exactly the enforcement D1
+   retires.
 2. **Byte-identical response shape** — the endpoint's ``ProductActivationResponse``
    carries the same fields/values (identity, previous-active id, stats counts,
    fully-hydrated detail graph) it did before the collapse, asserted against a
@@ -110,11 +113,12 @@ def _add_vision(session, tenant_key: str, product_id: str, name: str = "Vision")
 
 
 @pytest.mark.asyncio
-async def test_activate_switches_active_and_preserves_cascade(db_session, db_manager):
+async def test_activate_shows_without_touching_siblings_or_cascading(db_session, db_manager):
     """
-    Activating a product flips it active, deactivates the prior active product
-    (≤1 active per tenant), and the project + job cascade still fires for the
-    deactivated product. These behaviors must survive the P2 query-collapse.
+    FE-9524/D1: showing product B leaves product A shown too (no sibling
+    deactivation), and does not pause product A's active project or cancel its
+    active job -- "several tabs open is the point". These properties must
+    survive the P2 query-collapse the same way the old cascade used to.
     """
     tenant_key = TestData.generate_tenant_key()
 
@@ -149,7 +153,7 @@ async def test_activate_switches_active_and_preserves_cascade(db_session, db_man
     await db_session.refresh(project_x)
     await db_session.refresh(job)
 
-    # ≤1 active invariant: exactly one active product, and it is B.
+    # Both shown -- no single-active enforcement left, DB or service.
     active_rows = (
         (
             await db_session.execute(
@@ -165,13 +169,12 @@ async def test_activate_switches_active_and_preserves_cascade(db_session, db_man
         .scalars()
         .all()
     )
-    assert len(active_rows) == 1
-    assert str(active_rows[0].id) == str(product_b.id)
-    assert product_a.is_active is False
+    assert {str(r.id) for r in active_rows} == {str(product_a.id), str(product_b.id)}
+    assert product_a.is_active is True
 
-    # Cascade still fires for the deactivated product.
-    assert project_x.status == ProjectStatus.INACTIVE
-    assert job.status == "cancelled"
+    # No cascade: showing B never touches A's project or job.
+    assert project_x.status == ProjectStatus.ACTIVE
+    assert job.status == "active"
 
 
 @pytest.mark.asyncio
@@ -264,6 +267,10 @@ async def test_lean_previous_active_fetch_issues_fewer_statements(db_session, db
     tenant_key = TestData.generate_tenant_key()
 
     product = _add_product(db_session, tenant_key, "Active Product", is_active=True)
+    # FE-9524: get_default_product now queries is_default (a single explicit
+    # row is one SELECT; without it the sole-shown-product fallback issues
+    # two more, which would inflate this statement count).
+    product.is_default = True
     await db_session.flush()
     # Relations exist, so the eager path actually issues its selectin loads.
     _add_vision(db_session, tenant_key, product.id, "Vision A")
@@ -287,11 +294,11 @@ async def test_lean_previous_active_fetch_issues_fewer_statements(db_session, db
     event.listen(sync_engine, "before_cursor_execute", _count)
     try:
         counter["n"] = 0
-        lean = await service.get_active_product(eager_load=False)
+        lean = await service.get_default_product(eager_load=False)
         lean_stmts = counter["n"]
 
         counter["n"] = 0
-        eager = await service.get_active_product(eager_load=True)
+        eager = await service.get_default_product(eager_load=True)
         eager_stmts = counter["n"]
     finally:
         event.remove(sync_engine, "before_cursor_execute", _count)

@@ -151,9 +151,10 @@ class TestListProjectsBehavior:
                 accessor._project_service, "_get_valid_project_types", new_callable=AsyncMock, return_value=[]
             ),
         ):
-            mock_product_svc.return_value.get_active_product = AsyncMock(
+            mock_product_svc.return_value.get_default_product = AsyncMock(
                 return_value=mock_product,
             )
+            mock_product_svc.return_value.resolve_binding_product = AsyncMock(return_value=mock_product)
             result = await accessor._project_service.list_projects_for_mcp(tenant_key="tenant-test")
 
         assert result["success"] is True
@@ -221,9 +222,10 @@ class TestListProjectsBehavior:
                 accessor._project_service, "_get_valid_project_types", new_callable=AsyncMock, return_value=[]
             ),
         ):
-            mock_product_svc.return_value.get_active_product = AsyncMock(
+            mock_product_svc.return_value.get_default_product = AsyncMock(
                 return_value=mock_product,
             )
+            mock_product_svc.return_value.resolve_binding_product = AsyncMock(return_value=mock_product)
             result = await accessor._project_service.list_projects_for_mcp(
                 status_filter="active",
                 tenant_key="tenant-test",
@@ -281,9 +283,10 @@ class TestListProjectsBehavior:
                 accessor._project_service, "_get_valid_project_types", new_callable=AsyncMock, return_value=[]
             ),
         ):
-            mock_product_svc.return_value.get_active_product = AsyncMock(
+            mock_product_svc.return_value.get_default_product = AsyncMock(
                 return_value=mock_product,
             )
+            mock_product_svc.return_value.resolve_binding_product = AsyncMock(return_value=mock_product)
             result = await accessor._project_service.list_projects_for_mcp(
                 status_filter="all",
                 tenant_key="tenant-test",
@@ -299,8 +302,15 @@ class TestListProjectsBehavior:
         """Should raise ValidationError when no active product."""
         accessor = _make_accessor()
 
+        from giljo_mcp.exceptions import ValidationError
+
         with patch(_PRODUCT_SERVICE_PATH) as mock_product_svc:
-            mock_product_svc.return_value.get_active_product = AsyncMock(return_value=None)
+            mock_product_svc.return_value.get_default_product = AsyncMock(return_value=None)
+            # BE-9499a: list_projects_for_mcp resolves through resolve_binding_product now;
+            # an omitted product_id with no active product raises the same message.
+            mock_product_svc.return_value.resolve_binding_product = AsyncMock(
+                side_effect=ValidationError("No active product set. Please activate a product first.")
+            )
 
             with pytest.raises(Exception, match="No active product"):
                 await accessor._project_service.list_projects_for_mcp(tenant_key="tenant-test")
@@ -346,9 +356,10 @@ class TestListProjectsBehavior:
                 accessor._project_service, "_get_valid_project_types", new_callable=AsyncMock, return_value=[]
             ),
         ):
-            mock_product_svc.return_value.get_active_product = AsyncMock(
+            mock_product_svc.return_value.get_default_product = AsyncMock(
                 return_value=mock_product,
             )
+            mock_product_svc.return_value.resolve_binding_product = AsyncMock(return_value=mock_product)
             result = await accessor._project_service.list_projects_for_mcp(tenant_key="tenant-test")
 
         desc = result["projects"][0]["description"]
@@ -419,7 +430,7 @@ class TestUpdateProjectMetadataBehavior:
             patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
             patch.object(accessor._project_service, "board_counts", new_callable=AsyncMock, return_value=[]),
         ):
-            mock_product_svc.return_value.get_active_product = AsyncMock(
+            mock_product_svc.return_value.get_default_product = AsyncMock(
                 return_value=mock_active_product,
             )
             result = await accessor._project_service.update_project_metadata_for_mcp(
@@ -470,7 +481,7 @@ class TestUpdateProjectMetadataBehavior:
             patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
             patch.object(accessor._project_service, "board_counts", new_callable=AsyncMock, return_value=[]),
         ):
-            mock_product_svc.return_value.get_active_product = AsyncMock(
+            mock_product_svc.return_value.get_default_product = AsyncMock(
                 return_value=mock_active_product,
             )
             result = await accessor._project_service.update_project_metadata_for_mcp(
@@ -593,7 +604,7 @@ class TestUpdateProjectMetadataBehavior:
             patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
             patch.object(accessor._project_service, "board_counts", new_callable=AsyncMock, return_value=[]),
         ):
-            mock_product_svc.return_value.get_active_product = AsyncMock(
+            mock_product_svc.return_value.get_default_product = AsyncMock(
                 return_value=mock_active_product,
             )
             result = await accessor._project_service.update_project_metadata_for_mcp(
@@ -645,7 +656,7 @@ class TestUpdateProjectMetadataBehavior:
             patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
             patch.object(accessor._project_service, "board_counts", new_callable=AsyncMock, return_value=[]),
         ):
-            mock_product_svc.return_value.get_active_product = AsyncMock(
+            mock_product_svc.return_value.get_default_product = AsyncMock(
                 return_value=mock_active_product,
             )
             await accessor._project_service.update_project_metadata_for_mcp(

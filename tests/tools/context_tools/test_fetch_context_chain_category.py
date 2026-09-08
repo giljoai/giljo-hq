@@ -169,7 +169,7 @@ async def test_chain_category_no_active_run_returns_clean_error(db_manager, clea
 async def test_chain_category_hands_the_sub_orchestrator_its_hub(db_manager, cleanup_tenants: list[str]) -> None:
     """BE-9291: the hub arrives WITH the chain context — no subject convention involved.
 
-    This is the seam that replaced ``search_threads(query="{run_id}")``. The hub below is
+    This is the seam that replaced ``list_threads(query="{run_id}")``. The hub below is
     created with a subject that does not contain the run_id anywhere, which is precisely
     what the old mechanism could not find. A sub-orchestrator now asks for its chain
     context and gets the thread id handed to it.

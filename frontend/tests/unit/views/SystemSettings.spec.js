@@ -9,7 +9,7 @@
  * - Admin-only access
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import { createVuetify } from 'vuetify'
 import * as components from 'vuetify/components'
@@ -19,6 +19,14 @@ import SystemSettings from '@/views/SystemSettings.vue'
 import configService from '@/services/configService'
 
 // Mock the api service
+// FE-9553: local hoisted toast spy -- see the same note in the RoadmapView and
+// ApiKeyManager specs. The global mock in tests/setup.js hands out a fresh
+// vi.fn() per call, so a toast assertion through it observes nothing.
+const showToastSpy = vi.hoisted(() => vi.fn())
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({ showToast: showToastSpy }),
+}))
+
 vi.mock('@/services/api', () => ({
   default: {
     settings: {
@@ -553,6 +561,51 @@ describe('SystemSettings.vue', () => {
 
       expect(wrapper.exists()).toBe(true)
       // Actual admin check happens in router guard
+    })
+  })
+
+  // ── FE-9553: loadDatabaseSettings is silent unless a click asked ─────────
+  //
+  // It runs from onMounted AND from the retry button. Only the retry follows a
+  // click, so only the retry may speak. Both directions asserted, because a
+  // silence test alone would be satisfied by a guard that is always off.
+  //
+  // Note the retry button had to change too: `@click="loadDatabaseSettings"`
+  // hands the MouseEvent in as the options object, which would have made
+  // `notify` undefined and the retry silent. It now calls explicitly.
+  describe('the notify opt-in (FE-9553)', () => {
+    function mountIt() {
+      return mount(SystemSettings, {
+        global: {
+          plugins: [vuetify, router, pinia],
+          stubs: {
+            DatabaseConnection: { template: '<div>Database Connection Mock</div>' },
+            UserManager: { template: '<div>User Manager Mock</div>' },
+          },
+        },
+      })
+    }
+
+    it('says NOTHING when the mount-time database read fails', async () => {
+      global.fetch.mockRejectedValue(new Error('Network error'))
+      showToastSpy.mockClear()
+
+      wrapper = mountIt()
+      await flushPromises()
+
+      expect(showToastSpy).not.toHaveBeenCalled()
+    })
+
+    it('DOES speak up when the retry button asked for it', async () => {
+      wrapper = mountIt()
+      await flushPromises()
+
+      global.fetch.mockRejectedValue(new Error('Network error'))
+      showToastSpy.mockClear()
+      await wrapper.vm.loadDatabaseSettings({ notify: true })
+      await flushPromises()
+
+      expect(showToastSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }))
     })
   })
 })

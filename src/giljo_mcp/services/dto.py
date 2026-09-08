@@ -30,6 +30,10 @@ class BroadcastAgentCreatedContext:
     mission: str
     phase: int | None
     created_at: datetime
+    # BE-9525c: additive -- product_id alongside project_id so the per-project
+    # Jobs viewport (FE-9525d) and the product-activity router can key on
+    # either without a store lookup.
+    product_id: str | None = None
 
 
 @dataclass

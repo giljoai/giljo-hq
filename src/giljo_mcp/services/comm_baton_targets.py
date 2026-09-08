@@ -337,3 +337,30 @@ async def post_target_rejection(
         current_owner=current_owner,
         participants=participants,
     )
+
+
+def broadcast_reply_should_clear_baton(
+    clear_baton_on_broadcast_reply: bool,
+    to_participant: str | None,
+    current_owner: str | None,
+    user_id: str | None,
+) -> bool:
+    """BE-9560: should a REST broadcast reply clear the baton to None?
+
+    Operator ruling 2026-09-02 ("answering means answering"): a directed reply
+    already hands the baton to its addressee via ``pass_baton_to`` (unconditional,
+    same as the MCP auto-pass -- ``post_to_thread`` takes that branch first and
+    never reaches this one). A BROADCAST reply (no ``to_participant``) clears the
+    baton instead of leaving it to the manual raised-hand control -- but ONLY when
+    it is currently held by the poster (``current_owner == user_id``) or shared
+    via ``'all'``. A baton held by someone else (an agent still mid-task) is left
+    alone: the operator merely commenting on a thread must never silently cancel
+    another agent's still-open turn. ``clear_baton_on_broadcast_reply`` is the
+    REST-only opt-in; the MCP wrapper never sets it, so its broadcasts are
+    unaffected by this function ever being called. ``user_id`` must be truthy to
+    match its own branch -- an omitted poster identity must never coincide with
+    an already-None owner and read as "the poster holds it".
+    """
+    if not clear_baton_on_broadcast_reply or to_participant:
+        return False
+    return current_owner == "all" or (bool(user_id) and current_owner == user_id)

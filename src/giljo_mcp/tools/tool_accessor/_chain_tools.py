@@ -58,21 +58,55 @@ class ChainToolsMixin:
 
     async def start_chain_run(
         self,
-        project_ids: list[str],
-        execution_mode: str,
+        project_ids: list[str] | None = None,
+        execution_mode: str | None = None,
         resolved_order: list[str] | None = None,
         review_policy: str = "per_card",
         chain_mission: str | None = None,
         tenant_key: str | None = None,
+        action: str = "start",
+        run_id: str | None = None,
+        member_project_id: str | None = None,
     ) -> dict[str, Any]:
         """Create a chain (sequence run) + its conductor, reusing the existing engine.
 
         Returns the serialized run plus the conductor identity and a next_action
         that bootstraps the conductor's drive, or a structured rejection dict.
+
+        BE-9500b: ``action`` is the chain reverse gear / member-review verb, the
+        same one-tool-many-actions pattern ``stage_project`` uses for its staging
+        reverse gear (BE-9499b) -- no new tool registered, roster-lock untouched.
+        ``action="start"`` (default) is the behavior above, unchanged.
+        ``action="terminate_remaining"`` (requires ``run_id``) cancels the run via
+        ``SequenceRunService.release(mode="cancel")`` -- byte-identical to the REST
+        ``POST /sequence-runs/{run}/release?mode=cancel`` door, no precondition.
+        ``action="mark_reviewed"`` (requires ``run_id`` + ``member_project_id``)
+        durably records a member reviewed via
+        ``SequenceRunService.mark_member_reviewed`` -- byte-identical to the REST
+        ``POST /sequence-runs/{run}/members/{pid}/review`` door. Verified by call
+        path (BE-9500b): this is NON-GATING, it never touches
+        ``current_index``/``project_statuses`` -- a completed member is already
+        advanced past automatically (BE-9500a). It exists so a headless conductor
+        can take the one action a human takes closing the review pane, keeping the
+        durable review record consistent regardless of which door drove it.
         """
         effective_tenant_key = tenant_key or self.tenant_manager.get_current_tenant()
         if not effective_tenant_key:
-            raise ValidationError(message="tenant_key is required", context={"operation": "start_chain_run"})
+            raise ValidationError(message="tenant_key is required", context={"operation": "accessor.start_chain_run"})
+
+        if action != "start":
+            return await self._chain_run_reverse_gear(
+                action=action,
+                run_id=run_id,
+                member_project_id=member_project_id,
+                tenant_key=effective_tenant_key,
+            )
+
+        if project_ids is None or execution_mode is None:
+            raise ValidationError(
+                message="project_ids and execution_mode are required for action='start'",
+                context={"operation": "accessor.start_chain_run"},
+            )
 
         # Tool-layer input validation: agent input is untrusted (CLAUDE.md). Type +
         # enum + length are checked BEFORE the service so a bad value is a clean 422,
@@ -112,6 +146,57 @@ class ChainToolsMixin:
 
         conductor_job_id = await self._resolve_conductor_job_id(run["conductor_agent_id"], effective_tenant_key)
         return self._chain_run_response(run, conductor_job_id)
+
+    # ------------------------------------------------------------------
+    # BE-9500b: chain reverse gear (terminate-remaining, mark-reviewed)
+    # ------------------------------------------------------------------
+
+    _CHAIN_REVERSE_ACTIONS = frozenset({"terminate_remaining", "mark_reviewed"})
+
+    async def _chain_run_reverse_gear(
+        self,
+        *,
+        action: str,
+        run_id: str | None,
+        member_project_id: str | None,
+        tenant_key: str,
+    ) -> dict[str, Any]:
+        """The two surviving chain verbs (BE-9500b), dispatched off ``action``.
+
+        Each branch calls the exact ``SequenceRunService`` method the matching
+        REST door calls -- one owning writer, two doors. Both routes
+        end in ``service.update()`` internally, so ``sequence:updated`` fires the
+        same as the REST path and the dashboard cockpit tracks a headless-driven
+        end/review exactly as it tracks a UI-driven one.
+        """
+        if action not in self._CHAIN_REVERSE_ACTIONS:
+            raise ValidationError(
+                message=f"Invalid action {action!r}. Valid actions: start, "
+                f"{', '.join(sorted(self._CHAIN_REVERSE_ACTIONS))}.",
+                context={"valid_actions": ["start", *sorted(self._CHAIN_REVERSE_ACTIONS)]},
+            )
+        if not isinstance(run_id, str) or not run_id.strip():
+            raise ValidationError(message="run_id is required for this action", context={"field": "run_id"})
+
+        service = SequenceRunService(
+            db_manager=self.db_manager,
+            tenant_manager=self.tenant_manager,
+            websocket_manager=self._websocket_manager,
+            session=self._test_session,
+        )
+
+        if action == "terminate_remaining":
+            run = await service.release(run_id=run_id, mode="cancel", tenant_key=tenant_key)
+            return {"success": True, "action": action, "run": run}
+
+        # Remaining branch: action == "mark_reviewed" (enforced by the membership check above).
+        if not isinstance(member_project_id, str) or not member_project_id.strip():
+            raise ValidationError(
+                message="member_project_id is required for action='mark_reviewed'",
+                context={"field": "member_project_id"},
+            )
+        run = await service.mark_member_reviewed(run_id=run_id, project_id=member_project_id, tenant_key=tenant_key)
+        return {"success": True, "action": action, "run": run}
 
     # ------------------------------------------------------------------
     # Validation helpers
@@ -293,7 +378,14 @@ class ChainToolsMixin:
                 "You are the dedicated chain conductor for this run. Receive your chain staging "
                 "protocol (CH_CAPABILITY + CH_CHAIN_STAGING): stand up the Hub thread, author the "
                 "chain mission, then complete_job to end staging. The implementation drive "
-                "(get_job_mission) comes after staging is complete."
+                "(get_job_mission) comes after staging is complete. This run row is the "
+                "crash-resume ground truth, not a workflow you must hold in your own context: "
+                "run['resolved_order'] + run['project_ids'] are the grouping/order and "
+                "run['current_index'] + run['project_statuses'] are the live progress, all "
+                "durable on the sequence_run record -- a fresh session that lost this response "
+                "recovers by reading the record (get_context / the run itself), never by "
+                "re-electing or re-staging. The dashboard's Run Sequential button writes this "
+                "SAME record through the same SequenceRunService; you are not its only writer."
             ),
         )
         return {

@@ -138,6 +138,7 @@ def _build_product_response(product, stats=None, override_active=None) -> Produc
         brand_guidelines=product.brand_guidelines,
         extraction_custom_instructions=product.extraction_custom_instructions,
         is_active=is_active,
+        is_default=product.is_default,
         product_memory=pm,
         target_platforms=product.target_platforms or ["all"],
         # BE-5117/BE-5118: surface AI-owned vision-analysis state to the frontend.
@@ -184,6 +185,7 @@ def _build_product_list_response(product, metrics: dict | None, vision: dict | N
         created_at=product.created_at,
         updated_at=product.updated_at,
         is_active=product.is_active,
+        is_default=product.is_default,
         project_path=product.project_path,
         target_platforms=product.target_platforms or ["all"],
         project_count=metrics["project_count"] if metrics else 0,

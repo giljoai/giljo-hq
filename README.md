@@ -80,6 +80,10 @@ python startup.py
 Requires Python 3.12+, PostgreSQL 18+, Node.js 22+.
 </details>
 
+**Using VS Code?** This repo ships a `.vscode/mcp.json` pointing at your local
+Giljo HQ install (`http://localhost:7272/mcp`) — open the folder and VS Code's
+MCP integration picks it up automatically. No copy-pasting a connect command.
+
 <br>
 
 ## The Six Pillars

@@ -158,7 +158,8 @@ describe('OAuth generators (BE-6157, byte-parity with ai_tools.py)', () => {
 
   it('OpenCode sign-in command registers then authenticates, no bearer (FE-9204)', () => {
     const result = generateOpenCodeOAuthConfig('https://giljo.example.com')
-    expect(result).toBe('opencode mcp add giljo_hq --url https://giljo.example.com/mcp && opencode mcp auth giljo_hq')
+    // Two lines, never `&&`: PowerShell 5.1 (Windows default shell) rejects `&&`.
+    expect(result).toBe('opencode mcp add giljo_hq --url https://giljo.example.com/mcp\nopencode mcp auth giljo_hq')
     expect(result).not.toContain('Authorization')
     expect(result).not.toContain('Bearer')
   })
@@ -241,7 +242,7 @@ describe('generateConfigForTool authMethod dispatch (BE-6157)', () => {
 
   it('routes opencode oauth to the sign-in-plus-auth command (FE-9204)', () => {
     const result = generateConfigForTool('opencode', URL, KEY, { authMethod: 'oauth' })
-    expect(result).toBe(`opencode mcp add giljo_hq --url ${URL}/mcp && opencode mcp auth giljo_hq`)
+    expect(result).toBe(`opencode mcp add giljo_hq --url ${URL}/mcp\nopencode mcp auth giljo_hq`)
     expect(result).not.toContain('Authorization')
     expect(result).not.toContain('Bearer')
   })
@@ -339,5 +340,30 @@ describe('makeKeyName', () => {
 
   it('returns Antigravity prompt key for antigravity_cli wizard id', () => {
     expect(makeKeyName('antigravity_cli')).toBe('Antigravity CLI prompt key')
+  })
+})
+
+describe('PS 5.1 safety: no generated command ever contains &&', () => {
+  // PowerShell 5.1 -- the DEFAULT shell on Windows 10/11 -- rejects `&&` as a
+  // parse error. These strings are pasted into whatever terminal the user has
+  // open, so multi-step commands must be one command per LINE. This sweep
+  // covers every generator so a new tool entry cannot reintroduce the bug.
+  it('every tool config for both auth modes is &&-free', async () => {
+    const mod = await import('./useMcpConfig')
+    const url = 'https://x.example.com'
+    for (const gen of Object.entries(mod)) {
+      const [name, fn] = gen
+      if (typeof fn !== 'function' || !name.startsWith('generate')) continue
+      let out
+      try {
+        out = fn(url, 'gk_dummy_key', {})
+      } catch {
+        continue
+      }
+      if (typeof out !== 'string') continue
+      expect(out.includes('&&'), `${name} output must not contain && (PS 5.1)`).toBe(false)
+    }
+    expect(mod.CERT_TRUST_UNIX.includes('&&'), 'CERT_TRUST_UNIX must not contain &&').toBe(false)
+    expect(mod.CERT_TRUST_WINDOWS.includes('&&'), 'CERT_TRUST_WINDOWS must not contain &&').toBe(false)
   })
 })

@@ -12,13 +12,13 @@ independently audited to APPROVE. The health monitor had moved it to 'silent'.
 The orchestrator, having verified the deliverable, wanted to accept it — and
 found no way to. It fell back to ``write_project_closeout(force=true)``, which
 auto-decommissions, so the dashboard now labels a successful contributor
-'decommissioned' ("failed/replaced/abandoned" per ``close_job``'s own docstring).
+'decommissioned' ("failed/replaced/abandoned" per ``finalize_job``'s own docstring).
 
 **The transition was never missing.** ``complete_job``'s lookup
 (``find_active_execution_for_completion``) excludes only
 ``('complete', 'closed', 'decommissioned')`` — 'silent' is NOT terminal, so
-``complete_job`` accepts it and ``close_job`` then reaches 'closed'. The defect
-is that this path is announced NOWHERE: ``close_job``'s wrong-state error said
+``complete_job`` accepts it and ``finalize_job`` then reaches 'closed'. The defect
+is that this path is announced NOWHERE: ``finalize_job``'s wrong-state error said
 only "not in 'complete' status" and pointed at ``diagnose_project_state``, a
 dead end for an orchestrator acting on behalf of an agent that will never call
 ``complete_job`` itself.
@@ -26,8 +26,8 @@ dead end for an orchestrator acting on behalf of an agent that will never call
 Regression tests at the MCP transport (the boundary an orchestrator actually
 calls), via ``create_connected_server_and_client_session``:
 
-  1. close_job on a 'silent' execution NAMES the complete_job recovery  [RED before fix]
-  2. silent → complete_job → close_job reaches 'closed', never 'decommissioned'
+  1. finalize_job on a 'silent' execution NAMES the complete_job recovery  [RED before fix]
+  2. silent → complete_job → finalize_job reaches 'closed', never 'decommissioned'
      (pins the path the fix documents, so it cannot be silently removed)
   3. the recovery hint is NOT offered where complete_job genuinely cannot
      recover ('decommissioned') — the hint must not lie in the other direction
@@ -74,7 +74,7 @@ def _content_text(result) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Fixture: DB-backed MCP client wiring complete_job AND close_job to the
+# Fixture: DB-backed MCP client wiring complete_job AND finalize_job to the
 # rolled-back test session.
 # ---------------------------------------------------------------------------
 
@@ -84,7 +84,7 @@ async def terminal_state_mcp_client(db_manager, db_session, monkeypatch):
     """Yield (client_factory, tenant_key, db_session) with the real ToolAccessor
     bound to the rolled-back test session for both tools under test.
 
-    ``close_job`` dispatches to ``acc._agent_state_service.close_job`` and
+    ``finalize_job`` dispatches to ``acc._agent_state_service.finalize_job`` and
     ``complete_job`` to ``acc._job_completion_service.complete_job``
     (``_base.TOOL_DISPATCH``), so both services are rebuilt with ``test_session``.
 
@@ -246,14 +246,14 @@ _VERIFIED_RESULT: dict[str, Any] = {
 
 
 # ---------------------------------------------------------------------------
-# Case 1 — RED before fix: close_job on 'silent' must name the recovery
+# Case 1 — RED before fix: finalize_job on 'silent' must name the recovery
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_close_job_on_silent_execution_names_the_complete_job_recovery(terminal_state_mcp_client):
     """An orchestrator that has verified a stalled worker's deliverable calls
-    close_job and is refused. Refusing is correct — 'silent' is not 'complete'.
+    finalize_job and is refused. Refusing is correct — 'silent' is not 'complete'.
     But the refusal must NAME the one call that makes it complete, because the
     orchestrator cannot wait for an agent that will never run again.
 
@@ -268,19 +268,21 @@ async def test_close_job_on_silent_execution_names_the_complete_job_recovery(ter
     await session.commit()
 
     async with client() as mcp_session:
-        result = await mcp_session.call_tool("close_job", {"job_id": job.job_id})
+        result = await mcp_session.call_tool("finalize_job", {"job_id": job.job_id})
 
     text = _content_text(result)
-    assert result.is_error, f"close_job on a 'silent' execution must still refuse (gate kept), got: {text!r}"
+    assert result.is_error, f"finalize_job on a 'silent' execution must still refuse (gate kept), got: {text!r}"
     assert "silent" in text, f"the refusal must name the actual status, got: {text!r}"
     assert "complete_job" in text, (
-        "close_job's wrong-state refusal must NAME the complete_job recovery for a "
+        "finalize_job's wrong-state refusal must NAME the complete_job recovery for a "
         f"still-completable execution — otherwise the orchestrator's only visible exit is "
         f"force-decommission. Got: {text!r}"
     )
 
     await session.refresh(execution)
-    assert execution.status == "silent", f"a refused close_job must not mutate the execution, got: {execution.status!r}"
+    assert execution.status == "silent", (
+        f"a refused finalize_job must not mutate the execution, got: {execution.status!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -292,9 +294,9 @@ async def test_close_job_on_silent_execution_names_the_complete_job_recovery(ter
 async def test_silent_job_with_verified_deliverable_reaches_closed_not_decommissioned(terminal_state_mcp_client):
     """The recovery the fix documents, driven end-to-end through the MCP
     transport by the orchestrator (not by the stalled agent, which is gone):
-    complete_job then close_job on a 'silent' execution reaches 'closed'.
+    complete_job then finalize_job on a 'silent' execution reaches 'closed'.
 
-    'closed' is an ACCEPTING terminal state — ``close_job`` is "final acceptance
+    'closed' is an ACCEPTING terminal state — ``finalize_job`` is "final acceptance
     by orchestrator". 'decommissioned' is the failure label. This pins that the
     accepting exit exists and is reachable, so no future change to the
     non-terminal status predicate can quietly remove it and send orchestrators
@@ -316,9 +318,9 @@ async def test_silent_job_with_verified_deliverable_reaches_closed_not_decommiss
             f"complete_job must accept a 'silent' execution ('silent' is not terminal), got: {complete_text!r}"
         )
 
-        close_result = await mcp_session.call_tool("close_job", {"job_id": job.job_id})
+        close_result = await mcp_session.call_tool("finalize_job", {"job_id": job.job_id})
         close_text = _content_text(close_result)
-        assert not close_result.is_error, f"close_job must accept the now-complete execution, got: {close_text!r}"
+        assert not close_result.is_error, f"finalize_job must accept the now-complete execution, got: {close_text!r}"
 
     await session.refresh(execution)
     assert execution.status == "closed", (
@@ -349,10 +351,10 @@ async def test_close_job_on_decommissioned_execution_does_not_offer_complete_job
     await session.commit()
 
     async with client() as mcp_session:
-        result = await mcp_session.call_tool("close_job", {"job_id": job.job_id})
+        result = await mcp_session.call_tool("finalize_job", {"job_id": job.job_id})
 
     text = _content_text(result)
-    assert result.is_error, f"close_job on a decommissioned execution must refuse, got: {text!r}"
+    assert result.is_error, f"finalize_job on a decommissioned execution must refuse, got: {text!r}"
     assert "complete_job" not in text, (
         "a decommissioned execution cannot be recovered by complete_job — offering it "
         f"would be a second dead end. Got: {text!r}"
@@ -379,10 +381,10 @@ async def test_close_job_on_working_execution_does_not_offer_complete_job_recove
     await session.commit()
 
     async with client() as mcp_session:
-        result = await mcp_session.call_tool("close_job", {"job_id": job.job_id})
+        result = await mcp_session.call_tool("finalize_job", {"job_id": job.job_id})
 
     text = _content_text(result)
-    assert result.is_error, f"close_job on a 'working' execution must refuse, got: {text!r}"
+    assert result.is_error, f"finalize_job on a 'working' execution must refuse, got: {text!r}"
     assert "complete_job" not in text, (
         f"a live 'working' agent must NOT be offered the complete-it-yourself recovery, got: {text!r}"
     )

@@ -91,16 +91,20 @@
         <template #item.quick_action="{ item }">
           <!-- FE-6178: no solo activate-launch for an in-chain project — it's part of an
                active chain; "Deactivate Chain" in the kebab is its only toggle. -->
-          <v-tooltip v-if="normalizeStatus(item.status) === 'inactive' && !inChainIds.includes(item.id)" :text="electionActive ? 'Projects are elected — use Run Sequential to launch them' : (hasActiveProject ? 'Another project is active — complete or deactivate it first' : (isProjectStaged(item) ? 'Activate & resume' : 'Activate & launch'))">
+          <!-- FE-9525d: the cross-project "Another project is active" grey-out is
+               retired -- multiple projects may be active per product now
+               (BE-9525a/b). Only per-row reasons (an election in progress) still
+               disable this button. -->
+          <v-tooltip v-if="normalizeStatus(item.status) === 'inactive' && !inChainIds.includes(item.id)" :text="electionActive ? 'Projects are elected — use Run Sequential to launch them' : (isProjectStaged(item) ? 'Activate & resume' : 'Activate & launch')">
             <template #activator="{ props: ttProps }">
               <button
                 v-bind="ttProps"
                 type="button"
                 class="play-circle-btn icon-interactive-play"
-                :class="{ 'play-btn-disabled': hasActiveProject || electionActive }"
-                :disabled="hasActiveProject || electionActive"
+                :class="{ 'play-btn-disabled': electionActive }"
+                :disabled="electionActive"
                 aria-label="Activate project"
-                @click.stop="!hasActiveProject && !electionActive && $emit('activate-launch', item.id)"
+                @click.stop="!electionActive && $emit('activate-launch', item.id)"
               >
                 <v-icon size="18">mdi-play</v-icon>
               </button>
@@ -346,10 +350,6 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  hasActiveProject: {
-    type: Boolean,
-    default: false,
-  },
   // Controlled by useProjectFilters in the parent (server-driven pagination/sort).
   currentPage: {
     type: Number,
@@ -385,7 +385,8 @@ const props = defineProps({
   },
   // FE-6171b: project ids whose run is in the locked (Staged) tier (run.locked=true).
   // Drives tickbox disable on /projects. Distinct from inChainIds: a project in-chain
-  // with run.locked=false (Editing tier) has its tickbox ENABLED for removeMember.
+  // with run.locked=false (Editing tier) has its tickbox ENABLED for the raw-toggle
+  // untick (FE-6175 -- not a removeMember dual-write, see FE-9503a).
   lockedChainIds: {
     type: Array,
     default: () => [],
@@ -746,8 +747,8 @@ function getStatusActions(item) {
   text-align: center;
 }
 
-/* ── Compact breakpoint (≤1280px) ── */
-@media (max-width: 1280px) {
+/* ── Compact breakpoint (FE-9536: shared $breakpoint-compact = 1280px) ── */
+@media (max-width: $breakpoint-compact) {
   .status-full,
   .date-full {
     display: none !important;
@@ -761,8 +762,8 @@ function getStatusActions(item) {
   }
 }
 
-/* ── Mobile breakpoint (≤600px) ── */
-@media (max-width: 600px) {
+/* ── Mobile breakpoint (FE-9536: shared $breakpoint-mobile = 600px) ── */
+@media (max-width: $breakpoint-mobile) {
   .project-id-text {
     display: none;
   }

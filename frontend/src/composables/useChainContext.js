@@ -25,6 +25,7 @@
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useSequenceRunStore } from '@/stores/sequenceRunStore'
+import { useNotificationStore } from '@/stores/notifications'
 import { useProjectStateStore } from '@/stores/projectStateStore'
 import { useProjectStore } from '@/stores/projects'
 import { useAgentJobs } from '@/composables/useAgentJobs'
@@ -228,6 +229,40 @@ export function useChainContext() {
     () => sequenceRunStore.activeRun,
     (ar) => {
       if (ar && runId.value && ar.id === runId.value) run.value = ar
+    },
+  )
+
+  // BE-9540: the run was PURGED out from under this open view (conductor-finale
+  // deletion, not merely a status flip) -- the store detected its own fetchRun
+  // 404 after the sequence:updated broadcast and raised this notice rather than
+  // leaving a stale activeRun in place. Meet it with the SAME graceful terminal
+  // state the FE-6175 RC2 orphaned-run path already uses (degrade to solo,
+  // console.warn already covers that path -- here the run is confirmed gone via
+  // a live event, so a user-visible toast is warranted too, since a Review card
+  // may have been on screen). Only reacts if the retired run is the one THIS
+  // view actually has open, so a notice about a different open tab is a no-op.
+  watch(
+    () => sequenceRunStore.retiredRunNotice,
+    (notice) => {
+      // Compared against the loaded run's OWN id, not the route's `?run=` query:
+      // loadRun() can be driven directly (bypassing the route), so run.value is
+      // the only reliable answer to "is this the run THIS view has open."
+      if (!notice || notice.runId !== run.value?.id) return
+      run.value = null
+      projects.value = []
+      // FE-9553: was a toast. This fires from a WATCH on a store notice fed by
+      // a live event -- the chain finished on its own, nobody clicked -- so by
+      // ruling 6 it is not the toast's to carry. It is informational rather
+      // than actionable, which puts it in the bell. Deterministic
+      // id so the same retirement noticed twice collapses to one row.
+      useNotificationStore().addNotification({
+        id: `chain-retired:${notice.runId}`,
+        type: 'lifecycle',
+        severity: 'info',
+        title: 'Chain finished',
+        message: 'This chain has finished; its record was retired.',
+      })
+      sequenceRunStore.clearRetiredRunNotice()
     },
   )
 

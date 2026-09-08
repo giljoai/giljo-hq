@@ -100,12 +100,20 @@ class TestAssemblerPlatformConsistency:
             fm = yaml.safe_load(yaml_section)
             assert fm["kind"] == "local"
 
-    def test_gemini_tools_is_yaml_list(self):
-        """Gemini frontmatter tools must be a YAML list."""
+    def test_gemini_omits_tools_key(self):
+        """BE-9567: Gemini frontmatter carries no ``tools:`` key at all.
+
+        A hardcoded roster here had drifted to zero live matches (the pre-rename
+        ``giljo_mcp`` alias, plus one tool BE-9554 retired), and gemini-cli
+        surfaces neither failure to the model or a human -- see
+        render_gemini_agent's docstring for the source citations. Omitting the
+        key inherits every parent tool instead (local-executor.ts's documented
+        fallback), matching every other renderer's convention.
+        """
         result = self.assembler.assemble(self.templates, "gemini_cli")
         yaml_section = result["agents"][0]["content"].split("---\n")[1]
         fm = yaml.safe_load(yaml_section)
-        assert isinstance(fm["tools"], list)
+        assert "tools" not in fm
 
     def test_codex_has_required_fields(self):
         """Codex agents must have all required structured fields."""

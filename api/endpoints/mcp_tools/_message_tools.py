@@ -23,6 +23,7 @@ from mcp.server.mcpserver import Context
 from mcp_types import InputRequiredResult
 from pydantic import Field
 
+from api.endpoints.mcp_tools import _base
 from api.endpoints.mcp_tools._base import (
     MCP_SHORT_TEXT_MAX,
     _call_tool,
@@ -88,3 +89,31 @@ async def request_approval(
     # (2026-07-28+ AND declared elicitation) we ADDITIONALLY offer the choice
     # inline; every other client gets ``result`` unchanged. Never raises.
     return maybe_offer_approval_inline(ctx, result, reason=reason, options=options)
+
+
+@mcp.tool(
+    title="Decide Approval",
+    description=(
+        "Answer a pending user approval from the harness -- clears awaiting_user for the "
+        "orchestrator that called request_approval. Relay the pending question's reason + "
+        "options to the user in your terminal, then call this with the option id they chose. "
+        "Routes through the SAME service write the dashboard's decide button uses -- there is "
+        "no separate write path. Available by default; a tenant that has switched Settings to "
+        "HITL mode is refused here and decides from the dashboard instead."
+    ),
+    annotations=_tool_hints("decide_approval"),
+)
+async def decide_approval(
+    approval_id: Annotated[str, Field(max_length=36, description="The pending approval's id (UUID).")],
+    option_id: Annotated[
+        str,
+        Field(max_length=100, description="The id of the option the user chose (must match one of approval.options)."),
+    ],
+    ctx: Context = None,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "approval_id": approval_id,
+        "option_id": option_id,
+        "user_id": _base._resolve_user_id(ctx),
+    }
+    return await _call_tool(ctx, "decide_approval", kwargs)

@@ -21,9 +21,9 @@ Two-sided proof (the load-bearing DoD):
    - It is idempotent: a second call does NOT re-stamp (already_launched=True).
 
 2. The human gate STILL BLOCKS, and clears ONLY after a launch:
-   - Before launch, implement_project returns gate_not_passed / not_launched and the
+   - Before launch, get_implementation_prompt returns gate_not_passed / not_launched and the
      flag is unset.
-   - After launch_implementation flips the flag, implement_project returns ``ready`` —
+   - After launch_implementation flips the flag, get_implementation_prompt returns ``ready`` —
      proving BOTH doors flip the EXACT flag the downstream gate reads.
 
 3. An agent CANNOT bypass the gate:
@@ -321,9 +321,9 @@ async def test_gate_blocks_before_launch_then_proceeds_after(lifecycle_mcp_clien
     )
     await _seed_orchestrator_and_agent(db_session, primary_tenant_key, seeded["project"])
 
-    # BEFORE launch: implement_project refuses (the human gate blocks).
+    # BEFORE launch: get_implementation_prompt refuses (the human gate blocks).
     async with new_client() as session:
-        blocked = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
+        blocked = await session.call_tool("get_implementation_prompt", {"project_id": seeded["project"].id})
     assert blocked.is_error is False, _error_text(blocked)
     blocked_payload = _payload(blocked)
     assert blocked_payload["status"] == "gate_not_passed"
@@ -335,10 +335,10 @@ async def test_gate_blocks_before_launch_then_proceeds_after(lifecycle_mcp_clien
     assert launched.is_error is False, _error_text(launched)
     assert _payload(launched)["already_launched"] is False
 
-    # AFTER launch: implement_project now proceeds — the downstream gate honors the
+    # AFTER launch: get_implementation_prompt now proceeds — the downstream gate honors the
     # SAME flag the CLI door flipped.
     async with new_client() as session:
-        ready = await session.call_tool("implement_project", {"project_id": seeded["project"].id})
+        ready = await session.call_tool("get_implementation_prompt", {"project_id": seeded["project"].id})
     assert ready.is_error is False, _error_text(ready)
     ready_payload = _payload(ready)
     assert ready_payload["status"] == "ready", "after launch_implementation the gate must clear"
@@ -402,3 +402,54 @@ async def test_launch_implementation_cross_tenant_blocked_flag_stays_unset(
     switch.value = primary_tenant_key
     row = (await db_session.execute(select(Project).where(Project.id == seeded["project"].id))).scalar_one()
     assert row.implementation_launched_at is None, "cross-tenant launch must NEVER stamp the flag"
+
+
+# ---------------------------------------------------------------------------
+# 5. BE-9499c goal-at-launch — an optional `mission` collapses "state your goal
+#    and say go" into ONE call, writing through the SAME single writer
+#    `update_project_mission` uses before the gate is stamped.
+# ---------------------------------------------------------------------------
+
+
+async def test_goal_at_launch_writes_mission_then_stamps_gate(lifecycle_mcp_client, db_session, primary_tenant_key):
+    new_client, _switch = lifecycle_mcp_client
+    seeded = await _seed_product_project(
+        db_session, primary_tenant_key, staging_status="staging_complete", launched=False
+    )
+
+    async with new_client() as session:
+        result = await session.call_tool(
+            "launch_implementation",
+            {"project_id": seeded["project"].id, "mission": "Ship the goal-at-launch feature end to end."},
+        )
+
+    assert result.is_error is False, _error_text(result)
+    payload = _payload(result)
+    assert payload["status"] == "launched"
+    assert payload["already_launched"] is False
+
+    row = (await db_session.execute(select(Project).where(Project.id == seeded["project"].id))).scalar_one()
+    assert row.mission == "Ship the goal-at-launch feature end to end.", (
+        "goal-at-launch must write the mission through the single-writer BEFORE stamping the gate"
+    )
+    assert row.implementation_launched_at is not None
+
+
+async def test_launch_without_mission_leaves_existing_mission_untouched(
+    lifecycle_mcp_client, db_session, primary_tenant_key
+):
+    """Omitting `mission` (the pre-existing call shape) must be byte-identical —
+    no mission write, gate flips exactly as before this feature existed."""
+    new_client, _switch = lifecycle_mcp_client
+    seeded = await _seed_product_project(
+        db_session, primary_tenant_key, staging_status="staging_complete", launched=False
+    )
+    original_mission = seeded["project"].mission
+
+    async with new_client() as session:
+        result = await session.call_tool("launch_implementation", {"project_id": seeded["project"].id})
+
+    assert result.is_error is False, _error_text(result)
+    row = (await db_session.execute(select(Project).where(Project.id == seeded["project"].id))).scalar_one()
+    assert row.mission == original_mission, "no mission param -> mission must be left untouched"
+    assert row.implementation_launched_at is not None

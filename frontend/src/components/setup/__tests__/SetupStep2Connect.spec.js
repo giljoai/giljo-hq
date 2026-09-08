@@ -21,11 +21,35 @@ vi.mock('@/stores/websocket', () => ({
   }),
 }))
 
+// FE-9569: credential-status seeding (detector 1). Defaults to "nothing
+// connected yet" so the pre-existing suite (which never anticipated this
+// call) keeps behaving exactly as before; individual tests below override
+// per-call to exercise the already-connected seed path.
+let mockConnectedHarnesses = {}
+
+// BE-9591: the flow now requires a FRESH connection, so seeds must be expressed
+// RELATIVE to now, never as fixed dates. A hardcoded "recent" literal silently
+// becomes history as the calendar moves -- 2026-09-01 read as fresh when these
+// tests were written and does not any more.
+const justNow = () => new Date(Date.now() + 60_000).toISOString()
+const longAgo = () => new Date(Date.now() - 86_400_000).toISOString()
 vi.mock('@/services/api', () => ({
   default: {
     apiKeys: {
       getActive: vi.fn().mockResolvedValue({ data: [] }),
       create: vi.fn().mockResolvedValue({ data: { api_key: 'gk_test_key_123' } }),
+    },
+    connect: {
+      credentialStatus: vi.fn(() =>
+        Promise.resolve({
+          data: {
+            has_valid_api_key: false,
+            has_valid_oauth: false,
+            has_expired_oauth: false,
+            connected_harnesses: mockConnectedHarnesses,
+          },
+        }),
+      ),
     },
   },
 }))
@@ -98,6 +122,7 @@ beforeEach(() => {
   wsHandlers = {}
   mockGiljoMode = 'saas'
   mockSslEnabled = false
+  mockConnectedHarnesses = {}
 })
 
 // -----------------------------------------------------------------------
@@ -182,6 +207,98 @@ describe('SetupStep2Connect — SaaS: sign-in primary path (FE-6259b vocabulary 
   it('does NOT show the connector URL block for a CLI tool', async () => {
     const wrapper = await mountStep(['claude_code'], 'saas')
     expect(wrapper.find('[data-testid="web-endpoint-block"]').exists()).toBe(false)
+  })
+})
+
+// -----------------------------------------------------------------------
+
+/**
+ * FE-9569 detector 1: the connect dot used to depend ENTIRELY on a live
+ * setup:tool_connected WS event arriving while this card is open. An
+ * already-authenticated tenant (connected in another TUI, or reconnecting
+ * after a reload) sends no `initialize` while the wizard is mounted, so the
+ * dot stayed stuck on "Waiting..." forever even though a real connection
+ * already exists. Fix: seed connectionStatus from the durable
+ * GET /api/connect/credential-status truth on mount (same idiom already
+ * shipped in ToolsConnectDirectory.vue), with the WS event staying as the
+ * live-delta path on top of that seed. By design: no recency cutoff on
+ * connected_harnesses — any timestamp counts, matching the shipped sibling.
+ */
+describe('SetupStep2Connect — credential-status seeding, already-connected case (FE-9569 detector 1)', () => {
+  it('fresh case: no connected_harnesses leaves the dot waiting (unchanged behavior)', async () => {
+    mockConnectedHarnesses = {}
+    const wrapper = await mountStep(['claude_code'], 'saas')
+    expect(wrapper.find('[data-testid="hero-check"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Waiting for')
+  })
+
+  it('a FRESH connection on record flips the dot green WITHOUT any WS event', async () => {
+    // MEANING NARROWED BY BE-9591. This used to assert that ANY connection on record
+    // flips the dot, however old. The operator hit the other side of that: he connected
+    // on one machine, opened the wizard on a second, and the tool was already green
+    // before that machine had ever connected. The guarantee it actually protects --
+    // don't depend on catching a live WS event -- is unchanged and still asserted here;
+    // what changed is that the record must be FRESH. See the historical-record test below.
+    // 'claude-code' is the backend harness_resolver token for claude_code (setupTools.js HARNESS_TO_TOOL_ID).
+    mockConnectedHarnesses = { 'claude-code': justNow() }
+    const wrapper = await mountStep(['claude_code'], 'saas')
+    expect(wrapper.find('[data-testid="hero-check"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('connected.')
+    // No setup:tool_connected fired -- this must NOT depend on the event.
+    expect(wsHandlers['setup:tool_connected']).toBeTruthy()
+  })
+
+  it('a fresh connection unblocks can-proceed on mount, no click needed', async () => {
+    mockConnectedHarnesses = { 'claude-code': justNow() }
+    const wrapper = await mountStep(['claude_code'], 'saas')
+    const canProceed = wrapper.emitted('can-proceed')
+    expect(canProceed[canProceed.length - 1]).toEqual([true])
+  })
+
+  it('multi-tool walk: resumes at the first NOT-yet-connected tool, not always index 0', async () => {
+    mockConnectedHarnesses = { 'claude-code': justNow() }
+    const wrapper = await mountStep(['claude_code', 'codex_cli'], 'saas')
+    // claude_code (tool 1) is already connected via credential-status, so the
+    // walk should resume on codex_cli (tool 2), not restart at tool 1.
+    expect(wrapper.find('.connect-eyebrow').text()).toContain('TOOL 2 OF 2')
+  })
+
+  it('an unrecognized/generic harness does not crash and does not falsely flip a named tool', async () => {
+    mockConnectedHarnesses = { generic: justNow() }
+    const wrapper = await mountStep(['claude_code'], 'saas')
+    expect(wrapper.find('[data-testid="hero-check"]').exists()).toBe(false)
+  })
+
+  it('BE-9591: a HISTORICAL connection does NOT satisfy this flow', async () => {
+    // The operator's report: connected on PC1, opened the wizard on a laptop, and
+    // Claude Code was already green there before the laptop had ever connected.
+    // Once-connected read as forever-connected. The active flow now requires a
+    // connection newer than the moment the step was entered.
+    mockConnectedHarnesses = { 'claude-code': longAgo() }
+    const wrapper = await mountStep(['claude_code'], 'saas')
+    expect(wrapper.find('[data-testid="hero-check"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Waiting for')
+  })
+
+  it('BE-9591: a live WS announce still flips it, history or not', async () => {
+    // The freshness cutoff must never swallow the live path -- an announce arriving
+    // WHILE the step is open is fresh by definition, and it is the signal a user
+    // connecting right now actually produces.
+    mockConnectedHarnesses = { 'claude-code': longAgo() }
+    const wrapper = await mountStep(['claude_code'], 'saas')
+    expect(wrapper.find('[data-testid="hero-check"]').exists()).toBe(false)
+
+    wsHandlers['setup:tool_connected']({ tool_name: 'claude-code' })
+    await nextTick()
+
+    expect(wrapper.find('[data-testid="hero-check"]').exists()).toBe(true)
+  })
+
+  it('a credential-status fetch failure degrades gracefully to the pre-fix waiting state', async () => {
+    const apiModule = (await import('@/services/api')).default
+    apiModule.connect.credentialStatus.mockRejectedValueOnce(new Error('network down'))
+    const wrapper = await mountStep(['claude_code'], 'saas')
+    expect(wrapper.text()).toContain('Waiting for')
   })
 })
 

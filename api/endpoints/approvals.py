@@ -26,7 +26,8 @@ from giljo_mcp.auth.dependencies import get_current_active_user
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
 from giljo_mcp.models.auth import User
-from giljo_mcp.schemas.user_approval import ApprovalListResponse, UserApprovalRead
+from giljo_mcp.models.user_approval import VALID_USER_APPROVAL_STATUSES
+from giljo_mcp.schemas.user_approval import ApprovalListResponse
 from giljo_mcp.services.comm_thread_service import CommThreadService
 from giljo_mcp.services.user_approval_service import UserApprovalService
 from giljo_mcp.tenant import TenantManager
@@ -87,26 +88,32 @@ async def list_approvals(
     current_user: User = Depends(get_current_active_user),
     service: UserApprovalService = Depends(get_user_approval_service),
 ) -> ApprovalListResponse:
-    """List approvals scoped to the authenticated user's tenant.
+    """List approvals scoped to the authenticated user's tenant, by status.
 
-    Currently only ``status=pending`` is supported -- the dashboard inbox.
     Tenant isolation is enforced at the repository layer; cross-tenant rows
     are unreachable.
+
+    BE-9514: widened from a ``status='pending'``-only 422 to any
+    ``VALID_USER_APPROVAL_STATUSES`` value. Decided approvals previously had
+    NO read surface at all -- ``status='decided'`` is the only way to verify
+    ``decided_via``/``decided_by_user_id`` end to end (the dashboard inbox
+    still defaults to and mainly uses ``pending``).
     """
-    if status_filter != "pending":
+    if status_filter not in VALID_USER_APPROVAL_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
                 "error_code": "APPROVAL_STATUS_UNSUPPORTED",
-                "message": "Only status='pending' is supported.",
+                "message": f"status must be one of {sorted(VALID_USER_APPROVAL_STATUSES)}.",
                 "requested_status": status_filter,
             },
         )
     try:
-        rows, total = await service.list_pending(
+        items, total = await service.list_pending(
             tenant_key=current_user.tenant_key,
             limit=limit,
             offset=offset,
+            status=status_filter,
         )
     except ValidationError as exc:
         raise HTTPException(
@@ -118,7 +125,6 @@ async def list_approvals(
             },
         ) from exc
 
-    items = [UserApprovalRead.model_validate(row) for row in rows]
     return ApprovalListResponse(
         items=items,
         count=len(items),
@@ -150,6 +156,7 @@ async def decide_approval(
             approval_id=approval_id,
             option_id=payload.option_id,
             user_id=str(current_user.id),
+            decided_via="ui",
         )
     except ResourceNotFoundError as exc:
         raise HTTPException(

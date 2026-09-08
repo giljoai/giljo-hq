@@ -53,6 +53,10 @@ async def _seed(db_session, *, active: bool = True) -> dict:
         description="roadmap test product",
         tenant_key=tenant_key,
         is_active=active,
+        # FE-9524: is_default is the read-fallback flag now (is_active is
+        # shown/hidden only) -- mirror `active` here so this helper's
+        # existing callers keep meaning "the resolvable product" vs "not".
+        is_default=active,
     )
     db_session.add(product)
     await db_session.flush()
@@ -548,10 +552,16 @@ async def test_a_sibling_product_item_is_told_it_is_in_another_product_not_that_
     await db_session.commit()
 
     svc = _svc(db_manager, db_session)
+    # BE-9523b: this tenant now owns two products, so an omitted product_id would
+    # hit the new ambiguity gate before ever reaching the item-ownership check this
+    # test is actually about. Name the active product explicitly -- it is the same
+    # product the omitted-id path used to resolve to, and the object under test is
+    # downstream of resolution (the sibling-item message), not resolution itself.
     with pytest.raises(ValidationError) as excinfo:
         await svc.upsert_metadata(
             items=[{"item_type": "project", "project_id": sibling_project.id, "sort_order": 0}],
             tenant_key=seed["tenant_key"],
+            product_id=seed["product_id"],
         )
 
     message = str(excinfo.value)
@@ -1105,7 +1115,7 @@ async def test_remove_item_without_active_product_raises(db_manager, db_session)
 
 
 # ---------------------------------------------------------------------------
-# 0006: update_roadmap_metadata `remove` param (ref-based, same-call eviction)
+# 0006: save_roadmap `remove` param (ref-based, same-call eviction)
 # ---------------------------------------------------------------------------
 
 

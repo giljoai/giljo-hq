@@ -36,8 +36,12 @@ NEXT_ACTION_COVERAGE: dict[str, str] = {
     # MIGRATED in BE-8003a (evidence-index sites + DoD item 3).
     # ------------------------------------------------------------------
     "stage_project": "MIGRATED",
-    "implement_project": "MIGRATED",
-    "start_chain_run": "MIGRATED",
+    # BE-9554 rename; same accessor, same migrated envelope.
+    "get_implementation_prompt": "MIGRATED",
+    # BE-9554: start_chain_run's start/terminate actions split into two named verbs.
+    # Both route to the SAME accessor, so they inherit its migrated next_action envelope.
+    "link_projects": "MIGRATED",
+    "unlink_projects": "MIGRATED",
     "complete_job": "MIGRATED",
     "get_workflow_status": "MIGRATED",
     # ------------------------------------------------------------------
@@ -59,11 +63,12 @@ NEXT_ACTION_COVERAGE: dict[str, str] = {
     "update_job_mission": "metadata write, no natural next-step to advertise",
     # BE-9012d: send_message / receive_messages hard-removed (bus retired).
     "create_thread": "fire-and-forget write, no natural next-step to advertise",
+    "update_thread": "fire-and-forget write (retag/rename/status), no natural next-step to advertise",
     "join_thread": "fire-and-forget write, no natural next-step to advertise",
     "post_to_thread": "fire-and-forget write, no natural next-step to advertise",
-    "pass_baton": "fire-and-forget write, no natural next-step to advertise",
+    "set_next_actor": "fire-and-forget write, no natural next-step to advertise",
     "report_progress": "fire-and-forget write (heartbeat/todo update), no natural next-step to advertise",
-    "close_job": "terminal write, no forced next step",
+    "finalize_job": "terminal write, no forced next step",
     "spawn_job": "returns SpawnResult identity; not in the BE-8003a evidence index -- candidate for a follow-up",
     "write_project_closeout": "terminal write; not in the BE-8003a evidence index -- candidate for a follow-up",
     # ------------------------------------------------------------------
@@ -72,9 +77,10 @@ NEXT_ACTION_COVERAGE: dict[str, str] = {
     # is a legitimate BE-8003a follow-up, not touched here to stay within this
     # PR's evidence-index scope (WO-8003a orchestrator delta #2/#3).
     # ------------------------------------------------------------------
-    "launch_implementation": "not in the BE-8003a evidence index -- candidate follow-up (natural next: implement_project)",
+    "launch_implementation": "not in the BE-8003a evidence index -- candidate follow-up (natural next: get_implementation_prompt)",
     # BE-9012b (BE-6225e): reactivate_job + dismiss_reactivation merged into one tool.
-    "resolve_reactivation": "carries Reactivation/DismissResult.instruction (analogous, differently-named) -- BE-8003a follow-up candidate",
+    # BE-9554 rename; same accessors, so the same analogous-instruction situation.
+    "resume_or_dismiss_job": "carries Reactivation/DismissResult.instruction (analogous, differently-named) -- BE-8003a follow-up candidate",
     "set_agent_status": (
         "carries ErrorReportResult.guidance (analogous, differently-named); NOT in the evidence index "
         "-- BE-8003a follow-up candidate (WO-8003a KICKOFF)"
@@ -84,6 +90,10 @@ NEXT_ACTION_COVERAGE: dict[str, str] = {
         "already carry actionable codes; not in the evidence index -- BE-8003a follow-up candidate"
     ),
     "request_approval": "sets awaiting_user (human gate, no MCP tool call applies) -- BE-8003a follow-up candidate",
+    # BE-9499d: terminal write on the approval (decided is a terminal state for
+    # that row) -- the agent's own next step is whatever it was already doing,
+    # not something this tool can name.
+    "decide_approval": "terminal write, no forced next step",
 }
 
 
@@ -117,8 +127,13 @@ def test_migrated_count_matches_this_pr_scope():
     migrated = [name for name, decision in NEXT_ACTION_COVERAGE.items() if decision == "MIGRATED"]
     assert sorted(migrated) == [
         "complete_job",
+        # BE-9554 rename: same accessor, same migrated envelope, two names for one release.
+        "get_implementation_prompt",
         "get_workflow_status",
-        "implement_project",
+        # BE-9554: link_projects/unlink_projects are start_chain_run's two verbs given
+        # their own names. They route to the SAME accessor, so they carry the SAME
+        # migrated envelope -- three entries for what is still one migrated code path.
+        "link_projects",
         "stage_project",
-        "start_chain_run",
+        "unlink_projects",
     ]

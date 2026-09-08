@@ -169,10 +169,16 @@ def test_parked_status_properties() -> None:
 
 
 def test_valid_update_set_matches_legacy() -> None:
-    """``VALID_UPDATE_STATUSES`` == legacy MCP-tool whitelist + (IMP-9258) parked.
+    """``VALID_UPDATE_STATUSES`` == legacy MCP-tool whitelist + (IMP-9258) parked
+    + (BE-9499b) superseded.
 
     Parked is agent-settable via update_project(status='parked') -- and
-    unpark (status='active'|'inactive') reuses the same whitelist.
+    unpark (status='active'|'inactive') reuses the same whitelist. Superseded
+    is agent-settable via update_project(status='superseded',
+    successor_project_id=...) -- the generic write's own successor-pointer
+    validation (ProjectService.update_project /
+    _lifecycle_redirects.require_supersede_successor) is what actually
+    prevents a null-successor row, not this whitelist.
     """
 
     assert {s.value for s in VALID_UPDATE_STATUSES} == {
@@ -181,6 +187,7 @@ def test_valid_update_set_matches_legacy() -> None:
         "completed",
         "cancelled",
         "parked",
+        "superseded",
     }
 
 

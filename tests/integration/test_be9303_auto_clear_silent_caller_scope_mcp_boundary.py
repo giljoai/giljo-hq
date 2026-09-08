@@ -6,7 +6,7 @@
 """BE-9303 — the stalled-agent recovery hint must survive the orchestrator's own read.
 
 The defect (carried forward from BE-9292b / 360 #913 with mechanical proof): the
-``close_job`` recovery hint fires only while the execution reads literally
+``finalize_job`` recovery hint fires only while the execution reads literally
 ``'silent'``, and ``_base._call_tool``'s ``auto_clear_silent`` post-hook flipped that
 flag on ANY successful MCP call carrying ``job_id`` — no caller identity, no tool
 allowlist. So ``get_context(categories=['todos'], job_id=...)``, the read documented
@@ -181,22 +181,22 @@ async def test_orchestrator_inspection_read_does_not_disarm_the_hint(boundary):
     await _call("get_context")
     assert boundary.silence_cleared_for == [], (
         "an orchestrator's read ABOUT a stalled job must not clear that job's "
-        "'silent' flag — clearing it disarms the close_job recovery hint before "
+        "'silent' flag — clearing it disarms the finalize_job recovery hint before "
         "the orchestrator can reach it."
     )
 
 
 @pytest.mark.parametrize(
     "tool_name",
-    # NB these are dispatch names, not tool names — resolve_reactivation reaches
+    # NB these are dispatch names, not tool names — resume_or_dismiss_job reaches
     # _call_tool as reactivate_job / dismiss_reactivation, so asserting on its own
     # name would have tested nothing.
-    ["get_context", "get_agent_result", "close_job", "reactivate_job", "dismiss_reactivation", "complete_job"],
+    ["get_context", "get_agent_result", "finalize_job", "reactivate_job", "dismiss_reactivation", "complete_job"],
 )
 async def test_bystander_tools_never_clear_silence(boundary, tool_name):
     """Every tool an orchestrator uses to inspect or accept a stalled job.
 
-    ``close_job`` matters most after ``get_context``: it is the call that RAISES
+    ``finalize_job`` matters most after ``get_context``: it is the call that RAISES
     the hint. If it cleared silence first, the hint could never fire on a retry.
     """
     await _call(tool_name)
@@ -205,7 +205,7 @@ async def test_bystander_tools_never_clear_silence(boundary, tool_name):
 
 async def test_the_hint_survives_the_inspection_read_end_to_end(boundary):
     """Closes the loop: the read no longer fires the mutation, so the flag is still
-    ``'silent'`` when ``close_job`` asks — and the recovery hint fires.
+    ``'silent'`` when ``finalize_job`` asks — and the recovery hint fires.
 
     BE-9292b pinned that the hint keys on the literal flag; the tests above pin
     that a bystander read no longer clears it. This asserts the composition, so
@@ -217,7 +217,7 @@ async def test_the_hint_survives_the_inspection_read_end_to_end(boundary):
     await _call("get_context")
     assert boundary.silence_cleared_for == []
 
-    # The execution therefore still reads 'silent' when close_job refuses.
+    # The execution therefore still reads 'silent' when finalize_job refuses.
     next_action = _wrong_state_next_action(
         job_id="job-be9303",
         project_id="proj-be9303",
@@ -256,7 +256,7 @@ async def test_heartbeat_still_runs_for_a_tool_that_does_not_clear_silence(bound
 def _dispatch_targets(func: ast.AST) -> set[str]:
     """The ``method_name`` values this tool actually hands ``_call_tool``.
 
-    Not the tool's own name: ``resolve_reactivation`` branches on ``action`` and
+    Not the tool's own name: ``resume_or_dismiss_job`` branches on ``action`` and
     dispatches to ``reactivate_job`` / ``dismiss_reactivation``, so those are what
     ``method_name`` holds inside the post-hook. Classifying the tool's own name
     there would never match anything — a negative that cannot fire.
@@ -333,7 +333,7 @@ def test_every_job_id_carrying_tool_is_deliberately_classified():
     )
 
     # No decoration: a classified name that never reaches _call_tool is a rule the
-    # gate can never apply. This is how "resolve_reactivation" was caught — the tool
+    # gate can never apply. This is how "resume_or_dismiss_job" was caught — the tool
     # dispatches under two OTHER names and its own never appears.
     stale = classified - discovered
     assert not stale, (

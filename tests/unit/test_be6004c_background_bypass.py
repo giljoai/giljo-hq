@@ -278,12 +278,12 @@ async def test_run_health_check_cycle_scopes_each_tenant_under_enforce(db_sessio
         async def get_session_async(self):
             yield db_session
 
-    # Complete broadcaster stub: BOTH async broadcast methods the per-tenant
-    # handler can await must be AsyncMock (a bare MagicMock raises TypeError
-    # on await — the exact failure leaked foreign rows used to trigger).
+    # Complete broadcaster stub: broadcast_event_to_tenant is the one method
+    # BE-9518's agent_health_ws_broadcast functions await, so it must be
+    # AsyncMock (a bare MagicMock raises TypeError on await — the exact
+    # failure leaked foreign rows used to trigger).
     ws = MagicMock()
-    ws.broadcast_health_alert = AsyncMock()
-    ws.broadcast_agent_auto_failed = AsyncMock()
+    ws.broadcast_event_to_tenant = AsyncMock()
     monitor = AgentHealthMonitor(db_manager=_SingleSessionDB(), ws_manager=ws)  # type: ignore[arg-type]
 
     # Scope the per-tenant loop to this test's own tenants: the REAL discovery
@@ -306,7 +306,12 @@ async def test_run_health_check_cycle_scopes_each_tenant_under_enforce(db_sessio
 
     # The ancient in-scope execution crossed the abandon ceiling: the handler
     # ran its tenant-scoped write and awaited the auto-fail broadcast.
-    ws.broadcast_agent_auto_failed.assert_awaited()
+    auto_failed_calls = [
+        call
+        for call in ws.broadcast_event_to_tenant.await_args_list
+        if call.kwargs.get("event", {}).get("type") == "agent:auto_failed"
+    ]
+    assert auto_failed_calls, "expected an agent:auto_failed broadcast for the ancient execution"
 
     # The cycle leaves no tenant context leaked on the shared ContextVar.
     assert TenantManager.get_current_tenant() is None

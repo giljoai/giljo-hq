@@ -94,16 +94,14 @@ class JobLifecycleService:
         context_chunks: list[str] | None = None,
         phase: int | None = None,
         predecessor_job_id: str | None = None,
+        inline_seed: bool = False,
     ) -> SpawnResult:
         """
         Create an agent job with thin client architecture using dual-model (AgentJob + AgentExecution).
 
-        Handover 0358b: Migrated from MCPAgentJob (monolithic) to AgentJob + AgentExecution.
-        - AgentJob: Work order (WHAT) - persists across succession
-        - AgentExecution: Executor instance (WHO) - changes on succession
-
-        Handover 0730b: Exception-based error handling (no success wrapper).
-        Handover 0497e: predecessor_job_id for recovery spawning (successor agents).
+        Handover 0358b: AgentJob (work order, persists across succession) + AgentExecution
+        (executor instance, changes on succession). Handover 0730b: exception-based error
+        handling. Handover 0497e: predecessor_job_id for recovery spawning.
 
         Args:
             agent_display_name: Display name of agent (UI label - what humans see)
@@ -114,12 +112,11 @@ class JobLifecycleService:
             parent_job_id: Optional parent agent_id for spawned agents (now refers to executor, not work order)
             context_chunks: Optional context chunks for the agent
             phase: Optional execution phase for multi-terminal ordering (1=first, same=parallel)
-            predecessor_job_id: Optional job_id of a previous agent whose output the new
-                                successor needs. Server reads the predecessor's completion
-                                record and renders the appropriate preamble (chain vs
-                                replacement is auto-detected from the predecessor's status).
-                                Skipped silently in subagent execution modes -- the
-                                orchestrator's CLI already has the predecessor result inline.
+            predecessor_job_id: Optional job_id of a previous agent whose output the new successor
+                                needs -- server renders the completion preamble (auto-detected chain
+                                vs replacement); skipped in subagent modes (already inline in the CLI).
+            inline_seed: BE-9499c -- multi_terminal: return the bootstrap seed inline
+                                (same generator subagent mode uses) instead of the pointer.
 
         Returns:
             Dict with job_id (work order), agent_id (executor), and agent_prompt
@@ -128,19 +125,6 @@ class JobLifecycleService:
             ResourceNotFoundError: Project not found or predecessor job not found
             ValidationError: Predecessor job not in same project/tenant
             DatabaseError: Failed to spawn agent
-
-        Example:
-            >>> result = await service.spawn_job(
-            ...     agent_display_name="Code Implementer",
-            ...     agent_name="impl-1",
-            ...     mission="Implement feature X",
-            ...     project_id="proj-123",
-            ...     tenant_key="tenant-abc",
-            ...     context_chunks=["chunk1", "chunk2"],
-            ...     phase=2,
-            ... )
-            >>> result["job_id"]  # Work order UUID (persists)
-            >>> result["agent_id"]  # Executor UUID (changes on succession)
         """
         # CE-0033 Task 11: phase > 1 implies dependency on a prior-phase job.
         # An empty predecessor_job_id silently strips the dependency context
@@ -190,7 +174,7 @@ class JobLifecycleService:
                 # project without an existing orchestrator skips this entirely and mints
                 # fresh exactly as before.
                 reuse = await self._reuse_existing_chain_orchestrator(
-                    session, agent_display_name, project_id, tenant_key
+                    session, agent_display_name, project_id, tenant_key, inline_seed=inline_seed
                 )
                 if reuse is not None:
                     return reuse
@@ -231,9 +215,8 @@ class JobLifecycleService:
                 if context_chunks:
                     metadata_dict["context_chunks"] = context_chunks
 
-                # NOTE: Serena instructions removed from spawn-time injection (was double-injecting).
-                # get_job_mission() handles Serena injection dynamically at read time (lines 1772-1786),
-                # respecting the toggle and keeping DB missions clean for summary display.
+                # NOTE: Serena injection happens dynamically in get_job_mission() at read time
+                # (not here, to avoid double-injecting and to keep DB missions clean).
 
                 # Handover 0411a/0417: Resolve template injection for multi-terminal mode
                 mission, resolved_template_id = await self._resolve_spawn_template(
@@ -268,21 +251,16 @@ class JobLifecycleService:
                 # failure can never leave a phantom agent on the dashboard).
                 await session.commit()
 
-                # BE-5103: multi_terminal swaps the bootstrap for a dashboard pointer.
-                _mt = await renders_multi_terminal(
-                    session, project=project, project_id=project_id, tenant_key=tenant_key
+                thin_agent_prompt, agent_prompt_location = await self._resolve_thin_prompt(
+                    session,
+                    project=project,
+                    project_id=project_id,
+                    tenant_key=tenant_key,
+                    agent_name=agent_name,
+                    agent_display_name=agent_display_name,
+                    job_id=job_id,
+                    inline_seed=inline_seed,
                 )
-                thin_agent_prompt = (
-                    _MULTI_TERMINAL_PROMPT_POINTER.format(agent_display_name=agent_display_name)
-                    if _mt
-                    else self._build_agent_prompt(
-                        agent_name=agent_name,
-                        agent_display_name=agent_display_name,
-                        project_name=project.name,
-                        job_id=job_id,
-                    )
-                )
-                agent_prompt_location = "dashboard" if _mt else "inline"
                 created_at = datetime.now(UTC)
 
                 # Broadcast agent creation via direct WebSocket
@@ -298,6 +276,7 @@ class JobLifecycleService:
                         mission=mission,
                         phase=phase,
                         created_at=created_at,
+                        product_id=project.product_id,
                     ),
                 )
 
@@ -343,6 +322,7 @@ class JobLifecycleService:
         agent_display_name: str,
         project_id: str,
         tenant_key: str,
+        inline_seed: bool = False,
     ) -> SpawnResult | None:
         """BE-6198 (Fix #1A): return the already-minted sub-orchestrator instead of forking.
 
@@ -373,16 +353,15 @@ class JobLifecycleService:
         # Regenerate the launch command for the EXISTING job via the same synthesis
         # the normal spawn path uses, so the returned shape is byte-compatible.
         project = await AgentJobRepository(None).get_project_by_id(session, tenant_key, project_id)
-        _mt = await renders_multi_terminal(session, project=project, project_id=project_id, tenant_key=tenant_key)
-        thin_agent_prompt = (
-            _MULTI_TERMINAL_PROMPT_POINTER.format(agent_display_name=existing.agent_display_name)
-            if _mt
-            else self._build_agent_prompt(
-                agent_name=existing.agent_name,
-                agent_display_name=existing.agent_display_name,
-                project_name=project.name,
-                job_id=existing.job_id,
-            )
+        thin_agent_prompt, agent_prompt_location = await self._resolve_thin_prompt(
+            session,
+            project=project,
+            project_id=project_id,
+            tenant_key=tenant_key,
+            agent_name=existing.agent_name,
+            agent_display_name=existing.agent_display_name,
+            job_id=existing.job_id,
+            inline_seed=inline_seed,
         )
 
         self._logger.info(
@@ -405,7 +384,7 @@ class JobLifecycleService:
             ],
             predecessor_job_id=None,
             phase=None,
-            agent_prompt_location="dashboard" if _mt else "inline",
+            agent_prompt_location=agent_prompt_location,
             # BE-9083b: breadcrumb footer from LIVE lifecycle phase.
             lifecycle_footer=build_spawn_footer(
                 phase=(
@@ -646,6 +625,27 @@ class JobLifecycleService:
 
         return mission, resolved_template_id
 
+    async def _resolve_thin_prompt(
+        self,
+        session: AsyncSession,
+        *,
+        project: Any,
+        project_id: str,
+        tenant_key: str,
+        agent_name: str,
+        agent_display_name: str,
+        job_id: str,
+        inline_seed: bool,
+    ) -> tuple[str, str]:
+        """(agent_prompt, agent_prompt_location) -- BE-5103 pointer vs BE-9499c inline seed."""
+        mt = await renders_multi_terminal(session, project=project, project_id=project_id, tenant_key=tenant_key)
+        if mt and not inline_seed:
+            return _MULTI_TERMINAL_PROMPT_POINTER.format(agent_display_name=agent_display_name), "dashboard"
+        prompt = self._build_agent_prompt(
+            agent_name=agent_name, agent_display_name=agent_display_name, project_name=project.name, job_id=job_id
+        )
+        return prompt, "inline"
+
     def _build_agent_prompt(self, agent_name: str, agent_display_name: str, project_name: str, job_id: str) -> str:
         """Build the ~10-line bootstrap prompt for a spawned agent session.
 
@@ -731,8 +731,7 @@ session (CE-0026 — the server returns a STOP directive when you do).
         execution_status = "staged" if is_staged else "waiting"
         job_mission = mission if not is_staged else None
 
-        # AgentJob: Work order (WHAT) -- persists across succession
-        agent_job = AgentJob(
+        agent_job = AgentJob(  # Work order (WHAT) -- persists across succession
             job_id=job_id,
             tenant_key=tenant_key,
             project_id=project_id,
@@ -784,6 +783,7 @@ session (CE-0026 — the server returns a STOP directive when you do).
                     event_type="agent:created",
                     data={
                         "project_id": ctx.project_id,
+                        "product_id": ctx.product_id,  # BE-9525c
                         "execution_id": ctx.agent_execution.id,  # Handover 0457: Unique row ID for frontend Map key
                         "agent_id": ctx.agent_id,  # Executor UUID
                         "job_id": ctx.job_id,  # Work order UUID

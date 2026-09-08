@@ -380,7 +380,7 @@ class MissionService:
                 tenant_key,
                 job_id,
                 expected_status="active",
-                method="get_agent_mission",
+                method="service.get_agent_mission",
                 db_manager=self.db_manager,
             )
 
@@ -749,7 +749,7 @@ class MissionService:
                         context={
                             "job_id": job_id,
                             "tenant_key": tenant_key,
-                            "method": "update_agent_mission",
+                            "method": "service.update_agent_mission",
                             "troubleshooting": [
                                 "Verify job_id is correct",
                                 "Ensure tenant_key matches",

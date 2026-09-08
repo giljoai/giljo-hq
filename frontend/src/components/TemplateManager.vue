@@ -39,9 +39,11 @@
       You need to update the agent templates, please run the <strong>giljo_setup</strong> tool (choose "Agents only") in your CLI tool.
     </v-alert>
 
-    <!-- Account-wide orchestration policy switches (closeout HITL, headless launch) -->
-    <OrchestrationToggles />
-
+    <!-- FE-9555 (operator direction 2026-09-04): the account-wide policy switches
+         moved OUT of here and into the "Agent Behaviour Settings" group ToolsView
+         renders ABOVE this roster. They never described the template roster around
+         them -- OrchestrationToggles' own docstring already said they only lived
+         here because this tab had room. -->
     <!-- Filter bar with New Template button right-aligned -->
     <div class="filter-bar">
       <v-text-field
@@ -209,7 +211,6 @@ import { useTemplateEditDialog } from '@/composables/useTemplateEditDialog'
 import { useTemplateRealtime } from '@/composables/useTemplateRealtime'
 import TemplatesTable from './templates/TemplatesTable.vue'
 import TemplateEditDialog from './templates/TemplateEditDialog.vue'
-import OrchestrationToggles from './templates/OrchestrationToggles.vue'
 import {
   TEMPLATE_TABLE_HEADERS,
   TEMPLATE_ROLE_OPTIONS,

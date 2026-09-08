@@ -15,11 +15,13 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager
 from giljo_mcp.domain.project_status import ProjectStatus
 from giljo_mcp.exceptions import (
+    AlreadyExistsError,
     BaseGiljoError,
     ProjectStateError,
     ResourceNotFoundError,
@@ -85,8 +87,8 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
         - staging -> active (initial launch)
         - inactive -> active (activate/resume)
 
-        Enforces Single Active Project constraint: automatically deactivates
-        any existing active project in the same product before activating the new one.
+        Ruling 5 amended (D5, 2026-08-28): N projects may be active per product.
+        Activating this project no longer touches any other project's status.
 
         Args:
             project_id: Project UUID
@@ -128,26 +130,6 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
                         context={"project_id": project_id, "current_status": project.status.value},
                     )
 
-                # Check for existing active project in same product (Single Active Project constraint)
-                if project.product_id:
-                    existing_active = await self._repo.find_active_in_product(
-                        session, resolved_tenant, str(project.product_id), project_id
-                    )
-
-                    if existing_active:
-                        # Auto-deactivate existing active project
-                        existing_active.status = ProjectStatus.INACTIVE
-                        existing_active.updated_at = datetime.now(UTC)
-                        self._logger.info(
-                            f"Auto-deactivated project {existing_active.id} due to Single Active Project constraint"
-                        )
-
-                        # IMPORTANT: Flush deactivation before activating the new project to
-                        # satisfy the unique index idx_project_single_active_per_product.
-                        # Otherwise Postgres may see two active projects for the same product
-                        # in a single flush and raise a unique violation.
-                        await self._repo.flush(session)
-
                 # Activate project
                 project.status = ProjectStatus.ACTIVE
                 project.updated_at = datetime.now(UTC)
@@ -183,6 +165,30 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
         except (ResourceNotFoundError, ProjectStateError):
             # Re-raise our custom exceptions
             raise
+        except IntegrityError as e:
+            # BE-9519, kept unreachable-but-harmless per BE-9525b: this branch
+            # mapped a unique-index violation on
+            # idx_project_single_active_per_product to a clean
+            # ANOTHER_PROJECT_ACTIVE rejection. BE-9525b (ruling 5 amended)
+            # dropped that index and the deactivate-then-activate ordering
+            # above, so this string match can no longer fire -- Postgres will
+            # never raise this IntegrityError again. Left in place rather than
+            # deleted: removing a weeks-old incident-fix catch is a separate
+            # cleanup with its own zero-reachability proof, not bundled here.
+            if "idx_project_single_active_per_product" in str(e):
+                raise AlreadyExistsError(
+                    message=(
+                        "Another project is already active for this product. "
+                        "Deactivate it first, or use the activate endpoint, "
+                        "which handles this automatically."
+                    ),
+                    error_code="ANOTHER_PROJECT_ACTIVE",
+                    context={"project_id": project_id},
+                ) from e
+            self._logger.exception("Failed to activate project")
+            raise BaseGiljoError(
+                message=f"Failed to activate project: {e!s}", context={"project_id": project_id}
+            ) from e
         except Exception as e:  # Broad catch: service boundary, wraps in BaseGiljoError
             self._logger.exception("Failed to activate project")
             raise BaseGiljoError(
@@ -270,7 +276,9 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
             # BE-6123: tell open dashboards to drop the deleted rows live. Emitted
             # post-commit (TRANSACTION_OWNERSHIP_CONVENTION) so a failed commit
             # never produces a phantom removal; WS failure must not fail the op.
-            await self._broadcast_agents_removed(ws_mgr, resolved_tenant, project_id, removed)
+            await self._broadcast_agents_removed(
+                ws_mgr, resolved_tenant, project_id, removed, product_id=project.product_id
+            )
 
             return project
 
@@ -496,6 +504,7 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
                     self._websocket_manager,
                     tenant_key=tenant_key,
                     project_id=project_id,
+                    product_id=project.product_id,  # BE-9518
                     events=decommission_events,
                 )
         elif decommission_events and decommission_events_out is not None:
@@ -516,7 +525,12 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
                 await ws_mgr.broadcast_project_update(
                     project_id=project_id,
                     update_type="status_changed",
-                    project_data={"name": project.name, "status": "completed", "mission": project.mission},
+                    project_data={
+                        "name": project.name,
+                        "status": "completed",
+                        "mission": project.mission,
+                        "product_id": project.product_id,
+                    },
                     tenant_key=tenant_key,
                 )
             except Exception as ws_error:  # noqa: BLE001 - WebSocket resilience: non-critical broadcast
@@ -659,6 +673,7 @@ class ProjectLifecycleService(OrchestratorFixtureMixin):
                                 "name": project.name,
                                 "status": ProjectStatus.INACTIVE.value,
                                 "mission": project.mission,
+                                "product_id": project.product_id,
                             },
                             tenant_key=tenant_key,
                         )
