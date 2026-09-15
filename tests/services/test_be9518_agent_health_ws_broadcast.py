@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9518 — direct unit tests for the extracted agent-health WS emitter module.
-
-``broadcast_health_alert`` / ``broadcast_agent_auto_failed`` moved off
-``WebSocketManager`` to module-level functions here (mirroring the existing
-``closeout_ws_broadcast.py`` / ``orchestrator_prompt_ws_broadcast.py``
-extractions) purely for ``api/websocket.py`` file-size compliance -- no
-behavior change. This file is the dedicated test surface for the new module;
-the wiring into ``monitoring/agent_health_monitor.py`` is covered separately
-by ``tests/unit/test_be9101_health_monitor_abandon.py`` and
-``tests/unit/test_be6004c_background_bypass.py``.
-
-Pure in-memory (spy WebSocket manager) -- no DB, no module-level mutable
-state. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -81,9 +67,6 @@ async def test_broadcast_health_alert_emits_correct_event_type_and_data():
 
 
 async def test_broadcast_health_alert_product_id_defaults_empty_string():
-    """Matches AgentHealthStatus's own default -- "" not None, for a job with
-    no owning project (mirrors the pre-existing project_id/project_name
-    convention on this dataclass)."""
     spy = _SpyManager()
     await broadcast_health_alert(
         spy,
@@ -116,9 +99,6 @@ async def test_broadcast_agent_auto_failed_emits_correct_event_type_and_data():
 
 
 async def test_broadcast_agent_auto_failed_omits_product_id_when_none():
-    """Additive contract: unlike health_alert (which always carries the field
-    via the AgentHealthStatus object), auto_failed takes product_id as a bare
-    optional kwarg and must OMIT it, not send null, when the caller has none."""
     spy = _SpyManager()
     await broadcast_agent_auto_failed(
         spy,

@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Roadmap API endpoints (FE-6022a) — the active product's single roadmap.
-
-- ``GET  /api/v1/roadmap``         — the product's roadmap + items joined to
-  project/task display fields (taxonomy_alias, title, status), sorted by
-  sort_order, tenant + product scoped.
-- ``PATCH /api/v1/roadmap/reorder`` — bulk sort_order update after a drag.
-- ``DELETE /api/v1/roadmap/items/{item_id}`` — remove one item from the active
-  product's roadmap (tenant + product scoped; never touches the underlying
-  project/task).
-
-There is intentionally no ``POST /generate`` endpoint: roadmap generation is
-client-side (the local agent persists via the ``update_roadmap_metadata`` MCP
-tool). One roadmap per product, so there is no list endpoint either.
-
-All operations are tenant + active-product scoped via RoadmapService.
-"""
 
 import logging
 from typing import Any

@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6208e: get_context/fetch_context resolves product_id from project_id.
-
-A combined-chain sub-orchestrator is handed a project_id but no product_id, yet
-its documented startup step calls get_context (which needs a product_id). When
-product_id is absent/empty and a project_id is supplied, fetch_context resolves
-the product server-side via the tenant-scoped ProjectRepository.get_by_id.
-
-Security invariant (ADR-009): the resolution filters by tenant_key, so a
-project_id belonging to another tenant must NOT resolve.
-"""
 
 from __future__ import annotations
 
@@ -33,15 +23,6 @@ from giljo_mcp.tools.context_tools.fetch_context import (
 
 
 class _SessionYieldingDBManager:
-    """A db_manager stand-in whose get_session_async yields the test's
-    transactional session, so the real ProjectRepository runs against the
-    test-created (and rolled-back) rows on a single connection.
-
-    The yielded session carries ``info["tenant_key"] = caller_tenant`` so the
-    tenant guard sees the same caller-scoped context the production
-    get_session_async installs — a cross-tenant query then simply matches no
-    rows (returns None) rather than tripping the guard's explicit-predicate
-    check, which is exactly the production behaviour we are asserting on."""
 
     def __init__(self, session, caller_tenant: str):
         self._session = session
@@ -90,7 +71,6 @@ async def _make_project(db_session, tenant_key: str, product_id: str) -> Project
 
 @pytest.mark.asyncio
 async def test_resolve_helper_returns_product_for_same_tenant(db_session, test_tenant_key):
-    """The tenant-scoped lookup returns the project's product_id."""
     product = await _make_product(db_session, test_tenant_key)
     project = await _make_project(db_session, test_tenant_key, product.id)
 
@@ -102,7 +82,6 @@ async def test_resolve_helper_returns_product_for_same_tenant(db_session, test_t
 
 @pytest.mark.asyncio
 async def test_resolve_helper_blocks_cross_tenant(db_session, test_tenant_key):
-    """A project_id from another tenant must NOT resolve — proves tenant scoping."""
     product = await _make_product(db_session, test_tenant_key)
     project = await _make_project(db_session, test_tenant_key, product.id)
 
@@ -115,7 +94,6 @@ async def test_resolve_helper_blocks_cross_tenant(db_session, test_tenant_key):
 
 @pytest.mark.asyncio
 async def test_fetch_context_resolves_when_product_id_empty(db_session, test_tenant_key):
-    """fetch_context with project_id and NO product_id resolves and returns context."""
     product = await _make_product(db_session, test_tenant_key)
     project = await _make_project(db_session, test_tenant_key, product.id)
 
@@ -135,7 +113,6 @@ async def test_fetch_context_resolves_when_product_id_empty(db_session, test_ten
 
 @pytest.mark.asyncio
 async def test_fetch_context_cross_tenant_does_not_resolve(db_session, test_tenant_key):
-    """fetch_context with a foreign-tenant project_id raises (no silent context)."""
     product = await _make_product(db_session, test_tenant_key)
     project = await _make_project(db_session, test_tenant_key, product.id)
 
@@ -152,7 +129,6 @@ async def test_fetch_context_cross_tenant_does_not_resolve(db_session, test_tena
 
 @pytest.mark.asyncio
 async def test_explicit_product_id_skips_resolution(db_session, test_tenant_key):
-    """The explicit-product_id path (solo) never invokes the resolver — unchanged."""
     product = await _make_product(db_session, test_tenant_key)
     project = await _make_project(db_session, test_tenant_key, product.id)
 

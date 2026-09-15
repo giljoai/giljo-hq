@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Route + WebSocket endpoint + exception-handler wiring extracted from api/app.py.
-
-Behavior-preserving (BE-6042b): ``register_event_handlers(app)`` registers the
-root endpoint, ``/health``, ``/api/system/status``, the ``/ws/{client_id}``
-WebSocket endpoint, and the global exception handlers — in the same order and
-under the same conditions as the original module-level ``_register_event_handlers``.
-"""
 
 from __future__ import annotations
 
@@ -31,11 +24,6 @@ logger = logging.getLogger("api.app")
 
 
 def register_event_handlers(app: FastAPI) -> None:
-    """Register route handlers, WebSocket endpoint, and exception handlers.
-
-    Sets up the root endpoint, health check, WebSocket endpoint for real-time
-    updates, and global exception handlers.
-    """
 
     dist_dir = Path(state.config.get_nested("paths.static", "frontend/dist")) if state.config else Path("frontend/dist")
     has_frontend = dist_dir.exists() and (dist_dir / "index.html").exists()
@@ -70,9 +58,6 @@ def register_event_handlers(app: FastAPI) -> None:
                     checks["database"] = "healthy"
                     state.health_detail.pop("database", None)
             except (ConnectionError, TimeoutError, RuntimeError, OSError) as e:
-                # SEC-9168: /health is unauthenticated — exception text can
-                # carry internal hostnames/ports, so only the generic marker
-                # goes out here. Full detail: logs + authed /api/system/status.
                 checks["database"] = "unhealthy: database"
                 state.health_detail["database"] = str(e)
                 logger.warning("Health check: database unhealthy: %s", sanitize(str(e)))
@@ -81,12 +66,6 @@ def register_event_handlers(app: FastAPI) -> None:
             checks["websocket"] = "healthy"
             checks["active_connections"] = len(state.connections)
 
-        # INF-3009c: Redis cache-backend status (SaaS only — CE never sets
-        # state.redis_mode away from its "unset" default, so CE health output
-        # is unchanged). "in-process" is a legitimate SaaS mode today (Redis
-        # is provisioning-readiness only until INF-3009d), so it does not by
-        # itself flip overall status to "degraded" — only an actual ping
-        # failure on a "connected" boot does.
         if GILJO_MODE == "saas":
             if state.redis_mode == "connected" and state.redis_client is not None:
                 from redis.exceptions import RedisError
@@ -97,7 +76,6 @@ def register_event_handlers(app: FastAPI) -> None:
                     if pong:
                         state.health_detail.pop("redis", None)
                 except (RedisError, ConnectionError, TimeoutError, OSError) as e:
-                    # SEC-9168: same anonymous-surface rule as the database check.
                     checks["redis"] = "unhealthy: redis"
                     state.health_detail["redis"] = str(e)
                     logger.warning("Health check: redis unhealthy: %s", sanitize(str(e)))
@@ -110,10 +88,6 @@ def register_event_handlers(app: FastAPI) -> None:
             else "degraded"
         )
 
-        # BE-9053: degraded_services was write-only — startup failures of the
-        # backup scheduler / reapers were appended to a list nothing ever read,
-        # so SaaS could run indefinitely with those services silently OFF.
-        # Surface it here so any health poller (the platform, operator curl) sees it.
         if state.degraded_services:
             checks["degraded_services"] = list(state.degraded_services)
             status = "degraded"
@@ -133,8 +107,6 @@ def register_event_handlers(app: FastAPI) -> None:
         return {
             "pending_migration": state.pending_migration,
             "update_available": state.update_available,
-            # SEC-9168: full health-failure detail lives here (authenticated),
-            # never on the anonymous /health surface.
             "health_detail": dict(state.health_detail),
         }
 
@@ -176,8 +148,6 @@ def register_event_handlers(app: FastAPI) -> None:
                     )
 
         except WebSocketDisconnect:
-            # Identity-safe: only evict THIS socket, never a newer one that may
-            # have taken over the same client_id while this loop was tearing down.
             state.websocket_manager.disconnect(client_id, websocket)
             if client_id in state.connections:
                 del state.connections[client_id]
@@ -188,10 +158,6 @@ def register_event_handlers(app: FastAPI) -> None:
             if client_id in state.connections:
                 del state.connections[client_id]
 
-    # Register global exception handlers (Handover 0480a)
     register_exception_handlers(app)
-    # Store state reference in app
     app.state.api_state = state
 
-    # Note: db_manager is exposed on app.state in lifespan() AFTER initialization
-    # Setting it here would be None since lifespan hasn't run yet

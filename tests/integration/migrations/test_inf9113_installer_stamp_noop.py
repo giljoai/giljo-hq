@@ -3,36 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""INF-9113 regression: installer Phase-B migration stamp logic.
-
-The CE installer runs migrations twice on a fresh install: Phase A
-("Setting Up Database", install.py --setup-only) upgrades the fresh DB to
-head, then Phase B ("Applying Database Migrations",
-DatabaseSetupMixin.run_database_migrations) re-checks the alembic state.
-Phase B's recognition scan resolved ``migrations/versions`` relative to
-``installer/core/database_setup.py`` -- a directory that does not exist --
-so every real ce_0XXX revision was misclassified as "unknown" and the
-pointer was destructively stamped DOWN to baseline_v37. The subsequent
-chain replay then crashed in ce_0015 (backfill reads ``tasks.category``,
-which ce_0016 drops), wedging every fresh install.
-
-Failing-layer regressions (real scratch PostgreSQL, per-worker DB):
-
-  (a) Fresh-install sequence -- Phase A to head, then Phase B must NO-OP:
-      pointer stays at head, never stamped down. THE load-bearing test:
-      the bug shipped because nothing ran Phase A + Phase B together.
-  (b) ce_0015 replayed over an at-head schema (category absent) no-ops
-      instead of crashing UndefinedColumn; a DB wedged by this bug
-      (pointer=baseline_v37, schema at head) self-heals via full replay.
-  (c) The genuinely-empty-DB path (no alembic_version table) still
-      installs to head -- the legacy case Phase B exists for.
-  (+) A revision unknown to this build's chain (newer build) is never
-      stamped down; the install fails loudly at alembic instead.
-
-SAFETY: scratch DB only (giljo_test_bootstrap{worker}); the live DBs
-giljo_mcp / giljo_mcp_ce are NEVER touched. Parallel-safe: per-worker
-scratch DB (conftest provisions it), monkeypatch owns env/cwd mutations.
-"""
 
 from __future__ import annotations
 
@@ -150,13 +120,6 @@ def _table_exists(engine: sa.Engine, name: str) -> bool:
 
 
 def _run_installer_phase_b(monkeypatch: pytest.MonkeyPatch) -> dict:
-    """Run the REAL installer Phase B (run_database_migrations) in-process.
-
-    Exercises the failing layer exactly: UnifiedInstaller (which hosts
-    DatabaseSetupMixin + _verify_essential_tables) against the scratch DB.
-    Only the venv-python lookup is stubbed (tests run in the dev venv, which
-    has alembic; there is no installer-created venv here).
-    """
     import install
 
     monkeypatch.chdir(PROJECT_ROOT)
@@ -175,46 +138,29 @@ def scratch_engine():
     engine.dispose()
 
 
-# ---------------------------------------------------------------------------
-# (a) THE load-bearing sequence: Phase A to head, Phase B must NO-OP
-# ---------------------------------------------------------------------------
 
 
 def test_phase_b_noops_on_fresh_at_head_db(scratch_engine, monkeypatch):
-    """Fresh install: after Phase A upgrades to head, Phase B must not stamp down."""
     _drop_all_objects(scratch_engine)
 
-    # Phase A: alembic upgrade head on the fresh DB (what --setup-only does).
     phase_a = _run_alembic("upgrade", "head")
     assert phase_a.returncode == 0, f"Phase A failed:\n{phase_a.stdout}\n{phase_a.stderr}"
 
     head_rev = _current_version(scratch_engine)
     assert head_rev is not None
     assert head_rev != "baseline_v37", "precondition: chain head must be past baseline"
-    # The Acer repro precondition: at head, tasks.category is already dropped.
     assert not _column_exists(scratch_engine, "tasks", "category")
 
-    # Phase B: the installer's second migration pass.
     result = _run_installer_phase_b(monkeypatch)
 
     assert result["success"] is True, f"Phase B failed: {result.get('error')}"
-    # THE regression assertion: pointer untouched, never stamped down.
     assert _current_version(scratch_engine) == head_rev
-    # And nothing got replayed on the already-at-head schema.
     assert result["migrations_applied"] == []
 
 
-# ---------------------------------------------------------------------------
-# (+) Unknown/newer revision: fail loudly, NEVER stamp down
-# ---------------------------------------------------------------------------
 
 
 def test_unknown_revision_is_never_stamped_down(scratch_engine, monkeypatch):
-    """A revision from a newer build must not be 'bridged' down to baseline_v37.
-
-    Phase B must leave the pointer alone; the subsequent `alembic upgrade
-    head` fails loudly ("Can't locate revision") and Phase B reports failure.
-    """
     _drop_all_objects(scratch_engine)
     phase_a = _run_alembic("upgrade", "head")
     assert phase_a.returncode == 0, f"setup failed:\n{phase_a.stderr}"
@@ -223,25 +169,18 @@ def test_unknown_revision_is_never_stamped_down(scratch_engine, monkeypatch):
 
     result = _run_installer_phase_b(monkeypatch)
 
-    # Loud failure at alembic -- not a silent destructive stamp.
     assert result["success"] is False
     assert _current_version(scratch_engine) == _FAKE_FUTURE_REVISION
 
 
-# ---------------------------------------------------------------------------
-# (b) ce_0015 replay tolerance + wedged-DB self-heal
-# ---------------------------------------------------------------------------
 
 
 def test_ce_0015_replays_cleanly_on_at_head_schema(scratch_engine):
-    """Replaying ce_0015 over a schema where ce_0016 already dropped
-    tasks.category must no-op, not crash UndefinedColumn."""
     _drop_all_objects(scratch_engine)
     assert _run_alembic("upgrade", "head").returncode == 0
 
     assert not _column_exists(scratch_engine, "tasks", "category")
 
-    # Force the exact replay the stamp-down bug caused, isolated to ce_0015.
     assert _run_alembic("stamp", _CE_0014).returncode == 0
     replay = _run_alembic("upgrade", _CE_0015)
 
@@ -250,14 +189,10 @@ def test_ce_0015_replays_cleanly_on_at_head_schema(scratch_engine):
 
 
 def test_wedged_db_self_heals_on_next_upgrade(scratch_engine):
-    """A DB wedged by the INF-9113 bug (pointer=baseline_v37, schema at head)
-    must reach head on its next `alembic upgrade head` (tolerance/self-heal
-    DoD -- no manual fix instructions to CE self-hosters)."""
     _drop_all_objects(scratch_engine)
     assert _run_alembic("upgrade", "head").returncode == 0
     head_rev = _current_version(scratch_engine)
 
-    # Reproduce the wedge exactly as the shipped installer created it.
     _set_version(scratch_engine, "baseline_v37")
 
     heal = _run_alembic("upgrade", "head")
@@ -266,14 +201,9 @@ def test_wedged_db_self_heals_on_next_upgrade(scratch_engine):
     assert _current_version(scratch_engine) == head_rev
 
 
-# ---------------------------------------------------------------------------
-# (+) startup.py boot path: same stamp-down policy, same fix
-# ---------------------------------------------------------------------------
 
 
 def _run_startup_migrations() -> subprocess.CompletedProcess[str]:
-    """Invoke startup.run_database_migrations in a fresh subprocess (the CE
-    boot path -- startup.py re-runs migrations on every server start)."""
     code = (
         "import sys, os; "
         "sys.path.insert(0, os.getcwd()); "
@@ -293,9 +223,6 @@ def _run_startup_migrations() -> subprocess.CompletedProcess[str]:
 
 
 def test_startup_boot_never_stamps_down_unknown_revision(scratch_engine):
-    """startup.py shares the installer's bridge logic; a revision from a
-    newer build (rollback / restore onto older code / partial update) must
-    never be stamped down on boot -- fail loudly, pointer untouched."""
     _drop_all_objects(scratch_engine)
     assert _run_alembic("upgrade", "head").returncode == 0
 
@@ -303,14 +230,11 @@ def test_startup_boot_never_stamps_down_unknown_revision(scratch_engine):
 
     boot = _run_startup_migrations()
 
-    # Loud failure at alembic ("Can't locate revision") -- not a silent
-    # destructive stamp + full-chain replay.
     assert boot.returncode != 0
     assert _current_version(scratch_engine) == _FAKE_FUTURE_REVISION
 
 
 def test_startup_boot_noops_on_at_head_db(scratch_engine):
-    """Normal boot on an at-head DB: pointer stays at head, boot succeeds."""
     _drop_all_objects(scratch_engine)
     assert _run_alembic("upgrade", "head").returncode == 0
     head_rev = _current_version(scratch_engine)
@@ -321,13 +245,9 @@ def test_startup_boot_noops_on_at_head_db(scratch_engine):
     assert _current_version(scratch_engine) == head_rev
 
 
-# ---------------------------------------------------------------------------
-# (c) Genuinely empty DB: the fresh path Phase B exists for still works
-# ---------------------------------------------------------------------------
 
 
 def test_empty_db_installs_to_head(scratch_engine, monkeypatch):
-    """No alembic_version table at all: Phase B runs the full chain to head."""
     _drop_all_objects(scratch_engine)
 
     result = _run_installer_phase_b(monkeypatch)

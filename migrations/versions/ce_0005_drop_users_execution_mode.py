@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Drop orphan users.execution_mode column.
-
-Revision ID: ce_0005_drop_users_execution_mode
-Revises: ce_0004_projects_product_id_not_null
-Create Date: 2026-04-28
-
-The users.execution_mode column was an orphan: zero frontend writers, zero
-SaaS readers, and the only CE readers were a service+endpoint pair that was
-never wired into the UI. Project.execution_mode is the canonical setting and
-remains untouched by this migration.
-
-Reversible: downgrade re-adds the column with its original String(20)
-NOT NULL default 'claude_code'.
-"""
 
 import sqlalchemy as sa
 from alembic import op
@@ -29,7 +15,6 @@ depends_on = None
 
 
 def _has_column(conn, table: str, column: str) -> bool:
-    """Idempotency guard -- check column existence via information_schema."""
     result = conn.execute(
         sa.text("SELECT 1 FROM information_schema.columns WHERE table_name = :table AND column_name = :column"),
         {"table": table, "column": column},

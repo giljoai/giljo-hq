@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tool Accessor for API Integration
-Provides direct access to MCP tool functions for API endpoints
-
-BE-6042a: This god-class was mechanically split into domain mixins under the
-``tool_accessor/`` subpackage. The composed ``ToolAccessor`` below preserves the
-load-bearing public import ``from giljo_mcp.tools.tool_accessor import ToolAccessor``
-(used by api/startup/core_services.py + the boundary test fixtures). Construction
-logic (``__init__`` + ``get_session_async``) stays here on the base; each tool
-domain lives in its own mixin module.
-
-BE-6118: after BE-3010b, ``_call_tool`` dispatches the ~30 PURE MCP tools straight
-to their terminal service bound method via ``TOOL_DISPATCH`` (no longer through the
-ToolAccessor mixin). The pure pass-through mixin methods were therefore deleted;
-only the genuine ADAPTER methods (reshape results / build envelopes / inject deps
-into standalone tool-functions / map params — resolved through ``_call_tool``'s
-``getattr`` fallback) remain. The all-pure TaskToolsMixin + RoadmapToolsMixin were
-removed entirely; the Project/Message/Comm/Job mixins keep only their adapters.
-"""
 
 from __future__ import annotations
 
@@ -65,7 +46,6 @@ class ToolAccessor(
     ContextToolsMixin,
     SetupMiscMixin,
 ):
-    """Provides direct access to MCP tool functionality for API"""
 
     def __init__(
         self,
@@ -79,44 +59,34 @@ class ToolAccessor(
         self._websocket_manager = websocket_manager
         self._test_session = test_session
 
-        self._product_service = None  # Lazy initialization per-request
+        self._product_service = None
         self._project_service = ProjectService(
             db_manager,
             tenant_manager,
             test_session=test_session,
-            websocket_manager=websocket_manager,  # Fix: Pass WebSocket manager for mission updates
+            websocket_manager=websocket_manager,
         )
         self._task_service = TaskService(
             db_manager,
             tenant_manager,
             websocket_manager=websocket_manager,
         )
-        # FE-6022a: Roadmapping Pane writes
         self._roadmap_service = RoadmapService(
             db_manager,
             tenant_manager,
             session=test_session,
             websocket_manager=websocket_manager,
         )
-        # BE-9012d: the bus send/broadcast methods were hard-removed; only the
-        # relocated Hub reactivation coupling (auto_block_for_thread_post) remains.
         self._message_routing_service = MessageRoutingService(
             db_manager,
             tenant_manager,
             websocket_manager=websocket_manager,
         )
-        # BE-6054b: Agent Message Hub thread/tool surface
         self._comm_thread_service = CommThreadService(
             db_manager,
             tenant_manager,
             session=test_session,
         )
-        # BE-9012d: websocket_manager is now passed directly (previously smuggled
-        # through the deleted MessageService's _websocket_manager fallback — see
-        # OrchestrationService.__init__'s ``websocket_manager or getattr(message_service,
-        # "_websocket_manager", None)``). Passing it explicitly here is required or the
-        # sub-services (JobLifecycleService, MissionService, ProgressService,
-        # OrchestrationAgentStateService) silently lose real-time WS emission.
         self._orchestration_service = OrchestrationService(
             db_manager,
             tenant_manager,
@@ -124,9 +94,6 @@ class ToolAccessor(
             websocket_manager=websocket_manager,
         )
 
-        # BE-5029: User approval primitive. BE-9012d: comm_thread_service replaces
-        # message_routing_service for the decide-notify Hub post (see
-        # UserApprovalService._notify_orchestrator_of_decision).
         self._user_approval_service = UserApprovalService(
             db_manager,
             tenant_manager,
@@ -135,7 +102,6 @@ class ToolAccessor(
             comm_thread_service=self._comm_thread_service,
         )
 
-        # Sprint 002f: Direct sub-service references for collapsed pass-throughs
         self._mission_service = self._orchestration_service._mission
         self._progress_service = self._orchestration_service._progress
         self._agent_state_service = self._orchestration_service._agent_state
@@ -143,13 +109,7 @@ class ToolAccessor(
         self._job_completion_service = self._orchestration_service._job_completion
 
     def get_session_async(self):
-        """
-        Get async session context manager.
-
-        Uses test_session when available for transaction sharing in tests (Handover 0358c).
-        """
         if self._test_session is not None:
-            # Return async context manager that yields test session
             import contextlib
 
             @contextlib.asynccontextmanager

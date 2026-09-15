@@ -3,52 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9449: capture the client's DECLARED MCP capabilities at ``initialize``.
-
-``session_data["capabilities"]`` has been initialised ``{}`` and never filled
-since the table was created, so the one signal that distinguishes Claude Desktop
-from claude.ai web -- both of which declare the byte-identical
-``Anthropic/ClaudeAI`` v1.0.0 clientInfo -- is thrown away at the only moment it
-is ever knowable. This module pins the NEW ``client_capabilities`` key that
-carries it, verbatim.
-
-Failing-layer discipline (per CLAUDE.md): the capture lives in the ASGI auth
-middleware's ``initialize`` special-case, so the regression tests drive a real
-``initialize`` JSON-RPC payload through ``MCPAuthMiddleware`` end-to-end -- the
-same boundary a real MCP client hits -- and assert what lands in the persisted
-``MCPSession.session_data`` row. **The observable is the row, never the fact
-that a helper was called.** Both mint paths are covered, because two mint paths
-means two places the value can silently fail to land: the API-key path
-(``mcp_auth_middleware.py:302``) and the JWT path (``:527`` ->
-``_ensure_jwt_initialize_session`` -> ``:640``).
-
-Reuses the seed + middleware drivers from ``tests/api/test_mcp_session.py``,
-matching ``test_be8003d_clientinfo_capture.py`` (the INF-8003d mirror this
-project copies).
-
-READ THIS BEFORE COUNTING THE PRE-FIX RED
------------------------------------------
-Against unmodified master this module produces two DIFFERENT kinds of failure
-and only one of them is evidence. They are separated into named classes here so
-a later reader cannot miscount them:
-
-* **EVIDENCE -- assertion-class.** Everything in ``TestCapturedAtTheApiKeyMint``
-  and ``TestCapturedAtTheJwtMint``. On master the session is created normally,
-  nothing imports wrong, the row is fully populated, and
-  ``session_data.get("client_capabilities")`` is simply ``None`` where the
-  declared object is expected. The ASSERTION fails. That is the reproduction.
-
-* **NOT EVIDENCE -- surface-absent class.** ``TestPeekHelperContract`` and
-  ``TestClientInfoPatchVehicle`` fail on master with ``ImportError`` /
-  ``TypeError`` because ``_peek_jsonrpc_capabilities`` and the new
-  ``capabilities`` keyword do not exist yet. A red against a surface that has
-  not been written proves nothing about the defect. These are worth having
-  AFTER the fix; they are not reproduction and must not be reported as such.
-
-* **BOTH-SIDES GUARDS.** ``TestUnchangedBehaviour`` passes on unmodified master
-  AND after the change. If any of it goes red, the instrument is broken and the
-  red above proves nothing.
-"""
 
 from __future__ import annotations
 
@@ -67,18 +21,8 @@ from tests.api.test_mcp_session import (  # noqa: E402
 )
 
 
-# The MCP middleware derives the expected JWT audience from the request scope's
-# base URL. With a ``host: test`` header and an http scope the canonical URI is
-# deterministic, so the JWT's ``aud`` must match exactly (same constant and same
-# reason as tests/api/test_sec3001a_mcp_deactivation.py).
 _CANONICAL_AUD = "http://test/mcp"
 
-# A capabilities object that is deliberately NOT a tidy spec subset. It carries
-# a spec-declared key the BE-9440 consumer needs (``elicitation``), a nested
-# structure (``roots``), and two things no MCP spec declares at all. The last
-# two are the point: a live prod row shows ``claude-code`` sending an undeclared
-# ``description`` key inside clientInfo, so a filtered capture would hide
-# exactly the class of thing this project exists to observe.
 _DECLARED_CAPABILITIES = {
     "elicitation": {},
     "roots": {"listChanged": True},
@@ -91,7 +35,6 @@ _CLIENT_INFO = {"name": "test-harness", "version": "9.9.9"}
 
 
 class _CapturingProbe:
-    """Minimal inner ASGI app that returns 200 and drains the body."""
 
     async def __call__(self, scope, receive, send) -> None:
         await receive()
@@ -123,7 +66,6 @@ def _initialize_params(capabilities: object = _DECLARED_CAPABILITIES) -> dict:
 
 
 async def _initialize_over_api_key(db_manager, raw_key: str, params: dict) -> str:
-    """Drive one real ``initialize`` over the API-key path; return the session id."""
     from api.endpoints.mcp_sdk_server import MCPAuthMiddleware
 
     status, headers, _body = await _drive_middleware_with_body(
@@ -138,7 +80,6 @@ async def _initialize_over_api_key(db_manager, raw_key: str, params: dict) -> st
 
 
 async def _seed_jwt_user(db_manager) -> tuple[str, str, str]:
-    """Create org+user for the JWT mint path; return (user_id, username, tenant_key)."""
     from giljo_mcp.models.auth import User
     from giljo_mcp.models.organizations import Organization
     from giljo_mcp.tenant import TenantManager
@@ -186,7 +127,6 @@ def _mint_jwt(*, user_id: str, username: str, tenant_key: str) -> str:
 
 
 async def _initialize_over_jwt(db_manager, token: str, params: dict) -> str:
-    """Drive one real ``initialize`` over the JWT path; return the session id."""
     from api.endpoints.mcp_sdk_server import MCPAuthMiddleware
 
     status, headers, _body = await _drive_middleware_with_body(
@@ -204,22 +144,12 @@ async def _initialize_over_jwt(db_manager, token: str, params: dict) -> str:
     return session_id
 
 
-# ---------------------------------------------------------------------------
-# EVIDENCE (assertion-class) -- this is the reproduction.
-# ---------------------------------------------------------------------------
 
 
 class TestCapturedAtTheApiKeyMint:
-    """API-key mint path (``mcp_auth_middleware.py:302``) -> ``create_session``."""
 
     @pytest.mark.asyncio
     async def test_declared_capabilities_land_verbatim(self, db_manager, jwt_env):
-        """DoD 1 + DoD 3: the WHOLE declared object reaches session_data, unfiltered.
-
-        Equality against the full dict is deliberate. A subset assertion would
-        pass a filtered capture, and a filter is precisely what this project
-        forbids -- the undeclared keys are the ones worth seeing.
-        """
         from api.app_state import state
 
         raw_key, tenant_key = await _seed_api_key(db_manager)
@@ -241,12 +171,6 @@ class TestCapturedAtTheApiKeyMint:
 
     @pytest.mark.asyncio
     async def test_undeclared_nested_key_survives_the_round_trip(self, db_manager, jwt_env):
-        """DoD 3, stated as its own failure: an arbitrary key no spec declares survives.
-
-        Separate from the equality test above so that a partial regression (a
-        capture that keeps the spec keys and drops the rest) names itself
-        instead of hiding inside a whole-object mismatch.
-        """
         from api.app_state import state
 
         raw_key, tenant_key = await _seed_api_key(db_manager)
@@ -269,13 +193,6 @@ class TestCapturedAtTheApiKeyMint:
 
     @pytest.mark.asyncio
     async def test_elicitation_is_readable_from_the_captured_row(self, db_manager, jwt_env):
-        """DoD 4: the BE-9440 consumer's read.
-
-        Whether a client declares elicitation support decides whether per-decision
-        confirmation is available at all as a headless-safety mechanism. This
-        asserts the exact shape that consumer will read, ``.get``-chained the way
-        a legacy row (which simply lacks the key) requires.
-        """
         from api.app_state import state
 
         raw_key, tenant_key = await _seed_api_key(db_manager)
@@ -295,12 +212,6 @@ class TestCapturedAtTheApiKeyMint:
 
 
 class TestCapturedAtTheJwtMint:
-    """JWT mint path (``:527`` -> ``_ensure_jwt_initialize_session`` -> ``:640``).
-
-    Covered observably rather than by code reading: two mint paths are two
-    places the capture can silently fail to land, and the API-key test would
-    stay green through a JWT-path regression.
-    """
 
     @pytest.mark.asyncio
     async def test_declared_capabilities_land_verbatim_over_jwt(self, db_manager, jwt_env):
@@ -323,19 +234,11 @@ class TestCapturedAtTheJwtMint:
             state.db_manager = prior_db
 
 
-# ---------------------------------------------------------------------------
-# BOTH-SIDES GUARDS -- green on unmodified master AND after the change.
-# If one of these goes red, the instrument is broken and the reds above prove
-# nothing -- when one goes red, suspect the instrument first.
-# ---------------------------------------------------------------------------
 
 
 class TestUnchangedBehaviour:
     @pytest.mark.asyncio
     async def test_existing_capture_keys_still_land(self, db_manager, jwt_env):
-        """DoD 2: client_info, resolved_harness, resolved_preset and protocol_version
-        are untouched by this change -- the three keys already riding the
-        ``_client_info_patch`` vehicle (BE-9327, INF-9371) plus the raw clientInfo."""
         from api.app_state import state
 
         raw_key, tenant_key = await _seed_api_key(db_manager)
@@ -355,14 +258,6 @@ class TestUnchangedBehaviour:
 
     @pytest.mark.asyncio
     async def test_existing_empty_capabilities_key_is_untouched(self, db_manager, jwt_env):
-        """DoD 5: ``session_data["capabilities"]`` stays exactly as it is -- ``{}``.
-
-        Deliberately NOT filled. ``capabilities`` is an overloaded word here:
-        ``platform_registry.py`` takes a ``capabilities`` argument that is Giljo's
-        OWN derived vector (preset, can_spawn_terminals), a different concept from
-        the client's declared MCP capabilities. Merging the two meanings into one
-        JSONB field could change preset and terminal resolution.
-        """
         from api.app_state import state
 
         raw_key, tenant_key = await _seed_api_key(db_manager)
@@ -383,11 +278,6 @@ class TestUnchangedBehaviour:
 
     @pytest.mark.asyncio
     async def test_initialize_without_any_capabilities_still_creates_a_session(self, db_manager, jwt_env):
-        """DoD 2: a client that declares nothing must still get a session.
-
-        The absent-field path, asserted at the boundary rather than as a unit
-        test of the peek helper, so it is green on both sides of the change.
-        """
         from api.app_state import state
 
         raw_key, tenant_key = await _seed_api_key(db_manager)
@@ -408,13 +298,6 @@ class TestUnchangedBehaviour:
 
     @pytest.mark.asyncio
     async def test_malformed_capabilities_field_does_not_raise(self, db_manager, jwt_env):
-        """DoD 2: a ``capabilities`` that is not an object is tolerated, never fatal.
-
-        Same tolerate-malformed-body policy the sibling peeks carry: this is
-        session bookkeeping, never a security boundary. Asserted through the
-        transport (the observable) rather than against the helper, so it holds on
-        both sides.
-        """
         from api.app_state import state
 
         raw_key, tenant_key = await _seed_api_key(db_manager)
@@ -438,12 +321,6 @@ class TestUnchangedBehaviour:
 
     @pytest.mark.asyncio
     async def test_undecodable_body_is_still_answered_not_crashed(self, db_manager, jwt_env):
-        """A body that is not JSON at all must not 500 out of the middleware.
-
-        The strongest instrument guard in the file: it exercises the same peek
-        machinery with a body no parser can read, and it must behave identically
-        before and after the change.
-        """
         from api.app_state import state
         from api.endpoints.mcp_sdk_server import MCPAuthMiddleware
 
@@ -462,19 +339,9 @@ class TestUnchangedBehaviour:
             state.db_manager = prior_db
 
 
-# ---------------------------------------------------------------------------
-# NOT EVIDENCE -- surface-absent class.
-#
-# Everything below fails on unmodified master with ImportError / TypeError,
-# because the surface does not exist yet. A red against a surface that has not
-# been written proves nothing about the defect and MUST NOT be counted as
-# reproduction. These are worth having after the fix; they are not the fix's
-# justification.
-# ---------------------------------------------------------------------------
 
 
 class TestPeekHelperContract:
-    """Unit contract for ``_peek_jsonrpc_capabilities`` -- NOT reproduction evidence."""
 
     def test_returns_the_declared_object_verbatim(self):
         from api.endpoints.mcp_transport import _peek_jsonrpc_capabilities
@@ -504,7 +371,6 @@ class TestPeekHelperContract:
 
 
 class TestClientInfoPatchVehicle:
-    """``_client_info_patch`` gains a 5th key -- NOT reproduction evidence."""
 
     def test_patch_carries_client_capabilities(self):
         from api.endpoints.mcp_session import _client_info_patch
@@ -517,8 +383,6 @@ class TestClientInfoPatchVehicle:
         assert patch["client_capabilities"] == _DECLARED_CAPABILITIES
 
     def test_patch_defaults_the_new_key_to_none(self):
-        """A caller that supplies nothing still gets the key, valued None -- matching
-        how ``protocol_version`` behaves, so the shape is uniform across the vehicle."""
         from api.endpoints.mcp_session import _client_info_patch
 
         patch = _client_info_patch(dict(_CLIENT_INFO))

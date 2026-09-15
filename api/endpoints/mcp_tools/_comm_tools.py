@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Agent Message Hub thread tools — @mcp.tool wrappers (BE-6054b).
-
-The persistent, tenant-isolated message board (BBS). The reply-protocol is
-encoded into the tool semantics + descriptions so every vendor's agent complies
-without a pasted prose blob: posts are append-only; ``next_action_owner`` is the
-baton (``get_my_turn`` finds threads awaiting you); set a terminal status
-(resolved/closed) to end a looped conversation.
-
-Each wrapper validates input at the boundary (length caps -> clean 422) and
-delegates via ``_call_tool``. ``post_to_thread`` injects the authenticated user's
-identity from ``_base._resolve_user_id(ctx)`` so an explicit ``as_user=true`` post
-is attributed to the person; authorship itself is fail-closed (BE-9379): every post
-must claim ``from_agent`` XOR ``as_user``, and omission is refused, never defaulted.
-"""
 
 import logging
 from typing import Annotated, Any, Literal
@@ -44,29 +30,10 @@ from giljo_mcp.services._comm_thread_wake_mixin import MAX_WAIT_SECONDS
 
 logger = logging.getLogger(__name__)
 
-# BE-9061: a plain get_thread_history poll (no cursor/marker) reads the WHOLE
-# thread timeline, and loop_directive polling makes that the hottest Hub read —
-# so a long-lived chain thread gets slower without bound. Default the plain poll
-# to the most recent N messages. Callers that truly need the full timeline pass
-# tail=0; incremental (after_message_id/since) and unread_only cursor reads are
-# already deltas and are NOT capped by this default.
 DEFAULT_HISTORY_TAIL = 200
 
 
 def _resolve_pass_baton_to(pass_baton_to: str, requires_action: bool, to_participant: str) -> str:
-    """Resolve post_to_thread's atomic baton hand-off (BE-9197) — THE contract
-    agents rely on, resolved at the tool boundary so the REST and internal
-    service callers keep prior behavior unless they opt in:
-
-    - an explicit ``pass_baton_to`` always wins;
-    - ``'none'`` posts WITHOUT moving the baton (suppresses the default);
-    - when absent, a directed action-request (``requires_action=true`` +
-      ``to_participant``) auto-passes the baton to that participant — the
-      "posted the question, forgot the pass_baton" incident class;
-    - every other post (broadcasts included) leaves the baton untouched.
-
-    Returns the owner to hand the baton to, or "" for no baton write.
-    """
     resolved = pass_baton_to
     if not resolved and requires_action and to_participant:
         resolved = to_participant
@@ -74,26 +41,6 @@ def _resolve_pass_baton_to(pass_baton_to: str, requires_action: bool, to_partici
 
 
 def _post_refusal(from_agent: str, as_user: bool, my_status: str) -> dict[str, Any] | None:
-    """What makes a post refusable BEFORE any write — or None when it is acceptable.
-
-    Three BE-6081 Tier-2 domain rejections (a declined request the caller can
-    self-correct, NOT isError) share one property that is the reason they live together
-    here rather than inline: each must be decided before ``_call_tool`` runs, because a
-    post that is going to be refused must persist nothing at all. Grouping them also
-    keeps ``post_to_thread`` inside the 200-line rule as its parameter surface grows.
-
-    - BE-9379, both directions: authorship is fail-closed. Every post claims
-      ``from_agent`` (an agent's own voice) XOR ``as_user`` (the human's). An omitted
-      from_agent used to fall back to the authenticated principal, so one forgotten field
-      rendered an agent's post as the human operator in the durable record (CHT-0483).
-    - BE-9475: ``my_status`` is membership-checked against the locked vocabulary here, at
-      the boundary, ahead of the service layer. This value arrives from an AI agent, so
-      the failure has to name the valid set — a DB CHECK would produce a 500 and a Sentry
-      row for what is really a caller typo. Refusing the whole post rather than dropping
-      the bad field is deliberate: a silently-ignored status is the exact defect the
-      parameter exists to remove, and an agent that mistyped it would otherwise get a
-      success response and still show "Monitoring".
-    """
     if from_agent and as_user:
         return {
             "success": False,
@@ -128,7 +75,10 @@ def _post_refusal(from_agent: str, as_user: bool, my_status: str) -> dict[str, A
         "Create a persistent message-board thread (chat) and get back its CHT-#### "
         "chat id to share so other agents can join_thread. Threads are standalone by "
         "default; pass project_id to anchor one to a project. The creator is registered "
-        "as the first participant and holds the baton (next_action_owner). "
+        "as the first participant and holds the baton (next_action_owner). Every OTHER "
+        "persona should join_thread before it is addressed: the baton (pass_baton_to / "
+        "set_next_actor) is refused for an id not registered on the thread, and a "
+        "to_participant post to a never-joined id is stored but read by nobody. "
         "An omitted product_id is resolved for you (the same rule create_task/"
         "create_project already follow) -- a single-product tenant binds silently, several "
         "with none named comes back as PRODUCT_AMBIGUOUS naming the list to retry with. "
@@ -178,8 +128,8 @@ async def create_thread(
     ctx: Context = None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
-    if subject:
-        kwargs["subject"] = subject
+    if subject.strip():
+        kwargs["subject"] = subject.strip()
     if severity:
         kwargs["severity"] = severity
     if product_id:
@@ -193,9 +143,6 @@ async def create_thread(
     if sequence_run_id:
         kwargs["sequence_run_id"] = sequence_run_id
     result = await _call_tool(ctx, "create_thread", kwargs)
-    # NOTE: best-effort WS broadcast so an agent-created thread auto-appears on the
-    # dashboard, exactly like the user/REST create path (comm_threads.py). Without
-    # this the chat is written to the DB but the Hub only shows it on a manual reload.
     try:
         from api.app_state import state as _state
 
@@ -234,10 +181,6 @@ async def join_thread(
     kwargs: dict[str, Any] = {
         "thread_id": thread_id,
         "agent_id": agent_id,
-        # BE-9289a: the harness is DETECTED from the MCP handshake, never declared. This
-        # is the same resolver the render path uses (_detected_harness -> BE-9035b
-        # harness_from_client_info), so no local instruction file can change what the
-        # Hub shows. Absent/unknown clientInfo degrades to 'generic'.
         "detected_harness": _detected_harness(ctx),
     }
     if display_name:
@@ -253,7 +196,10 @@ async def join_thread(
         "Post a message to a thread (append-only) -- the canonical agent-to-agent messaging "
         "tool. Requires from_agent (or an explicit as_user=true for a post in the human "
         "user's voice). Broadcasts by default; see to_participant, set_status, and "
-        "pass_baton_to for DM, status, and atomic baton hand-off."
+        "pass_baton_to for DM, status, and atomic baton hand-off. Etiquette: make sure a "
+        "persona has join_thread'ed before you name it -- pass_baton_to refuses an id not "
+        "registered on the thread, and a to_participant post to a never-joined id is stored "
+        "but nobody is polling for it."
     ),
     annotations=_tool_hints("post_to_thread"),
 )
@@ -339,8 +285,6 @@ async def post_to_thread(
     ] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
-    # Every pre-write refusal lives in _post_refusal (module top): nothing is persisted
-    # for a post that is going to be declined.
     refusal = _post_refusal(from_agent, as_user, my_status)
     if refusal is not None:
         return refusal
@@ -350,7 +294,6 @@ async def post_to_thread(
         "requires_action": requires_action,
         "loop_directive": loop_directive,
         "user_id": _base._resolve_user_id(ctx),
-        # BE-9289a: server-detected harness, stamped onto the poster's participant row.
         "detected_harness": _detected_harness(ctx),
     }
     if from_agent:
@@ -367,24 +310,12 @@ async def post_to_thread(
         kwargs["self_reported_status"] = my_status
     if rename_to:
         kwargs["rename_to"] = rename_to
-    # BE-9197: the auto-pass rule lives in _resolve_pass_baton_to (module top).
     effective_baton_to = _resolve_pass_baton_to(pass_baton_to, requires_action, to_participant)
     if effective_baton_to:
         kwargs["pass_baton_to"] = effective_baton_to
     result = await _call_tool(ctx, "post_to_thread", kwargs)
-    # BE-9292a: a refused hand-off is not a post. Nothing was persisted, so the
-    # follow-on side effects below must not run — reactivation would block a recipient
-    # over a message that does not exist, and the WS fan-out would announce it to the
-    # Hub. Return the domain rejection untouched.
     if result.get("success") is False:
         return result
-    # BE-9012b (D5): relocate the bus auto-block/reactivation onto project-bound Hub
-    # posts. A directed (to_participant), action-required post on a project-bound
-    # thread flips a completed recipient -> blocked (reactivation), exactly as the bus
-    # did. Town-square / informational / broadcast posts are inert — the guards live
-    # in auto_block_for_thread_post. Best-effort: the post is already committed and
-    # authoritative; a rare failure here is logged (WARNING) and self-heals on the
-    # next directed post rather than failing the agent's successful post.
     if requires_action and to_participant:
         try:
             accessor = _base._get_tool_accessor()
@@ -395,9 +326,6 @@ async def post_to_thread(
                 requires_action=requires_action,
                 tenant_key=_base._resolve_tenant(ctx),
             )
-            # BE-9247: surface the forward-on-send outcome in the SAME response so the
-            # sender learns immediately (e.g. "Tester was closed -- your message was
-            # forwarded to the orchestrator"), rather than discarding it silently.
             if outcome.notice:
                 result["forward_notice"] = outcome.notice
         except Exception:  # noqa: BLE001 - reactivation is a follow-on side-effect; never unwind a durable post
@@ -407,7 +335,6 @@ async def post_to_thread(
                 to_participant,
                 exc_info=True,
             )
-    # NOTE: best-effort WS broadcast so agent posts also push live to the dashboard.
     try:
         from api.app_state import state as _state
 
@@ -420,30 +347,26 @@ async def post_to_thread(
                 message_id=result.get("message_id", ""),
                 from_agent_id=result.get("from_agent_id", from_agent or ""),
                 from_display_name=result.get("from_display_name", from_agent or "agent"),
-                from_kind=result.get("from_kind", "agent"),  # BE-9289a
+                from_kind=result.get("from_kind", "agent"),
                 content=content,
                 message_type="direct" if to_participant else "broadcast",
                 priority="normal",
                 requires_action=requires_action,
                 project_id=None,
-                # FE-9546: the service-RESOLVED addressee, not the raw tool parameter — an
-                # agent addresses the operator via the "user" alias, which only the service
-                # can expand to the real id (see comm_thread_service.post_to_thread).
                 to_participant=result.get("to_participant"),
             )
     except Exception:  # noqa: BLE001 - WS failure is non-fatal; result is already committed
         logger.debug("MCP post_to_thread WS broadcast failed (non-fatal)", exc_info=True)
-    # BE-9197: parity with standalone pass_baton's thread_update (boundary-tested).
     if result.get("baton_passed"):
         await broadcast_thread_metadata_update(
             ctx,
             thread_id,
             update_type="baton",
             next_action_owner=result.get("next_action_owner"),
-            from_display_name=result.get("from_display_name"),  # BE-9296a
+            from_display_name=result.get("from_display_name"),
             from_kind=result.get("from_kind"),
         )
-    if rename_to:  # BE-9502a: live title update for anyone with the thread open.
+    if rename_to:
         await broadcast_thread_metadata_update(ctx, thread_id, update_type="updated", include_subject=True)
     return result
 
@@ -517,7 +440,8 @@ async def get_participant_liveness(
         "or 'none' (CLEARS it -- nobody is waiting). Whoever you name finds it via "
         "get_my_turn. NOTE the difference from post_to_thread's pass_baton_to parameter: "
         "there, 'none' means LEAVE the current actor alone. Here it CLEARS them. Clearing "
-        "is the one thing only this tool can do."
+        "is the one thing only this tool can do. The agent you name must already have "
+        "join_thread'ed this chat -- the baton is refused for an id not registered on it."
     ),
     annotations=_tool_hints("set_next_actor"),
 )
@@ -548,11 +472,8 @@ async def set_next_actor(
     if from_agent:
         kwargs["from_agent"] = from_agent
     result = await _call_tool(ctx, "pass_baton", kwargs)
-    # BE-9292a: a refused hand-off moved no baton — broadcasting would tell the Hub the
-    # owner had been cleared when it is unchanged.
     if result.get("success") is False:
         return result
-    # NOTE: best-effort WS broadcast so MCP baton-passes also push live to the dashboard.
     try:
         from api.app_state import state as _state
 
@@ -561,9 +482,6 @@ async def set_next_actor(
 
             tenant_key = _base._resolve_tenant(ctx)
             accessor: ToolAccessor = _base._get_tool_accessor()
-            # BE-6118: the pure get_thread_history pass-through was removed from
-            # ToolAccessor; call the owning terminal service directly (the same
-            # target _call_tool dispatches to via TOOL_DISPATCH).
             history = await accessor._comm_thread_service.get_thread_history(thread_id=thread_id, tenant_key=tenant_key)
             t = history["thread"]
             await broadcast_thread_update(
@@ -574,7 +492,6 @@ async def set_next_actor(
                 status=t["status"],
                 next_action_owner=result.get("next_action_owner"),
                 update_type="baton",
-                # BE-9296a: resolved by the service from the passer's participant row.
                 from_display_name=result.get("from_display_name"),
                 from_kind=result.get("from_kind"),
             )
@@ -628,11 +545,7 @@ async def list_threads(
         "acknowledge; pass mark_read=true to do so). See tail/after_message_id/since for "
         "polling and as_participant for the persistent per-participant read cursor."
     ),
-    meta=MCP_HEAVY_TOOL_META,  # BE-9083c: raise Claude Code's inline-truncation ceiling
-    # BE-9251 audit F2: read-scoped for auth (TOOL_SCOPES=mcp:read) but
-    # mark_read=true is a real write -- _READ_SCOPED_BUT_MUTATING flips
-    # readOnlyHint=False; destructive=False because that write is additive/
-    # idempotent (draining an unread cursor), never deletes data.
+    meta=MCP_HEAVY_TOOL_META,
     annotations=_tool_hints("get_thread_history", destructive=False),
 )
 async def get_thread_history(
@@ -701,18 +614,10 @@ async def get_thread_history(
         kwargs["after_message_id"] = after_message_id
     if since:
         kwargs["since"] = since
-    # BE-9061: bound the DEFAULT plain poll (the hot loop_directive read). tail>0
-    # is honored as-is; tail==0 is the explicit FULL timeline (forward nothing);
-    # tail omitted (-1) applies DEFAULT_HISTORY_TAIL, but ONLY on a plain read —
-    # an after_message_id/since/unread_only read is already a delta and truncating
-    # it would (for unread_only+mark_read) stall the read cursor.
     if tail > 0:
         kwargs["tail"] = tail
     elif tail < 0 and not (after_message_id or since or unread_only or mark_read):
         kwargs["tail"] = DEFAULT_HISTORY_TAIL
-    # BE-9012a: forward as_participant + the cursor flags. Flags are forwarded even
-    # without as_participant so the owning service raises the clean 422 (required-param)
-    # rather than the wrapper silently dropping them.
     if as_participant:
         kwargs["as_participant"] = as_participant
     if unread_only:
@@ -724,10 +629,6 @@ async def get_thread_history(
     if action_required_only:
         kwargs["action_required_only"] = True
     result = await _call_tool(ctx, "get_thread_history", kwargs)
-    # BE-9012b (D5, §6 row 10): surface the "how to exit blocked" guidance to an
-    # auto-blocked reader on the cursor read, the way the bus drain-read did. Only when
-    # the reader self-identifies (as_participant) and is post-completion auto-blocked;
-    # returns nothing otherwise. Best-effort — never fail a read over the hint.
     if as_participant and isinstance(result, dict):
         try:
             accessor = _base._get_tool_accessor()
@@ -738,12 +639,6 @@ async def get_thread_history(
                 result["reactivation_guidance"] = guidance
         except Exception:  # noqa: BLE001 - guidance is an advisory hint; never fail the read
             logger.debug("get_thread_history reactivation guidance (D5) failed (non-fatal)", exc_info=True)
-    # FE-9184: a mark_read drain writes message_acknowledgments, which decrements
-    # the /jobs "Messages Waiting" badge — push a live thread_update so the
-    # dashboard refreshes without waiting for the next post. Emit ONLY when acks
-    # were actually written (marked_read > 0: a plain read, an already-drained
-    # cursor, and the NOT_A_PARTICIPANT rejection all skip). Best-effort like
-    # every hub WS emit — the acks are already committed.
     if (
         mark_read
         and isinstance(result, dict)

@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-API Key IP address logging.
-
-Extracted from api/endpoints/mcp_session.MCPSessionManager.log_ip (Sprint 003a)
-to eliminate the backward import from src/giljo_mcp/auth/dependencies.py.
-
-This is a standalone async function with no api/ dependencies.
-"""
 
 import logging
 
@@ -21,21 +13,6 @@ logger = logging.getLogger(__name__)
 
 
 async def log_api_key_ip(db: AsyncSession, api_key_id: str, ip_address: str) -> None:
-    """Log IP address for API key usage tracking (passive, non-blocking).
-
-    Uses PostgreSQL upsert (INSERT ... ON CONFLICT) to either create a new
-    entry or increment the request_count for an existing api_key + ip_address
-    pair.
-
-    This function is designed to never raise exceptions. All errors are
-    caught and logged as warnings so that IP logging never blocks or
-    slows down the authentication flow.
-
-    Args:
-        db: Async database session
-        api_key_id: The ID of the API key that was used.
-        ip_address: The client IP address (IPv4/IPv6 or 'unknown').
-    """
     try:
         from uuid import uuid4
 

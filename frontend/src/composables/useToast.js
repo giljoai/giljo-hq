@@ -14,8 +14,6 @@ export function useToast() {
 
     toasts.value.push(toast)
 
-    // Use ToastManager's global $toast if available (preferred - avoids race condition)
-    // Otherwise dispatch event as fallback
     if (window.$toast?.show) {
       window.$toast.show(options)
     } else {

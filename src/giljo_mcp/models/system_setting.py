@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""System-scoped settings (NOT tenant-scoped).
-
-The system_settings table holds singleton key/value rows that describe
-the deployment as a whole. The first such row is skills_version_announced,
-which records the SKILLS_VERSION the server considers current for the
-purpose of the slash-command bundle drift banner.
-
-Tenant isolation does NOT apply here: there is exactly one row per key
-across the entire database.
-"""
 
 from sqlalchemy import Column, DateTime, String, Text
 from sqlalchemy.sql import func
@@ -21,7 +11,6 @@ from .base import Base
 
 
 class SystemSetting(Base):
-    """System-wide singleton key/value setting (no tenant_key)."""
 
     __tablename__ = "system_settings"
 

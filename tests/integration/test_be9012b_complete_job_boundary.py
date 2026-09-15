@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9012b (D7) — the closeout dance is gone AT THE MCP BOUNDARY.
-
-CLAUDE.md mandates a regression test at the failing layer, and BE-5042 shipped
-broken because the failing layer (the FastMCP ``@mcp.tool`` complete_job wrapper)
-had no boundary test — every service-layer unit test passed. This exercises
-complete_job through the real MCP transport (create_connected_server_and_client_session
-+ _call_tool dispatch) and proves the D7 reframe end-to-end:
-
-* an orchestrator with a self-referential closeout TODO + an INFORMATIONAL unread
-  post can complete_job WITHOUT passing ``acknowledge_closeout_todo`` or
-  ``acknowledge_messages_on_complete`` — the closeout dance is dissolved server-side;
-* a genuine ACTION-REQUIRED unread post STILL blocks complete_job at the boundary
-  (the gate reframe stays two-sided).
-
-Harness pattern mirrors tests/integration/test_complete_job_mcp_boundary.py.
-Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -58,9 +41,6 @@ def _error_text(call_tool_result) -> str:
 
 @pytest_asyncio.fixture
 async def boundary_client(db_manager, db_session, monkeypatch):
-    """Wire JobCompletionService to the rolled-back db_session via ToolAccessor,
-    then hand back an MCP client factory + the tenant key. (Same shared-session
-    rebinding as test_complete_job_mcp_boundary.phase_mcp_client.)"""
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -127,7 +107,7 @@ async def _seed_closeout_orchestrator(db_session, tenant_key: str) -> tuple[Agen
         job_id=str(uuid4()),
         tenant_key=tenant_key,
         project_id=project.id,
-        job_type="orchestrator",  # not staging-end => is_closeout_phase
+        job_type="orchestrator",
         mission="coordinate closeout",
         status="active",
         created_at=datetime.now(UTC),
@@ -144,8 +124,6 @@ async def _seed_closeout_orchestrator(db_session, tenant_key: str) -> tuple[Agen
         started_at=datetime.now(UTC) - timedelta(minutes=5),
     )
     db_session.add(execution)
-    # Self-referential closeout TODO (todo_kind NULL — the gate falls back to the
-    # classifier, exactly as an in-flight legacy TODO would).
     db_session.add(
         AgentTodoItem(
             job_id=job.job_id,
@@ -178,8 +156,6 @@ async def _add_unread(db_session, tenant_key: str, project_id: str, agent_id: st
 
 
 async def test_closeout_dance_gone_without_flags_via_mcp(boundary_client):
-    """The DoD proof: complete_job succeeds through the MCP transport with a
-    self-closeout TODO + an informational unread post and NO acknowledge_* flags."""
     new_client, tenant_key, session = boundary_client
     job, execution = await _seed_closeout_orchestrator(session, tenant_key)
     project_id = job.project_id
@@ -195,7 +171,6 @@ async def test_closeout_dance_gone_without_flags_via_mcp(boundary_client):
     payload = _payload(result)
     assert payload.get("status") == "success", payload
 
-    # The self-closeout TODO auto-cleared server-side.
     todo = (
         await session.execute(
             select(AgentTodoItem).where(AgentTodoItem.job_id == job.job_id, AgentTodoItem.tenant_key == tenant_key)
@@ -205,8 +180,6 @@ async def test_closeout_dance_gone_without_flags_via_mcp(boundary_client):
 
 
 async def test_action_required_post_still_blocks_via_mcp(boundary_client):
-    """The reframe stays two-sided: a genuine action-required unread post STILL
-    blocks complete_job at the boundary (no acknowledge_* escape)."""
     new_client, tenant_key, session = boundary_client
     job, execution = await _seed_closeout_orchestrator(session, tenant_key)
     await _add_unread(session, tenant_key, job.project_id, execution.agent_id, requires_action=True)

@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9079 -- detected_harness threaded through get_job_mission (service + render).
-
-get_staging_instructions already applies DETECTED-beats-declared render precedence via
-``effective_harness``; get_job_mission did not, so an orchestrator refetching its mission
-from a detected claude-code/codex session fell to the GENERIC spawn ladder. The trap that
-reverted the first attempt: the wrapper dispatches to ``MissionService.get_agent_mission``
-via ``_call_tool``'s ``tool_func(**kwargs)`` spread, and get_agent_mission had no
-``detected_harness`` param -> TypeError on EVERY implementation-phase mission fetch. A test
-that monkeypatches ``_call_tool`` does NOT catch that -- so these tests exercise the REAL
-render (``assemble_mission_context``) and the REAL service (``get_agent_mission`` through the
-exact wrapper payload spread), never a mocked ``_call_tool``.
-
-Two-sided: (a) a detected claude-code/codex orchestrator renders its native spawn prose;
-(b) no-detection (None/"generic") is byte-identical to today. Plus: the protocol etag hash
-covers the effective harness (no stale cross-harness cache), and the dispatch does not raise.
-
-Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -42,14 +24,10 @@ from giljo_mcp.services.mission_service import MissionService
 _LOGGER = logging.getLogger("be9079-test")
 _TENANT = "tenant-test"
 
-# The wrapper's exact _call_tool payload keys for get_job_mission (api/endpoints/mcp_tools/
-# _job_tools.py). Every key here is spread into MissionService.get_agent_mission by
-# _call_tool; a key with no matching parameter (and no **kwargs) is the TypeError trap.
 _WRAPPER_PAYLOAD_KEYS = {"job_id", "protocol_etag", "preset_name", "detected_harness"}
 
 
 def _make_orchestrator_fixtures() -> tuple[AgentJob, AgentExecution, Project]:
-    """Fresh orchestrator job/execution/project in implementation phase (no shared state)."""
     job_id = str(uuid4())
     project_id = str(uuid4())
     job = AgentJob(
@@ -86,12 +64,6 @@ def _make_orchestrator_fixtures() -> tuple[AgentJob, AgentExecution, Project]:
 
 
 def _render_full_protocol(fixtures: tuple[AgentJob, AgentExecution, Project], detected_harness: str | None) -> str:
-    """Render an orchestrator's full_protocol via the REAL assembler (the consumer the fix
-    modifies), varying ONLY detected_harness against the SAME fixtures (so any difference is
-    the harness, not the embedded job_id/agent_id). multi_terminal project so the FORBIDDEN
-    banner renders and its ``YOUR TOOL:`` line reveals the resolved render tool.
-    ``assemble_mission_context`` only reads its ORM args, so reusing one fixture set across
-    several renders is safe."""
     job, execution, project = fixtures
     response = assemble_mission_context(
         _LOGGER,
@@ -112,61 +84,41 @@ def _render_full_protocol(fixtures: tuple[AgentJob, AgentExecution, Project], de
     return response.full_protocol
 
 
-# ---------------------------------------------------------------------------
-# (a) A detected CLI harness renders its native spawn prose
-# ---------------------------------------------------------------------------
 
 
 def test_detected_claude_code_renders_native_tool():
-    """A detected claude-code session renders the claude-code FORBIDDEN facet, not generic."""
     protocol = _render_full_protocol(_make_orchestrator_fixtures(), "claude-code")
     assert "YOUR TOOL: Claude Code" in protocol
     assert "YOUR TOOL: Multi-Terminal (generic)" not in protocol
-    # claude-code-specific forbidden prose (proves the tool axis, not just a label swap);
-    # absent from the generic three-CLI listing.
     assert "That menu is irrelevant in this mode" in protocol
 
 
 def test_detected_codex_renders_native_tool():
-    """A detected codex session renders the codex render tool."""
     protocol = _render_full_protocol(_make_orchestrator_fixtures(), "codex")
     assert "YOUR TOOL: Codex" in protocol
     assert "YOUR TOOL: Multi-Terminal (generic)" not in protocol
 
 
 def test_detection_changes_the_render():
-    """The core fix: a concrete detected harness must change the rendered protocol (same
-    fixtures, so the only variable is the harness)."""
     fx = _make_orchestrator_fixtures()
     assert _render_full_protocol(fx, "claude-code") != _render_full_protocol(fx, None)
     assert _render_full_protocol(fx, "codex") != _render_full_protocol(fx, "claude-code")
 
 
-# ---------------------------------------------------------------------------
-# (b) No detection is byte-identical to today (the declared mode governs)
-# ---------------------------------------------------------------------------
 
 
 def test_no_detection_is_generic_and_byte_identical():
-    """None and "generic" both resolve back to the declared hint -> the generic render,
-    byte-identical to today (before detected_harness threading existed)."""
     fx = _make_orchestrator_fixtures()
     none_render = _render_full_protocol(fx, None)
     generic_render = _render_full_protocol(fx, "generic")
     assert none_render == generic_render, "None and 'generic' must render identically"
     assert "YOUR TOOL: Multi-Terminal (generic)" in none_render
-    # An unrecognized/non-CLI token is also the floor -> no override -> generic.
     assert _render_full_protocol(fx, "totally-made-up-harness") == none_render
 
 
-# ---------------------------------------------------------------------------
-# etag hash covers the effective harness (no stale cross-harness cache)
-# ---------------------------------------------------------------------------
 
 
 def test_protocol_etag_covers_effective_harness():
-    """The static-block etag (hashed over the rendered full_protocol) MUST differ across
-    harnesses, or a harness change could serve a stale cached identity+protocol block."""
     fx = _make_orchestrator_fixtures()
     identity = "ORCHESTRATOR IDENTITY"
     etag_claude = compute_protocol_etag(identity, _render_full_protocol(fx, "claude-code"))
@@ -175,20 +127,12 @@ def test_protocol_etag_covers_effective_harness():
     assert etag_claude != etag_none, "detected claude-code must not share the generic etag"
     assert etag_codex != etag_none
     assert etag_claude != etag_codex
-    # No detection is stable (a re-fetch caches correctly).
     assert etag_none == compute_protocol_etag(identity, _render_full_protocol(fx, "generic"))
 
 
-# ---------------------------------------------------------------------------
-# The MCP-boundary trap: get_agent_mission accepts the wrapper payload spread
-# ---------------------------------------------------------------------------
 
 
 def test_get_agent_mission_signature_accepts_wrapper_payload():
-    """Structural pin on the reverted regression: _call_tool spreads the wrapper payload as
-    kwargs into get_agent_mission. Every payload key MUST be an accepted parameter, or the
-    real dispatch raises TypeError on every implementation-phase fetch (the exact hole the
-    first attempt shipped)."""
     params = set(inspect.signature(MissionService.get_agent_mission).parameters)
     missing = _WRAPPER_PAYLOAD_KEYS - params
     assert not missing, f"get_agent_mission is missing wrapper payload params: {missing}"
@@ -205,16 +149,13 @@ def mock_db_session():
     session.refresh = AsyncMock()
     session.add = MagicMock()
     session.get = AsyncMock()
-    session.info = {}  # tenant_session_context save/restore target
+    session.info = {}
     db_manager.get_session_async = MagicMock(return_value=session)
     return db_manager, session
 
 
 @pytest.mark.asyncio
 async def test_get_agent_mission_through_dispatch_does_not_raise_and_renders_native(mock_db_session):
-    """Drive the REAL MissionService.get_agent_mission with the EXACT wrapper payload spread
-    (**payload) -- reproducing _call_tool's tool_func(**kwargs). Proves (1) no TypeError from
-    the detected_harness key, and (2) the detected harness reaches the render (claude-native)."""
     db_manager, session = mock_db_session
     job, execution, project = _make_orchestrator_fixtures()
 
@@ -226,18 +167,11 @@ async def test_get_agent_mission_through_dispatch_does_not_raise_and_renders_nat
     all_exec = MagicMock()
     all_exec.all = MagicMock(return_value=[(execution, job)])
 
-    # Same 6-query pattern proven by test_0830 for a multi_terminal orchestrator in
-    # implementation phase: job, exec, project (gate), all-execs (team), project (identity),
-    # override (none). A stray read in a resilient injector beyond this is swallowed.
     session.execute = AsyncMock(
         side_effect=[
             _scalar(job),
             _scalar(execution),
             _scalar(project),
-            # TSK-9459: get_agent_mission now resolves the project's bound Hub
-            # thread for the ORCHESTRATOR too, so it is joined structurally
-            # instead of being left off its own thread. This mocked test does not
-            # exercise the Hub — let the resolver degrade to None as documented.
             RuntimeError("TSK-9459: no Hub thread in this mocked session"),
             all_exec,
             _scalar(project),

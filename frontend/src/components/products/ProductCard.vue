@@ -34,7 +34,6 @@
         </div>
       </div>
 
-      <!-- Statistics -->
       <v-divider class="my-3 product-divider"></v-divider>
       <v-row dense class="product-stats-row">
         <v-col cols="4" class="text-center product-stat-col">
@@ -57,7 +56,6 @@
         </v-col>
       </v-row>
 
-      <!-- Vision Document Status (Handover 0347; BE-6066 P4: aggregates) -->
       <div v-if="visionDocCount > 0" class="mt-2 d-flex ga-1 flex-wrap">
         <span
           class="vision-chip"
@@ -74,7 +72,6 @@
           <v-icon size="12" class="mr-1">mdi-database</v-icon>
           {{ visionTotalChunks }} chunks
         </span>
-        <!-- BE-5118: AI analysis aggregate state -->
         <span
           class="vision-chip smooth-border"
           :style="analysisPillStyle"
@@ -211,14 +208,6 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  // FE-9529: whether THIS product is the resolved DEFAULT (where an unscoped
-  // read goes) -- independent of isActive/shown-hidden (D2: a hidden product
-  // is still a fully valid default). Callers must pass the RESOLVED default
-  // (e.g. productStore.activeProduct), not the row's raw is_default column:
-  // a tenant's sole product can be the real fallback target while its own
-  // is_default is still false (never auto-set on create), and rendering the
-  // raw column there would show an unticked box on a tenant whose reads
-  // plainly work.
   isDefault: {
     type: Boolean,
     default: false,
@@ -229,11 +218,6 @@ const emit = defineEmits(['info', 'tune', 'edit', 'delete', 'toggle-activation',
 
 const { formatDate } = useFormatDate()
 
-// Exactly one default exists tenant-wide (DB-enforced) -- this is a
-// radio-like single selection, not an independent per-card toggle. Clicking
-// an already-checked box is a no-op (there is no "unset the default", only
-// "move it elsewhere"); the checkbox stays checked because it is driven by
-// the isDefault prop, not local state.
 function onDefaultToggle(value) {
   if (value && !props.isDefault) {
     emit('set-default', props.product)
@@ -246,16 +230,10 @@ const completedProjectsCount = computed(() => {
   return Math.max(0, totalProjects - unfinishedProjects)
 })
 
-// BE-6066 P4: the products LIST no longer ships the full vision_documents
-// array — the backend pre-aggregates it into product.vision_summary
-// {doc_count, chunked_count, chunk_total, embedded_count}, mirroring the exact
-// semantics these computeds used to derive client-side. Full per-doc detail
-// loads on demand when the user opens Details/Edit.
 const visionDocCount = computed(() => props.product.vision_summary?.doc_count || 0)
 const visionChunkedCount = computed(() => props.product.vision_summary?.chunked_count || 0)
 const visionTotalChunks = computed(() => props.product.vision_summary?.chunk_total || 0)
 
-// BE-5118: product-level vision-analysis aggregate pill helpers
 const ANALYSIS_GREEN = getStatusColor('complete')
 const ANALYSIS_YELLOW = getAgentColor('tester').hex
 

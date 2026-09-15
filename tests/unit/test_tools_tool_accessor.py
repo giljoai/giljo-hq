@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Unit tests for ToolAccessor (public MCP-facing surface).
-
-This suite intentionally tests behavior that should remain stable:
-- ToolAccessor wiring (db_manager / tenant_manager)
-- Legacy download flow tools are not present anymore
-"""
 
 from giljo_mcp.tools.tool_accessor import ToolAccessor
 
@@ -30,6 +23,5 @@ def test_legacy_download_flow_tools_removed(mock_db_manager, mock_tenant_manager
     assert not hasattr(accessor, "gil_import_productagents")
     assert not hasattr(accessor, "gil_import_personalagents")
     assert not hasattr(accessor, "gil_update_agents")
-    # Verify removed MCP tools (deprecated)
     assert not hasattr(accessor, "setup_slash_commands")
     assert not hasattr(accessor, "get_agent_download_url")

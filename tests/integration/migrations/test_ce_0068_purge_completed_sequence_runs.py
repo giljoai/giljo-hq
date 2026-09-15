@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Migration regression for ce_0068 — auto-purge completed sequence_runs (Option A).
-
-Real scratch PostgreSQL DB, real alembic. Covers ce_0068's one-time backfill:
-
-- A ``completed`` run + its project-less conductor AgentJob + AgentExecution
-  (linked ONLY via ``agent_jobs.job_metadata->>'run_id'``) are all DELETED.
-- A ``terminated`` run + its conductor job/execution SURVIVE (terminated /
-  cancelled runs are an audit signal, out of scope).
-- Idempotency: re-running against an already-migrated DB is a clean no-op
-  (the "CE reruns upgrade head on every boot" scenario) — the survivor stays,
-  the purged rows stay gone, no crash.
-
-Mirrors tests/integration/migrations/test_ce_0067_tsk_task_exclusive.py.
-"""
 
 from __future__ import annotations
 
@@ -141,7 +127,6 @@ def scratch_engine():
 
 @pytest.fixture
 def scratch_at_pre(scratch_engine: sa.Engine):
-    """Fresh schema built up to ce_0067 (the pre-revision), ready for seeding."""
     _drop_all_objects(scratch_engine)
     up = _run_alembic("upgrade", _PRE)
     assert up.returncode == 0, f"upgrade to {_PRE} failed:\n{up.stdout}\n{up.stderr}"
@@ -149,16 +134,11 @@ def scratch_at_pre(scratch_engine: sa.Engine):
     _drop_all_objects(scratch_engine)
 
 
-# --------------------------------------------------------------------------- #
-# Seed helpers (raw SQL — the ORM models are not needed for a migration test)  #
-# --------------------------------------------------------------------------- #
 
 TK = "tk_ce0068"
 
 
 def _seed_run_with_conductor(engine: sa.Engine, *, status: str) -> dict[str, str]:
-    """Seed a sequence_run in ``status`` plus its project-less conductor AgentJob +
-    AgentExecution, linked ONLY via job_metadata->>'run_id'. Return the ids."""
     run_id = str(uuid4())
     job_id = str(uuid4())
     agent_id = str(uuid4())
@@ -235,8 +215,6 @@ class TestCe0068PurgeCompletedSequenceRuns:
         assert _exec_exists(scratch_at_pre, kept["exec_id"]), "terminated run's conductor execution must survive"
 
     def test_rerun_is_idempotent(self, scratch_at_pre: sa.Engine) -> None:
-        """Re-running ce_0068 (boot-rerun / stamp-behind) purges nothing further and
-        leaves the terminated survivor untouched."""
         done = _seed_run_with_conductor(scratch_at_pre, status="completed")
         kept = _seed_run_with_conductor(scratch_at_pre, status="terminated")
 

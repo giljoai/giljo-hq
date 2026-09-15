@@ -5,28 +5,17 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Manual verification script for network IP detection.
-
-This script demonstrates the behavior of get_network_ip() in various scenarios:
-1. With config.yaml present (reads from config)
-2. Without config.yaml (runtime detection fallback)
-3. With invalid config.yaml (runtime detection fallback)
-"""
 
 import sys
 from pathlib import Path
 
 
-# Add parent directory to path to import startup module
-# TODO: Remove after editable install confirmed on all platforms
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from startup import get_network_ip, print_header, print_info, print_success
 
 
 def test_with_config():
-    """Test with existing config.yaml."""
     print_header("Test 1: With config.yaml (reads from config)")
 
     network_ip = get_network_ip()
@@ -40,10 +29,8 @@ def test_with_config():
 
 
 def test_without_config():
-    """Test without config.yaml (fresh install simulation)."""
     print_header("Test 2: Without config.yaml (fresh install simulation)")
 
-    # Temporarily move config.yaml if it exists
     config_path = Path.cwd() / "config.yaml"
     backup_path = Path.cwd() / "config.yaml.temp_backup"
 
@@ -64,20 +51,17 @@ def test_without_config():
         return network_ip
 
     finally:
-        # Restore config.yaml
         if config_existed:
             backup_path.rename(config_path)
             print_info("Restored config.yaml")
 
 
 def test_adapter_filtering():
-    """Test that virtual adapters are filtered correctly."""
     print_header("Test 3: Adapter Filtering")
 
     try:
         import psutil
 
-        # Get all network interfaces
         interfaces = psutil.net_if_addrs()
         interface_stats = psutil.net_if_stats()
 
@@ -101,10 +85,8 @@ def test_adapter_filtering():
             stats = interface_stats.get(name)
             is_up = stats.isup if stats else False
 
-            # Check if virtual
             is_virtual = any(pattern.lower() in name.lower() for pattern in virtual_patterns)
 
-            # Get IPv4 addresses
             ipv4_addrs = [addr.address for addr in addresses if addr.family == 2]
 
             status = "UP" if is_up else "DOWN"
@@ -119,23 +101,18 @@ def test_adapter_filtering():
 
 
 def main():
-    """Run all verification tests."""
     print_header("Network IP Detection Verification")
 
     print_info("This script verifies the enhanced get_network_ip() function")
     print_info("It tests both config.yaml reading and runtime detection")
     print()
 
-    # Test 1: With config.yaml
     ip_with_config = test_with_config()
 
-    # Test 2: Without config.yaml (runtime detection)
     ip_without_config = test_without_config()
 
-    # Test 3: Show adapter filtering
     test_adapter_filtering()
 
-    # Summary
     print_header("Summary")
 
     if ip_with_config:

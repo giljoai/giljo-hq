@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tenant isolation regression tests for OrchestrationService (BATCH 1 Security Fix).
-
-Verifies that cross-tenant data leaks are prevented for:
-- report_progress() AgentJob lookup, AgentTodoItem DELETE/SELECT (requires tenant_key filter)
-- get_agent_mission() Project lookup (replaced session.get with tenant-scoped query)
-- complete_job() AgentExecution other_active_stmt (requires tenant_key filter)
-- report_error() AgentJob lookup (requires tenant_key filter)
-
-Test Strategy:
-- Create entities in two tenants (A and B)
-- Attempt cross-tenant operations from tenant A against tenant B's data
-- Verify all cross-tenant attempts are blocked (ResourceNotFoundError)
-- Verify same-tenant operations succeed
-
-Follows patterns from: test_project_tenant_isolation_regression.py
-"""
 
 import random
 import uuid
@@ -37,16 +20,9 @@ from giljo_mcp.tenant import TenantManager
 
 @pytest_asyncio.fixture(scope="function")
 async def two_tenant_orchestration(db_session, db_manager):
-    """
-    Create orchestration entities in two separate tenants for isolation testing.
-
-    Tenant A: product_a, project_a, job_a, execution_a (active, working)
-    Tenant B: product_b, project_b, job_b, execution_b (active, working)
-    """
     tenant_a = TenantManager.generate_tenant_key()
     tenant_b = TenantManager.generate_tenant_key()
 
-    # Create products
     product_a = Product(
         id=str(uuid.uuid4()),
         name="Tenant A Product",
@@ -65,7 +41,6 @@ async def two_tenant_orchestration(db_session, db_manager):
     db_session.add(product_b)
     await db_session.commit()
 
-    # Create projects (required FK for agent jobs)
     project_a = Project(
         id=str(uuid.uuid4()),
         name="Tenant A Project",
@@ -94,7 +69,6 @@ async def two_tenant_orchestration(db_session, db_manager):
     db_session.add(project_b)
     await db_session.commit()
 
-    # Create agent jobs
     job_a = AgentJob(
         job_id=str(uuid.uuid4()),
         tenant_key=tenant_a,
@@ -119,7 +93,6 @@ async def two_tenant_orchestration(db_session, db_manager):
     db_session.add(job_b)
     await db_session.commit()
 
-    # Create agent executions
     exec_a = AgentExecution(
         agent_id=str(uuid.uuid4()),
         job_id=job_a.job_id,
@@ -145,7 +118,6 @@ async def two_tenant_orchestration(db_session, db_manager):
     for obj in [job_a, job_b, exec_a, exec_b]:
         await db_session.refresh(obj)
 
-    # Create service
     tenant_manager = TenantManager()
     service = OrchestrationService(
         db_manager=db_manager,
@@ -168,20 +140,11 @@ async def two_tenant_orchestration(db_session, db_manager):
     }
 
 
-# ============================================================================
-# report_progress() -- Cross-Tenant Tests
-# ============================================================================
 
 
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_report_progress_blocks_cross_tenant(db_session, two_tenant_orchestration):
-    """
-    REGRESSION: report_progress() must filter AgentJob by tenant_key.
-
-    Bug: AgentJob lookup had no tenant_key filter, allowing any tenant to
-    report progress on another tenant's job if they knew the job_id.
-    """
     tenant_a = two_tenant_orchestration["tenant_a"]
     job_b = two_tenant_orchestration["job_b"]
     service = two_tenant_orchestration["service"]
@@ -197,9 +160,6 @@ async def test_report_progress_blocks_cross_tenant(db_session, two_tenant_orches
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_report_progress_same_tenant_succeeds(db_session, two_tenant_orchestration):
-    """
-    Verify that same-tenant report_progress still works correctly.
-    """
     tenant_a = two_tenant_orchestration["tenant_a"]
     job_a = two_tenant_orchestration["job_a"]
     service = two_tenant_orchestration["service"]
@@ -213,26 +173,15 @@ async def test_report_progress_same_tenant_succeeds(db_session, two_tenant_orche
     assert result.status == "success"
 
 
-# ============================================================================
-# get_agent_mission() -- Cross-Tenant Tests
-# ============================================================================
 
 
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_get_agent_mission_blocks_cross_tenant(db_session, two_tenant_orchestration):
-    """
-    REGRESSION: get_agent_mission() must scope Project lookup by tenant_key.
-
-    Bug: Used session.get(Project, job.project_id) which fetches by PK only,
-    allowing cross-tenant project data to be included in mission response.
-    Now uses select().where(Project.tenant_key == tenant_key).
-    """
     tenant_a = two_tenant_orchestration["tenant_a"]
     job_b = two_tenant_orchestration["job_b"]
     service = two_tenant_orchestration["service"]
 
-    # Tenant A tries to get mission for tenant B's job
     with pytest.raises(ResourceNotFoundError):
         await service.get_agent_mission(
             job_id=job_b.job_id,
@@ -243,9 +192,6 @@ async def test_get_agent_mission_blocks_cross_tenant(db_session, two_tenant_orch
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_get_agent_mission_same_tenant_succeeds(db_session, two_tenant_orchestration):
-    """
-    Verify that same-tenant get_agent_mission still works correctly.
-    """
     tenant_a = two_tenant_orchestration["tenant_a"]
     job_a = two_tenant_orchestration["job_a"]
     service = two_tenant_orchestration["service"]
@@ -259,20 +205,11 @@ async def test_get_agent_mission_same_tenant_succeeds(db_session, two_tenant_orc
     assert "Implement feature for tenant A" in result.mission
 
 
-# ============================================================================
-# complete_job() -- Cross-Tenant Tests
-# ============================================================================
 
 
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_complete_job_blocks_cross_tenant(db_session, two_tenant_orchestration):
-    """
-    REGRESSION: complete_job() must scope AgentExecution queries by tenant_key.
-
-    Bug: The other_active_stmt for decommissioning sibling executions had
-    no tenant_key filter, potentially decommissioning cross-tenant executions.
-    """
     tenant_a = two_tenant_orchestration["tenant_a"]
     job_b = two_tenant_orchestration["job_b"]
     exec_b = two_tenant_orchestration["exec_b"]
@@ -285,7 +222,6 @@ async def test_complete_job_blocks_cross_tenant(db_session, two_tenant_orchestra
             tenant_key=tenant_a,
         )
 
-    # Verify tenant B's execution was NOT modified
     await db_session.refresh(exec_b)
     assert exec_b.status == "working", "Cross-tenant complete_job modified another tenant's execution!"
 
@@ -293,9 +229,6 @@ async def test_complete_job_blocks_cross_tenant(db_session, two_tenant_orchestra
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_complete_job_same_tenant_succeeds(db_session, two_tenant_orchestration):
-    """
-    Verify that same-tenant complete_job still works correctly.
-    """
     tenant_a = two_tenant_orchestration["tenant_a"]
     job_a = two_tenant_orchestration["job_a"]
     service = two_tenant_orchestration["service"]
@@ -309,20 +242,11 @@ async def test_complete_job_same_tenant_succeeds(db_session, two_tenant_orchestr
     assert result.job_id == job_a.job_id
 
 
-# ============================================================================
-# report_error() -- Cross-Tenant Tests
-# ============================================================================
 
 
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_report_error_blocks_cross_tenant(db_session, two_tenant_orchestration):
-    """
-    REGRESSION: report_error() must filter AgentJob by tenant_key.
-
-    Bug: AgentJob lookup had no tenant_key filter, allowing any tenant to
-    report errors on another tenant's job.
-    """
     tenant_a = two_tenant_orchestration["tenant_a"]
     job_b = two_tenant_orchestration["job_b"]
     exec_b = two_tenant_orchestration["exec_b"]
@@ -336,7 +260,6 @@ async def test_report_error_blocks_cross_tenant(db_session, two_tenant_orchestra
             tenant_key=tenant_a,
         )
 
-    # Verify tenant B's execution was NOT modified
     await db_session.refresh(exec_b)
     assert exec_b.status == "working", "Cross-tenant set_agent_status modified another tenant's execution!"
 
@@ -344,9 +267,6 @@ async def test_report_error_blocks_cross_tenant(db_session, two_tenant_orchestra
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_set_agent_status_same_tenant_succeeds(db_session, two_tenant_orchestration):
-    """
-    Verify that same-tenant set_agent_status still works correctly.
-    """
     tenant_a = two_tenant_orchestration["tenant_a"]
     job_a = two_tenant_orchestration["job_a"]
     service = two_tenant_orchestration["service"]
@@ -361,18 +281,11 @@ async def test_set_agent_status_same_tenant_succeeds(db_session, two_tenant_orch
     assert result.job_id == job_a.job_id
 
 
-# ============================================================================
-# Combined -- Full Cross-Tenant Audit
-# ============================================================================
 
 
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_orchestration_service_cross_tenant_audit(db_session, two_tenant_orchestration):
-    """
-    Integration test: Attempt every cross-tenant orchestration operation from
-    tenant A against tenant B's data. All must be blocked.
-    """
     tenant_a = two_tenant_orchestration["tenant_a"]
     job_b = two_tenant_orchestration["job_b"]
     exec_b = two_tenant_orchestration["exec_b"]
@@ -380,7 +293,6 @@ async def test_orchestration_service_cross_tenant_audit(db_session, two_tenant_o
 
     violations = []
 
-    # 1. report_progress cross-tenant
     try:
         await service.report_progress(
             job_id=job_b.job_id,
@@ -391,7 +303,6 @@ async def test_orchestration_service_cross_tenant_audit(db_session, two_tenant_o
     except (ResourceNotFoundError, ValidationError):
         pass
 
-    # 2. get_agent_mission cross-tenant
     try:
         await service.get_agent_mission(
             job_id=job_b.job_id,
@@ -401,7 +312,6 @@ async def test_orchestration_service_cross_tenant_audit(db_session, two_tenant_o
     except (ResourceNotFoundError, ValidationError):
         pass
 
-    # 3. complete_job cross-tenant
     try:
         await service.complete_job(
             job_id=job_b.job_id,
@@ -412,7 +322,6 @@ async def test_orchestration_service_cross_tenant_audit(db_session, two_tenant_o
     except (ResourceNotFoundError, ValidationError):
         pass
 
-    # 4. set_agent_status cross-tenant
     try:
         await service.set_agent_status(
             job_id=job_b.job_id,
@@ -424,7 +333,6 @@ async def test_orchestration_service_cross_tenant_audit(db_session, two_tenant_o
     except (ResourceNotFoundError, ValidationError):
         pass
 
-    # Verify tenant B's execution was NEVER modified
     await db_session.refresh(exec_b)
     if exec_b.status != "working":
         violations.append(f"Tenant B execution status changed from 'working' to '{exec_b.status}'")

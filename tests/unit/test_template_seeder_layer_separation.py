@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tests for Template Seeder Layer 3 separation.
-
-Verifies that _get_template_metadata() is consistent with v103 templates:
-- behavioral_rules and success_criteria are empty (content now lives
-  in v103 user_instructions text, not structured metadata fields)
-- category and variables are present for every role
-- All 6 standard roles are defined
-
-Handover 0371a: Template Dead Code Removal & Test Remediation
-Handover 0815: Cleared stale rules/criteria to match v103 design
-"""
 
 from giljo_mcp.template_seeder import _get_template_metadata
 
@@ -23,15 +11,12 @@ EXPECTED_ROLES = {"orchestrator", "analyzer", "implementer", "tester", "reviewer
 
 
 class TestLayer3TemplateSeparation:
-    """Test that _get_template_metadata() is consistent with v103 template design."""
 
     def test_all_standard_roles_present(self):
-        """Metadata should cover all 6 standard agent roles."""
         templates = _get_template_metadata()
         assert set(templates.keys()) == EXPECTED_ROLES
 
     def test_metadata_fields_present_for_each_role(self):
-        """Each role should have category, behavioral_rules, success_criteria, variables."""
         templates = _get_template_metadata()
         required_keys = {"category", "behavioral_rules", "success_criteria", "variables"}
 
@@ -42,11 +27,6 @@ class TestLayer3TemplateSeparation:
             assert template_def["category"] == "role", f"{role_name} should have category 'role'"
 
     def test_rules_and_criteria_are_empty(self):
-        """behavioral_rules and success_criteria should be empty lists.
-
-        In v103, role-specific guidance is embedded in user_instructions text.
-        The structured metadata fields are kept empty for consistency.
-        """
         templates = _get_template_metadata()
 
         for role_name, template_def in templates.items():
@@ -58,7 +38,6 @@ class TestLayer3TemplateSeparation:
             )
 
     def test_orchestrator_has_extended_variables(self):
-        """Orchestrator should have project_mission variable in addition to standard ones."""
         templates = _get_template_metadata()
         orchestrator = templates["orchestrator"]
         assert "project_mission" in orchestrator["variables"]

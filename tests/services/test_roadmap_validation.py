@@ -2,15 +2,6 @@
 # Licensed under the Elastic License 2.0.
 # See LICENSE in the project root for terms.
 
-"""Unit tests for the roadmap validation boundary (IMP-6044).
-
-These validators are pure, DB-free transforms extracted from RoadmapService, so
-they are tested directly here (no session, no fixtures). They guard the
-"no unvalidated agent input -> DB" contract: a malformed payload must raise
-ValidationError (-> 422) at the boundary, never reach a DB constraint as a 500.
-
-Parallel-safe: no DB, no network, no module-level mutable state.
-"""
 
 import pytest
 
@@ -35,9 +26,6 @@ VALID_RISK = next(iter(VALID_ROADMAP_RISKS))
 VALID_COMPLEXITY = next(iter(VALID_ROADMAP_COMPLEXITIES))
 
 
-# --------------------------------------------------------------------------
-# validate_items
-# --------------------------------------------------------------------------
 
 
 def test_validate_items_empty_list():
@@ -59,7 +47,7 @@ def test_validate_items_normalizes_project_item():
     assert out == [
         {
             "item_type": "project",
-            "project_id": "123",  # coerced to str
+            "project_id": "123",
             "task_id": None,
             "sort_order": 3,
             "risk": VALID_RISK,
@@ -116,7 +104,7 @@ def test_validate_items_rejects_bad_complexity():
 def test_validate_items_blocked_true_keeps_reason():
     out = validate_items([{"item_type": "project", "project_id": "p1", "blocked": True, "blocked_reason": " waiting "}])
     assert out[0]["blocked"] is True
-    assert out[0]["blocked_reason"] == "waiting"  # stripped
+    assert out[0]["blocked_reason"] == "waiting"
 
 
 def test_validate_items_blocked_false_drops_reason():
@@ -125,9 +113,6 @@ def test_validate_items_blocked_false_drops_reason():
     assert out[0]["blocked_reason"] is None
 
 
-# --------------------------------------------------------------------------
-# validate_sort_order
-# --------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("value", [0, 1, MAX_ROADMAP_SORT_ORDER])
@@ -147,9 +132,6 @@ def test_validate_sort_order_rejects_non_int(value):
         validate_sort_order(value, 0)
 
 
-# --------------------------------------------------------------------------
-# validate_blocked
-# --------------------------------------------------------------------------
 
 
 def test_validate_blocked_defaults_false():
@@ -171,9 +153,6 @@ def test_validate_blocked_rejects_overlong_reason():
         validate_blocked(True, "x" * (MAX_BLOCKED_REASON_LEN + 1), 0)
 
 
-# --------------------------------------------------------------------------
-# validate_reorder
-# --------------------------------------------------------------------------
 
 
 def test_validate_reorder_normalizes():
@@ -195,9 +174,6 @@ def test_validate_reorder_rejects_bad_sort_order():
         validate_reorder([{"id": "x", "sort_order": -5}])
 
 
-# --------------------------------------------------------------------------
-# validate_remove
-# --------------------------------------------------------------------------
 
 
 def test_validate_remove_none_is_empty():

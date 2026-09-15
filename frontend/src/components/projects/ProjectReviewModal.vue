@@ -10,7 +10,6 @@
     @keydown.esc="$emit('close')"
   >
     <v-card class="smooth-border">
-      <!-- Header -->
       <div id="review-modal-title" class="dlg-header">
         <v-icon class="dlg-icon">mdi-eye</v-icon>
         <div class="d-flex flex-column flex-grow-1">
@@ -63,7 +62,6 @@
         <v-alert v-if="error" type="error" variant="tonal" density="compact" class="mb-4">{{ error }}</v-alert>
 
         <template v-if="projectData && !loading">
-          <!-- Section 1: Project Overview -->
           <div class="mb-6">
             <div class="d-flex align-center mb-2">
               <h3 class="text-title-large">Overview</h3>
@@ -91,10 +89,6 @@
             </span>
             <p class="mt-2">{{ projectData.description || 'No description provided.' }}</p>
 
-            <!-- FE-9591: a superseded project says what replaced it. Gated on the
-                 STATUS, not on the pointer, so a superseded project whose successor
-                 was never recorded still says so instead of rendering nothing. Every
-                 other status gains no chrome at all. -->
             <SupersededSuccessorNotice
               v-if="projectData.status === 'superseded'"
               :successor-id="projectData.successor_project_id || null"
@@ -102,7 +96,6 @@
             />
           </div>
 
-          <!-- Section 2: Mission -->
           <div class="mb-6">
             <div class="d-flex align-center mb-2">
               <h3 class="text-title-large">Mission</h3>
@@ -129,7 +122,6 @@
             </v-card>
           </div>
 
-          <!-- Section 3: Agent Roster -->
           <div class="mb-6">
             <h3 class="text-title-large mb-2 d-flex align-center">
               Agents ({{ agents.length }})
@@ -214,7 +206,6 @@
             </div>
           </div>
 
-          <!-- Section 4: Agent Messages (expandable, lazy-loaded messages) -->
           <div v-if="agents.length" class="mb-6">
 
             <h3 class="text-title-large mb-2">Agent Messages</h3>
@@ -260,7 +251,6 @@
             </v-expansion-panels>
           </div>
 
-          <!-- Section: Project Threads — the project's bound Hub thread, read-only -->
           <div class="mb-6">
             <div class="d-flex align-center mb-2">
               <h3 class="text-title-large">Project Threads</h3>
@@ -281,9 +271,6 @@
               class="pa-0 smooth-border project-comms-card"
               data-testid="project-comms-timeline"
             >
-              <!-- FE-9289c: the `readonly` prop is gone. Its only job was hiding the
-                   waiting/read/sent filter pills, and those are deleted — the pane has
-                   no interactive chrome left to hide in either mode. -->
               <ThreadTimeline :thread-id="boundThread.thread_id" />
             </v-card>
             <p v-else class="text-body-small text-muted-a11y" data-testid="project-comms-empty">
@@ -291,7 +278,6 @@
             </p>
           </div>
 
-          <!-- Section 5: 360 Memory -->
           <div class="mb-6">
             <h3 class="text-title-large mb-2">360 Memory ({{ memoryEntries.length }} entries)</h3>
             <p v-if="!memoryEntries.length" class="text-body-small text-muted-a11y">No data</p>
@@ -364,7 +350,6 @@
             </v-expansion-panels>
           </div>
 
-          <!-- Section 6: Git Commits -->
           <div class="mb-6">
             <h3 class="text-title-large mb-2">Commits</h3>
             <div v-if="gitCommits.length">
@@ -446,7 +431,6 @@ function copyMemoryEntry(entry, i) {
 const loading = ref(false)
 const error = ref(null)
 const projectData = ref(null)
-// Phase 5 / D1(a): the project's bound Hub thread, surfaced read-only below.
 const boundThread = ref(null)
 const boundThreadLoading = ref(false)
 const agents = ref([])
@@ -460,11 +444,6 @@ function copyProjectId() {
   if (props.projectId) clipboardCopy(props.projectId)
 }
 
-// BE-9035c: execution-mode collapse — only 'multi_terminal' and 'subagent'
-// are canonical now. A pre-collapse project may still carry one of the 5
-// legacy per-CLI tokens (claude_code_cli, codex_cli, gemini_cli,
-// antigravity_cli, generic_mcp); fold anything that isn't multi_terminal
-// into the generic "Subagent" entry so old data still renders sensibly.
 const EXECUTION_MODE_MAP = {
   multi_terminal: { label: 'Multi-Terminal', icon: 'mdi-monitor-multiple', img: null },
   subagent: { label: 'Subagent', icon: 'mdi-connection', img: null },
@@ -536,7 +515,6 @@ watch(() => props.show, (open) => {
   }
 })
 
-// Lazy-load agent messages when expansion panel opens
 watch(expandedAgentPanels, (expanded) => {
   if (expanded == null) return
   const indices = Array.isArray(expanded) ? expanded : [expanded]
@@ -564,9 +542,6 @@ async function loadReviewData() {
   }
 }
 
-// Phase 5 / D1(a): resolve THE project's bound Hub thread WITHOUT creating one
-// (a read-only surface must not mutate state just by being viewed) and preload
-// its history so the embedded read-only ThreadTimeline renders it.
 async function loadBoundThread() {
   if (!props.projectId) return
   boundThreadLoading.value = true
@@ -575,8 +550,6 @@ async function loadBoundThread() {
     boundThread.value = t
     if (t) {
       await commHub.loadThread(t.thread_id)
-      // Load the participant directory so ThreadTimeline can resolve author
-      // identity (role name + color) instead of falling back to raw UUIDs.
       await commHub.loadParticipants(t.thread_id)
     }
   } catch (err) {
@@ -587,8 +560,6 @@ async function loadBoundThread() {
   }
 }
 
-// Deep-link into the Hub (Project threads tab, this thread) for interaction —
-// the pane itself is read-only.
 function openInHub() {
   if (!boundThread.value) return
   router.push({ name: 'Hub', query: { thread: boundThread.value.thread_id, tab: 'project' } })
@@ -635,7 +606,7 @@ const missionText = computed(() => {
 const statusColor = computed(() => {
   const s = projectData.value?.status
   if (s === 'completed') return 'success'
-  if (s === 'active') return 'white' // Vuetify color prop — use CSS named color
+  if (s === 'active') return 'white'
   if (s === 'terminated') return 'warning'
   if (s === 'cancelled') return 'grey'
   if (s === 'superseded') return 'grey'
@@ -643,7 +614,7 @@ const statusColor = computed(() => {
 })
 
 const statusTextStyle = computed(() => {
-  if (projectData.value?.status === 'active') return { color: 'var(--color-text-dark)' } // dark text on white 'active' badge
+  if (projectData.value?.status === 'active') return { color: 'var(--color-text-dark)' }
   return {}
 })
 

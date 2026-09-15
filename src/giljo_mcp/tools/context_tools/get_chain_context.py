@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Chain Context Tool (BE-6196 follow-up).
-
-Fetch the live chain mission for a sub-orchestrator's active sequential
-multi-project run. Backs the 'chain' get_context category referenced by the
-CH_SUB_ORCHESTRATOR chapter prose (chapters_chain.py) -- that prose has told
-sub-orchestrators to "fetch the full chain mission via get_context" since
-BE-6196, but no category ever served it (dead pointer).
-"""
-# Read-only tool -- uses SequenceRunService.find_active_run_for_project (no writes)
 
 import logging
 from typing import Any
@@ -29,35 +19,6 @@ logger = logging.getLogger(__name__)
 async def get_chain_context(
     project_id: str, tenant_key: str, db_manager: DatabaseManager | None = None
 ) -> dict[str, Any]:
-    """
-    Fetch the caller's active chain run context, tenant-scoped by project_id.
-
-    Args:
-        project_id: The caller's own project UUID (used to find the active
-            SequenceRun that contains it -- the caller's chain, not any chain).
-        tenant_key: Tenant isolation key
-        db_manager: Database manager instance
-
-    Returns:
-        Dict with chain context info:
-        {
-            "source": "chain_context",
-            "data": {
-                "run_id": "uuid",
-                "chain_mission": "...",
-                "resolved_order": ["p1", "p2", ...],
-                "hub_thread_id": "uuid" | None,
-                "hub_chat_id": "CHT-####" | None,
-            },
-            "metadata": {"project_id": "uuid", "tenant_key": "..."}
-        }
-        On no active run (common outside a chain), "data" is {} and
-        "metadata.error" is set to "no_active_chain_run" -- a clean structured
-        signal, not an exception.
-
-    Multi-Tenant Isolation:
-        find_active_run_for_project filters by tenant_key.
-    """
     logger.info("fetching_chain_context project_id=%s tenant_key=%s", project_id, tenant_key)
 
     if db_manager is None:
@@ -83,11 +44,6 @@ async def get_chain_context(
             "metadata": {"project_id": project_id, "tenant_key": tenant_key, "error": "no_active_chain_run"},
         }
 
-    # BE-9291: hand the caller its hub instead of making it go looking. This is what
-    # replaced search_threads(query="{run_id}") -- resolution is on
-    # comm_threads.sequence_run_id now, so the hub is found whatever its subject says.
-    # None means the conductor has not stood the hub up yet, which is a legitimate
-    # early state and reads as an absent key rather than an error.
     hub = await CommThreadService(db_manager, TenantManager()).resolve_chain_hub_thread(
         sequence_run_id=run["id"], tenant_key=tenant_key
     )

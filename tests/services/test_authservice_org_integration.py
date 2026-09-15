@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tests for AuthService Organization Integration (Handover 0424g).
-
-This test suite follows TDD discipline (Red -> Green -> Refactor):
-1. Tests written FIRST (this file) - RED PHASE
-2. All tests must FAIL initially
-3. Implementation makes tests pass - GREEN PHASE
-4. Refactor for quality - REFACTOR PHASE
-
-Test Coverage (Handover 0424g):
-- _create_default_organization returns org_id
-- _create_first_admin_impl creates org FIRST, sets user.org_id
-- _register_user_impl accepts org_id parameter
-- create_user_in_org creates users within admin's organization
-- Permission checks for create_user_in_org (owner/admin only)
-
-Handover 0731c: Updated for typed service returns (AuthResult, UserInfo).
-"""
 
 from datetime import UTC, datetime
 
@@ -37,27 +19,24 @@ from giljo_mcp.schemas.service_responses import UserInfo
 from giljo_mcp.services.auth_service import AuthService
 
 
-# Fixtures
 
 
 @pytest_asyncio.fixture
 async def auth_service(db_manager, db_session):
-    """Create AuthService instance for testing with shared session"""
     return AuthService(
         db_manager=db_manager,
-        websocket_manager=None,  # No WebSocket in tests
-        session=db_session,  # SHARED SESSION for test transaction isolation
+        websocket_manager=None,
+        session=db_session,
     )
 
 
 @pytest_asyncio.fixture
 async def test_org(db_session):
-    """Create test organization"""
     org = Organization(
         id="test-org-001",
         name="Test Organization",
         slug="test-organization",
-        tenant_key="test_tenant_001",  # 0424m: Required NOT NULL
+        tenant_key="test_tenant_001",
         is_active=True,
         settings={},
     )
@@ -69,7 +48,6 @@ async def test_org(db_session):
 
 @pytest_asyncio.fixture
 async def test_admin_user(db_session, test_org):
-    """Create admin user with org_id set and owner membership"""
     password = "Admin1234!@#$"
     admin = User(
         id="test-admin-001",
@@ -79,19 +57,18 @@ async def test_admin_user(db_session, test_org):
         password_hash=bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8"),
         role="admin",
         tenant_key="test_tenant_001",
-        org_id=test_org.id,  # Direct FK to organization
+        org_id=test_org.id,
         is_active=True,
         created_at=datetime.now(UTC),
     )
     db_session.add(admin)
     await db_session.flush()
 
-    # Create owner membership (0424m: tenant_key required)
     owner_membership = OrgMembership(
         org_id=test_org.id,
         user_id=admin.id,
         role="owner",
-        tenant_key="test_tenant_001",  # 0424m: Required NOT NULL
+        tenant_key="test_tenant_001",
         is_active=True,
     )
     db_session.add(owner_membership)
@@ -102,7 +79,6 @@ async def test_admin_user(db_session, test_org):
 
 @pytest_asyncio.fixture
 async def test_member_user(db_session, test_org):
-    """Create member user for permission tests"""
     password = "Member1234!@#$"
     member = User(
         id="test-member-001",
@@ -119,12 +95,11 @@ async def test_member_user(db_session, test_org):
     db_session.add(member)
     await db_session.flush()
 
-    # Create member membership (0424m: tenant_key required)
     member_membership = OrgMembership(
         org_id=test_org.id,
         user_id=member.id,
         role="member",
-        tenant_key="test_tenant_001",  # 0424m: Required NOT NULL
+        tenant_key="test_tenant_001",
         is_active=True,
     )
     db_session.add(member_membership)
@@ -133,29 +108,17 @@ async def test_member_user(db_session, test_org):
     return member, password
 
 
-# Tests updated for typed returns (Handover 0731c)
 
 
 @pytest.mark.asyncio
 async def test_create_default_organization_returns_org_id(auth_service, db_session):
-    """
-    Test that _create_default_organization returns org_id as string.
-
-    Expected behavior (Handover 0424g):
-    - Creates organization with custom name
-    - Returns org.id as UUID string
-    - Does NOT create membership (caller handles that)
-    """
-    # Call method with new signature
     org_id = await auth_service._create_default_organization(
         session=db_session, tenant_key="test_tenant_999", org_name="Custom Workspace"
     )
 
-    # Verify returns UUID string
     assert isinstance(org_id, str)
-    assert len(org_id) == 36  # UUID format
+    assert len(org_id) == 36
 
-    # Verify organization created in database
     stmt = select(Organization).where(Organization.id == org_id)
     result = await db_session.execute(stmt)
     org = result.scalar_one_or_none()
@@ -164,27 +127,17 @@ async def test_create_default_organization_returns_org_id(auth_service, db_sessi
     assert org.name == "Custom Workspace"
     assert org.is_active is True
 
-    # Verify NO membership created (caller's responsibility)
     membership_stmt = select(OrgMembership).where(OrgMembership.org_id == org_id)
     membership_result = await db_session.execute(membership_stmt)
     membership = membership_result.scalar_one_or_none()
 
-    assert membership is None  # No membership created by this method
+    assert membership is None
 
 
 @pytest.mark.asyncio
 async def test_register_user_sets_org_id(auth_service, db_session, test_admin_user, test_org):
-    """
-    Test that _register_user_impl accepts org_id parameter and sets user.org_id.
-
-    Expected behavior (Handover 0424g):
-    - Accepts org_id and org_role parameters
-    - Sets user.org_id if provided
-    - Creates membership with specified role
-    """
     admin, _ = test_admin_user
 
-    # Register user with org_id - returns UserInfo (typed)
     result = await auth_service._register_user_impl(
         session=db_session,
         username="newuser",
@@ -196,7 +149,6 @@ async def test_register_user_sets_org_id(auth_service, db_session, test_admin_us
         org_role="member",
     )
 
-    # Typed return: UserInfo with attribute access
     assert isinstance(result, UserInfo)
     user_id = result.id
     stmt = select(User).where(User.id == user_id)
@@ -205,7 +157,6 @@ async def test_register_user_sets_org_id(auth_service, db_session, test_admin_us
 
     assert user.org_id == test_org.id
 
-    # Verify membership created with specified role
     membership_stmt = (
         select(OrgMembership).where(OrgMembership.org_id == test_org.id).where(OrgMembership.user_id == user.id)
     )
@@ -218,17 +169,8 @@ async def test_register_user_sets_org_id(auth_service, db_session, test_admin_us
 
 @pytest.mark.asyncio
 async def test_create_user_in_org_by_admin(auth_service, db_session, test_admin_user, test_org):
-    """
-    Test that create_user_in_org creates users within admin's organization.
-
-    Expected behavior (Handover 0424g):
-    - Admin can create users in their organization
-    - New user gets admin's org_id
-    - Membership created with specified role
-    """
     admin, _ = test_admin_user
 
-    # Admin creates new user in their organization - returns UserInfo (typed)
     result = await auth_service.create_user_in_org(
         session=db_session,
         admin_user_id=admin.id,
@@ -238,7 +180,6 @@ async def test_create_user_in_org_by_admin(auth_service, db_session, test_admin_
         initial_password="OrgUser1234!@#$",
     )
 
-    # Typed return: UserInfo with attribute access
     assert isinstance(result, UserInfo)
     assert result.username == "orguser"
     assert result.email == "orguser@example.com"
@@ -248,9 +189,8 @@ async def test_create_user_in_org_by_admin(auth_service, db_session, test_admin_
     user_result = await db_session.execute(stmt)
     user = user_result.scalar_one()
 
-    assert user.org_id == test_org.id  # Same org as admin
+    assert user.org_id == test_org.id
 
-    # Verify membership created
     membership_stmt = (
         select(OrgMembership).where(OrgMembership.org_id == test_org.id).where(OrgMembership.user_id == user.id)
     )
@@ -263,16 +203,8 @@ async def test_create_user_in_org_by_admin(auth_service, db_session, test_admin_
 
 @pytest.mark.asyncio
 async def test_create_user_in_org_requires_admin_role(auth_service, db_session, test_member_user, test_org):
-    """
-    Test that create_user_in_org requires owner/admin membership role.
-
-    Expected behavior (Handover 0424g):
-    - Member users cannot create users
-    - Raises AuthorizationError for non-admin roles
-    """
     member, _ = test_member_user
 
-    # Member tries to create user (should fail)
     with pytest.raises(AuthorizationError) as exc_info:
         await auth_service.create_user_in_org(
             session=db_session,
@@ -283,10 +215,8 @@ async def test_create_user_in_org_requires_admin_role(auth_service, db_session, 
             initial_password="Unauthorized1234!@#$",
         )
 
-    # Verify error message mentions permission requirement
     assert "owner" in str(exc_info.value).lower() or "admin" in str(exc_info.value).lower()
 
-    # Verify no user created
     stmt = select(User).where(User.username == "unauthorizeduser")
     result = await db_session.execute(stmt)
     user = result.scalar_one_or_none()

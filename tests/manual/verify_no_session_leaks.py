@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Manual verification script for database session leak fix.
-
-Run this script to verify that:
-1. No garbage collector warnings appear
-2. Connection pool size remains stable
-3. HTTPExceptions don't cause session leaks
-
-Usage:
-    python tests/manual/verify_no_session_leaks.py
-"""
 
 import asyncio
 import gc
@@ -24,27 +13,22 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 
-# Add src to path
-# TODO: Remove after editable install confirmed on all platforms
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from fastapi import HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-# Enable all warnings
 warnings.filterwarnings("always")
 logging.basicConfig(level=logging.DEBUG)
 
 
 async def simulate_endpoint_with_http_exception():
-    """Simulate an endpoint that raises HTTPException after opening DB session"""
     from contextlib import asynccontextmanager
 
     from giljo_mcp.auth.dependencies import get_db_session
     from giljo_mcp.database import DatabaseManager
 
-    # Create mock components
     mock_request = MagicMock(spec=Request)
     mock_db_manager = MagicMock(spec=DatabaseManager)
     sessions_created = 0
@@ -79,21 +63,17 @@ async def simulate_endpoint_with_http_exception():
     mock_db_manager.get_session_async = track_sessions
     mock_request.app.state.api_state.db_manager = mock_db_manager
 
-    # Simulate 100 requests that fail with HTTPException
     for i in range(100):
         session_generator = get_db_session(mock_request)
 
         try:
             await session_generator.__anext__()
-            # Simulate endpoint raising HTTPException
             raise HTTPException(status_code=403, detail="Permission denied")
         except HTTPException:
-            # Cleanup generator
             await session_generator.aclose()
 
-    # Force garbage collection
     gc.collect()
-    await asyncio.sleep(0.2)  # Allow async cleanup
+    await asyncio.sleep(0.2)
 
     print("\n" + "=" * 60)
     print("SESSION LEAK VERIFICATION RESULTS")
@@ -112,7 +92,6 @@ async def simulate_endpoint_with_http_exception():
 
 
 async def main():
-    """Run verification tests"""
     print("Starting database session leak verification...")
     print("This will simulate 100 requests that raise HTTPException")
     print("Watching for garbage collector warnings and session leaks...\n")

@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Add deleted_at column to organizations (account deletion grace period).
-
-Revision ID: ce_0002_add_org_deleted_at
-Revises: ce_0001_add_org_status
-Create Date: 2026-04-25
-
-Adds a nullable ``deleted_at`` TIMESTAMPTZ column to ``organizations`` so the
-deletion reaper can determine when the 30-day grace period ends. The column is
-unused by CE code paths; SaaS deletion service and reaper are the only readers.
-Added to the CE chain per the edition-isolation rule that new columns on existing
-CE tables belong in the CE migration chain even when only SaaS code reads/writes
-them.
-"""
 
 import sqlalchemy as sa
 from alembic import op
@@ -28,7 +15,6 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Idempotency guard: skip if column already exists
     conn = op.get_bind()
     exists = conn.execute(
         sa.text(

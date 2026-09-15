@@ -3,39 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6086: task-domain transaction-ownership regression tests.
-
-The final repo in the BE-3006b/c transaction-ownership chain. ``task_repository``
-was the last repository still committing inside the repo layer (4 sites:
-``add_and_commit`` / ``commit`` / ``commit_and_refresh`` / ``delete_and_commit``).
-It is now flush-only (``add_and_flush`` / ``flush`` / ``flush_and_refresh`` /
-``delete_and_flush``); the session OWNER (the service entry-point scope) commits.
-
-These tests pin the convention at the layer the change occurred -- TWO-SIDED, as
-the manifest requires for a shared-write path:
-
-* Forced-failure / no-partial-state (the repo flushes, never commits, so the
-  owner's rollback discards everything):
-  - ``test_add_and_flush_failure_leaves_no_partial_task`` -- a task-only write.
-  - ``test_conversion_failure_after_flush_leaves_no_partial_state`` -- the
-    task->project CONVERSION path: a failure after the converted flush rolls
-    back the new project AND leaves the original task intact (atomic unit).
-* Happy-path / persists (the load-bearing half -- prove the owner actually
-  commits, not merely that the repo stopped committing):
-  - ``test_log_task_happy_path_persists`` -- task create.
-  - ``test_update_task_happy_path_persists_and_broadcasts_after_commit`` --
-    task update (Shape B: the owner commits explicitly BEFORE the task:updated
-    broadcast; the broadcast fires only after the write is durable).
-  - ``test_change_status_happy_path_persists`` -- flush_and_refresh path.
-  - ``test_convert_to_project_happy_path_persists`` -- conversion commits the
-    whole unit (new project persists, original task is gone).
-
-Parallel-safe: every test owns its setup under a freshly generated, unique
-tenant key (no shared fixtures, no module-level mutable state, no ordering
-deps). Happy-path tests commit real rows and purge their tenant in a finally
-block. Forced-failure tests commit nothing that must survive, but still purge
-their seed product/task for hygiene.
-"""
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
@@ -55,20 +22,9 @@ from giljo_mcp.services.task_service import TaskService
 from giljo_mcp.tenant import TenantManager
 
 
-# ---------------------------------------------------------------------------
-# Helpers -- pure functions (no module-level mutable state). Real committing
-# sessions via db_manager.get_session_async so the commit-vs-flush distinction
-# is observable (the shared transactional fixture would hide it).
-# ---------------------------------------------------------------------------
 
 
 def _make_task_service(db_manager, tenant_key, websocket_manager=None):
-    """Build a TaskService bound to a real (committing) session path.
-
-    No injected session -> the service uses db_manager.get_session_async, whose
-    scope-exit auto-commit (or the explicit owner commit on the update path) is
-    exactly the owner-commit behaviour under test.
-    """
     tm = MagicMock()
     tm.get_current_tenant.return_value = tenant_key
     return TaskService(
@@ -80,7 +36,6 @@ def _make_task_service(db_manager, tenant_key, websocket_manager=None):
 
 
 async def _seed_product(db_manager, tenant_key) -> str:
-    """Create one active product (committed). Returns its id."""
     product_id = str(uuid4())
     async with db_manager.get_session_async(tenant_key=tenant_key) as session:
         session.add(
@@ -97,7 +52,6 @@ async def _seed_product(db_manager, tenant_key) -> str:
 
 
 async def _seed_task(db_manager, tenant_key, product_id, created_by_user_id=None) -> str:
-    """Create one task (committed, untyped). Returns its id."""
     task_id = str(uuid4())
     async with db_manager.get_session_async(tenant_key=tenant_key) as session:
         session.add(
@@ -117,10 +71,6 @@ async def _seed_task(db_manager, tenant_key, product_id, created_by_user_id=None
 
 
 async def _seed_admin_user(db_manager, tenant_key) -> str:
-    """Create an org + admin user (committed) for the conversion permission check.
-
-    Returns the user id. Admin role makes the creator-or-admin gate pass.
-    """
     org_id = str(uuid4())
     user_id = str(uuid4())
     async with db_manager.get_session_async(tenant_key=tenant_key) as session:
@@ -139,7 +89,7 @@ async def _seed_admin_user(db_manager, tenant_key) -> str:
                 id=user_id,
                 username=f"be6086_admin_{uuid4().hex[:6]}",
                 email=f"be6086_{uuid4().hex[:6]}@example.com",
-                password_hash="x",  # not exercised; gate uses role/id only
+                password_hash="x",
                 full_name="BE6086 Admin",
                 role="admin",
                 tenant_key=tenant_key,
@@ -152,7 +102,6 @@ async def _seed_admin_user(db_manager, tenant_key) -> str:
 
 
 async def _purge_tenant(db_manager, tenant_key) -> None:
-    """Delete every row this suite could have committed for a tenant (FK order)."""
     async with db_manager.get_session_async(tenant_key=tenant_key) as session:
         await session.execute(delete(Task).where(Task.tenant_key == tenant_key))
         await session.execute(delete(Project).where(Project.tenant_key == tenant_key))
@@ -167,18 +116,10 @@ async def _task_exists(db_manager, tenant_key, task_id) -> bool:
     return found is not None
 
 
-# ---------------------------------------------------------------------------
-# Forced-failure (no partial state)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_add_and_flush_failure_leaves_no_partial_task(db_manager):
-    """Task-only path: a failure after add_and_flush (before owner commit) leaves no row.
-
-    Pre-fix the repo committed inside add_and_commit, so the row would survive
-    this rollback and the assertion would fail.
-    """
     tenant_key = TenantManager.generate_tenant_key()
     product_id = await _seed_product(db_manager, tenant_key)
     task_id = str(uuid4())
@@ -197,7 +138,6 @@ async def test_add_and_flush_failure_leaves_no_partial_task(db_manager):
                 created_at=datetime.now(UTC),
             )
             await repo.add_and_flush(session, task)
-            # Failure AFTER the flush-only add, BEFORE the owner commits.
             raise RuntimeError("boom before owner commit")
 
     try:
@@ -213,12 +153,6 @@ async def test_add_and_flush_failure_leaves_no_partial_task(db_manager):
 
 @pytest.mark.asyncio
 async def test_conversion_failure_after_flush_leaves_no_partial_state(db_manager):
-    """Conversion path: a failure after the converted flush rolls the WHOLE unit back.
-
-    The new project (flushed early to obtain its id) must NOT persist and the
-    original task must NOT be deleted -- the task->project conversion commits as
-    one transaction owned by the service, or rolls back wholly.
-    """
     tenant_key = TenantManager.generate_tenant_key()
     try:
         product_id = await _seed_product(db_manager, tenant_key)
@@ -227,9 +161,6 @@ async def test_conversion_failure_after_flush_leaves_no_partial_state(db_manager
 
         service = _make_task_service(db_manager, tenant_key)
 
-        # Inject a failure AFTER the converted flush: the conversion impl calls
-        # repo.flush(...) then repo.refresh(...). Make refresh raise so the
-        # failure lands after the flush but before the owner (scope-exit) commit.
         async def _boom(*_a, **_kw):
             raise RuntimeError("boom after converted flush")
 
@@ -244,11 +175,9 @@ async def test_conversion_failure_after_flush_leaves_no_partial_state(db_manager
                 user_id=user_id,
             )
 
-        # The original task must still exist (its delete rolled back)...
         assert await _task_exists(db_manager, tenant_key, task_id), (
             "original task was lost -- conversion rollback must restore it"
         )
-        # ...and NO project may have been persisted.
         async with db_manager.get_session_async(tenant_key=tenant_key) as session:
             result = await session.execute(select(Project).where(Project.tenant_key == tenant_key))
             projects = result.scalars().all()
@@ -257,14 +186,10 @@ async def test_conversion_failure_after_flush_leaves_no_partial_state(db_manager
         await _purge_tenant(db_manager, tenant_key)
 
 
-# ---------------------------------------------------------------------------
-# Happy path (persists -- the load-bearing half)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_log_task_happy_path_persists(db_manager):
-    """Create: log_task succeeds AND the row is durable (owner scope-exit commit)."""
     tenant_key = TenantManager.generate_tenant_key()
     try:
         product_id = await _seed_product(db_manager, tenant_key)
@@ -286,12 +211,6 @@ async def test_log_task_happy_path_persists(db_manager):
 
 @pytest.mark.asyncio
 async def test_update_task_happy_path_persists_and_broadcasts_after_commit(db_manager):
-    """Update (Shape B): the row persists AND task:updated fires after the commit.
-
-    This is the trickiest caller -- it emits a WebSocket event inside the
-    session scope, so the owner must commit EXPLICITLY before the broadcast. A
-    converted-but-uncommitted bug would make the change silently not persist.
-    """
     tenant_key = TenantManager.generate_tenant_key()
     mock_ws = MagicMock()
     mock_ws.broadcast_to_tenant = AsyncMock()
@@ -305,18 +224,15 @@ async def test_update_task_happy_path_persists_and_broadcasts_after_commit(db_ma
         assert "status" in result.updated_fields
         assert "priority" in result.updated_fields
 
-        # Persisted at the owner?
         async with db_manager.get_session_async(tenant_key=tenant_key) as session:
             reloaded = await TaskRepository().get_task_by_id(session, task_id, tenant_key)
         assert reloaded is not None
         assert reloaded.status == "in_progress"
         assert reloaded.priority == "high"
-        assert reloaded.started_at is not None  # auto-stamped on in_progress
+        assert reloaded.started_at is not None
 
-        # Broadcast fired (after the explicit owner commit).
         mock_ws.broadcast_to_tenant.assert_called_once()
         assert mock_ws.broadcast_to_tenant.call_args.kwargs.get("event_type") == "task:updated"
-        # BE-9518: task:updated must carry product_id like task:created already does.
         assert mock_ws.broadcast_to_tenant.call_args.kwargs["data"]["product_id"] == product_id
     finally:
         await _purge_tenant(db_manager, tenant_key)
@@ -324,7 +240,6 @@ async def test_update_task_happy_path_persists_and_broadcasts_after_commit(db_ma
 
 @pytest.mark.asyncio
 async def test_change_status_happy_path_persists(db_manager):
-    """flush_and_refresh path: change_status succeeds AND persists at the owner."""
     tenant_key = TenantManager.generate_tenant_key()
     try:
         product_id = await _seed_product(db_manager, tenant_key)
@@ -345,7 +260,6 @@ async def test_change_status_happy_path_persists(db_manager):
 
 @pytest.mark.asyncio
 async def test_convert_to_project_happy_path_persists(db_manager):
-    """Conversion atomic commit: the new project persists AND the task is gone."""
     tenant_key = TenantManager.generate_tenant_key()
     try:
         product_id = await _seed_product(db_manager, tenant_key)
@@ -364,7 +278,6 @@ async def test_convert_to_project_happy_path_persists(db_manager):
         assert result.project_id
         assert result.project_name == "Converted Project"
 
-        # The whole atomic unit committed: project exists, original task deleted.
         async with db_manager.get_session_async(tenant_key=tenant_key) as session:
             project = await TaskRepository().get_project_by_id(session, result.project_id, product_id, tenant_key)
         assert project is not None, "converted project did not persist -- owner must commit"

@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tool-layer (ToolAccessor) tests for request_approval (BE-5029 Phase A).
-
-CLAUDE.md regression-test-at-the-failing-layer rule: the prose-contract bug
-that BE-5029 replaces lived at the orchestrator/tool boundary, so this test
-exercises ToolAccessor.request_approval through Pydantic validation, not just
-the underlying service.
-"""
 
 import random
 from datetime import UTC, datetime
@@ -62,8 +55,6 @@ async def seed(db_session, test_tenant_key):
     )
     db_session.add(project)
     await db_session.flush()
-    # BE-9054 (a): request_approval is orchestrator-only, so the happy-path seed
-    # job must be an orchestrator. Worker rejection is covered separately below.
     job = AgentJob(
         job_id=str(uuid4()),
         tenant_key=test_tenant_key,
@@ -102,20 +93,15 @@ async def test_request_approval_happy_path(tool_accessor, seed, test_tenant_key)
         context={"deferred": ["x"]},
         tenant_key=test_tenant_key,
     )
-    # Tightened (BE-5083): existence-of-key passed even if approval_id was None/empty.
-    # The tool returns exactly {"approval_id": <persisted UUID>, "status": "pending"}.
     assert set(result.keys()) == {"approval_id", "status"}
     approval_id = result["approval_id"]
     assert isinstance(approval_id, str)
-    assert UUID(approval_id)  # raises if not a real UUID -> guards None/empty/garbage id
+    assert UUID(approval_id)
     assert result["status"] == "pending"
 
 
 @pytest.mark.asyncio
 async def test_request_approval_worker_gets_structured_rejection(tool_accessor, seed, db_session, test_tenant_key):
-    """BE-9054 (a) tool-layer half: a worker job's request_approval returns the
-    BE-6081 structured domain rejection (a response, not an error) and leaves
-    the worker's execution status untouched."""
     worker_job = AgentJob(
         job_id=str(uuid4()),
         tenant_key=test_tenant_key,
@@ -172,7 +158,6 @@ async def test_request_approval_rejects_missing_tenant(tool_accessor, seed):
 
 @pytest.mark.asyncio
 async def test_request_approval_pydantic_rejects_bad_input(tool_accessor, seed, test_tenant_key):
-    """Empty options must produce a Pydantic 422-style error, never reach service."""
     with pytest.raises(PydanticValidationError):
         await tool_accessor.request_approval(
             job_id=seed["job"].job_id,

@@ -1,15 +1,3 @@
-/**
- * ProductsView.defaultProduct.spec.js — FE-9529
- *
- * The Default-product control: ProductsView must pass the RESOLVED default
- * (productStore.activeProduct, from GET /refresh-active -> get_default_product)
- * to ProductCard's isDefault prop -- NOT a product's raw is_default column
- * (a tenant's sole product can be the real fallback target while its own
- * column is still false). And @set-default must call the store's write,
- * which is exactly-one/DB-enforced, never a local clear-then-set.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
@@ -20,8 +8,6 @@ const h = vi.hoisted(() => {
   const setDefaultProduct = vi.fn().mockResolvedValue({ ...productA, is_default: true })
   const mockStore = {
     products: [productA, productB],
-    // The RESOLVED default -- a sole-shown-product fallback can point here
-    // even when neither row's own is_default column is true yet.
     activeProduct: productA,
     fetchProducts: vi.fn().mockResolvedValue(undefined),
     fetchActiveProduct: vi.fn().mockResolvedValue(true),
@@ -111,8 +97,6 @@ describe('ProductsView — Default control wiring (FE-9529)', () => {
     const cardA = cards.find((c) => c.props('product').id === 'prod-a')
     const cardB = cards.find((c) => c.props('product').id === 'prod-b')
 
-    // Neither row's own is_default column is true (sole-shown fallback case),
-    // but activeProduct (the resolution) points at A.
     expect(h.productA.is_default).toBe(false)
     expect(cardA.props('isDefault')).toBe(true)
     expect(cardB.props('isDefault')).toBe(false)

@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Project Status Endpoints - Handover 0125
-
-Handles project status and query operations:
-- GET /{project_id}/summary - Get project summary (Handover 0504)
-- GET /{project_id}/orchestrator - Get orchestrator job
-
-All operations use ProjectService where available.
-"""
 
 import logging
 
@@ -58,14 +49,12 @@ async def get_project_summary(
     """
     logger.debug("User %s getting summary for project %s", sanitize(current_user.username), sanitize(project_id))
 
-    # Get summary via ProjectService (raises exceptions on error, returns ProjectSummaryResult)
     summary_data = await project_service.summary.get_project_summary(
         project_id=project_id, tenant_key=current_user.tenant_key
     )
 
     logger.info("Retrieved summary for project %s", sanitize(project_id))
 
-    # 0731d: ProjectService returns ProjectSummaryResult typed model
     return ProjectSummaryResponse(
         id=summary_data.id,
         name=summary_data.name,
@@ -128,7 +117,6 @@ async def get_project_orchestrator(
 
     logger.debug("User %s getting orchestrator for project %s", sanitize(current_user.username), sanitize(project_id))
 
-    # Verify project exists and user has access
     project_stmt = select(Project).where(Project.id == project_id, Project.tenant_key == current_user.tenant_key)
     project_result = await db.execute(project_stmt)
     project = project_result.scalar_one_or_none()
@@ -136,10 +124,6 @@ async def get_project_orchestrator(
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Project not found: {project_id}")
 
-    # Find orchestrator - get latest ACTIVE instance
-    # FIX: Filter by active statuses to avoid returning cancelled/failed orchestrators
-    # Bug: Previously returned cancelled orchestrators causing "Project not ready to launch" error
-    # MIGRATION: Query AgentExecution joined with AgentJob (Handover 0367b)
     orch_stmt = (
         select(AgentExecution)
         .options(joinedload(AgentExecution.job))
@@ -148,8 +132,6 @@ async def get_project_orchestrator(
             AgentJob.project_id == project_id,
             AgentExecution.agent_display_name == "orchestrator",
             AgentExecution.tenant_key == current_user.tenant_key,
-            # Include complete/handed_over to show finished orchestrators (Handover 0506)
-            # Previously excluded these, causing auto-spawn bug when viewing completed projects
             AgentExecution.status.in_(["waiting", "working", "blocked", "complete", "handed_over"]),
         )
         .order_by(AgentExecution.started_at.desc())
@@ -158,8 +140,6 @@ async def get_project_orchestrator(
     orchestrator_execution = orch_result.scalars().first()
 
     if not orchestrator_execution:
-        # Handover 0506: No auto-creation - return null orchestrator
-        # Frontend shows "Re-launch Orchestrator" button when orchestrator is null
         logger.info(
             "No orchestrator found for project %s (user: %s)", sanitize(project_id), sanitize(current_user.username)
         )
@@ -172,9 +152,6 @@ async def get_project_orchestrator(
         sanitize(project_id),
     )
 
-    # TSK-9038: read the most recently touched MCP session's stamped resolved_harness
-    # (BE-9035b) for this project -- the smallest read-only surface for the dashboard's
-    # "detected: <harness>" chip. Never gates anything; a bookkeeping read only.
     session_stmt = (
         select(MCPSession)
         .where(MCPSession.project_id == project_id, MCPSession.tenant_key == current_user.tenant_key)
@@ -184,23 +161,22 @@ async def get_project_orchestrator(
     mcp_session = session_result.scalars().first()
     detected_harness = _detected_harness_from_session(mcp_session)
 
-    # Return orchestrator data - map from AgentExecution + AgentJob
     from .models import OrchestratorJobResponse
 
     return OrchestratorResponse(
         success=True,
         orchestrator=OrchestratorJobResponse(
-            job_id=orchestrator_execution.job_id,  # AgentJob.job_id
-            agent_id=orchestrator_execution.agent_id,  # AgentExecution.agent_id (executor UUID)
-            agent_display_name=orchestrator_execution.agent_display_name,  # From AgentExecution
-            agent_name=orchestrator_execution.agent_name,  # From AgentExecution
-            mission=orchestrator_execution.job.mission,  # From AgentJob
-            status=orchestrator_execution.status,  # From AgentExecution
-            progress=orchestrator_execution.progress,  # From AgentExecution
-            tool_type=orchestrator_execution.tool_type,  # From AgentExecution
+            job_id=orchestrator_execution.job_id,
+            agent_id=orchestrator_execution.agent_id,
+            agent_display_name=orchestrator_execution.agent_display_name,
+            agent_name=orchestrator_execution.agent_name,
+            mission=orchestrator_execution.job.mission,
+            status=orchestrator_execution.status,
+            progress=orchestrator_execution.progress,
+            tool_type=orchestrator_execution.tool_type,
             created_at=orchestrator_execution.started_at or orchestrator_execution.job.created_at,
-            started_at=orchestrator_execution.started_at,  # From AgentExecution
-            completed_at=orchestrator_execution.completed_at,  # From AgentExecution
-            detected_harness=detected_harness,  # TSK-9038, from MCPSession.session_data
+            started_at=orchestrator_execution.started_at,
+            completed_at=orchestrator_execution.completed_at,
+            detected_harness=detected_harness,
         ),
     )

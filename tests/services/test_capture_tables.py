@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Unit tests for the capture discovery module (BE-9188) — CE registry only.
-
-Deliberately imports NO ``saas/`` code: this file must keep passing in the CE
-export Deletion Test (where every ``saas/`` directory is deleted), proving the
-discovery module is edition-clean. The cross-edition reconciliation (SaaS
-models registered too) lives in ``tests/saas/backup/test_export_membership_drift.py``.
-"""
 
 from __future__ import annotations
 
@@ -57,7 +50,6 @@ def test_order_is_topological_and_deterministic():
             parent = fk.column.table.name
             if parent != model.__tablename__ and parent in pos:
                 assert pos[parent] < pos[model.__tablename__], f"{parent} must precede {model.__tablename__}"
-    # The purge direction is the exact reverse — children before parents.
     purge_pos = {name: i for i, name in enumerate(reversed(order))}
     assert purge_pos["messages"] < purge_pos["comm_threads"] < purge_pos["projects"]
 

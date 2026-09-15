@@ -2,9 +2,6 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-// FE-9339 follow-up — the inline cert-trust link opens the same modal, and the modal
-// offers "Don't show this again on this device". The card has to listen for @continue,
-// otherwise the tick is thrown away and the setup wizard shows the modal again later.
 
 const fetchConfig = vi.fn()
 vi.mock('@/services/configService', () => ({
@@ -74,8 +71,6 @@ afterEach(() => {
 })
 
 describe('ConnectToolCard — FE-9339 "don\'t show again" reaches storage', () => {
-  // localStorage is a spy in tests/setup.js, so assert on the write the way
-  // WelcomeView.spec.js does rather than reading the value back.
   it('ticking the box and continuing persists cert_modal_never for this device', async () => {
     const wrapper = await openCertModal()
 

@@ -3,30 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Agent Jobs Module - Handover 0124
-
-Consolidated agent job endpoints using OrchestrationService.
-
-Module Structure:
-- lifecycle.py: Spawn agent job
-- status.py: List jobs, get job details
-- orchestration.py: Launch project, launch implementation
-- simple_handover.py: Simple 360 Memory-based handover (Handover 0461c)
-- operations.py: Update agent mission (Handover 0244b)
-- messages.py: Message content for MessageAuditModal (Handover 0387g)
-
-All routers are exported with /api/agent-jobs prefix and agent-jobs tag.
-Operations router also exported separately with /api/jobs prefix for compatibility.
-
-Note: succession.py removed in Handover 0700d - use simple_handover.py instead.
-Note: table_view.py, filters.py removed in Handover 0729 (unused endpoints).
-Note: regenerate-mission endpoint removed in Handover 0729 (never integrated).
-Note: progress.py, executions.py removed in BE-9143 (registered-but-dead routes:
-      /progress, /{id}/executions, /{id}/clear-silent — no remaining caller).
-      Also retired in BE-9143: lifecycle /complete + /error, status /pending +
-      /{id}/mission (GET), orchestration /workflow/{id}, operations /{id}/health.
-"""
 
 from fastapi import APIRouter
 
@@ -40,18 +16,14 @@ from . import (
 )
 
 
-# Create main router for agent_jobs module
 router = APIRouter(prefix="/api/agent-jobs", tags=["agent-jobs"])
 
-# Include all sub-routers
 router.include_router(lifecycle.router)
 router.include_router(status.router)
 router.include_router(orchestration.router)
-router.include_router(simple_handover.router)  # Handover 0461c (authoritative handover mechanism)
-router.include_router(messages.router)  # Handover 0387g
+router.include_router(simple_handover.router)
+router.include_router(messages.router)
 
-# Create separate router for job operations (Handover 0107)
-# Using /api/jobs prefix for compatibility with existing tools
 jobs_router = APIRouter(prefix="/api/jobs", tags=["job-operations"])
 jobs_router.include_router(operations.router)
 

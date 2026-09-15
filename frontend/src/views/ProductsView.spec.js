@@ -1,13 +1,3 @@
-/**
- * ProductsView.spec.js — FE-9222
- *
- * The context-tuning banner deep-links here with ?tune=<product_id>. On mount,
- * after the product list loads, the matching product's ProductTuningDialog opens
- * and the query param is stripped. An unknown/missing id fails soft (no dialog,
- * param still stripped) — the same strip-after-acting idiom as ?create=true.
- *
- * Edition scope: Both
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { shallowMount, flushPromises } from '@vue/test-utils'
 

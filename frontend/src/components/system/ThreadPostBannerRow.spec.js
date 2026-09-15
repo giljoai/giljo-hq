@@ -1,16 +1,3 @@
-/**
- * ThreadPostBannerRow.spec.js — FE-9586
- *
- * The row that gives mention and directed-ask signals a banner, so their popouts
- * can be projections of it rather than events with a ten-minute deadline.
- *
- * The rules pinned here are the ones a reasonable implementation gets wrong:
- * one row for both classes rather than a stack, the directed ask outranking a
- * mention when both are live, a single-target CTA only when there IS one target,
- * and nothing rendered at all for zero.
- *
- * Edition Scope: Both
- */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 
@@ -63,8 +50,6 @@ describe('ThreadPostBannerRow (FE-9586)', () => {
   })
 
   it('falls back to a thread COUNT when both classes are live', () => {
-    // "An agent asked you and also named you" is not a sentence for a 24px strip,
-    // and picking one kind to report would hide the other.
     const wrapper = row({ mentions: [mention(1)], directedAsks: [ask(1)] })
 
     expect(wrapper.find(TEXT).text()).toBe('2 chat threads are waiting for you')
@@ -85,8 +70,6 @@ describe('ThreadPostBannerRow (FE-9586)', () => {
   })
 
   it('emits NULL when several are asking -- the Hub list is the honest landing', () => {
-    // Picking one would send the operator to an arbitrary thread and silently drop
-    // the others from view.
     const wrapper = row({ mentions: [mention(1), mention(2)], directedAsks: [] })
 
     wrapper.find(CTA).trigger('click')
@@ -102,8 +85,6 @@ describe('ThreadPostBannerRow (FE-9586)', () => {
   })
 
   it('puts the DIRECTED ask first: an explicit ask outranks being named in passing', () => {
-    // Visible in the CTA target when one of each is live... which is the count case,
-    // so assert it where it shows: the pill order.
     const wrapper = row({ mentions: [mention(1)], directedAsks: [ask(1)] })
 
     const pills = wrapper.findAll(PILL).map((p) => p.text())
@@ -132,10 +113,6 @@ describe('ThreadPostBannerRow (FE-9586)', () => {
     expect(wrapper.findAll(PILL)).toHaveLength(1)
   })
 
-  // FE-9589: the row used to carry no dismiss control at all, on the reasoning
-  // that reading the thread was what cleared it. With several entries live its
-  // CTA could not perform that read, so the row was permanent; the operator
-  // ruled that anything on screen must be closeable where it stands.
   it('renders a dismiss X and emits `dismiss` when it is clicked', async () => {
     const wrapper = row({ mentions: [mention(1), mention(2)], directedAsks: [] })
 
@@ -145,16 +122,33 @@ describe('ThreadPostBannerRow (FE-9586)', () => {
     await x.trigger('click')
 
     expect(wrapper.emitted('dismiss')).toHaveLength(1)
-    // The X is not the CTA: dismissing must not also open anything.
     expect(wrapper.emitted('open')).toBeUndefined()
   })
 
   it('never navigates on its own -- it only emits', () => {
-    // The UI does not auto-navigate on agent activity: banners announce, the user
-    // chooses to look. A component that routed itself would break that everywhere it
-    // was mounted.
     const wrapper = row({ mentions: [mention(1)], directedAsks: [] })
 
     expect(wrapper.emitted('open')).toBeUndefined()
+  })
+
+  it('a chat badge is a button that opens its own thread', async () => {
+    const wrapper = row({ mentions: [mention(1), mention(2)], directedAsks: [] })
+
+    const pills = wrapper.findAll(PILL)
+    expect(pills).toHaveLength(2)
+    expect(pills[0].element.tagName).toBe('BUTTON')
+    await pills[1].trigger('click')
+
+    expect(wrapper.emitted('open')).toEqual([['t-2']])
+  })
+
+  it('each badge on a multi-thread row navigates to a different thread', async () => {
+    const wrapper = row({ mentions: [mention(1)], directedAsks: [ask(7)] })
+
+    const pills = wrapper.findAll(PILL)
+    await pills[0].trigger('click')
+    await pills[1].trigger('click')
+
+    expect(wrapper.emitted('open')).toEqual([['a-7'], ['t-1']])
   })
 })

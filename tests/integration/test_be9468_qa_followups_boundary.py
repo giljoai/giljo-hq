@@ -3,28 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9468 follow-ups -- the two defects that live in the @mcp.tool wrapper schema
-itself, not in a service function, so they can only be pinned by reading the REAL
-schema FastMCP hands to a connected client (``mcp._tool_manager.list_tools()``), not by
-calling a Python function directly.
-
-Fix 2 -- ``list_projects``'s ``limit`` Field carries ``le=LIST_PROJECTS_LIMIT_MAX``,
-which makes pydantic REJECT (not clamp) a value above the max before the handler is ever
-reached -- confirmed separately in ``tests/services/test_be9468_project_service_list_bounds.py``,
-whose ``resolve_row_limit`` genuinely clamps but is unreachable from this boundary for an
-over-max value. The advertised description nonetheless says "Values above the max are
-clamped, not rejected" -- exactly backwards. An agent that trusts the sentence passes 1000
-expecting 500 rows back and gets a bare tool error instead. This module asserts the live
-schema's description does not make that claim, and separately (as a both-sides guard)
-that the real transport does in fact refuse an over-max limit, so the validation itself
-is never quietly changed as a side effect of correcting the sentence.
-
-Fix 3 -- ``list_projects``'s ``limit`` is ``ge=0`` (0 = use the default); the sibling
-``list_tasks``'s is ``ge=1`` with no "0 means default" story. RULED: align both on
-``ge=0``, purely additive (widens what is accepted, never narrows it).
-
-Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -47,14 +25,9 @@ class TestListProjectsLimitDescriptionMatchesItsOwnSchema:
     def test_description_does_not_claim_clamping_when_the_schema_rejects(self):
         schema = _limit_schema("list_projects")
 
-        # Sanity: the schema DOES reject above this value (le / "maximum") -- the
-        # premise the description must not contradict.
         assert "maximum" in schema, "expected list_projects.limit to carry a le= ceiling"
 
         description = schema["description"].lower()
-        # The false claim shipped as "...are clamped, not rejected" -- assert the
-        # SPECIFIC backwards phrasing is gone, not the bare word "clamped" (an
-        # honest "not clamped" is a legitimate way to phrase the correction).
         assert "are clamped" not in description, (
             "list_projects.limit description claims values above the max ARE clamped "
             "while the schema's own maximum= rejects them at the pydantic validation "
@@ -66,13 +39,6 @@ class TestListProjectsLimitDescriptionMatchesItsOwnSchema:
         )
 
     def test_both_sides_guard_an_over_max_limit_is_genuinely_refused(self):
-        """Never change as a side effect of fixing the sentence (PRE-RULING: do not
-        change the validation to match the sentence -- the rejection is correct).
-
-        Drives ``fn_metadata.validate_arguments`` -- the SAME pydantic arg-model
-        validation FastMCP runs against a real client call -- rather than
-        re-implementing the bound, so this exercises the actual boundary.
-        """
         import pytest
         from pydantic import ValidationError
 

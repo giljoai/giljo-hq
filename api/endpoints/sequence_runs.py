@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Sequence run REST endpoints (BE-6131a) — durable state machine for the
-Sequential Multi-Project Runner.
-
-Routes:
-  POST   /api/v1/sequence-runs          — create a new run
-  GET    /api/v1/sequence-runs/{run_id} — read a run
-  PATCH  /api/v1/sequence-runs/{run_id} — partial update (current_index, status,
-                                          project_statuses, review_policy)
-
-All operations are tenant-scoped via SequenceRunService. No new MCP tool — the
-runner drives these endpoints over REST.
-
-Pattern reference: api/endpoints/agent_jobs/orchestration.py (router/dependency
-conventions) and api/endpoints/roadmap.py (request-model validation pattern).
-"""
 
 import logging
 from typing import Any
@@ -44,9 +29,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# ---------------------------------------------------------------------------
-# Request / response models
-# ---------------------------------------------------------------------------
 
 
 class CreateSequenceRunRequest(BaseModel):
@@ -150,9 +132,6 @@ class UpdateSequenceRunRequest(BaseModel):
     )
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

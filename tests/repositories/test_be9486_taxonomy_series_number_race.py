@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9486: ``TaxonomyRepository.get_next_series_number`` must serialize.
-
-Two concurrent readers of the same ``(tenant_key, product_id)`` bucket must
-never observe the same ``max(...) + 1`` watermark and go on to mint the same
-``series_number`` -- the class of bug ``uq_project_taxonomy_active`` caught on
-master CI run 7803 (BE-9486).
-
-``ProjectRepository.get_next_series_number_shared`` already serializes via
-``lock_rows_for_series_shared`` (BE-5065, predates this incident -- see
-``tests/services/test_concurrent_taxonomy_assignment.py``). This test covers
-the SECOND allocator, ``TaxonomyRepository.get_next_series_number`` (feeds the
-``/next-series`` UI preview), which had no such protection: nothing pairs it
-with an insert today, but a future caller that treats the preview as an
-allocator would inherit the exact same race. This test drives it exactly like
-an allocator (read watermark, insert, commit) to prove it can no longer mint a
-duplicate.
-"""
 
 import asyncio
 from uuid import uuid4
@@ -42,7 +25,6 @@ async def isolated_tenant_key() -> str:
 
 @pytest_asyncio.fixture
 async def isolated_product(db_manager, isolated_tenant_key):
-    """Own-committed product in a fresh tenant bucket; cleaned up after."""
     async with db_manager.get_session_async(tenant_key=isolated_tenant_key) as setup:
         product = Product(
             id=str(uuid4()),
@@ -67,21 +49,6 @@ async def isolated_product(db_manager, isolated_tenant_key):
 class TestTaxonomySeriesNumberRace:
     @pytest.mark.asyncio
     async def test_two_racers_get_distinct_series_numbers(self, db_manager, isolated_product):
-        """BE-9486 deterministic repro: two racers driving the (unlocked, pre-fix)
-        allocator concurrently must not both mint the same series_number.
-
-        Each racer opens its OWN session (own DB connection, like two separate
-        API requests), reads the next watermark from
-        ``TaxonomyRepository.get_next_series_number``, inserts a ``Project`` with
-        it, and commits -- the exact read-then-insert shape any real allocator
-        caller would use. Before the BE-9486 fix this reliably fails: both
-        connections' SELECT MAX race in the same window, read the same
-        watermark, and the second INSERT trips ``uq_project_taxonomy_active``.
-        After the fix, ``get_next_series_number`` takes the same
-        ``pg_advisory_xact_lock`` bucket as ``ProjectRepository.lock_rows_for_
-        series_shared``, so the second racer blocks until the first commits and
-        reads a fresh watermark.
-        """
         tenant_key = isolated_product["tenant_key"]
         product_id = isolated_product["product_id"]
         repo = TaxonomyRepository()

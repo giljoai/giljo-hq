@@ -1,27 +1,3 @@
-/**
- * FE-9233 item 4: the Serena/Git integration nudge must never render from
- * unproven integration status.
- *
- * Reported in testing: the nudge flashes briefly on a box where both integrations
- * ARE enabled. Mechanism (verified in SystemStatusBanner.vue): loadNudgeInputs()
- * sets hasProjects from the dashboard read FIRST, which makes the nudge
- * eligible, and only THEN awaits refreshIntegrationStatus(). In that window
- * gitEnabled/serenaEnabled are still at their `false` defaults, so
- * `!(gitEnabled && serenaEnabled)` is true and the row renders — then the
- * status lands as true/true and it vanishes. That render is the flash.
- *
- * Same defect class as the setupService/authGuard half of FE-9233: an unknown
- * state being read as a definitive negative one. A nudge is optional UI, so
- * the correct degrade is to stay hidden until the status is positively known —
- * including when the status fetch ERRORS (the composable keeps its false
- * defaults on error, which would otherwise nag a fully-configured box during
- * exactly the 429 storm item 1 addresses).
- *
- * These tests drive the PENDING window explicitly via a deferred refresh, so
- * they fail against the pre-fix component rather than passing vacuously.
- *
- * Edition scope: Both
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -37,7 +13,6 @@ const h = vi.hoisted(() => ({
   serena: { value: false },
   resolved: { value: false },
   dist: { value: { active: 2 } },
-  // Controls when refreshIntegrationStatus() settles.
   refreshDeferred: { value: null },
 }))
 
@@ -50,9 +25,6 @@ vi.mock('@/services/configService', () => ({
   },
 }))
 
-// Partial mock: the real module supplies ACTIVATE_BREADCRUMB_ARMED_EVENT, which
-// the banner imports for its listener. Only the storage-backed calls are stubbed
-// — this spec is about the integration nudge, not the tutorial row.
 vi.mock('@/composables/useTutorialState', async (importOriginal) => ({
   ...(await importOriginal()),
   isActivateBreadcrumbArmed: () => false,
@@ -68,8 +40,6 @@ vi.mock('@/composables/useOnboardingReminders', () => ({
   }),
 }))
 
-// Models the REAL composable: git/serena/resolved start false and only move
-// when the caller-controlled refresh settles.
 vi.mock('@/composables/useIntegrationStatus', async () => {
   const { ref } = await import('vue')
   return {
@@ -85,7 +55,7 @@ vi.mock('@/composables/useIntegrationStatus', async () => {
         refresh: () =>
           h.refreshDeferred.value.promise.then(
             ({ git, serena, failed }) => {
-              if (failed) return // composable swallows the error, keeps defaults
+              if (failed) return
               gitEnabled.value = git
               serenaEnabled.value = serena
               resolved.value = true
@@ -130,7 +100,7 @@ async function mountPending() {
   useNotificationStore().notifications = []
   useUserStore().currentUser = { role: 'admin' }
   useProductStore().activeProduct = { id: 'p1' }
-  await flushPromises() // dashboard read lands; integration status still pending
+  await flushPromises()
   return wrapper
 }
 
@@ -154,7 +124,6 @@ describe('SystemStatusBanner integration nudge — resolved-status gating (FE-92
 
   it('THE FLASH: the nudge is absent while integration status is still pending', async () => {
     const wrapper = await mountPending()
-    // Pre-fix this is where the row rendered from default-false status.
     expect(wrapper.find(NUDGE).exists()).toBe(false)
   })
 

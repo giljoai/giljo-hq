@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9582: the API-metrics flusher must not write rows for purged tenants.
-
-Edition Scope: Both (the flusher is core).
-
-``sync_api_metrics_to_db`` buffers per-tenant call counts in memory and flushes
-them periodically. Buffered counts were flushed without checking that the tenant
-still existed, so a tenant deleted between its last request and the next flush
-could have a row recreated after erasure. The flusher now skips tenants with no
-remaining user row.
-
-Existence is checked against ``users`` rather than ``tenants``: this is CE code
-and must never reference a SaaS-only table. The purge enumerates every
-``tenant_key``-carrying table from ``Base.metadata``, so a purged tenant has no
-``users`` row left either — which is what makes it a usable liveness signal in
-both editions.
-
-These tests drive one flush tick directly. The 300s loop is not exercised here;
-the defect lives in what a single tick writes.
-"""
 
 from __future__ import annotations
 
@@ -35,7 +16,6 @@ from giljo_mcp.models.auth import User
 
 
 class _FakeState:
-    """The two attributes the flusher actually touches."""
 
     def __init__(self, db_manager, api_counts=None, mcp_counts=None):
         self.db_manager = db_manager
@@ -65,7 +45,6 @@ async def _api_metrics_rows(db_manager, tenant_key: str) -> list[ApiMetrics]:
 
 
 async def _cleanup(db_manager, tenant_keys: list[str]) -> None:
-    """These tests commit through the flusher's own sessions, so rollback cannot reach them."""
     async with db_manager.get_session_async() as session:
         with tenant_isolation_bypass(session, reason="BE-9582 test teardown", models=(ApiMetrics, User)):
             await session.execute(delete(ApiMetrics).where(ApiMetrics.tenant_key.in_(tenant_keys)))
@@ -75,7 +54,6 @@ async def _cleanup(db_manager, tenant_keys: list[str]) -> None:
 
 @pytest.mark.asyncio
 async def test_purged_tenant_gets_no_row(db_manager):
-    """The defect: buffered counts for a tenant that no longer exists must not be written."""
     purged = "test_tenant_be9582_purged"
     await _cleanup(db_manager, [purged])
     state = _FakeState(db_manager, api_counts={purged: 7}, mcp_counts={purged: 3})
@@ -94,11 +72,6 @@ async def test_purged_tenant_gets_no_row(db_manager):
 
 @pytest.mark.asyncio
 async def test_live_tenant_still_gets_its_row(db_manager):
-    """Instrument check: the filter must not simply drop everything.
-
-    Without this, a fix that skipped every tenant would pass the test above and
-    silently stop all metrics collection.
-    """
     live = "test_tenant_be9582_live"
     await _cleanup(db_manager, [live])
     await _make_user(db_manager, live)
@@ -117,11 +90,6 @@ async def test_live_tenant_still_gets_its_row(db_manager):
 
 @pytest.mark.asyncio
 async def test_mcp_only_counts_for_a_live_tenant_still_reach_the_db(db_manager):
-    """/mcp is a public path, so a tenant can have MCP calls and no API calls.
-
-    The union of both maps is load-bearing (a pre-existing fix); the existence
-    filter must narrow that union without collapsing it back to api_counts.
-    """
     live = "test_tenant_be9582_mcponly"
     await _cleanup(db_manager, [live])
     await _make_user(db_manager, live)
@@ -139,7 +107,6 @@ async def test_mcp_only_counts_for_a_live_tenant_still_reach_the_db(db_manager):
 
 @pytest.mark.asyncio
 async def test_purged_tenant_counts_are_not_left_in_the_buffer(db_manager):
-    """A dropped tenant must not linger in memory and be retried forever."""
     purged = "test_tenant_be9582_nobuffer"
     await _cleanup(db_manager, [purged])
     state = _FakeState(db_manager, api_counts={purged: 1}, mcp_counts={purged: 1})
@@ -155,7 +122,6 @@ async def test_purged_tenant_counts_are_not_left_in_the_buffer(db_manager):
 
 @pytest.mark.asyncio
 async def test_mixed_batch_writes_only_the_live_tenant(db_manager):
-    """One purged and one live tenant in the same tick: only the live one lands."""
     live = "test_tenant_be9582_mixed_live"
     purged = "test_tenant_be9582_mixed_purged"
     await _cleanup(db_manager, [live, purged])

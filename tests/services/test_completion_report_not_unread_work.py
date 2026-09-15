@@ -3,33 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""System completion_report messages are NOT "unread work".
-
-Root cause: the server auto-sends a ``completion_report`` message to the
-orchestrator whenever a deliverable agent completes (see
-``agent_job_repository`` auto_message, ``message_type="completion_report"``).
-These are SYSTEM notifications, not action items, yet they:
-  (a) blocked the orchestrator's own closeout via the unread-messages gate
-      (``agent_completion_repository.get_unread_messages_for_agent``), forcing
-      a naive agent into COMPLETION_BLOCKED (the "closeout dance");
-  (b) showed as phantom unread badges (UI-1) because
-      ``agent_operations_repository.get_live_unread_counts_by_agent`` (the
-      get_workflow_status count, BE-6200) counted them.
-
-Fix: exclude ``message_type == "completion_report"`` from BOTH queries — one
-definition of "counts as unread work".
-
-BE-9012b (D7, §6 rows 1-2) narrowed the GATE query further: it now blocks ONLY on
-``requires_action=True`` AND ``auto_generated=False`` posts (real completion_reports
-carry ``auto_generated=True``). Informational agent-to-agent messages no longer gate
-— that dissolves the closeout dance server-side. The gate is therefore deliberately
-NARROWER than the unread BADGE count (which still surfaces every non-completion_report
-unread), so the two intentionally diverge for informational posts; they agree again
-for action-required posts.
-
-Parallel-safe: db_session (TransactionalTestContext). Each test owns its setup.
-Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -51,8 +24,6 @@ pytestmark = pytest.mark.asyncio
 
 
 async def _seed_orchestrator(session: AsyncSession, tenant_key: str) -> tuple[str, AgentExecution]:
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_proj = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -123,9 +94,6 @@ async def _add_pending(
     await session.commit()
 
 
-# ---------------------------------------------------------------------------
-# (a) Closeout gate: ONLY completion_reports -> not blocked
-# ---------------------------------------------------------------------------
 
 
 async def test_gate_ignores_only_completion_reports(db_session: AsyncSession) -> None:
@@ -139,18 +107,13 @@ async def test_gate_ignores_only_completion_reports(db_session: AsyncSession) ->
     assert unread == [], "completion_report notifications must not count as unread work for the closeout gate"
 
 
-# ---------------------------------------------------------------------------
-# (b) Closeout gate: genuine action message STILL blocks
-# ---------------------------------------------------------------------------
 
 
 async def test_gate_still_blocks_on_genuine_message(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
     pid, orchestrator = await _seed_orchestrator(db_session, tenant)
     await _add_pending(db_session, tenant, pid, orchestrator, "completion_report", "agent done")
-    # BE-9012b (D7): an informational directive (requires_action=False) no longer gates.
     await _add_pending(db_session, tenant, pid, orchestrator, "directive", "FYI sharing results")
-    # A genuine ACTION-REQUIRED directive still blocks closeout.
     await _add_pending(
         db_session, tenant, pid, orchestrator, "directive", "please review the failing test", requires_action=True
     )
@@ -162,9 +125,6 @@ async def test_gate_still_blocks_on_genuine_message(db_session: AsyncSession) ->
     assert unread[0].requires_action is True
 
 
-# ---------------------------------------------------------------------------
-# (c) get_workflow_status count excludes completion_reports, includes genuine
-# ---------------------------------------------------------------------------
 
 
 async def test_live_unread_count_excludes_completion_reports(db_session: AsyncSession) -> None:
@@ -182,11 +142,3 @@ async def test_live_unread_count_excludes_completion_reports(db_session: AsyncSe
     assert counts.get(orchestrator.agent_id, 0) == 1, "genuine unread message must still be counted"
 
 
-# BE-9012d: (d) test_parity_for_genuine_messages (the gate/count vs.
-# MessageService.receive_messages 3-way parity) and (e)
-# test_list_messages_view_excludes_completion_reports (MessageService.list_messages,
-# the retired /api/v1/messages/ REST view's backing method — that endpoint had zero
-# live frontend consumers, confirmed dead) were removed with the bus hard-removal.
-# The gate (a)/(b) and live-count (c) contracts above are unaffected — they read
-# AgentCompletionRepository / AgentOperationsRepository directly, independent of
-# MessageService.

@@ -5,23 +5,15 @@ import { TASK_STATUS } from '@/utils/constants'
 import { useProductStore } from './products'
 
 export const useTaskStore = defineStore('tasks', () => {
-  // Get product store
   const productStore = useProductStore()
 
-  // State
   const tasks = ref([])
   const loading = ref(false)
   const error = ref(null)
 
-  // FE-9501c (D9): the params of the LAST fetchTasks() call (post auto-product_id),
-  // so a WS-driven refresh can replay the view's current filter instead of a bare
-  // paramless refetch clobbering it. Mirrors _lastListOpts/refreshList in projects.js.
   let _lastFetchParams = {}
 
-  // Actions
   async function fetchTasks(params = {}) {
-    // Don't auto-add product_id if filter_type is explicitly set (e.g., 'all_tasks')
-    // Only add product_id when no filter_type is specified
     if (productStore.currentProductId && !params.product_id && !params.filter_type) {
       params.product_id = productStore.currentProductId
     }
@@ -41,12 +33,6 @@ export const useTaskStore = defineStore('tasks', () => {
     }
   }
 
-  /**
-   * FE-9501c (D9): re-fetch with the SAME params as the last fetchTasks() call,
-   * not the bare default. A WS handler calling a paramless fetchTasks() on every
-   * task:created/task:updated reset the user's product/status filter out from
-   * under them -- this replays it instead.
-   */
   async function refreshList() {
     return fetchTasks({ ..._lastFetchParams })
   }
@@ -57,7 +43,6 @@ export const useTaskStore = defineStore('tasks', () => {
     try {
       const response = await api.tasks.get(id)
 
-      // Update in list if exists
       const index = tasks.value.findIndex((t) => t.id === id)
       if (index !== -1) {
         tasks.value[index] = response.data
@@ -71,7 +56,6 @@ export const useTaskStore = defineStore('tasks', () => {
   }
 
   async function createTask(taskData) {
-    // Add current product_id if not provided
     if (!taskData.product_id && productStore.currentProductId) {
       taskData.product_id = productStore.currentProductId
     }
@@ -137,7 +121,6 @@ export const useTaskStore = defineStore('tasks', () => {
         task.status = status
         task.updated_at = new Date().toISOString()
 
-        // Update progress based on status
         if (status === TASK_STATUS.COMPLETED) {
           task.progress = 100
         } else if (status === TASK_STATUS.IN_PROGRESS && task.progress === 0) {
@@ -152,7 +135,6 @@ export const useTaskStore = defineStore('tasks', () => {
     }
   }
 
-  // Handle real-time updates from WebSocket
   function handleRealtimeUpdate(data) {
     const {
       task_id,
@@ -167,11 +149,9 @@ export const useTaskStore = defineStore('tasks', () => {
       completed_at,
     } = data
 
-    // Find task by ID
     const taskIndex = tasks.value.findIndex((t) => t.id === task_id)
 
     if (update_type === 'created' && taskIndex === -1) {
-      // New task - add to list
       const newTask = {
         id: task_id,
         project_id,
@@ -187,7 +167,6 @@ export const useTaskStore = defineStore('tasks', () => {
 
       tasks.value.push(newTask)
     } else if (taskIndex !== -1) {
-      // Update existing task
       const task = tasks.value[taskIndex]
 
       if (update_type === 'status_changed' && status) {
@@ -198,7 +177,6 @@ export const useTaskStore = defineStore('tasks', () => {
         }
       }
 
-      // Update other fields if provided
       if (title) {
         task.title = title
       }
@@ -217,18 +195,15 @@ export const useTaskStore = defineStore('tasks', () => {
 
       task.updated_at = new Date().toISOString()
     } else if (task_id && update_type === 'created') {
-      // Unknown task - fetch updated list
       fetchTasks({ project_id })
     }
   }
 
   return {
-    // State
     tasks,
     loading,
     error,
 
-    // Actions
     fetchTasks,
     refreshList,
     fetchTask,

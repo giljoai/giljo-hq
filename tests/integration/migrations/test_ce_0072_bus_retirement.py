@@ -3,26 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Migration regression for ce_0072_bus_retirement_fold_and_fk (BE-9012d, D8+D10).
-
-The failing layer is the SCHEMA/migration layer, so this runs the REAL alembic
-chain against a scratch PostgreSQL DB (model create_all can't exercise a data
-backfill, and asserts here prove the actual upgrade folds + alters correctly).
-
-Covered:
-
-- D8 fold precedence (the resolver contract the shims + D1(a) also use): a project
-  with bus rows but NO thread gets ONE marker thread minted; a project with an
-  ORGANIC bound thread reuses it (no duplicate); a project with several threads
-  folds into the marker one; town-square rows are untouched.
-- D10 FK: after upgrade, comm_threads.project_id is ON DELETE CASCADE ('c') and a
-  genuine project purge cascade-deletes the bound thread (was orphaned under the
-  old SET NULL).
-- Idempotency / reversibility: downgrade restores SET NULL, re-upgrade restores
-  CASCADE and re-running the fold mints no duplicate threads.
-
-Mirrors tests/integration/migrations/test_ce_0069_index_dedup_fk_cascade.py.
-"""
 
 from __future__ import annotations
 
@@ -96,7 +76,7 @@ def _build_env() -> dict[str, str]:
     env["POSTGRES_USER"] = ADMIN_USER
     pwd = url.split("//", 1)[1].split("@", 1)[0].split(":", 1)[1]
     env["POSTGRES_PASSWORD"] = pwd
-    env.pop("GILJO_MODE", None)  # CE chain
+    env.pop("GILJO_MODE", None)
     return env
 
 
@@ -146,9 +126,6 @@ def empty_scratch_db(scratch_engine: sa.Engine):
     _drop_all_objects(scratch_engine)
 
 
-# --------------------------------------------------------------------------- #
-# Seed helpers (raw SQL — the ORM isn't importable against a bare scratch DB)
-# --------------------------------------------------------------------------- #
 
 _TK = "tk_ce0072"
 
@@ -162,7 +139,6 @@ def _mk_product(conn) -> None:
 
 
 def _mk_project(conn, pid: str, series: int) -> None:
-    # projects.alias is varchar(6); uq_project_taxonomy_active needs distinct series.
     _seed(
         conn,
         "INSERT INTO projects (id, tenant_key, product_id, name, alias, description, mission, series_number) "
@@ -217,27 +193,21 @@ def _fk_deltype(engine: sa.Engine) -> str | None:
 @pytest.mark.integration
 class TestCe0072BusRetirement:
     def test_fold_precedence_and_fk_and_cascade(self, empty_scratch_db: sa.Engine) -> None:
-        """One upgrade covers: create-new, organic-reuse, marker-precedence, town
-        untouched, FK -> CASCADE, and a functional project-purge cascade."""
         assert _run_alembic("upgrade", _PRE).returncode == 0
         eng = empty_scratch_db
         with eng.connect() as conn:
             _mk_product(conn)
-            # A: create-new (3 bus rows, no thread)
             _mk_project(conn, "pA", 1)
             for i in range(3):
                 _mk_bus(conn, f"a{i}", "pA")
-            # B: organic reuse (2 bus rows + 1 organic thread, no marker)
             _mk_project(conn, "pB", 2)
             _mk_thread(conn, "tB", "pB", 201, "Chain hub", "2026-01-01")
             for i in range(2):
                 _mk_bus(conn, f"b{i}", "pB")
-            # C: several, marker present (1 bus row + marker + older organic)
             _mk_project(conn, "pC", 3)
             _mk_thread(conn, "tC_org", "pC", 202, "Older hub", "2026-01-01")
             _mk_thread(conn, "tC_mark", "pC", 203, _MARKER, "2026-02-01")
             _mk_bus(conn, "c0", "pC")
-            # Town square (no project) — must be untouched
             _mk_thread(conn, "tTown", None, 204, "town", "2026-01-01")
             _seed(
                 conn,
@@ -250,22 +220,20 @@ class TestCe0072BusRetirement:
         up = _run_alembic("upgrade", _TARGET)
         assert up.returncode == 0, f"upgrade {_TARGET} failed:\n{up.stdout}\n{up.stderr}"
 
-        # D8 fold
         assert _scalar(eng, "SELECT count(*) FROM messages WHERE thread_id IS NULL AND project_id IS NOT NULL") == 0
         assert _scalar(eng, "SELECT count(*) FROM comm_threads WHERE project_id='pA'") == 1
         assert _scalar(eng, "SELECT subject FROM comm_threads WHERE project_id='pA'") == _MARKER
         a_tid = _scalar(eng, "SELECT id FROM comm_threads WHERE project_id='pA'")
         assert _scalar(eng, "SELECT count(*) FROM messages WHERE project_id='pA' AND thread_id=:t", t=a_tid) == 3
-        assert _scalar(eng, "SELECT count(*) FROM comm_threads WHERE project_id='pB'") == 1  # organic reused
+        assert _scalar(eng, "SELECT count(*) FROM comm_threads WHERE project_id='pB'") == 1
         assert _scalar(eng, "SELECT count(*) FROM messages WHERE project_id='pB' AND thread_id='tB'") == 2
-        assert _scalar(eng, "SELECT thread_id FROM messages WHERE id='c0'") == "tC_mark"  # marker precedence
-        assert _scalar(eng, "SELECT count(*) FROM comm_threads WHERE project_id='pC'") == 2  # no dup minted
-        assert _scalar(eng, "SELECT thread_id FROM messages WHERE id='town0'") == "tTown"  # untouched
+        assert _scalar(eng, "SELECT thread_id FROM messages WHERE id='c0'") == "tC_mark"
+        assert _scalar(eng, "SELECT count(*) FROM comm_threads WHERE project_id='pC'") == 2
+        assert _scalar(eng, "SELECT thread_id FROM messages WHERE id='town0'") == "tTown"
 
-        # D10 FK + functional cascade
         assert _fk_deltype(eng) == "c", "comm_threads.project_id must be ON DELETE CASCADE after ce_0072"
         with eng.connect() as conn:
-            conn.execute(text("DELETE FROM messages WHERE project_id='pA'"))  # nuclear_delete order
+            conn.execute(text("DELETE FROM messages WHERE project_id='pA'"))
             conn.execute(text("DELETE FROM projects WHERE id='pA'"))
             conn.commit()
         assert _scalar(eng, "SELECT count(*) FROM comm_threads WHERE id=:t", t=a_tid) == 0, (
@@ -276,8 +244,6 @@ class TestCe0072BusRetirement:
         )
 
     def test_downgrade_restores_set_null_reup_is_idempotent(self, empty_scratch_db: sa.Engine) -> None:
-        """downgrade -> SET NULL; re-upgrade -> CASCADE again and no duplicate
-        threads (the fold re-runs on already-folded data as a no-op)."""
         assert _run_alembic("upgrade", _PRE).returncode == 0
         eng = empty_scratch_db
         with eng.connect() as conn:

@@ -3,11 +3,6 @@
 // See LICENSE in the project root for terms.
 // [CE] Community Edition.
 
-/**
- * lifecycleBannerStore.spec.js — FE-9538
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useLifecycleBannerStore, MAX_LIFECYCLE_ROWS } from './lifecycleBannerStore'
@@ -18,10 +13,6 @@ beforeEach(() => {
 })
 
 function seedProject(id, overrides = {}) {
-  // projectById() falls back to the trimmed list row (projects.js:61) when an
-  // entity has only been seen in a list fetch -- no public single-row writer
-  // exists on this store, so this is the same fallback path any list-fetched
-  // project takes.
   useProjectStore().projects.push({
     id,
     name: 'Fix the thing',
@@ -81,7 +72,6 @@ describe('useLifecycleBannerStore', () => {
       store.announce({ projectId: `p${i}`, moment: 'activated' })
     }
     expect(store.rows).toHaveLength(MAX_LIFECYCLE_ROWS)
-    // Newest announced project is first.
     expect(store.rows[0].projectId).toBe(`p${MAX_LIFECYCLE_ROWS + 1}`)
   })
 

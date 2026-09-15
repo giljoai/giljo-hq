@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Team context header generation for agent missions."""
 
 from __future__ import annotations
 
@@ -20,64 +19,29 @@ def _generate_team_context_header(
     mission_lookup: dict[str, str] | None = None,
     include_team_table: bool = True,
 ) -> str:
-    """
-    Generate team-aware context header for agent missions (Handover 0353, 0358b, 0367a).
-
-    This header provides each agent with:
-    - YOUR IDENTITY: Role + agent_id for MCP tool calls
-    - YOUR TEAM: Roster of all agents on the project
-    - YOUR DEPENDENCIES: Upstream/downstream relationships (inferred from roles)
-    - COORDINATION: Messaging guidance
-
-    Handover 0367a: Removed MCPAgentJob support - now AgentExecution only.
-    For AgentExecution, mission is retrieved from mission_lookup dict or job relationship.
-
-    Args:
-        current_job: The agent execution receiving the mission
-        all_project_jobs: All agent executions on the same project
-        mission_lookup: Optional dict mapping job_id to mission text (for dual-model)
-        include_team_table: BE-6008 -- when False, omit the static `## YOUR TEAM`
-            roster table (identity/dependencies/coordination are still emitted).
-            Set False for multi_terminal specialists, which instead receive the
-            live CH_TEAM roster chapter in full_protocol; emitting both would be a
-            duplicate roster.
-
-    Returns:
-        Multi-line markdown header to prepend to the mission text
-    """
-    # AgentExecution only
     agent_name = getattr(current_job, "agent_name", None) or getattr(current_job, "agent_display_name", "unknown")
     agent_display_name = getattr(current_job, "agent_display_name", "unknown")
 
-    # For AgentExecution, use agent_id
     agent_id = getattr(current_job, "agent_id", "unknown")
     job_id = getattr(current_job, "job_id", agent_id)
 
-    # Build YOUR IDENTITY section (use agent_id for MCP calls)
     identity_section = f"""## YOUR IDENTITY
 You are **{agent_name.upper()}** (agent_id: `{agent_id}`, job_id: `{job_id}`)
 Role: {agent_display_name}
 """
 
-    # Build YOUR TEAM section. BE-6008: suppressed for multi_terminal specialists
-    # (include_team_table=False) — they get the live CH_TEAM roster in
-    # full_protocol instead, and shipping both is a duplicate roster.
     if include_team_table:
         num_agents = len(all_project_jobs)
         team_rows = []
         for job in all_project_jobs:
             role_name = getattr(job, "agent_name", None) or getattr(job, "agent_display_name", "unknown")
 
-            # Get mission: prefer lookup dict (avoids lazy load), then direct attribute
-            # IMPORTANT: Check mission_lookup FIRST to avoid SQLAlchemy lazy load errors
-            # when AgentExecution objects are accessed outside session context (Handover 0366 fix)
             mission_text = ""
             if mission_lookup and hasattr(job, "job_id") and job.job_id in mission_lookup:
                 mission_text = mission_lookup[job.job_id]
             elif hasattr(job, "mission") and job.mission:
                 mission_text = job.mission
 
-            # Extract a short deliverable summary from the mission (first 80 chars)
             deliverable_preview = (mission_text or "")[:80].replace("\n", " ")
             if len(mission_text or "") > 80:
                 deliverable_preview += "..."
@@ -97,12 +61,9 @@ This project has {num_agents} agent(s) working together:
     else:
         team_section = ""
 
-    # Build YOUR DEPENDENCIES section
-    # Infer basic dependencies based on common role relationships
     dependencies_upstream = []
     dependencies_downstream = []
 
-    # Common dependency patterns (can be expanded)
     dependency_rules = {
         "analyzer": {"upstream": [], "downstream": ["implementer", "documenter", "tester"]},
         "implementer": {"upstream": ["analyzer"], "downstream": ["tester", "reviewer", "documenter"]},
@@ -111,7 +72,6 @@ This project has {num_agents} agent(s) working together:
         "documenter": {"upstream": ["analyzer", "implementer", "reviewer"], "downstream": []},
     }
 
-    # Get other agents (exclude current by agent_id or job_id)
     current_id = getattr(current_job, "agent_id", None) or getattr(current_job, "job_id", None)
     other_agents = [
         j for j in all_project_jobs if (getattr(j, "agent_id", None) or getattr(j, "job_id", None)) != current_id
@@ -140,7 +100,6 @@ This project has {num_agents} agent(s) working together:
 {downstream_text}
 """
 
-    # Build COORDINATION section
     coordination_section = f"""## COORDINATION
 - **UUID-ONLY MESSAGING**: Always use agent_id UUIDs from the team table above when addressing agents
 - Use `post_to_thread(thread_id=<your coordination thread>, content="...", from_agent="{agent_id}", to_participant="<agent_id>", ...)` with UUID values

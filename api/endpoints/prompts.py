@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Prompt Generation API endpoints for Handover 0073: Static Agent Grid.
-
-Provides REST API for generating executable prompts:
-- GET /api/prompts/agent/{agent_id} - Generate agent prompt
-- GET /api/prompts/staging/{project_id} - Generate comprehensive orchestrator staging prompt (Handover 0079)
-
-All endpoints enforce multi-tenant isolation and authentication.
-"""
 
 import logging
 from datetime import UTC, datetime
@@ -54,13 +45,10 @@ from giljo_mcp.thin_prompt_generator import ThinClientPromptGenerator
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 
-_TOOL_PREFIX = f"mcp__{MCP_ALIAS}__"  # BE-9275b: derived from branding, not a fresh literal.
+_TOOL_PREFIX = f"mcp__{MCP_ALIAS}__"
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Staging-prompt Query validation patterns, derived from the PlatformRegistry so a
-# platform add/remove updates them in one place (BE-3010a). Evaluated at import,
-# exactly as the prior inline ``pattern=`` literals were.
 _TOOL_TYPE_PATTERN = tool_type_pattern()
 _EXECUTION_MODE_PATTERN = execution_mode_pattern()
 
@@ -103,26 +91,22 @@ async def generate_orchestrator_prompt_thin(
 
         generator = ThinClientPromptGenerator(db, current_user.tenant_key)
 
-        # Handover 0840d: Let generate() fetch toggles from user_field_priorities table
         result = await generator.generate(
             project_id=project_id,
             user_id=str(current_user.id),
             tool=tool,
         )
 
-        # Broadcast WebSocket event for real-time UI update.
-        # BE-9332: shape owned by the shared emitter (same fields as before the
-        # extraction); this site keeps its own estimated_tokens + timestamp.
         if ws_dep.is_available():
             await broadcast_orchestrator_prompt_generated(
                 ws_dep,
                 tenant_key=current_user.tenant_key,
                 project_id=project_id,
                 orchestrator_id=result["orchestrator_id"],
-                execution_id=result.get("execution_id"),  # no agent_id here -> this IS the store unique_key
+                execution_id=result.get("execution_id"),
                 estimated_tokens=result["estimated_prompt_tokens"],
                 timestamp=datetime.now(UTC).isoformat(),
-                product_id=result.get("product_id"),  # BE-9518
+                product_id=result.get("product_id"),
             )
 
         return ThinOrchestratorPromptResponse(
@@ -137,7 +121,7 @@ async def generate_orchestrator_prompt_thin(
     except ValueError as e:
         logger.exception("Validation error generating thin orchestrator prompt")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requested resource not found.") from e
-    except Exception as e:  # Broad catch: API boundary, converts to HTTP error
+    except Exception as e:
         logger.error("Error generating thin orchestrator prompt: %s", e, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -169,7 +153,6 @@ async def generate_agent_prompt(
     Raises:
         404: Agent not found or not accessible
     """
-    # Get agent execution with job relationship and tenant isolation
     stmt = (
         select(AgentExecution)
         .options(joinedload(AgentExecution.job))
@@ -183,7 +166,6 @@ async def generate_agent_prompt(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Agent {agent_id} not found or not accessible"
         )
 
-    # Get project name for prompt identity line
     project_name = "Unknown Project"
     if agent.job and agent.job.project_id:
         project_stmt = select(Project).where(
@@ -194,24 +176,15 @@ async def generate_agent_prompt(
         if project:
             project_name = project.name
 
-    # Resolve display values
     agent_name = agent.agent_name or agent.agent_display_name
     agent_display_name = agent.agent_display_name
     job_id = agent.job_id
     tenant_key = current_user.tenant_key
     tool_type = agent.tool_type or "universal"
 
-    # Truncate mission for preview (first 200 chars)
-    # BE-9330: AgentJob.mission is nullable BY DESIGN -- "null while staged;
-    # written at Phase-2". The old `if agent.job else ""` guarded only a missing
-    # JOB, so a staged agent (mission column NULL) reached len(None) -> 500 when
-    # the user clicked Play. Empty preview is the truthful rendering of "no
-    # mission written yet"; the prompt itself tells the agent to fetch its
-    # mission over MCP, so nothing is lost.
     mission = (agent.job.mission if agent.job else None) or ""
     mission_preview = mission[:200] + "..." if len(mission) > 200 else mission
 
-    # Build thin prompt (matches spawn_job pattern)
     prompt = f"""I am {agent_name} (Agent {agent_display_name}) for Project "{project_name}".
 
 ## MCP TOOL USAGE
@@ -258,8 +231,7 @@ async def generate_staging_prompt(
         None,
         pattern=_EXECUTION_MODE_PATTERN,
         description=(
-            "Execution mode: 'multi_terminal', 'claude_code_cli', 'codex_cli', 'gemini_cli', "
-            "or 'antigravity_cli'. "
+            "Execution mode: 'multi_terminal' or 'subagent' (legacy per-CLI tokens are tolerated). "
             "NULL-state: omit when the user has not chosen a mode — staging is then rejected with 409."
         ),
     ),
@@ -291,11 +263,11 @@ async def generate_staging_prompt(
     - MCP-only data access (remote-safe, no local file reads)
     - Dynamic field priority integration (user-configured)
     - Professional UX (copy 10 lines, not 3000)
-    - Multi-tool support (Claude Code, Codex, Gemini)
+    - Multi-tool support (Claude Code, Codex, opencode, generic)
 
     Args:
         project_id: Project UUID to generate prompt for
-        tool: Target AI tool (claude-code, codex, or gemini)
+        tool: Target AI tool (claude-code, codex, opencode, or generic)
         current_user: Authenticated user (ensures tenant isolation)
         db: Database session
 
@@ -315,7 +287,6 @@ async def generate_staging_prompt(
 
     from giljo_mcp.thin_prompt_generator import ThinClientPromptGenerator
 
-    # Staging guard: prevent re-staging when already staged or in progress
     proj_result = await db.execute(
         select(Project).where(_and(Project.id == project_id, Project.tenant_key == current_user.tenant_key))
     )
@@ -326,72 +297,47 @@ async def generate_staging_prompt(
             detail="Staging already in progress. Use Unstage to reset first.",
         )
 
-    # NULL-state gate (PRIMARY): staging is the user-facing chokepoint where the
-    # execution mode becomes concrete (persisted at line 449). Resolve the mode
-    # from the request param, falling back to any mode already chosen on the row
-    # (the dashboard pills PATCH it). If neither is set, refuse to stage — this is
-    # the gate that forces an explicit choice and stops the old silent
-    # 'multi_terminal' default from being cemented onto the project.
     effective_execution_mode = (execution_mode or (project.execution_mode if project else None) or "").strip()
     if project is not None and not effective_execution_mode:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "No execution mode selected. Choose an execution mode "
-                "(Multi-Terminal / Subagent: Claude / Subagent: Codex / Subagent: Gemini) "
-                "before staging."
-            ),
+            detail=("No execution mode selected. Choose an execution mode (Multi-Terminal / Subagent) before staging."),
         )
 
     try:
-        # Initialize thin client generator
         generator = ThinClientPromptGenerator(db, current_user.tenant_key)
 
-        # Handover 0840d: Let generate() fetch toggles from user_field_priorities table
         result = await generator.generate(
             project_id=project_id,
             user_id=str(current_user.id),
             tool=tool,
         )
 
-        # Use generate_staging_prompt for mode-specific content
-        # Handover 0388: Pass agent_id for correct MCP tool call in prompt
-        # CE-0035: pass tool so Claude Code orch spawn prompt includes the
-        # ToolSearch bootstrap (build_staging_prompt is the production path;
-        # CE-0034 patched build_thin_prompt by mistake — sibling method on a
-        # separate flow that does not render the user-facing prompt).
         staging_prompt = await generator.generate_staging_prompt(
             orchestrator_id=result["orchestrator_id"],
             project_id=project_id,
-            agent_id=result.get("agent_id"),  # WHO - executor ID for MCP tool calls
+            agent_id=result.get("agent_id"),
             tool=tool,
         )
 
-        # Calculate token estimate for staging prompt (1 token ≈ 4 chars)
         staging_tokens = len(staging_prompt) // 4
 
-        # Broadcast WebSocket event for real-time UI update.
-        # BE-9332: shape owned by the shared emitter (same fields as before the
-        # extraction); this site keeps its own agent_id + tool.
         if ws_dep.is_available():
             await broadcast_orchestrator_prompt_generated(
                 ws_dep,
                 tenant_key=current_user.tenant_key,
                 project_id=project_id,
                 orchestrator_id=result["orchestrator_id"],
-                agent_id=result.get("agent_id"),  # Handover 0388: Include agent_id
-                # NOT the unique_key here (agent_id wins) -- sent so all three emit sites
-                # agree; full rationale at _IDENTITY_FIELDS in the integration test.
+                agent_id=result.get("agent_id"),
                 execution_id=result.get("execution_id"),
                 tool=tool,
-                product_id=result.get("product_id"),  # BE-9518
+                product_id=result.get("product_id"),
             )
             logger.info(
                 "[STAGING PROMPT THIN] WebSocket broadcast sent for orchestrator %s",
                 sanitize(str(result["orchestrator_id"])),
             )
 
-        # Log successful generation
         logger.info(
             "[STAGING PROMPT THIN] Generated for project=%s, tool=%s, tokens=%s, user=%s",
             sanitize(project_id),
@@ -400,45 +346,25 @@ async def generate_staging_prompt(
             sanitize(current_user.username),
         )
 
-        # Persist staged state so it survives navigation away. Write the RESOLVED
-        # mode (request param, else the mode already chosen on the row) — never an
-        # implicit default. The 409 gate above guarantees effective_execution_mode
-        # is a real, user-chosen mode by this point. Staging is the authoritative
-        # mode-commit point PRE-launch; once implementation_launched_at is stamped,
-        # the mode is locked (mirror of the PATCH-path guard in
-        # ProjectService._apply_project_updates) — re-stage, which clears the
-        # timestamp, to change it. Conditional write (not a 409) so legitimate
-        # flows never break: the staging endpoint is only reached pre-launch.
         if project:
-            # BE-3006a single-writer rule: the staging-state write is owned by
-            # ProjectStagingService.mark_staged (via the lifecycle facade), not a
-            # raw db.commit here; the service applies the same
-            # implementation_launched_at guard on execution_mode. Pass THIS
-            # request's own session + tenant so the write lands on it too, instead
-            # of opening a separate one.
             await project_service.lifecycle.mark_staged(
                 project_id, effective_execution_mode, tenant_key=current_user.tenant_key, db_session=db
             )
 
-        # Return response with 'prompt' key for frontend compatibility
-        # Handover 0260: Use staging_prompt (mode-specific) instead of thin_prompt
-        # Handover 0388: Include agent_id in response
         return StagingPromptResponse(
             orchestrator_id=result["orchestrator_id"],
-            agent_id=result.get("agent_id"),  # WHO - executor ID for MCP tool calls
-            prompt=staging_prompt,  # Mode-specific staging prompt
-            estimated_prompt_tokens=staging_tokens,  # Updated token count for staging prompt
+            agent_id=result.get("agent_id"),
+            prompt=staging_prompt,
+            estimated_prompt_tokens=staging_tokens,
         )
 
     except ValueError as e:
-        # Project not found or invalid tool
         logger.warning(
             "[STAGING PROMPT THIN] Validation error for project=%s: %s", sanitize(project_id), sanitize(str(e))
         )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requested resource not found.") from e
 
-    except Exception as e:  # Broad catch: API boundary, converts to HTTP error
-        # Unexpected error during generation
+    except Exception as e:
         logger.exception("[STAGING PROMPT THIN] Generation failed for project=%s", sanitize(project_id))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -490,12 +416,6 @@ async def get_implementation_prompt(
         HTTPException 403: Tenant isolation violation
         HTTPException 500: Prompt generation error
     """
-    # INF-6049b: the staging/launch gate + orchestrator/agent assembly + prompt
-    # generation live in ONE shared core (ThinClientPromptGenerator.implement),
-    # also driven by the implement_project MCP tool. The core enforces the SACRED
-    # human gate via ProjectStagingService.check_implementation_allowed. The typed
-    # domain errors below map to the SAME HTTP status + detail the inline checks
-    # produced, so REST behavior is byte-unchanged.
     generator = ThinClientPromptGenerator(db, current_user.tenant_key)
     try:
         payload = await generator.implement(project_id=project_id, user_id=str(current_user.id))
@@ -510,8 +430,6 @@ async def get_implementation_prompt(
         sanitize(current_user.username),
     )
 
-    # BE-9165: model_validate picks up ready_to_close when implement() returns the
-    # all-specialists-complete state and ignores payload keys the schema doesn't carry.
     return ImplementationPromptResponse.model_validate(payload)
 
 
@@ -539,7 +457,6 @@ async def get_termination_prompt(
     Raises:
         HTTPException 404: Project not found or no working orchestrator
     """
-    # 1. Fetch project with tenant isolation
     project_stmt = select(Project).where(
         Project.id == project_id,
         Project.tenant_key == current_user.tenant_key,
@@ -553,7 +470,6 @@ async def get_termination_prompt(
             detail=f"Project {project_id} not found or not accessible",
         )
 
-    # 2. Fetch working orchestrator execution
     orchestrator_stmt = (
         select(AgentExecution)
         .options(joinedload(AgentExecution.job))
@@ -578,7 +494,6 @@ async def get_termination_prompt(
             detail="No working orchestrator found for this project.",
         )
 
-    # 3. Fetch all spawned agent executions (any non-orchestrator)
     agent_stmt = (
         select(AgentExecution)
         .options(joinedload(AgentExecution.job))
@@ -596,19 +511,14 @@ async def get_termination_prompt(
     agent_result = await db.execute(agent_stmt)
     agents = agent_result.scalars().all()
 
-    # 4. Set early_termination flag on project.
-    # BE-3006c: routed through the owning ProjectService (single-writer rule +
-    # TRANSACTION_OWNERSHIP_CONVENTION) -- the endpoint must not write/commit directly.
     await project_service.set_early_termination(project_id, current_user.tenant_key)
 
-    # 5. Build agent list for prompt
     agent_lines = []
     for agent in agents:
         display = agent.agent_display_name or agent.agent_name or agent.agent_id
         agent_lines.append(f"  - {display} | job_id: {agent.job_id} | status: {agent.status}")
     agent_section = "\n".join(agent_lines) if agent_lines else "  (no spawned agents)"
 
-    # 6. Build termination prompt
     prompt = f"""URGENT: USER-INITIATED PROJECT TERMINATION
 
 The user has requested early termination of this project.
@@ -681,24 +591,9 @@ project_id: {project_id}"""
     )
 
 
-# ---------------------------------------------------------------------------
-# BE-6191: Chain orchestrator prompt endpoints.
-# Both routes look up the SequenceRun, resolve the DEDICATED, project-less chain
-# orchestrator (run.conductor_agent_id; its AgentJob.project_id IS NULL), and
-# return a THIN bootstrap. The orchestrator fetches its full chain protocol itself
-# (get_staging_instructions for staging / get_job_mission for implementation),
-# which renders CH_CAPABILITY + CH_CHAIN_STAGING / CH_CHAIN_DRIVE via the
-# project-less conductor branch (BE-6186). No chapter bodies are inlined here.
-# ---------------------------------------------------------------------------
 
 
 async def _resolve_conductor_job_id(run: dict, tenant_key: str, db: AsyncSession) -> str:
-    """Return the job_id of the dedicated, project-less conductor for a run.
-
-    The conductor is minted at run-create (run['conductor_agent_id']); its
-    AgentJob has project_id IS NULL. Resolve its job_id by the agent_id stamped on the
-    run. Legacy (pre-BE-6184) runs may lack conductor_agent_id -> 409 (recreate the chain).
-    """
     cond_agent_id = run.get("conductor_agent_id")
     if not cond_agent_id:
         raise HTTPException(
@@ -721,24 +616,10 @@ async def _resolve_conductor_job_id(run: dict, tenant_key: str, db: AsyncSession
 
 
 def _conductor_mcp_url() -> str:
-    """MCP server URL for the conductor bootstrap.
-
-    Routes through the one accessor the SOLO staging path also uses, so the chain
-    and solo prompts share both the value AND its normalisation. Before BE-9442
-    they shared only the value — this site did not strip a trailing slash and the
-    thin-prompt path did (see url_resolver.get_public_url)."""
     return get_public_url()
 
 
 def _build_conductor_bootstrap(*, identity: dict, mcp_url: str, phase: str, harness_is_claude: bool) -> str:
-    """Thin bootstrap for the project-less conductor. phase in {'staging','implementation'}.
-
-    staging -> START NOW step 2 calls get_staging_instructions(job_id); implementation
-    -> get_job_mission(job_id). harness_is_claude -> include the CE-0035 ToolSearch
-    STEP 0 bootstrap (else omit). Mode-AGNOSTIC: the full mode-specific protocol
-    (CH_CAPABILITY / CH_CHAIN_STAGING / CH_CHAIN_DRIVE) is fetched by the orchestrator
-    via that step 2 call, never inlined here.
-    """
     job_id = identity.get("job_id") or ""
     agent_id = identity.get("agent_id") or ""
     run_id = identity.get("run_id") or ""
@@ -757,11 +638,6 @@ def _build_conductor_bootstrap(*, identity: dict, mcp_url: str, phase: str, harn
             "      auto-continue loop that advances the chain project by project."
         )
 
-    # CE-0035: Claude Code defers MCP tool schemas; without this single up-front
-    # ToolSearch call, the very first health_check() raises InputValidationError.
-    # Identical wording to StagingPromptBuilder.build_staging_prompt so the two
-    # surfaces do not drift. The hint MUST live in this spawn prompt because
-    # get_staging_instructions is unreachable until ToolSearch loads its schema.
     toolsearch_bootstrap = ""
     tool_prefix_line = (
         "  Tool names below are bare; your MCP client may expose them under a prefix "
@@ -841,14 +717,6 @@ async def get_chain_staging_prompt(
         )
     head_pid = resolved_order[0]
 
-    # Propagate the chain's execution mode (stored on the RUN, one mode for the whole
-    # chain) DOWN to every member project's execution_mode column. The per-project
-    # boundary gates (get_job_mission / get_staging_instructions / spawn_job) read
-    # project.execution_mode, NOT the run, so without this each member is BLOCKED with
-    # EXECUTION_MODE_NOT_SELECTED. Writes execution_mode ONLY (does NOT flip
-    # staging_status). Idempotent. Routes through ProjectService (write discipline +
-    # the post-launch execution_mode lock guard). An already-launched member raises
-    # ProjectStateError; skip it (its mode is already committed and locked).
     run_mode = (run.get("execution_mode") or "").strip()
     if run_mode:
         for member_pid in resolved_order:
@@ -857,15 +725,8 @@ async def get_chain_staging_prompt(
             except ProjectStateError:
                 continue
             except ResourceNotFoundError:
-                # A member hard-deleted out from under the run — skip; the chain
-                # context degrades to the surviving members (FE-6175 tolerance).
                 continue
 
-    # Resolve the DEDICATED, project-less conductor and fetch its staging
-    # instructions on its OWN job. get_staging_instructions resolves the project-less
-    # conductor branch (BE-6186) and returns the conductor staging response (status
-    # CHAIN_CONDUCTOR_STAGING, identity, thin_client). We use only result["identity"]
-    # for the bootstrap; the conductor fetches the full protocol itself.
     conductor_job_id = await _resolve_conductor_job_id(run, current_user.tenant_key, db)
 
     svc = MissionOrchestrationService(db_manager=None, tenant_manager=None, test_session=db)
@@ -874,10 +735,6 @@ async def get_chain_staging_prompt(
     except BaseGiljoError as exc:
         raise HTTPException(status_code=exc.default_status_code, detail=exc.message) from exc
 
-    # BE-9035b: route the per-CLI render key through the ONE precedence helper
-    # (effective_harness). These REST endpoints carry no MCP session, so session=None
-    # → detection absent → the declared-mode hint → byte-identical to today's bytes
-    # (the seam is proven adopted; the DETECTED tier is exercised at the MCP boundary).
     harness_is_claude = effective_harness(run_mode) == HARNESS_CLAUDE_CODE or run_mode == "multi_terminal"
     prompt_text = _build_conductor_bootstrap(
         identity=result["identity"],
@@ -943,10 +800,6 @@ async def get_chain_implementation_prompt(
     conductor_job_id = await _resolve_conductor_job_id(run, tenant_key, db)
 
     run_mode = (run.get("execution_mode") or "").strip()
-    # BE-9035b: route the per-CLI render key through the ONE precedence helper
-    # (effective_harness). These REST endpoints carry no MCP session, so session=None
-    # → detection absent → the declared-mode hint → byte-identical to today's bytes
-    # (the seam is proven adopted; the DETECTED tier is exercised at the MCP boundary).
     harness_is_claude = effective_harness(run_mode) == HARNESS_CLAUDE_CODE or run_mode == "multi_terminal"
     identity = {
         "agent_id": run.get("conductor_agent_id"),

@@ -1,13 +1,3 @@
-<!--
-  NewThreadDialog.vue — FE-9289c
-
-  A name and one hint. The raw project_id / product_id fields are gone: a general
-  thread does not need them, and a project thread is created BY the project, never by
-  someone pasting a UUID into a text box here.
-
-  On create the thread id goes straight to the clipboard, because handing it to an
-  agent is the only reason the operator opened this dialog.
--->
 <template>
   <BaseDialog
     v-model="isOpen"
@@ -116,28 +106,11 @@ async function onCreate() {
   creating.value = true
   errorMsg.value = null
   try {
-    // FE-9588 — carry the viewed product. Since Headless-S4 demoted the active
-    // product to a mere default, a create naming no product on a tenant owning
-    // more than one is refused with PRODUCT_AMBIGUOUS. That refusal is written for
-    // an agent, whose remedy is to retry naming one; a dialog cannot retry, so it
-    // states the product up front. `currentProductId` is the VIEWED TAB (not
-    // `activeProduct`, the tenant-wide default) — the Hub is tabbed by product, so
-    // what the operator is looking at is the unambiguous answer.
-    //
-    // Omitted when there is no viewed tab: a tenant owning zero products is ruling
-    // 1's stated exception and the server resolves it to a standalone thread.
-    // NOT defaulted inside `commHub.createThread`, deliberately — the other caller
-    // (useProjectBoundThread) passes a project_id, and the server derives the
-    // product from THAT project on purpose, "regardless of which tab the caller
-    // happens to be viewing". A store-level default would silently override it.
     const body = { subject: subject.value.trim() }
     if (productStore.currentProductId) body.product_id = productStore.currentProductId
 
     const thread = await commHub.createThread(body)
 
-    // The id is the point of the dialog — put it on the clipboard rather than making
-    // the operator go and find it. A blocked clipboard is not a failed create, so it
-    // downgrades the message instead of erroring: the id is still shown afterwards.
     const copied = thread?.thread_id ? await copy(thread.thread_id) : false
     showToast({
       type: 'success',

@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Service-layer tests for roadmap reference resolution (BE-9474).
-
-The MCP-boundary suite
-(``tests/integration/test_be9474_roadmap_ergonomics_mcp_transport.py``) proves
-an agent can rank by alias. This file covers what that one cannot reach:
-
-- the id-vs-alias classification, which decides whether a lookup happens at all;
-- the ``remove`` list, resolved by the same call as ``items``;
-- the duplicate guard, which the ``uq_*_taxonomy_active`` UNIQUE indexes make
-  unreachable through the database and which therefore has to be driven
-  directly if it is to be tested at all.
-
-Parallel-safe: each test owns its fixture data, uses the rolled-back
-``db_session`` (TransactionalTestContext), and shares no module-level state.
-
-Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -40,7 +23,6 @@ pytestmark = pytest.mark.asyncio
 
 
 async def _seed_aliased(db_session, *, project_series: int = 7, task_series: int = 86) -> dict:
-    """Org + active product + one aliased project + one aliased task, fresh tenant."""
     suffix = uuid.uuid4().hex[:8]
     tenant_key = TenantManager.generate_tenant_key()
 
@@ -99,23 +81,17 @@ async def _seed_aliased(db_session, *, project_series: int = 7, task_series: int
 
 
 async def test_only_non_uuid_references_are_treated_as_aliases():
-    """The classifier decides whether an existing caller pays for a lookup.
-
-    Everything an existing caller sends is UUID-shaped, so it must classify as
-    an id; everything the alias builder can emit must classify as an alias.
-    """
     assert _is_uuid_shaped(str(uuid.uuid4())) is True
-    assert _is_uuid_shaped(uuid.uuid4().hex) is True  # dashless form of the same id
+    assert _is_uuid_shaped(uuid.uuid4().hex) is True
     assert _is_uuid_shaped("BE-0007") is False
     assert _is_uuid_shaped("IMP-0086") is False
-    assert _is_uuid_shaped("BE-0001a") is False  # subseries suffix
-    assert _is_uuid_shaped("0017") is False  # untyped project: serial only
-    assert _is_uuid_shaped("5RRBTM") is False  # type-less project's random alias
+    assert _is_uuid_shaped("BE-0001a") is False
+    assert _is_uuid_shaped("0017") is False
+    assert _is_uuid_shaped("5RRBTM") is False
     assert _is_uuid_shaped("") is False
 
 
 async def test_resolve_refs_rewrites_aliases_in_items_and_remove(db_session):
-    """One call resolves BOTH lists, so a row can be named the same way in either."""
     seed = await _seed_aliased(db_session)
 
     items = [
@@ -133,11 +109,6 @@ async def test_resolve_refs_rewrites_aliases_in_items_and_remove(db_session):
 
 
 async def test_resolve_refs_leaves_ids_and_unresolvable_aliases_exactly_as_sent(db_session):
-    """An id is passed through untouched; an alias that names nothing is NOT invented.
-
-    Leaving the unresolved value in place is what routes it into the existing
-    "do not exist in this workspace" refusal instead of a second vocabulary.
-    """
     seed = await _seed_aliased(db_session)
     stranger = str(uuid.uuid4())
 
@@ -156,37 +127,23 @@ async def test_resolve_refs_leaves_ids_and_unresolvable_aliases_exactly_as_sent(
 
 
 async def test_resolve_refs_will_not_reach_across_a_tenant_or_a_product(db_session):
-    """Resolution is scoped, so a neighbour's alias simply does not resolve."""
-    # Distinct serials: if both tenants minted BE-0007 the neighbour's alias
-    # would resolve to MY row and the test would pass for the wrong reason.
     mine = await _seed_aliased(db_session, project_series=7, task_series=86)
     theirs = await _seed_aliased(db_session, project_series=50, task_series=51)
 
     items = [{"item_type": "project", "project_id": theirs["project_alias"], "task_id": None}]
 
-    # Same alias text, my tenant + my product: nothing to resolve it to.
     with tenant_session_context(db_session, mine["tenant_key"]):
         await resolve_refs(db_session, mine["tenant_key"], mine["product_id"], items, [])
     assert items[0]["project_id"] == theirs["project_alias"]
 
-    # And it is a real row -- resolvable from its own tenant + product.
     with tenant_session_context(db_session, theirs["tenant_key"]):
         await resolve_refs(db_session, theirs["tenant_key"], theirs["product_id"], items, [])
     assert items[0]["project_id"] == theirs["project_id"]
 
 
 async def test_an_alias_matching_two_rows_is_refused_rather_than_guessed():
-    """The guard the UNIQUE indexes make unreachable, driven directly.
-
-    ``uq_project_taxonomy_active`` is UNIQUE over exactly the tuple an alias is
-    built from, so no seedable database state reaches this branch -- which is
-    the point: the guard exists so that relaxing that constraint fails loudly
-    instead of silently picking a row on the user's behalf. Driving it needs a
-    stand-in for the one call it makes.
-    """
 
     class _TwoRowSession:
-        """Minimal AsyncSession stand-in: answers ``execute`` and nothing else."""
 
         async def execute(self, _stmt):
             return [("BE-0007", "id-one"), ("BE-0007", "id-two")]

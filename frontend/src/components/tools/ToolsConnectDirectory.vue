@@ -1,6 +1,5 @@
 <template>
   <div class="tools-directory smooth-border" data-testid="tools-connect-directory">
-    <!-- Fleet rail — the user's tools with live status + "+ Add a tool" -->
     <aside class="dir-rail">
       <div class="dir-rail-top">
         <img src="/icons/Giljo_YW_Face.svg" alt="" class="dir-rail-logo" />
@@ -31,9 +30,7 @@
       </div>
     </aside>
 
-    <!-- Action window -->
     <div class="dir-window">
-      <!-- Tool picker (from "+ Add a tool") -->
       <template v-if="mode === 'picker'">
         <div class="dir-eyebrow">TOOLS · ADD A TOOL</div>
         <h2 class="dir-title">Pick a tool to connect.</h2>
@@ -58,7 +55,6 @@
         </div>
       </template>
 
-      <!-- Selected tool's connect card -->
       <template v-else-if="selectedId">
         <div class="dir-eyebrow">TOOLS · {{ selectedName }}</div>
         <h2 class="dir-title">{{ selectedName }}.</h2>
@@ -80,7 +76,6 @@
         </div>
       </template>
 
-      <!-- Empty fleet -->
       <template v-else>
         <div class="dir-empty" data-testid="dir-empty">
           <p>No tools yet. Add your first with <strong>+ Add a tool</strong>.</p>
@@ -101,13 +96,6 @@ import ConnectToolCard from '@/components/setup/ConnectToolCard.vue'
 const userStore = useUserStore()
 const wsStore = useWebSocketStore()
 
-// Fleet = the user's chosen tools (persisted via setup_selected_tools). "+ Add a tool"
-// appends here. Connection status is WORKSPACE-LEVEL, backed by the durable
-// GET /api/connect/credential-status endpoint (FE-9274) — the server emits a
-// GENERIC connect event (it cannot tell which CLI connected, proposal §6: no
-// per-tool attribution), so every row reflects the same tenant-wide credential
-// truth. This also fixes the core bug where an in-memory-only status reverted to
-// "Waiting" on every remount: the durable fetch survives navigation.
 const fleetIds = ref([...(userStore.currentUser?.setup_selected_tools ?? [])])
 const fleet = computed(() =>
   fleetIds.value.filter((id) => TOOL_META[id]).map((id) => ({ id, name: toolName(id) })),
@@ -119,16 +107,7 @@ const credStatus = reactive({
   has_expired_oauth: false,
   connected_harnesses: {},
 })
-// "I already configured this" optimistic flip — bridges the gap until the NEXT
-// completed fetchCredentialStatus() call, which is always authoritative and always
-// clears this flag (whatever it finds). It must never persist past that fetch: an
-// un-reset optimistic flag would let a stale "Configured" survive an authoritative
-// fetch that found no valid credential (e.g. after a revoke) — a false-positive
-// worse than the stale-red bug this component was built to fix.
 const optimisticConfigured = ref(false)
-// In-session-only message after a revoke drops the workspace to no valid credential
-// (no persistence flag, honors the no-tracking-per-tool rule: a fresh reload settles
-// back to the plain "Not set up" idle state).
 const justDeleted = ref(false)
 
 const keyMode = reactive({})
@@ -137,16 +116,10 @@ const mode = ref(selectedId.value ? 'card' : 'picker')
 
 const selectedName = computed(() => toolName(selectedId.value))
 
-// FE-9500: WORKSPACE-level -- "this account holds a live credential". True the
-// moment ANY tool connects, so it must never be rendered as one tool's status.
 const hasWorkspaceCredential = computed(
   () => credStatus.has_valid_api_key || credStatus.has_valid_oauth || optimisticConfigured.value,
 )
 
-// PER-TOOL truth: this tool completed an MCP handshake (mcp_sessions clientInfo,
-// via credential-status.connected_harnesses). Previously every card was bound to
-// the workspace flag above, so connecting ONE tool lit Claude, Antigravity and
-// every other card green -- including tools not installed on the machine.
 const connectedToolIds = computed(() => {
   const ids = new Set()
   for (const harness of Object.keys(credStatus.connected_harnesses || {})) {
@@ -156,29 +129,11 @@ const connectedToolIds = computed(() => {
   return ids
 })
 
-// BE-9591 (c): PICKING A TOOL ALWAYS STARTS A FRESH FLOW.
-//
-// The operator's second-device case: he connected on his PC, opened this UI on a
-// laptop, and the card was already green -- a connection inherited from a machine
-// that was not the one in front of him. The server cannot tell machines apart, so
-// the card verifies the connect he is performing NOW rather than reporting that
-// SOMETHING, SOMEWHERE once connected.
-//
-// Deliberate UI theatre, and strictly view state: entering the flow WRITES NOTHING.
-// Back out without connecting and the passive surfaces show the remembered state
-// again immediately, because nothing was erased -- only "Remove tool" erases, and
-// only a connection landing after entry upgrades the card.
-//
-// The RAIL (statusFor / connectedToolIds) is untouched and still shows the durable
-// record: that passive label is not this ruling's target.
 const cardEnteredAt = ref(new Date().toISOString())
 
-/** Connect stamps newer than the moment this card was opened. */
 const freshlyConnectedToolIds = computed(() => {
   const ids = new Set()
   for (const [harness, stamp] of Object.entries(credStatus.connected_harnesses || {})) {
-    // A malformed or absent stamp is not fresh: the point is to stop history
-    // satisfying the flow, and an unreadable timestamp is not evidence of anything.
     if (typeof stamp !== 'string' || stamp <= cardEnteredAt.value) continue
     const id = toolIdForHarness(harness)
     if (id) ids.add(id)
@@ -186,10 +141,6 @@ const freshlyConnectedToolIds = computed(() => {
   return ids
 })
 
-// The optimistic flip stays per-tool ("I already configured this" on THIS card) and
-// is deliberately NOT subject to the freshness cutoff: it is the user asserting about
-// the machine in front of them, which is the very thing the cutoff exists to require.
-// Inherited history is what gets filtered, not an explicit statement.
 const isConfigured = computed(
   () => freshlyConnectedToolIds.value.has(selectedId.value) || optimisticConfigured.value,
 )
@@ -204,9 +155,6 @@ async function fetchCredentialStatus() {
     credStatus.has_valid_oauth = !!data?.has_valid_oauth
   credStatus.has_expired_oauth = !!data?.has_expired_oauth
     credStatus.connected_harnesses = data?.connected_harnesses || {}
-    // The completed fetch is authoritative — clear the optimistic flag atomically
-    // with the new credStatus so a stale "already configured" click can never
-    // outlive a real fetch that found nothing valid.
     optimisticConfigured.value = false
   } catch (e) {
     console.warn('[ToolsConnectDirectory] Failed to fetch credential status:', e)
@@ -215,17 +163,11 @@ async function fetchCredentialStatus() {
 
 async function handleKeyRevoked() {
   await fetchCredentialStatus()
-  // Revoking a key is a WORKSPACE event, so the "just deleted" notice keys off the
-  // workspace flag -- not the selected tool's per-tool status (FE-9500).
   if (!hasWorkspaceCredential.value) {
     justDeleted.value = true
   }
 }
 
-// FE-9500: this takes an `id` and must ANSWER FOR THAT id. It previously returned
-// the SELECTED tool's status for every row, so opening one tool's card painted the
-// whole sidebar with that tool's state -- the visible half of "every harness reports
-// connected". Only the transient states below are allowed to be selection-scoped.
 function statusFor(id) {
   if (connectedToolIds.value.has(id)) return 'configured'
   if (selectedId.value === id && optimisticConfigured.value) return 'configured'
@@ -250,7 +192,6 @@ function statusLabel(state) {
 }
 
 function selectTool(id) {
-  // Each pick is a NEW flow, so the freshness anchor moves with it.
   cardEnteredAt.value = new Date().toISOString()
   selectedId.value = id
   mode.value = 'card'
@@ -279,14 +220,6 @@ async function removeTool(id) {
   } catch (e) {
     console.warn('[ToolsConnectDirectory] Failed to persist tool removal:', e)
   }
-  // BE-9591: forget the DURABLE connection too. Dropping the card from the local
-  // fleet list was the whole of "Remove tool", and the card's green comes from
-  // connected_harnesses (mcp_sessions rows) -- so re-adding the tool showed it
-  // connected again from history, with nothing the user could do about it.
-  //
-  // Failure is warned, not surfaced: the card is already gone from the fleet list
-  // and the user asked for that. A stale row means the status is wrong on the next
-  // fetch, which is the same place they would go to try again.
   const harness = harnessForToolId(id)
   if (harness) {
     try {
@@ -306,22 +239,10 @@ function toggleKeyMode() {
   keyMode[selectedId.value] = !keyMode[selectedId.value]
 }
 
-// "I already configured this" — optimistic workspace-level flip; the next durable
-// fetch (mount, WS event, or key-created/-revoked) reconciles it against the truth.
 function markConfigured() {
   optimisticConfigured.value = true
 }
 
-// FE-9500 changed the backend to emit the RESOLVED harness token (e.g.
-// 'claude-code', 'opencode') instead of the hardcoded 'mcp_connected'
-// placeholder this used to gate on -- so that check was permanently false in
-// production and a real connect never refreshed this directory (it survived
-// only on its own mount-time fetch, plus the api-key-created/-revoked window
-// events). Re-fetch on ANY connect event: the durable GET recomputes full
-// per-tool truth from connected_harnesses regardless of which token arrived,
-// same as the credential-status idiom everywhere else on this surface. The
-// legacy 'mcp_connected' literal still triggers it too (falls through the
-// same truthy check) so an older backend during a rolling deploy keeps working.
 let wsUnsub = null
 async function handleToolConnected(payload) {
   if (payload?.tool_name) {

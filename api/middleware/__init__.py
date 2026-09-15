@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Middleware for Giljo HQ
-
-This module provides security middleware:
-
-- AuthMiddleware: Authentication for all API requests
-- APIMetricsMiddleware: API and MCP call tracking
-- SecurityHeadersMiddleware: Security headers (HSTS, CSP, X-Frame-Options, etc.)
-- RateLimitMiddleware: Per-IP rate limiting (100 req/min default)
-- InputValidationMiddleware: Input validation and sanitization
-- CSRFProtectionMiddleware: CSRF protection
-
-Created/Updated in Handover 0129c - Security Hardening & OWASP Compliance
-"""
 
 from .auth import AuthMiddleware
 from .auth_rate_limiter import RateLimiter as AuthRateLimiter

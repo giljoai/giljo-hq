@@ -10,12 +10,9 @@
         @keydown.escape="handleSkip"
         @keydown.tab="trapTab"
       >
-        <!-- Backdrop — click does NOT close (same as setup wizard) -->
         <div class="setup-wizard-backdrop" />
 
-        <!-- Content panel — identical structure to SetupWizardOverlay -->
         <div ref="panelRef" class="setup-wizard-panel smooth-border" tabindex="-1">
-          <!-- Header -->
           <div class="setup-wizard-header">
             <h2 class="setup-wizard-title">
               <span class="setup-wizard-title-gradient">Certificate</span>
@@ -32,7 +29,6 @@
             </v-btn>
           </div>
 
-          <!-- Step content -->
           <div class="setup-wizard-content">
             <p class="step-question">
               You're connecting from another machine over HTTPS
@@ -45,14 +41,13 @@
               certificate, you're done and can simply continue. <strong>If your
               browser warned you, or if the certificate is private or
               self-signed,</strong> your command-line AI tools (Claude Code, Codex,
-              Gemini CLI, and OpenCode) need to trust it too. The one-time steps below
+              and OpenCode) need to trust it too. The one-time steps below
               set that up on this machine.
             </p>
             <p class="cert-hint cert-hint--intro">
               Skip these if your browser shows a padlock with no warning.
             </p>
 
-            <!-- Step 1: Download -->
               <div class="cert-step">
                 <div class="cert-step-number">1</div>
                 <div class="cert-step-content">
@@ -71,7 +66,6 @@
                 </div>
               </div>
 
-              <!-- Step 2: Install into OS trust store -->
               <div class="cert-step">
                 <div class="cert-step-number">2</div>
                 <div class="cert-step-content">
@@ -105,12 +99,11 @@
                 </div>
               </div>
 
-              <!-- Step 3: NODE_EXTRA_CA_CERTS -->
               <div class="cert-step">
                 <div class="cert-step-number">3</div>
                 <div class="cert-step-content">
                   <div class="cert-step-title">Trust certificate in Node.js</div>
-                  <p class="cert-hint">Required for Claude Code CLI, Codex CLI, Gemini CLI, and OpenCode (all Node versions):</p>
+                  <p class="cert-hint">Required for Claude Code CLI, Codex CLI, and OpenCode (all Node versions):</p>
 
                   <div class="cert-command-block smooth-border">
                     <code class="cert-command">{{ nodeCommand }}</code>
@@ -129,7 +122,6 @@
               </div>
           </div>
 
-          <!-- Footer — same pattern as setup wizard -->
           <div class="setup-wizard-footer">
             <v-btn variant="text" class="footer-btn-back" @click="handleSkip">
               Skip for now
@@ -173,11 +165,6 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'continue'])
 
-// ── Focus containment (IMP-9342) ───────────────────────────────────────────
-// role="dialog" aria-modal="true" is a promise that focus stays inside. Without
-// a trap, Tab walked out into the page behind the overlay — from the Connect tab
-// that let a keyboard user reach the inline cert-trust link and open a SECOND
-// copy of this dialog at the same z-index, which reads as a broken close button.
 const panelRef = ref(null)
 let focusOnOpen = null
 
@@ -200,7 +187,6 @@ function trapTab(event) {
   if (!panel) return
   const items = focusableItems()
   if (!items.length) {
-    // Nothing tabbable inside: park focus on the panel rather than let it leave.
     event.preventDefault()
     panel.focus()
     return
@@ -209,8 +195,6 @@ function trapTab(event) {
   const first = items[0]
   const last = items[items.length - 1]
   const active = document.activeElement
-  // The panel itself carries tabindex="-1", so it holds focus without being a
-  // tab stop — treat it as "not inside" so either direction wraps deliberately.
   const inside = panel.contains(active) && active !== panel
 
   if (event.shiftKey) {
@@ -233,8 +217,6 @@ watch(
       panelRef.value?.focus()
       return
     }
-    // Closing: hand focus back to whatever opened us, so a keyboard user resumes
-    // where they were instead of at the top of the document.
     const opener = focusOnOpen
     focusOnOpen = null
     if (opener && typeof opener.focus === 'function' && document.contains(opener)) {
@@ -253,7 +235,6 @@ const copiedOs = ref(false)
 const copiedNode = ref(false)
 const dontShowAgain = ref(false)
 
-// Detect client OS from navigator
 const detectedOs = (() => {
   const ua = navigator.userAgent || ''
   if (/Win/.test(ua)) return 'windows'
@@ -282,8 +263,6 @@ const nodeCommand = computed(() => {
     return '$env:NODE_OPTIONS = "--use-system-ca"; [System.Environment]::SetEnvironmentVariable(\'NODE_OPTIONS\', \'--use-system-ca\', \'User\')'
   }
   const rcFile = activeOs.value === 'macos' ? '~/.zshrc' : '~/.bashrc'
-  // One command per line, never `&&` — the block renders pre-wrap and every
-  // shell (bash, zsh, PowerShell 5.1) runs pasted lines sequentially.
   return `mkdir -p ~/.giljo\ncp ~/Downloads/giljo-server-cert.pem ~/.giljo/giljo-server-cert.pem\necho 'export NODE_EXTRA_CA_CERTS="$HOME/.giljo/giljo-server-cert.pem"' >> ${rcFile}\nexport NODE_EXTRA_CA_CERTS="$HOME/.giljo/giljo-server-cert.pem"`
 })
 
@@ -299,8 +278,6 @@ async function downloadCert() {
       },
     })
     if (response.status === 404) {
-      // No certificate configured on this server, or the server uses a
-      // publicly-trusted cert that clients already trust — nothing to download.
       downloadError.value = 'No certificate available to download. If your browser showed no warning, your tools will connect without this step.'
       return
     }
@@ -326,10 +303,6 @@ async function downloadCert() {
 
 async function copyCommand(text, which) {
   const success = await clipboardCopy(text)
-  // FE-9320: the check mark is an assertion that the command is on the
-  // clipboard, so it may only be set once the copy is verified. It used to be
-  // set unconditionally, which made a failed copy look done — the user pasted
-  // nothing and the cert-trust step still read as complete.
   if (!success) return
   if (which === 'node') {
     copiedNode.value = true

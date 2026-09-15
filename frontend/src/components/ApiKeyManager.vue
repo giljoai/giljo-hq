@@ -24,13 +24,11 @@
     </v-chip>
 
     <v-card-text>
-      <!-- Empty State -->
       <v-alert v-if="!loading && apiKeys.length === 0" type="info" variant="tonal" class="mb-4">
         No API keys yet. Copy an MCP connection command from the
         <strong>Connect</strong> tab to automatically generate one.
       </v-alert>
 
-      <!-- API Keys Table -->
       <v-data-table
         v-if="apiKeys.length > 0"
         :items="apiKeys"
@@ -38,7 +36,6 @@
         :loading="loading"
         class="elevation-0"
       >
-        <!-- Name Column -->
         <template #item.name="{ item }">
           <div class="d-flex align-center">
             <v-icon size="small" class="mr-2">mdi-label</v-icon>
@@ -46,22 +43,18 @@
           </div>
         </template>
 
-        <!-- Key Preview Column -->
         <template #item.key_prefix="{ item }">
           <code class="text-body-small">{{ item.key_prefix }}...</code>
         </template>
 
-        <!-- Created Date Column -->
         <template #item.created_at="{ item }">
           <span class="text-body-small">{{ formatDateTime(item.created_at) }}</span>
         </template>
 
-        <!-- Last Used Column -->
         <template #item.last_used="{ item }">
           <span class="text-body-small">{{ humanizeTimestamp(item.last_used) }}</span>
         </template>
 
-        <!-- Expires Column -->
         <template #item.expires_at="{ item }">
           <v-chip v-if="isExpired(item.expires_at)" color="error" size="small" variant="flat">
             Expired
@@ -72,7 +65,6 @@
           <span v-else class="text-body-small text-muted-a11y">No expiry</span>
         </template>
 
-        <!-- Actions Column -->
         <template #item.actions="{ item }">
           <v-tooltip text="Revoke this API key">
             <template #activator="{ props }">
@@ -90,7 +82,6 @@
       </v-data-table>
     </v-card-text>
 
-    <!-- Revoke Confirmation Dialog -->
     <BaseDialog
       v-model="showRevokeDialog"
       type="danger"
@@ -133,14 +124,12 @@ import { useToast } from '@/composables/useToast'
 const { formatDateTime } = useFormatDate()
 const { showToast } = useToast()
 
-// State
 const apiKeys = ref([])
 const loading = ref(false)
 const showRevokeDialog = ref(false)
 const revoking = ref(false)
 const keyToRevoke = ref(null)
 
-// Table headers
 const headers = [
   { title: 'Name', key: 'name', sortable: true },
   { title: 'Key Prefix', key: 'key_prefix', sortable: false },
@@ -150,7 +139,6 @@ const headers = [
   { title: 'Actions', key: 'actions', sortable: false, align: 'end' },
 ]
 
-// Methods
 function humanizeTimestamp(timestamp) {
   if (!timestamp) return 'Never'
   try {
@@ -178,14 +166,8 @@ function expiryClass(expiresAt) {
   return 'text-success'
 }
 
-// BE-6147 removed the 5-key cap — keys are unlimited. Show a plain active count.
 const activeKeyCount = computed(() => apiKeys.value.filter((k) => k.is_active).length)
 
-/**
- * FE-9553: `notify` defaults to FALSE. Reachable from onMounted AND from the
- * post-create / post-revoke refresh, and only the latter follows a click.
- * HubView's loadDeletedThreads({ notify = false }) is the precedent.
- */
 async function loadKeys({ notify = false } = {}) {
   loading.value = true
   try {
@@ -202,7 +184,6 @@ async function loadKeys({ notify = false } = {}) {
 }
 
 async function refreshKeys() {
-  // Reached from the post-mutation refresh, which follows a click.
   await loadKeys({ notify: true })
 }
 
@@ -223,18 +204,14 @@ async function revokeKey() {
   try {
     await api.apiKeys.delete(keyToRevoke.value.id)
 
-    // Optimistically remove from list, then reload to ensure consistency
     const revokedId = keyToRevoke.value.id
     apiKeys.value = apiKeys.value.filter((k) => k.id !== revokedId)
-    // Post-revoke: follows the operator's own click, so it may speak up.
     await loadKeys({ notify: true })
 
-    // Tell durable-status listeners (Connect directory, FE-9274) a key just went away.
     try {
       window.dispatchEvent(new Event('api-key-revoked'))
     } catch { /* no-op */ }
 
-    // Close dialog
     showRevokeDialog.value = false
     keyToRevoke.value = null
   } catch (err) {
@@ -246,10 +223,8 @@ async function revokeKey() {
 }
 
 
-// Lifecycle
 onMounted(() => {
   loadKeys()
-  // Listen for keys created elsewhere (the connect flow's key step generates them)
   window.addEventListener('api-key-created', refreshKeys)
 })
 

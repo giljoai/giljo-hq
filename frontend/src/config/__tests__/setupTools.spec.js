@@ -2,15 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { SETUP_TOOLS, TOOL_META, toolName, methodTag } from '@/config/setupTools'
 
 describe('setupTools registry (FE-9204)', () => {
-  it('lists exactly the six connectable tools, in order', () => {
-    expect(SETUP_TOOLS.map((t) => t.id)).toEqual([
-      'claude_code',
-      'codex_cli',
-      'gemini_cli',
-      'antigravity_cli',
-      'opencode',
-      'generic',
-    ])
+  it('lists exactly the four connectable tools, in order (INF-9605a)', () => {
+    expect(SETUP_TOOLS.map((t) => t.id)).toEqual(['claude_code', 'codex_cli', 'opencode', 'generic'])
   })
 
   it('every tool has a name and either a logo or an mdi icon', () => {
@@ -29,13 +22,9 @@ describe('setupTools registry (FE-9204)', () => {
 
 describe('methodTag — per-edition (proposal §3/§4)', () => {
   it('SaaS: sign-in-capable tools read SIGN-IN OR KEY', () => {
-    for (const id of ['claude_code', 'codex_cli', 'gemini_cli', 'opencode']) {
+    for (const id of ['claude_code', 'codex_cli', 'opencode']) {
       expect(methodTag(id, false)).toBe('SIGN-IN OR KEY')
     }
-  })
-
-  it('SaaS: Antigravity (key-only) reads API KEY ONLY', () => {
-    expect(methodTag('antigravity_cli', false)).toBe('API KEY ONLY')
   })
 
   it('generic client is always MANUAL CONFIG, both editions', () => {
@@ -44,7 +33,7 @@ describe('methodTag — per-edition (proposal §3/§4)', () => {
   })
 
   it('CE: every non-generic tool reads API KEY', () => {
-    for (const id of ['claude_code', 'codex_cli', 'gemini_cli', 'antigravity_cli', 'opencode']) {
+    for (const id of ['claude_code', 'codex_cli', 'opencode']) {
       expect(methodTag(id, true)).toBe('API KEY')
     }
   })

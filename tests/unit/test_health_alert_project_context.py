@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Unit tests for Handover 0259: Health alert project context.
-
-Verifies that:
-1. AgentHealthStatus dataclass accepts and stores project_id/project_name
-2. Default values for project fields are empty strings
-3. broadcast_health_alert includes project_id, project_name, execution_id in the broadcast data
-
-Edition Scope: CE
-"""
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
@@ -24,10 +14,8 @@ from giljo_mcp.services.agent_health_ws_broadcast import broadcast_agent_auto_fa
 
 
 class TestAgentHealthStatusProjectFields:
-    """Verify AgentHealthStatus dataclass has project_id and project_name fields."""
 
     def test_agent_health_status_has_project_fields(self):
-        """AgentHealthStatus should accept and store project_id and project_name."""
         status = AgentHealthStatus(
             execution_id="exec-001",
             job_id="job-001",
@@ -47,7 +35,6 @@ class TestAgentHealthStatusProjectFields:
         assert status.project_name == "My Project"
 
     def test_agent_health_status_default_project_fields_are_empty(self):
-        """Creating AgentHealthStatus without project fields should default to empty strings."""
         status = AgentHealthStatus(
             execution_id="exec-002",
             job_id="job-002",
@@ -65,7 +52,6 @@ class TestAgentHealthStatusProjectFields:
         assert status.project_name == ""
 
     def test_agent_health_status_stores_all_required_fields(self):
-        """AgentHealthStatus should correctly store all required fields alongside project fields."""
         now = datetime.now(UTC)
         status = AgentHealthStatus(
             execution_id="exec-003",
@@ -96,7 +82,6 @@ class TestAgentHealthStatusProjectFields:
         assert status.project_name == "Backend Refactor"
 
     def test_agent_health_status_empty_project_for_orphaned_job(self):
-        """Orphaned jobs (no project) should have empty project fields."""
         status = AgentHealthStatus(
             execution_id="exec-orphan",
             job_id="job-orphan",
@@ -117,16 +102,13 @@ class TestAgentHealthStatusProjectFields:
 
 
 class TestBroadcastHealthAlertProjectContext:
-    """Verify broadcast_health_alert includes project context in broadcast data."""
 
     @pytest.mark.asyncio
     async def test_broadcast_health_alert_includes_project_context(self):
-        """broadcast_health_alert should include project_id, project_name, and execution_id."""
         from api.websocket import WebSocketManager
 
         ws_manager = WebSocketManager()
 
-        # Mock broadcast_event_to_tenant to capture the event
         ws_manager.broadcast_event_to_tenant = AsyncMock()
 
         health_status = AgentHealthStatus(
@@ -161,7 +143,6 @@ class TestBroadcastHealthAlertProjectContext:
             else call_kwargs.kwargs["event"]
         )
 
-        # Verify the event data contains project context
         data = event["data"]
         assert data["project_id"] == "proj-abc"
         assert data["project_name"] == "Feature Sprint"
@@ -170,12 +151,10 @@ class TestBroadcastHealthAlertProjectContext:
         assert data["job_id"] == "job-100"
         assert data["agent_display_name"] == "implementer"
         assert data["health_state"] == "critical"
-        # BE-9518: product_id must ride the payload so a per-tab WS router can filter on it.
         assert data["product_id"] == "product-abc"
 
     @pytest.mark.asyncio
     async def test_broadcast_health_alert_includes_empty_project_for_orphaned_jobs(self):
-        """broadcast_health_alert should include empty project fields for orphaned jobs."""
         from api.websocket import WebSocketManager
 
         ws_manager = WebSocketManager()
@@ -217,7 +196,6 @@ class TestBroadcastHealthAlertProjectContext:
 
     @pytest.mark.asyncio
     async def test_broadcast_health_alert_event_type_is_correct(self):
-        """broadcast_health_alert should emit event type 'agent:health_alert'."""
         from api.websocket import WebSocketManager
 
         ws_manager = WebSocketManager()
@@ -258,7 +236,6 @@ class TestBroadcastHealthAlertProjectContext:
 
 
 class TestBroadcastAgentAutoFailedProductId:
-    """BE-9518: broadcast_agent_auto_failed must carry product_id when supplied."""
 
     @pytest.mark.asyncio
     async def test_broadcast_agent_auto_failed_includes_product_id(self):
@@ -283,7 +260,6 @@ class TestBroadcastAgentAutoFailedProductId:
 
     @pytest.mark.asyncio
     async def test_broadcast_agent_auto_failed_omits_product_id_when_none(self):
-        """Additive contract: omitted (not null) when the caller has no product_id."""
         from api.websocket import WebSocketManager
 
         ws_manager = WebSocketManager()

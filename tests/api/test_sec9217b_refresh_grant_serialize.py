@@ -3,31 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-9217b — the OAuth refresh grant must serialize against session invalidation.
-
-TOCTOU race (confirmed against code): ``refresh_token_grant`` loads the refresh
-row with NO row lock, then the reuse-detection gate ``if row.revoked:`` reads the
-ORM attribute cached from that initial load. A concurrent invalidation
-(force-logout / password change / deactivation) that flips ``revoked=true`` and
-bumps the epoch, committing in the window between the load and the check -- a
-window WIDENED by the bcrypt client-secret verify that sits between them -- is not
-seen: the stale attribute reads False, reuse-detection is skipped, and the grant
-re-reads ``User`` fresh (post-bump epoch), mints a NEW access JWT at the new epoch
-and inserts a fresh un-revoked refresh row. Net: after "invalidation" the holder
-still has a live access+refresh pair.
-
-Fix: a user-first ``SELECT ... FOR UPDATE`` on the owning User row in both the
-grant and the eviction paths, plus a FRESH re-read of ``row.revoked`` under the
-lock, so the two cannot interleave.
-
-Regression at the failing layer -- the refresh-grant service path, driven through
-the real ``/api/oauth/refresh`` route. The concurrent invalidation is injected
-deterministically at the bcrypt-verify seam (``_verify_client_authentication``),
-committed on a SEPARATE session so it lands exactly in the TOCTOU window.
-
-Parallel-safe: unique tenant/user per test, monkeypatch-only patching, committed
-seed rows keyed by a unique tenant_key (no shared mutable state, no ordering deps).
-"""
 
 from __future__ import annotations
 
@@ -46,7 +21,6 @@ from giljo_mcp.services.session_eviction import evict_user_tokens
 
 
 async def _seed_user(db_manager) -> tuple[str, str, str]:
-    """Create org+user (epoch 0), committed; return (user_id, username, tenant_key)."""
     from giljo_mcp.models.auth import User
     from giljo_mcp.models.organizations import Organization
     from giljo_mcp.tenant import TenantManager
@@ -79,7 +53,6 @@ async def _seed_user(db_manager) -> tuple[str, str, str]:
 
 
 def _install_confidential_resolver(client_id: str, secret_hash: str):
-    """Stub resolver recognizing one confidential client (test_sec9047 pattern)."""
     from giljo_mcp.services import oauth_service as svc
 
     prior = svc.get_client_resolver()
@@ -151,15 +124,9 @@ async def _live_refresh_rows(db_manager, *, tenant_key: str, user_id: str) -> in
 
 @pytest.mark.asyncio
 async def test_refresh_grant_loses_to_concurrent_invalidation(api_client, db_manager, monkeypatch):
-    """A session invalidation committing mid-grant (at the bcrypt-verify seam) must
-    NOT leave the holder with a surviving access+refresh pair: the grant re-reads
-    the revocation state under a user-first lock, detects the revoke, revokes the
-    family durably, and returns invalid_grant. No new live refresh row survives."""
     from giljo_mcp.services import oauth_refresh_service as _refresh_svc
 
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
-    # Disable the idempotency window so the grant does not short-circuit before the
-    # reuse-detection gate this test targets.
     monkeypatch.setattr(_refresh_svc, "OAUTH_REFRESH_IDEMPOTENCY_WINDOW_SECONDS", 0)
     clear_revocation_cache()
 
@@ -170,10 +137,6 @@ async def test_refresh_grant_loses_to_concurrent_invalidation(api_client, db_man
     secret_hash = bcrypt.hashpw(client_secret.encode("utf-8"), bcrypt.gensalt()).decode("ascii")
     restore = _install_confidential_resolver(client_id, secret_hash)
 
-    # Inject the concurrent invalidation deterministically at the bcrypt-verify
-    # seam: a SEPARATE, committed session bumps the epoch + revokes every refresh
-    # token, landing in the exact TOCTOU window between the grant's unlocked row
-    # load and its reuse-detection check.
     from giljo_mcp.models.auth import User
 
     orig_verify = OAuthService._verify_client_authentication
@@ -195,13 +158,10 @@ async def test_refresh_grant_loses_to_concurrent_invalidation(api_client, db_man
         resp = await _refresh_call(api_client, refresh_token=raw, client_id=client_id, client_secret=client_secret)
 
         assert injected["done"], "the invalidation seam must have fired mid-grant"
-        # The grant must lose: invalid_grant, no access/refresh pair minted.
         assert resp.status_code == 401, resp.text
         assert "invalid_grant" in _oauth_err_text(resp.json()).lower()
         assert "access_token" not in resp.json()
 
-        # The family ends durably revoked -- no surviving live refresh row exists
-        # for the user (neither the original nor any freshly minted rotation).
         assert await _live_refresh_rows(db_manager, tenant_key=tk, user_id=user_id) == 0
     finally:
         restore()
@@ -210,13 +170,9 @@ async def test_refresh_grant_loses_to_concurrent_invalidation(api_client, db_man
 
 @pytest.mark.asyncio
 async def test_idempotency_window_retry_still_returns_same_pair(api_client, db_manager, monkeypatch):
-    """API-0021l unregressed: the user-first lock is taken AFTER the idempotency
-    fast-path, so a same-token/same-client retry inside the window still returns
-    the SAME rotated pair (not a second rotation, not reuse-detection)."""
     from giljo_mcp.services import oauth_refresh_service as _refresh_svc
 
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
-    # A real, positive idempotency window so the retry hits the cache fast-path.
     monkeypatch.setattr(_refresh_svc, "OAUTH_REFRESH_IDEMPOTENCY_WINDOW_SECONDS", 30)
     clear_revocation_cache()
 
@@ -232,7 +188,6 @@ async def test_idempotency_window_retry_still_returns_same_pair(api_client, db_m
         first = await _refresh_call(api_client, refresh_token=raw, client_id=client_id, client_secret=client_secret)
         assert first.status_code == 200, first.text
 
-        # Retry the SAME original token inside the window: idempotency hit, same pair.
         again = await _refresh_call(api_client, refresh_token=raw, client_id=client_id, client_secret=client_secret)
         assert again.status_code == 200, again.text
         assert again.json()["refresh_token"] == first.json()["refresh_token"]

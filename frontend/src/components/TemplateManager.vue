@@ -1,6 +1,5 @@
 <template>
   <div>
-    <!-- Title (above filter bar) -->
     <div class="tab-header mb-4 d-flex align-center">
       <h2 class="text-title-large">Agent Template Manager</h2>
       <v-tooltip location="bottom" max-width="360">
@@ -12,8 +11,8 @@
         <span
           >Each active agent template consumes context tokens during orchestration. The 16-slot limit
           keeps prompt budgets manageable. 1 slot is reserved for the Orchestrator (managed in Admin
-          Settings), leaving 15 for your custom agents. Run the giljo_setup tool (choose "Agents only")
-          in your CLI tool to install or update templates.</span
+          Settings), leaving 15 for your custom agents. Agents receive their profile from the server when a
+          job starts; nothing needs installing. Use a row's menu to download any profile as Markdown.</span
         >
       </v-tooltip>
       <v-chip
@@ -27,24 +26,6 @@
       </v-chip>
     </div>
 
-    <!-- Stale templates banner -->
-    <v-alert
-      v-if="hasStaleTemplates"
-      type="warning"
-      variant="tonal"
-      density="compact"
-      class="mb-4"
-      icon="mdi-alert-circle-outline"
-    >
-      You need to update the agent templates, please run the <strong>giljo_setup</strong> tool (choose "Agents only") in your CLI tool.
-    </v-alert>
-
-    <!-- FE-9555 (operator direction 2026-09-04): the account-wide policy switches
-         moved OUT of here and into the "Agent Behaviour Settings" group ToolsView
-         renders ABOVE this roster. They never described the template roster around
-         them -- OrchestrationToggles' own docstring already said they only lived
-         here because this tab had room. -->
-    <!-- Filter bar with New Template button right-aligned -->
     <div class="filter-bar">
       <v-text-field
         v-model="search"
@@ -79,11 +60,52 @@
         hide-details
         class="filter-select"
       />
+      <v-switch
+        :model-value="showAllProducts"
+        label="All products"
+        color="primary"
+        density="compact"
+        hide-details
+        class="filter-showall"
+        data-testid="show-all-products"
+        @update:model-value="showAllProducts = $event"
+      />
+      <v-menu>
+        <template #activator="{ props: menuProps }">
+          <v-btn
+            v-bind="menuProps"
+            variant="tonal"
+            prepend-icon="mdi-playlist-check"
+            aria-label="Bulk actions for this product"
+            data-testid="product-bulk-menu"
+            :disabled="!loadedProductId || showAllProducts"
+            :loading="bulkRunning"
+          >
+            This Product
+          </v-btn>
+        </template>
+        <v-list density="compact" min-width="240">
+          <v-list-item
+            prepend-icon="mdi-check-all"
+            title="Enable all for this product"
+            data-testid="bulk-enable-product"
+            @click="setAllHere(true)"
+          />
+          <v-list-item
+            prepend-icon="mdi-close-box-multiple-outline"
+            title="Disable all for this product"
+            data-testid="bulk-disable-product"
+            @click="setAllHere(false)"
+          />
+        </v-list>
+      </v-menu>
       <v-btn
         variant="tonal"
         color="primary"
         prepend-icon="mdi-account-multiple-plus"
         aria-label="Add default agents"
+        data-testid="add-default-agents"
+        :disabled="!viewedProductId || showAllProducts"
         :loading="importingDefaults"
         @click="importDefaultAgents"
       >
@@ -93,6 +115,7 @@
         color="primary"
         prepend-icon="mdi-plus"
         aria-label="Create new template"
+        :disabled="!viewedProductId || showAllProducts"
         @click="openCreateDialog"
       >
         New Template
@@ -101,24 +124,76 @@
 
     <v-card class="template-manager smooth-border">
       <v-card-text>
-        <!-- Templates Table (presentational child) -->
-        <TemplatesTable
-          :templates="filteredTemplates"
-          :loading="loading"
-          :headers="headers"
-          :search="search"
-          :remaining-user-slots="remainingUserSlots"
-          :user-agent-limit="userAgentLimit"
-          @toggle-active="handleToggleActive"
-          @edit="editTemplate"
-          @duplicate="duplicateTemplate"
-          @reset="confirmReset"
-          @delete="confirmDelete"
-          @mark-user-managed="markUserManaged"
+        <EmptyState
+          v-if="!viewedProductId && !showAllProducts"
+          icon="mdi-package-variant-closed"
+          title="No product selected"
+          description="Agents belong to a product. Open or create a product, and it arrives with a full crew of agents you can rename, tune and switch on."
+          data-testid="empty-no-product"
         />
+
+        <EmptyState
+          v-else-if="noAgentsAtAll"
+          icon="mdi-account-multiple-outline"
+          title="No agents for this product"
+          description="This product has no agents, so a job started for it runs on whatever default agent your coding tool provides. Add the default set to get a crew you can rename, tune and switch on."
+          data-testid="empty-no-agents"
+        >
+          <v-btn
+            color="primary"
+            variant="flat"
+            prepend-icon="mdi-account-multiple-plus"
+            :loading="importingDefaults"
+            data-testid="empty-add-defaults"
+            @click="importDefaultAgents"
+          >
+            Add Default Agents
+          </v-btn>
+        </EmptyState>
+
+        <template v-else>
+          <EmptyState
+            v-if="noneActiveHere && !showAllProducts"
+            icon="mdi-toggle-switch-off-outline"
+            title="Every agent is switched off for this product"
+            description="This product has agents, but none are switched on, so a job started for it runs on whatever default agent your coding tool provides. Switch on the ones you want, or enable them all in one step."
+            compact
+            data-testid="empty-none-active"
+          >
+            <v-btn
+              color="primary"
+              variant="flat"
+              prepend-icon="mdi-check-all"
+              :loading="bulkRunning"
+              data-testid="empty-enable-all"
+              @click="setAllHere(true)"
+            >
+              Enable all for this product
+            </v-btn>
+          </EmptyState>
+
+          <TemplatesTable
+            :templates="filteredTemplates"
+            :loading="loading"
+            :assignments-loading="assignmentsLoading"
+            :headers="headers"
+            :search="search"
+            :show-all-products="showAllProducts"
+            :viewed-product-id="viewedProductId"
+            :product-name-for="productNameFor"
+            :remaining-user-slots="remainingUserSlots"
+            :user-agent-limit="userAgentLimit"
+            @toggle-active="handleToggleActive"
+            @edit="editTemplate"
+            @duplicate="duplicateTemplate"
+            @reset="confirmReset"
+            @delete="confirmDelete"
+            @download-profile="downloadProfile"
+            @clear-filters="clearFilters"
+          />
+        </template>
       </v-card-text>
 
-      <!-- Create/Edit Dialog (presentational child) -->
       <TemplateEditDialog
         v-model="editDialog"
         :template="editingTemplate"
@@ -132,7 +207,6 @@
         @update:template="onUpdateTemplate"
       />
 
-      <!-- Delete Confirmation Dialog -->
       <v-dialog v-model="deleteDialog" max-width="500px" persistent retain-focus>
         <v-card v-draggable class="smooth-border">
           <div class="dlg-header dlg-header--danger">
@@ -164,7 +238,6 @@
         </v-card>
       </v-dialog>
 
-      <!-- Reset Confirmation Dialog -->
       <v-dialog v-model="resetDialog" max-width="600px" persistent retain-focus>
         <v-card v-draggable class="smooth-border">
           <div class="dlg-header dlg-header--warning">
@@ -202,29 +275,36 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import api from '@/services/api'
 import { useToast } from '@/composables/useToast'
 import { useTemplateData } from '@/composables/useTemplateData'
 import { useProductAgentAssignments } from '@/composables/useProductAgentAssignments'
 import { useTemplateEditDialog } from '@/composables/useTemplateEditDialog'
 import { useTemplateRealtime } from '@/composables/useTemplateRealtime'
+import { useProductStore } from '@/stores/products'
 import TemplatesTable from './templates/TemplatesTable.vue'
 import TemplateEditDialog from './templates/TemplateEditDialog.vue'
+import EmptyState from './common/EmptyState.vue'
 import {
-  TEMPLATE_TABLE_HEADERS,
   TEMPLATE_ROLE_OPTIONS,
   TEMPLATE_STATUS_OPTIONS,
+  templateRowActive,
+  templateTableHeaders,
+  templateOwningProductName,
 } from './templates/templateTableConfig'
 
 const { showToast } = useToast()
 
-// Search and filters (owned here, passed into composable)
 const search = ref('')
 const filterRole = ref(null)
 const filterStatus = ref(null)
 
-// Template data composable
+const productStore = useProductStore()
+const viewedProductId = computed(() => productStore.effectiveProductId || null)
+
+const showAllProducts = ref(false)
+
 const {
   templates,
   loading,
@@ -241,16 +321,46 @@ const {
   resetEditingTemplate,
   importingDefaults,
   importDefaults,
-} = useTemplateData(search, filterRole, filterStatus)
+} = useTemplateData(search, filterRole, filterStatus, viewedProductId, showAllProducts)
 
-const { loadProductAssignments, toggleAgent } = useProductAgentAssignments(templates, loadActiveCount)
+const {
+  loadProductAssignments,
+  toggleAgent,
+  setAllForProduct,
+  loadedProductId,
+  assignmentsLoading,
+  bulkRunning,
+} = useProductAgentAssignments(templates, loadActiveCount)
 
-// BE-9394: the dialog's own state machine (open/close, dirty tracking, field updates)
-// lives in its own composable -- see useTemplateEditDialog for why.
+const productsById = computed(() =>
+  Object.fromEntries((productStore.products || []).map((p) => [p.id, p])),
+)
+const headers = computed(() =>
+  templateTableHeaders({ showAllProducts: showAllProducts.value, productsById: productsById.value }),
+)
+
+const noAgentsAtAll = computed(
+  () => !loading.value && !!viewedProductId.value && templates.value.length === 0,
+)
+const noneActiveHere = computed(
+  () =>
+    !loading.value &&
+    !assignmentsLoading.value &&
+    templates.value.length > 0 &&
+    !templates.value.some((t) => templateRowActive(t)),
+)
+
+const productNameFor = (template) => templateOwningProductName(template, productsById.value)
+
+const clearFilters = () => {
+  search.value = ''
+  filterRole.value = null
+  filterStatus.value = null
+}
+
 const {
   editDialog,
   hasChanges,
-  retireChanged,
   openCreateDialog,
   editTemplate,
   duplicateTemplate,
@@ -259,43 +369,82 @@ const {
   onUpdateTemplate,
 } = useTemplateEditDialog(editingTemplate, resetEditingTemplate)
 
-const hasStaleTemplates = computed(() => templates.value.some((t) => t.may_be_stale && !t.user_managed_export))
-
-// Dialog loading states
 const saving = ref(false)
 const deleting = ref(false)
 const resetting = ref(false)
 
-// Dialogs (editDialog is owned by useTemplateEditDialog)
 const deleteDialog = ref(false)
 const resetDialog = ref(false)
 
-// Template being deleted / reset
 const deletingTemplate = ref(null)
 const resettingTemplate = ref(null)
 
-// Table/filter configuration lives in templateTableConfig.js. Re-bound locally
-// because the template and the characterization spec both read these names.
-const headers = TEMPLATE_TABLE_HEADERS
 const roleOptions = TEMPLATE_ROLE_OPTIONS
 const statusOptions = TEMPLATE_STATUS_OPTIONS
 
-// Handover 0075 + BE-9385a: the switch writes the PER-PRODUCT junction (see
-// useProductAgentAssignments); tenant `is_active` is the retire switch in the dialog.
 const handleToggleActive = async (template, newValue) => {
   try {
-    const at = (await toggleAgent(template, newValue)) ? ' for this product' : ''
+    if (!(await toggleAgent(template, newValue))) {
+      showToast({ message: 'Pick a product tab first - agents belong to a product.', type: 'info' })
+      return
+    }
     showToast({
-      message: newValue ? `Agent enabled${at} - re-export required` : `Agent disabled${at}`,
+      message: newValue
+        ? 'Agent enabled for this product'
+        : 'Agent disabled for this product',
       type: newValue ? 'warning' : 'info' })
     localStorage.setItem('agent_export_stale', 'true')
   } catch (error) {
-    showToast({ message: error.response?.data?.detail || 'Failed to update agent', type: 'error' })
+    const overBudget = error.response?.status === 409
+    showToast({
+      message:
+        error.response?.data?.detail ||
+        (overBudget ? 'This product is at its agent limit.' : 'Failed to update agent'),
+      type: overBudget ? 'warning' : 'error',
+      title: overBudget ? 'Agent limit reached' : 'Error',
+    })
     await reloadTemplates()
   }
 }
 
-// FE-9203: "Add default agents" — additive import; the server guards repeat clicks (skip-identical).
+const setAllHere = async (isActive) => {
+  const { changed, failed, overBudget } = await setAllForProduct(isActive)
+  await reloadTemplates()
+  await reloadActiveCount()
+
+  if (overBudget.length) {
+    showToast({
+      message: `${overBudget.length} more would exceed this product's limit of ${userAgentLimit.value} agent roles. Switch a role off first: ${overBudget.join(', ')}`,
+      type: 'warning',
+      title: 'Agent limit reached',
+    })
+  }
+  if (failed.length) {
+    showToast({
+      message: `${failed.length} agent${failed.length === 1 ? '' : 's'} could not be updated: ${failed.join(', ')}`,
+      type: 'error',
+      title: 'Partly applied',
+    })
+  }
+  if (!changed) {
+    if (!failed.length && !overBudget.length) {
+      showToast({
+        message: isActive
+          ? 'Every agent was already enabled for this product'
+          : 'Every agent was already disabled for this product',
+        type: 'info',
+      })
+    }
+    return
+  }
+  const n = `${changed} agent${changed === 1 ? '' : 's'}`
+  showToast({
+    message: isActive ? `Enabled ${n} for this product` : `Disabled ${n} for this product`,
+    type: isActive ? 'warning' : 'info',
+  })
+  localStorage.setItem('agent_export_stale', 'true')
+}
+
 const importDefaultAgents = async () => {
   try {
     const summary = await importDefaults()
@@ -311,9 +460,18 @@ const importDefaultAgents = async () => {
 }
 
 const saveTemplate = async () => {
+  const owner = viewedProductId.value
+  if (!editingTemplate.value.id && !owner) {
+    showToast({
+      message: 'Pick a product tab first - a new agent belongs to the product you create it in.',
+      type: 'warning',
+    })
+    return
+  }
   saving.value = true
   try {
     const data = {
+      product_id: owner,
       name: generatedName.value || editingTemplate.value.role,
       category: 'role',
       role: editingTemplate.value.role || null,
@@ -322,13 +480,13 @@ const saveTemplate = async () => {
       background_color: editingTemplate.value.background_color,
       description: editingTemplate.value.description,
       user_instructions: editingTemplate.value.user_instructions,
-      model: editingTemplate.value.model || null,
+      model: editingTemplate.value.model || 'inherit',
+      effort: editingTemplate.value.effort || 'inherit',
       tools: editingTemplate.value.tools,
       behavioral_rules: editingTemplate.value.behavioral_rules || [],
       success_criteria: editingTemplate.value.success_criteria || [],
       tags: editingTemplate.value.tags || [],
       is_default: editingTemplate.value.is_default || false,
-      is_active: true, // BE-9391: born active — create is the only path that assumes it.
     }
 
     if (editingTemplate.value.id) {
@@ -340,14 +498,12 @@ const saveTemplate = async () => {
         user_instructions: data.user_instructions,
         description: data.description,
         model: data.model,
+        effort: data.effort,
         tools: data.tools,
         behavioral_rules: data.behavioral_rules,
         success_criteria: data.success_criteria,
         tags: data.tags,
         is_default: data.is_default,
-        // BE-9394: the tenant-wide retire switch, sent ONLY when the user moved it.
-        // An ordinary edit must never carry this field -- see retireChanged.
-        ...(retireChanged.value ? { is_active: editingTemplate.value.is_active } : {}),
       })
     } else {
       await api.templates.create(data)
@@ -410,28 +566,21 @@ const resetTemplate = async () => {
   }
 }
 
-const markUserManaged = async (template) => {
-  try {
-    await api.templates.update(template.id, { user_managed_export: true })
-    template.user_managed_export = true
-    template.may_be_stale = false
-    showToast({ message: 'Template marked as user managed', type: 'success' })
-  } catch (error) {
-    console.error('Failed to mark template:', error)
-    showToast({ message: 'Failed to update template', type: 'error' })
-  }
+const downloadProfile = (template) => {
+  window.open(api.templates.profileDownloadUrl(template.id), '_blank')
 }
 
-// Tenant-scoped template queries; BE-9385a overlays the per-product state on top.
 const reloadTemplates = async () => (await loadTemplates(), loadProductAssignments())
 const reloadActiveCount = () => loadActiveCount()
 
-// Export/update/download signals from the event router and the parent view.
-// Self-wiring: registers and tears down its own window listeners.
 useTemplateRealtime(templates, reloadActiveCount)
 
-// Lifecycle
 onMounted(() => {
+  reloadTemplates()
+  reloadActiveCount()
+})
+
+watch([() => productStore.effectiveProductId, showAllProducts], () => {
   reloadTemplates()
   reloadActiveCount()
 })

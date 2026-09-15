@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-9227i (L5 audit follow-up) — the /token exception-log sinks must sanitize.
-
-The independent audit caught a real CWE-117 that the first L5 sweep missed: the
-/token handler NEVER passes ``redirect_uri`` (or ``client_id``) through
-``_enforce_oauth_field_caps``, so an authenticated user with a valid code can POST
-a CRLF-injected ``redirect_uri`` that mismatches the code's registered value. The
-service raises ``redirect_uri mismatch: ... got '<CRLF>'`` and the catch-all
-``logger.warning("OAuth token exchange failed: %s", exc)`` logs the RAW exception
-— injecting a forged line into the log.
-
-The lesson the audit named: a DIRECT ``_enforce_oauth_field_caps(redirect_uri=...)``
-unit test proves nothing about the WIRED call site (which never passes
-redirect_uri to it). So this repro drives the real ``POST /api/oauth/token`` route
-and observes the log record. The fix sanitizes ``str(exc)`` at every oauth
-exception-log sink.
-
-Parallel-safe: unique tenant/user/code per test, committed seed rows,
-monkeypatch-only, no shared mutable state.
-"""
 
 from __future__ import annotations
 
@@ -43,8 +24,6 @@ from giljo_mcp.tenant import TenantManager
 
 
 _REGISTERED_REDIRECT = "http://localhost:3000/callback"
-# A different redirect_uri than the one bound to the code, carrying a CRLF so a
-# raw log write would forge a new line. Built with explicit escapes (ASCII source).
 _CRLF_REDIRECT = "http://evil.example\r\nINJECTED-TOKEN-LOG-LINE/callback"
 
 
@@ -100,20 +79,12 @@ async def _seed_code(db_manager, *, user_id: str, tenant_key: str, challenge: st
     return code_value
 
 
-# The builtin client is a CE concept; the SaaS OAuth resolver resolves clients by
-# UUID (DCR-issued), so BUILTIN_CLIENT_ID cannot resolve there — the same reason
-# the sec9227b /token tests only run in CE. The exc-sink fix in oauth.py is itself
-# edition-agnostic; this route repro is CE-only.
 @pytest.mark.skipif(
     os.environ.get("GILJO_MODE") == "saas",
     reason="CE /token builtin-client path; SaaS resolver requires UUID client_ids",
 )
 @pytest.mark.asyncio
 async def test_token_exc_log_sanitizes_crlf_redirect_uri(api_client, db_manager, monkeypatch, caplog):
-    """FAIL-FIRST at the WIRED /token route: a valid code + a CRLF redirect_uri
-    that mismatches the bound value -> the catch-all exc log. Pre-fix the raw
-    CRLF reaches the log line; post-fix sanitize(str(exc)) at the sink strips it.
-    """
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     user_id, tk = await _seed_user(db_manager)
     verifier, challenge = _generate_pkce_pair()
@@ -135,7 +106,6 @@ async def test_token_exc_log_sanitizes_crlf_redirect_uri(api_client, db_manager,
     records = [r for r in caplog.records if "OAuth token" in r.getMessage()]
     assert records, "expected a /token exception log record"
     joined = "\n".join(r.getMessage() for r in records)
-    # The forged marker is logged (the value IS observed) but WITHOUT a raw line break.
     assert "INJECTED-TOKEN-LOG-LINE" in joined, "the redirect_uri value should still appear (sanitized)"
     assert "\r" not in joined, "raw carriage return (CRLF redirect_uri) reached the /token exc log"
     assert "\n" not in "".join(r.getMessage() for r in records), "raw newline reached the /token exc log"

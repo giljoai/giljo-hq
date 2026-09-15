@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""(b) Health endpoint returns 200 through the full edge path.
-
-``GET /health`` is the unauthenticated liveness probe (also Railway's
-healthcheck path). Reaching it 200 over the live edge proves the proxy chain
-forwards plain HTTP GETs to uvicorn and the app booted.
-"""
 
 from __future__ import annotations
 
@@ -21,8 +15,5 @@ def test_health_endpoint_ok(http_client):
     assert resp.status_code == 200, resp.text
 
     body = resp.json()
-    # Shape per api/wiring/events.py health_check(): {"status": ..., "checks": {...}}.
-    # "degraded" is tolerated (e.g. a transient DB blip) — this test asserts
-    # reachability + contract shape, not deep subsystem health.
     assert body.get("status") in {"healthy", "degraded"}, body
     assert isinstance(body.get("checks"), dict), body

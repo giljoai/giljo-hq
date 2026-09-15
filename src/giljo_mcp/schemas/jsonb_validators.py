@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Pydantic validation models for remaining JSONB columns.
-
-These models enforce schema consistency at write time for JSONB columns
-that intentionally remain as flexible storage.
-
-Created: Handover 0840f
-Updated: Handover 0962c — added AgentExecutionResult, template
-    validators; fixed ProductMemoryConfig field names; removed stale todo_steps from
-    AgentJobMetadata.
-Updated: Sprint 002d — removed 6 dead validators + CloseoutChecklistItem.
-Updated: BE-8000j — removed 4 dead validator models (AgentTemplateMetadata,
-    MemoryEntryMetrics, SetupValidationEntry, MCPSessionData) + validate_job_metadata;
-    their JSONB columns are never populated in current code, so they validated nothing.
-Updated: BE-9000h — rewrote AgentJobMetadata to the ACTUAL job_metadata key
-    inventory (field_toggles/depth_config/user_id/tool/chain_conductor/run_id/
-    created_via/created_at/todo_steps) + added validate_agent_job_metadata, now
-    called at every job_metadata write boundary; length-caps the agent-supplied
-    strings (user_id, tool, todo_steps.current_step).
-"""
 
 from __future__ import annotations
 
@@ -30,9 +11,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# Notification.payload & system-banner payload schemas were extracted to a
-# sibling module (INF-6132) to keep this file under the 800-line guardrail.
-# Re-exported here so existing imports keep working unchanged.
 from giljo_mcp.schemas.jsonb_notification_payloads import (  # noqa: F401
     NOTIFICATION_PAYLOAD_VALIDATORS,
     ApiKeyExpiringSoonPayload,
@@ -44,9 +22,6 @@ from giljo_mcp.schemas.jsonb_notification_payloads import (  # noqa: F401
     validate_notification_payload,
 )
 
-# SequenceRun (sequence_runs) JSONB columns were extracted to a sibling module
-# (BE-9540 cleanup) to keep this file under the 800-line guardrail. Re-exported
-# here so existing imports keep working unchanged.
 from giljo_mcp.schemas.jsonb_validators_sequence_runs import (  # noqa: F401
     VALID_REVIEWED_VIA,
     SequenceRunProjectIds,
@@ -59,9 +34,6 @@ from giljo_mcp.schemas.jsonb_validators_sequence_runs import (  # noqa: F401
     validate_sequence_run_reviewed_via,
 )
 
-# Settings.settings_data category-specific schemas were extracted to a
-# sibling module (BE-9040 cleanup) to keep this file under the 800-line
-# guardrail. Re-exported here so existing imports keep working unchanged.
 from giljo_mcp.schemas.jsonb_validators_settings import (  # noqa: F401
     SETTINGS_CATEGORY_VALIDATORS,
     GitIntegrationSettings,
@@ -73,11 +45,7 @@ from giljo_mcp.schemas.jsonb_validators_settings import (  # noqa: F401
 )
 
 
-# --- AgentJob.job_metadata ---
 
-# Cap agent/boundary-supplied strings so a runaway or malicious agent cannot
-# store an unbounded blob in the job_metadata JSONB (no-unvalidated-agent-input
-# rule). Generous headroom over any legitimate value.
 _JOB_METADATA_CURRENT_STEP_MAX = 2000
 _JOB_METADATA_STR_MAX = 200
 
@@ -125,17 +93,6 @@ class AgentJobMetadata(BaseModel):
 
 
 def validate_agent_job_metadata(data: dict | None) -> dict | None:
-    """Validate agent_jobs.job_metadata at every write boundary (BE-9000h).
-
-    Type-checks the known orchestration keys and length-caps the
-    agent/boundary-supplied strings (``user_id``, ``tool`` and
-    ``todo_steps.current_step``). ``extra="allow"`` means ad-hoc server-built
-    keys pass through untouched; the ORIGINAL payload is returned unchanged on
-    success (no reshaping, no null-padding of absent keys). Raises
-    ``pydantic.ValidationError`` when a known field is the wrong type or an
-    agent-supplied string exceeds its cap, which the service boundary surfaces
-    as a clean rejection rather than letting a malformed blob reach the column.
-    """
     if data is None:
         return None
     if not isinstance(data, dict):
@@ -144,7 +101,6 @@ def validate_agent_job_metadata(data: dict | None) -> dict | None:
     return data
 
 
-# --- ProductMemoryEntry arrays ---
 
 
 class GitCommitEntry(BaseModel):
@@ -169,13 +125,11 @@ class GitCommitEntry(BaseModel):
     @field_validator("files_changed", "lines_added", mode="before")
     @classmethod
     def _none_to_zero(cls, v: int | None) -> int:
-        """Normalize missing/None optional integer counts to 0."""
         if v is None:
             return 0
         return v
 
 
-# --- Organization.settings ---
 
 
 class OrganizationSettings(BaseModel):
@@ -189,13 +143,8 @@ class OrganizationSettings(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-# --- AgentExecution.result ---
 
 
-# Caps for the two web-coding hand-off fields (BE-8003j). A git branch ref is
-# bounded well under 255 chars; a PR URL matches the 2048 cap used for redirect
-# URIs. Both are agent-supplied via complete_job(result=...), so they carry the
-# no-unvalidated-agent-input cap.
 _EXEC_RESULT_BRANCH_MAX = 255
 _EXEC_RESULT_PR_URL_MAX = 2048
 
@@ -225,24 +174,10 @@ class AgentExecutionResult(BaseModel):
 
 
 def validate_agent_execution_result(data: dict) -> dict:
-    """Validate agent_executions.result at the complete_job write boundary (BE-3006d).
-
-    The agent-supplied ``result`` dict from complete_job() lands in the
-    ``agent_executions.result`` JSONB column. ``AgentExecutionResult`` is
-    ``extra="allow"`` — the blob is genuinely extensible (callers also pass
-    ``files_changed`` / ``decisions_made`` and other ad-hoc keys) — so this gate
-    only type-checks the known fields (``summary`` / ``artifacts`` / ``commits`` /
-    ``branch`` / ``pr_url``) and returns the ORIGINAL payload unchanged on success
-    (no reshaping, no dropped extras). Raises ``pydantic.ValidationError`` when a
-    known field is the wrong type or an agent-supplied string exceeds its cap,
-    which the MCP boundary surfaces as a clean 422-style error rather than letting
-    a malformed blob reach the column.
-    """
     AgentExecutionResult(**data)
     return data
 
 
-# --- Product.product_memory ---
 
 
 class ProductMemoryConfig(BaseModel):
@@ -259,7 +194,6 @@ class ProductMemoryConfig(BaseModel):
     context: dict | None = None
 
 
-# --- Product.tuning_state ---
 
 
 class ProductTuningState(BaseModel):
@@ -271,14 +205,13 @@ class ProductTuningState(BaseModel):
     last_tuned_at_sequence: int | None = None
 
 
-# --- User.setup_selected_tools ---
 
 
 class SetupSelectedTools(BaseModel):
     """Validates users.setup_selected_tools JSONB.
 
     List of AI coding tool names selected during setup wizard.
-    Known values: claude, codex, gemini, etc.
+    Known values: claude_code, codex_cli, opencode, generic; retired tool ids are tolerated.
     """
 
     items: list[str] = Field(default_factory=list, max_length=50)
@@ -292,13 +225,8 @@ class SetupSelectedTools(BaseModel):
         return v
 
 
-# --- User.notification_preferences ---
 
 
-# FE-9553: the popout scope control can only ever answer "how much of the
-# banner do I project" -- there is deliberately no independent category matrix,
-# which is what stops the settings grid growing back. Declared as a tuple so
-# the validator and the reader cannot drift apart.
 POPOUT_SCOPE_ALL = "all"
 POPOUT_SCOPE_ACTIONABLE = "actionable"
 POPOUT_SCOPE_OFF = "off"
@@ -323,16 +251,11 @@ class NotificationPreferences(BaseModel):
     context_tuning_reminder: bool = True
     tuning_reminder_threshold: int = Field(default=10, ge=3, le=1000)
 
-    # Decisions, your-turn and mentions are deliberately NOT represented here.
-    # They are always-on by ruling -- a settings menu must never unplug the
-    # doorbell for decisions the system blocks on -- so the settings card states
-    # that in text rather than offering a switch that must never be flipped.
     banner_lifecycle_enabled: bool = True
     banner_advisories_in_fold: bool = True
     popout_scope: Literal["all", "actionable", "off"] = POPOUT_SCOPE_ALL
 
 
-# --- APIKey.permissions ---
 
 
 class APIKeyPermissions(BaseModel):
@@ -352,7 +275,6 @@ class APIKeyPermissions(BaseModel):
         return v
 
 
-# --- OAuthClient.redirect_uris (SaaS, API-0021c) ---
 
 
 class OAuthClientRedirectUris(BaseModel):
@@ -378,7 +300,6 @@ class OAuthClientRedirectUris(BaseModel):
         return v
 
 
-# --- MCPContextIndex.keywords ---
 
 
 class ContextIndexKeywords(BaseModel):
@@ -398,20 +319,12 @@ class ContextIndexKeywords(BaseModel):
         return v
 
 
-# --- Convenience validators ---
 
 
 GIT_LOG_TITLED_COMMAND_HINT = "git log --format='%H%x09%s%x09%an' <base>..HEAD"
 
 
 class GitCommitTitleRequiredError(ValueError):
-    """Raised by validate_git_commits when a commit entry has no title.
-
-    BE-9256: a title-less SHA-only string (or empty message/subject) was
-    previously normalized to ``{"sha": ..., "message": ""}``, rendering a
-    blank title on every UI surface. Fails closed instead, with the exact
-    command to self-correct.
-    """
 
     def __init__(self, offending: object):
         self.offending = offending
@@ -425,10 +338,6 @@ class GitCommitTitleRequiredError(ValueError):
 
 
 def _parse_porcelain_commit_line(line: str) -> dict[str, str]:
-    """Parse one ``<sha>\\t<subject>\\t<author>`` porcelain line (author optional).
-
-    Matches the output of ``git log --format='%H%x09%s%x09%an'``.
-    """
     parts = line.split("\t")
     sha = parts[0].strip() if parts else ""
     message = parts[1].strip() if len(parts) > 1 else ""
@@ -440,25 +349,13 @@ def _parse_porcelain_commit_line(line: str) -> dict[str, str]:
 
 
 def validate_git_commits(data: list | None) -> list | None:
-    """Validate git_commits array (BE-9256: fail closed on a missing commit title).
-
-    Each entry must be EITHER a dict ``{"sha", "message", "author"?, "pr_url"?,
-    ...}`` with a non-empty ``message``, OR a tab-delimited porcelain string
-    ``"<sha>\\t<subject>\\t<author>"`` (author optional), parsed into that dict
-    shape. A plain SHA-only string (no tabs) or any empty title raises
-    ``GitCommitTitleRequiredError`` (BE-6208a used to silently normalize such
-    a string to an empty-titled entry -- fixed here). Empty list / ``None``
-    stays valid (the non-git-repo escape hatch is untouched).
-    """
     if data is None:
         return None
     normalized: list = []
     for entry in data:
         if isinstance(entry, str):
-            # rstrip \r\n only -- a full .strip() let a leading tab (empty sha) through (BE-9256 #2).
             raw = entry.rstrip("\r\n")
             if "\t" not in raw:
-                # Plain SHA-only string (no tabs) -- the exact pre-BE-9256 empty-title shape.
                 raise GitCommitTitleRequiredError(entry)
             parsed = _parse_porcelain_commit_line(raw)
             if not parsed.get("sha") or not parsed.get("message"):
@@ -475,21 +372,18 @@ def validate_git_commits(data: list | None) -> list | None:
 
 
 def validate_product_memory(data: dict | None) -> dict | None:
-    """Validate product_memory dict."""
     if data is None:
         return None
     return ProductMemoryConfig(**data).model_dump(exclude_none=False)
 
 
 def validate_tuning_state(data: dict | None) -> dict | None:
-    """Validate tuning_state dict."""
     if data is None:
         return None
     return ProductTuningState(**data).model_dump(exclude_none=False)
 
 
 def validate_behavioral_rules(data: list | None) -> list | None:
-    """Validate agent_templates.behavioral_rules — must be a list of strings."""
     if data is None:
         return None
     validated = []
@@ -501,7 +395,6 @@ def validate_behavioral_rules(data: list | None) -> list | None:
 
 
 def validate_success_criteria(data: list | None) -> list | None:
-    """Validate agent_templates.success_criteria — must be a list of strings."""
     if data is None:
         return None
     validated = []
@@ -512,7 +405,6 @@ def validate_success_criteria(data: list | None) -> list | None:
     return validated
 
 
-# --- UserApproval JSONB columns (BE-5029 Phase A) ---
 
 
 class UserApprovalOption(BaseModel):
@@ -525,10 +417,6 @@ class UserApprovalOption(BaseModel):
 
 
 def validate_user_approval_options(data: list[dict]) -> list[dict]:
-    """Validate user_approvals.options at the service write boundary.
-
-    Raises pydantic.ValidationError on shape mismatch and ValueError on duplicate ids.
-    """
     if not isinstance(data, list) or not data:
         raise ValueError("options must be a non-empty list")
     validated = [UserApprovalOption(**opt).model_dump() for opt in data]
@@ -539,17 +427,10 @@ def validate_user_approval_options(data: list[dict]) -> list[dict]:
 
 
 def validate_user_approval_context(data: dict | None) -> dict | None:
-    """Validate user_approvals.context at the service write boundary.
-
-    Context is intentionally extensible (deferred-findings payloads vary), but
-    must be a JSON-serializable dict (or None) and must not exceed a soft size cap.
-    """
     if data is None:
         return None
     if not isinstance(data, dict):
         raise TypeError("context must be a dict or None")
-    # Soft cap: keep context payloads small enough that JSONB indexes stay healthy.
-    # 16 KB serialized is generous for any realistic deferred-findings list.
     import json
 
     serialized = json.dumps(data)
@@ -558,44 +439,33 @@ def validate_user_approval_context(data: dict | None) -> dict | None:
     return data
 
 
-# --- New convenience validators (sprint 002) ---
 
 
 def validate_setup_selected_tools(data: list | None) -> list | None:
-    """Validate User.setup_selected_tools — list of tool name strings."""
     if data is None:
         return None
     return SetupSelectedTools(items=data).items
 
 
 def validate_notification_preferences(data: dict | None) -> dict | None:
-    """Validate User.notification_preferences dict."""
     if data is None:
         return None
     return NotificationPreferences(**data).model_dump()
 
 
 def validate_api_key_permissions(data: list | None) -> list | None:
-    """Validate APIKey.permissions — list of permission strings."""
     if data is None:
         return None
     return APIKeyPermissions(items=data).items
 
 
 def validate_context_keywords(data: list | None) -> list | None:
-    """Validate MCPContextIndex.keywords — list of keyword strings."""
     if data is None:
         return None
     return ContextIndexKeywords(items=data).items
 
 
 def validate_oauth_client_redirect_uris(data: list) -> list[str]:
-    """Validate OAuthClient.redirect_uris — list of registered URIs.
-
-    Required (non-empty) per RFC 7591 §2; max 10 entries to keep storage
-    bounded. Scheme/host policy is enforced separately at the service
-    layer where dev-vs-prod posture (allow http://localhost) is known.
-    """
     return OAuthClientRedirectUris(items=data).items
 
 
@@ -605,24 +475,6 @@ def validate_string_list(
     max_items: int = 1000,
     max_length: int = 5000,
 ) -> list | None:
-    """Generic validator for JSONB columns storing list[str].
-
-    Used for ProductMemoryEntry list columns: key_outcomes, decisions_made,
-    deliverables, tags.
-
-    Args:
-        data: List to validate, or None.
-        field_name: Column name for error messages.
-        max_items: Maximum number of items allowed.
-        max_length: Maximum character length per item.
-
-    Returns:
-        Validated list or None.
-
-    Raises:
-        TypeError: If any item is not a string.
-        ValueError: If list exceeds max_items or item exceeds max_length.
-    """
     if data is None:
         return None
     if len(data) > max_items:
@@ -637,12 +489,7 @@ def validate_string_list(
     return validated
 
 
-# --- update_product_context MCP tool payloads (BE-5117) ---
 
-# Runaway-agent tripline, NOT a product limit. Ingest auto-chunks documents and
-# delivery paginates summaries, so legitimate light/medium summaries can exceed
-# 50K chars; the only job of this bound is to stop a broken agent from OOMing
-# Postgres TOAST with an unbounded blob.
 _VISION_SUMMARY_MAX_CHARS = 500_000
 
 
@@ -682,12 +529,6 @@ class ConsolidatedVisionPayload(BaseModel):
 
 
 def validate_vision_summaries(data: list | None) -> list[dict] | None:
-    """Validate update_product_context(vision_summaries=[...]) input.
-
-    Returns None for None input. Otherwise returns a list of dicts with
-    keys {doc_id, light, medium}. Raises pydantic.ValidationError or
-    ValueError on shape mismatch / length cap / duplicate doc_id.
-    """
     if data is None:
         return None
     if not isinstance(data, list):
@@ -702,7 +543,6 @@ def validate_vision_summaries(data: list | None) -> list[dict] | None:
 
 
 def validate_consolidated_vision(data: dict | None) -> dict | None:
-    """Validate update_product_context(consolidated_vision={...}) input."""
     if data is None:
         return None
     if not isinstance(data, dict):
@@ -710,12 +550,8 @@ def validate_consolidated_vision(data: dict | None) -> dict | None:
     return ConsolidatedVisionPayload(**data).model_dump()
 
 
-# --- SequenceRun JSONB columns (BE-6131a) ---
-# Extracted to jsonb_validators_sequence_runs.py (BE-9540 cleanup, 800-line
-# guardrail) — see the re-export block near the top of this file.
 
 
-# --- AccountDeletionRequest.billing_cancel_response (SEC-5105b / BE-5108) ---
 
 
 class ProviderCancelResponse(BaseModel):
@@ -740,7 +576,6 @@ class ProviderCancelResponse(BaseModel):
     already_canceled: bool = False
 
 
-# --- DeletionReceipt.storage_object_key_sha256s (BE-9040 fix, reviewer WARN) ---
 class DeletionReceiptStorageKeyHashes(BaseModel):
     """SHA-256 hex digests of purged backup-bucket keys; raw keys never persisted."""
 

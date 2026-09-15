@@ -2,13 +2,6 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-// FE-9339 — the inline cert-trust entry point on the connect card.
-//
-// A CE self-hoster running HTTPS pastes the connect command, their AI tool refuses
-// on a certificate error, and the fix used to live only on Tools > Startup. This
-// card is where they are standing when it fails, so it now offers the same modal
-// inline. The link is gated twice, and the SaaS gate is the one that would embarrass
-// us if it leaked: a hosted tenant has no server certificate to trust.
 
 const fetchConfig = vi.fn()
 vi.mock('@/services/configService', () => ({
@@ -45,10 +38,6 @@ const globalStubs = {
   },
 }
 
-// jsdom serves the page from http://localhost:3000, so a config whose host matches
-// resolves through buildServerUrl()'s same-host branch to window.location.origin
-// (http) — that is the localhost default a self-hoster starts on. A different host
-// with protocol https takes the out-of-band branch and composes an https URL.
 const HTTP_API = { host: 'localhost', port: '7272', protocol: 'http', ssl_enabled: false }
 const HTTPS_API = { host: 'giljo.example.com', port: 443, protocol: 'https', ssl_enabled: true }
 
@@ -80,7 +69,6 @@ describe('ConnectToolCard — FE-9339 inline cert-trust link', () => {
     expect(wrapper.find('[data-testid="server-url-field"]').text()).toContain('https://')
     const link = wrapper.find('[data-testid="cert-trust-link"]')
     expect(link.exists()).toBe(true)
-    // Copy leads with the symptom — the user does not yet know "certificate" is their problem.
     expect(link.text()).toContain('Tool rejecting the connection?')
   })
 
@@ -118,11 +106,6 @@ describe('ConnectToolCard — FE-9339 inline cert-trust link', () => {
   })
 })
 
-// FE-9383 — the same CE-over-HTTPS moment, named before it happens. A Node-based CLI
-// answers an untrusted certificate with a TLS verification error, which reads as "the
-// command is wrong" and sends the user back to re-copy a command that was already
-// correct. The note says what actually failed and points at the trust store; product
-// copy must never offer "turn verification off" as the way out.
 describe('ConnectToolCard — FE-9383 Node/TLS note', () => {
   it('CE + https: states the failure in terms of Node clients and the trust store', async () => {
     const wrapper = await mountCard({ mode: 'ce', api: HTTPS_API, toolId: 'opencode' })

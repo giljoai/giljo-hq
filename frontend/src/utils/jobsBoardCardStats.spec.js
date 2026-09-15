@@ -1,13 +1,3 @@
-/**
- * jobsBoardCardStats.spec.js — FE-9548
- *
- * Pure unit tests for the Jobs board card's aggregate stat strip + meta
- * line arithmetic. Fixture numbers mirror the v4 mock's own BE-6174 example
- * card (steps 7/12, agents 3, waiting 1, duration 41m) so a regression here
- * would also fail the visual comparison against the mock.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect } from 'vitest'
 import { aggregateSteps, aggregateWaiting, projectDurationSeconds, jobsBoardMetaLine } from './jobsBoardCardStats'
 import { JOBS_SECTION_LABELS } from './jobsSectionLabel'
@@ -55,7 +45,7 @@ describe('projectDurationSeconds', () => {
 
   it('freezes at completed_at once the project is done (Review)', () => {
     const launched = '2026-08-30T22:29:00Z'
-    const completed = '2026-08-30T23:41:00Z' // 1h12m later
+    const completed = '2026-08-30T23:41:00Z'
     const farFuture = Date.parse(completed) + 999_000
     expect(
       projectDurationSeconds({ implementation_launched_at: launched, completed_at: completed }, farFuture),
@@ -98,11 +88,6 @@ describe('jobsBoardMetaLine', () => {
     expect(line.startsWith('completed ')).toBe(true)
   })
 
-  // FE-9551 REGRESSION: Activated/Planning are new pre-launch states with no
-  // implementation_launched_at -- without an explicit branch they fell into
-  // the default "launched/elapsed" text, which rendered the nonsensical
-  // "--- elapsed" (formatDurationSeconds(null) === '---') for a project that
-  // has never launched.
   it('Planning: does not fall into the launched/elapsed default', () => {
     const line = jobsBoardMetaLine({}, JOBS_SECTION_LABELS.PLANNING, Date.now())
     expect(line).not.toContain('---')

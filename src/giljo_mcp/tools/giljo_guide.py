@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""GiljoAI cross-tool guide -- the single discoverable "recipe" surface.
-
-INF-6049a: this is the judgment layer that used to live across the per-platform
-slash commands (gil_add / gil_get / gil_chain / gil_get_reference). The slash
-fleet was collapsed to one thin ``/giljo`` command whose body is "call
-``get_giljo_guide`` (bare) and follow it." The content here is consolidated
-verbatim-in-spirit from those slash bodies -- it is NOT new policy.
-
-Static, tenant-independent text: no DB, no tenant_key, no active product needed
-to READ the guide (the recipes it describes do require an active product).
-"""
 
 from __future__ import annotations
 
@@ -22,10 +11,6 @@ from typing import Any
 from giljo_mcp.branding import PRODUCT_NAME
 
 
-# Kept under ~1-2k tokens on purpose: a fresh agent (no CLAUDE.md, no skills)
-# reads this once to become competent at the project/task tool surface.
-# BE-9543: product naming derives from branding.py (not hand-copied) so a future
-# rename changes one constant instead of a hunt through this string.
 _GUIDE_TEMPLATE = """\
 # {product_name} -- how to drive the project/task tools
 
@@ -188,6 +173,13 @@ SaaS = hosted/billing/multi-org; Both = ships identically to each.
   `list_tasks`) fall back to the default product when `product_id` is omitted, and
   never refuse -- pass `product_id` explicitly when you mean a different one.
 - On success, the dashboard updates live via WebSocket -- do NOT fabricate a URL.
+- **Status vocabulary** (the only values the update tools accept):
+
+  | Entity  | Values |
+  |---------|--------|
+  | project | `active` `inactive` `parked` `completed` `cancelled` `superseded` (`terminated`/`deleted` are set by the system, never passed) |
+  | task    | `pending` `in_progress` `blocked` `completed` `cancelled` |
+  | thread  | `open` `active` `resolved` `closed` |
 
 ## 6. Lifecycle (orchestrated work)
 create project -> stage it -> **stop at the human gate** (a human authorizes: the
@@ -199,7 +191,7 @@ Drive it with these tools:
   is EXECUTION STYLE ONLY -- 'subagent' (one orchestrator session drives worker agents
   in-session) or 'multi_terminal' (a fresh terminal per agent). Do NOT ask the user which
   coding tool/harness they're running -- that is auto-detected server-side from your MCP
-  client, never a `mode` choice. ('claude'/'codex'/'gemini'/'antigravity' still work as
+  client, never a `mode` choice. ('claude'/'codex' still work as
   legacy aliases for older callers, but are not the intended values -- pass 'subagent' or
   'multi_terminal'.) Returns the orchestrator staging prompt. When it returns, **STOP**:
   staging never auto-executes. Tell the user to review the staged plan in the dashboard
@@ -212,6 +204,13 @@ Drive it with these tools:
 - `launch_implementation(project_id, mission)` -- records the user's goal and their
   explicit authorization in one call, then opens the implementation gate. Requires human
   authorization at call time. Idempotent.
+
+**Workers get their role from the server, not from your disk.** Every spawned agent's
+`get_job_mission` response carries an `agent_profile` (role, description, harness,
+model/effort, instructions, rules, success criteria) in every execution mode -- that IS
+its role. Do NOT look for, install, or refresh agent template files; there are none.
+A template may name a preferred `model`/`effort`; `inherit` means the same as the
+orchestrator, and a harness that cannot honour a value ignores it.
 
 **Recovery -- when a project looks wedged, diagnose before you guess.** If a project
 seems stuck (agents blocked/silent, nothing advancing, a gate won't clear, or you
@@ -294,6 +293,16 @@ Nine tools:
   resolved/closed, post with `loop_directive=true` -- they loop/sleep on their normal
   wake interval until you set the thread `resolved`/`closed` (which stops them).
 
+**Hub etiquette (five rules):**
+1. `join_thread` BEFORE anyone names you -- the baton is refused for an id not registered
+   on the thread, and a DM to a never-joined id is stored but read by nobody.
+2. `from_agent` is YOUR id, every post; `to_participant` is one joined id, or omit to broadcast.
+3. Hand work on explicitly: `pass_baton_to=<id>` or `requires_action=true` + `to_participant`.
+   A plain broadcast obligates nobody and moves no baton.
+4. Park on `get_my_turn(agent_id, wait_seconds=45)` only when you asked something or hold
+   the baton; an informational post needs no follow-up.
+5. End it: `set_status="resolved"` (answered) or `"closed"` (no further posts) -- once.
+
 ## 9. request_approval -- the HITL gate, and how it clears
 `request_approval(job_id, project_id, reason, options)` creates a pending approval and flips
 the calling agent to `status='awaiting_user'`. Use it at a gate that genuinely needs a human
@@ -323,13 +332,4 @@ choice (closeout with deferred findings, an ambiguous decision) -- `options` is 
 
 
 def build_giljo_guide() -> dict[str, Any]:
-    """Return the static cross-tool guide as a JSON-safe dict.
-
-    No tenant context or DB access -- the guide is identical for every caller.
-
-    BE-9543: uses ``str.replace`` rather than ``str.format`` -- the guide body has
-    plenty of its OWN literal ``{...}`` (JSON-shaped tool-arg examples like
-    ``filters={...}``), which ``.format()`` would try to interpolate and crash on.
-    ``replace`` only ever touches the one placeholder we put there.
-    """
     return {"guide": _GUIDE_TEMPLATE.replace("{product_name}", PRODUCT_NAME)}

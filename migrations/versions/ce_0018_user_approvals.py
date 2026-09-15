@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Create user_approvals primitive table (BE-5029 Phase A).
-
-Revision ID: ce_0018_user_approvals
-Revises: ce_0017_tasks_add_series_number_subseries
-Create Date: 2026-05-06
-
-BE-5029 introduces a first-class approval primitive that replaces the prose
-``user_approval_required`` boolean and the ``set_agent_status(blocked, "Closeout:
-awaiting user review")`` instruction. The new table stores one pending row per
-agent execution; the gate flips ``agent_executions.status`` to ``awaiting_user``
-in the same transaction.
-
-Edition Scope: Both -- approvals exist in CE and SaaS; lives in CE chain because
-the table is shared and ``startup.py`` only runs the CE chain on boot.
-
-Idempotent: table creation guarded by information_schema lookup; index creation
-guarded by pg_indexes lookup. Down-migration drops the table cleanly.
-"""
 
 import sqlalchemy as sa
 from alembic import op

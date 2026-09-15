@@ -25,12 +25,6 @@
 </template>
 
 <script setup>
-// CE-only view. In CE there is no billing, so instead of a payment surface we
-// invite self-hosted users to the managed service (hosted Giljo HQ with
-// OAuth client integrations). The SaaS route override at
-// `frontend/src/saas/routes/index.js` replaces this with the real subscription
-// dashboard in SaaS mode, so this card never renders for hosted customers.
-// Provider-neutral by design: no billing-provider names appear here (export gate).
 import { PRODUCT_NAME } from '@/branding'
 
 const productName = PRODUCT_NAME

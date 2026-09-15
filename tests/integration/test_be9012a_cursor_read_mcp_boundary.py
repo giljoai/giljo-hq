@@ -3,28 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""MCP-transport boundary tests for BE-9012a — server-persistent read cursor (D6)
-+ per-recipient acted-on state (D4) on ``get_thread_history``.
-
-CLAUDE.md / BE-5042 mandate a regression at the layer the behavior lives. The
-cursor read lives at the FastMCP ``@mcp.tool`` wrapper
-(``api/endpoints/mcp_tools/_comm_tools.py`` -> ``_call_tool`` dispatch ->
-``CommThreadService.get_thread_history``). These tests exercise the ACTUAL
-transport (``create_connected_server_and_client_session``) so the new params,
-the required-param 422, and the structured NOT_A_PARTICIPANT rejection are all
-covered end-to-end, not just at the service.
-
-Behaviors under test (over the wire):
-- unread_only + mark_read is an O(N) drain: N posts are delivered exactly once,
-  the cursor advances exactly once, and a re-read returns nothing new.
-- mark_read writes ``message_acknowledgments`` (D4) idempotently.
-- the four cursor params REQUIRE as_participant (clean 422 without it).
-- mark_read on a thread the reader never joined => structured NOT_A_PARTICIPANT
-  (a domain rejection delivered as normal content, NOT isError).
-- unread_only for a never-joined reader is honest: it returns the whole timeline.
-- directed_only excludes posts aimed at OTHER participants.
-- action_required_only returns only requires_action posts.
-"""
 
 from __future__ import annotations
 
@@ -49,11 +27,6 @@ from tests.helpers.mcp_session_fixture import create_connected_server_and_client
 
 pytestmark = pytest.mark.asyncio
 
-# created_at is server_default=func.now() = Postgres transaction time, so posts in
-# this test's single (rolled-back) transaction share a timestamp. Where the cursor
-# advance is asserted, stamp DISTINCT increasing created_at via the shared db_session
-# (the same transaction the MCP path reads through test_session) so the filter bites
-# deterministically. In prod each post is its own transaction, so times differ.
 _T1 = datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC)
 _T2 = datetime(2026, 1, 1, 0, 0, 2, tzinfo=UTC)
 _T3 = datetime(2026, 1, 1, 0, 0, 3, tzinfo=UTC)
@@ -82,11 +55,6 @@ def _error_text(res) -> str:
 
 @pytest_asyncio.fixture
 async def comm_mcp_client(db_manager, db_session, monkeypatch):
-    """Yield ``(new_client, tenant_key, db_session)`` for FastMCP transport tests.
-
-    CommThreadService receives ``test_session`` from ToolAccessor, so its writes
-    land in the rolled-back transaction (visible to db_session queries, no commit).
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -141,7 +109,6 @@ async def _create_thread(client, **kwargs):
 
 
 async def _setup_thread_with_beta(new_client):
-    """A thread whose creator is alpha, with beta joined. Returns thread_id."""
     thread = await _create_thread(new_client, subject="cursor", creator_id="alpha")
     tid = thread["thread_id"]
     async with new_client() as s:
@@ -160,14 +127,11 @@ async def _post(new_client, tid, content, **kwargs):
 
 
 async def test_unread_drain_is_on_delivered_once_and_cursor_advances_once(comm_mcp_client):
-    """The O(N) guarantee: N posts delivered exactly once across a drain sequence,
-    cursor advances exactly once, re-read returns nothing new."""
     new_client, tenant_key, db_session = comm_mcp_client
     tid = await _setup_thread_with_beta(new_client)
     ids = [(await _post(new_client, tid, f"post {i}"))["message_id"] for i in range(3)]
     await _stamp(db_session, tenant_key, list(zip(ids, (_T1, _T2, _T3), strict=True)))
 
-    # First drain: all 3 unread returned + marked read.
     async with new_client() as s:
         first = await s.call_tool(
             "get_thread_history",
@@ -178,7 +142,6 @@ async def test_unread_drain_is_on_delivered_once_and_cursor_advances_once(comm_m
     assert first_p["count"] == 3
     assert first_p["marked_read"] == 3
 
-    # Second drain: cursor advanced => nothing new. Delivered-once, not O(N^2).
     async with new_client() as s:
         second = await s.call_tool(
             "get_thread_history",
@@ -189,14 +152,11 @@ async def test_unread_drain_is_on_delivered_once_and_cursor_advances_once(comm_m
     assert second_p["count"] == 0
     assert second_p["marked_read"] == 0
 
-    # Total volume delivered across the whole sequence == N (3), not N + N.
     total_delivered = first_p["count"] + second_p["count"]
     assert total_delivered == 3
 
 
 async def test_mark_read_writes_acknowledgments_idempotently(comm_mcp_client):
-    """D4: mark_read records message_acknowledgments for the reader; a repeat is a
-    no-op (idempotent via uq_msg_ack), never a duplicate."""
     new_client, tenant_key, db_session = comm_mcp_client
     tid = await _setup_thread_with_beta(new_client)
     await _post(new_client, tid, "one")
@@ -221,7 +181,6 @@ async def test_mark_read_writes_acknowledgments_idempotently(comm_mcp_client):
             {"thread_id": tid, "as_participant": "beta", "mark_read": True},
         )
     assert await _ack_count() == 2
-    # Re-mark the same posts: idempotent — still exactly 2 ack rows.
     async with new_client() as s:
         await s.call_tool(
             "get_thread_history",
@@ -231,7 +190,6 @@ async def test_mark_read_writes_acknowledgments_idempotently(comm_mcp_client):
 
 
 async def test_cursor_params_require_as_participant(comm_mcp_client):
-    """Each of the four cursor params without as_participant => clean 422 (isError)."""
     new_client, _tk, _sess = comm_mcp_client
     tid = await _setup_thread_with_beta(new_client)
     for param in ("unread_only", "mark_read", "directed_only", "action_required_only"):
@@ -242,8 +200,6 @@ async def test_cursor_params_require_as_participant(comm_mcp_client):
 
 
 async def test_mark_read_on_non_participant_is_structured_rejection(comm_mcp_client):
-    """mark_read by a reader that never join_thread'd => NOT_A_PARTICIPANT, delivered
-    as normal content (NOT isError) per the BE-6081 domain-rejection carve-out."""
     new_client, _tk, _sess = comm_mcp_client
     tid = await _setup_thread_with_beta(new_client)
     await _post(new_client, tid, "hello")
@@ -253,7 +209,7 @@ async def test_mark_read_on_non_participant_is_structured_rejection(comm_mcp_cli
             "get_thread_history",
             {"thread_id": tid, "as_participant": "ghost", "mark_read": True},
         )
-    assert res.is_error is False, _error_text(res)  # domain rejection, not an error
+    assert res.is_error is False, _error_text(res)
     p = _payload(res)
     assert p["success"] is False
     assert p["error"] == "NOT_A_PARTICIPANT"
@@ -261,8 +217,6 @@ async def test_mark_read_on_non_participant_is_structured_rejection(comm_mcp_cli
 
 
 async def test_unread_only_for_never_joined_reader_is_honest_full_timeline(comm_mcp_client):
-    """as_participant given but no cursor row (never joined) => unread returns the
-    whole timeline (honest 'nothing read yet'), NOT an error and NOT empty."""
     new_client, _tk, _sess = comm_mcp_client
     tid = await _setup_thread_with_beta(new_client)
     await _post(new_client, tid, "a")
@@ -278,16 +232,12 @@ async def test_unread_only_for_never_joined_reader_is_honest_full_timeline(comm_
 
 
 async def test_directed_only_returns_posts_delivered_to_reader(comm_mcp_client):
-    """directed_only = posts the reader is a recipient of — the inbox semantic that
-    replaces receive_messages. That INCLUDES a broadcast delivered to the reader and a
-    DM addressed to them; it EXCLUDES a DM aimed only at another participant and the
-    reader's OWN posts (a broadcast excludes its sender from the fan-out)."""
     new_client, _tk, _sess = comm_mcp_client
     tid = await _setup_thread_with_beta(new_client)
     async with new_client() as s:
         join = await s.call_tool("join_thread", {"thread_id": tid, "agent_id": "gamma"})
         assert join.is_error is False, _error_text(join)
-    await _post(new_client, tid, "broadcast to all")  # alpha broadcast -> beta is a recipient
+    await _post(new_client, tid, "broadcast to all")
     await _post(new_client, tid, "dm to beta", to_participant="beta")
     await _post(new_client, tid, "dm to gamma", to_participant="gamma")
 
@@ -298,13 +248,12 @@ async def test_directed_only_returns_posts_delivered_to_reader(comm_mcp_client):
         )
     assert res.is_error is False, _error_text(res)
     contents = [m["content"] for m in _payload(res)["messages"]]
-    assert "broadcast to all" in contents  # delivered to beta -> included
+    assert "broadcast to all" in contents
     assert "dm to beta" in contents
-    assert "dm to gamma" not in contents  # aimed only at gamma -> excluded
+    assert "dm to gamma" not in contents
 
 
 async def test_action_required_only_filters_to_action_posts(comm_mcp_client):
-    """action_required_only returns only requires_action posts."""
     new_client, _tk, _sess = comm_mcp_client
     tid = await _setup_thread_with_beta(new_client)
     await _post(new_client, tid, "just informational")

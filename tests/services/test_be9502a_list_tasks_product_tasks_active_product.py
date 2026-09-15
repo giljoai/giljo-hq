@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9502a museum-rule pinning test.
-
-TaskService.list_tasks(filter_type="product_tasks") with no explicit product_id
-falls back to the tenant's ACTIVE product (task_service/_query_mixin.py:139-148,
-via TaskRepository.get_default_product -> Product.is_active). A tenant with no
-active product gets an EMPTY list, not an error and not the whole tenant's tasks.
-
-This call path had zero prior test coverage (found during the BE-9502a is_active
-dependents audit). Pinning it here BEFORE any behavior change so a later
-active-product-demotion change cannot silently alter it. Both assertions were
-verified to fail first against a variant that removed the ``Product.is_active``
-predicate from ``TaskRepository.get_default_product`` (it then returned an
-arbitrary/most-recent product instead of None, which flipped
-``test_falls_back_to_empty_list_with_no_active_product`` from empty to non-empty).
-"""
 
 from __future__ import annotations
 
@@ -38,7 +23,6 @@ async def test_scopes_to_the_active_product_when_product_id_omitted(db_session, 
     tenant_a = two_tenant_service_setup["tenant_a"]
     product_a = two_tenant_service_setup["product_a"]
 
-    # A second, INACTIVE product in the same tenant with its own task.
     product_a2 = Product(
         id=str(uuid4()),
         name="Service Test Product A2",
@@ -83,7 +67,6 @@ async def test_falls_back_to_empty_list_with_no_active_product(db_session, db_ma
     tenant_a = two_tenant_service_setup["tenant_a"]
     product_a = two_tenant_service_setup["product_a"]
 
-    # Deactivate the only product -- the tenant now has NO active product.
     product_a.is_active = False
     await db_session.commit()
 

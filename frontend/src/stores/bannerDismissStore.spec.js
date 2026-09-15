@@ -1,20 +1,9 @@
-/**
- * bannerDismissStore.spec.js — FE-9589
- *
- * The persistence half of banner dismissal. The row specs prove a dismissed
- * banner stays dismissed across a remount; these pin the two properties that
- * only this store can be asked about: dismissals belong to ONE user, and a
- * stale key is reconciled away rather than outliving its obligation.
- *
- * Edition Scope: Both
- */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 import { useBannerDismissStore } from './bannerDismissStore'
 import { useUserStore } from './user'
 
-// tests/setup.js replaces window.localStorage with no-op vi.fn()s.
 function installFunctionalLocalStorage() {
   const store = new Map()
   Object.defineProperty(window, 'localStorage', {
@@ -28,7 +17,6 @@ function installFunctionalLocalStorage() {
   })
 }
 
-/** A fresh pinia, so the store re-runs its hydration watcher against `userId`. */
 function freshStore(userId) {
   setActivePinia(createPinia())
   useUserStore().currentUser = userId ? { id: userId } : null
@@ -49,8 +37,6 @@ describe('bannerDismissStore (FE-9589)', () => {
   it('does NOT leak dismissals between users sharing a browser profile', () => {
     freshStore('user-a').dismiss('approval:appr-1')
 
-    // Second login, same machine: the first operator's acknowledgement is not
-    // evidence that this one has seen anything.
     expect(freshStore('user-b').isDismissed('approval:appr-1')).toBe(false)
   })
 
@@ -59,8 +45,6 @@ describe('bannerDismissStore (FE-9589)', () => {
     store.dismiss('approval:appr-1')
 
     expect(store.isDismissed('approval:appr-1')).toBe(true)
-    // ...but it was never persisted, so it cannot come back attributed to
-    // whoever logs in next.
     expect(freshStore('user-a').isDismissed('approval:appr-1')).toBe(false)
   })
 
@@ -72,7 +56,6 @@ describe('bannerDismissStore (FE-9589)', () => {
 
     expect(store.isDismissed('ask:t-1')).toBe(false)
     expect(store.isDismissed('ask:t-2')).toBe(true)
-    // Prefix-scoped: reconciling one family must not clear another's.
     expect(store.isDismissed('mention:t-9:m-1')).toBe(true)
   })
 
@@ -94,9 +77,6 @@ describe('bannerDismissStore (FE-9589)', () => {
   })
 
   it('clear(outgoingUserId) works after the session has already been nulled', () => {
-    // The logout flow nulls currentUser BEFORE the dependent stores are cleaned
-    // up, so a clear() that could only read the live session would leave the
-    // outgoing user's dismissals on the machine.
     const store = freshStore('user-a')
     store.dismiss('approval:appr-1')
     useUserStore().currentUser = null

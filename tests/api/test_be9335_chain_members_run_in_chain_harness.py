@@ -3,26 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9335 regression — a chain member runs in the CHAIN's harness, not its own.
-
-The defect: a chain's execution mode lives on the RUN, but most boundary readers
-resolved ``project.execution_mode``. Only the chain-STAGING prompt endpoint copied
-the run's mode down to the members, so a chain driven straight to IMPLEMENTATION
-left every member on whatever mode it carried from being staged individually.
-
-The damaging state is a DIVERGENT mode, not an absent one: the per-project gate
-never fires (the member *has* a mode), so nothing complains and the member is
-simply told the wrong harness. Worse, it is told BOTH — the mission protocol
-header already resolved the run (BE-6177) while the staging instructions and the
-spawn bootstrap resolved the project column.
-
-The fix routes every chain-member mode read through one resolver
-(``effective_execution_mode``) for which the RUN is authoritative, and freezes the
-run's mode once any member has crossed its launch gate, so the resolved value
-cannot shift under a live chain.
-
-Edition scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -44,14 +24,13 @@ from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.services.conductor_job_minter import mint_conductor_job
 from giljo_mcp.services.mission_orchestration_service import MissionOrchestrationService
 from giljo_mcp.tenant import TenantManager
+from tests.helpers.product_crew_helper import adopt_all_templates
 
 
 pytestmark = pytest.mark.asyncio
 
 _TEST_CSRF_TOKEN = secrets.token_urlsafe(32)
 
-# The individually-staged members' own mode, and the mode the user picked FOR THE
-# CHAIN. They differ — that divergence is the whole defect.
 MEMBER_MODE = "subagent"
 CHAIN_MODE = "multi_terminal"
 
@@ -66,23 +45,6 @@ async def _seed_divergent_chain(
     launched_members: int = 0,
     member_staging_status: str = "staged",
 ) -> dict:
-    """Seed the straight-to-implementation state: members staged individually, chain linked.
-
-    Each member carries ``member_mode`` (what it was staged with on its own) while
-    the run carries ``chain_mode`` (what the user picked for the chain).
-
-    ``member_staging_status`` defaults to ``"staged"`` deliberately, and it is
-    load-bearing: it is what the solo staging endpoint writes, and it is the state
-    in which the boundary actually RENDERS the mode-specific fields. A
-    ``staging_complete`` member short-circuits into ``check_staging_redirect`` and
-    returns a redirect with no mode fields at all — a test seeded that way passes
-    without proving anything.
-
-    ``launched_members`` is how many members (in order) have crossed their launch
-    gate. That is the signal that says agents are LIVE with prompts already
-    rendered, and it is what the run's mode-freeze keys on — not the run's
-    lock/ultralock tier, which only means the Implement button is available.
-    """
     async with db_manager.get_session_async() as session:
         suffix = uuid.uuid4().hex[:8]
         tenant_key = TenantManager.generate_tenant_key()
@@ -121,9 +83,6 @@ async def _seed_divergent_chain(
                 mission=f"Build the {label.lower()} component.",
                 tenant_key=tenant_key,
                 product_id=product.id,
-                # "inactive": only one ACTIVE project per product is allowed
-                # (idx_project_single_active_per_product), and project status is
-                # irrelevant to mode resolution.
                 status="inactive",
                 series_number=uuid.uuid4().int % 9000 + 1,
                 execution_mode=member_mode,
@@ -155,8 +114,6 @@ async def _seed_divergent_chain(
         conductor_identity = await mint_conductor_job(session, tenant_key=tenant_key, run_id=run.id)
         run.conductor_agent_id = conductor_identity["agent_id"]
 
-        # The head project's sub-orchestrator: the agent that actually receives the
-        # wrong harness. project_phase="implementation" mirrors a driven member.
         member_job_id = generate_uuid()
         member_agent_id = generate_uuid()
         session.add(
@@ -183,14 +140,6 @@ async def _seed_divergent_chain(
         )
         await session.commit()
 
-        # INF-9417: an `os.environ.setdefault("JWT_SECRET", ...)` stood here. It was
-        # process-global mutation inside a helper ~17 tests call, which the house test
-        # discipline forbids -- and it was also a guaranteed no-op: tests/conftest.py
-        # performs the identical setdefault at MODULE scope, and pytest imports the root
-        # conftest before any test module, so the key is always already set by the time
-        # this runs. Deleted rather than converted to monkeypatch.setenv, because
-        # threading a fixture through 17 call sites to preserve a line that cannot
-        # change anything is cost with no guarantee attached.
         token = JWTManager.create_access_token(
             user_id=user.id,
             username=user.username,
@@ -214,19 +163,10 @@ async def _seed_divergent_chain(
 
 
 def _renders_as_subagent(staging_response: dict) -> bool:
-    """True when the staging response carries the SUBAGENT render, not multi_terminal.
-
-    ``cli_mode_rules`` is emitted only for a subagent-shaped mode;
-    ``phase_assignment_instructions`` only for multi_terminal. Asserting on the
-    rendered artifact (rather than on a column) is what makes this a test of what
-    the agent is actually told.
-    """
     return "cli_mode_rules" in staging_response
 
 
 async def _run_mode(db_manager, seed: dict) -> str:
-    """Read the run's stored mode back. The tenant-scope listener needs the
-    contextvar set — an explicit tenant_key predicate alone does not satisfy it."""
     token = TenantManager.set_current_tenant(seed["tenant_key"])
     try:
         async with db_manager.get_session_async() as session:
@@ -251,12 +191,6 @@ async def _staging_instructions(db_manager, seed: dict) -> dict:
 
 
 async def test_chain_member_staging_instructions_follow_the_run_not_the_project(db_manager):
-    """A chain member is told the CHAIN's harness by get_staging_instructions.
-
-    Fail-first: on master the member renders ``cli_mode_rules`` (its own
-    individually-staged ``subagent`` mode) even though the chain is
-    ``multi_terminal``.
-    """
     seed = await _seed_divergent_chain(db_manager)
 
     response = await _staging_instructions(db_manager, seed)
@@ -269,13 +203,6 @@ async def test_chain_member_staging_instructions_follow_the_run_not_the_project(
 
 
 async def test_chain_member_boundaries_do_not_contradict_each_other(db_manager):
-    """The mission header and the staging instructions must not disagree.
-
-    The mission protocol header already resolves the RUN (BE-6177) while the
-    staging instructions resolved the project column — so on master the same
-    member is simultaneously told ``multi_terminal`` (header) and the subagent
-    spawn syntax (staging). Whichever mode wins, the two must agree.
-    """
     seed = await _seed_divergent_chain(db_manager)
 
     from giljo_mcp.services.mission_service import MissionService
@@ -283,7 +210,6 @@ async def test_chain_member_boundaries_do_not_contradict_each_other(db_manager):
     mission = await MissionService(db_manager=db_manager, tenant_manager=TenantManager()).get_agent_mission(
         job_id=seed["member_job_id"], tenant_key=seed["tenant_key"]
     )
-    # MissionResponse is a pydantic model, not a dict.
     protocol = mission.full_protocol or ""
     header_says_multi_terminal = "EXECUTION_MODE: multi_terminal" in protocol
 
@@ -306,15 +232,6 @@ async def test_chain_member_boundaries_do_not_contradict_each_other(db_manager):
 async def test_ch6_auto_checkin_follows_the_same_mode_as_the_header(
     db_manager, member_mode: str, chain_mode: str, expect_ch6: bool
 ):
-    """The CH6 auto check-in block must key off the SAME mode as the header.
-
-    This branch is orchestrator-gated, so unlike the specialist team-table branch
-    it sits exactly where the chain mode IS resolved — and it read the raw project
-    column while the header two hundred lines above resolved the run. It therefore
-    disagreed with the header in both directions on the same protocol string: a
-    multi_terminal chain silently LOST its auto check-in loop, and a subagent chain
-    was SHIPPED a multi_terminal loop it must never run.
-    """
     from giljo_mcp.services.mission_service import MissionService
 
     seed = await _seed_divergent_chain(db_manager, member_mode=member_mode, chain_mode=chain_mode)
@@ -324,7 +241,7 @@ async def test_ch6_auto_checkin_follows_the_same_mode_as_the_header(
     )
     protocol = mission.full_protocol or ""
 
-    has_ch6 = "CH6: CHECK-IN" in protocol  # FE-9296b renamed the chapter
+    has_ch6 = "CH6: CHECK-IN" in protocol
     header_is_multi_terminal = "EXECUTION_MODE: multi_terminal" in protocol
 
     assert has_ch6 is expect_ch6, (
@@ -332,14 +249,12 @@ async def test_ch6_auto_checkin_follows_the_same_mode_as_the_header(
         f"{'missing' if expect_ch6 else 'present'} — it resolved the project column while "
         "the header resolved the run"
     )
-    # The real invariant: CH6 and the header are two renders of ONE decision.
     assert has_ch6 == header_is_multi_terminal, (
         "CH6 and the EXECUTION_MODE header disagree inside the same protocol string"
     )
 
 
 async def test_solo_project_still_follows_its_own_execution_mode(db_manager):
-    """No active run ⇒ the project column stays authoritative (solo unchanged)."""
     seed = await _seed_divergent_chain(db_manager, run_status="completed")
 
     response = await _staging_instructions(db_manager, seed)
@@ -354,12 +269,6 @@ async def test_solo_project_still_follows_its_own_execution_mode(db_manager):
 async def test_both_chain_prompt_routes_leave_members_on_the_chain_mode(
     api_client: AsyncClient, db_manager, route: str
 ):
-    """Neither chain entry point may leave a member on a divergent mode.
-
-    The defect is the ASYMMETRY between the two routes, so this is parametrised
-    over both: a test that only exercised chain-implementation would let the
-    reverse regression (someone removing the staging propagation) through.
-    """
     seed = await _seed_divergent_chain(db_manager, locked=False, run_status="pending")
 
     resp = await api_client.get(f"/api/v1/prompts/{route}/{seed['run_id']}", headers=seed["headers"])
@@ -377,20 +286,6 @@ async def test_both_chain_prompt_routes_leave_members_on_the_chain_mode(
 async def test_launched_member_keeps_running_the_chain_mode_and_staging_still_succeeds(
     api_client: AsyncClient, db_manager
 ):
-    """An ALREADY-LAUNCHED member stays consistent, and the staging loop still tolerates it.
-
-    The staging propagation writes through ProjectService, which refuses an
-    ``execution_mode`` write once ``implementation_launched_at`` is stamped; the
-    loop swallows that and moves on. Two things must hold together, and the
-    launched member is where they could come apart:
-
-    1. chain-staging still returns 200 with a launched member in the chain (the
-       skip is tolerated, not fatal) — the DoD-3 guard behaviour, preserved.
-    2. the launched member is still rendered the CHAIN's harness. Its own column
-       is now unwritable, so under a propagate-only fix it would be pinned to the
-       divergent mode forever; resolving at READ time is what keeps it consistent,
-       and the run's mode is frozen so that answer cannot move under it.
-    """
     seed = await _seed_divergent_chain(db_manager, launched_members=1, locked=False, run_status="pending")
 
     resp = await api_client.get(f"/api/v1/prompts/chain-staging/{seed['run_id']}", headers=seed["headers"])
@@ -404,11 +299,6 @@ async def test_launched_member_keeps_running_the_chain_mode_and_staging_still_su
 
 
 async def _add_specialist(db_manager, seed: dict) -> str:
-    """Give the head project one launchable non-orchestrator agent.
-
-    ``implement()`` synthesises per-terminal launch commands only for these, so a
-    member with none cannot exhibit the mode-dependent branch at all.
-    """
     token = TenantManager.set_current_tenant(seed["tenant_key"])
     try:
         async with db_manager.get_session_async() as session:
@@ -445,20 +335,6 @@ async def _add_specialist(db_manager, seed: dict) -> str:
 
 
 async def test_solo_implement_path_on_a_chain_member_uses_the_chain_harness(db_manager):
-    """The dashboard Play button on a chain member must render the CHAIN's harness.
-
-    This is the most reachable path in the whole defect and it needs no headless
-    caller: the solo Play button is live on a chain member's Jobs tab, so opening
-    a member project and pressing Play calls
-    ``GET /api/v1/prompts/implementation/{member_id}`` -> ``implement()``, which
-    read ``project.execution_mode`` raw at four sites. The human gate does not
-    stand in the way — a chain sub-orchestrator's staging-end auto-stamps
-    ``implementation_launched_at``.
-
-    ``launch_commands`` is the crisp observable: ``implement()`` synthesises the
-    per-terminal launch array only for multi_terminal, so on a divergent member it
-    came back empty while the chain was multi_terminal all along.
-    """
     from giljo_mcp.thin_prompt_generator import ThinClientPromptGenerator
 
     seed = await _seed_divergent_chain(
@@ -488,20 +364,11 @@ async def test_solo_implement_path_on_a_chain_member_uses_the_chain_harness(db_m
 
 
 async def test_spawn_bootstrap_for_a_chain_member_follows_the_chain_mode(db_manager):
-    """A worker spawned into a chain member gets the CHAIN's bootstrap.
-
-    The spawn bootstrap is the other half of the "told BOTH harnesses"
-    contradiction: ``spawn_job`` handed the agent an inline subagent bootstrap
-    (the member's own mode) while the mission header said multi_terminal. A
-    multi_terminal spawn must instead return the dashboard pointer, so this pins
-    ``agent_prompt_location``.
-    """
     from giljo_mcp.models.templates import AgentTemplate
     from giljo_mcp.services.job_lifecycle_service import JobLifecycleService
 
     seed = await _seed_divergent_chain(db_manager)
 
-    # spawn_job validates agent_name against the tenant's templates.
     token = TenantManager.set_current_tenant(seed["tenant_key"])
     try:
         async with db_manager.get_session_async() as session:
@@ -519,6 +386,10 @@ async def test_spawn_bootstrap_for_a_chain_member_follows_the_chain_mode(db_mana
                 )
             )
             await session.commit()
+            for (_pid,) in (
+                await session.execute(select(Product.id).where(Product.tenant_key == seed["tenant_key"]))
+            ).all():
+                await adopt_all_templates(session, seed["tenant_key"], _pid)
     finally:
         from giljo_mcp.tenant import current_tenant
 
@@ -539,15 +410,6 @@ async def test_spawn_bootstrap_for_a_chain_member_follows_the_chain_mode(db_mana
 
 
 async def test_orchestrator_identity_for_a_legacy_mode_member_follows_the_chain(db_manager):
-    """The orchestrator IDENTITY's harness override must follow the chain too.
-
-    The identity is composed with a tool derived from the mode. For the two
-    canonical modes that composition is byte-identical, so this is only observable
-    on a LEGACY member row (``claude_code_cli`` -> tool ``claude-code``), which the
-    codebase deliberately still tolerates. There the identity gains a Claude
-    Code-only harness override — which must NOT be shipped to a member the chain is
-    running as multi_terminal.
-    """
     from giljo_mcp.services.mission_service import MissionService
 
     seed = await _seed_divergent_chain(db_manager, member_mode="claude_code_cli")
@@ -563,16 +425,6 @@ async def test_orchestrator_identity_for_a_legacy_mode_member_follows_the_chain(
 
 
 async def test_member_with_no_mode_of_its_own_still_refuses_loudly(api_client: AsyncClient, db_manager):
-    """Scope boundary, pinned: an ABSENT member mode still BLOCKS; it is not coerced.
-
-    This fix makes the run authoritative where the member HAS a mode — the silent
-    failure. It deliberately does not loosen the NULL-state gate, so a member that
-    never had a mode of its own is still refused with a STOP an agent can act on,
-    rather than being silently run on the chain's mode. The distinction that
-    matters is refuse-loudly vs run-wrong-harness-silently; this test pins which
-    side of it the absent case sits on, so a later change to the gate is a
-    deliberate decision rather than a drift.
-    """
     seed = await _seed_divergent_chain(db_manager, member_mode=None, locked=False, run_status="pending")
 
     resp = await api_client.get(f"/api/v1/prompts/chain-implementation/{seed['run_id']}", headers=seed["headers"])
@@ -582,27 +434,12 @@ async def test_member_with_no_mode_of_its_own_still_refuses_loudly(api_client: A
     assert response.get("status") == "BLOCKED", f"expected a loud refusal, got {response.get('status')!r}"
     assert response.get("action") == "STOP"
     assert not _renders_as_subagent(response), "a blocked member must not also render a harness"
-    # A loud refusal that does not say WHICH member is at fault makes the user hunt
-    # for it — in a chain there is more than one candidate.
     assert seed["head_name"] in (response.get("message") or ""), (
         f"the refusal must name the offending project: {response.get('message')!r}"
     )
 
 
 async def test_run_execution_mode_is_frozen_while_the_chain_is_running(api_client: AsyncClient, db_manager):
-    """The run's mode cannot be changed once the run is ultralocked.
-
-    With the RUN authoritative for its members, an unguarded mode write would
-    re-point every member's harness mid-flight — the exact desync the per-project
-    post-launch lock exists to prevent. ``locked`` and ``chain_mission`` were
-    already gated here; ``execution_mode`` was not, which is what let a caller
-    stage a chain, change the mode off-UI, and then drive members on the old one.
-
-    Driven through the REST PATCH because that is where the server decides. The
-    dashboard's own ``patchRunMode`` refuses while ``run.locked``, but that guard
-    is client-side only and does not cover every state the server must, so the
-    refusal has to live here.
-    """
     seed = await _seed_divergent_chain(db_manager)
 
     resp = await api_client.patch(
@@ -616,12 +453,6 @@ async def test_run_execution_mode_is_frozen_while_the_chain_is_running(api_clien
 
 
 async def test_run_execution_mode_is_still_editable_before_any_launch(api_client: AsyncClient, db_manager):
-    """The freeze must not seize the normal pre-Stage mode picker.
-
-    Guards the obvious over-correction: the mode write must leave a pending,
-    unlocked run fully editable, which is exactly what the dashboard mode selector
-    does before Stage Chain.
-    """
     seed = await _seed_divergent_chain(db_manager, run_status="pending", locked=False)
 
     resp = await api_client.patch(
@@ -633,15 +464,6 @@ async def test_run_execution_mode_is_still_editable_before_any_launch(api_client
 
 
 async def test_mode_still_editable_when_members_are_staged_but_nothing_launched(api_client: AsyncClient, db_manager):
-    """Members individually staged to completion, nothing launched → still editable.
-
-    Regression guard. Keying the mode freeze on the ULTRALOCK tier was wrong: that
-    tier means "the Implement button is available" (any member at
-    ``staging_complete``), not "agents are live". It refused this state, which the
-    server had always allowed, and the refusal it offered pointed at Unstage —
-    which is itself refused at that tier, so the remedy was a dead end. The freeze
-    keys on the launch gate instead, so this state stays editable.
-    """
     seed = await _seed_divergent_chain(
         db_manager,
         run_status="pending",
@@ -665,15 +487,6 @@ async def test_mode_still_editable_when_members_are_staged_but_nothing_launched(
 async def test_mode_frozen_once_a_member_is_launched_even_on_a_pending_unlocked_run(
     api_client: AsyncClient, db_manager
 ):
-    """The freeze must engage on the straight-to-implementation path itself.
-
-    ``GET /prompts/chain-implementation`` is a pure READ — it sets neither
-    ``status`` nor ``locked``. So a chain driven straight to implementation stays
-    ``pending`` + unlocked while its members are launched and running. Keying the
-    freeze on the run's lock tier therefore left the mode writable during exactly
-    the flow this project is about, and flipping it re-pointed a LIVE member's
-    harness mid-flight. The launch gate is the signal that closes it.
-    """
     seed = await _seed_divergent_chain(
         db_manager,
         run_status="pending",
@@ -696,19 +509,6 @@ async def test_mode_frozen_once_a_member_is_launched_even_on_a_pending_unlocked_
 async def test_frozen_mode_error_names_the_launched_project_and_a_remedy_that_actually_works(
     api_client: AsyncClient, db_manager
 ):
-    """The refusal names the member AND a remedy that survives being DRIVEN.
-
-    This test drives the remedy end to end rather than grepping the message for a
-    verb, because the previous wording pointed at Re-stage and Re-stage is refused
-    in the exact state that produces this error: both writers of
-    ``implementation_launched_at`` require ``staging_complete``, and restage refuses
-    ``staging_complete AND launched`` (and refuses every other staging_status
-    outright). Naming an unreachable remedy is the same defect as the original
-    regression, only better worded.
-
-    Reset is the path that genuinely works, and it is destructive — it hard-deletes
-    the project's agents — so the message says so instead of implying a cheap fix.
-    """
     seed = await _seed_divergent_chain(
         db_manager,
         run_status="pending",
@@ -726,14 +526,12 @@ async def test_frozen_mode_error_names_the_launched_project_and_a_remedy_that_ac
     detail = refusal.text
     assert seed["head_name"] in detail, f"the launched member's name must appear in the refusal: {detail}"
 
-    # The remedy the message does NOT name, driven: proves why it is not named.
     restage = await api_client.post(f"/api/v1/projects/{seed['head_pid']}/restage", headers=seed["headers"])
     assert restage.status_code >= 400, (
         "restage unexpectedly succeeded on a launched project — if this ever starts "
         "working, the refusal message should name it instead of Reset"
     )
 
-    # The remedy the message DOES name, driven: it must actually unblock the change.
     reset = await api_client.post(f"/api/v1/projects/{seed['head_pid']}/reset", headers=seed["headers"])
     assert reset.status_code == 200, f"the named remedy must be reachable: {reset.text}"
 

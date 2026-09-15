@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""TSK-9091: sequence_runs.status must leave "pending" once a chain is driving.
-
-Regression for the INF-6174d capstone finding: ``sequence_runs.status`` stayed
-"pending" for the entire life of a running chain because nothing ever wrote
-"running". The fix threads ``status="running"`` through every write inside
-``project_helpers.advance_chain_member_to_implementing`` — the single source of
-truth for "a chain member crossed staging->implementation" (BE-6188). These
-tests exercise that function directly at the service layer, the layer the bug
-(and the fix) lives at.
-
-Parallel-safe: DB-touching tests use db_session (TransactionalTestContext). No
-module-level mutable state. Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -33,8 +20,6 @@ from tests.helpers.taxonomy_seeds import next_series_number
 
 
 async def _seed_project(session: AsyncSession, tenant_key: str, *, closed_out: bool = False) -> str:
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -51,8 +36,6 @@ async def _seed_project(session: AsyncSession, tenant_key: str, *, closed_out: b
         status="active",
         tenant_key=tenant_key,
         product_id=_owning_product_project.id,
-        # BE-9429: uq_project_taxonomy_active is NULLS NOT DISTINCT, so these
-        # NULL-product/NULL-type rows collide unless the serial differs.
         series_number=next_series_number(),
         execution_mode="claude_code_cli",
         created_at=datetime.now(UTC),
@@ -70,8 +53,6 @@ def _run_svc(session: AsyncSession) -> SequenceRunService:
 
 @pytest.mark.asyncio
 async def test_head_project_entering_implementation_flips_run_to_running(db_session: AsyncSession) -> None:
-    """The FIRST member (head, index 0) crossing into implementation is the
-    semantically-true "the chain started driving" moment — status must flip."""
     tenant = TenantManager.generate_tenant_key()
     p1 = await _seed_project(db_session, tenant)
     p2 = await _seed_project(db_session, tenant)
@@ -101,8 +82,6 @@ async def test_head_project_entering_implementation_flips_run_to_running(db_sess
 async def test_downstream_member_flips_run_to_running_even_when_advance_blocked(
     db_session: AsyncSession,
 ) -> None:
-    """A downstream member entering implementation is itself proof the chain is
-    driving, even when current_index is held back pending the prior closeout."""
     tenant = TenantManager.generate_tenant_key()
     p1 = await _seed_project(db_session, tenant, closed_out=False)
     p2 = await _seed_project(db_session, tenant)
@@ -131,8 +110,6 @@ async def test_downstream_member_flips_run_to_running_even_when_advance_blocked(
 
 @pytest.mark.asyncio
 async def test_stalled_run_resumes_to_running_on_member_advance(db_session: AsyncSession) -> None:
-    """A 'stalled' run whose member finally advances must resume to 'running',
-    not stay stuck at 'stalled' (the write is unconditional, not head-only)."""
     tenant = TenantManager.generate_tenant_key()
     p1 = await _seed_project(db_session, tenant)
 
@@ -159,9 +136,6 @@ async def test_stalled_run_resumes_to_running_on_member_advance(db_session: Asyn
 
 @pytest.mark.asyncio
 async def test_active_run_filters_still_include_running(db_session: AsyncSession) -> None:
-    """Critical-rule guard: every active-run status filter must keep matching a
-    run once it flips to 'running' (list_active / find_active_run_for_project /
-    find_active_run_for_conductor all key off the same active-statuses tuple)."""
     tenant = TenantManager.generate_tenant_key()
     p1 = await _seed_project(db_session, tenant)
 

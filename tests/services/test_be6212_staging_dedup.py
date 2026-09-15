@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6212 — get_staging_instructions dedup for chain sub-orchestrators.
-
-A chain SUB-ORCHESTRATOR boots by calling get_job_mission FIRST (build_conductor_thin_prompt
-mandates it), receiving the full orchestrator identity + protocol. get_staging_instructions
-then re-shipped the SAME identity + ~30 KB protocol — the ~52.9 KB duplication the field
-report flagged. _build_orchestrator_response now SKIPS building both for a chain sub-orch and
-returns a pointer (protocol_unchanged / protocol_source / protocol_note), keeping the
-staging-only delta (agent_templates + identity IDs).
-
-SOLO IS SACRED: the branch is gated strictly on chain_ctx.role == 'sub_orchestrator'. On the
-solo path chain_ctx is None, so the full protocol + identity are still built and returned —
-byte-for-byte as before (the project-less conductor uses a separate builder and never reaches
-this assembler).
-
-Pure unit test (no DB, no module-level mutable state) — parallel-safe under xdist. CE.
-"""
 
 from __future__ import annotations
 
@@ -71,28 +55,21 @@ def _resp(chain_ctx: ChainContext | None) -> dict:
 
 
 def test_chain_suborch_staging_omits_protocol_and_identity() -> None:
-    """A chain sub-orch's staging response omits the duplicated protocol + identity and
-    points back at the boot get_job_mission copy, while keeping the staging delta."""
     resp = _resp(_suborch_ctx())
 
-    # The two heavy duplicated fields are GONE.
     assert "orchestrator_protocol" not in resp, "chain sub-orch must not re-ship the full protocol"
     assert "orchestrator_identity" not in resp, "chain sub-orch must not re-ship the orchestrator identity"
 
-    # Replaced by a cheap pointer.
     assert resp["protocol_unchanged"] is True
     assert resp["protocol_source"] == "get_job_mission"
     assert "get_job_mission" in resp["protocol_note"]
 
-    # The staging-only DELTA the sub-orch actually needs is still present.
     assert resp["agent_templates"], "agent_templates (the real reason to call this) must remain"
     assert resp["identity"]["job_id"] == "job-sub"
     assert resp["identity"]["project_id"] == "p2"
 
 
 def test_solo_staging_keeps_protocol_and_identity() -> None:
-    """SOLO (chain_ctx None) still builds + returns the full protocol + identity — the
-    omission branch never executes, so the solo staging response is unchanged."""
     resp = _resp(None)
 
     assert "orchestrator_protocol" in resp, "solo must keep the full protocol (byte-identical path)"

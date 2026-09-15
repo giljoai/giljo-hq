@@ -10,7 +10,6 @@
         aria-label="GiljoAI tour"
         @keydown.escape="handleSkip"
       >
-        <!-- Backdrop — click does NOT close (parity with the setup wizard) -->
         <div class="tutorial-backdrop" />
 
         <div
@@ -71,9 +70,6 @@
           </div>
         </div>
 
-        <!-- Door C is the only door that navigates away immediately — confirm
-             before leaving (walkthrough fix 3). Cancel returns to the router;
-             confirm proceeds exactly as before (ProductForm + breadcrumb). -->
         <BaseDialog
           v-model="showDoorCConfirm"
           type="warning"
@@ -139,13 +135,8 @@ const {
   releaseAbandonedDraft,
 } = useTutorialState()
 
-// Bumping the key re-mounts the current beat, restarting its CSS animations
-// (the per-beat replay control — skip + replay stay always available).
 const replayKey = ref(0)
 
-// Reduced motion: swap every animation for its final frame. Evaluated once
-// per mount — matches the mock's .gj-anim media-query gate, but class-driven
-// so component tests can exercise it.
 const reducedMotion = ref(
   typeof window !== 'undefined' &&
     typeof window.matchMedia === 'function' &&
@@ -153,9 +144,6 @@ const reducedMotion = ref(
 )
 
 function close() {
-  // TRUE tutorial exit (skip / done-screen exit / esc / door C confirm) —
-  // fire-and-forget the abandoned-draft hatch (walkthrough fix 4). Back-nav
-  // between tutorial screens never comes through here.
   releaseAbandonedDraft()
   emit('dismiss')
   emit('update:modelValue', false)
@@ -166,9 +154,6 @@ function handleSkip() {
   close()
 }
 
-// Door C confirmation (walkthrough fix 3): every other door opens an interim
-// screen with a back button; C navigates away — confirm first. pick('C') is
-// deferred to confirm so a cancel leaves the state machine on the router.
 const showDoorCConfirm = ref(false)
 
 function onPick(path) {
@@ -183,8 +168,6 @@ function cancelDoorC() {
   showDoorCConfirm.value = false
 }
 
-// Leave the tutorial for the manual form: drop the activate nudge behind, finish
-// the tutorial, and open the classic ProductForm on the Products page.
 function leaveForManualForm() {
   armActivateBreadcrumb()
   markComplete()
@@ -194,16 +177,10 @@ function leaveForManualForm() {
 
 function confirmDoorC() {
   showDoorCConfirm.value = false
-  // Path C: the manual form.
   pick('C')
   leaveForManualForm()
 }
 
-// FE-9320: escape hatch from either agent-driven door once it is clear no
-// connected agent is coming (the door's own stalled state offers it). The
-// recorded router_choice is deliberately NOT rewritten to 'C' — the user did
-// pick the door they picked, and this is the same destination, not the same
-// choice.
 function goManual() {
   leaveForManualForm()
 }

@@ -3,40 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9292b — an accepted-but-stalled ('silent') job must close without being
-labelled 'decommissioned'.
-
-The incident (ledger-zero chain, 2026-07-25): an implementer stalled in a
-wait-loop and never called ``complete_job``. Its work was fully committed and
-independently audited to APPROVE. The health monitor had moved it to 'silent'.
-The orchestrator, having verified the deliverable, wanted to accept it — and
-found no way to. It fell back to ``write_project_closeout(force=true)``, which
-auto-decommissions, so the dashboard now labels a successful contributor
-'decommissioned' ("failed/replaced/abandoned" per ``finalize_job``'s own docstring).
-
-**The transition was never missing.** ``complete_job``'s lookup
-(``find_active_execution_for_completion``) excludes only
-``('complete', 'closed', 'decommissioned')`` — 'silent' is NOT terminal, so
-``complete_job`` accepts it and ``finalize_job`` then reaches 'closed'. The defect
-is that this path is announced NOWHERE: ``finalize_job``'s wrong-state error said
-only "not in 'complete' status" and pointed at ``diagnose_project_state``, a
-dead end for an orchestrator acting on behalf of an agent that will never call
-``complete_job`` itself.
-
-Regression tests at the MCP transport (the boundary an orchestrator actually
-calls), via ``create_connected_server_and_client_session``:
-
-  1. finalize_job on a 'silent' execution NAMES the complete_job recovery  [RED before fix]
-  2. silent → complete_job → finalize_job reaches 'closed', never 'decommissioned'
-     (pins the path the fix documents, so it cannot be silently removed)
-  3. the recovery hint is NOT offered where complete_job genuinely cannot
-     recover ('decommissioned') — the hint must not lie in the other direction
-  4. stranded TODOs still block completion, naming them — this is why the
-     documented recovery must name report_progress as its first step
-
-Parallel-safe: fresh tenant_key per test, rolled-back db_session, no
-module-level mutable state, no ordering dependencies.
-"""
 
 from __future__ import annotations
 
@@ -59,9 +25,6 @@ from giljo_mcp.tools.tool_accessor import ToolAccessor
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
-# ---------------------------------------------------------------------------
-# Wire helpers (mirrors test_be9165_closeout_deadlock_mcp_boundary.py)
-# ---------------------------------------------------------------------------
 
 
 def _content_text(result) -> str:
@@ -73,31 +36,10 @@ def _content_text(result) -> str:
     return "\n".join(parts)
 
 
-# ---------------------------------------------------------------------------
-# Fixture: DB-backed MCP client wiring complete_job AND finalize_job to the
-# rolled-back test session.
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
 async def terminal_state_mcp_client(db_manager, db_session, monkeypatch):
-    """Yield (client_factory, tenant_key, db_session) with the real ToolAccessor
-    bound to the rolled-back test session for both tools under test.
-
-    ``finalize_job`` dispatches to ``acc._agent_state_service.finalize_job`` and
-    ``complete_job`` to ``acc._job_completion_service.complete_job``
-    (``_base.TOOL_DISPATCH``), so both services are rebuilt with ``test_session``.
-
-    The ``_base`` post-hooks are disabled for this fixture. They are keyed on a
-    successful call carrying ``job_id`` and the first of them is
-    ``auto_clear_silent``, which flips a 'silent' execution back to 'working' —
-    on a SEPARATE session opened from ``app_state.db_manager``. That is correct
-    production behavior (a live-but-slow agent clears its own silent flag on its
-    next call; the stalled agent in the incident made no further calls, which is
-    why it stayed silent), but here it would race the rolled-back test session
-    and erase the exact state under test. Disabling the debounce gate switches
-    both post-hooks off deterministically.
-    """
     from api import app_state
     from api.endpoints.mcp_tools import _base
     from giljo_mcp.services.job_completion_service import JobCompletionService
@@ -141,9 +83,6 @@ async def terminal_state_mcp_client(db_manager, db_session, monkeypatch):
         state.db_manager = prior_db_manager
 
 
-# ---------------------------------------------------------------------------
-# Seed helpers
-# ---------------------------------------------------------------------------
 
 
 async def _seed_org_product(db_session, tenant_key: str):
@@ -190,11 +129,6 @@ async def _seed_project(db_session, tenant_key: str, product_id: str):
 
 
 async def _seed_specialist(db_session, tenant_key: str, project_id: str, *, status: str):
-    """A spawned implementer whose execution sits in ``status``.
-
-    'silent' reproduces the incident: the health monitor's auto-silent timeout
-    fired on an agent that stalled mid-run (agent_health_monitor auto-silent).
-    """
     job = AgentJob(
         job_id=str(uuid4()),
         tenant_key=tenant_key,
@@ -237,7 +171,6 @@ async def _seed_todo(db_session, tenant_key: str, job_id: str, content: str):
     return todo
 
 
-# The deliverable the orchestrator independently verified before accepting.
 _VERIFIED_RESULT: dict[str, Any] = {
     "summary": "Guard implemented and audited to APPROVE; commits landed before the stall.",
     "commits": ["b17b7901c", "0ad48106a"],
@@ -245,22 +178,10 @@ _VERIFIED_RESULT: dict[str, Any] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Case 1 — RED before fix: finalize_job on 'silent' must name the recovery
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_close_job_on_silent_execution_names_the_complete_job_recovery(terminal_state_mcp_client):
-    """An orchestrator that has verified a stalled worker's deliverable calls
-    finalize_job and is refused. Refusing is correct — 'silent' is not 'complete'.
-    But the refusal must NAME the one call that makes it complete, because the
-    orchestrator cannot wait for an agent that will never run again.
-
-    RED before fix: the payload named only ``diagnose_project_state`` — the dead
-    end the BE-9288 orchestrator hit, which sent it to
-    ``write_project_closeout(force=true)`` and mislabelled a successful agent.
-    """
     client, tenant_key, session = terminal_state_mcp_client
     _org, product = await _seed_org_product(session, tenant_key)
     project = await _seed_project(session, tenant_key, product.id)
@@ -285,23 +206,10 @@ async def test_close_job_on_silent_execution_names_the_complete_job_recovery(ter
     )
 
 
-# ---------------------------------------------------------------------------
-# Case 2 — the accepting path reaches 'closed', never 'decommissioned'
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_silent_job_with_verified_deliverable_reaches_closed_not_decommissioned(terminal_state_mcp_client):
-    """The recovery the fix documents, driven end-to-end through the MCP
-    transport by the orchestrator (not by the stalled agent, which is gone):
-    complete_job then finalize_job on a 'silent' execution reaches 'closed'.
-
-    'closed' is an ACCEPTING terminal state — ``finalize_job`` is "final acceptance
-    by orchestrator". 'decommissioned' is the failure label. This pins that the
-    accepting exit exists and is reachable, so no future change to the
-    non-terminal status predicate can quietly remove it and send orchestrators
-    back to force-decommission.
-    """
     client, tenant_key, session = terminal_state_mcp_client
     _org, product = await _seed_org_product(session, tenant_key)
     project = await _seed_project(session, tenant_key, product.id)
@@ -332,18 +240,10 @@ async def test_silent_job_with_verified_deliverable_reaches_closed_not_decommiss
     )
 
 
-# ---------------------------------------------------------------------------
-# Case 3 — two-sided: the hint must not be offered where it cannot work
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_close_job_on_decommissioned_execution_does_not_offer_complete_job_recovery(terminal_state_mcp_client):
-    """'decommissioned' IS terminal — complete_job refuses it outright
-    ("was decommissioned and cannot transition to 'completed'"). The recovery
-    hint must therefore NOT appear here, or it would send an orchestrator into a
-    second dead end. Scopes the fix to still-completable executions.
-    """
     client, tenant_key, session = terminal_state_mcp_client
     _org, product = await _seed_org_product(session, tenant_key)
     project = await _seed_project(session, tenant_key, product.id)
@@ -361,19 +261,10 @@ async def test_close_job_on_decommissioned_execution_does_not_offer_complete_job
     )
 
 
-# ---------------------------------------------------------------------------
-# Case 3b — two-sided: a LIVE agent must not be completed out from under itself
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_close_job_on_working_execution_does_not_offer_complete_job_recovery(terminal_state_mcp_client):
-    """A 'working' agent is alive and will report its own completion. Telling an
-    orchestrator to call complete_job on it would be worse advice than the dead
-    end this fix replaces — it invites completing a live agent's job out from
-    under it. Only the unattended ('silent') case gets the recovery; everything
-    still-reachable keeps the generic diagnose_project_state guidance.
-    """
     client, tenant_key, session = terminal_state_mcp_client
     _org, product = await _seed_org_product(session, tenant_key)
     project = await _seed_project(session, tenant_key, product.id)
@@ -391,21 +282,10 @@ async def test_close_job_on_working_execution_does_not_offer_complete_job_recove
     assert "diagnose_project_state" in text, f"a reachable agent keeps the generic guidance, got: {text!r}"
 
 
-# ---------------------------------------------------------------------------
-# Case 4 — why the documented recovery must start at report_progress
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_silent_job_with_stranded_todos_is_completion_blocked_naming_the_todos(terminal_state_mcp_client):
-    """A stalled agent leaves its TODO ledger mid-flight (the incident stranded
-    six). ``complete_job`` still enforces the TODOs gate on a 'silent'
-    execution, so "just call complete_job" is NOT a sufficient recovery — the
-    orchestrator must settle the ledger with ``report_progress`` first.
-
-    Pinned mechanically so the guidance the fix ships cannot drift from the gate
-    it describes.
-    """
     client, tenant_key, session = terminal_state_mcp_client
     _org, product = await _seed_org_product(session, tenant_key)
     project = await _seed_project(session, tenant_key, product.id)
@@ -432,25 +312,12 @@ async def test_silent_job_with_stranded_todos_is_completion_blocked_naming_the_t
     )
 
 
-# ---------------------------------------------------------------------------
-# Case 4b (audit F2) — the wall must name the tool that clears it
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_completion_blocked_names_report_progress_and_speaks_to_the_orchestrator(
     terminal_state_mcp_client,
 ):
-    """AUDIT_9292B F2: COMPLETION_BLOCKED listed the stranded TODOs and named NO tool.
-
-    This is the wall an orchestrator hits while running the documented recovery for a
-    stalled agent, so a rejection that only says "these TODOs are open" leaves it having
-    to already know that ``report_progress`` exists and that it may drive another agent's
-    ledger. It also addressed the caller as the agent whose ledger it is ("*your*
-    coordination thread") — wrong for an orchestrator acting on behalf of a dead one.
-
-    Pins the remedy, not just the diagnosis.
-    """
     client, tenant_key, session = terminal_state_mcp_client
     _org, product = await _seed_org_product(session, tenant_key)
     project = await _seed_project(session, tenant_key, product.id)
@@ -471,7 +338,6 @@ async def test_completion_blocked_names_report_progress_and_speaks_to_the_orches
         "replace=true is the load-bearing argument — without it the orchestrator cannot "
         f"rewrite a stalled agent's ledger to its honest final state. Got: {text!r}"
     )
-    # An orchestrator acting for a dead agent must not be told to drain "your" thread.
     assert "your coordination thread" not in text, (
         f"COMPLETION_BLOCKED must not address the caller as the agent whose ledger it is, got: {text!r}"
     )

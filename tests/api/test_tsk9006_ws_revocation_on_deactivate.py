@@ -3,36 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""TSK-9006 — deactivating a user must bite live WebSocket sessions.
-
-Edition Scope: Both (api/websocket.py + UserService are CE-shared; deactivation
-behaves identically by GILJO_MODE).
-
-is_active was only re-checked at the WS handshake, so a deactivated account kept
-a live socket reading until it naturally reconnected. Deactivation now:
-
-  1. bumps ``token_revocation_epoch`` + revokes the user's refresh tokens (the
-     SEC-9047 eviction idiom) so outstanding tokens die AND — because the epoch
-     persists — a later reactivation cannot resurrect the pre-deactivation
-     session; and
-  2. force-closes the account's live sockets immediately, fanned across workers
-     over the existing giljo_ws_events broker (no new channel; ADR-009 tenant
-     scoping — tenant_key is per-user today).
-
-Tested at the two failing layers:
-
-  * WS layer — ``WebSocketManager.disconnect_tenant`` closes only the target
-    tenant's sockets, publishes a control message cross-worker, and a peer that
-    receives that control closes its own sockets without re-publishing (no loop)
-    and ignores its own echo.
-  * Service layer — ``UserService.update_user(is_active=False)`` and
-    ``delete_user`` bump the epoch, revoke refresh tokens, and invoke the live
-    socket close; reactivation does NOT bump again (no resurrection); a
-    non-is_active update evicts nothing.
-
-Parallel-safe: manager driven with lightweight fakes (no DB); service tests use a
-unique tenant/user each and monkeypatch-only module patching.
-"""
 
 from __future__ import annotations
 
@@ -46,13 +16,9 @@ from api.broker.base import WebSocketBrokerMessage, WebSocketEventBroker
 from api.websocket import WebSocketManager
 
 
-# ---------------------------------------------------------------------------
-# Fakes
-# ---------------------------------------------------------------------------
 
 
 class _FakeWS:
-    """Starlette-WebSocket stand-in recording close(code, reason)."""
 
     def __init__(self) -> None:
         self.sent: list[str] = []
@@ -73,7 +39,6 @@ class _FakeWS:
 
 
 class _FakeBroker(WebSocketEventBroker):
-    """Records publishes and exposes the subscribed handler for peer simulation."""
 
     def __init__(self) -> None:
         self.published: list[WebSocketBrokerMessage] = []
@@ -98,15 +63,11 @@ def _wire(mgr: WebSocketManager, client_id: str, ws: _FakeWS, tenant_key: str) -
 
 
 def _force_multiworker(monkeypatch) -> None:
-    """attach_broker caches _worker_count() > 1 as the publish gate."""
     import api.startup.database as db_startup
 
     monkeypatch.setattr(db_startup, "_worker_count", lambda: 2)
 
 
-# ---------------------------------------------------------------------------
-# WS layer — disconnect_tenant
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -119,16 +80,13 @@ async def test_disconnect_tenant_closes_only_target_tenant_and_deregisters():
 
     closed = await mgr.disconnect_tenant("tenant_A", publish_to_broker=False)
 
-    # Both of tenant A's sockets were closed with the policy-violation code.
     assert closed == 2
     assert a1.closed and a2.closed
     assert a1.close_code == 1008
     assert a1.close_reason == "account deactivated"
-    # Deregistered from every index so they can no longer receive fan-out.
     assert "a1" not in mgr.active_connections
     assert "a2" not in mgr.active_connections
     assert "tenant_A" not in mgr.tenant_connections
-    # Tenant B is untouched — deactivation is scoped to the account.
     assert not b1.closed
     assert "b1" in mgr.active_connections
 
@@ -157,14 +115,14 @@ async def test_disconnect_tenant_publishes_control_when_multiworker(monkeypatch)
     a1 = _FakeWS()
     _wire(mgr, "a1", a1, "tenant_A")
 
-    await mgr.disconnect_tenant("tenant_A")  # publish_to_broker defaults True
+    await mgr.disconnect_tenant("tenant_A")
 
     assert a1.closed
     assert len(broker.published) == 1
     msg = broker.published[0]
     assert msg.control == "disconnect_tenant"
     assert msg.tenant_key == "tenant_A"
-    assert msg.origin == mgr._broker_origin  # carries origin so the echo is suppressed
+    assert msg.origin == mgr._broker_origin
 
 
 @pytest.mark.asyncio
@@ -179,7 +137,6 @@ async def test_disconnect_tenant_single_worker_does_not_publish(monkeypatch):
 
     await mgr.disconnect_tenant("tenant_A")
 
-    # Sole worker already closed locally — no cross-worker publish overhead.
     assert broker.published == []
 
 
@@ -192,7 +149,6 @@ async def test_peer_control_message_closes_local_sockets_without_republishing(mo
     a1 = _FakeWS()
     _wire(mgr, "a1", a1, "tenant_A")
 
-    # A control message from a DIFFERENT worker arrives on this worker's broker.
     peer_msg = WebSocketBrokerMessage(
         tenant_key="tenant_A",
         event={},
@@ -203,7 +159,6 @@ async def test_peer_control_message_closes_local_sockets_without_republishing(mo
 
     assert a1.closed
     assert "a1" not in mgr.active_connections
-    # The peer close must NOT re-publish — that would loop between workers.
     assert broker.published == []
 
 
@@ -216,7 +171,6 @@ async def test_own_echo_control_message_is_ignored(monkeypatch):
     a1 = _FakeWS()
     _wire(mgr, "a1", a1, "tenant_A")
 
-    # The LISTEN connection echoes this worker's own publish back to it.
     own_msg = WebSocketBrokerMessage(
         tenant_key="tenant_A",
         event={},
@@ -225,13 +179,11 @@ async def test_own_echo_control_message_is_ignored(monkeypatch):
     )
     await broker.handler(own_msg)
 
-    # Already closed locally at publish time — the echo must be a no-op.
     assert not a1.closed
     assert "a1" in mgr.active_connections
 
 
 def test_broker_message_control_survives_serialization_roundtrip():
-    """The pg_notify (de)serializer carries the control discriminator."""
     from api.broker.postgres_notify import PostgresNotifyWebSocketEventBroker as B
 
     msg = WebSocketBrokerMessage(tenant_key="tenant_A", event={}, origin="orig", control="disconnect_tenant")
@@ -241,13 +193,9 @@ def test_broker_message_control_survives_serialization_roundtrip():
     assert restored.origin == "orig"
 
 
-# ---------------------------------------------------------------------------
-# Service layer — deactivation triggers eviction + live socket close
-# ---------------------------------------------------------------------------
 
 
 class _RecordingWsManager:
-    """Captures disconnect_tenant calls made by the service."""
 
     def __init__(self) -> None:
         self.disconnects: list[str] = []
@@ -258,7 +206,6 @@ class _RecordingWsManager:
 
 
 async def _seed_user(db_manager) -> tuple[str, str]:
-    """Create org+user (active, epoch 0); return (user_id, tenant_key)."""
     from giljo_mcp.models.auth import User
     from giljo_mcp.models.organizations import Organization
     from giljo_mcp.tenant import TenantManager
@@ -304,7 +251,6 @@ async def _read_user(db_manager, *, tenant_key: str, user_id: str):
 
 @pytest.fixture
 def spy_ws_manager(monkeypatch):
-    """Swap a recording ws manager onto api.app_state.state (the service's source)."""
     from api import app_state
 
     spy = _RecordingWsManager()
@@ -325,9 +271,9 @@ async def test_update_deactivate_bumps_epoch_and_closes_sockets(db_manager, spy_
     await _service(db_manager, tk).update_user(user_id, is_active=False)
 
     epoch, is_active = await _read_user(db_manager, tenant_key=tk, user_id=user_id)
-    assert epoch == 1  # eviction epoch bumped exactly once
+    assert epoch == 1
     assert is_active is False
-    assert spy_ws_manager.disconnects == [tk]  # live sockets closed for the tenant
+    assert spy_ws_manager.disconnects == [tk]
 
 
 @pytest.mark.asyncio
@@ -338,14 +284,12 @@ async def test_reactivation_does_not_resurrect_or_close(db_manager, spy_ws_manag
     await svc.update_user(user_id, is_active=False)
     assert spy_ws_manager.disconnects == [tk]
 
-    # Reactivate: must NOT bump the epoch again (old tokens stay dead — no
-    # resurrection) and must NOT close any sockets.
     await svc.update_user(user_id, is_active=True)
 
     epoch, is_active = await _read_user(db_manager, tenant_key=tk, user_id=user_id)
-    assert epoch == 1  # unchanged by reactivation
+    assert epoch == 1
     assert is_active is True
-    assert spy_ws_manager.disconnects == [tk]  # no second disconnect
+    assert spy_ws_manager.disconnects == [tk]
 
 
 @pytest.mark.asyncio
@@ -355,7 +299,7 @@ async def test_non_active_update_evicts_nothing(db_manager, spy_ws_manager):
     await _service(db_manager, tk).update_user(user_id, first_name="Renamed")
 
     epoch, _ = await _read_user(db_manager, tenant_key=tk, user_id=user_id)
-    assert epoch == 0  # a non-credential, non-deactivation update never evicts
+    assert epoch == 0
     assert spy_ws_manager.disconnects == []
 
 

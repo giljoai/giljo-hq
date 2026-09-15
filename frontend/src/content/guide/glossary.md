@@ -22,7 +22,7 @@ Quick definitions for the terms used throughout Giljo HQ. Terms are grouped by w
 
 | Term | Meaning |
 |---|---|
-| **Agent** | An AI worker that connects through your own AI coding tool — Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, OpenCode, or any other MCP-compatible client — and does the actual reasoning and coding. GiljoAI assigns each agent its role and context; your tool and subscription do the work. |
+| **Agent** | An AI worker that connects through your own AI coding tool — Claude Code, Codex CLI, OpenCode, or any other MCP-compatible client — and does the actual reasoning and coding. GiljoAI assigns each agent its role and context; your tool and subscription do the work. |
 | **Orchestrator** | The lead agent for a project. It reads your product context and 360 Memory, plans the mission, spawns the specialist agents, and coordinates them until the project closes out. |
 | **Agent template** | The reusable definition behind an agent role — its role, coding tool, and identity. Manage yours in **Tools > Agents**; up to 7 of your own plus the built-in Orchestrator can be active at once. |
 | **"Role & Expertise"** | The field on an agent template where you describe that agent's specialization and personality — what used to be labeled its "system prompt." |

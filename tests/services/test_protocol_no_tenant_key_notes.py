@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression: rendered protocols and thin prompts must not contain
-the vestigial "tenant_key auto-injected" / "do not pass tenant_key" notes
-or any literal `tenant_key="..."` example signatures (audit_vestigial_cleanup).
-
-Background
-----------
-The MCP server's tool dispatch (mcp_sdk_server.py) auto-injects tenant_key
-from the API key session and strips it from the tool schema entirely. Prose
-warning agents to "not pass" a parameter they cannot pass anyway is dead
-weight, and the example signatures interpolating literal tenant_key="..."
-are an active contradiction. This test asserts on the RENDERED output
-(thin prompt + protocol body) so it cannot regress through copy-paste in
-either direction.
-"""
 
 from __future__ import annotations
 
@@ -39,7 +25,6 @@ PROJECT_ID = "33333333-3333-3333-3333-333333333333"
 PRODUCT_ID = "44444444-4444-4444-4444-444444444444"
 
 
-# --- Forbidden phrase corpus ------------------------------------------------
 
 _FORBIDDEN_NOTES = [
     "tenant_key auto-injected by server from API key session",
@@ -48,11 +33,6 @@ _FORBIDDEN_NOTES = [
     "never pass tenant_key",
 ]
 
-# Literal example signatures -- e.g. `agent_id="...", tenant_key="..."`.
-# Matches the worker-protocol example call style that previously
-# interpolated tenant_key. We allow tenant_key as a code symbol elsewhere
-# (function signatures, internal docstrings) -- this only flags rendered
-# example call lines.
 _TENANT_KEY_EXAMPLE_RE = re.compile(r'tenant_key="[^"]+"')
 
 
@@ -60,18 +40,13 @@ def _assert_clean(text: str, where: str) -> None:
     for needle in _FORBIDDEN_NOTES:
         assert needle not in text, f"{where}: forbidden vestigial note still present: {needle!r}"
     matches = _TENANT_KEY_EXAMPLE_RE.findall(text)
-    # Permitted: the get_context() example call still passes tenant_key
-    # because the live MCP tool accepts it. Filter that one signature out.
     leaks = [m for m in matches if "get_context" not in text.split(m, 1)[0].splitlines()[-1]]
     assert not leaks, f'{where}: tenant_key="..." example signature still rendered: {leaks!r}'
 
 
-# --- Tests ------------------------------------------------------------------
 
 
 class TestNoTenantKeyAutoInjectNotes:
-    """The rendered protocol surface must contain none of the deprecated
-    tenant_key warning prose or example signatures."""
 
     def test_ch1_mission_default(self):
         rendered = _build_ch1_mission(tool="multi_terminal")
@@ -83,11 +58,7 @@ class TestNoTenantKeyAutoInjectNotes:
         _assert_clean(rendered, f"CH1 mission ({tool})")
 
     def test_ch1_no_duplicate_implementation_warning(self):
-        """A.5 fix: the literal "do NOT execute implementation work" line was
-        dropped; only the platform-specific spawn_warning carries that meaning."""
         rendered = _build_ch1_mission(tool="multi_terminal")
-        # The default spawn_warning text is "You do NOT execute implementation work directly".
-        # That should appear EXACTLY once -- not twice (the bug was a duplicate).
         count = rendered.count("You do NOT execute implementation work")
         assert count == 1, f"CH1 multi_terminal: duplicate-line bug regressed (count={count})"
 
@@ -157,14 +128,10 @@ class TestNoTenantKeyAutoInjectNotes:
 
 
 class TestThinPromptHasNoTenantKeyNote:
-    """The thin agent prompt rendered into the spawned CLI session must not
-    contain the auto-inject note."""
 
     def test_thin_prompt(self):
         from giljo_mcp.services.job_lifecycle_service import JobLifecycleService
 
-        # _build_agent_prompt is a pure-string helper -- no DB access required.
-        # Pass None for self since the method body never dereferences it.
         prompt = JobLifecycleService._build_agent_prompt(
             None,
             agent_name="implementer",

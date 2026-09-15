@@ -1,30 +1,10 @@
-/**
- * ProjectsTable.fe2004.spec.js — FE-2004
- *
- * Regression: in the collapsed/compact view (≤1280px) the project Status column
- * swaps the full-size `StatusBadge` pill for a small `.status-dot`. The dot's
- * background color came from `statusDotColor()`, which mapped `active` to
- * `COLOR_SURFACE` (#ffffff, white) instead of the implementer/active token
- * (`--color-agent-implementer` #6db3e4, blue) that the pill uses — so the active
- * badge rendered WHITE in collapsed view while the full-size pill was BLUE.
- *
- * This test asserts the collapsed active dot carries the same active color source
- * as the pill (the implementer agent color), not white. It RED-fails on master
- * (white dot) and GREEN-passes after the fix.
- *
- * Note: colorTokens is intentionally NOT mocked here (unlike the other
- * ProjectsTable specs) so the real COLOR_SURFACE/#ffffff exercises the pre-fix
- * failure path; getAgentColor resolves the real implementer hex.
- *
- * Edition scope: CE.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 
 import { getAgentColor } from '@/config/agentColors'
 
-const smAndDownRef = { value: true } // collapsed viewport
+const smAndDownRef = { value: true }
 vi.mock('vuetify', () => ({
   useDisplay: () => ({ smAndDown: smAndDownRef }),
 }))
@@ -100,7 +80,6 @@ function mountTable(status) {
   })
 }
 
-// jsdom normalizes inline hex background-color to rgb(...) form.
 function hexToRgbString(hex) {
   const h = hex.replace('#', '')
   const r = parseInt(h.slice(0, 2), 16)
@@ -121,11 +100,9 @@ describe('ProjectsTable FE-2004 — collapsed active status dot color', () => {
     expect(dot.exists()).toBe(true)
 
     const bg = dot.element.style.backgroundColor
-    const activeBlue = hexToRgbString(getAgentColor('implementer').hex) // rgb(109, 179, 228)
+    const activeBlue = hexToRgbString(getAgentColor('implementer').hex)
 
-    // RED on master: the dot background was #ffffff (white).
     expect(bg).not.toBe('rgb(255, 255, 255)')
-    // GREEN after fix: dot shares the pill's active color source.
     expect(bg).toBe(activeBlue)
   })
 })

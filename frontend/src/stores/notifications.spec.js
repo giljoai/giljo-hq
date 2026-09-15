@@ -1,24 +1,3 @@
-/**
- * notifications.spec.js — FE-9241
- *
- * Locks the client-side persistence + local dismiss/read behaviour for
- * `_local` notification rows (silent-agent / auto-failed bell notifications
- * emitted via addNotification() — see stores/eventRoutes/agentEventRoutes.js
- * — that never reach the server `notifications` table):
- *
- *  - dismiss/read on a `_local` row mutates in memory + re-persists to
- *    localStorage, with NO REST call (a REST call against a client id 404s).
- *  - fetch() MERGES server rows with persisted `_local` rows instead of
- *    replacing the list outright (the prior full-replace flushed silent-agent
- *    notifications on every reload).
- *  - `_local` rows rehydrate on store (re)creation — i.e. survive a reload —
- *    scoped to a per-user localStorage key so a different account on the
- *    same browser cannot read them.
- *  - server-backed rows are unaffected: markRead/markDismissed keep their
- *    original REST round trip.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 
@@ -46,12 +25,6 @@ describe('notifications store — FE-9241 `_local` row persistence + dismiss/rea
     vi.clearAllMocks()
     mockList.mockResolvedValue({ data: [] })
 
-    // tests/setup.js stubs window.localStorage with no-op vi.fn()s (getItem
-    // always undefined, setItem/removeItem no-ops) for the wider suite. This
-    // spec exercises REAL persist/rehydrate round trips (FE-9241), so give it
-    // an in-memory backing store for the duration of each test — jsdom's
-    // environment is instantiated per test FILE, so this override cannot leak
-    // into any other spec file.
     const backing = new Map()
     window.localStorage = {
       getItem: (k) => (backing.has(k) ? backing.get(k) : null),
@@ -99,7 +72,6 @@ describe('notifications store — FE-9241 `_local` row persistence + dismiss/rea
   it('markDismissed on a server row keeps the REST round trip unchanged', async () => {
     mockMarkDismissed.mockResolvedValue({})
     const store = useNotificationStore()
-    // Server-shaped row (no `_local` tag) — as fetch()/normalizeServerNotif would produce.
     store.notifications = [
       { id: 'server-1', type: 'system_alert', title: 'Server row', read: false },
     ]
@@ -146,7 +118,6 @@ describe('notifications store — FE-9241 `_local` row persistence + dismiss/rea
   })
 
   it('`_local` rows rehydrate on store (re)creation — survives a simulated page reload', async () => {
-    // "Session 1": user logs in, a silent-agent notification arrives and persists.
     useUserStore().currentUser = { id: 'user-1' }
     useNotificationStore().addNotification({
       id: 'local-4',
@@ -155,9 +126,6 @@ describe('notifications store — FE-9241 `_local` row persistence + dismiss/rea
       message: 'implementer - stopped communicating',
     })
 
-    // Simulate a full page reload: fresh Pinia (fresh in-memory state), same
-    // logged-in user (cookie session survives a reload) — the store is
-    // instantiated for the first time in this "session".
     setActivePinia(createPinia())
     useUserStore().currentUser = { id: 'user-1' }
     const reloadedStore = useNotificationStore()
@@ -174,7 +142,6 @@ describe('notifications store — FE-9241 `_local` row persistence + dismiss/rea
       message: 'implementer - stopped communicating',
     })
 
-    // A different account logs in on the same browser (fresh Pinia, different user id).
     setActivePinia(createPinia())
     useUserStore().currentUser = { id: 'user-b' }
     const otherUserStore = useNotificationStore()
@@ -192,11 +159,8 @@ describe('notifications store — FE-9241 `_local` row persistence + dismiss/rea
       message: 'implementer - stopped communicating',
     })
 
-    // Logout path (stores/user.js) calls clearAll(outgoingUserId) with the id
-    // captured before currentUser is nulled.
     store.clearAll('user-1')
 
-    // Same user logs back in later (fresh Pinia — simulates the next session).
     setActivePinia(createPinia())
     useUserStore().currentUser = { id: 'user-1' }
     const nextSessionStore = useNotificationStore()
@@ -223,9 +187,6 @@ describe('notifications store — D16 (Headless S3d) live resolve/update WS hand
     store.handleWsResolvedNotification({ ids: ['n1', 'n3'] })
 
     expect(store.notifications.map((n) => n.id)).toEqual(['n2'])
-    // The point of D16: bannerNotifications (what SystemStatusBanner reads) is
-    // a computed filter over `notifications` -- dropping the row here is what
-    // makes the banner disappear live, no refetch/remount required.
     expect(store.bannerNotifications.some((n) => n.id === 'n1')).toBe(false)
   })
 

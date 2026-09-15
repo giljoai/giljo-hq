@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9012b (D5) — reactivation-as-post: the relocated auto-block, at its layer.
-
-The bus's single message->lifecycle coupling (``_auto_block_completed_recipients``)
-is now also reachable from a Hub post via
-``MessageRoutingService.auto_block_for_thread_post``. These tests pin that method
-at the service layer against a real DB session, covering the §6 hard rules:
-
-* a DIRECTED, action-required post on a PROJECT-BOUND thread flips a completed
-  recipient -> blocked (the reactivation feature relocated onto the Hub);
-* a TOWN-SQUARE post (the persisted message carries a NULL project_id) is
-  side-effect-free — the load-bearing HARD RULE, with its own regression here;
-* an informational post (requires_action=False, row 8), a broadcast (no explicit
-  recipient — must never fan-reactivate everyone), and a post to a completed/
-  cancelled project (IMMUTABLE_PROJECT_STATUSES, row 16) all stay inert.
-
-Parallel-safe: db_session (TransactionalTestContext). Each test owns its setup.
-Edition Scope: Both (CE messaging/lifecycle core).
-"""
 
 from __future__ import annotations
 
@@ -48,8 +30,6 @@ pytestmark = pytest.mark.asyncio
 def routing_service(db_session: AsyncSession, test_tenant_key: str) -> MessageRoutingService:
     tenant_manager = MagicMock()
     tenant_manager.get_current_tenant.return_value = test_tenant_key
-    # websocket_manager=None: the auto-block still flips the recipient; only the
-    # (best-effort) status broadcast is skipped, which keeps this test DB-only.
     return MessageRoutingService(
         db_manager=MagicMock(),
         tenant_manager=tenant_manager,
@@ -86,8 +66,6 @@ async def _seed_project(db_session: AsyncSession, tenant_key: str, *, status: st
 
 
 async def _seed_completed_recipient(db_session: AsyncSession, tenant_key: str, project_id: str) -> AgentExecution:
-    # Only the EXECUTION status ("complete") drives the auto-block; the job row just
-    # needs a valid status (ck_agent_job_status), so keep it "active".
     job = AgentJob(
         job_id=str(uuid4()),
         tenant_key=tenant_key,
@@ -122,15 +100,13 @@ async def _seed_thread_post(
     recipient_agent_id: str,
     requires_action: bool = True,
 ) -> Message:
-    """Persist a thread post exactly as comm_thread_service would: thread_id set,
-    project_id = thread.project_id (NULL for a town-square thread)."""
     thread = CommThread(
         id=str(uuid4()),
         tenant_key=tenant_key,
         serial=random.randint(1, 90000),
         subject="D5 thread",
         status="open",
-        project_id=project_id,  # NULL => town-square
+        project_id=project_id,
     )
     db_session.add(thread)
     await db_session.flush()
@@ -167,8 +143,6 @@ async def _recipient_status(db_session: AsyncSession, tenant_key: str, agent_id:
 async def test_project_bound_directed_action_post_blocks_completed_recipient(
     db_session: AsyncSession, routing_service: MessageRoutingService, test_tenant_key: str
 ):
-    """The core relocation: a directed, action-required post on a PROJECT-BOUND
-    thread reactivates (auto-blocks) the completed recipient."""
     project = await _seed_project(db_session, test_tenant_key)
     recipient = await _seed_completed_recipient(db_session, test_tenant_key, project.id)
     msg = await _seed_thread_post(
@@ -190,11 +164,8 @@ async def test_project_bound_directed_action_post_blocks_completed_recipient(
 async def test_town_square_post_is_side_effect_free(
     db_session: AsyncSession, routing_service: MessageRoutingService, test_tenant_key: str
 ):
-    """HARD RULE regression: a town-square post (NULL project_id) NEVER auto-blocks,
-    even when directed + action-required to a completed agent."""
     project = await _seed_project(db_session, test_tenant_key)
     recipient = await _seed_completed_recipient(db_session, test_tenant_key, project.id)
-    # project_id=None => the persisted message is a town-square post.
     msg = await _seed_thread_post(db_session, test_tenant_key, project_id=None, recipient_agent_id=recipient.agent_id)
 
     blocked = await routing_service.auto_block_for_thread_post(
@@ -212,7 +183,6 @@ async def test_town_square_post_is_side_effect_free(
 async def test_informational_post_does_not_block(
     db_session: AsyncSession, routing_service: MessageRoutingService, test_tenant_key: str
 ):
-    """Row 8: requires_action=False (informational) is inert on a project-bound thread."""
     project = await _seed_project(db_session, test_tenant_key)
     recipient = await _seed_completed_recipient(db_session, test_tenant_key, project.id)
     msg = await _seed_thread_post(
@@ -234,8 +204,6 @@ async def test_informational_post_does_not_block(
 async def test_broadcast_without_explicit_recipient_does_not_fan_reactivate(
     db_session: AsyncSession, routing_service: MessageRoutingService, test_tenant_key: str
 ):
-    """A broadcast (no explicit to_participant) must NOT fan-reactivate every
-    completed participant — same guard the bus applies to a broadcast fanout."""
     project = await _seed_project(db_session, test_tenant_key)
     recipient = await _seed_completed_recipient(db_session, test_tenant_key, project.id)
     msg = await _seed_thread_post(
@@ -244,7 +212,7 @@ async def test_broadcast_without_explicit_recipient_does_not_fan_reactivate(
 
     blocked = await routing_service.auto_block_for_thread_post(
         message_id=msg.id,
-        to_participant=None,  # broadcast
+        to_participant=None,
         sender_display_name="orchestrator",
         requires_action=True,
         tenant_key=test_tenant_key,
@@ -257,8 +225,6 @@ async def test_broadcast_without_explicit_recipient_does_not_fan_reactivate(
 async def test_terminal_project_skips_auto_block(
     db_session: AsyncSession, routing_service: MessageRoutingService, test_tenant_key: str
 ):
-    """Row 16: a project-bound thread on a completed/cancelled (IMMUTABLE) project
-    performs no side-effect, inherited free from the reused _auto_block method."""
     project = await _seed_project(db_session, test_tenant_key, status="completed")
     recipient = await _seed_completed_recipient(db_session, test_tenant_key, project.id)
     msg = await _seed_thread_post(

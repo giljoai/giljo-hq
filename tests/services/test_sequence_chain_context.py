@@ -3,61 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6165c / BE-6184: sequence driver agent-id role classification + helper tests.
-
-BE-6184 moved the conductor off the head project (the dual-hat collapse) to a
-DEDICATED, project-less orchestrator minted at run-create. resolve() now classifies
-role BY AGENT IDENTITY (conductor iff the calling agent IS the run's
-conductor_agent_id); the head project's orchestrator is a symmetric sub_orchestrator
-and conductor_project_id is no longer stamped.
-
-Regression tests (failing layer = MCP-boundary / service layer):
-
-1. test_resolve_null_conductor_fallback_stamps_agent_id
-   resolve() on a run whose conductor_agent_id is NULL (legacy/out-of-band) takes
-   the non-fatal safety fallback: it stamps conductor_agent_id (NOT
-   conductor_project_id), classifies the caller as conductor, and broadcasts.
-
-2. test_conductor_agent_match_is_idempotent
-   A resolve() whose orchestrator_agent_id already equals conductor_agent_id is a
-   no-op (conductor role, no re-stamp, no broadcast).
-
-3. test_head_orchestrator_is_sub_when_conductor_set
-   With conductor_agent_id already set to a DIFFERENT (dedicated-conductor) agent,
-   the head project's own orchestrator resolves as sub_orchestrator and does NOT
-   overwrite the conductor identity.
-
-4. test_sub_orchestrator_never_overwrites_conductor
-   A non-head project in the run is classified as sub_orchestrator and MUST NOT
-   overwrite conductor_agent_id.
-
-5. test_solo_project_no_ch_conductor
-   A project with no active run returns chain_ctx=None and the protocol response
-   has NO ch_conductor chapter (byte-identical solo path).
-
-6. test_find_active_run_tenant_isolation
-   find_active_run_for_project is tenant-scoped (other-tenant run invisible).
-
-7. test_find_active_run_status_filter
-   Completed/terminated/cancelled runs are excluded; pending/running/stalled included.
-
-8. test_advance_index_if_committed_refuses_without_closeout
-   advance_index_if_committed returns False without a closeout record.
-
-9. test_advance_index_if_committed_advances_with_closeout
-   advance_index_if_committed returns True and bumps the index when
-   closeout_executed_at is set.
-
-10. test_mark_stalled_if_past_deadline
-    mark_stalled_if_past_deadline flips status to stalled past the deadline and
-    returns False when before it.
-
-Parallel-safety:
-- DB-touching tests use the ``db_session`` fixture (TransactionalTestContext —
-  rollback at teardown, each test owns its setup).
-- No module-level mutable state.
-- No ordering dependencies.
-"""
 
 from __future__ import annotations
 
@@ -82,9 +27,6 @@ from tests.helpers.taxonomy_seeds import next_series_number
 pytestmark = pytest.mark.asyncio
 
 
-# ---------------------------------------------------------------------------
-# Seed helpers
-# ---------------------------------------------------------------------------
 
 
 async def _seed_project(
@@ -94,9 +36,6 @@ async def _seed_project(
     execution_mode: str = "claude_code_cli",
     closeout_executed_at: datetime | None = None,
 ) -> str:
-    """Seed a project in implementation phase and return its id."""
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -113,8 +52,6 @@ async def _seed_project(
         status="active",
         tenant_key=tenant_key,
         product_id=_owning_product_project.id,
-        # BE-9429: uq_project_taxonomy_active is NULLS NOT DISTINCT, so these
-        # NULL-product/NULL-type rows collide unless the serial differs.
         series_number=next_series_number(),
         execution_mode=execution_mode,
         created_at=datetime.now(UTC),
@@ -128,7 +65,6 @@ async def _seed_project(
 
 
 async def _spawn_orchestrator(session: AsyncSession, tenant_key: str, project_id: str) -> tuple[str, str]:
-    """Spawn an orchestrator job; return (job_id, agent_id)."""
     lifecycle = JobLifecycleService(
         db_manager=None,  # type: ignore[arg-type]
         tenant_manager=TenantManager(),
@@ -163,7 +99,6 @@ async def _seed_sequence_run(
     conductor_agent_id: str | None = None,
     conductor_project_id: str | None = None,
 ) -> str:
-    """Seed a SequenceRun and return its id."""
     run_id = str(uuid.uuid4())
     run = SequenceRun(
         id=run_id,
@@ -187,7 +122,6 @@ async def _seed_sequence_run(
 
 
 def _make_svc(session: AsyncSession, ws_manager: Any = None) -> MissionOrchestrationService:
-    """Build a MissionOrchestrationService with a shared test session."""
     return MissionOrchestrationService(
         db_manager=None,  # type: ignore[arg-type]
         tenant_manager=TenantManager(),
@@ -197,19 +131,14 @@ def _make_svc(session: AsyncSession, ws_manager: Any = None) -> MissionOrchestra
 
 
 def _stub_ws() -> MagicMock:
-    """Return a stub WebSocket manager that captures broadcast calls."""
     ws = MagicMock()
     ws.broadcast_event_to_tenant = AsyncMock()
     return ws
 
 
-# ---------------------------------------------------------------------------
-# 1. NULL-conductor fallback stamps conductor_agent_id (not conductor_project_id)
-# ---------------------------------------------------------------------------
 
 
 async def test_resolve_null_conductor_fallback_stamps_agent_id(db_session: AsyncSession) -> None:
-    """resolve() on a NULL-conductor run takes the safety fallback: stamp agent_id only."""
     tenant = TenantManager.generate_tenant_key()
     proj_id = await _seed_project(db_session, tenant)
     proj2_id = await _seed_project(db_session, tenant)
@@ -238,32 +167,25 @@ async def test_resolve_null_conductor_fallback_stamps_agent_id(db_session: Async
     assert chain_ctx.role == "conductor", "the fallback stamps this agent as conductor-of-record"
     assert chain_ctx.conductor_agent_id == agent_id, "conductor_agent_id must reflect the stamped value"
 
-    # Verify the DB row was updated: agent_id stamped, project_id NOT (BE-6184).
     svc2 = SequenceRunService(db_manager=None, tenant_manager=TenantManager(), session=db_session)
     run = await svc2.get(run_id=run_id, tenant_key=tenant)
     assert run["conductor_agent_id"] == agent_id, "SequenceRun.conductor_agent_id must be persisted"
     assert run["conductor_project_id"] is None, "BE-6184: resolve() must NOT stamp conductor_project_id"
 
-    # Verify broadcast was attempted.
     ws.broadcast_event_to_tenant.assert_called_once()
     call_kwargs = ws.broadcast_event_to_tenant.call_args
     broadcast_tenant = call_kwargs[0][0] if call_kwargs[0] else call_kwargs[1].get("tenant_key")
-    assert broadcast_tenant == tenant or call_kwargs is not None  # broadcast fired
+    assert broadcast_tenant == tenant or call_kwargs is not None
 
 
-# ---------------------------------------------------------------------------
-# 2. agent_id match is idempotent (conductor role, no re-write, no broadcast)
-# ---------------------------------------------------------------------------
 
 
 async def test_conductor_agent_match_is_idempotent(db_session: AsyncSession) -> None:
-    """resolve() whose agent_id already equals conductor_agent_id is a no-op."""
     tenant = TenantManager.generate_tenant_key()
     proj_id = await _seed_project(db_session, tenant)
     proj2_id = await _seed_project(db_session, tenant)
     _job_id, agent_id = await _spawn_orchestrator(db_session, tenant, proj_id)
 
-    # Pre-stamp the run with this agent_id (the conductor already minted/registered).
     await _seed_sequence_run(
         db_session,
         tenant,
@@ -286,22 +208,16 @@ async def test_conductor_agent_match_is_idempotent(db_session: AsyncSession) -> 
 
     assert chain_ctx is not None
     assert chain_ctx.role == "conductor", "agent_id == conductor_agent_id must classify as conductor"
-    # No broadcast: agent_id already matches, no re-stamp/fallback.
     ws.broadcast_event_to_tenant.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# 3. Head orchestrator is sub_orchestrator when a (different) conductor is set
-# ---------------------------------------------------------------------------
 
 
 async def test_head_orchestrator_is_sub_when_conductor_set(db_session: AsyncSession) -> None:
-    """BE-6184: the head project's own orchestrator is a sub_orchestrator, not the conductor."""
     tenant = TenantManager.generate_tenant_key()
     proj_id = await _seed_project(db_session, tenant)
     proj2_id = await _seed_project(db_session, tenant)
 
-    # The dedicated conductor's agent_id is already stamped (minted at run-create).
     conductor_agent_id = str(uuid.uuid4())
     run_id = await _seed_sequence_run(
         db_session,
@@ -312,7 +228,6 @@ async def test_head_orchestrator_is_sub_when_conductor_set(db_session: AsyncSess
         conductor_agent_id=conductor_agent_id,
     )
 
-    # The head project's OWN orchestrator (a different agent) resolves.
     _job_id, head_agent_id = await _spawn_orchestrator(db_session, tenant, proj_id)
     assert head_agent_id != conductor_agent_id
 
@@ -329,24 +244,18 @@ async def test_head_orchestrator_is_sub_when_conductor_set(db_session: AsyncSess
 
     assert chain_ctx is not None
     assert chain_ctx.role == "sub_orchestrator", "BE-6184: the head project's orchestrator is NOT the conductor"
-    # The conductor identity (carried on the ctx) is the dedicated conductor's, not the head's.
     assert chain_ctx.conductor_agent_id == conductor_agent_id
 
     svc2 = SequenceRunService(db_manager=None, tenant_manager=TenantManager(), session=db_session)
     run = await svc2.get(run_id=run_id, tenant_key=tenant)
     assert run["conductor_agent_id"] == conductor_agent_id, "the head orchestrator must NOT overwrite the conductor"
 
-    # No broadcast / re-stamp from a sub_orchestrator.
     ws.broadcast_event_to_tenant.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# 4. Sub-orchestrator (non-head project) never overwrites conductor identity
-# ---------------------------------------------------------------------------
 
 
 async def test_sub_orchestrator_never_overwrites_conductor(db_session: AsyncSession) -> None:
-    """A sub_orchestrator project must NOT overwrite conductor_agent_id."""
     tenant = TenantManager.generate_tenant_key()
     head_proj_id = await _seed_project(db_session, tenant)
     sub_proj_id = await _seed_project(db_session, tenant)
@@ -362,7 +271,6 @@ async def test_sub_orchestrator_never_overwrites_conductor(db_session: AsyncSess
         conductor_project_id=head_proj_id,
     )
 
-    # Sub-orchestrator spawned for project 2.
     _job_id, sub_agent_id = await _spawn_orchestrator(db_session, tenant, sub_proj_id)
 
     ws = _stub_ws()
@@ -379,23 +287,17 @@ async def test_sub_orchestrator_never_overwrites_conductor(db_session: AsyncSess
     assert chain_ctx is not None
     assert chain_ctx.role == "sub_orchestrator", "non-head project must be sub_orchestrator"
 
-    # Conductor identity must be unchanged.
     svc2 = SequenceRunService(db_manager=None, tenant_manager=TenantManager(), session=db_session)
     run = await svc2.get(run_id=run_id, tenant_key=tenant)
     assert run["conductor_agent_id"] == conductor_agent_id, "sub_orchestrator must NOT overwrite conductor_agent_id"
     assert run["conductor_project_id"] == head_proj_id
 
-    # No broadcast from sub-orchestrator path.
     ws.broadcast_event_to_tenant.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# 5. Solo project (no active run) → chain_ctx=None → no ch_conductor chapter
-# ---------------------------------------------------------------------------
 
 
 async def test_solo_project_no_ch_conductor(db_session: AsyncSession) -> None:
-    """A project with no active run returns chain_ctx=None → no ch_conductor in protocol."""
     tenant = TenantManager.generate_tenant_key()
     proj_id = await _seed_project(db_session, tenant)
 
@@ -413,7 +315,6 @@ async def test_solo_project_no_ch_conductor(db_session: AsyncSession) -> None:
     assert chain_ctx is None, "solo project (no active run) must return None"
     ws.broadcast_event_to_tenant.assert_not_called()
 
-    # Verify the protocol builder produces no ch_conductor (byte-identical solo path).
     from giljo_mcp.services.protocol_builder import _build_orchestrator_protocol
 
     protocol = _build_orchestrator_protocol(
@@ -427,19 +328,14 @@ async def test_solo_project_no_ch_conductor(db_session: AsyncSession) -> None:
     assert "ch_conductor" not in protocol, "solo project must produce no ch_conductor chapter"
 
 
-# ---------------------------------------------------------------------------
-# 6. find_active_run_for_project tenant isolation
-# ---------------------------------------------------------------------------
 
 
 async def test_find_active_run_tenant_isolation(db_session: AsyncSession) -> None:
-    """find_active_run_for_project must not return runs from another tenant."""
     tenant_a = TenantManager.generate_tenant_key()
     tenant_b = TenantManager.generate_tenant_key()
 
     proj_id = str(uuid.uuid4())
 
-    # Seed a run for tenant_a containing proj_id.
     run_a = SequenceRun(
         id=str(uuid.uuid4()),
         tenant_key=tenant_a,
@@ -458,23 +354,17 @@ async def test_find_active_run_tenant_isolation(db_session: AsyncSession) -> Non
 
     svc = SequenceRunService(db_manager=None, tenant_manager=TenantManager(), session=db_session)
 
-    # tenant_b must not see tenant_a's run.
     result = await svc.find_active_run_for_project(project_id=proj_id, tenant_key=tenant_b)
     assert result is None, "tenant_b must not see tenant_a's run"
 
-    # tenant_a sees its own run.
     result_a = await svc.find_active_run_for_project(project_id=proj_id, tenant_key=tenant_a)
     assert result_a is not None
     assert result_a["id"] == run_a.id
 
 
-# ---------------------------------------------------------------------------
-# 7. find_active_run_for_project status filter
-# ---------------------------------------------------------------------------
 
 
 async def test_find_active_run_status_filter(db_session: AsyncSession) -> None:
-    """Completed/terminated/cancelled runs are excluded; pending/running/stalled included."""
     tenant = TenantManager.generate_tenant_key()
     proj_id = str(uuid.uuid4())
 
@@ -525,13 +415,9 @@ async def test_find_active_run_status_filter(db_session: AsyncSession) -> None:
         assert found["status"] == status
 
 
-# ---------------------------------------------------------------------------
-# 8. advance_index_if_committed refuses without closeout
-# ---------------------------------------------------------------------------
 
 
 async def test_advance_index_if_committed_refuses_without_closeout(db_session: AsyncSession) -> None:
-    """advance_index_if_committed returns False when project has no closeout record."""
     tenant = TenantManager.generate_tenant_key()
     proj_id = await _seed_project(db_session, tenant, closeout_executed_at=None)
     proj2_id = await _seed_project(db_session, tenant)
@@ -552,19 +438,14 @@ async def test_advance_index_if_committed_refuses_without_closeout(db_session: A
     )
     assert advanced is False, "must refuse without closeout_executed_at"
 
-    # Index must remain 0.
     run_svc = SequenceRunService(db_manager=None, tenant_manager=TenantManager(), session=db_session)
     run = await run_svc.get(run_id=run_id, tenant_key=tenant)
     assert run["current_index"] == 0
 
 
-# ---------------------------------------------------------------------------
-# 9. advance_index_if_committed advances with closeout
-# ---------------------------------------------------------------------------
 
 
 async def test_advance_index_if_committed_advances_with_closeout(db_session: AsyncSession) -> None:
-    """advance_index_if_committed returns True and bumps index when closeout_executed_at is set."""
     tenant = TenantManager.generate_tenant_key()
     proj_id = await _seed_project(db_session, tenant, closeout_executed_at=datetime.now(UTC))
     proj2_id = await _seed_project(db_session, tenant)
@@ -590,13 +471,9 @@ async def test_advance_index_if_committed_advances_with_closeout(db_session: Asy
     assert run["current_index"] == 1
 
 
-# ---------------------------------------------------------------------------
-# 10. mark_stalled_if_past_deadline
-# ---------------------------------------------------------------------------
 
 
 async def test_mark_stalled_if_past_deadline(db_session: AsyncSession) -> None:
-    """mark_stalled_if_past_deadline flips to stalled past deadline, no-op before it."""
     tenant = TenantManager.generate_tenant_key()
     proj_id = await _seed_project(db_session, tenant)
     run_id = await _seed_sequence_run(
@@ -612,7 +489,6 @@ async def test_mark_stalled_if_past_deadline(db_session: AsyncSession) -> None:
     future = now + timedelta(hours=1)
     past = now - timedelta(seconds=1)
 
-    # Before deadline → no flip.
     not_stalled = await svc._chain.mark_stalled_if_past_deadline(
         run_id=run_id,
         tenant_key=tenant,
@@ -625,7 +501,6 @@ async def test_mark_stalled_if_past_deadline(db_session: AsyncSession) -> None:
     run = await run_svc.get(run_id=run_id, tenant_key=tenant)
     assert run["status"] == "running"
 
-    # Past deadline → flip to stalled.
     stalled = await svc._chain.mark_stalled_if_past_deadline(
         run_id=run_id,
         tenant_key=tenant,

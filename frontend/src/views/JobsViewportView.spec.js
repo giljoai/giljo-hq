@@ -1,19 +1,3 @@
-/**
- * JobsViewportView.spec.js — FE-9548
- *
- * The Jobs board, rebuilt strictly to design mock jobs-board-proposal-v4.html
- * after FE-9525d shipped with none of the house design-system treatments
- * applied. Reads the SAME store field (activeProjectsMeta) the
- * LaunchRedirectView plural-redirect test drives.
- *
- * FE-9545 REGRESSION lesson carried forward: the server's real
- * /api/agent-jobs/ response is a PAGINATED ENVELOPE ({jobs, total, limit,
- * offset}), never a bare array -- every agent-jobs mock below uses that
- * shape, matching agent_jobs/models.py's JobListResponse.response_model
- * rather than a shape read off the component.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -51,7 +35,6 @@ const router = createRouter({
   ],
 })
 
-// The paginated envelope FE-9545 fixed the code to actually read.
 function envelope(jobs) {
   return { data: { jobs, total: jobs.length, limit: 50, offset: 0 } }
 }
@@ -63,10 +46,6 @@ beforeEach(() => {
   h.listAgentJobs.mockResolvedValue(envelope([]))
 })
 
-// The global v-tooltip stub (tests/setup.js) renders only the default slot,
-// hiding activator-slotted content (JobsBoardCard's title/badge tooltips use
-// #activator). Override with a stub rendering both, mirroring
-// JobsBoardCard.spec.js / AgentRow.spec.js / JobsTab.spec.js.
 const tooltipStub = {
   template: `<div class="v-tooltip"><slot name="activator" :props="{}" /><slot /></div>`,
 }
@@ -176,11 +155,6 @@ describe('JobsViewportView', () => {
     expect(wrapper.findAll('[data-testid="jobs-board-card-wrap"]')).toHaveLength(2)
   })
 
-  // FE-9551: an activated-but-never-staged project (staging_status
-  // null/undefined) and a project mid-staging (staging_status 'staging')
-  // must both be filterable -- a state a card can display but the filter
-  // can't reach is a hole. Also pins the honest Activated label replacing
-  // the old catch-all "Staged" mislabeling.
   it('the filter toolbar covers Activated and Planning, each with a live count', async () => {
     h.getActive.mockResolvedValue({
       data: [

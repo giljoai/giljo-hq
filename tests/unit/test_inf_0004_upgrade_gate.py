@@ -3,38 +3,16 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Regression tests for INF-0004 sub-task #3 — the startup.py pre-boot consistency gate.
-
-Exercised at the layer the logic lives (startup.py functions), per the CLAUDE.md
-"regression test at the failing layer" rule. Covers the three checks the gate runs:
-
-  (a) Alembic DB revision vs. code head — fail-open behaviour (no DB -> no false drift).
-  (b) Critical Python imports present.
-  (c) Frontend build present and not stale (dist/index.html newer than package.json).
-
-Plus the aggregator verify_install_consistency() that combines them.
-
-These tests touch NO database and mutate NO module-level state (parallel-safe under
-pytest-xdist): the frontend checks use tmp_path, and import/alembic checks are driven
-via monkeypatch on the gate's own helpers.
-"""
 
 import sys
 from pathlib import Path
 
 
-# Import the module under test (startup.py lives at the repo root). The venv-relaunch
-# guard in startup.py is skipped when pytest is loaded, so this import is side-effect free.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 import startup  # noqa: E402
 
 
 def _make_frontend(tmp_path: Path, *, with_index: bool, index_newer: bool) -> Path:
-    """Build a fake frontend/ tree and return its path.
-
-    index_newer controls whether dist/index.html is newer than package.json.
-    """
     frontend = tmp_path / "frontend"
     (frontend / "dist").mkdir(parents=True)
     package_json = frontend / "package.json"
@@ -42,7 +20,6 @@ def _make_frontend(tmp_path: Path, *, with_index: bool, index_newer: bool) -> Pa
     if with_index:
         index_html = frontend / "dist" / "index.html"
         index_html.write_text("<html></html>")
-        # Drive freshness deterministically via mtimes rather than wall-clock ordering.
         if index_newer:
             package_json.touch()
             _set_mtime(package_json, 1000)
@@ -59,9 +36,6 @@ def _set_mtime(path: Path, when: float) -> None:
     os.utime(path, (when, when))
 
 
-# ---------------------------------------------------------------------------
-# (c) Frontend consistency
-# ---------------------------------------------------------------------------
 
 
 class TestFrontendConsistency:
@@ -82,20 +56,15 @@ class TestFrontendConsistency:
         assert startup._frontend_consistency_problem(frontend) is None
 
     def test_no_package_json_is_skipped(self, tmp_path):
-        # A tree with no frontend/package.json has nothing to serve -> no problem.
         empty = tmp_path / "frontend"
         empty.mkdir()
         assert startup._frontend_consistency_problem(empty) is None
 
 
-# ---------------------------------------------------------------------------
-# (b) Critical imports
-# ---------------------------------------------------------------------------
 
 
 class TestCriticalImports:
     def test_all_present_in_test_env(self):
-        # The test environment installs the full requirements, so nothing is missing.
         assert startup._missing_critical_imports() == []
 
     def test_detects_a_missing_module(self, monkeypatch):
@@ -108,14 +77,10 @@ class TestCriticalImports:
         assert missing == ["giljo_definitely_not_a_real_module_xyz"]
 
 
-# ---------------------------------------------------------------------------
-# (a) Alembic drift — fail-open
-# ---------------------------------------------------------------------------
 
 
 class TestAlembicDriftFailOpen:
     def test_no_database_url_returns_none(self, monkeypatch):
-        # With no resolvable DB URL the check must fail open (return None), never raise.
         monkeypatch.setattr(startup, "_get_database_url", lambda: None)
         assert startup._alembic_revision_drift() is None
 
@@ -124,13 +89,9 @@ class TestAlembicDriftFailOpen:
             raise RuntimeError("alembic exploded")
 
         monkeypatch.setattr(startup, "_get_database_url", boom)
-        # Must swallow the error and report "no drift" rather than crash the boot.
         assert startup._alembic_revision_drift() is None
 
 
-# ---------------------------------------------------------------------------
-# Aggregator
-# ---------------------------------------------------------------------------
 
 
 class TestVerifyInstallConsistency:
@@ -161,7 +122,6 @@ class TestVerifyInstallConsistency:
         assert problems == []
 
     def test_enforce_frontend_false_skips_frontend(self, tmp_path, monkeypatch):
-        # The npm-missing "run on existing dist" fallback passes enforce_frontend=False.
         frontend = _make_frontend(tmp_path, with_index=False, index_newer=False)
         monkeypatch.setattr(startup, "_alembic_revision_drift", lambda: None)
         problems = startup.verify_install_consistency(frontend_dir=frontend, dev_mode=False, enforce_frontend=False)

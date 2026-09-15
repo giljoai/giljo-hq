@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""INF-6236 — bring-your-own-cert HTTPS provisioning (Network settings, CE).
-
-Failing layer = the SSL endpoints in ``api/endpoints/configuration.py``. INF-6236
-re-homes the SSL setting off the per-tenant SettingsService onto config.yaml
-(server-level), drops the auto-self-signed mint, and adds bring-your-own-cert:
-
-  - ``_validate_cert_pair`` is the cert-AGNOSTIC server check (the pair must parse +
-    match; trust is a client-side concern). It backs upload + reference + the
-    enable path.
-  - ``toggle_ssl`` REQUIRES a provisioned cert to enable (no minting) and writes
-    config.yaml only -- the same source of truth uvicorn reads at startup.
-
-These tests exercise the validator + the toggle's no-cert rejection directly
-(pure unit, no DB / no HTTP client needed). config.yaml IO is monkeypatched so
-nothing touches the real install config. xdist-safe: per-test tmp files, no
-module-level mutable state.
-"""
 
 from __future__ import annotations
 
@@ -37,12 +20,6 @@ from api.endpoints import configuration_ssl as cfg
 
 
 def _write_self_signed_pair(tmp_path) -> tuple[str, str]:
-    """Write a throwaway self-signed cert+key PEM pair. Returns (cert_path, key_path).
-
-    A self-signed cert is an UNtrusted but structurally-valid pair -- exactly what
-    the cert-agnostic server check should ACCEPT (it validates parse+match, not
-    trust). Generated in-process so the test needs no openssl binary.
-    """
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test.local")])
     cert = (
@@ -70,11 +47,9 @@ def _write_self_signed_pair(tmp_path) -> tuple[str, str]:
 
 
 class TestValidateCertPair:
-    """The cert-agnostic parse+match check accepts a valid pair, rejects bad input."""
 
     def test_valid_self_signed_pair_accepted(self, tmp_path):
         cert_path, key_path = _write_self_signed_pair(tmp_path)
-        # Untrusted but structurally valid -> must NOT raise (trust is client-side).
         cfg._validate_cert_pair(cert_path, key_path)
 
     def test_missing_file_rejected(self, tmp_path):
@@ -84,7 +59,6 @@ class TestValidateCertPair:
         assert exc.value.status_code == 400
 
     def test_mismatched_pair_rejected(self, tmp_path):
-        # cert from one key, key from a different keypair -> must be rejected.
         cert_path, _ = _write_self_signed_pair(tmp_path)
         other = tmp_path / "other"
         other.mkdir()
@@ -104,11 +78,9 @@ class TestValidateCertPair:
 
 
 class TestToggleRequiresProvisionedCert:
-    """Enabling HTTPS must require a provisioned cert -- the server never mints one."""
 
     @pytest.mark.asyncio
     async def test_enable_without_cert_rejected_no_mint(self, monkeypatch):
-        # No cert provisioned anywhere -> enabling must be rejected, NOT auto-minted.
         monkeypatch.setattr(cfg, "_ssl_status_from_config", lambda: (False, None, None, False))
 
         def _boom(_config):
@@ -125,7 +97,6 @@ class TestToggleRequiresProvisionedCert:
 
     @pytest.mark.asyncio
     async def test_disable_always_allowed(self, monkeypatch, tmp_path):
-        # Disabling never needs a cert and must write ssl_enabled=False to config.yaml.
         monkeypatch.setattr(cfg, "_ssl_status_from_config", lambda: (True, None, None, False))
         captured = {}
 

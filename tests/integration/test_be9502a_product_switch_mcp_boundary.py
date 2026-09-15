@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9502a — product activate/deactivate/switch reachable from the harness, tested
-AT the MCP transport boundary (CLAUDE.md's BE-5042 rule: test at the layer that
-failed before, and a boundary change needs a boundary test).
-
-``update_product_context`` (the existing tool — no new tool, per the roster lock)
-grows an optional ``is_active`` param that routes through
-``ProductService.activate_product`` / ``deactivate_product`` -- the SAME owning
-writer ``POST /api/products/{id}/activate|deactivate`` uses (dual-door,
-single-writer). Deliberately NOT the generic field merge-write: that path
-would bypass the one owning writer for this field, same as any other
-service-owned column. (FE-9524/D1: the sibling auto-deactivate this docstring
-used to describe is retired -- several products may be shown at once.)
-
-Mirrors the fixtures in test_fe9320_update_product_context_boundary.py (Section B:
-real ToolAccessor on the rolled-back test session).
-"""
 
 from __future__ import annotations
 
@@ -89,10 +73,6 @@ async def _seed_two_products(session, tenant_key: str) -> tuple[Product, Product
 
 @pytest.mark.asyncio
 async def test_switching_products_leaves_the_sibling_shown(product_switch_client):
-    """FE-9524/D1: showing product B while A is shown must leave A shown too --
-    several tabs open is the point, and the single-active-per-tenant invariant
-    this test used to pin is exactly what D1 retires (DB index dropped in
-    ce_0099, service-layer sibling-deactivate removed from activate_product)."""
     new_client, tenant_key, session = product_switch_client
     active, inactive = await _seed_two_products(session, tenant_key)
 
@@ -129,8 +109,6 @@ async def test_deactivating_the_active_product_leaves_none_active(product_switch
 
 @pytest.mark.asyncio
 async def test_is_active_omitted_leaves_activation_state_untouched(product_switch_client):
-    """Byte-identical for existing callers: a plain field-only update_product_context
-    call must not move activation state at all."""
     new_client, tenant_key, session = product_switch_client
     active, inactive = await _seed_two_products(session, tenant_key)
 
@@ -164,7 +142,6 @@ async def test_activating_an_unknown_product_id_is_a_clean_rejection_not_a_500(p
 
 @pytest.mark.asyncio
 async def test_switch_and_field_correction_land_in_the_same_call(product_switch_client):
-    """Combines both DoD asks (switch + post-creation field correction) in one call."""
     new_client, tenant_key, session = product_switch_client
     _active, inactive = await _seed_two_products(session, tenant_key)
 

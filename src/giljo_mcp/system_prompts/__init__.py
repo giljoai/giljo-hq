@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""System prompt helpers for immutable, admin-managed instructions."""
 
 from .service import SystemPromptService
 

@@ -16,8 +16,6 @@
       No messages yet.
     </div>
 
-    <!-- FE-9368 (D): a filter that matches nothing is not an empty thread, and saying
-         "No messages yet" there would read as data loss. -->
     <div
       v-else-if="filteredMessages.length === 0"
       class="thread-timeline__empty"
@@ -40,14 +38,6 @@
       ]"
       :data-testid="`timeline-message-${message.message_id}`"
     >
-      <!-- FE-9410: the operator followed a "waiting on you" notification to THIS post.
-           Landing in the thread is not enough on its own — a long thread still leaves
-           them scanning — so the post that pulled them here says so out loud.
-
-           FE-9436: three things can pull them here now — a hand-off, a mention, an
-           approval — and per the operator ruling they share ONE flag. The reason picks
-           the words and the tint; it adds no second element and no second scroll rule.
-           The hand-off's reason is spelled `baton`, so its testid is unchanged. -->
       <span
         v-if="message.message_id === focusMessageId"
         class="timeline-msg__focus-flag"
@@ -56,9 +46,6 @@
       >
         {{ FOCUS_COPY[resolvedFocusReason] }}
       </span>
-      <!-- Sender badge: user -> brand-yellow avatar+initials; agent -> tinted role color
-           badge. A grouped continuation keeps the column but shows no badge, so the
-           run of posts reads as one person speaking. -->
       <div
         v-if="!message._grouped"
         class="timeline-msg__avatar smooth-border"
@@ -72,14 +59,7 @@
       <div v-else class="timeline-msg__avatar-spacer" aria-hidden="true" />
 
       <div class="timeline-msg__body">
-        <!-- Header row: who / harness / time. NO host — the server cannot know a
-             client's hostname, so it would have to be self-declared, which is the
-             thing BE-9289a removed. -->
         <div v-if="!message._grouped" class="timeline-msg__header">
-          <!-- FE-9365d: the name is WHITE for every agent. Role colour lives in the
-               badge and only there. Tinting the name too made six agents in a thread
-               read as six different levels of importance — a hierarchy the data does
-               not contain and the operator cannot act on. -->
           <span
             class="timeline-msg__sender"
             :class="{ 'timeline-msg__sender--user': message._isUser }"
@@ -96,9 +76,6 @@
           <span class="timeline-msg__time" data-testid="message-time">
             {{ formatTime(message.created_at) }}
           </span>
-          <!-- Direct posts only. "broadcast" is the server-side DEFAULT, so badging it
-               marked effectively every message and carried no information; the chip now
-               fires only on the case that is actually a choice. -->
           <span
             v-if="message._isDirect"
             class="timeline-msg__type-chip smooth-border"
@@ -107,7 +84,6 @@
           >
             direct
           </span>
-          <!-- requires_action marker -->
           <span
             v-if="message.requires_action"
             class="timeline-msg__action-flag smooth-border"
@@ -118,10 +94,6 @@
           </span>
         </div>
 
-        <!-- SEC-0003: message bodies are agent-authored, so every one goes through
-             useSanitizeMarkdown -> marked -> hardened DOMPurify (renderedBody is the
-             only producer of this string and has no other path). Nothing reaches the
-             DOM unsanitized. v-html sanctioned via eslint.config.js file override. -->
         <div class="timeline-msg__content" data-testid="message-content">
           <div class="timeline-msg__md" v-html="renderedBody(message)" />
           <button
@@ -142,19 +114,12 @@
 <script setup>
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { useCommHubStore } from '@/stores/commHubStore'
+import { useHubMessageOrder } from '@/components/hub/useHubMessageOrder'
 import { useSanitizeMarkdown } from '@/composables/useSanitizeMarkdown'
 import { getAgentColor, getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
 import { BATON_FOCUS, MENTION_FOCUS, APPROVAL_FOCUS } from '@/components/hub/hubThreadRoute'
 
-/**
- * FE-9436: what the one flag SAYS, per reason.
- *
- * The hand-off's line is FE-9410's, word for word — the operator ruling harmonised the
- * surface, not the wording of a notification that was already right. The other two are
- * deliberately not variations on it: "Waiting on you" is a claim about whose turn it is,
- * and only the baton can make it.
- */
 const FOCUS_COPY = {
   [BATON_FOCUS]: 'Waiting on you',
   [MENTION_FOCUS]: 'You were mentioned',
@@ -162,33 +127,12 @@ const FOCUS_COPY = {
 }
 
 const props = defineProps({
-  // Explicit thread to render (Phase 5 / D1(a) read-only surfaces). Falls back
-  // to the store's selected thread when omitted, so existing callers like
-  // HubView.vue (`<ThreadTimeline />` with no props) keep working identically.
   threadId: { type: String, default: null },
-  // FE-9368 (D): free-text filter over the messages ALREADY loaded for this thread.
-  // Empty string means "show everything", which is the default every other caller
-  // gets by not passing it at all.
   search: { type: String, default: '' },
-  // FE-9410: the message the operator was sent here to read, when they arrived from an
-  // "Action needed" notification. Null for every ordinary arrival, which is why nothing
-  // is marked unless a notification actually pointed at a post.
   focusMessageId: { type: String, default: null },
-  // FE-9436: WHY they were sent — handover (`baton`), mention, or approval. It decides
-  // the words and the tint on the flag above and nothing else; it cannot cause a mark,
-  // because `focusMessageId` remains the only thing that does.
   focusReason: { type: String, default: BATON_FOCUS },
 })
 
-/**
- * FE-9436: the reason actually rendered.
- *
- * A reason this component has no copy for is treated as the hand-off, which is the
- * pre-FE-9436 behaviour of the only caller that can reach it — FE-9410's own spec mounts
- * with a focus id and no reason at all. Production cannot land here: HubView derives the
- * id and the reason from the SAME query, and `resolveFocusMessageId` returns no id
- * unless that query named a reason this module recognises.
- */
 const resolvedFocusReason = computed(() =>
   FOCUS_COPY[props.focusReason] ? props.focusReason : BATON_FOCUS,
 )
@@ -196,6 +140,7 @@ const resolvedFocusReason = computed(() =>
 const commHub = useCommHubStore()
 const { sanitizeMarkdown } = useSanitizeMarkdown()
 const timelineEl = ref(null)
+const { newestFirst } = useHubMessageOrder()
 
 const effectiveThreadId = computed(() => props.threadId || commHub.selectedThreadId)
 const messages = computed(() => {
@@ -203,18 +148,12 @@ const messages = computed(() => {
   return commHub.messagesFor(effectiveThreadId.value)
 })
 
-// FE-9410: per-message elements, so a focused post can be scrolled to by id.
 const messageEls = new Map()
 function setMessageRef(messageId, el) {
   if (el) messageEls.set(messageId, el)
   else messageEls.delete(messageId)
 }
 
-/**
- * FE-9410: bring the focused post into view. Returns whether it found one, because the
- * bottom-scroll below hands over to it rather than both firing — two scrolls in one
- * frame is how a timeline lands somewhere neither of them meant.
- */
 function scrollToFocused() {
   const el = props.focusMessageId ? messageEls.get(props.focusMessageId) : null
   if (!el || typeof el.scrollIntoView !== 'function') return false
@@ -222,43 +161,24 @@ function scrollToFocused() {
   return true
 }
 
-// Auto-scroll to bottom when new messages arrive
 watch(
   () => messages.value.length,
   () => {
     nextTick(() => {
       if (scrollToFocused()) return
       if (timelineEl.value) {
-        timelineEl.value.scrollTop = timelineEl.value.scrollHeight
+        timelineEl.value.scrollTop = newestFirst.value ? 0 : timelineEl.value.scrollHeight
       }
     })
   },
 )
 
-// The focus can also arrive AFTER the messages do — the operator clicks the banner from
-// inside the Hub, and the thread is already loaded when the target is named.
 watch(
   () => props.focusMessageId,
   () => nextTick(scrollToFocused),
 )
 
-// ---- display helpers ----
 
-// WHAT the author is comes from the server: `from_kind` ('agent' | 'user') is resolved
-// at post time, where the backend actually knows which attribution branch ran. The
-// client does not decide this and must not try to.
-//
-// It used to guess from the SHAPE of from_agent_id ("looks like a UUID therefore
-// human"), which broke the moment agents began posting under their own agent_id UUID:
-// those posts rendered as the HUMAN user, right-aligned and brand-yellow, with a raw
-// UUID for a name. The guess was unfixable on this side — from_agent_id is a
-// self-declared functional key (recipient self-exclusion, baton matching, read
-// cursors), so its shape carries no information about the author. BE-9289a made the
-// server answer the question instead, and every poster is now registered, so the
-// heuristic is gone rather than merely demoted to a fallback.
-//
-// The participant directory is still consulted, but only for the friendlier NAME and
-// the harness the poster connected from.
 function authorFor(message) {
   const p = commHub
     .participantsFor(effectiveThreadId.value)
@@ -266,23 +186,16 @@ function authorFor(message) {
   return {
     isUser: message.from_kind === 'user',
     name: p?.display_name || message.from_display_name || message.from_agent_id,
-    // FE-9490: the participant's stable role, so the avatar colour can key off
-    // it (see getAgentColorKey) instead of the human display name alone — the
-    // same agent must resolve to the same badge colour everywhere.
     role: p?.role || '',
     harness: p?.harness || '',
   }
 }
 
-// `generic` is the resolver's fail-safe floor, not a harness name — label it. An
-// author with no participant row shows NO harness rather than a guessed one.
 function harnessLabel(harness) {
   if (!harness) return ''
   return harness === 'generic' ? 'Generic Harness' : harness
 }
 
-// A run of posts by the same author, close in time, reads as one person speaking:
-// the continuation keeps the column but drops the badge and the header row.
 const GROUP_WINDOW_MS = 5 * 60 * 1000
 
 function continuesRun(message, previous) {
@@ -293,10 +206,9 @@ function continuesRun(message, previous) {
   const a = new Date(previous.created_at).getTime()
   const b = new Date(message.created_at).getTime()
   if (Number.isNaN(a) || Number.isNaN(b)) return false
-  return b - a < GROUP_WINDOW_MS
+  return Math.abs(b - a) < GROUP_WINDOW_MS
 }
 
-// Long posts fold to their first sentence until the reader asks for the rest.
 const FOLD_THRESHOLD = 420
 const expanded = reactive(new Set())
 
@@ -317,11 +229,6 @@ function renderedBody(message) {
   return sanitizeMarkdown(body)
 }
 
-// FE-9368 (D): the in-thread filter. Client-side over the timeline already loaded —
-// the whole history for the open thread is in the store, so there is nothing to fetch
-// and no debounce to get wrong. Matches the message text OR the author's RESOLVED name
-// (what the operator actually sees on the post), not the raw from_agent_id they never
-// read. A blank query means no filter at all.
 const filteredMessages = computed(() => {
   const q = String(props.search || '').trim().toLowerCase()
   if (!q) return messages.value
@@ -332,14 +239,12 @@ const filteredMessages = computed(() => {
   )
 })
 
-// Enrich the visible messages with resolved author identity so the template binds
-// off stable per-message fields instead of re-resolving per node.
-//
-// Grouping is computed over the FILTERED list on purpose: with a filter on, the post
-// above a message on screen is its neighbour in that list, and grouping against the
-// unfiltered one would hide the author badge of a post whose predecessor is not shown.
+const orderedMessages = computed(() =>
+  newestFirst.value ? [...filteredMessages.value].reverse() : filteredMessages.value,
+)
+
 const decoratedMessages = computed(() =>
-  filteredMessages.value.map((m, i) => {
+  orderedMessages.value.map((m, i) => {
     const author = authorFor(m)
     return {
       ...m,
@@ -348,7 +253,7 @@ const decoratedMessages = computed(() =>
       _role: author.role,
       _harness: author.isUser ? '' : harnessLabel(author.harness),
       _isDirect: m.message_type === 'direct',
-      _grouped: continuesRun(m, filteredMessages.value[i - 1]),
+      _grouped: continuesRun(m, orderedMessages.value[i - 1]),
       _foldable: (m.content || '').length > FOLD_THRESHOLD,
     }
   }),
@@ -358,12 +263,8 @@ function avatarInitials(name) {
   return getAgentInitials(name)
 }
 
-// Fallback to orchestrator color (the canonical default from agentColors.js)
 const FALLBACK_HEX = getAgentColor('orchestrator')?.hex
 
-// FE-9490: keyed off {role, name} — role (the stable participant field) wins
-// over the display name, same priority getAgentColorKey enforces for every
-// other badge site, so this agent's colour matches the Hub pill/composer/panel.
 function avatarStyle({ role, name } = {}) {
   const colorObj = getAgentColor(getAgentColorKey({ role, display_name: name }))
   const hex = colorObj?.hex || FALLBACK_HEX
@@ -374,7 +275,6 @@ function avatarStyle({ role, name } = {}) {
   }
 }
 
-// Direct chip: lavender (reviewer). Hex derived from getAgentColor() — no hardcoded hex.
 const directChipStyle = computed(() => {
   const hex = getAgentColor('reviewer')?.hex
   return {

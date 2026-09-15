@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9499b -- direct unit coverage for ``diagnose_staging_hints.py``.
-
-The end-to-end wire behavior (over the real MCP transport) is pinned by
-``tests/integration/test_be9499b_diagnose_reverse_gear_hints.py``; this file
-covers the pure logic directly, including combinations the transport test
-doesn't exercise (blocked/silent/awaiting_user, terminal projects).
-"""
 
 from __future__ import annotations
 
@@ -29,10 +22,6 @@ class TestStagingStuckHints:
         assert "restage" in STAGING_STUCK_HINTS["staging"][0]
 
     def test_no_base_hint_mentions_cancel_staging(self):
-        """BE-9512: cancel_staging is gated separately (see
-        TestCancelStagingReachability) because its precondition depends on
-        `status`, which this staging_status-keyed dict can't see -- from
-        'staged' it is structurally unreachable and must never be offered."""
         for hints in STAGING_STUCK_HINTS.values():
             assert not any("cancel_staging" in h for h in hints)
 
@@ -63,8 +52,6 @@ class TestComputeStuckConditions:
         assert any("restage" in s for s in suggested)
 
     def test_no_agents_and_no_staging_status_has_no_reverse_gear_hint(self):
-        """A brand-new project with no agents and no staging_status is not
-        'stuck in staging' -- there is nothing to unstage/restage/cancel."""
         stuck, suggested = compute_stuck_conditions(
             execution_mode="claude_code_cli",
             is_terminal=False,
@@ -126,14 +113,8 @@ class TestComputeStuckConditions:
 
 
 class TestCancelStagingReachability:
-    """BE-9512: cancel_staging must only be suggested when
-    ProjectStagingService.cancel_staging can actually succeed --
-    staging_status == 'staging' AND status == INACTIVE
-    (project_staging_service.py:682)."""
 
     def test_staged_never_suggests_cancel_staging(self):
-        """Unreachable from 'staged' regardless of status -- staging_status
-        alone rules it out."""
         stuck, suggested = compute_stuck_conditions(
             execution_mode="claude_code_cli",
             is_terminal=False,
@@ -161,8 +142,6 @@ class TestCancelStagingReachability:
         assert any("cancel_staging" in s for s in suggested)
 
     def test_staging_but_not_inactive_omits_cancel_staging(self):
-        """staging_status='staging' alone isn't enough -- status must also be
-        INACTIVE, or the call would be rejected."""
         stuck, suggested = compute_stuck_conditions(
             execution_mode="claude_code_cli",
             is_terminal=False,
@@ -177,7 +156,6 @@ class TestCancelStagingReachability:
         assert not any("cancel_staging" in s for s in suggested)
 
     def test_status_omitted_defaults_to_no_cancel_staging_suggestion(self):
-        """Unknown status must never be treated as a green light."""
         _stuck, suggested = compute_stuck_conditions(
             execution_mode="claude_code_cli",
             is_terminal=False,

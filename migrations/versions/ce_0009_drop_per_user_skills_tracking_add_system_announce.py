@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""IMP-0023: replace per-user skills-version tracking with system-level row.
-
-Revision ID: ce_0009_drop_per_user_skills_tracking_add_system_announce
-Revises: ce_0008_project_status_enum
-Create Date: 2026-05-03
-
-Drops users.last_installed_skills_version + users.last_update_reminder_at.
-Creates system_settings (key/value/updated_at). Seeds skills_version_announced
-to the bundled SKILLS_VERSION constant via ON CONFLICT DO NOTHING.
-
-All four operations idempotent: re-applying the migration is a no-op.
-"""
 
 import sqlalchemy as sa
 from alembic import op

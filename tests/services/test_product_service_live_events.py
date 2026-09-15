@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-FE-9501c (D10): ProductService.create_product() / update_product() must emit
-product:created / product:updated so Products views can live-update instead
-of only loading on mount. No event existed at all before this.
-
-Mirrors test_product_service_project_deactivation.py's mock_ws pattern.
-"""
 
 import json
 import uuid
@@ -74,7 +67,6 @@ async def test_update_product_emits_product_updated(db_session, db_manager):
 
 @pytest.mark.asyncio
 async def test_create_and_update_are_graceful_with_no_websocket_manager(db_session, db_manager):
-    """websocket_manager=None (e.g. a caller that never wired one) must not raise."""
     tenant_key = TestData.generate_tenant_key()
     service = ProductService(db_manager, tenant_key=tenant_key, websocket_manager=None, test_session=db_session)
 
@@ -84,7 +76,6 @@ async def test_create_and_update_are_graceful_with_no_websocket_manager(db_sessi
 
 @pytest.mark.asyncio
 async def test_product_created_and_updated_payloads_stay_well_under_the_envelope_cap(db_session, db_manager):
-    """DoD: payload sizes verified against the 7999-byte envelope cap (DETAIL_ANNEX section E)."""
     envelope_cap_bytes = 7999
     tenant_key = TestData.generate_tenant_key()
     mock_ws = _mock_ws()

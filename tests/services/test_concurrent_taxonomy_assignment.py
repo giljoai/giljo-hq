@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-5065: Concurrent taxonomy assignment must serialize via FOR UPDATE.
-
-Two concurrent transactions that insert a task and a project under the same
-``(tenant_key, product_id, taxonomy_type_id)`` bucket must:
-  - both succeed (no deadlock, no IntegrityError),
-  - produce two distinct, consecutive ``series_number`` values,
-  - leave the partial unique index ``uq_task_taxonomy_active`` /
-    ``uq_project_taxonomy_active`` intact (no duplicates).
-
-This is the row-locking guarantee. The bucket uses a fresh tenant_key so
-committed rows don't pollute other tests.
-"""
 
 import asyncio
 from uuid import uuid4
@@ -39,7 +27,6 @@ async def isolated_tenant_key() -> str:
 
 @pytest_asyncio.fixture
 async def isolated_bucket(db_manager, isolated_tenant_key):
-    """Create taxonomy + product in an own-committed session and clean up after."""
     async with db_manager.get_session_async(tenant_key=isolated_tenant_key) as setup:
         tt = TaxonomyType(
             id=str(uuid4()),

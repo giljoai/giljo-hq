@@ -1,14 +1,3 @@
-/**
- * ThreadCard.spec.js — FE-9289c
- *
- * One Quiet Card's rendering + the packet corrections that override the design spec:
- *  - NO host on the pill (role badge + agent name + harness + live dot only)
- *  - the harness token `generic` renders "Generic Harness"
- *  - an empty participant list shows the check-in prompt
- *  - a project thread shows a lock (not a missing button) and no rename affordance
- *  - the status chip renders only for terminal threads (no "open" chip noise)
- *  - inline rename emits { thread, subject } and is not offered on project threads
- */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { readFileSync } from 'fs'
@@ -40,11 +29,6 @@ describe('ThreadCard', () => {
   })
 
   it('renders an agent pill as badge + harness + dot, with NO name and NO host', () => {
-    // FE-9365c: the NAME left the pill. Real names are `LANE_A — installer + harness
-    // fixes`; with no max-width they wrapped to three lines each, so a five-agent card
-    // became taller than everything else on screen. The badge is the identity; the full
-    // name lives in the pill's title and in the two places it is actually read — the
-    // composer's To dropdown and every message author line.
     const w = mountCard({
       ...BASE,
       participants: [{ participant_id: 'a', display_name: 'Alpha', role: 'implementer', harness: 'claude-code', host: 'laptop-a' }],
@@ -53,18 +37,12 @@ describe('ThreadCard', () => {
     expect(pill.exists()).toBe(true)
     expect(pill.text()).toContain('claude-code')
     expect(pill.text()).not.toContain('Alpha')
-    // Still recoverable — hovering the pill names the agent, its harness and its status.
     expect(pill.attributes('title')).toContain('Alpha')
-    // The correction that predates this: host is never rendered, even if the payload
-    // still carries it.
     expect(pill.text()).not.toContain('laptop-a')
     expect(pill.attributes('title')).not.toContain('laptop-a')
   })
 
   it('normalises the model suffix out of the harness label', () => {
-    // `OpenCode · Qwen` renders as `OpenCode`. At 11.5px the family is the useful fact,
-    // and the model changes per session — the same agent would look different between
-    // two polls.
     const w = mountCard({
       ...BASE,
       participants: [{ participant_id: 'a', display_name: 'Alpha', harness: 'OpenCode · Qwen' }],
@@ -127,23 +105,10 @@ describe('ThreadCard', () => {
 
   it('project card footer says it is kept with the project 360 memory', () => {
     const w = mountCard({ ...BASE, project_id: 'proj-1' })
-    // FE-9365c: the note left the serial (which moved to the FRONT of the title) and
-    // now sits beside the join block, where the rest of the footer's context lives.
     expect(w.find('[data-testid="thread-card"]').text()).toContain('360 memory')
   })
 
   it('reserves room for the hover actions so they never draw over the title', () => {
-    // FAIL-FIRST for a live defect (reported with screenshots, 2026-08-04): on hover the
-    // copy and trash icons were drawn directly ON TOP of the title's last words.
-    //
-    // Cause: `__actions` is absolutely positioned at `right: 20px`, so it is out of flow
-    // and `__title` (flex: 1) truncated at the FULL card width — the title never
-    // shortened to make room. Worst in a narrow column, which is why it survived review.
-    //
-    // jsdom does no layout, so the assertion is against the RULE rather than rendered
-    // geometry: the head must reserve a right-hand strip at least as wide as the action
-    // block (3 x 26px + 2 x 4px gap + 20px offset = 106px). Deleting the padding — the
-    // obvious "cleanup" — fails here instead of silently restoring the overlap.
     const style = readFileSync(resolve(__dirname, '../ThreadCard.vue'), 'utf8')
     const head = style.match(/&__head\s*\{([^}]*)\}/)
     expect(head, 'the __head rule went missing').not.toBeNull()
@@ -152,15 +117,10 @@ describe('ThreadCard', () => {
     expect(padding, '__head no longer reserves room for the hover actions').not.toBeNull()
     expect(Number(padding[1])).toBeGreaterThanOrEqual(106)
 
-    // And the actions must still be OUT of flow, or the fix trades overlap for the
-    // layout shift the absolute positioning exists to prevent.
     expect(style).toMatch(/&__actions\s*\{[^}]*position:\s*absolute/)
   })
 
   it('raises the hand ONLY from the baton — the same source as the gold frame', () => {
-    // FE-9365g. The hand and the frame must agree, and both must ignore unread:
-    // an operator who was away has unread everywhere, and a signal that is always
-    // on signals nothing (the all-gold board was a live report, 2026-08-05).
     const up = mountCard({ ...BASE, unread: true, _yourTurn: true })
     expect(up.find('[data-testid="thread-card-hand"]').exists()).toBe(true)
     expect(up.classes()).toContain('thread-card--attention')
@@ -176,8 +136,6 @@ describe('ThreadCard', () => {
   })
 
   it('the footer carries the FULL thread uuid as a copyable join command', () => {
-    // A partial id is useless to paste, so the card shows all of it — this is the
-    // most-used action after opening the thread.
     const w = mountCard({ ...BASE, thread_id: '906637cb-d8fa-4b71-9c2e-4f1ab0d77e31' })
     const join = w.find('[data-testid="thread-card-join"]')
     expect(join.text()).toContain('join_thread')
@@ -195,14 +153,11 @@ describe('ThreadCard', () => {
     expect(w.findAll('[data-testid="thread-card-pill"]').length).toBe(5)
     const more = w.find('[data-testid="thread-card-pill-more"]')
     expect(more.text()).toBe('+2 more')
-    // The dropped names stay recoverable rather than lost.
     expect(more.attributes('title')).toContain('LANE_5')
     expect(more.attributes('title')).toContain('LANE_6')
   })
 
   it('never leaves a +0 more or +-1 more string in the DOM', () => {
-    // The naive `agents.length - MAX` computes a label for every card, including the
-    // ones with nothing to overflow.
     for (const count of [0, 1, 4, 5]) {
       const participants = Array.from({ length: count }, (_, i) => ({ participant_id: `a${i}`, harness: 'generic' }))
       const html = mountCard({ ...BASE, participants }).html()
@@ -219,7 +174,6 @@ describe('ThreadCard', () => {
     await input.setValue('New name')
     await input.trigger('keydown.enter')
     expect(w.emitted('rename')[0][0]).toEqual({ thread: expect.objectContaining({ thread_id: 't1' }), subject: 'New name' })
-    // Clicking inside the card while editing must not bubble to open.
     expect(w.emitted('open')).toBeFalsy()
   })
 
@@ -231,9 +185,6 @@ describe('ThreadCard', () => {
   })
 })
 
-// FE-9530: one Hub space shows every product's threads together, so each card
-// states which product it belongs to (or that it has none) and how many
-// additional projects it tags.
 describe('ThreadCard — product/project chips (FE-9530)', () => {
   it('shows "No product" for a genuinely product-less thread', () => {
     const w = mountCard({ ...BASE, product_id: null, project_ids: [] })

@@ -1,11 +1,3 @@
-/**
- * Pre-filled project templates surfaced on the Welcome screen step-4
- * branch (active product, zero projects). Clicking a template card calls
- * `projectStore.createProject({ name, description })` with the payload
- * defined here — there is no new entity type, no DB schema change, and
- * no backend coupling. This file is the single source of truth for the
- * starter-template payloads.
- */
 
 export const PROJECT_TEMPLATES = Object.freeze([
   Object.freeze({
@@ -18,7 +10,7 @@ export const PROJECT_TEMPLATES = Object.freeze([
     projectDescription: [
       'Scaffold the project skeleton for a brand-new product: backend folder, frontend folder, shared requirements.txt (or package.json depending on stack), and a starter README.md. Use sensible defaults for the stack the user has indicated, or ask if unclear.',
       '',
-      'When the scaffold is in place, propose four follow-up projects via /giljo (Claude Code CLI, Gemini CLI) or $giljo (Codex CLI). Use /giljo (or $giljo) to read back project and task state when you need to confirm what is already staged. Name each project with its execution-order prefix so the user can see the run order at a glance: Bootstrap 1 - {title}, Bootstrap 2 - {title}, Bootstrap 3 - {title}, Bootstrap 4 - {title}. Cover:',
+      'When the scaffold is in place, propose four follow-up projects via /giljo (Claude Code CLI, OpenCode) or $giljo (Codex CLI). Use /giljo (or $giljo) to read back project and task state when you need to confirm what is already staged. Name each project with its execution-order prefix so the user can see the run order at a glance: Bootstrap 1 - {title}, Bootstrap 2 - {title}, Bootstrap 3 - {title}, Bootstrap 4 - {title}. Cover:',
       '1. Bootstrap 1 - Backend bootstrap — framework choice, app entry, health endpoint, env handling',
       '2. Bootstrap 2 - Frontend bootstrap — framework choice, root layout, theme, basic routing',
       '3. Bootstrap 3 - Auth + data layer — chosen auth strategy, ORM/DB connection, first migration',
@@ -35,7 +27,7 @@ export const PROJECT_TEMPLATES = Object.freeze([
     icon: 'mdi-database-import-outline',
     projectName: 'Import existing product (GiljoAI 360-memory bootstrap)',
     projectDescription: [
-      'Bootstrap the 360-memory for an existing codebase. Use /giljo (Claude Code CLI, Gemini CLI) or $giljo (Codex CLI) first to inspect any existing projects and tasks before proposing new ones, then propose four read-only audit projects via /giljo (or $giljo). Name each project with its execution-order prefix so the user can see the run order at a glance: Bootstrap 1 - {title}, Bootstrap 2 - {title}, Bootstrap 3 - {title}, Bootstrap 4 - {title}. Cover:',
+      'Bootstrap the 360-memory for an existing codebase. Use /giljo (Claude Code CLI, OpenCode) or $giljo (Codex CLI) first to inspect any existing projects and tasks before proposing new ones, then propose four read-only audit projects via /giljo (or $giljo). Name each project with its execution-order prefix so the user can see the run order at a glance: Bootstrap 1 - {title}, Bootstrap 2 - {title}, Bootstrap 3 - {title}, Bootstrap 4 - {title}. Cover:',
       '1. Bootstrap 1 - Frontend audit — components, routes, state management, design system, build setup',
       '2. Bootstrap 2 - Backend audit — services, endpoints, data model, auth flow, integration points',
       '3. Bootstrap 3 - Documentation audit — README, handovers, ADRs, inline docstrings, gaps',

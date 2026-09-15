@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Unit tests for giljo_mcp.http.url_resolver.get_public_base_url.
-
-INF-5012 Phase 1: public-URL resolution must come from request.base_url
-(honoring X-Forwarded-* via Uvicorn proxy_headers) and never from config.
-One helper, no edition branches.
-"""
 
 from unittest.mock import MagicMock
 
@@ -17,7 +10,6 @@ from giljo_mcp.http.url_resolver import get_public_base_url
 
 
 def _make_request(base_url: str) -> MagicMock:
-    """Build a minimal Request double whose base_url stringifies as given."""
     request = MagicMock()
     request.base_url = MagicMock()
     request.base_url.__str__ = lambda _self: base_url
@@ -25,7 +17,6 @@ def _make_request(base_url: str) -> MagicMock:
 
 
 class TestGetPublicBaseUrl:
-    """get_public_base_url returns request.base_url stripped of trailing slash."""
 
     def test_localhost_http(self):
         request = _make_request("http://localhost:7272/")
@@ -36,12 +27,10 @@ class TestGetPublicBaseUrl:
         assert get_public_base_url(request) == "https://192.0.2.42:7272"
 
     def test_cloudflare_tunnel_no_port(self):
-        """Demo Cloudflare Tunnel: public URL has no :7272 suffix."""
         request = _make_request("https://mcp.example.com/")
         assert get_public_base_url(request) == "https://mcp.example.com"
 
     def test_customer_nginx_proxy(self):
-        """CE customer behind nginx: honors X-Forwarded-Host / X-Forwarded-Proto."""
         request = _make_request("https://mcp.acme.corp/")
         assert get_public_base_url(request) == "https://mcp.acme.corp"
 
@@ -50,7 +39,6 @@ class TestGetPublicBaseUrl:
         assert get_public_base_url(request) == "https://app.example.com"
 
     def test_no_trailing_slash_input(self):
-        """Even if FastAPI ever yields base_url without a trailing slash, result is stable."""
         request = _make_request("http://localhost:7272")
         assert get_public_base_url(request) == "http://localhost:7272"
 

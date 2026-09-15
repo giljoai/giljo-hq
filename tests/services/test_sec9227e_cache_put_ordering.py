@@ -3,48 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-9227e (M2b) — idempotency cache writes must happen only after commit.
-
-Defect (atomicity/ordering): on BOTH grant paths the idempotency cache write
-happens inside the request transaction, before the caller's commit:
-
-- /refresh: ``_refresh_grant_after_lookup`` runs ``db.flush()`` for the
-  rotation, then ``_refresh_idempotency_cache_put``, then returns; the commit
-  belongs to the router's ``get_db_session`` dependency and only happens after
-  the response is produced.
-- /token: ``exchange_code_for_token`` runs ``_idem.cache_put`` after the
-  refresh-row flush inside the service, before the endpoint-level commit.
-
-If the transaction is rolled back after the cache write (a later exception in
-the request pipeline, a dropped connection), the cache retains a token pair
-whose refresh row never persisted. An honest in-window retry then receives
-that phantom pair from the cache, and the client's next /refresh finds no row
-— a hard logout for a healthy client.
-
-Both tests simulate the rollback-after-successful-return deterministically:
-the grant is driven at the service layer inside a real
-``db_manager.get_session_async()`` context, and a sentinel exception raised
-after the service returns makes the session context manager roll the
-transaction back — exactly what a post-return failure in the request pipeline
-does to the router's session. The assertion is an ordering-agnostic
-CONSISTENCY invariant, so it keeps passing under either accepted fix shape
-(explicit in-service commit before the cache-put, or cache-put lifted to the
-endpoint after the dependency's commit):
-
-    a cached response's refresh token must correspond to a live DB row.
-
-Pre-fix both tests failed (cache entry present, row rolled back) and were
-marked ``xfail(strict=True)``; the M2b fix (explicit in-service commit before
-the cache-put on both paths) removed the markers and both now pass.
-
-Museum rule: nothing here weakens the idempotency window or its in-window
-reuse-suppression — the fix changes only WHEN the cache write happens.
-
-Parallel-safe: unique tenant/user/client per test, per-test cache-backend
-registry reset (precedent: ``tests/services/test_oauth_token_idempotency.py``),
-no module-level mutable state, committed seed rows keyed by a unique
-tenant_key.
-"""
 
 from __future__ import annotations
 
@@ -71,19 +29,17 @@ from giljo_mcp.services.oauth_service import BUILTIN_CLIENT_ID, OAuthService
 
 
 class _PostReturnFailureError(Exception):
-    """Sentinel: a failure AFTER the service returned but BEFORE the commit."""
+    pass
 
 
 @pytest.fixture(autouse=True)
 def _isolated_cache_registry():
-    """Fresh cache-backend registry per test so no entry leaks across tests."""
     cache_backends.reset_registry_for_tests()
     yield
     cache_backends.reset_registry_for_tests()
 
 
 async def _seed_user(db_manager) -> tuple[str, str]:
-    """Create org+user, committed; return (user_id, tenant_key)."""
     from giljo_mcp.models.auth import User
     from giljo_mcp.models.organizations import Organization
     from giljo_mcp.tenant import TenantManager
@@ -120,7 +76,6 @@ async def _seed_user(db_manager) -> tuple[str, str]:
 
 
 def _install_confidential_resolver(client_id: str, secret_hash: str):
-    """Stub resolver recognizing one confidential client (test_sec9217b pattern)."""
     from giljo_mcp.services import oauth_service as svc
 
     prior = svc.get_client_resolver()
@@ -155,7 +110,6 @@ async def _refresh_row_exists(db_manager, *, tenant_key: str, raw_token: str) ->
 
 @pytest.mark.asyncio
 async def test_refresh_cache_entry_never_outlives_a_rolled_back_transaction(db_manager, monkeypatch):
-    """/refresh: after a post-return rollback, any cached pair must map to a live row."""
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     monkeypatch.setattr(_refresh_svc, "OAUTH_REFRESH_IDEMPOTENCY_WINDOW_SECONDS", 30)
 
@@ -166,8 +120,6 @@ async def test_refresh_cache_entry_never_outlives_a_rolled_back_transaction(db_m
     restore = _install_confidential_resolver(client_id, secret_hash)
 
     try:
-        # Committed presented row (separate session): the grant's lookup finds it,
-        # and the later rollback removes only the grant's own writes.
         async with db_manager.get_session_async(tenant_key=tk) as session:
             raw_presented = await issue_refresh_token(
                 session,
@@ -181,8 +133,6 @@ async def test_refresh_cache_entry_never_outlives_a_rolled_back_transaction(db_m
             )
             await session.commit()
 
-        # Drive the grant on a real session, then fail BEFORE the context
-        # manager's commit — the rollback-after-cache-put shape.
         response_holder: dict = {}
 
         async def _grant_then_fail_pre_commit() -> None:
@@ -200,10 +150,6 @@ async def test_refresh_cache_entry_never_outlives_a_rolled_back_transaction(db_m
 
         assert "body" in response_holder, "the grant itself must have succeeded before the failure"
 
-        # Consistency invariant (holds under either accepted fix shape): if the
-        # cache holds a response for the presented token, the rotated refresh
-        # token inside it must exist as a DB row. Pre-fix the entry is present
-        # but the row was rolled back.
         cached = await _refresh_svc._refresh_idempotency_cache_get(tk, hash_refresh_token(raw_presented))
         if cached is not None:
             cached_refresh = cached.response_body["refresh_token"]
@@ -224,7 +170,6 @@ def _generate_pkce_pair() -> tuple[str, str]:
 
 @pytest.mark.asyncio
 async def test_token_cache_entry_never_outlives_a_rolled_back_transaction(db_manager, monkeypatch):
-    """/token: after a post-return rollback, any cached pair must map to a live row."""
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     monkeypatch.setattr(_idem, "OAUTH_TOKEN_IDEMPOTENCY_WINDOW_SECONDS", 30)
 
@@ -235,8 +180,6 @@ async def test_token_cache_entry_never_outlives_a_rolled_back_transaction(db_man
     code_value = secrets.token_urlsafe(64)
     redirect_uri = "http://localhost:3000/callback"
 
-    # Committed auth code for the built-in public PKCE client (no resolver stub
-    # needed; public clients also receive a refresh token — BE-6161).
     async with db_manager.get_session_async(tenant_key=tk) as session:
         session.add(
             OAuthAuthorizationCode(
@@ -274,7 +217,6 @@ async def test_token_cache_entry_never_outlives_a_rolled_back_transaction(db_man
     assert "body" in response_holder, "the exchange itself must have succeeded before the failure"
     assert "refresh_token" in response_holder["body"]
 
-    # Same consistency invariant as the /refresh twin.
     cached = await _idem.cache_get(tk, code_value)
     if cached is not None:
         cached_refresh = cached.response_body["refresh_token"]

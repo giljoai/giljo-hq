@@ -1,12 +1,3 @@
-/**
- * durationFormat.spec.js — FE-9548
- *
- * Pure unit tests for the shared duration/time formatters extracted from
- * AgentRow.vue so AgentRow and the new Jobs board agent row render
- * byte-identical duration strings.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect } from 'vitest'
 import {
   formatDurationSeconds,
@@ -86,7 +77,6 @@ describe('formatTimeOfDay', () => {
   })
 
   it('formats a valid ISO timestamp as a short local time', () => {
-    // Locale-dependent formatting; assert shape (digits:digits) not exact locale string.
     expect(formatTimeOfDay('2026-08-30T22:14:00Z')).toMatch(/^\d{1,2}:\d{2}(\s?[AP]M)?$/)
   })
 })

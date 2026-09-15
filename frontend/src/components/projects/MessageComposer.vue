@@ -51,36 +51,12 @@ import { useCommHubStore } from '@/stores/commHubStore'
 import { useProjectBoundThread } from '@/composables/useProjectBoundThread'
 import { useToast } from '@/composables/useToast'
 
-/**
- * MessageComposer — standalone message input panel extracted from JobsTab.
- * Sends direct or broadcast messages to agents in a project.
- *
- * BE-9012d Part 1: rewired off the retired agent bus (`/api/v1/messages/*`,
- * `MessageRoutingService`) onto the Hub's thread primitives (`commHubStore` ->
- * `/api/v1/threads/*`) — the same store HubComposer.vue posts through.
- * "Orchestrator" posts a DIRECTED, requires_action message (mirrors the old
- * bus send_message wake/reactivation); "Broadcast" posts with no
- * to_participant (mirrors HubComposer's own broadcast — a project-anchored
- * thread auto-enrolls the project's roster server-side). Both target the
- * project's canonical bound Hub thread, resolved with the SAME precedence
- * CommThreadService.resolve_or_create_bound_thread uses server-side (ce_0072
- * D8 migration + D9 shims): exactly one live project-bound thread -> use it;
- * none -> create one with the reserved marker subject; several -> the
- * marker-subject one if present, else the oldest. Composed from the existing
- * threads.list/threads.create calls — no new endpoint.
- */
 
 const props = defineProps({
   projectId: {
     type: String,
     required: true,
   },
-  // FE-6174b: chain implementation reroute. When chainMode is true and the
-  // project-less conductor is addressable (conductorAgentId + chainRunId),
-  // the "Orchestrator" button targets the chain CONDUCTOR on its own chain
-  // coordination thread instead of the active project's own orchestrator.
-  // "Broadcast" always stays scoped to the active project's bound thread (the
-  // Hub has no all-projects broadcast primitive — see FE-6131d).
   chainMode: {
     type: Boolean,
     default: false,
@@ -89,19 +65,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
-  // BE-9012d Part 1: the run_id used to resolve the conductor's OWN "Chain run
-  // {run_id} coordination hub" Hub thread via commHub.searchThreads(runId) —
-  // the same lookup the conductor/sub-orchestrators use themselves. The
-  // conductor is project-less (BE-6184), so it has no project-bound thread to
-  // address directly; replaces the dead conductorProjectId (always empty
-  // under the project-less conductor design — BE-9012d field finding).
   chainRunId: {
     type: String,
     default: '',
   },
-  // BE-9012d Part 1: the active project's own orchestrator agent_id, needed
-  // to address a DIRECTED Hub post (the old bus resolved 'orchestrator' by
-  // role; the Hub addresses participants by agent_id).
   orchestratorAgentId: {
     type: String,
     default: '',
@@ -118,25 +85,13 @@ const messageText = ref('')
 const selectedRecipient = ref('orchestrator')
 const sending = ref(false)
 
-// True when the chain conductor is addressable (a sequence run with a
-// registered, project-less conductor + a resolvable run_id). Until then the
-// Orchestrator reroute falls back to the local project path.
 const conductorReady = () =>
   props.chainMode && Boolean(props.conductorAgentId) && Boolean(props.chainRunId)
 
-/** Resolve THE project's bound Hub thread — shared with useChainLifecycle
- *  (see useProjectBoundThread for the precedence this mirrors). */
 async function resolveProjectThread() {
   return resolveProjectBoundThread(props.projectId)
 }
 
-/**
- * Resolve the chain conductor's own coordination thread. The conductor mints
- * this itself as the FIRST action of its protocol (subject "Chain run
- * {run_id} coordination hub", never surfaced on the run record), so the FE
- * finds it the SAME way every sub-orchestrator does: list_threads(query=run_id).
- * Returns null if the conductor hasn't created it yet — never fabricated.
- */
 async function resolveConductorThread() {
   const results = await commHub.searchThreads(props.chainRunId)
   const subject = `Chain run ${props.chainRunId} coordination hub`
@@ -154,9 +109,6 @@ async function sendMessage() {
 
   try {
     if (selectedRecipient.value === 'orchestrator' && conductorReady()) {
-      // Reroute the directive to the conductor (its own agent_id) on the
-      // chain's coordination thread. requires_action=true mirrors the old bus
-      // send_message wake — delivery stays poll-based either way.
       const thread = await resolveConductorThread()
       if (!thread) {
         showToast({

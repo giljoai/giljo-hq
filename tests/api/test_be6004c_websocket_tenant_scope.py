@@ -3,41 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""WS-transport regression test for BE6004C-4 (RC-4).
-
-Bug: the WebSocket scope bypasses the HTTP ``AuthMiddleware`` (which is a
-``BaseHTTPMiddleware`` and only runs on HTTP scopes), so no tenant context
-exists when the connection is established. The first DB read on the WS auth
-path is a pre-auth probe of the tenant-scoped ``SetupState`` singleton on a
-bare session. Under enforce mode the fail-closed guard rejected that read with
-``TenantIsolationError`` -> the endpoint closed the socket with code 1008 ->
-the frontend reconnected -> reconnect storm.
-
-This test drives a REAL WebSocket connection through the actual production ASGI
-app (``api.app.app``, with every middleware mounted) via Starlette's
-``TestClient.websocket_connect`` -- the FAILING layer (WS transport), not a
-service stub -- per the CLAUDE.md failing-layer rule (BE-5042 lesson). It
-asserts:
-
-1. The authenticated ``/ws/{client_id}`` handshake SUCCEEDS (no 1008 close).
-2. A liveness ``ping`` round-trips (``pong``).
-3. A ``subscribe`` to a same-tenant project DELIVERS a ``subscribed`` event
-   (the post-auth entity-resolution read is now tenant-scoped, not a bare read).
-
-Cross-loop safety: Starlette's ``TestClient`` runs the ASGI app on its own
-anyio portal thread with a dedicated event loop. asyncpg connections are
-loop-bound, so the test builds its ``DatabaseManager`` and performs all DB
-seeding ON THE PORTAL LOOP via ``client.portal.call(...)`` rather than reusing
-the pytest-asyncio ``db_manager`` fixture (whose engine is bound to a different
-loop).
-
-Parallel-safe: each test seeds its own unique tenant (``tk_...``) so concurrent
-xdist workers never collide; no module-level mutable state; no test ordering
-dependency. Isolation is by unique tenant_key (the proven ``tests/api``
-pattern); rows are explicitly deleted on teardown.
-
-Project: BE6004C-4 (RC-4).
-"""
 
 from __future__ import annotations
 
@@ -61,25 +26,14 @@ _TEST_CSRF_TOKEN = secrets.token_urlsafe(32)
 
 
 async def _build_portal_db_manager():
-    """Create a DatabaseManager whose async engine is bound to the caller's loop.
-
-    Invoked via ``client.portal.call`` so the asyncpg engine is created on the
-    TestClient portal loop that will later run the WS handler's DB reads.
-    """
     from giljo_mcp.database import DatabaseManager
 
     await PostgreSQLTestHelper.ensure_test_database_exists()
-    # NullPool (BE-6014): bounded connection use under pytest-xdist.
     db_manager = DatabaseManager(PostgreSQLTestHelper.get_test_db_url(), is_async=True, use_null_pool=True)
     return db_manager
 
 
 async def _seed_tenant_with_project(db_manager) -> dict:
-    """Create org + user + project in a fresh tenant; return auth + ids.
-
-    Runs on the portal loop (via ``client.portal.call``) so the seeding session
-    shares the loop the WS handler will use.
-    """
     suffix = uuid.uuid4().hex[:8]
     tenant_key = TenantManager.generate_tenant_key()
 
@@ -105,8 +59,6 @@ async def _seed_tenant_with_project(db_manager) -> dict:
         session.add(user)
         await session.flush()
 
-        # BE-9437: a project belongs to a product. Its own, so an active
-        # seed cannot collide under idx_project_single_active_per_product.
         _owning_product_project = Product(
             id=str(uuid.uuid4()),
             tenant_key=tenant_key,
@@ -138,7 +90,6 @@ async def _seed_tenant_with_project(db_manager) -> dict:
 
 
 async def _cleanup_tenant(db_manager, tenant_key: str) -> None:
-    """Delete the rows seeded for a tenant (runs on the portal loop)."""
     from giljo_mcp.database import tenant_session_context
 
     async with db_manager.get_session_async(tenant_key=tenant_key) as session:
@@ -151,14 +102,6 @@ async def _cleanup_tenant(db_manager, tenant_key: str) -> None:
 
 @contextlib.contextmanager
 def _no_op_lifespan(app):
-    """Swap the app's lifespan for a no-op for the duration of the test.
-
-    ``TestClient.__enter__`` runs the FastAPI lifespan, which in production opens
-    the real DB and starts the cross-tenant background scans (health monitor,
-    deletion purge). Those scans are RC-5 (Slice 5) -- out of scope for this RC-4
-    WS test and they raise under enforce mode -- so this test wires ``state``
-    manually and runs a clean no-op lifespan instead. Restored on exit.
-    """
     original = app.router.lifespan_context
 
     @contextlib.asynccontextmanager
@@ -173,12 +116,6 @@ def _no_op_lifespan(app):
 
 
 def _install_ws_app_state(db_manager):
-    """Wire the minimal app/state the WS endpoint needs and return a restore fn.
-
-    The WS endpoint reads ``state.db_manager`` / ``state.websocket_manager``
-    directly (NOT via Depends), so the test seeds them on the shared module
-    ``state`` object. Returns a callable that restores the prior values.
-    """
     from unittest.mock import MagicMock
 
     from api.app import app
@@ -233,13 +170,6 @@ def _install_ws_app_state(db_manager):
 
 @pytest.mark.tenant_isolation
 def test_authenticated_ws_handshake_succeeds_and_subscribe_delivers_event(monkeypatch):
-    """RC-4: authenticated WS connects (no 1008), pings, and subscribe delivers.
-
-    Before BE6004C-4 the pre-auth ``SetupState`` probe ran on a bare session and
-    the fail-closed guard raised ``TenantIsolationError`` -> 1008 close. After the
-    fix the probe is bypass-wrapped and the post-auth subscribe read is scoped to
-    the connection's validated tenant_key.
-    """
     from api.app import app
 
     monkeypatch.setenv("GILJO_TENANT_GUARD_MODE", "enforce")
@@ -251,13 +181,10 @@ def test_authenticated_ws_handshake_succeeds_and_subscribe_delivers_event(monkey
         client_id = f"ws-test-{uuid.uuid4().hex[:8]}"
         try:
             with client.websocket_connect(f"/ws/{client_id}?token={seeded['token']}") as ws:
-                # 1. Handshake succeeded (no 1008 close on connect).
-                # 2. Liveness ping round-trips.
                 ws.send_json({"type": "ping"})
                 pong = ws.receive_json()
                 assert pong == {"type": "pong"}, pong
 
-                # 3. Subscribe to a same-tenant project delivers a 'subscribed' event.
                 ws.send_json({"type": "subscribe", "entity_type": "project", "entity_id": seeded["project_id"]})
                 msg = ws.receive_json()
                 assert msg.get("type") == "subscribed", msg
@@ -271,12 +198,6 @@ def test_authenticated_ws_handshake_succeeds_and_subscribe_delivers_event(monkey
 
 @pytest.mark.tenant_isolation
 def test_ws_subscribe_blocks_cross_tenant_project(monkeypatch):
-    """A client cannot subscribe to a project owned by a different tenant.
-
-    The post-auth entity-resolution read is scoped to the connection's tenant, so
-    a foreign-tenant project does not resolve -> subscription is denied (defense in
-    depth for the existing cross-tenant guard at api/app.py:_handle_ws_subscribe).
-    """
     from api.app import app
 
     monkeypatch.setenv("GILJO_TENANT_GUARD_MODE", "enforce")

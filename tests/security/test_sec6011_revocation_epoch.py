@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-6011 — forced-logout revocation epoch at the validate_principal boundary.
-
-An admin force-logout bumps the user's ``token_revocation_epoch``; every access
-JWT minted before that carries a lower ``rev`` claim and MUST be rejected on its
-next request, across every transport (the check lives in
-``principal._validate_jwt``, which cookie / Bearer / WS / /mcp all converge on).
-
-Two-sided throughout: a token at the CURRENT epoch authenticates (re-login after
-a forced logout must work), right next to every reject — a validator that
-rejects everything is broken, not secure.
-
-Parallel-safe (pytest-xdist): each test seeds a unique tenant/user and clears the
-revocation TTL cache around mutate steps. No module-level mutable state.
-"""
 
 from __future__ import annotations
 
@@ -46,7 +32,6 @@ def jwt_secret(monkeypatch):
 
 
 async def _seed_user(db_manager, *, epoch: int = 0) -> tuple[str, str, str]:
-    """Create org+user at a given revocation epoch; return (user_id, username, tenant_key)."""
     from giljo_mcp.models.organizations import Organization
     from giljo_mcp.tenant import TenantManager
 
@@ -82,7 +67,6 @@ async def _seed_user(db_manager, *, epoch: int = 0) -> tuple[str, str, str]:
 
 
 async def _set_epoch(db_manager, user_id: str, tenant_key: str, epoch: int) -> None:
-    """Simulate an admin force-logout by setting the user's epoch."""
     async with db_manager.get_session_async(tenant_key=tenant_key) as session:
         await session.execute(
             update(User).where(User.id == user_id, User.tenant_key == tenant_key).values(token_revocation_epoch=epoch)
@@ -100,9 +84,6 @@ def _mint(user_id: str, username: str, tenant_key: str, *, revocation_epoch: int
     )
 
 
-# ---------------------------------------------------------------------------
-# Minting — the `rev` claim is embedded
-# ---------------------------------------------------------------------------
 
 
 class TestRevClaimMinting:
@@ -119,9 +100,6 @@ class TestRevClaimMinting:
         assert payload["rev"] == 0
 
 
-# ---------------------------------------------------------------------------
-# Enforcement at validate_principal
-# ---------------------------------------------------------------------------
 
 
 class TestRevocationEpochContract:
@@ -143,10 +121,8 @@ class TestRevocationEpochContract:
         clear_revocation_cache()
         user_id, username, tk = await _seed_user(db_manager, epoch=0)
 
-        # Token minted at epoch 0 (the session held before the admin acts).
         stale = _mint(user_id, username, tk, revocation_epoch=0)
 
-        # Admin force-logout bumps the user's epoch to 1.
         await _set_epoch(db_manager, user_id, tk, 1)
 
         async with db_manager.get_session_async() as db:
@@ -154,7 +130,6 @@ class TestRevocationEpochContract:
                 await validate_principal(db, jwt_token=stale)
         assert exc.value.reason == AuthErrorReason.REVOKED
 
-        # A freshly minted token at the new epoch authenticates — re-login works.
         fresh = _mint(user_id, username, tk, revocation_epoch=1)
         async with db_manager.get_session_async() as db:
             principal = await validate_principal(db, jwt_token=fresh)
@@ -163,8 +138,6 @@ class TestRevocationEpochContract:
 
     @pytest.mark.asyncio
     async def test_legacy_token_without_rev_claim_treated_as_epoch_zero(self, db_manager, jwt_secret):
-        """A pre-SEC-6011 token carries no `rev` claim -> treated as epoch 0:
-        valid while the user epoch is 0, rejected once a force-logout bumps it."""
         clear_revocation_cache()
         user_id, username, tk = await _seed_user(db_manager, epoch=0)
 
@@ -179,7 +152,6 @@ class TestRevocationEpochContract:
                 "iat": now,
                 "type": "access",
                 "jti": uuid4().hex,
-                # no `rev` claim
             },
             jwt_secret,
             algorithm=JWTManager.ALGORITHM,
@@ -187,7 +159,7 @@ class TestRevocationEpochContract:
 
         async with db_manager.get_session_async() as db:
             principal = await validate_principal(db, jwt_token=legacy)
-        assert principal.user_id == user_id  # epoch 0 vs absent-rev(=0): still valid
+        assert principal.user_id == user_id
 
         await _set_epoch(db_manager, user_id, tk, 1)
         async with db_manager.get_session_async() as db:

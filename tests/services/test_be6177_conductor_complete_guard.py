@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6177 (C1) — conductor close-down guard regression.
-
-A chain CONDUCTOR (the head project's orchestrator) must NOT be able to
-complete_job while its sequence run still has incomplete projects — that would
-orphan the chain mid-drive (the invariant: "a project cannot close without its
-orchestrator closing too"). The guard is server-enforced, not prose-dependent.
-
-Crucially it is a NO-OP for every non-conductor (a different agent, a worker job
-type, or a run whose projects are all done), so solo complete_job stays
-byte-identical (Deletion Test).
-
-Tests target the service-layer guard directly (the failing layer).
-
-Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -73,7 +58,6 @@ async def _call_guard(db_manager, tenant_key, *, agent_id, job_type="orchestrato
 
 
 async def test_conductor_complete_blocked_while_projects_incomplete(db_manager):
-    """The live conductor of a run with a pending project is refused."""
     p1, p2 = str(uuid.uuid4()), str(uuid.uuid4())
     tenant_key = await _seed_run(
         db_manager,
@@ -87,7 +71,6 @@ async def test_conductor_complete_blocked_while_projects_incomplete(db_manager):
 
 
 async def test_conductor_complete_allowed_when_all_projects_done(db_manager):
-    """Once every project is terminal, the conductor may self-complete."""
     p1, p2 = str(uuid.uuid4()), str(uuid.uuid4())
     tenant_key = await _seed_run(
         db_manager,
@@ -95,12 +78,10 @@ async def test_conductor_complete_allowed_when_all_projects_done(db_manager):
         project_statuses={p1: "completed", p2: "completed"},
         resolved_order=[p1, p2],
     )
-    # No raise — guard is a no-op.
     await _call_guard(db_manager, tenant_key, agent_id="cond-1")
 
 
 async def test_non_conductor_agent_never_blocked(db_manager):
-    """A different agent (e.g. a solo orchestrator) is never blocked — byte-identical."""
     p1, p2 = str(uuid.uuid4()), str(uuid.uuid4())
     tenant_key = await _seed_run(
         db_manager,
@@ -112,7 +93,6 @@ async def test_non_conductor_agent_never_blocked(db_manager):
 
 
 async def test_non_orchestrator_job_never_blocked(db_manager):
-    """A worker (non-orchestrator) job is never a conductor, even with the id match."""
     p1 = str(uuid.uuid4())
     tenant_key = await _seed_run(
         db_manager,

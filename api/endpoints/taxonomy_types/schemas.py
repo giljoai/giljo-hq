@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Pydantic schemas for taxonomy type endpoints.
-
-Renamed from project type schemas in Phase A of the agent-parity + unified
-Type taxonomy project. Same shape; new names reflect the unified taxonomy.
-
-Schemas:
-- TaxonomyTypeCreate: Validated input for creating a new taxonomy type
-- TaxonomyTypeUpdate: Partial update (label, color, sort_order only)
-- TaxonomyTypeResponse: Full response model with project_count
-"""
 
 from datetime import datetime
 

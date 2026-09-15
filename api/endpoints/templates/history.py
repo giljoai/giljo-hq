@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Template History Endpoints - Handover 0126
-
-Handles template history, restore, and reset operations.
-
-NOTE: This module contains operations not yet in TemplateService.
-Future work: Extract history management logic to TemplateService methods.
-"""
 
 import logging
 
@@ -110,9 +102,9 @@ async def restore_template(
 
     await template_service.commit_and_refresh_template(session, template)
 
-    from .crud import _convert_in_product_context  # local import to avoid cycles
+    from .crud import _convert_to_response
 
-    return await _convert_in_product_context(session, current_user.tenant_key, template)
+    return _convert_to_response(template)
 
 
 @router.post("/{template_id}/reset", response_model=TemplateResponse)
@@ -142,9 +134,9 @@ async def reset_template(
 
     await template_service.commit_and_refresh_template(session, template)
 
-    from .crud import _convert_in_product_context  # local import to avoid cycles
+    from .crud import _convert_to_response
 
-    return await _convert_in_product_context(session, current_user.tenant_key, template)
+    return _convert_to_response(template)
 
 
 @router.post("/{template_id}/reset-system", response_model=TemplateResponse)
@@ -180,6 +172,6 @@ async def reset_system_instructions(
 
     await template_service.commit_and_refresh_template(session, template)
 
-    from .crud import _convert_in_product_context  # local import to avoid cycles
+    from .crud import _convert_to_response
 
-    return await _convert_in_product_context(session, current_user.tenant_key, template)
+    return _convert_to_response(template)

@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Auth identifier validation accepts normal email-address lengths."""
 
 from __future__ import annotations
 

@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Statistics and monitoring API endpoints
-
-Handover 1011 Phase 1: Migrated to use StatisticsRepository pattern for all queries.
-Original direct SQLAlchemy queries preserved as comments for rollback reference.
-"""
 
 import logging
 from datetime import UTC, datetime
@@ -27,7 +21,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# Pydantic models for response
 class SystemStatsResponse(BaseModel):
     total_projects: int
     active_projects: int
@@ -52,7 +45,6 @@ class CallCountsResponse(BaseModel):
     total_mcp_calls: int
 
 
-# Store startup time
 startup_time = datetime.now(UTC)
 
 
@@ -76,8 +68,6 @@ class DashboardStatsResponse(BaseModel):
     task_status_dist: dict[str, int]
     execution_mode_dist: dict[str, int]
     products: list[dict]
-    # BE-6078: true cumulative commit count across 360 memory entries (tenant +
-    # per-product filter scoped). Default 0 keeps the response forgiving.
     total_commits: int = 0
 
 

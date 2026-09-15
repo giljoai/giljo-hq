@@ -3,29 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6186: chain_mission write mirror on update_job_mission.
-
-Regression at the failing layer (MissionService.update_agent_mission via the
-conductor_mission_mirror helper). When the dedicated chain CONDUCTOR writes its job
-mission, the server mirrors that text into sequence_runs.chain_mission (the FE-facing
-column). A NON-conductor job does NOT touch any run.
-
-1. test_conductor_mission_mirrors_into_chain_mission
-   update_job_mission on the conductor's job writes its text into the run's
-   chain_mission column.
-
-2. test_non_conductor_job_does_not_touch_any_run
-   The SAME call on a normal (project-bound, non-conductor) orchestrator does NOT
-   write chain_mission on any run.
-
-3. test_mirror_is_best_effort_when_run_missing
-   A conductor job whose run_id points at no live run still completes
-   update_job_mission cleanly (best-effort: the mirror never breaks the primary write).
-
-The _wipe_sequence_runs autouse teardown mirrors test_be6185_chain_mission_storage:
-SequenceRunService COMMITs through the injected session, so the table is wiped after
-each test (per-worker DB, serial -> safe). Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -70,8 +47,6 @@ def _mission_svc(session: AsyncSession) -> MissionService:
 
 
 async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -88,8 +63,6 @@ async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
         status="active",
         tenant_key=tenant_key,
         product_id=_owning_product_project.id,
-        # BE-9429: uq_project_taxonomy_active is NULLS NOT DISTINCT, so these
-        # NULL-product/NULL-type rows collide unless the serial differs.
         series_number=next_series_number(),
         execution_mode="claude_code_cli",
         created_at=datetime.now(UTC),
@@ -110,9 +83,6 @@ async def _conductor_job_id(session: AsyncSession, tenant_key: str, conductor_ag
     return str(row.scalar_one())
 
 
-# ---------------------------------------------------------------------------
-# 1. conductor mission mirrors into chain_mission
-# ---------------------------------------------------------------------------
 
 
 async def test_conductor_mission_mirrors_into_chain_mission(db_session: AsyncSession) -> None:
@@ -136,11 +106,6 @@ async def test_conductor_mission_mirrors_into_chain_mission(db_session: AsyncSes
 
 
 async def test_conductor_mission_write_broadcasts_sequence_updated(db_session: AsyncSession) -> None:
-    """BE-6199 live-update fix: the conductor's mission write must fire the
-    sequence:updated WS event so the chain-mission window live-fills at staging
-    time (previously the mirror built a manager-less SequenceRunService, so the
-    broadcast no-op'd and the window only rendered after a manual refresh).
-    """
     import sys
     import types
     from unittest.mock import AsyncMock
@@ -160,7 +125,7 @@ async def test_conductor_mission_write_broadcasts_sequence_updated(db_session: A
     )
     conductor_job_id = await _conductor_job_id(db_session, tenant, run["conductor_agent_id"])
 
-    ws = AsyncMock(spec=WebSocketManager)  # spec => a renamed broadcast method would fail here
+    ws = AsyncMock(spec=WebSocketManager)
     mission_svc = MissionService(
         db_manager=None, tenant_manager=TenantManager(), test_session=db_session, websocket_manager=ws
     )
@@ -169,9 +134,6 @@ async def test_conductor_mission_write_broadcasts_sequence_updated(db_session: A
     ws.broadcast_event_to_tenant.assert_any_await(tenant, {"type": "sequence:updated", "data": {"run_id": run["id"]}})
 
 
-# ---------------------------------------------------------------------------
-# 2. a non-conductor (project-bound) orchestrator does NOT touch any run
-# ---------------------------------------------------------------------------
 
 
 async def test_non_conductor_job_does_not_touch_any_run(db_session: AsyncSession) -> None:
@@ -187,7 +149,6 @@ async def test_non_conductor_job_does_not_touch_any_run(db_session: AsyncSession
     )
     assert run["chain_mission"] is None
 
-    # A normal project-bound orchestrator job (NOT the conductor; no chain_conductor flag).
     job_id = str(uuid.uuid4())
     db_session.add(
         AgentJob(
@@ -221,13 +182,9 @@ async def test_non_conductor_job_does_not_touch_any_run(db_session: AsyncSession
     assert fetched["chain_mission"] is None, "a non-conductor job must NOT write chain_mission on any run"
 
 
-# ---------------------------------------------------------------------------
-# 3. best-effort: a conductor job with no live run still completes cleanly
-# ---------------------------------------------------------------------------
 
 
 async def test_mirror_is_best_effort_when_run_missing(db_session: AsyncSession) -> None:
-    """A chain_conductor job whose run does not exist still completes update_job_mission."""
     tenant = TenantManager.generate_tenant_key()
     job_id = str(uuid.uuid4())
     db_session.add(
@@ -238,7 +195,7 @@ async def test_mirror_is_best_effort_when_run_missing(db_session: AsyncSession) 
             mission=None,
             job_type="orchestrator",
             status="active",
-            job_metadata={"chain_conductor": True, "run_id": str(uuid.uuid4())},  # dangling run_id
+            job_metadata={"chain_conductor": True, "run_id": str(uuid.uuid4())},
         )
     )
     db_session.add(
@@ -256,6 +213,5 @@ async def test_mirror_is_best_effort_when_run_missing(db_session: AsyncSession) 
     db_session.info["tenant_key"] = tenant
     await db_session.flush()
 
-    # No raise: best-effort mirror swallows the missing-run case.
     result = await _mission_svc(db_session).update_agent_mission(job_id, tenant, "orphan conductor plan")
     assert result.mission_updated is True, "the primary mission write must succeed even when the mirror has no run"

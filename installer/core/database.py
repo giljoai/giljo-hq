@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-PostgreSQL 18 database installer with fallback script generation
-Handles database creation, role setup, and migrations
-
-This module provides comprehensive PostgreSQL setup capabilities:
-- PostgreSQL version detection and validation (16-18)
-- Direct database creation with admin credentials
-- Fallback script generation for elevated privileges
-- Alembic migration support
-- Secure password generation
-- Cross-platform compatibility (Windows, Linux, macOS)
-"""
 
 import contextlib
 import logging
@@ -39,9 +27,7 @@ except ImportError:
 
 
 class DatabaseInstaller:
-    """Handle PostgreSQL setup with elevation fallback"""
 
-    # Supported PostgreSQL versions
     MIN_PG_VERSION = 16
     MAX_PG_VERSION = 18
     RECOMMENDED_VERSION = 18
@@ -55,39 +41,30 @@ class DatabaseInstaller:
         self.db_name = settings.get("db_name", "giljo_mcp")
         self.logger = logging.getLogger(self.__class__.__name__)
 
-        # Generated credentials
         self.owner_password = None
         self.user_password = None
         self.credentials_file = None
 
-        # PostgreSQL version info
         self.pg_version = None
         self.pg_version_string = None
 
     def setup(self) -> Dict[str, Any]:
-        """Main database setup workflow"""
         result = {"success": False, "errors": [], "warnings": []}
 
         try:
-            # Check PostgreSQL availability
             self.logger.info("Checking PostgreSQL connection...")
             if not check_postgresql_connection(self.host, self.port):
                 result["errors"].append("Cannot connect to PostgreSQL")
                 result["postgresql_guide"] = self.get_postgresql_install_guide()
                 return result
 
-            # Check psycopg2 availability
             if not psycopg2:
                 self.logger.warning("psycopg2 not installed, using fallback approach")
                 return self.fallback_setup()
 
-            # Detect and validate PostgreSQL version
             self.logger.info("Detecting PostgreSQL version...")
             version_result = self.detect_postgresql_version()
             if not version_result["success"]:
-                # First contact with the server. A failure here is usually the
-                # real story (wrong port, wrong password) and used to sit in a
-                # warnings list nothing printed. (INF-9321)
                 self.logger.warning(
                     "Could not detect PostgreSQL version at %s:%s: %s",
                     self.host,
@@ -102,7 +79,6 @@ class DatabaseInstaller:
                 self.pg_version_string = version_result["version_string"]
                 self.logger.info(f"Detected PostgreSQL {self.pg_version_string}")
 
-                # Validate version compatibility
                 if self.pg_version < self.MIN_PG_VERSION:
                     result["errors"].append(
                         f"PostgreSQL {self.pg_version} is not supported. "
@@ -121,7 +97,6 @@ class DatabaseInstaller:
                         "is recommended for best compatibility."
                     )
 
-            # Try direct database creation
             self.logger.info("Attempting direct database creation...")
             direct_result = self.create_database_direct()
 
@@ -130,13 +105,6 @@ class DatabaseInstaller:
                 result = direct_result
                 result["warnings"] = result.get("warnings", [])
             else:
-                # Need elevation - generate fallback scripts.
-                #
-                # Carry the direct-creation errors forward. Rebinding `result`
-                # here used to discard them, so the only text an operator ever
-                # saw was the generic "run the script by hand" banner -- which an
-                # unattended install cannot act on, and which names no cause. The
-                # real psql/connection error is the whole diagnosis. (INF-9321)
                 direct_errors = direct_result.get("errors", [])
                 for err in direct_errors:
                     self.logger.error("Direct database creation failed: %s", err)
@@ -154,11 +122,9 @@ class DatabaseInstaller:
             return result
 
     def detect_postgresql_version(self) -> Dict[str, Any]:
-        """Detect PostgreSQL version via connection"""
         result = {"success": False}
 
         try:
-            # Try to connect and get version
             conn = psycopg2.connect(
                 host=self.host,
                 port=self.port,
@@ -172,11 +138,9 @@ class DatabaseInstaller:
                 cur.execute("SELECT version();")
                 version_string = cur.fetchone()[0]
 
-                # Also get numeric version
                 cur.execute("SHOW server_version_num;")
                 version_num = int(cur.fetchone()[0])
 
-                # Extract major version (first two digits)
                 major_version = version_num // 10000
 
             conn.close()
@@ -196,31 +160,12 @@ class DatabaseInstaller:
             return result
 
     def create_database_direct(self) -> Dict[str, Any]:
-        """
-        Create database with provided credentials and setup extensions
-
-        This method handles:
-        1. Database and role creation
-        2. Password generation for giljo_owner and giljo_user
-        3. Privilege assignment following least-privilege principle
-        4. Extension creation (pg_trgm for Handover 0017)
-
-        Security Model (Handover 0017 Fix):
-        - giljo_owner: Database owner with CREATE privilege (for extensions/migrations)
-        - giljo_user: Application user with table-level privileges only (no CREATE)
-        - Extensions created during setup with superuser, not at application runtime
-
-        Returns:
-            Dict with success status, credentials, and any errors/warnings
-        """
         result = {"success": False, "errors": [], "warnings": []}
 
         try:
-            # Generate secure passwords
             self.owner_password = self.generate_password()
             self.user_password = self.generate_password()
 
-            # Connect to PostgreSQL as admin
             conn = psycopg2.connect(
                 host=self.host,
                 port=self.port,
@@ -232,26 +177,15 @@ class DatabaseInstaller:
             conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
 
             with conn.cursor() as cur:
-                # Check if database exists
                 cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (self.db_name,))
                 db_exists = cur.fetchone() is not None
 
-                # Check if roles exist
                 cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", ("giljo_owner",))
                 owner_exists = cur.fetchone() is not None
 
                 cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", ("giljo_user",))
                 user_exists = cur.fetchone() is not None
 
-                # TSK-6261: partial role existence is an irreconcilable state — fail fast.
-                # If EXACTLY ONE of giljo_owner / giljo_user exists, we cannot proceed
-                # safely.  The existing role's password is unknown to us (INF-6260 forbids
-                # resetting it), so creating the missing role with a fresh random password
-                # would NOT match the credential the caller reloads from the existing .env
-                # (roles_reused path) — that role's password would silently mismatch.  And
-                # writing all-fresh credentials would instead mismatch the untouched existing
-                # role.  Neither reconciles a mixed state, so refuse to mint an inconsistent
-                # credential and tell the operator exactly how to recover.
                 if owner_exists != user_exists:
                     present = "giljo_owner" if owner_exists else "giljo_user"
                     missing = "giljo_user" if owner_exists else "giljo_owner"
@@ -270,19 +204,11 @@ class DatabaseInstaller:
                     conn.close()
                     return result
 
-                # Create or update roles
                 self.logger.info("Setting up database roles...")
 
                 if owner_exists:
-                    # Role already exists on this host.  NEVER reset its password —
-                    # resetting a shared role's password would silently break any
-                    # co-located live GiljoAI installation that authenticates with
-                    # the current credential.  The caller (setup_database) detects
-                    # roles_reused=True and reloads credentials from the existing .env
-                    # instead of overwriting it.  (INF-6260)
                     self.logger.info("giljo_owner role already exists; leaving password unchanged (co-located-safe)")
                 else:
-                    # Fresh install — create the role with a new password.
                     self.logger.info("Creating giljo_owner role")
                     cur.execute(
                         sql.SQL("CREATE ROLE {} LOGIN PASSWORD %s").format(sql.Identifier("giljo_owner")),
@@ -290,17 +216,14 @@ class DatabaseInstaller:
                     )
 
                 if user_exists:
-                    # Same co-located-safe policy for giljo_user.  (INF-6260)
                     self.logger.info("giljo_user role already exists; leaving password unchanged (co-located-safe)")
                 else:
-                    # Fresh install — create the role with a new password.
                     self.logger.info("Creating giljo_user role")
                     cur.execute(
                         sql.SQL("CREATE ROLE {} LOGIN PASSWORD %s").format(sql.Identifier("giljo_user")),
                         [self.user_password],
                     )
 
-                # Create database if needed
                 if not db_exists:
                     self.logger.info(f"Creating database {self.db_name}...")
                     cur.execute(
@@ -315,7 +238,6 @@ class DatabaseInstaller:
 
             conn.close()
 
-            # Connect to the database and setup permissions
             self.logger.info("Setting up database permissions...")
             conn_db = psycopg2.connect(
                 host=self.host,
@@ -327,57 +249,36 @@ class DatabaseInstaller:
             conn_db.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
 
             with conn_db.cursor() as cur:
-                # Grant database-level permissions
                 cur.execute(
                     sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
                         sql.Identifier(self.db_name), sql.Identifier("giljo_user")
                     )
                 )
 
-                # Grant CREATE privilege to owner for extension management (Handover 0017)
-                # Application user (giljo_user) does NOT get CREATE - security best practice
                 cur.execute(
                     sql.SQL("GRANT CREATE ON DATABASE {} TO {}").format(
                         sql.Identifier(self.db_name), sql.Identifier("giljo_owner")
                     )
                 )
 
-                # ========================================================================
-                # HANDOVER 0017 FIX: PostgreSQL Extension Creation
-                # ========================================================================
-                # Problem: Application user lacked CREATE privilege on database
-                # Solution: Create extensions during installation with superuser privileges
-                #
-                # Security Model:
-                # - Extensions created HERE during setup (postgres superuser context)
-                # - giljo_owner gets CREATE privilege for future migrations only
-                # - giljo_user (application) has NO CREATE privilege (security)
-                #
-                # Extensions Required:
-                # - pg_trgm: Trigram matching for full-text search on vision chunks
-                # ========================================================================
                 self.logger.info("Creating PostgreSQL extensions (Handover 0017)...")
                 cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
                 self.logger.info("Extension pg_trgm created successfully")
 
-                # Grant schema permissions
                 cur.execute("""
                     GRANT USAGE, CREATE ON SCHEMA public TO giljo_owner;
                     GRANT ALL ON SCHEMA public TO giljo_user;
                 """)
 
-                # Grant privileges on existing tables and sequences
                 cur.execute("""
                     GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO giljo_user;
                     GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO giljo_user;
                 """)
-                # Grant default privileges for tables
                 cur.execute("""
                     ALTER DEFAULT PRIVILEGES FOR ROLE giljo_owner IN SCHEMA public
                     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO giljo_user;
                 """)
 
-                # Grant default privileges for sequences
                 cur.execute("""
                     ALTER DEFAULT PRIVILEGES FOR ROLE giljo_owner IN SCHEMA public
                     GRANT USAGE, SELECT ON SEQUENCES TO giljo_user;
@@ -385,27 +286,17 @@ class DatabaseInstaller:
 
             conn_db.close()
 
-            # Save credentials
             self.save_credentials()
 
             result["success"] = True
             result["credentials"] = {"owner_password": self.owner_password, "user_password": self.user_password}
             result["credentials_file"] = str(self.credentials_file)
             result["database_existed"] = db_exists
-            # Signal to the caller whether roles were pre-existing (co-located-safe path).
-            # TSK-6261: this means ALL expected roles pre-existed (both), so the caller can
-            # safely reload every credential from the existing .env.  The mixed/partial
-            # state (exactly one role) is rejected earlier via fail-fast, so it never
-            # reaches here — `and` documents the invariant precisely.
             result["roles_reused"] = owner_exists and user_exists
 
             return result
 
         except psycopg2.OperationalError as e:
-            # Always name the host:port that was tried. A port mismatch is then a
-            # single readable line instead of a forensics exercise on the guest --
-            # the failure that cost a lab re-run in INF-9321 read "Cannot connect
-            # to PostgreSQL server" with no clue that 5432 was not our cluster.
             target = f"{self.host}:{self.port}"
             error_msg = str(e).lower()
             if "password authentication failed" in error_msg:
@@ -432,27 +323,9 @@ class DatabaseInstaller:
             return result
 
     def reset_role_passwords(self) -> Dict[str, Any]:
-        """Reset giljo_owner / giljo_user passwords to fresh random values.
-
-        Used ONLY by the explicit ``--repair`` recovery path (install.py, INF-5089),
-        when the roles already exist on the host but the installer has no usable .env
-        to recover their current passwords from — e.g. a prior run created the roles
-        with fresh random passwords, then died before writing .env, so those passwords
-        are unrecoverable. Both roles are altered and the new credentials are persisted
-        so the caller can regenerate a consistent .env.
-
-        WARNING: resetting a shared role's password breaks any *other* co-located
-        GiljoAI install that authenticates with the old credential. This is exactly why
-        the normal (non-repair) path never resets — see INF-6260. Repair is an explicit,
-        opt-in operator action to fix THIS install.
-
-        Returns:
-            Dict with success status, the fresh credentials, and any errors.
-        """
         result: Dict[str, Any] = {"success": False, "errors": []}
 
         try:
-            # Fresh random passwords for both application roles.
             self.owner_password = self.generate_password()
             self.user_password = self.generate_password()
 
@@ -478,7 +351,6 @@ class DatabaseInstaller:
 
             conn.close()
 
-            # Persist the fresh credentials (same sink create_database_direct uses).
             self.save_credentials()
 
             result["success"] = True
@@ -496,39 +368,30 @@ class DatabaseInstaller:
             return result
 
     def fallback_setup(self) -> Dict[str, Any]:
-        """Generate fallback scripts for manual execution"""
         result = {"success": False, "errors": []}
 
         try:
-            # Generate secure passwords
             self.owner_password = self.generate_password()
             self.user_password = self.generate_password()
 
-            # Create scripts directory
             scripts_dir = Path("installer/scripts")
             scripts_dir.mkdir(parents=True, exist_ok=True)
 
-            # Generate platform-specific scripts
             if platform.system() == "Windows":
                 script_path = self.generate_windows_script(scripts_dir)
             else:
                 script_path = self.generate_unix_script(scripts_dir)
 
-            # Save credentials for later use
             self.save_credentials()
 
-            # Guide user through elevation
             self.display_elevation_guide(script_path)
 
-            # Wait for user confirmation — skip entirely in batch/headless/unattended
-            # mode so that automated and second-instance installs never hang.  (INF-6260)
             _skip_prompt = (
                 self.settings.get("batch") or self.settings.get("headless") or self.settings.get("unattended")
             )
             if not _skip_prompt:
                 input("\nPress Enter after running the script...")
 
-                # Verify database was created
                 if self.verify_database_exists():
                     result["success"] = True
                     result["credentials"] = {"owner_password": self.owner_password, "user_password": self.user_password}
@@ -537,7 +400,6 @@ class DatabaseInstaller:
                 else:
                     result["errors"].append("Database not found after script execution")
             else:
-                # In batch mode, verify DB was created rather than assuming success
                 if self.verify_database_exists():
                     result["success"] = True
                     result["credentials"] = {"owner_password": self.owner_password, "user_password": self.user_password}
@@ -558,7 +420,6 @@ class DatabaseInstaller:
             return result
 
     def generate_windows_script(self, scripts_dir: Path) -> Path:
-        """Generate Windows PowerShell elevation script"""
         script_path = scripts_dir / "create_db.ps1"
 
         script_content = f'''# Giljo HQ Database Creation Script for Windows
@@ -737,7 +598,6 @@ Write-Host ""
         return script_path
 
     def generate_unix_script(self, scripts_dir: Path) -> Path:
-        """Generate Unix/Linux elevation script"""
         script_path = scripts_dir / "create_db.sh"
 
         script_content = f'''#!/bin/bash
@@ -895,7 +755,6 @@ echo ""
         return script_path
 
     def display_elevation_guide(self, script_path: Path):
-        """Display clear instructions for running elevation script"""
         print("\n" + "=" * 60)
         print("Database Setup Required")
         print("=" * 60)
@@ -904,8 +763,6 @@ echo ""
         print("A script has been generated with all necessary commands.")
         print()
 
-        # Resolve to absolute path, then try to make relative to cwd for shorter display.
-        # Fall back to absolute path if the script lives outside cwd (e.g. tmpdir on CI).
         abs_script = Path(script_path).resolve()
         try:
             display_path = abs_script.relative_to(Path.cwd().resolve())
@@ -936,15 +793,12 @@ echo ""
         print()
 
     def verify_database_exists(self) -> bool:
-        """Check if database was created successfully"""
-        # First check for flag file
         flag_file = Path("database_created.flag")
         if flag_file.exists():
             self.logger.info("Database creation flag found")
-            flag_file.unlink()  # Remove flag
+            flag_file.unlink()
             return True
 
-        # Try to connect if psycopg2 available
         if psycopg2:
             with contextlib.suppress(Exception):
                 conn = psycopg2.connect(
@@ -961,29 +815,15 @@ echo ""
         return False
 
     def create_default_admin_account(self) -> Dict[str, Any]:
-        """
-        Create default admin account on fresh install.
-
-        Credentials:
-        - Username: admin
-        - Password: admin (bcrypt hashed)
-
-        Sets default_password_active: true in setup state
-
-        Returns:
-            Dict with success status and admin user info
-        """
         result = {"success": False, "errors": []}
 
         try:
-            # Import bcrypt
             try:
                 import bcrypt
             except ImportError:
                 result["errors"].append("bcrypt not installed - cannot hash password")
                 return result
 
-            # Connect to giljo_mcp database
             conn = psycopg2.connect(
                 host=self.host,
                 port=self.port,
@@ -995,7 +835,6 @@ echo ""
             conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
 
             with conn.cursor() as cur:
-                # Check if admin user already exists (idempotent)
                 cur.execute("SELECT 1 FROM users WHERE username = %s", ("admin",))
                 if cur.fetchone():
                     self.logger.info("Admin user already exists, skipping creation")
@@ -1003,15 +842,12 @@ echo ""
                     result["already_exists"] = True
                     return result
 
-                # Hash the default password 'admin'
                 password_hash = bcrypt.hashpw(b"admin", bcrypt.gensalt()).decode("utf-8")
 
-                # Generate UUID for admin user
                 import uuid
 
                 admin_id = str(uuid.uuid4())
 
-                # Create admin user
                 cur.execute(
                     """
                     INSERT INTO users (
@@ -1024,14 +860,12 @@ echo ""
                     (admin_id, "default", "admin", password_hash, "admin@localhost", "admin", True),
                 )
 
-                # Update setup state to mark default password as active
                 cur.execute("""
                     UPDATE setup_state
                     SET default_password_active = true
                     WHERE tenant_key = 'default'
                 """)
 
-                # If no setup_state exists, create one
                 if cur.rowcount == 0:
                     setup_id = str(uuid.uuid4())
                     cur.execute(
@@ -1048,7 +882,6 @@ echo ""
 
             conn.close()
 
-            # Display credentials in terminal
             print("\n" + "=" * 60)
             print("Default Admin Credentials:")
             print("  Username: admin")
@@ -1067,12 +900,9 @@ echo ""
             return result
 
     def save_credentials(self):
-        """Save database credentials securely (single file, overwrites previous)"""
         credentials_dir = Path("installer/credentials")
         credentials_dir.mkdir(parents=True, exist_ok=True)
 
-        # Use single fixed filename - overwrites on each install
-        # Note: Credentials are also saved in .env, this is just a backup
         self.credentials_file = credentials_dir / "db_credentials.txt"
 
         content = f"""# Giljo HQ Database Credentials
@@ -1097,21 +927,17 @@ USER_URL=postgresql://giljo_user:{self.user_password}@{self.host}:{self.port}/{s
         # noqa: S105 — credentials file written with restricted permissions (0o600), required for installer handoff
         self.credentials_file.write_text(content, encoding="utf-8")
 
-        # Set restrictive permissions on non-Windows
         if platform.system() != "Windows":
             os.chmod(self.credentials_file, 0o600)
 
         self.logger.info(f"Credentials saved to: {self.credentials_file}")
 
     def generate_password(self, length: int = 20) -> str:
-        """Generate a secure random password"""
         alphabet = string.ascii_letters + string.digits
-        # Avoid special characters that might cause issues in connection strings
         password = "".join(secrets.choice(alphabet) for _ in range(length))
         return password
 
     def get_postgresql_install_guide(self) -> str:
-        """Return platform-specific PostgreSQL installation guide"""
         system = platform.system()
 
         if system == "Windows":
@@ -1130,7 +956,7 @@ PostgreSQL Installation Guide for Windows:
 
 4. After installation, return here and run the installer again
 """
-        elif system == "Darwin":  # macOS
+        elif system == "Darwin":
             return """
 PostgreSQL Installation Guide for macOS:
 
@@ -1145,7 +971,7 @@ Using official installer:
 
 After installation, return here and run the installer again
 """
-        else:  # Linux
+        else:
             return """
 PostgreSQL Installation Guide for Linux:
 
@@ -1167,33 +993,11 @@ After installation, return here and run the installer again
 """
 
     async def create_database_async(self) -> Dict[str, Any]:
-        """
-        Async wrapper for create_database_direct.
-
-        Required for test compatibility and future async workflows.
-        """
         return self.create_database_direct()
 
     async def create_tables_async(self) -> Dict[str, Any]:
-        """
-        DEPRECATED (v3.1.0+): Create database tables using SQLAlchemy models.
-
-        This method is deprecated in favor of Alembic migrations.
-        It is kept ONLY for backwards compatibility with test suites.
-
-        For production installs, use run_database_migrations() in install.py instead.
-
-        IMPORTANT:
-        - Production code should NEVER call this method
-        - All schema changes MUST go through Alembic migrations
-        - This method will be removed in v4.0
-
-        Returns:
-            Dict with success status, table count, and deprecation warning
-        """
         result = {"success": False, "errors": [], "warnings": []}
 
-        # Add deprecation warning
         deprecation_msg = (
             "DEPRECATED: create_tables_async() is deprecated in v3.1.0+. "
             "Use Alembic migrations (run_database_migrations) for production installs. "
@@ -1203,20 +1007,16 @@ After installation, return here and run the installer again
         self.logger.warning(deprecation_msg)
 
         try:
-            # Import DatabaseManager to create tables
             from giljo_mcp.database_manager import DatabaseManager
 
             from giljo_mcp.models import Base
 
-            # Create database manager
             db_url = f"postgresql://giljo_owner:{self.owner_password}@{self.host}:{self.port}/{self.db_name}"
             db_manager = DatabaseManager(db_url)
 
-            # Create all tables (DEPRECATED - for test compatibility only)
             self.logger.info("Creating database tables from SQLAlchemy models (DEPRECATED)...")
             Base.metadata.create_all(db_manager.engine)
 
-            # Count tables created
             table_count = len(Base.metadata.tables)
             self.logger.info(f"Created {table_count} tables successfully")
 
@@ -1230,19 +1030,12 @@ After installation, return here and run the installer again
             return result
 
     def _generate_password(self, length: int = 20) -> str:
-        """
-        Internal method for password generation (test-accessible).
-
-        Alias for generate_password() method.
-        """
         return self.generate_password(length=length)
 
     def run_migrations(self, alembic_ini_path: Optional[Path] = None) -> Dict[str, Any]:
-        """Run Alembic migrations to initialize/update database schema"""
         result = {"success": False, "errors": [], "warnings": []}
 
         try:
-            # Try to import alembic
             try:
                 from alembic import command
                 from alembic.config import Config
@@ -1251,9 +1044,7 @@ After installation, return here and run the installer again
                 self.logger.warning("Alembic not available for migrations")
                 return result
 
-            # Find alembic.ini
             if alembic_ini_path is None:
-                # Look for alembic.ini in current directory or parent directories
                 search_paths = [
                     Path.cwd() / "alembic.ini",
                     Path.cwd().parent / "alembic.ini",
@@ -1267,19 +1058,16 @@ After installation, return here and run the installer again
             if alembic_ini_path is None or not alembic_ini_path.exists():
                 result["warnings"].append("alembic.ini not found - skipping migrations")
                 self.logger.warning("No alembic.ini found, skipping migrations")
-                result["success"] = True  # Not an error, just skip
+                result["success"] = True
                 return result
 
             self.logger.info(f"Running migrations using {alembic_ini_path}")
 
-            # Configure Alembic
             alembic_cfg = Config(str(alembic_ini_path))
 
-            # Set the database URL (use owner credentials for migrations)
             db_url = f"postgresql://{self.settings.get('pg_user', 'giljo_owner')}:{self.owner_password}@{self.host}:{self.port}/{self.db_name}"
             alembic_cfg.set_main_option("sqlalchemy.url", db_url)
 
-            # Run migrations to head
             self.logger.info("Upgrading database schema to latest version...")
             command.upgrade(alembic_cfg, "head")
 
@@ -1294,7 +1082,6 @@ After installation, return here and run the installer again
 
 
 def check_postgresql_connection(host: str, port: int, timeout: int = 5) -> bool:
-    """Check if PostgreSQL is accessible on given host:port"""
     with contextlib.suppress(Exception):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
@@ -1305,7 +1092,6 @@ def check_postgresql_connection(host: str, port: int, timeout: int = 5) -> bool:
 
 
 def detect_postgresql_cli() -> Optional[str]:
-    """Detect if psql is available in PATH"""
     try:
         result = subprocess.run(["psql", "--version"], capture_output=True, text=True, timeout=5)
         if result.returncode == 0:

@@ -1,25 +1,3 @@
-/**
- * TutorialPromptScreen.detector3.spec.js — FE-9569 detector 3 + Part 2 copy
- *
- * Detector 3: the pulsing "Waiting for your agent…" dot is mechanically
- * sound (agentReportsDone already flips it, and the screen already
- * auto-advances) but the operator flagged it as easy to miss while the
- * agent works. This pins the enhanced-visibility markup (a pulsing halo
- * ring around the dot, data-testid hooks) staying present through the
- * waiting state and disappearing once the agent reports done.
- *
- * Part 2 copy: the old instruction text under the button ("Paste it into
- * your connected CLI... Come back here when your agent reports done.") was
- * impossible -- the user sits at this screen while the agent works, and the
- * screen refreshes itself. Replaced with the operator's literal copy.
- *
- * Part 2 open question (answered in the PR body): keep the yellow
- * Copy-prompt button visible once the agent starts populating the product
- * (a restart path), but demote its styling once agent activity is detected
- * so it stops reading as the next action.
- *
- * Edition scope: Both (shared frontend/src).
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
@@ -93,7 +71,6 @@ describe('TutorialPromptScreen — waiting-dot enhanced visibility (FE-9569 dete
     await flushPromises()
 
     expect(wrapper.find('[data-testid="tutorial-agent-waiting"]').exists()).toBe(true)
-    // The halo ring is the visibility enhancement itself -- a lone dot was the complaint.
     expect(wrapper.find('.waiting-dot-ring').exists()).toBe(true)
   })
 
@@ -123,13 +100,11 @@ describe('TutorialPromptScreen — copy-prompt button demotes once agent activit
     const wrapper = mountPrompt('D')
     await flushPromises()
 
-    // Progressive-fill call 1 lands (Info section) -- agent activity, but not done.
     h.row = { id: 'prod-1', name: 'agent-named', description: 'Populated by the agent.' }
     await vi.advanceTimersByTimeAsync(10_000)
     await flushPromises()
 
     const btn = wrapper.find('[data-testid="tutorial-copy-prompt"]')
-    // Still there -- it is a restart path, never removed.
     expect(btn.exists()).toBe(true)
     expect(btn.attributes('data-variant')).not.toBe('flat')
   })

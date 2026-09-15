@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tests for ProjectService nuclear_delete_project using product_memory_entries table.
-
-Verifies that soft-delete uses ProductMemoryRepository instead of JSONB.
-Handover 0390b Phase 3.
-Updated 0730d: Exception-based error handling patterns (no success wrappers).
-Updated 0731c: Typed returns - nuclear_delete_project returns NuclearDeleteResult.
-"""
 
 import random
 from datetime import UTC, datetime
@@ -27,11 +19,6 @@ from giljo_mcp.schemas.service_responses import NuclearDeleteResult
 async def test_nuclear_delete_marks_memory_entries_in_table(
     db_session, test_tenant_key, test_product, project_service_with_session
 ):
-    """
-    Test that nuclear_delete_project marks entries in product_memory_entries table
-    instead of mutating JSONB.
-    """
-    # Arrange - Create project and memory entries
     project = Project(
         id=str(uuid4()),
         tenant_key=test_tenant_key,
@@ -46,7 +33,6 @@ async def test_nuclear_delete_marks_memory_entries_in_table(
     )
     db_session.add(project)
 
-    # Create 3 memory entries for this project
     entries = []
     for i in range(3):
         entry = ProductMemoryEntry(
@@ -69,23 +55,17 @@ async def test_nuclear_delete_marks_memory_entries_in_table(
     for entry in entries:
         await db_session.refresh(entry)
 
-    # Store entry IDs for verification after deletion
     entry_ids = [entry.id for entry in entries]
 
-    # Act - Nuclear delete the project
-    # 0731c: nuclear_delete_project returns NuclearDeleteResult typed model
     result = await project_service_with_session.deletion.nuclear_delete_project(
         project_id=project.id, websocket_manager=None
     )
 
-    # Assert - Verify result is typed NuclearDeleteResult
     assert isinstance(result, NuclearDeleteResult)
     assert result.message
     assert result.deleted_counts["memory_entries_marked"] == 3
 
-    # Verify entries are marked as deleted in table (not hard deleted)
-    # Note: project_id will be NULL after project deletion (SET NULL constraint)
-    await db_session.commit()  # Refresh session after service commit
+    await db_session.commit()
     from sqlalchemy import select
 
     stmt = select(ProductMemoryEntry).where(ProductMemoryEntry.id.in_(entry_ids))
@@ -102,10 +82,6 @@ async def test_nuclear_delete_marks_memory_entries_in_table(
 async def test_nuclear_delete_with_no_memory_entries(
     db_session, test_tenant_key, test_product, project_service_with_session
 ):
-    """
-    Test that nuclear_delete_project handles projects with no memory entries gracefully.
-    """
-    # Arrange - Create project without memory entries
     project = Project(
         id=str(uuid4()),
         tenant_key=test_tenant_key,
@@ -122,23 +98,16 @@ async def test_nuclear_delete_with_no_memory_entries(
     await db_session.commit()
     await db_session.refresh(project)
 
-    # Act - Nuclear delete
-    # 0731c: nuclear_delete_project returns NuclearDeleteResult typed model
     result = await project_service_with_session.deletion.nuclear_delete_project(
         project_id=project.id, websocket_manager=None
     )
 
-    # Assert - Typed model with 0 entries marked
     assert isinstance(result, NuclearDeleteResult)
     assert result.deleted_counts["memory_entries_marked"] == 0
 
 
 @pytest.mark.asyncio
 async def test_nuclear_delete_tenant_isolation(db_session, test_tenant_key, test_product, project_service_with_session):
-    """
-    Test that nuclear_delete only marks entries for the correct tenant.
-    """
-    # Arrange - Create project and entries for first tenant
     project1 = Project(
         id=str(uuid4()),
         tenant_key=test_tenant_key,
@@ -167,17 +136,11 @@ async def test_nuclear_delete_tenant_isolation(db_session, test_tenant_key, test
     )
     db_session.add(entry1)
 
-    # Create project and entry for different tenant (simulated)
-    # Note: In real scenario, this would be a different tenant_key
-    # For test purposes, we'll verify the query filters correctly
     await db_session.commit()
 
-    # Act - Delete first project
-    # 0731c: nuclear_delete_project returns NuclearDeleteResult typed model
     result = await project_service_with_session.deletion.nuclear_delete_project(
         project_id=project1.id, websocket_manager=None
     )
 
-    # Assert - Typed model with 1 entry marked
     assert isinstance(result, NuclearDeleteResult)
     assert result.deleted_counts["memory_entries_marked"] == 1

@@ -57,4 +57,4 @@ The MCP spec evolves — three versions were published in 2025 alone. This confo
 
 ---
 
-This document covers conformance to the MCP specification only. Conformance with individual MCP clients (claude.ai, ChatGPT, Inspector, Gemini, etc.) is validated separately via the manual handshake runbook at `scripts/conformance/`.
+This document covers conformance to the MCP specification only. Conformance with individual MCP clients (claude.ai, ChatGPT, Inspector, etc.) is validated separately via the manual handshake runbook at `scripts/conformance/`.

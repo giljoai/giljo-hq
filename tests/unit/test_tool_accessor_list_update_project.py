@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Unit tests for ToolAccessor.list_projects() and ToolAccessor.update_project_metadata().
-
-Test Coverage:
-- list_projects: returns projects for active product, respects status filter, tenant isolation
-- update_project_metadata: updates name, description, status; rejects invalid project_id;
-  rejects cross-tenant access; validates field lengths; rejects invalid status values
-"""
 
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -22,9 +14,6 @@ from giljo_mcp.tools.tool_accessor import ToolAccessor
 _PRODUCT_SERVICE_PATH = "giljo_mcp.services.product_service.ProductService"
 
 
-# ---------------------------------------------------------------------------
-# Helper: create a ToolAccessor with mocked dependencies
-# ---------------------------------------------------------------------------
 
 
 def _make_accessor(tenant_key: str = "tenant-test") -> ToolAccessor:
@@ -33,8 +22,7 @@ def _make_accessor(tenant_key: str = "tenant-test") -> ToolAccessor:
     db_manager.get_session_async = Mock(return_value=mock_session)
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=False)
-    mock_session.info = {}  # tenant_session_context save/restore target
-    # execute() returns a result with scalars().all() for project type queries
+    mock_session.info = {}
     mock_result = Mock()
     mock_result.scalars = Mock(return_value=Mock(all=Mock(return_value=[])))
     mock_session.execute = AsyncMock(return_value=mock_result)
@@ -60,7 +48,6 @@ def _mock_project(
     created_at=None,
     updated_at=None,
 ):
-    """Create a mock project object."""
     proj = Mock()
     proj.id = project_id
     proj.name = name
@@ -87,7 +74,6 @@ def _mock_project(
 
 
 def _patch_active_product(product_id="prod-001"):
-    """Return a patch context for ProductService with a mocked active product."""
     mock_product = Mock()
     mock_product.id = product_id
 
@@ -95,25 +81,14 @@ def _patch_active_product(product_id="prod-001"):
     return p, mock_product
 
 
-# ===========================================================================
-# list_projects — Signature Tests
-# ===========================================================================
 
 
-# ===========================================================================
-# list_projects — Behavior Tests (BE-6118: exercise ProjectService.list_projects_for_mcp
-# directly — the pure ToolAccessor.list_projects pass-through was deleted; its
-# presence/param contract is locked by test_be6042c_project_service_surface.py +
-# test_be6042d_mcp_tool_registry_surface.py + test_be3010b_registry_dispatch.py)
-# ===========================================================================
 
 
 class TestListProjectsBehavior:
-    """Test list_projects returns correct data and respects filters."""
 
     @pytest.mark.asyncio
     async def test_returns_projects_for_active_product(self):
-        """list_projects should resolve active product and return its projects."""
         accessor = _make_accessor()
 
         mock_product = Mock()
@@ -164,12 +139,6 @@ class TestListProjectsBehavior:
 
     @pytest.mark.asyncio
     async def test_passes_status_filter_to_service(self):
-        """status_filter='active' must filter results to active projects only.
-
-        v1.2.1: filtering moved from service.list_projects to
-        list_projects_for_mcp (post-fetch). We assert the BEHAVIOR (only
-        active rows in payload), not the internal wiring.
-        """
         accessor = _make_accessor()
 
         mock_product = Mock()
@@ -236,11 +205,6 @@ class TestListProjectsBehavior:
 
     @pytest.mark.asyncio
     async def test_status_filter_all_passes_none(self):
-        """status_filter='all' must include archived projects (completed/cancelled).
-
-        v1.2.1: the legacy 'all' value disables the new lifecycle-finished
-        default filter, restoring pre-1.2.1 behavior.
-        """
         accessor = _make_accessor()
 
         mock_product = Mock()
@@ -299,15 +263,12 @@ class TestListProjectsBehavior:
 
     @pytest.mark.asyncio
     async def test_raises_on_no_active_product(self):
-        """Should raise ValidationError when no active product."""
         accessor = _make_accessor()
 
         from giljo_mcp.exceptions import ValidationError
 
         with patch(_PRODUCT_SERVICE_PATH) as mock_product_svc:
             mock_product_svc.return_value.get_default_product = AsyncMock(return_value=None)
-            # BE-9499a: list_projects_for_mcp resolves through resolve_binding_product now;
-            # an omitted product_id with no active product raises the same message.
             mock_product_svc.return_value.resolve_binding_product = AsyncMock(
                 side_effect=ValidationError("No active product set. Please activate a product first.")
             )
@@ -317,7 +278,6 @@ class TestListProjectsBehavior:
 
     @pytest.mark.asyncio
     async def test_description_returned_in_full(self):
-        """Full descriptions should be returned without truncation."""
         accessor = _make_accessor()
 
         mock_product = Mock()
@@ -368,7 +328,6 @@ class TestListProjectsBehavior:
 
     @pytest.mark.asyncio
     async def test_rejects_invalid_status_filter(self):
-        """Invalid status_filter values should raise ValidationError."""
         accessor = _make_accessor()
 
         with pytest.raises(Exception, match=r"[Ii]nvalid.*status"):
@@ -378,24 +337,14 @@ class TestListProjectsBehavior:
             )
 
 
-# ===========================================================================
-# update_project_metadata — Signature Tests
-# ===========================================================================
 
 
-# ===========================================================================
-# update_project_metadata — Behavior Tests (BE-6118: exercise
-# ProjectService.update_project_metadata_for_mcp directly — the pure
-# ToolAccessor.update_project_metadata pass-through was deleted)
-# ===========================================================================
 
 
 class TestUpdateProjectMetadataBehavior:
-    """Test update_project_metadata validates input and delegates to service."""
 
     @pytest.mark.asyncio
     async def test_updates_name_successfully(self):
-        """Should pass name update through to ProjectService.update_project."""
         accessor = _make_accessor()
 
         mock_project_data = Mock()
@@ -446,7 +395,6 @@ class TestUpdateProjectMetadataBehavior:
 
     @pytest.mark.asyncio
     async def test_updates_description_and_status(self):
-        """Should pass description and status updates through to service."""
         accessor = _make_accessor()
 
         mock_project_data = Mock()
@@ -498,7 +446,6 @@ class TestUpdateProjectMetadataBehavior:
 
     @pytest.mark.asyncio
     async def test_rejects_invalid_status_value(self):
-        """Invalid status values should raise ValidationError."""
         accessor = _make_accessor()
 
         with pytest.raises(Exception, match=r"[Ii]nvalid.*status"):
@@ -510,7 +457,6 @@ class TestUpdateProjectMetadataBehavior:
 
     @pytest.mark.asyncio
     async def test_rejects_name_exceeding_max_length(self):
-        """Name over 200 chars should be rejected."""
         accessor = _make_accessor()
 
         with pytest.raises(Exception, match=r"[Nn]ame.*200|too long|exceed"):
@@ -522,7 +468,6 @@ class TestUpdateProjectMetadataBehavior:
 
     @pytest.mark.asyncio
     async def test_rejects_description_exceeding_max_length(self):
-        """Description over 20000 chars should be rejected."""
         accessor = _make_accessor()
 
         with pytest.raises(Exception, match=r"[Dd]escription.*20000|too long|exceed"):
@@ -534,7 +479,6 @@ class TestUpdateProjectMetadataBehavior:
 
     @pytest.mark.asyncio
     async def test_rejects_empty_project_id(self):
-        """Empty or whitespace project_id should be rejected."""
         accessor = _make_accessor()
 
         with pytest.raises(Exception, match=r"[Pp]roject.*required|[Pp]roject.*empty"):
@@ -545,7 +489,6 @@ class TestUpdateProjectMetadataBehavior:
 
     @pytest.mark.asyncio
     async def test_rejects_no_fields_provided(self):
-        """Should reject when no update fields are provided."""
         accessor = _make_accessor()
 
         with pytest.raises(Exception, match=r"[Aa]t least one"):
@@ -556,20 +499,6 @@ class TestUpdateProjectMetadataBehavior:
 
     @pytest.mark.asyncio
     async def test_updates_a_project_belonging_to_a_non_active_product(self):
-        """BE-9435: the inversion of the deleted active-product gate.
-
-        This test replaces three that pinned the gate, all removed with it:
-        ``test_rejects_project_not_in_active_product`` (the original, from the
-        tool's 2026-04-13 birth commit) and BE-9420's two refusal-message tests,
-        ``test_the_product_mismatch_refusal_names_both_products_and_the_fix`` and
-        ``test_the_refusal_survives_a_product_row_it_cannot_read`` -- the latter
-        pinned ``_describe_product``'s never-raise contract and went with the
-        helper it guarded.
-
-        The deleted assertion is replaced by its exact converse rather than by a
-        hole: the same mismatched shape those tests set up (project under
-        ``prod-OTHER``, active product ``prod-001``) must now update successfully.
-        """
         accessor = _make_accessor()
 
         mock_project_data = Mock()
@@ -614,14 +543,11 @@ class TestUpdateProjectMetadataBehavior:
             )
 
         assert result["success"] is True
-        # The write must actually be delegated -- a tool that returned success
-        # without reaching the service would satisfy the assertion above.
         mock_update.assert_called_once()
         assert mock_update.call_args[1]["updates"]["name"] == "New Name"
 
     @pytest.mark.asyncio
     async def test_only_provided_fields_in_updates(self):
-        """When only name is provided, updates dict should not contain description or status."""
         accessor = _make_accessor()
 
         mock_project_data = Mock()

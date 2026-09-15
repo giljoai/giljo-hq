@@ -1,19 +1,3 @@
-/**
- * useTutorialState.breadcrumb.spec.js — FE-9320
- *
- * The other half of the activate-nudge fix. SystemStatusBanner.spec.js proves
- * the banner reacts to the arming event; this proves arming actually EMITS it.
- * Without both halves each side could pass against a broken whole: the banner
- * listening for an event nobody sends, or the composable announcing to nobody.
- *
- * NOTE ON THE HARNESS: tests/setup.js replaces window.localStorage with plain
- * vi.fn() stubs (getItem always returns undefined), so these tests assert the
- * CALLS this module makes rather than a value round-tripping through storage —
- * a round-trip assertion cannot pass here, and "storage unavailable" has to be
- * simulated on that stub, not on Storage.prototype.
- *
- * Edition scope: Both (shared frontend/src).
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   ACTIVATE_BREADCRUMB_ARMED_EVENT,
@@ -22,8 +6,6 @@ import {
   isActivateBreadcrumbArmed,
 } from './useTutorialState'
 
-// Imported, never re-declared. A local copy of this string would let the emit
-// and the listener drift apart with both sides' specs still green.
 const EVENT = ACTIVATE_BREADCRUMB_ARMED_EVENT
 const KEY = 'giljo_tutorial_activate_breadcrumb'
 

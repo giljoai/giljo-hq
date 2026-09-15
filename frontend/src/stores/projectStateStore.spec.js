@@ -1,11 +1,3 @@
-/**
- * CE-0029 Item 3 — projectStateStore: setImplementationLaunched mutation +
- * handleImplementationLaunched WS handler.
- *
- * Mirrors the setStagingComplete/handleStagingComplete pattern. Tests are
- * deliberately store-mutation-driven (no prop injection), per the
- * test-discipline rule in feedback_frontend_prop_vs_store_source_of_truth.
- */
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
@@ -92,8 +84,6 @@ describe('projectStateStore — CE-0029 Item 3 implementation_launched', () => {
   })
 
   it('handleImplementationLaunched preserves stagingComplete on the same project', () => {
-    // Verifies the patch is additive — staging signal that arrived earlier
-    // is not clobbered by the impl-launched signal.
     const store = useProjectStateStore()
     store.handleStagingComplete({ project_id: 'proj-1' })
     store.handleImplementationLaunched({
@@ -119,7 +109,6 @@ describe('projectStateStore — BE-6047 unstage/restage mission clearing (lock-r
     }))
     const { useProjectStateStore: useStore } = await import('./projectStateStore')
     const store = useStore()
-    // seed with a mission (the lock-trap condition) + staged state
     store.setProject({ id: 'proj-1', mission: 'some orchestrator mission', staging_status: 'staged' })
     await store.unstageProject('proj-1')
     const state = store.getProjectState('proj-1')
@@ -134,7 +123,6 @@ describe('projectStateStore — BE-6047 unstage/restage mission clearing (lock-r
     }))
     const { useProjectStateStore: useStore } = await import('./projectStateStore')
     const store = useStore()
-    // seed: staging_complete + mission + (no impl-launch — restage allowed path)
     store.setProject({ id: 'proj-1', mission: 'old mission', staging_status: 'staging_complete' })
     await store.restageProject('proj-1')
     const state = store.getProjectState('proj-1')
@@ -177,10 +165,6 @@ describe('projectStateStore — FE-9122 isLaunched monotonic guard', () => {
     store.setLaunched('proj-1', true)
     expect(store.getProjectState('proj-1').isLaunched).toBe(true)
 
-    // Simulate the projects.js _upsertEntity bridge refetching a complete
-    // ProjectResponse — API entities don't carry isLaunched (it's client-only
-    // launch-nav state), so normalizeProjectState would otherwise default it
-    // back to false on every refetch.
     store.setProject({ id: 'proj-1', mission: 'm', status: 'active', staging_status: 'staging' })
 
     expect(store.getProjectState('proj-1').isLaunched).toBe(true)

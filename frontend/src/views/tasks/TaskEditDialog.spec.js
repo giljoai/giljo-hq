@@ -1,9 +1,3 @@
-/**
- * TaskEditDialog.spec.js — FE-6006 unit 3b
- *
- * Tests the task create/edit dialog component.
- * Edition scope: CE
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
@@ -91,19 +85,13 @@ describe('TaskEditDialog', () => {
     expect(wrapper.html()).toContain('Create')
   })
 
-  // FE-6049e: tasks are auto-TSK with an auto-assigned serial — Type and Serial
-  // are READ-ONLY text fields, NOT pickers.
   it('renders Type and Serial as read-only fields (no type picker)', () => {
     const wrapper = mountDialog()
     expect(wrapper.find('[data-test="edit-task-type"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="edit-task-serial"]').exists()).toBe(true)
-    // The Type field is a text-field (input), not the v-select picker stub.
     expect(wrapper.find('.v-select[data-test="edit-task-type"]').exists()).toBe(false)
   })
 
-  // fix/tsk-serial-pad-display: serial field must zero-pad to 4 digits in edit mode.
-  // The v-text-field stub renders as a native <input> with data-model-value mirroring
-  // the modelValue prop — read that attribute to assert what Vue bound.
   function serialFieldValue(wrapper) {
     return wrapper.find('[data-test="edit-task-serial"]').attributes('data-model-value')
   }

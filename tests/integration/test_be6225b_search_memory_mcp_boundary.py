@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Transport-layer tests for the ``search_memory`` MCP tool (BE-6225b).
-
-Regression-at-the-failing-layer: ``search_memory`` is an @mcp.tool wrapper, so the
-BE-5042 lesson applies — exercise it through the in-memory FastMCP transport, not
-just the service. These tests drive the wrapper's kwarg-unpacking + ``_call_tool``
-dispatch + tenant_key injection + active-product resolution + the length-cap →
-422 surfacing.
-
-Proves the BE-6225b DoD:
-- a matching query returns the right tenant-scoped headlines (with score + tags);
-- an empty query and a no-match query return a clean empty result (NOT an error);
-- an over-length query (> MCP_SHORT_TEXT_MAX) surfaces a 422-class isError;
-- a cross-tenant memory entry never leaks into another tenant's search.
-
-Pattern reference: ``tests/integration/test_roadmap_tools_mcp_transport.py`` — same
-in-memory ``create_connected_server_and_client_session`` transport + the
-``_resolve_tenant`` monkeypatch + a ToolAccessor bound to the rolled-back session.
-"""
 
 from __future__ import annotations
 
@@ -63,7 +44,6 @@ def _error_text(call_tool_result) -> str:
 
 
 async def _seed_active_product(db_session, tenant_key: str) -> str:
-    """Seed org + active product + one project for a tenant; return product_id."""
     suffix = uuid.uuid4().hex[:8]
     org = Organization(name=f"Org {suffix}", slug=f"org-{suffix}", tenant_key=tenant_key, is_active=True)
     db_session.add(org)
@@ -128,13 +108,6 @@ class _TenantSwitch:
 
 @pytest_asyncio.fixture
 async def search_memory_mcp_client(db_manager, db_session, monkeypatch):
-    """Yield ``(new_client, tenant_switch)`` against the live FastMCP server.
-
-    Builds a ToolAccessor bound to the test ``db_session`` (test_session) so the
-    ProductService / ProductMemoryService my adapter constructs read inside the
-    rolled-back transaction, and monkeypatches ``_resolve_tenant`` to a mutable
-    closure so a single client can switch identity to prove no cross-tenant leak.
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -209,14 +182,12 @@ async def test_search_memory_matching_query_returns_tenant_scoped_headlines(sear
     assert "quantumwidget" in hit["summary"].lower()
     assert hit["score"] > 0
     assert "backend" in hit["tags"]
-    # The non-matching billing entry must be absent.
     assert all("billing" not in r["summary"].lower() for r in payload["results"])
 
 
 async def test_search_memory_tag_filter_narrows_results(search_memory_mcp_client, db_session):
     new_client, switch = search_memory_mcp_client
     product_id, project_id = await _seed_active_product(db_session, switch.value)
-    # Both summaries match the keyword; only one carries the 'security' tag.
     await _seed_memory_entry(
         db_session,
         switch.value,
@@ -306,15 +277,16 @@ async def test_search_memory_over_length_query_is_422(search_memory_mcp_client, 
     async with new_client() as session:
         result = await session.call_tool("search_memory", {"query": too_long})
 
-    # Over-length is rejected at the FastMCP arg-validation boundary (a 422-class
-    # ToolError), never a 500 and never an unvalidated value reaching the DB.
-    assert result.is_error is True
-    text = _error_text(result).lower()
-    assert "query" in text or "length" in text or "2000" in text
+    assert result.is_error is False, _error_text(result)
+    payload = _payload(result)
+    assert payload["success"] is False
+    assert payload["error"] == "VALIDATION_ERROR"
+    assert payload["field"] == "query"
+    assert payload["constraint"] == "string_too_long"
+    assert str(MCP_SHORT_TEXT_MAX) in payload["message"]
 
 
 async def test_search_memory_no_cross_tenant_leak(search_memory_mcp_client, db_session):
-    """Tenant B searching the SAME keyword never sees tenant A's memory entry."""
     new_client, switch = search_memory_mcp_client
 
     tenant_a = switch.value
@@ -344,10 +316,7 @@ async def test_search_memory_no_cross_tenant_leak(search_memory_mcp_client, db_s
 
 
 async def test_search_memory_no_active_product_surfaces_error(search_memory_mcp_client, db_session):
-    """No active product surfaces a ValidationError (→ isError), same contract as
-    list_projects — proves tenant context propagates through the wrapper."""
     new_client, _switch = search_memory_mcp_client
-    # Deliberately seed NOTHING for this fresh tenant (no active product).
     async with new_client() as session:
         result = await session.call_tool("search_memory", {"query": "anything"})
 

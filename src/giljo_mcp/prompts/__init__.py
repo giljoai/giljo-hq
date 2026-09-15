@@ -3,17 +3,10 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Prompt builders subpackage for Giljo HQ.
-
-Extracted from ThinClientPromptGenerator (Handover 0950g).
-Shared logic in ExecutionPromptBuilderBase (quality-sprint-002e).
-Four platform-specific builders + one staging builder.
-"""
 
 from giljo_mcp.prompts.claude_prompt_builder import ClaudePromptBuilder
 from giljo_mcp.prompts.codex_prompt_builder import CodexPromptBuilder
 from giljo_mcp.prompts.execution_prompt_base import ExecutionPromptBuilderBase
-from giljo_mcp.prompts.gemini_prompt_builder import GeminiPromptBuilder
 from giljo_mcp.prompts.multi_terminal_prompt_builder import MultiTerminalPromptBuilder
 from giljo_mcp.prompts.staging_prompt_builder import StagingPromptBuilder
 
@@ -22,7 +15,6 @@ __all__ = [
     "ClaudePromptBuilder",
     "CodexPromptBuilder",
     "ExecutionPromptBuilderBase",
-    "GeminiPromptBuilder",
     "MultiTerminalPromptBuilder",
     "StagingPromptBuilder",
 ]

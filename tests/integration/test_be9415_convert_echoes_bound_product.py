@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9415 — ``update_task(convert_to_project=True)`` MCP-boundary binding test.
-
-The service-layer regression lives in
-``tests/services/test_be9415_convert_binds_task_product.py``; this file covers
-the half that only the wrapper can answer: an agent calling the tool over the
-real transport gets a project bound to the TASK's product, and the response
-NAMES that product so the agent can self-check the filing without a second call.
-
-That echo is the BE-9411 contract applied to the promotion path -- the misfiling
-incident's defining property was that nothing in the response made the wrong
-landing visible.
-
-Tested THROUGH THE MCP TRANSPORT rather than against the adapter, per BE-5042:
-for an ``@mcp.tool`` wrapper the wrapper IS the failing layer, and a dict the
-adapter returns is not evidence that the field survives serialization. Harness
-and fixtures are the shipped ones from
-``tests/integration/test_be9382_convert_to_project_mcp_boundary.py`` (same tool,
-same seam) rather than a second copy.
-"""
 
 from __future__ import annotations
 
@@ -75,12 +56,6 @@ class _Seeded:
 
 
 async def _seed_task_on_a_non_active_product(db_session, tenant_key: str) -> _Seeded:
-    """A task on product OWNER, while a DIFFERENT product is the active one.
-
-    Exactly one product is active: the pre-fix lookup is ``scalar_one_or_none()``
-    over ``Product.is_active``, so a second active row would raise
-    ``MultipleResultsFound`` and this would fail for the wrong reason.
-    """
     suffix = uuid4().hex[:8]
 
     org = Organization(name=f"Org {suffix}", slug=f"org-{suffix}", tenant_key=tenant_key, is_active=True)
@@ -145,12 +120,6 @@ class _Resolved:
 
 @pytest_asyncio.fixture
 async def convert_client(db_manager, db_session, monkeypatch):
-    """``(new_client, resolved, tenant_key)`` -- the BE-9382 harness verbatim.
-
-    The ToolAccessor's TaskService is bound to the rollback-isolated
-    ``db_session`` so the conversion's own commit-owning scope stays inside the
-    test transaction.
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -192,7 +161,6 @@ async def convert_client(db_manager, db_session, monkeypatch):
 
 class TestConvertEchoesBoundProduct:
     async def test_promotion_binds_to_the_tasks_product_over_the_transport(self, convert_client, db_session):
-        """The row lands on the task's product even though another product is active."""
         new_client, resolved, tenant_key = convert_client
         seeded = await _seed_task_on_a_non_active_product(db_session, tenant_key)
         resolved.user_id = seeded.user_id
@@ -213,13 +181,6 @@ class TestConvertEchoesBoundProduct:
         assert product_id != seeded.active_product_id
 
     async def test_response_echoes_the_bound_product_through_the_wrapper(self, convert_client, db_session):
-        """The echo must SURVIVE the wrapper, not merely exist on the adapter dict.
-
-        A field the adapter returns can still be dropped by the tool surface; the
-        only way to know is to read it off a real ``call_tool`` result. Asserting
-        the id AND the name because the id alone is what the incident already
-        had -- the name is what makes a wrong landing legible without a lookup.
-        """
         new_client, resolved, tenant_key = convert_client
         seeded = await _seed_task_on_a_non_active_product(db_session, tenant_key)
         resolved.user_id = seeded.user_id
@@ -238,31 +199,12 @@ class TestConvertEchoesBoundProduct:
         assert payload["product_id"] != seeded.active_product_id
 
     async def test_an_absorbed_product_id_cannot_redirect_the_filing(self, convert_client, db_session):
-        """An undeclared ``product_id`` is ABSORBED by the wrapper -- so the
-        binding must be safe under absorption, which is what this pins.
-
-        BE-9415 adds no tool parameter: the destination is derived from the task
-        row. Measured at the transport rather than inferred from the signature,
-        the wrapper does **not** reject an undeclared ``product_id`` -- the call
-        runs normally and the argument is dropped before the handler sees it.
-        That is L24's census finding recurring here, and it is exactly why the
-        derived binding matters: an agent that passes a product hoping to steer
-        the promotion is silently not steering it, so the only thing standing
-        between that agent and a misfile is that the derived destination is
-        correct on its own.
-
-        So the assertion is not "the argument is refused" (it is not) but "the
-        argument cannot move the row" -- passing a DIFFERENT, real, tenant-owned
-        product still lands the project on the task's product.
-        """
         new_client, resolved, tenant_key = convert_client
         seeded = await _seed_task_on_a_non_active_product(db_session, tenant_key)
         resolved.user_id = seeded.user_id
 
         async with new_client() as session:
             tools = {tool.name: tool for tool in (await session.list_tools()).tools}
-            # SDK 2.0 renamed the field to snake_case (``inputSchema`` ->
-            # ``input_schema``); INF-9371 put this tree on mcp 2.0.0.
             assert "product_id" not in tools["update_task"].input_schema.get("properties", {})
 
             result = await session.call_tool(
@@ -270,7 +212,6 @@ class TestConvertEchoesBoundProduct:
                 {
                     "task_id": seeded.task_id,
                     "convert_to_project": True,
-                    # Undeclared, and deliberately the OTHER real product.
                     "product_id": seeded.active_product_id,
                 },
             )

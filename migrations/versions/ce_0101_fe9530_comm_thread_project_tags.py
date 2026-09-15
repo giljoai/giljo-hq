@@ -3,43 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-9530 -- a thread may tag several projects, not only the one it is bound to.
-
-Revision ID: ce_0101_fe9530_comm_thread_project_tags
-Revises: ce_0100_be9525b_drop_single_active_project
-Create Date: 2026-08-30
-
-Operator ruling 3 (FE-9530, 2026-08-29): "a thread must tag a product and MAY tag
-projects -- one, several, or none. Do not build a single-project foreign key and
-call it done." ``comm_threads.project_id`` IS exactly that single foreign key --
-it answers "whose bound thread is this" (the BE-9012d lifecycle binding, CASCADE
-with the project), not "which projects does this conversation touch."
-
-This migration adds the second answer as a new, purely additive many-to-many
-table. ``project_id`` is UNCHANGED -- no column dropped, no data moved, no
-existing row rewritten. That is deliberate: this is schema capability, not a
-data-facing convention change, so there is nothing to backfill and nothing for
-old rows to tolerate. A thread created before this table existed simply has zero
-tag rows, which reads identically to "no additional projects tagged."
-
-Operations
-----------
-1. Create ``comm_thread_project_tags`` (id, tenant_key, thread_id, project_id,
-   created_at). CASCADE on both FKs -- a tag is metadata about a conversation,
-   not a lifecycle link (unlike ``comm_threads.project_id``), so it should not
-   outlive either side.
-2. Unique (thread_id, project_id) -- a thread tags a given project at most once.
-3. Index the reverse lookup (tenant_key, project_id) for "which threads mention
-   project X," and a plain index on thread_id for the forward read.
-
-Idempotency
------------
-``inspect().has_table()`` guards table creation; the whole migration is a no-op
-on a second run, matching every other CE migration's contract with the installer
-that reruns the chain on every boot.
-
-Edition Scope: CE -- ``comm_threads`` and ``projects`` are both CE tables.
-"""
 
 import sqlalchemy as sa
 from alembic import op

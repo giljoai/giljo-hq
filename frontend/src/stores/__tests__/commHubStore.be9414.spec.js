@@ -1,22 +1,3 @@
-/**
- * commHubStore.be9414.spec.js — BE-9414, the consumer half.
- *
- * A long Hub post cannot ride the cross-worker broker whole: pg_notify caps a
- * payload at 7999 bytes, so the server sends a bounded excerpt plus
- * `content_truncated` / `content_length`. The Hub renders event content directly
- * (handleThreadMessage -> _upsertMessage -> ThreadTimeline), so without this the
- * operator would read a permanently cut-off message.
- *
- * What is pinned here:
- *  - a truncated message on the OPEN thread is topped up to its full body
- *  - a truncated message on ANY thread is topped up, not only the open one
- *    (the bell's mention check reads content on every thread)
- *  - an ordinary message fetches nothing at all
- *  - the top-up never flips the Hub into its loading state, and leaves other
- *    threads' unread counts alone
- *  - a burst of long posts coalesces into two reads, and strands nobody
- *  - a failed top-up leaves the excerpt readable rather than blanking it
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useCommHubStore } from '@/stores/commHubStore'
@@ -92,14 +73,10 @@ describe('BE-9414 — a truncated thread_message is topped up to its full body',
     expect(historyMock).toHaveBeenCalledWith(THREAD_ID)
     const [message] = store.messagesFor(THREAD_ID)
     expect(message.message_id).toBe(MESSAGE_ID)
-    // The point of the whole project: what the Hub ultimately renders is unchanged.
     expect(message.content).toBe(FULL_BODY)
   })
 
   it('tops up a thread that is NOT on screen too, so a late mention still reaches the bell', async () => {
-    // useHubNotifications tests `content` for the operator's display name on every
-    // thread, not only the open one. Scoping the top-up to the open thread would
-    // silently drop the bell for a mention written past the excerpt cut-off.
     store.selectedThreadId = 'some-other-thread'
 
     await store.handleThreadMessage(truncatedEvent())
@@ -128,11 +105,6 @@ describe('BE-9414 — a truncated thread_message is topped up to its full body',
   })
 
   it('never flips the Hub into its loading state while topping up', async () => {
-    // Sampled MID-FLIGHT, not after: `loading` is false again by the time an
-    // awaited loadThread returns, so asserting it at the end would pass whichever
-    // implementation ran. This is the assertion that actually pins the decision
-    // not to reuse loadThread — a spinner over the timeline on every long post is
-    // exactly the flicker a background top-up must not cause.
     store.selectedThreadId = THREAD_ID
     let loadingDuringFetch = null
     historyMock.mockImplementation(() => {
@@ -165,8 +137,6 @@ describe('BE-9414 — a truncated thread_message is topped up to its full body',
     for (let i = 0; i < 4; i += 1) {
       inFlight.push(store.handleThreadMessage(truncatedEvent({ message_id: `msg-burst-${i}` })))
     }
-    // Release repeatedly: the first read resolves, the coalesced follow-up starts,
-    // and that one needs releasing too.
     for (let i = 0; i < 5; i += 1) {
       pending.splice(0).forEach((release) => release())
       await Promise.resolve()
@@ -174,23 +144,16 @@ describe('BE-9414 — a truncated thread_message is topped up to its full body',
     }
     await Promise.all(inFlight)
 
-    // Five posts, two reads: one in flight plus one follow-up for everything that
-    // arrived during it.
     expect(historyMock).toHaveBeenCalledTimes(2)
   })
 
   it('does not strand a message that arrived while a read was already in flight', async () => {
-    // The correctness reason the burst is COALESCED and not merely de-duplicated:
-    // the in-flight read may have queried the server before the newer message was
-    // committed, so dropping the second request would leave it on its excerpt
-    // forever. This is the assertion that a plain "skip if busy" cannot satisfy.
     store.selectedThreadId = THREAD_ID
     const LATE_ID = 'msg-arrived-during-the-read'
     const LATE_BODY = 'the late post, in full'
     let firstReadResolve
     historyMock
       .mockImplementationOnce(
-        // Snapshot taken BEFORE the late message committed: it is not in here.
         () => new Promise((resolve) => (firstReadResolve = () => resolve(historyPayload()))),
       )
       .mockImplementationOnce(() =>
@@ -228,7 +191,6 @@ describe('BE-9414 — a truncated thread_message is topped up to its full body',
 
     await store.handleThreadMessage(truncatedEvent())
 
-    // Partly readable beats blank, and the next open re-reads the thread in full.
     expect(store.messagesFor(THREAD_ID)[0].content).toBe(EXCERPT)
     expect(store.error).toBeNull()
   })

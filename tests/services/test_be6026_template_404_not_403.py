@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Regression test for BE-6026 Item 1: template existence oracle collapsed to 404.
-
-The template write/reset endpoints previously distinguished "exists in another
-tenant" (403 "Access denied for this template") from "does not exist anywhere"
-(404 "Template not found"). That 403 branch was a cross-tenant existence oracle:
-it let a caller learn that a given template id exists in some other tenant. The
-endpoints now always raise 404 when the template is not in the caller's tenant,
-revealing nothing about other tenants.
-
-Uses real PostgreSQL via the shared transactional ``db_session`` (rolled back at
-teardown). No module-level mutable state; no ordering dependencies.
-"""
 
 from uuid import uuid4
 
@@ -46,7 +33,6 @@ async def test_update_template_other_tenant_returns_404_not_403(
     from api.endpoints.templates.crud import update_template
     from api.endpoints.templates.models import TemplateUpdate
 
-    # A template that exists ONLY in another tenant.
     other_product = Product(
         id=str(uuid4()),
         name=f"Other Product {uuid4().hex[:6]}",
@@ -130,7 +116,6 @@ async def test_reset_template_other_tenant_returns_404_not_403(
 
 @pytest.mark.asyncio
 async def test_update_template_nonexistent_returns_404(db_session, template_service, test_tenant_key):
-    """A template id that exists in no tenant also returns 404 (same response as cross-tenant)."""
     from api.endpoints.templates.crud import update_template
     from api.endpoints.templates.models import TemplateUpdate
 

@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Regression tests for TSK-9159: get_context/fetch_context git_history
-depth-string crash.
-
-The get_context MCP boundary advertises string depth overrides
-(``depth_config={'git_history': 'summary'}`` in the tool schema), but the
-git_history branch of ``_fetch_category`` parsed the depth with a bare
-``int(depth)``. A string token raised
-``ValueError: invalid literal for int() with base 10: 'summary'``, the
-per-category catch swallowed it, and git_history was dropped from the
-response into ``errors``.
-
-Contract under test: string depth tokens must be tolerated — a named token
-maps to a sensible commit count, a numeric string parses, and an
-unrecognized value falls back to the default with a warning, never an error.
-"""
 
 import sys
 from typing import Any
@@ -26,8 +10,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-# Import the function and grab the module from sys.modules — `import ... as`
-# yields the function shadowed by the package's __init__ re-export.
 from giljo_mcp.tools.context_tools.fetch_context import fetch_context
 
 
@@ -47,7 +29,6 @@ def _git_history_result() -> dict[str, Any]:
 
 
 async def _run_fetch(depth_value: Any) -> tuple[dict[str, Any], AsyncMock]:
-    """Drive fetch_context for git_history with the given depth override."""
     git_tool = AsyncMock(return_value=_git_history_result())
 
     with (
@@ -61,14 +42,13 @@ async def _run_fetch(depth_value: Any) -> tuple[dict[str, Any], AsyncMock]:
             tenant_key=TENANT_KEY,
             categories=["git_history"],
             depth_config={"git_history": depth_value},
-            db_manager=object(),  # truthy stand-in; real DB calls are patched
+            db_manager=object(),
         )
     return response, git_tool
 
 
 @pytest.mark.asyncio
 async def test_git_history_depth_summary_token_does_not_drop_category():
-    """The exact failing input from TSK-9159: {'git_history': 'summary'}."""
     response, git_tool = await _run_fetch("summary")
 
     failed = {e["category"] for e in response.get("errors", [])}
@@ -85,7 +65,6 @@ async def test_git_history_depth_summary_token_does_not_drop_category():
 
 @pytest.mark.asyncio
 async def test_git_history_depth_numeric_string_parses():
-    """A numeric string depth ('50') must behave like the int 50."""
     response, git_tool = await _run_fetch("50")
 
     assert "git_history" in response["categories_returned"]
@@ -95,7 +74,6 @@ async def test_git_history_depth_numeric_string_parses():
 
 @pytest.mark.asyncio
 async def test_git_history_depth_unrecognized_string_falls_back_to_default():
-    """An unrecognized token must fall back to the default, not error out."""
     response, git_tool = await _run_fetch("bogus-token")
 
     failed = {e["category"] for e in response.get("errors", [])}
@@ -107,7 +85,6 @@ async def test_git_history_depth_unrecognized_string_falls_back_to_default():
 
 @pytest.mark.asyncio
 async def test_git_history_depth_int_unchanged_regression():
-    """The existing int depth path must keep working exactly as before."""
     response, git_tool = await _run_fetch(50)
 
     assert "git_history" in response["categories_returned"]

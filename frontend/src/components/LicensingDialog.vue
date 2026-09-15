@@ -58,8 +58,6 @@ const productName = PRODUCT_NAME
 
 async function checkLicensing() {
   try {
-    // CE-only gate: multi-user warning does not apply to demo/saas deployments,
-    // which are licensed for multi-user use by design.
     await configService.fetchConfig()
     if (configService.getGiljoMode() !== 'ce') return
 
@@ -70,7 +68,6 @@ async function checkLicensing() {
 
     userCount.value = totalUsers
 
-    // Check if dismissed within the last 30 days
     const dismissedAt = localStorage.getItem(STORAGE_KEY)
     if (dismissedAt) {
       const dismissedDate = new Date(dismissedAt)

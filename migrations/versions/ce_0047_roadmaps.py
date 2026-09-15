@@ -3,32 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-6022a: roadmaps + roadmap_items tables for the Roadmapping Pane.
-
-Revision ID: ce_0047_roadmaps
-Revises: ce_0046_list_tables_tenant_created_index
-Create Date: 2026-06-12
-
-Creates the thin 1:1 roadmap anchor and its junction table:
-
-- ``roadmaps(id, tenant_key, product_id UNIQUE, last_generated_at, summary,
-  created_at, updated_at)`` — one roadmap per product, auto-created on first write.
-- ``roadmap_items(id, tenant_key, roadmap_id, item_type, project_id, task_id,
-  priority, risk, complexity, created_at, updated_at)`` — junction rows tying a
-  project OR task into the roadmap with ordering + AI risk/complexity.
-
-The ``uq_roadmap_item`` UNIQUE uses ``NULLS NOT DISTINCT`` so the always-NULL
-discriminator (one of project_id/task_id is NULL per row) cannot defeat
-de-duplication / ON CONFLICT upserts. This mirrors the ORM model exactly so
-fresh installs (migration chain) and the test schema (Base.metadata.create_all)
-converge on the identical shape.
-
-Idempotent: every CREATE TABLE is guarded by an information_schema existence
-check. The CE installer reruns ``alembic upgrade head`` on every boot.
-
-Edition Scope: CE — these are CE (tenant_key) tables; they live in
-``migrations/versions/`` (NOT ``saas_versions/``). SaaS inherits them unchanged.
-"""
 
 import sqlalchemy as sa
 from alembic import op
@@ -103,7 +77,6 @@ def upgrade() -> None:
             sa.Column("complexity", sa.String(length=10), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP")),
-            # NULLS NOT DISTINCT mirrors the ORM model; required for upsert dedup.
             sa.UniqueConstraint(
                 "roadmap_id",
                 "item_type",
@@ -120,7 +93,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     conn = op.get_bind()
 
-    # Drop the junction first (FK to roadmaps).
     if _has_table(conn, ROADMAP_ITEMS):
         op.drop_table(ROADMAP_ITEMS)
     if _has_table(conn, ROADMAPS):

@@ -5,7 +5,6 @@ import {
   buildServerUrl,
   generateClaudeConfig,
   generateCodexConfig,
-  generateGeminiConfig,
   generateGenericMcpConfig,
   generateConfigForTool,
   generateCodexEnvVar,
@@ -23,10 +22,6 @@ describe('useMcpConfig', () => {
 
     it('maps codex_cli to codex', () => {
       expect(normalizeToolId('codex_cli')).toBe('codex')
-    })
-
-    it('maps gemini_cli to gemini', () => {
-      expect(normalizeToolId('gemini_cli')).toBe('gemini')
     })
 
     it('passes through unknown IDs unchanged', () => {
@@ -176,14 +171,6 @@ describe('useMcpConfig', () => {
         expect(cmd).not.toContain(':undefined')
       })
 
-      it('gemini command on mcp.example.com has no :port', () => {
-        const url = buildServerUrl({ host: 'mcp.example.com', port: null, protocol: 'https' })
-        const cmd = generateGeminiConfig(url, 'giljo_abc')
-        expect(cmd).toContain('https://mcp.example.com/mcp')
-        expect(cmd).not.toContain(':null')
-        expect(cmd).not.toContain(':undefined')
-      })
-
       it('claude command on CE localhost retains :7272', () => {
         const url = buildServerUrl({ host: 'some-other-host.lan', port: 7272, protocol: 'http' })
         const cmd = generateClaudeConfig(url, 'giljo_abc')
@@ -210,17 +197,6 @@ describe('useMcpConfig', () => {
       const result = generateCodexConfig('https://localhost:8372')
       expect(result).toBe(
         'codex mcp add giljo_hq --url https://localhost:8372/mcp --bearer-token-env-var GILJO_API_KEY',
-      )
-    })
-  })
-
-  // ─── generateGeminiConfig ──────────────────────────────────────────
-
-  describe('generateGeminiConfig', () => {
-    it('returns the correct gemini mcp add command', () => {
-      const result = generateGeminiConfig('https://localhost:8372', 'giljo_xyz789')
-      expect(result).toBe(
-        'gemini mcp add -t http -H "Authorization: Bearer giljo_xyz789" giljo_hq https://localhost:8372/mcp',
       )
     })
   })
@@ -260,14 +236,6 @@ describe('useMcpConfig', () => {
 
     it('dispatches to codex generator for legacy ID codex', () => {
       expect(generateConfigForTool('codex', serverUrl, apiKey)).toContain('codex mcp add')
-    })
-
-    it('dispatches to gemini generator for wizard ID gemini_cli', () => {
-      expect(generateConfigForTool('gemini_cli', serverUrl, apiKey)).toContain('gemini mcp add')
-    })
-
-    it('dispatches to gemini generator for legacy ID gemini', () => {
-      expect(generateConfigForTool('gemini', serverUrl, apiKey)).toContain('gemini mcp add')
     })
 
     it('dispatches to generic MCP generator for generic_mcp', () => {

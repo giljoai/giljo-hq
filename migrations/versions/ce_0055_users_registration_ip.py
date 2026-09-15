@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Add nullable registration_ip column to users (registration audit / abuse signal).
-
-Revision ID: ce_0055_users_registration_ip
-Revises: ce_0054_cht_taxonomy_backfill
-Create Date: 2026-06-16
-
-Adds a nullable ``registration_ip`` VARCHAR(45) column to ``users`` so the
-client IP can be captured at account creation (abuse/fraud signal + audit). The
-column belongs in the CE chain because ``users`` is a CE table, even though the
-primary reader is the SaaS Ops Panel (mirrors ce_0002's deleted_at rationale).
-
-Nullable, no backfill: existing rows predate the column and tolerate its absence
-(data-shape self-heal). Idempotent (existence-checked) because the CE installer
-reruns migrations on every boot; reversible (downgrade drops the column).
-Length 45 = IPv6 maximum, mirroring ApiKeyIpLog.ip_address.
-"""
 
 import sqlalchemy as sa
 from alembic import op
@@ -31,7 +15,6 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Idempotency guard: skip if the column already exists (CE reruns on boot).
     conn = op.get_bind()
     exists = conn.execute(
         sa.text(

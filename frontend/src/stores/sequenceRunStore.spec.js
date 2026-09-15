@@ -1,9 +1,3 @@
-/**
- * sequenceRunStore.spec.js — FE-6165f
- *
- * Durable-election keystone: hydrate from the bare-array list, the three
- * membership getters, PATCH/terminal-drop, and the WS re-fetch handler.
- */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useSequenceRunStore } from './sequenceRunStore'
@@ -36,8 +30,6 @@ describe('sequenceRunStore (FE-6165f)', () => {
       await store.hydrate()
       expect(store.activeRuns).toHaveLength(2)
       expect(store.runsById.get('r1').project_ids).toEqual(['pA', 'pB'])
-      // FE-9104: hydrate now also requests terminal review-pending runs so the
-      // chain review surface stays reachable after a cold refresh.
       expect(api.sequenceRuns.list).toHaveBeenCalledWith({
         status: 'pending,running,stalled',
         include_review_pending: true,
@@ -55,7 +47,6 @@ describe('sequenceRunStore (FE-6165f)', () => {
       api.sequenceRuns.list.mockResolvedValueOnce({ data: [run('r1', ['pA']), run('r2', ['pB'])] })
       await store.hydrate()
       expect(store.activeRuns).toHaveLength(2)
-      // r2 went terminal → no longer returned by the status filter
       api.sequenceRuns.list.mockResolvedValueOnce({ data: [run('r1', ['pA'])] })
       await store.hydrate()
       expect(store.activeRuns).toHaveLength(1)
@@ -142,7 +133,6 @@ describe('sequenceRunStore (FE-6165f)', () => {
   describe('handleSequenceUpdated (WS re-fetch)', () => {
     it('re-hydrates the active set from the {run_id}-only payload', async () => {
       store._testSeedRuns([run('r1', ['pA']), run('r2', ['pB'])])
-      // After the event, r2 has gone terminal → dropped from the list
       api.sequenceRuns.list.mockResolvedValueOnce({ data: [run('r1', ['pA'])] })
       await store.handleSequenceUpdated({ run_id: 'r2' })
       expect(api.sequenceRuns.list).toHaveBeenCalled()
@@ -195,10 +185,6 @@ describe('normalizeRun — chain_mission preserved (FE-6199 B1)', () => {
   })
 })
 
-// UI-2 / BE-6177: per-member archive must NOT eject the user from the chain view.
-// handleSequenceUpdated re-hydrates on sequence:updated. If the run is STILL active
-// (status=running, present in hydrate list), runsById keeps it → no fetchRun fallback
-// → activeRun stays pointed at the active run → no eject.
 describe('handleSequenceUpdated — chain eject guard (UI-2)', () => {
   let store
 
@@ -208,54 +194,38 @@ describe('handleSequenceUpdated — chain eject guard (UI-2)', () => {
   })
 
   it('does NOT eject when a member closes but the run stays active (still in hydrate list)', async () => {
-    // Seed one active run as the cockpit's open run.
     const activeRunData = run('r1', ['p1', 'p2'], 'running')
     store._testSeedRuns([activeRunData])
     store._testSetActiveRun(activeRunData)
 
-    // After the member-close sequence:updated, hydrate still returns the run
-    // (still running — conductor hasn't finished the whole chain yet).
     api.sequenceRuns.list.mockResolvedValueOnce({ data: [run('r1', ['p1', 'p2'], 'running', {
       project_statuses: { p1: 'completed', p2: 'implementing' },
     })] })
 
     await store.handleSequenceUpdated({ run_id: 'r1' })
 
-    // Run must remain in the active set (no fetchRun fallback triggered).
     expect(store.isProjectInActiveChain('p1')).toBe(true)
     expect(store.isProjectInActiveChain('p2')).toBe(true)
-    // activeRun is updated with the fresh data from hydrate (p1 now completed).
     expect(store.activeRun?.project_statuses?.p1).toBe('completed')
-    // fetchRun is NOT called (the fallback path for a terminal run).
     expect(api.sequenceRuns.get).not.toHaveBeenCalled()
   })
 
   it('does fetch the terminal run when the whole run completes (genuine whole-run termination)', async () => {
-    // Seed one active run as open in the cockpit.
     const activeRunData = run('r1', ['p1', 'p2'], 'running')
     store._testSeedRuns([activeRunData])
     store._testSetActiveRun(activeRunData)
 
-    // After the conductor completes the chain, hydrate returns NOTHING (run is terminal).
     api.sequenceRuns.list.mockResolvedValueOnce({ data: [] })
-    // fetchRun returns the terminal snapshot for the cockpit to display.
     api.sequenceRuns.get.mockResolvedValueOnce({
       data: run('r1', ['p1', 'p2'], 'completed', { project_statuses: { p1: 'completed', p2: 'completed' } }),
     })
 
     await store.handleSequenceUpdated({ run_id: 'r1' })
 
-    // Run dropped from the active set.
     expect(store.isProjectInActiveChain('p1')).toBe(false)
-    // fetchRun WAS called to give the cockpit the terminal snapshot.
     expect(api.sequenceRuns.get).toHaveBeenCalledWith('r1')
   })
 
-  // BE-9540: the run purged out from under an OPEN cockpit (conductor finale
-  // deleted the row, not just retired its status). Before the fix, fetchRun's
-  // 404 was swallowed with "leave last-known activeRun in place" — the cockpit
-  // kept showing a Review card for a run that no longer exists, and any further
-  // interaction (e.g. clicking review) would storm more 404s against it.
   it('clears the stale activeRun and raises a retired-run notice when the run is genuinely gone', async () => {
     const activeRunData = run('r1', ['p1', 'p2'], 'running')
     store._testSeedRuns([activeRunData])
@@ -271,9 +241,6 @@ describe('handleSequenceUpdated — chain eject guard (UI-2)', () => {
   })
 })
 
-// FE-6199: chain staging live-fill — conductor writes chain_mission →
-// sequence:updated → handleSequenceUpdated must update activeRun.chain_mission
-// and activeRun.locked so useChainContext watchers fire and chainImplementReady arms.
 describe('handleSequenceUpdated — chain staging live-fill (FE-6199)', () => {
   let store
 
@@ -283,12 +250,10 @@ describe('handleSequenceUpdated — chain staging live-fill (FE-6199)', () => {
   })
 
   it('updates activeRun.chain_mission when conductor writes chain mission (still-active run)', async () => {
-    // Cockpit open: run is pending, chain_mission not yet written.
     const initial = run('r1', ['p1', 'p2'], 'pending', { chain_mission: null, locked: true })
     store._testSeedRuns([initial])
     store._testSetActiveRun(initial)
 
-    // After the conductor writes chain_mission, hydrate returns the updated run.
     api.sequenceRuns.list.mockResolvedValueOnce({
       data: [run('r1', ['p1', 'p2'], 'pending', {
         chain_mission: 'Build A then wire B',
@@ -298,11 +263,8 @@ describe('handleSequenceUpdated — chain staging live-fill (FE-6199)', () => {
 
     await store.handleSequenceUpdated({ run_id: 'r1' })
 
-    // activeRun must reflect the freshly written chain_mission.
     expect(store.activeRun?.chain_mission).toBe('Build A then wire B')
-    // Run stays in the active set (still pending).
     expect(store.isProjectInActiveChain('p1')).toBe(true)
-    // No extra GET /sequence-runs/:id — data came from the list.
     expect(api.sequenceRuns.get).not.toHaveBeenCalled()
   })
 
@@ -311,7 +273,6 @@ describe('handleSequenceUpdated — chain staging live-fill (FE-6199)', () => {
     store._testSeedRuns([initial])
     store._testSetActiveRun(initial)
 
-    // After Stage Chain, hydrate returns locked: true.
     api.sequenceRuns.list.mockResolvedValueOnce({
       data: [run('r1', ['p1', 'p2'], 'pending', { locked: true, chain_mission: null })],
     })
@@ -322,22 +283,18 @@ describe('handleSequenceUpdated — chain staging live-fill (FE-6199)', () => {
   })
 
   it('arms chainImplementReady-relevant fields in one sequence:updated round-trip', async () => {
-    // Start: staged run, locked, no mission yet.
     const initial = run('r1', ['p1', 'p2'], 'pending', { locked: true, chain_mission: null })
     store._testSeedRuns([initial])
     store._testSetActiveRun(initial)
 
-    // Conductor writes mission: hydrate returns locked + mission.
     api.sequenceRuns.list.mockResolvedValueOnce({
       data: [run('r1', ['p1', 'p2'], 'pending', { locked: true, chain_mission: 'Full delivery plan' })],
     })
 
     await store.handleSequenceUpdated({ run_id: 'r1' })
 
-    // Both fields that chainImplementReady reads must be fresh.
     expect(store.activeRun?.locked).toBe(true)
     expect(store.activeRun?.chain_mission).toBe('Full delivery plan')
-    // The run is still active — no fetchRun needed.
     expect(api.sequenceRuns.get).not.toHaveBeenCalled()
   })
 })

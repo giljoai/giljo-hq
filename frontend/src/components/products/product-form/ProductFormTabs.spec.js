@@ -1,9 +1,3 @@
-/**
- * ProductFormTabs.spec.js — FE-6006 unit 3b
- *
- * Tests for the 5 ProductForm tab sub-components.
- * Edition scope: CE
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'

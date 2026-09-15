@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Git integration endpoints for system-level configuration.
-
-Stores settings in the database via SettingsService (category='integrations')
-instead of config.yaml. Cascade: disabling git also bulk-disables git_history
-in user_field_priorities for the tenant.
-"""
 
 import logging
 from typing import Any
@@ -29,9 +22,6 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Default git integration settings (used when no DB row exists yet).
-# BE-9103/BE-9148: no max_commits / include_commit_history / branch_strategy —
-# commit depth is the per-user Context-tab knob; only ``enabled`` gates fetch.
 _GIT_DEFAULTS: dict[str, Any] = {
     "enabled": False,
     "use_in_prompts": False,
@@ -81,18 +71,15 @@ async def toggle_git_integration(
     tenant_key = current_user.tenant_key
     service = SettingsService(db, tenant_key)
 
-    # Read current integrations settings
     integrations = await service.get_settings("integrations")
     git_settings = integrations.get("git_integration", dict(_GIT_DEFAULTS))
 
-    # Update enabled + use_in_prompts
     git_settings["enabled"] = request.enabled
     git_settings["use_in_prompts"] = request.enabled
 
     integrations["git_integration"] = git_settings
     await service.update_settings("integrations", integrations)
 
-    # Cascade: when disabling git, bulk-disable git_history for all tenant users
     if not request.enabled:
         disabled_count = await user_service.bulk_disable_field_priority("git_history")
         if disabled_count > 0:
@@ -104,7 +91,6 @@ async def toggle_git_integration(
 
     logger.info("Git integration toggled to %s by user %s", sanitize(request.enabled), sanitize(current_user.username))
 
-    # Emit WebSocket event for real-time UI updates
     try:
         await ws_dep.broadcast_to_tenant(
             tenant_key=tenant_key,
@@ -135,11 +121,9 @@ async def update_git_settings(
     tenant_key = current_user.tenant_key
     service = SettingsService(db, tenant_key)
 
-    # Read current integrations settings
     integrations = await service.get_settings("integrations")
     git_settings = integrations.get("git_integration", dict(_GIT_DEFAULTS))
 
-    # Update settings fields
     git_settings["use_in_prompts"] = request.use_in_prompts
 
     integrations["git_integration"] = git_settings

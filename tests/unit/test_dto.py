@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tests for service DTOs (Sprint 002e extraction).
-
-Tests MemoryEntryCreateParams dataclass:
-- Required fields validation
-- Default values for optional fields
-- Type correctness
-- Field count (regression guard)
-"""
 
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -19,10 +11,8 @@ from giljo_mcp.services.dto import MemoryEntryCreateParams
 
 
 class TestMemoryEntryCreateParams:
-    """Tests for MemoryEntryCreateParams dataclass."""
 
     def _make_required_kwargs(self):
-        """Return minimal kwargs to construct a valid instance."""
         return {
             "tenant_key": "tk_testTenantValue1234567890123",
             "product_id": uuid4(),
@@ -33,7 +23,6 @@ class TestMemoryEntryCreateParams:
         }
 
     def test_create_with_required_fields_only(self):
-        """MemoryEntryCreateParams constructs with only required fields."""
         params = MemoryEntryCreateParams(**self._make_required_kwargs())
 
         assert params.tenant_key.startswith("tk_")
@@ -44,7 +33,6 @@ class TestMemoryEntryCreateParams:
         assert isinstance(params.timestamp, datetime)
 
     def test_optional_fields_default_to_none(self):
-        """Optional fields default to None when not provided."""
         params = MemoryEntryCreateParams(**self._make_required_kwargs())
 
         assert params.project_id is None
@@ -62,14 +50,12 @@ class TestMemoryEntryCreateParams:
         assert params.author_type is None
 
     def test_numeric_defaults(self):
-        """priority defaults to 3, significance_score defaults to 0.5."""
         params = MemoryEntryCreateParams(**self._make_required_kwargs())
 
         assert params.priority == 3
         assert params.significance_score == 0.5
 
     def test_all_fields_populated(self):
-        """MemoryEntryCreateParams accepts all fields when explicitly set."""
         project_uuid = uuid4()
         author_uuid = uuid4()
         now = datetime.now(tz=UTC)
@@ -115,7 +101,6 @@ class TestMemoryEntryCreateParams:
         assert params.author_type == "agent"
 
     def test_missing_required_field_raises_type_error(self):
-        """Omitting a required field raises TypeError."""
         import pytest
 
         with pytest.raises(TypeError):
@@ -125,11 +110,9 @@ class TestMemoryEntryCreateParams:
                 sequence=1,
                 entry_type="session_progress",
                 source="orchestrator",
-                # timestamp intentionally missing
             )
 
     def test_field_count_regression_guard(self):
-        """Ensure the dataclass has the expected number of fields (regression guard)."""
         import dataclasses
 
         fields = dataclasses.fields(MemoryEntryCreateParams)
@@ -139,7 +122,6 @@ class TestMemoryEntryCreateParams:
         )
 
     def test_product_id_accepts_uuid_object(self):
-        """product_id field accepts UUID objects (not just strings)."""
         pid = uuid4()
         params = MemoryEntryCreateParams(
             tenant_key="tk_uuidTypeTest12345678901234567",

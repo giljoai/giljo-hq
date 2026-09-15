@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Unit tests for src/giljo_mcp/branding.py (BE-9275a).
-
-Locks the product-identity constants so a future rebrand pass changes them in
-exactly one place instead of drifting across call sites.
-"""
 
 from giljo_mcp import branding
 

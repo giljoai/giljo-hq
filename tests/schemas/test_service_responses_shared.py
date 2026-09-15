@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tests for shared/generic service-layer Pydantic response models.
-
-Split from test_service_responses.py — covers DeleteResult, OperationResult,
-PaginatedResult, and cross-cutting serialization tests.
-
-Created: Handover 0731
-"""
 
 from datetime import UTC, datetime
 
@@ -28,29 +20,22 @@ from giljo_mcp.schemas.service_responses import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Shared Result Types
-# ---------------------------------------------------------------------------
 
 
 class TestDeleteResult:
-    """Tests for DeleteResult model."""
 
     def test_creation_defaults(self):
-        """DeleteResult should default deleted=True and deleted_at=None."""
         result = DeleteResult()
         assert result.deleted is True
         assert result.deleted_at is None
 
     def test_creation_with_timestamp(self):
-        """DeleteResult accepts an explicit deleted_at timestamp."""
         ts = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
         result = DeleteResult(deleted=True, deleted_at=ts)
         assert result.deleted is True
         assert result.deleted_at == ts
 
     def test_model_dump(self):
-        """model_dump should produce a plain dict."""
         result = DeleteResult()
         dumped = result.model_dump()
         assert isinstance(dumped, dict)
@@ -58,25 +43,20 @@ class TestDeleteResult:
         assert dumped["deleted_at"] is None
 
     def test_from_attributes_config(self):
-        """Model should have from_attributes=True in config."""
         assert DeleteResult.model_config.get("from_attributes") is True
 
 
 class TestOperationResult:
-    """Tests for OperationResult model."""
 
     def test_creation_with_message(self):
-        """OperationResult requires a message string."""
         result = OperationResult(message="Product activated successfully")
         assert result.message == "Product activated successfully"
 
     def test_missing_message_raises(self):
-        """OperationResult without message should raise ValidationError."""
         with pytest.raises(ValidationError):
             OperationResult()
 
     def test_model_dump(self):
-        """model_dump should serialize correctly."""
         result = OperationResult(message="Done")
         dumped = result.model_dump()
         assert dumped == {"message": "Done"}
@@ -86,10 +66,8 @@ class TestOperationResult:
 
 
 class TestPaginatedResult:
-    """Tests for PaginatedResult generic model."""
 
     def test_creation_with_string_items(self):
-        """PaginatedResult[str] should hold a list of strings."""
         result = PaginatedResult[str](items=["a", "b", "c"], total=3)
         assert result.items == ["a", "b", "c"]
         assert result.total == 3
@@ -97,7 +75,6 @@ class TestPaginatedResult:
         assert result.page_size == 50
 
     def test_creation_with_int_items(self):
-        """PaginatedResult[int] should hold a list of ints."""
         result = PaginatedResult[int](items=[1, 2], total=100, page=2, page_size=25)
         assert result.items == [1, 2]
         assert result.total == 100
@@ -105,25 +82,21 @@ class TestPaginatedResult:
         assert result.page_size == 25
 
     def test_creation_with_dict_items(self):
-        """PaginatedResult[dict] should hold a list of dicts."""
         items = [{"id": "1", "name": "Product A"}, {"id": "2", "name": "Product B"}]
         result = PaginatedResult[dict](items=items, total=2)
         assert len(result.items) == 2
         assert result.items[0]["name"] == "Product A"
 
     def test_empty_items(self):
-        """PaginatedResult with empty items list and total=0."""
         result = PaginatedResult[str](items=[], total=0)
         assert result.items == []
         assert result.total == 0
 
     def test_missing_total_raises(self):
-        """total is required."""
         with pytest.raises(ValidationError):
             PaginatedResult[str](items=["a"])
 
     def test_missing_items_raises(self):
-        """items is required."""
         with pytest.raises(ValidationError):
             PaginatedResult[str](total=5)
 
@@ -139,30 +112,23 @@ class TestPaginatedResult:
         assert PaginatedResult.model_config.get("from_attributes") is True
 
 
-# ---------------------------------------------------------------------------
-# Cross-Cutting Concerns
-# ---------------------------------------------------------------------------
 
 
 class TestModelJsonSerialization:
-    """Test JSON serialization round-trip for models with complex types."""
 
     def test_delete_result_with_datetime_json(self):
-        """Datetime fields should serialize to JSON correctly."""
         ts = datetime(2026, 2, 1, 10, 30, 0, tzinfo=UTC)
         result = DeleteResult(deleted_at=ts)
         json_str = result.model_dump_json()
         assert "2026" in json_str
 
     def test_paginated_result_json(self):
-        """PaginatedResult should serialize to JSON correctly."""
         result = PaginatedResult[str](items=["a", "b"], total=2)
         json_str = result.model_dump_json()
         assert '"items"' in json_str
         assert '"total"' in json_str
 
     def test_task_summary_nested_dicts_json(self):
-        """Nested dict fields should serialize to JSON correctly."""
         summary = TaskSummary(
             total=10,
             by_status={"pending": 5, "completed": 5},
@@ -172,7 +138,6 @@ class TestModelJsonSerialization:
 
 
 class TestModelFromDict:
-    """Test model construction from dictionaries (common API pattern)."""
 
     def test_spawn_result_from_dict(self):
         data = {"job_id": "j1", "agent_id": "a1", "agent_prompt": "prompt"}
@@ -191,7 +156,6 @@ class TestModelFromDict:
         assert result.role == "admin"
 
     def test_product_statistics_from_partial_dict(self):
-        """Models with required+default fields should accept partial dicts with required fields."""
         data = {"product_id": "p1", "name": "Test", "is_active": True, "project_count": 5}
         stats = ProductStatistics(**data)
         assert stats.project_count == 5

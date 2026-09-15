@@ -1,25 +1,10 @@
-/**
- * TemplatesTable.spec.js — FE-6042b
- *
- * Co-located child spec for TemplatesTable.vue.
- * Covers render variants and EVERY emit.
- *
- * Edition scope: CE
- */
 
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import TemplatesTable from './TemplatesTable.vue'
 
-// ---------------------------------------------------------------------------
-// Stubs
-// ---------------------------------------------------------------------------
 
-/**
- * v-data-table stub that renders item.* slots for every item.
- * Same shape as in TemplateManager.spec.js — the slot names are stable.
- */
 const dataTableStub = {
   props: ['headers', 'items', 'loading', 'search', 'itemsPerPage'],
   template: `
@@ -28,7 +13,6 @@ const dataTableStub = {
         <slot name="item.name" :item="item" />
         <slot name="item.role" :item="item" />
         <slot name="item.is_active" :item="item" />
-        <slot name="item.export_status" :item="item" />
         <slot name="item.updated_at" :item="item" />
         <slot name="item.actions" :item="item" />
       </div>
@@ -36,9 +20,6 @@ const dataTableStub = {
   `,
 }
 
-/**
- * v-switch stub: emits update:modelValue on change.
- */
 const switchStub = {
   props: ['modelValue', 'disabled', 'color', 'hideDetails', 'density', 'ariaLabel'],
   emits: ['update:modelValue'],
@@ -68,9 +49,6 @@ const tooltipStub = {
   template: `<div class="v-tooltip"><slot name="activator" :props="{}" /><slot /></div>`,
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function makeTemplate(overrides = {}) {
   return {
@@ -79,10 +57,7 @@ function makeTemplate(overrides = {}) {
     role: 'analyzer',
     category: 'role',
     is_active: true,
-    may_be_stale: false,
-    user_managed_export: false,
     _system: false,
-    last_exported_at: '2024-01-01T12:00:00Z',
     updated_at: '2024-01-01T12:00:00Z',
     ...overrides,
   }
@@ -117,9 +92,6 @@ function mountTable(propsData = {}) {
   })
 }
 
-// ---------------------------------------------------------------------------
-// Render variants
-// ---------------------------------------------------------------------------
 
 describe('TemplatesTable — render', () => {
   it('renders without errors for an empty template list', () => {
@@ -154,7 +126,6 @@ describe('TemplatesTable — render', () => {
     const wrapper = mountTable({
       templates: [makeTemplate({ _system: true })],
     })
-    // _system row renders mdi-lock icon, not a switch
     expect(wrapper.find('.v-switch').exists()).toBe(false)
   })
 
@@ -165,34 +136,6 @@ describe('TemplatesTable — render', () => {
     expect(wrapper.find('[data-testid="template-toggle-frontend"]').exists()).toBe(true)
   })
 
-  it('renders "User Managed" chip when user_managed_export=true', () => {
-    const wrapper = mountTable({
-      templates: [makeTemplate({ user_managed_export: true })],
-    })
-    expect(wrapper.text()).toContain('User Managed')
-  })
-
-  it('renders "System managed" text for _system templates', () => {
-    const wrapper = mountTable({
-      templates: [makeTemplate({ _system: true })],
-    })
-    expect(wrapper.text()).toContain('System managed')
-  })
-
-  it('renders "Never exported" when last_exported_at is null', () => {
-    const wrapper = mountTable({
-      templates: [makeTemplate({ last_exported_at: null })],
-    })
-    expect(wrapper.text()).toContain('Never exported')
-  })
-
-  it('renders "May be outdated" chip when may_be_stale=true and is_active=true', () => {
-    const wrapper = mountTable({
-      templates: [makeTemplate({ may_be_stale: true, is_active: true })],
-    })
-    expect(wrapper.text()).toContain('May be outdated')
-  })
-
   it('does not render action menu for _system templates', () => {
     const wrapper = mountTable({
       templates: [makeTemplate({ _system: true })],
@@ -201,9 +144,6 @@ describe('TemplatesTable — render', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// Emits — every declared emit
-// ---------------------------------------------------------------------------
 
 describe('TemplatesTable — emit: toggle-active', () => {
   it('emits toggle-active with (item, newValue) when switch changes', async () => {
@@ -255,8 +195,6 @@ describe('TemplatesTable — emit: reset', () => {
   })
 
   it('hides Reset to Default for a non-default (custom) template', () => {
-    // BE-9018: reset only restores real content for a shipped default template;
-    // a custom template has nothing to reset to, so the action is not offered.
     const tpl = makeTemplate({ id: 7, role: 'reviewer', is_default: false })
     const wrapper = mountTable({ templates: [tpl] })
 
@@ -276,51 +214,15 @@ describe('TemplatesTable — emit: delete', () => {
   })
 })
 
-describe('TemplatesTable — emit: mark-user-managed', () => {
-  it('emits mark-user-managed when Mark as User Managed is clicked (stale, not user-managed)', async () => {
-    const tpl = makeTemplate({ id: 11, role: 'analyzer', may_be_stale: true, user_managed_export: false })
-    const wrapper = mountTable({ templates: [tpl] })
-
-    await wrapper.find('[title="Mark as User Managed"]').trigger('click')
-
-    expect(wrapper.emitted('mark-user-managed')).toHaveLength(1)
-    expect(wrapper.emitted('mark-user-managed')[0]).toEqual([tpl])
-  })
-
-  it('does not render Mark as User Managed when template is not stale', () => {
-    const tpl = makeTemplate({ id: 12, role: 'analyzer', may_be_stale: false })
-    const wrapper = mountTable({ templates: [tpl] })
-
-    expect(wrapper.find('[title="Mark as User Managed"]').exists()).toBe(false)
-  })
-
-  it('does not render Mark as User Managed when already user-managed', () => {
-    const tpl = makeTemplate({ id: 13, role: 'analyzer', may_be_stale: true, user_managed_export: true })
-    const wrapper = mountTable({ templates: [tpl] })
-
-    expect(wrapper.find('[title="Mark as User Managed"]').exists()).toBe(false)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Slot passthrough: search prop forwarded to v-data-table
-// ---------------------------------------------------------------------------
 
 describe('TemplatesTable — search prop', () => {
   it('passes search to the v-data-table stub', () => {
     const wrapper = mountTable({ search: 'hello' })
-    // The stub renders as a div with class v-data-table; we can verify via props
     const table = wrapper.findComponent(dataTableStub)
     expect(table.props('search')).toBe('hello')
   })
 })
 
-// ---------------------------------------------------------------------------
-// FE-9385c — the Updated column renders STATE, not a raw date
-// ---------------------------------------------------------------------------
-// The derivation itself is pinned in templateTableConfig.spec.js. These assert
-// the part that only exists in the DOM: which string the user actually reads,
-// and that the accent lands on the one state they should act on.
 
 describe('TemplatesTable — FE-9385c Updated state column', () => {
   const cell = (wrapper, id) => wrapper.find(`[data-testid="updated-state-${id}"]`)
@@ -331,7 +233,6 @@ describe('TemplatesTable — FE-9385c Updated state column', () => {
     })
 
     expect(cell(wrapper, 11).text()).toBe('Never edited')
-    // Muted, not accented: an untouched stock agent is not something to act on.
     expect(cell(wrapper, 11).classes()).toContain('text-muted-a11y')
     expect(cell(wrapper, 11).classes()).not.toContain('updated-new')
   })
@@ -353,7 +254,6 @@ describe('TemplatesTable — FE-9385c Updated state column', () => {
     })
 
     expect(cell(wrapper, 13).text()).toBe('Added today')
-    // This is the one state carrying brand accent — it is the unfinished business.
     expect(cell(wrapper, 13).classes()).toContain('updated-new')
   })
 
@@ -367,29 +267,40 @@ describe('TemplatesTable — FE-9385c Updated state column', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// FE-9385c — vocabulary lock on user-visible copy
-// ---------------------------------------------------------------------------
 
 describe('TemplatesTable — FE-9385c vocabulary', () => {
-  it('directs the user to "Available in all products", not to a control that no longer exists', () => {
-    // This tooltip told the user to go to "Edit -> Availability". That heading
-    // is gone, so the instruction named a control they could not find. Pinned
-    // because a mutation check showed NOTHING failed when the old wording was
-    // restored — the fix was real but unprotected.
+  it('FE-9604: does not send the user to a dialog control that no longer exists', () => {
     const wrapper = mountTable({
       templates: [makeTemplate({ id: 21, is_active: false })],
       remainingUserSlots: 5,
     })
 
     const html = wrapper.html()
-    expect(html).toContain('Available in all products')
+    expect(html).not.toContain('Available in all products')
     expect(html).not.toMatch(/Edit\s*(&rarr;|→)\s*Availability/)
+    expect(wrapper.find('[data-testid="template-toggle-analyzer"]').element.disabled).toBe(false)
+  })
+
+  it('FE-9604: the row shows the per-product state when an assignment exists', () => {
+    const wrapper = mountTable({
+      templates: [makeTemplate({ id: 23, is_active: true, product_active: false })],
+    })
+    expect(wrapper.find('[data-testid="template-toggle-analyzer"]').element.checked).toBe(false)
+  })
+
+  it('FE-9610c: an agent with an active assignment shows as on', () => {
+    const wrapper = mountTable({
+      templates: [makeTemplate({ id: 23, is_active: false, product_active: true })],
+    })
+    expect(wrapper.find('[data-testid="template-toggle-analyzer"]').element.checked).toBe(true)
+  })
+
+  it('FE-9604: holds the switch while assignments load', () => {
+    const wrapper = mountTable({ templates: [makeTemplate({ id: 24 })], assignmentsLoading: true })
+    expect(wrapper.find('[data-testid="template-toggle-analyzer"]').element.disabled).toBe(true)
   })
 
   it('never shows the internal name for the account-wide switch', () => {
-    // "retire switch" is an internal phrase that has already confused the
-    // operator once. It must not reach any user-visible string here.
     const wrapper = mountTable({
       templates: [makeTemplate({ id: 22, is_active: false })],
       remainingUserSlots: 5,

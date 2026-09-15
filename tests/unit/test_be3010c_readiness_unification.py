@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-3010c — the three closeout-readiness sites share ONE gathering method.
-
-Before BE-3010c, "is this project ready to close?" was answered by THREE divergent
-implementations (``tools/project_closeout._check_agent_readiness``,
-``tools/write_memory_entry._check_closeout_readiness`` and
-``ProjectCloseoutService.can_close``) — a readiness bug fixed in one silently
-persisted in the other two. They now all derive from the single
-``ProjectCloseoutService.evaluate_closeout_readiness`` gathering method; a change
-to the readiness RULE is made once and every site observes it. Rendering (the
-blocker wire shape) legitimately differs per site and is preserved.
-
-This suite locks: (1) all three sites call the one method, and (2) the two rich
-sites SHAPE the same report into their respective (and different) wire formats.
-
-Edition Scope: Both. No DB (the gathering method is patched); parallel-safe.
-"""
 
 from __future__ import annotations
 
@@ -61,7 +45,6 @@ def _still_working_finding() -> AgentReadinessFinding:
 
 @pytest.mark.asyncio
 async def test_check_agent_readiness_routes_through_evaluate():
-    """tools/project_closeout._check_agent_readiness derives from the one method."""
     from giljo_mcp.tools.project_closeout import _check_agent_readiness
 
     with patch.object(
@@ -76,7 +59,6 @@ async def test_check_agent_readiness_routes_through_evaluate():
 
 @pytest.mark.asyncio
 async def test_check_closeout_readiness_routes_through_evaluate():
-    """tools/write_memory_entry._check_closeout_readiness derives from the one method."""
     from giljo_mcp.tools.write_memory_entry import _check_closeout_readiness
 
     with patch.object(
@@ -91,7 +73,6 @@ async def test_check_closeout_readiness_routes_through_evaluate():
 
 @pytest.mark.asyncio
 async def test_can_close_routes_through_evaluate():
-    """ProjectCloseoutService.can_close derives its coarse counts from the one method."""
     service = ProjectCloseoutService(None, Mock())
     canned = _report(status_counts={"total": 2, "completed": 2, "blocked": 0, "silent": 0, "active": 0})
 
@@ -108,7 +89,6 @@ async def test_can_close_routes_through_evaluate():
 
 @pytest.mark.asyncio
 async def test_rich_sites_shape_one_report_into_their_own_wire_formats():
-    """One report -> A's merged-per-agent blocker; B's per-issue envelope (both blocked)."""
     from giljo_mcp.tools.project_closeout import _check_agent_readiness
     from giljo_mcp.tools.write_memory_entry import _check_closeout_readiness
 
@@ -118,7 +98,6 @@ async def test_rich_sites_shape_one_report_into_their_own_wire_formats():
         a_ready, a_blockers = await _check_agent_readiness(Mock(), "proj-1", "tenant-1")
         b_ready, b_result = await _check_closeout_readiness(Mock(), "proj-1", "tenant-1")
 
-    # A: ONE merged still_working blocker carrying message + todo detail, + trailing _summary.
     assert a_ready is False
     a_agent_blockers = [b for b in a_blockers if "_summary" not in b]
     assert len(a_agent_blockers) == 1
@@ -126,8 +105,6 @@ async def test_rich_sites_shape_one_report_into_their_own_wire_formats():
     assert a_agent_blockers[0]["messages_waiting"] == 2
     assert a_agent_blockers[0]["incomplete_todo_count"] == 2
 
-    # B: a still_working blocker only (B reports message/todo issues for COMPLETE agents),
-    #    wrapped in the envelope with summary + message + next_steps.
     assert b_ready is False
     assert b_result["summary"]["still_working"] == 1
     assert {blk["issue_type"] for blk in b_result["blockers"]} == {"still_working"}

@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9153 — chain-runtime settlement gate (two-phase closeout inside a chain).
-
-Edition Scope: Both.
-
-A findings-bearing chain link under closeout_mode='hitl' is accepted PROVISIONALLY
-(its settlement approval is created WITHOUT parking the agent — the conductor
-advances), and the chain's OWN closeout is held until every settlement approval is
-decided. This exercises that at the chain-runtime layer:
-
-* ``create_pending(park_execution=False)`` creates the settlement approval without
-  flipping the agent to awaiting_user (provisional completion).
-* ``complete_chain_run_if_finished`` HOLDS (returns False, does not purge) while a
-  settlement approval for the run is pending — even though every project is terminal.
-* deciding the last settlement approval (``mark_decided``) drains the queue and the
-  run purges.
-
-Parallel-safe: unique tenant per test, shared ``db_session`` rolled back at teardown.
-"""
 
 from __future__ import annotations
 
@@ -54,9 +36,6 @@ def _approval_svc(session: AsyncSession) -> UserApprovalService:
 
 
 async def _seed_member(db_session, tenant_key: str) -> dict:
-    """A chain-member project with an orchestrator (sub-orch) job + working execution."""
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid4()),
         tenant_key=tenant_key,
@@ -134,7 +113,6 @@ async def _reload(db_session, tenant_key, execution_id) -> AgentExecution:
 
 
 async def test_settlement_approval_does_not_park_the_agent(db_session):
-    """park_execution=False leaves the link agent free to complete (provisional)."""
     tenant = TenantManager.generate_tenant_key()
     member = await _seed_member(db_session, tenant)
     run = await _run_svc(db_session).create(
@@ -152,8 +130,6 @@ async def test_settlement_approval_does_not_park_the_agent(db_session):
 
 
 async def test_chain_closeout_held_then_drained_on_decide(db_session):
-    """complete_chain_run_if_finished holds while a settlement approval is pending,
-    and the run purges once it is decided (drain via mark_decided)."""
     tenant = TenantManager.generate_tenant_key()
     member = await _seed_member(db_session, tenant)
     run = await _run_svc(db_session).create(
@@ -163,14 +139,12 @@ async def test_chain_closeout_held_then_drained_on_decide(db_session):
         tenant_key=tenant,
     )
     conductor = run["conductor_agent_id"]
-    # Every project terminal (the link completed provisionally).
     await _run_svc(db_session).update(
         run_id=run["id"], tenant_key=tenant, project_statuses={str(member["project"].id): "completed"}
     )
 
     approval = await _create_settlement_approval(db_session, tenant, member, run)
 
-    # HOLD: all projects terminal, but the settlement approval is still pending.
     held = await complete_chain_run_if_finished(
         db_manager=None,
         tenant_manager=TenantManager(),
@@ -184,7 +158,6 @@ async def test_chain_closeout_held_then_drained_on_decide(db_session):
     )
     assert still_there is not None, "run must not be purged while settlement is pending"
 
-    # DRAIN: deciding the last settlement approval re-triggers the chain closeout.
     await _approval_svc(db_session).mark_decided(
         tenant_key=tenant, approval_id=approval.id, option_id="approve", user_id=None, decided_via="mcp"
     )

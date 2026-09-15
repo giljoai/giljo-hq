@@ -3,32 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6054a: Agent Message Hub data foundation — comm_threads / comm_participants
-+ messages.thread_id + messages.project_id NULLABLE.
-
-Revision ID: ce_0053_comm_hub_tables
-Revises: ce_0052_pme_fts_be6082
-Create Date: 2026-06-15
-
-Creates the two message-board tables and wires the existing ``messages`` table
-into the hub:
-
-- ``comm_threads`` — the thread entity (CHT-#### serial, loose status lifecycle,
-  the ``next_action_owner`` baton, optional product_id/project_id, validated
-  ``resolution`` JSONB).
-- ``comm_participants`` — standalone-participant + user directory.
-- ``messages.thread_id`` — nullable FK to comm_threads (chat-thread anchor).
-- ``messages.project_id`` → **NULLABLE** (data-facing). Legacy rows all carry a
-  project_id and are untouched; the change only PERMITS new standalone
-  chat-thread messages to omit it. Read-sites that assumed non-null were audited
-  + hardened in the same project (the FORWARD hazard).
-
-Idempotent: every CREATE TABLE / ADD COLUMN / ALTER is guarded by an
-information_schema existence/state check, so a second ``alembic upgrade head``
-(CE reruns it on every boot) is a clean no-op.
-
-Edition Scope: CE — tenant_key tables in migrations/versions/ (NOT saas_versions/).
-"""
 
 import sqlalchemy as sa
 from alembic import op
@@ -132,7 +106,6 @@ def upgrade() -> None:
         op.create_index("idx_comm_participant_thread", COMM_PARTICIPANTS, ["thread_id"])
         op.create_index("idx_comm_participant_lookup", COMM_PARTICIPANTS, ["tenant_key", "participant_id"])
 
-    # messages.thread_id — nullable FK anchor to comm_threads.
     if not _has_column(conn, MESSAGES, "thread_id"):
         op.add_column(
             MESSAGES,
@@ -145,7 +118,6 @@ def upgrade() -> None:
         )
         op.create_index("idx_message_thread", MESSAGES, ["thread_id"])
 
-    # messages.project_id -> NULLABLE (data-facing; legacy rows unaffected).
     if not _is_nullable(conn, MESSAGES, "project_id"):
         op.alter_column(MESSAGES, "project_id", existing_type=sa.String(length=36), nullable=True)
 
@@ -153,9 +125,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     conn = op.get_bind()
 
-    # Restore messages.project_id NOT NULL only if no NULL rows exist (a NULL
-    # chat-thread message would make the constraint un-restorable — leave it
-    # nullable rather than fail the downgrade).
     if _is_nullable(conn, MESSAGES, "project_id"):
         null_count = conn.execute(sa.text("SELECT COUNT(*) FROM messages WHERE project_id IS NULL")).scalar_one()
         if null_count == 0:

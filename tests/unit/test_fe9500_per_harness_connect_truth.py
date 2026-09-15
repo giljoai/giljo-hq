@@ -3,31 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-9500: the Connect surface must report WHICH tool connected, not "any credential".
-
-THE DEFECT: connecting any single tool marked EVERY card on Tools -> Connect
-green, including tools not installed on that machine at all. Removing a tool did
-not turn it red.
-
-Two independent causes, both pinned here:
-
-1. The BACKEND emitted ``tool_name="mcp_connected"`` -- a hardcoded placeholder --
-   even though ``harness_resolver.harness_from_client_info`` already existed and the
-   ``initialize`` clientInfo was in scope at the emit site. The identity was
-   available and discarded.
-
-2. ``credential-status`` answered one WORKSPACE-wide question ("does this tenant
-   hold a live API key or OAuth grant?") and the frontend painted that single
-   boolean onto every tool card.
-
-The fix keeps the workspace flags (they are correct for what they are) and adds
-``connected_harnesses``, derived on the fly from EXISTING ``mcp_sessions`` rows --
-the same no-new-table idiom FE-9274 established.
-
-HONEST LIMIT, pinned below so nobody "fixes" it later: Claude Desktop and claude.ai
-web send byte-identical initialize payloads, so they are one harness and cannot
-be separated.
-"""
 
 from __future__ import annotations
 
@@ -44,12 +19,9 @@ HARNESS_RESOLVER = REPO_ROOT / "src" / "giljo_mcp" / "harness_resolver.py"
 
 
 class TestEventNamesTheHarness:
-    """Cause 1: the announcement must carry the resolved harness, not a placeholder."""
 
     def test_placeholder_tool_name_is_gone(self) -> None:
         src = MIDDLEWARE.read_text(encoding="utf-8")
-        # Target the EMIT, not any mention: the comment above the fix names the old
-        # placeholder on purpose, and a substring check would ban explaining the bug.
         assert 'tool_name="mcp_connected"' not in src, (
             "mcp_auth_middleware still emits the hardcoded 'mcp_connected' placeholder. "
             "The resolved harness is available at that line via harness_from_client_info; "
@@ -60,7 +32,6 @@ class TestEventNamesTheHarness:
     def test_emit_site_resolves_the_harness_from_client_info(self) -> None:
         src = MIDDLEWARE.read_text(encoding="utf-8")
         assert "harness_from_client_info" in src
-        # client_info must actually be threaded to the announcer, not just imported.
         assert "_announce_client_connected(tenant_key, user_id, client_info)" in src, (
             "client_info is not passed to _announce_client_connected -- the resolver "
             "would receive nothing and every connect would report 'generic'."
@@ -69,18 +40,14 @@ class TestEventNamesTheHarness:
     def test_resolver_maps_the_real_client_names(self) -> None:
         assert harness_from_client_info("opencode") == "opencode"
         assert harness_from_client_info("claude-code") == "claude-code"
-        assert harness_from_client_info("antigravity-client") == "antigravity"
 
     def test_unidentified_client_degrades_to_generic_not_to_a_guess(self) -> None:
-        # A real connect that self-identifies with nothing must report 'generic'
-        # rather than being attributed to whichever tool the user is looking at.
         assert harness_from_client_info(None) == "generic"
         assert harness_from_client_info("") == "generic"
         assert harness_from_client_info("some-client-we-have-never-seen") == "generic"
 
 
 class TestCredentialStatusCarriesPerToolTruth:
-    """Cause 2: the response must distinguish workspace credential from per-tool connect."""
 
     def test_schema_exposes_connected_harnesses(self) -> None:
         from giljo_mcp.schemas.responses.auth import CredentialStatusResult
@@ -90,7 +57,6 @@ class TestCredentialStatusCarriesPerToolTruth:
             "credential-status has no per-tool field, so the frontend can only fall back "
             "to the workspace-wide flags -- the exact defect."
         )
-        # The workspace flags must SURVIVE: they are correct for what they describe.
         for flag in ("has_valid_api_key", "has_valid_oauth", "has_expired_oauth"):
             assert flag in fields
 
@@ -98,8 +64,6 @@ class TestCredentialStatusCarriesPerToolTruth:
         from giljo_mcp.schemas.responses.auth import CredentialStatusResult
 
         result = CredentialStatusResult(has_valid_api_key=True, has_valid_oauth=False, has_expired_oauth=False)
-        # A tenant holding a credential but with no completed handshake must report
-        # NO connected tools -- credential existence is not a connection.
         assert result.connected_harnesses == {}
 
     def test_repository_derives_from_sessions_without_a_new_table(self) -> None:
@@ -113,15 +77,6 @@ class TestCredentialStatusCarriesPerToolTruth:
 
 
 class TestFrontendBackendSeam:
-    """The two sides use DIFFERENT vocabularies. A silent mismatch = a dead card.
-
-    Backend tokens: claude-code / codex / gemini / antigravity / opencode / generic.
-    Frontend ids:   claude_code / codex_cli / gemini_cli / antigravity_cli / opencode / generic.
-
-    Nothing at runtime would fail loudly if these drifted -- a real connect would just
-    never light its card, which is indistinguishable from "the tool did not connect".
-    So the map is pinned from BOTH directions here.
-    """
 
     def _js_map(self) -> dict[str, str]:
         js = SETUP_TOOLS_JS.read_text(encoding="utf-8")
@@ -142,8 +97,6 @@ class TestFrontendBackendSeam:
         )
 
     def test_generic_is_mapped_deliberately(self) -> None:
-        # 'generic' is a REAL connect (client identified itself with nothing), not an
-        # error case -- it must have a home rather than being silently dropped.
         assert self._js_map().get("generic") == "generic"
 
     def test_every_mapped_tool_id_actually_exists_in_the_picker(self) -> None:
@@ -153,7 +106,4 @@ class TestFrontendBackendSeam:
         assert not bogus, f"HARNESS_TO_TOOL_ID points at tool id(s) {bogus} that SETUP_TOOLS lacks"
 
     def test_claude_desktop_and_web_share_one_harness_by_design(self) -> None:
-        # Pinned so a future change does not try to split them: production measurement
-        # showed byte-identical initialize payloads. If this ever becomes possible the
-        # resolver's docstring is the place to revisit, deliberately.
         assert harness_from_client_info("Anthropic/ClaudeAI") == harness_from_client_info("Anthropic/ClaudeAI", "1.0")

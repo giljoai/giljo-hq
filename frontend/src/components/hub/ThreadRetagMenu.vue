@@ -1,14 +1,3 @@
-<!--
-  ThreadRetagMenu.vue — FE-9530
-
-  The ONLY way an old, pre-existing thread ever gets a product (operator ruling 2:
-  no bulk migration). A menu rather than a v-select so it matches the thread
-  header's icon-button language instead of introducing a form control there.
-
-  Dumb: owns no store, emits `retag` with the chosen product id (or '' for
-  "No product") and lets the caller do the actual write + toast, matching
-  ThreadCard's "list-level state stays in the parent" boundary.
--->
 <template>
   <v-menu>
     <template #activator="{ props: menuProps }">

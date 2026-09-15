@@ -1,22 +1,9 @@
-/**
- * TemplateEditDialog.cliTool.spec.js — INF-6049c
- *
- * Covers the per-role "Coding tool" dropdown (deliverable 2): it renders the
- * four-tool vocabulary, reflects the template's current cli_tool, and persists a
- * change by emitting update:template with the new cli_tool (the container's
- * saveTemplate already forwards cli_tool to the existing update endpoint).
- *
- * Edition scope: CE
- */
 
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import TemplateEditDialog from './TemplateEditDialog.vue'
 
-// v-select stub that handles BOTH string items (Role) and {title,value} object
-// items (Coding tool), exposes data-testid via $attrs, and emits the option's
-// value on click so the component's @update:model-value listener fires.
 const selectStub = {
   props: ['modelValue', 'items', 'label'],
   emits: ['update:modelValue'],
@@ -91,19 +78,42 @@ function codingToolSelect(wrapper) {
 }
 
 describe('TemplateEditDialog — Coding tool dropdown (INF-6049c)', () => {
-  it('renders the Coding tool select with all four tools', () => {
+  it('renders the Coding tool select with the surviving tools (INF-9605a)', () => {
     const wrapper = mountDialog()
     const select = codingToolSelect(wrapper)
     expect(select.exists()).toBe(true)
     const values = select.findAll('button').map((b) => b.attributes('data-value'))
-    expect(values).toEqual(['claude', 'codex', 'gemini', 'antigravity'])
+    expect(values).toEqual(['claude', 'codex', 'generic'])
   })
 
   it('reflects the template current cli_tool', () => {
-    const wrapper = mountDialog({ template: makeTemplate({ cli_tool: 'gemini' }) })
+    const wrapper = mountDialog({ template: makeTemplate({ cli_tool: 'codex' }) })
     expect(codingToolSelect(wrapper).attributes('data-testid')).toBe('cli-tool-select')
-    // The stub binds model-value; assert the select received gemini.
     expect(codingToolSelect(wrapper).exists()).toBe(true)
+  })
+
+  it('shows a retired cli_tool once as "Generic (was Gemini)" (INF-9605a)', () => {
+    const wrapper = mountDialog({ template: makeTemplate({ cli_tool: 'gemini' }) })
+    const select = codingToolSelect(wrapper)
+    const legacy = select.find('[data-value="gemini"]')
+    expect(legacy.exists()).toBe(true)
+    expect(legacy.text()).toBe('Generic (was Gemini)')
+    expect(select.find('[data-value="antigravity"]').exists()).toBe(false)
+  })
+
+  it('folds a retired cli_tool to generic on the next edit of any field (INF-9605a)', async () => {
+    const wrapper = mountDialog({ template: makeTemplate({ cli_tool: 'antigravity', role: 'implementer' }) })
+    const codexBtn = codingToolSelect(wrapper).find('[data-value="codex"]')
+    await codexBtn.trigger('click')
+    expect(wrapper.emitted('update:template')[0][0]).toMatchObject({ cli_tool: 'codex' })
+
+    const wrapper2 = mountDialog({ template: makeTemplate({ cli_tool: 'gemini', role: 'implementer' }) })
+    const suffix = wrapper2.find('input[aria-label="Custom agent name suffix"]')
+    expect(suffix.exists()).toBe(true)
+    await suffix.setValue('fastapi')
+    const emitted = wrapper2.emitted('update:template')
+    expect(emitted).toHaveLength(1)
+    expect(emitted[0][0]).toMatchObject({ custom_suffix: 'fastapi', cli_tool: 'generic' })
   })
 
   it('persists a change by emitting update:template with the new cli_tool', async () => {
@@ -114,13 +124,11 @@ describe('TemplateEditDialog — Coding tool dropdown (INF-6049c)', () => {
 
     const emitted = wrapper.emitted('update:template')
     expect(emitted).toHaveLength(1)
-    // cli_tool updated; sibling fields preserved (update() spreads the template).
     expect(emitted[0][0]).toMatchObject({ cli_tool: 'codex', role: 'implementer' })
   })
 
   it('defaults the displayed value to claude when cli_tool is unset', () => {
     const wrapper = mountDialog({ template: makeTemplate({ cli_tool: undefined }) })
-    // Selecting antigravity from the default still emits the chosen value.
-    expect(codingToolSelect(wrapper).find('[data-value="antigravity"]').exists()).toBe(true)
+    expect(codingToolSelect(wrapper).find('[data-value="generic"]').exists()).toBe(true)
   })
 })

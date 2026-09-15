@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9420 item 2 -- create_thread's ``product_id`` passthrough, pinned at the boundary.
-
-The project record claimed the MCP wrapper "never exposes product_id, so threads
-created by agents can never be product-filtered". Measured against the tree, that
-premise is FALSE: the parameter has been declared on the wrapper since BE-6054b
-(2026-06-16), it is already in the ``test_be6042d`` param lock, and it binds
-end-to-end.
-
-What was missing is this file. The capability shipped two months ago with NOTHING
-asserting it, which is precisely how it became possible for a census to conclude it
-did not exist. These tests are the durable artefact of item 2 -- they pin the
-agent-facing surface and the write, so the next reader does not have to re-derive
-either from the source.
-
-Driven over the ACTUAL MCP transport rather than by calling the service, per
-AGENTS.md: a wrapper claim proven by monkeypatching ``_call_tool`` away can hide a
-break in the real ``_call_tool -> TOOL_DISPATCH -> service`` chain.
-"""
 
 from __future__ import annotations
 
@@ -57,12 +39,6 @@ def _error_text(res) -> str:
 
 @pytest_asyncio.fixture
 async def thread_product_client(db_manager, db_session, monkeypatch):
-    """``(new_client, tenant_key, own_product_id, foreign_product_id, foreign_project_id)``.
-
-    Two tenants, one product each. The foreign product is a REAL row with a real
-    id -- the only thing wrong with it is that it belongs to somebody else, which
-    is the only shape that can tell a tenant check apart from a mere FK check.
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -90,9 +66,6 @@ async def thread_product_client(db_manager, db_session, monkeypatch):
         tenant_key=foreign_tenant_key,
         product_id=foreign_product.id,
         name=f"BE9420 Foreign Project {suffix}",
-        # tenant_key / name / description / mission are the four NOT NULL columns
-        # on projects with no default of their own -- read off the model rather
-        # than discovered one IntegrityError at a time.
         description="BE-9420 cross-tenant guard fixture",
         mission="Exists only so a real foreign project id can be offered.",
     )
@@ -121,25 +94,11 @@ async def thread_product_client(db_manager, db_session, monkeypatch):
 
 
 async def _thread_row(db_session, tenant_key: str, thread_id: str) -> CommThread:
-    """Read the thread back INSIDE a tenant context.
-
-    The ORM read is tenant-scoped: outside ``tenant_session_context`` a plain
-    ``select(CommThread)`` returns nothing even when the row is present (verified
-    against raw SQL, which sees it). Reading without the context would make an
-    "is it bound?" assertion fail for the wrong reason -- and, worse, would make a
-    "not bound" assertion PASS for the wrong reason.
-    """
     with tenant_session_context(db_session, tenant_key):
         return (await db_session.execute(select(CommThread).where(CommThread.id == thread_id))).scalar_one()
 
 
 async def test_product_id_is_on_the_agent_facing_tool_surface(thread_product_client):
-    """The parameter an agent can actually see, read off the live schema.
-
-    Asserted against ``list_tools`` rather than the function signature because the
-    signature is not what an agent reads -- a parameter that failed to render into
-    the advertised schema would be undiscoverable while looking correct in source.
-    """
     new_client, _tk, _own, _foreign, _fproj = thread_product_client
 
     async with new_client() as session:
@@ -153,7 +112,6 @@ async def test_product_id_is_on_the_agent_facing_tool_surface(thread_product_cli
 
 
 async def test_a_supplied_product_id_binds_the_thread(thread_product_client, db_session):
-    """Round-trip: the id reaches the row, not just the response."""
     new_client, tenant_key, own_product_id, _foreign, _fproj = thread_product_client
 
     async with new_client() as session:
@@ -173,20 +131,6 @@ async def test_a_supplied_product_id_binds_the_thread(thread_product_client, db_
 
 
 async def test_omitting_product_id_resolves_to_the_tenants_own_product(thread_product_client, db_session):
-    """SUPERSEDED by FE-9530: "a thread MUST carry
-    a product, unless application has no product." This test used to assert the
-    opposite -- that an omitted product_id left the thread genuinely unbound -- as
-    the control proving the write genuinely depends on the argument rather than
-    binding to some ambient product regardless. Mandatory resolution changes WHAT
-    "no argument" means (resolve, not leave null) without weakening that control:
-    the fixture's tenant owns exactly ONE product (``own_product``, never
-    ``foreign_product``), so asserting the thread lands on THAT one and not the
-    foreign tenant's still proves the resolution is tenant-scoped, not ambient.
-    The genuinely-product-less carve-out (a zero-product tenant) is covered at the
-    MCP boundary immediately below; the ambiguous-tenant and chain-conductor-
-    exemption cases are covered at the service layer in
-    test_be6054b_comm_thread_service.py.
-    """
     new_client, tenant_key, own_product_id, _foreign, _fproj = thread_product_client
 
     async with new_client() as session:
@@ -202,11 +146,6 @@ async def test_omitting_product_id_resolves_to_the_tenants_own_product(thread_pr
 
 
 async def test_omitting_product_id_on_a_zero_product_tenant_stays_unbound(db_manager, db_session, monkeypatch):
-    """FE-9530 ruling 1's stated exception, driven over the real MCP transport:
-    "unless application has no product." A tenant that owns NO product at all has
-    nothing to resolve to, so the thread is created genuinely standalone rather
-    than 422ing a fresh install's very first thread.
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -248,17 +187,6 @@ async def test_omitting_product_id_on_a_zero_product_tenant_stays_unbound(db_man
 
 
 async def test_another_tenants_product_id_cannot_bind(thread_product_client, db_session):
-    """Agent input is not trusted: a foreign product id must not become a link.
-
-    ``product_id`` arrives from an agent, and the repository already applies exactly
-    this reasoning to ``sequence_run_id`` in its own docstring -- *"a run id from
-    another tenant would otherwise be accepted by the constraint while silently
-    creating a cross-tenant link"*. The FK alone cannot tell the two apart: the
-    foreign id is a real, satisfiable row.
-
-    Either the call is refused, or the thread is left unbound. What must NOT happen
-    is a stored link from this tenant's thread to another tenant's product.
-    """
     new_client, tenant_key, _own, foreign_product_id, _fproj = thread_product_client
 
     async with new_client() as session:
@@ -268,7 +196,7 @@ async def test_another_tenants_product_id_cannot_bind(thread_product_client, db_
         )
 
     if result.is_error:
-        return  # Refused at the boundary — the strictest acceptable outcome.
+        return
 
     row = await _thread_row(db_session, tenant_key, _payload(result)["thread_id"])
     assert row.tenant_key == tenant_key
@@ -280,13 +208,6 @@ async def test_another_tenants_product_id_cannot_bind(thread_product_client, db_
 
 
 async def test_another_tenants_project_id_cannot_bind(thread_product_client, db_session):
-    """``project_id`` arrives at the same boundary and is written by the same call.
-
-    Fixed at the class rather than the instance: both optional ids on
-    ``create_thread`` are agent input, both are stored unvalidated, and a guard on
-    only the one this project happened to name would leave the identical hole open
-    one argument to the left.
-    """
     new_client, tenant_key, _own, _fprod, foreign_project_id = thread_product_client
 
     async with new_client() as session:

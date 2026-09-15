@@ -3,26 +3,6 @@
   Licensed under the Elastic License 2.0.
   See LICENSE in the project root for terms.
   [CE] Community Edition.
-
-  ApprovalBannerRow.vue — FE-9511
-
-  The raised-hand row's markup, extracted out of SystemStatusBanner.vue
-  to keep that file within the project's file-size budget. Presentational: the parent still owns
-  useApprovalsStore (its row COUNT feeds the FE-9377 space-reservation logic
-  alongside the other rows), and passes the live approvals list down as a
-  prop. This component owns only the canned-text + pill rendering
-  (useApprovalBannerState.js) and emits `open` on click -- it never navigates
-  on its own.
-
-  FE-9589: this row IS dismissible, and that supersedes the reasoning it
-  carried before ("a live read of a pending approval, it leaves the instant the
-  approval is decided"). The operator ruled that anything on screen must be
-  closeable from where it is on screen. Dismissal silences the ANNOUNCEMENT
-  only: the approval stays pending, its bell row stays, and the Review
-  destination is unchanged -- so the live-read property is intact, it just no
-  longer obliges the operator to live with the strip until they act. The parent
-  records the dismissal (bannerDismissStore, per user, survives a reload); this
-  component only emits, like every other action it has.
 -->
 <template>
   <div

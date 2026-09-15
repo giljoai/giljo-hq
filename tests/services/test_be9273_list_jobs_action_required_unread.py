@@ -3,30 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9273 item 3 (backend half) -- ``JobQueryService.list_jobs`` must surface
-``action_required_unread`` per job so the dashboard AgentRow badge can
-distinguish "someone is waiting on THIS agent" from plain unread mail.
-
-Root cause: the field already existed on the agent-facing
-``AgentWorkflowDetail`` schema (``workflow_status_service.get_workflow_status``,
-BE-9242 deliverable #3), but the dashboard's REST job list
-(``JobQueryService.list_jobs`` -> ``GET /api/agent-jobs/``, the endpoint
-``agentJobsStore.js`` actually polls) never computed or returned it -- so the
-frontend had no field to bind a distinct badge to.
-
-Fix (failing layer = JobQueryService.list_jobs, mirrors the existing
-``messages_waiting_count`` / ``get_live_unread_counts_by_project_agent``
-precedent from BE-6200 exactly): a new multi-project sibling repository method
-``get_live_action_required_unread_counts_by_project_agent`` (same
-requires_action=True + auto_generated=False + not-yet-acked definition as the
-single-project ``get_live_action_required_unread_counts_by_agent`` the MCP
-``get_workflow_status`` tool already uses) is threaded into ``list_jobs`` and
-surfaced as ``job["action_required_unread"]``.
-
-DB-touching: db_session (TransactionalTestContext). No module-level mutable
-state. Parallel-safe (pytest-xdist -n auto). Edition Scope: Both (CE
-dashboard core).
-"""
 
 from __future__ import annotations
 
@@ -55,8 +31,6 @@ def _jobs_svc(session: AsyncSession) -> JobQueryService:
 async def _seed_project_with_two_agents(
     session: AsyncSession, tenant_key: str
 ) -> tuple[str, AgentExecution, AgentExecution]:
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_proj = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -146,8 +120,6 @@ def _job_for(jobs: list[dict], agent_id: str) -> dict:
 async def test_list_jobs_surfaces_action_required_unread_for_directed_action_message(
     db_session: AsyncSession,
 ) -> None:
-    """A directed, requires_action, non-auto_generated post counts toward
-    BOTH messages_waiting_count and action_required_unread."""
     tenant = TenantManager.generate_tenant_key()
     pid, orchestrator, analyzer = await _seed_project_with_two_agents(db_session, tenant)
 
@@ -160,9 +132,6 @@ async def test_list_jobs_surfaces_action_required_unread_for_directed_action_mes
 
 
 async def test_list_jobs_excludes_informational_from_action_required_unread(db_session: AsyncSession) -> None:
-    """An informational (requires_action=False) post counts toward the broader
-    badge (messages_waiting_count) but NOT toward action_required_unread --
-    matching the closeout gate's own definition of "blocking work"."""
     tenant = TenantManager.generate_tenant_key()
     pid, orchestrator, analyzer = await _seed_project_with_two_agents(db_session, tenant)
 
@@ -175,10 +144,6 @@ async def test_list_jobs_excludes_informational_from_action_required_unread(db_s
 
 
 async def test_list_jobs_excludes_auto_generated_from_action_required_unread(db_session: AsyncSession) -> None:
-    """A requires_action=True but auto_generated=True post (e.g. a forwarded
-    system notice) still counts toward messages_waiting_count but NOT toward
-    action_required_unread -- mirrors get_unread_messages_for_agent's gate
-    definition exactly."""
     tenant = TenantManager.generate_tenant_key()
     pid, orchestrator, analyzer = await _seed_project_with_two_agents(db_session, tenant)
 
@@ -193,9 +158,6 @@ async def test_list_jobs_excludes_auto_generated_from_action_required_unread(db_
 async def test_list_jobs_action_required_unread_is_a_subset_never_exceeding_waiting_count(
     db_session: AsyncSession,
 ) -> None:
-    """Mixed inbox: 1 real directive + 1 informational + 1 auto_generated
-    directive -- action_required_unread must equal exactly the 1 genuinely
-    actionable post, never more than messages_waiting_count."""
     tenant = TenantManager.generate_tenant_key()
     pid, orchestrator, analyzer = await _seed_project_with_two_agents(db_session, tenant)
 
@@ -211,8 +173,6 @@ async def test_list_jobs_action_required_unread_is_a_subset_never_exceeding_wait
 
 
 async def test_list_jobs_zero_action_required_unread_for_project_less_row(db_session: AsyncSession) -> None:
-    """A project-less row (e.g. the chain conductor) must resolve to 0, same
-    as messages_waiting_count already does -- never a KeyError/None."""
     tenant = TenantManager.generate_tenant_key()
     job = AgentJob(
         job_id=str(uuid.uuid4()),
@@ -242,26 +202,11 @@ async def test_list_jobs_zero_action_required_unread_for_project_less_row(db_ses
     assert job_row["action_required_unread"] == 0
 
 
-# ---------------------------------------------------------------------------
-# Cross-tenant isolation (ADR-009) -- repository layer, adversarial audit
-# Finding A. Reuses the SAME literal agent_id across both tenants (a real
-# agent_id has no cross-tenant uniqueness constraint) and, on each call,
-# passes BOTH tenants' project_ids together -- the only thing standing
-# between "tenant A sees tenant B's count" is the tenant_key predicate
-# inside get_live_action_required_unread_counts_by_project_agent itself, not
-# disjoint id space (project ids ARE globally unique, but that alone must
-# not be what's silently making this test pass).
-# ---------------------------------------------------------------------------
 
 
 async def _seed_project_with_shared_agent(
     session: AsyncSession, tenant_key: str, shared_agent_id: str
 ) -> tuple[str, AgentExecution]:
-    """One project + one execution whose ``agent_id`` is caller-supplied (so
-    two tenants can share the identical literal), with one directed,
-    requires_action message addressed to it."""
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_proj = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -328,9 +273,6 @@ async def _seed_project_with_shared_agent(
 async def test_get_live_action_required_unread_counts_by_project_agent_is_tenant_isolated(
     db_session: AsyncSession,
 ) -> None:
-    """ADR-009 hardening: tenant A's count must NEVER include tenant B's row,
-    and vice versa, even when both tenants share the identical agent_id and
-    the query is called with BOTH tenants' project_ids in one request."""
     tenant_a = TenantManager.generate_tenant_key()
     tenant_b = TenantManager.generate_tenant_key()
     shared_agent_id = f"agent-shared-{uuid.uuid4().hex[:8]}"
@@ -341,12 +283,6 @@ async def test_get_live_action_required_unread_counts_by_project_agent_is_tenant
     repo = AgentOperationsRepository()
     both_project_ids = [project_a_id, project_b_id]
 
-    # The fail-closed tenant guard (tenant_guard.py) requires an EXPLICIT
-    # service-level tenant context for a SELECT carrying an explicit tenant
-    # predicate -- a flush-derived context (left behind by the seeding above)
-    # is not trusted to authorize it. tenant_session_context is the same
-    # mechanism optional_tenant_session/tenant_scoped_session apply for every
-    # injected-test-session service call in this suite.
     with tenant_session_context(db_session, tenant_a):
         counts_as_tenant_a = await repo.get_live_action_required_unread_counts_by_project_agent(
             db_session, tenant_a, both_project_ids, [shared_agent_id]

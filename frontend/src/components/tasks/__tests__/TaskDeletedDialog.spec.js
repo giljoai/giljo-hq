@@ -1,14 +1,3 @@
-/**
- * TaskDeletedDialog.spec.js — FE-6138
- *
- * Covers the 4 DoD cases for the task trash/recover dialog:
- * (a) renders soft-deleted tasks from prop
- * (b) restore emits `restore` with the task
- * (c) empty state when list is empty
- * (d) restore button disabled while restoringId matches
- *
- * Edition scope: CE
- */
 
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -42,7 +31,6 @@ function mountDialog(props = {}) {
 }
 
 describe('TaskDeletedDialog', () => {
-  // (a) renders soft-deleted tasks from prop
   it('renders soft-deleted tasks from the deletedTasks prop', () => {
     const wrapper = mountDialog()
     expect(wrapper.text()).toContain('Fix login bug')
@@ -51,7 +39,6 @@ describe('TaskDeletedDialog', () => {
     expect(wrapper.text()).toContain('FE-7')
   })
 
-  // (b) restore emits `restore` with the task
   it('emits restore event with the task when restore button is clicked', async () => {
     const wrapper = mountDialog()
     const btn = wrapper.find('[data-testid="restore-task"]')
@@ -61,21 +48,17 @@ describe('TaskDeletedDialog', () => {
     expect(wrapper.emitted('restore')[0][0]).toEqual(defaultTasks[0])
   })
 
-  // (c) empty state when list is empty
   it('shows the empty state when deletedTasks is empty', () => {
     const wrapper = mountDialog({ deletedTasks: [] })
     expect(wrapper.text()).toContain('No deleted tasks')
     expect(wrapper.find('[data-testid="restore-task"]').exists()).toBe(false)
   })
 
-  // (d) restore button disabled while restoringId matches
   it('disables the restore button for the task being restored', () => {
     const wrapper = mountDialog({ restoringId: 'task-001' })
     const btns = wrapper.findAll('[data-testid="restore-task"]')
     expect(btns.length).toBe(2)
-    // First task (task-001) matches restoringId — should be disabled
     expect(btns[0].attributes('disabled')).toBeDefined()
-    // Second task (task-002) does not match — should be enabled
     expect(btns[1].attributes('disabled')).toBeUndefined()
   })
 

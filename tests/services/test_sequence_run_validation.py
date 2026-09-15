@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6185: unit tests for the extracted SequenceRun write-boundary validators.
-
-``sequence_run_validation`` was lifted out of SequenceRunService (800-line
-guardrail) as a pure rename. These tests pin its behaviour directly: enum/length
-membership raises ValidationError (-> 422) rather than letting a DB constraint
-500, and the update validator normalizes + passes through the JSONB fields.
-
-Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -36,7 +27,6 @@ def _valid_create_kwargs() -> dict:
 
 
 def test_validate_create_fields_accepts_valid() -> None:
-    # Does not raise.
     validate_create_fields(**_valid_create_kwargs())
 
 

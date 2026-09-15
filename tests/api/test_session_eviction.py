@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Unit tests for services/session_eviction.py (SEC-9047 / TSK-9006 helpers).
-
-Edition Scope: Both. Direct coverage of the two extracted helpers:
-
-  * evict_user_tokens -- bumps the revocation epoch AND revokes the user's
-    outstanding refresh tokens, in-transaction.
-  * close_live_user_sockets -- best-effort reach into the running
-    WebSocketManager via app_state; a missing manager or a failing close must
-    never raise into the caller (the deactivation is already committed).
-
-Parallel-safe: unique tenant/user per test, monkeypatch-only patching.
-"""
 
 from __future__ import annotations
 
@@ -31,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 
 async def _seed_user_and_refresh(db_manager) -> tuple[str, str, str]:
-    """Create org+user (epoch 0) + one live refresh token; return (user_id, tk, raw)."""
     from giljo_mcp.models.auth import User
     from giljo_mcp.models.organizations import Organization
     from giljo_mcp.services.oauth_refresh_service import issue_refresh_token, new_family_id
@@ -85,7 +72,7 @@ async def test_evict_user_tokens_bumps_epoch_and_revokes_refresh(db_manager):
         revoked = await evict_user_tokens(session, user)
         await session.commit()
 
-    assert revoked == 1  # the one live refresh token was revoked
+    assert revoked == 1
 
     async with db_manager.get_session_async(tenant_key=tk) as session:
         user = await session.get(User, user_id)
@@ -128,7 +115,6 @@ async def test_close_live_user_sockets_noop_when_no_manager(monkeypatch):
 
     monkeypatch.setattr(app_state.state, "websocket_manager", None, raising=False)
 
-    # Must not raise when there is no running manager (CE non-API context / tests).
     await close_live_user_sockets("tenant_X", logger)
 
 
@@ -139,6 +125,5 @@ async def test_close_live_user_sockets_swallows_errors(monkeypatch):
     spy = _SpyWs(raises=True)
     monkeypatch.setattr(app_state.state, "websocket_manager", spy, raising=False)
 
-    # Best-effort: a close failure must never propagate into the committed deactivation.
     await close_live_user_sockets("tenant_X", logger)
     assert spy.calls == ["tenant_X"]

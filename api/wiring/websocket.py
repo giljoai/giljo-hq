@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""WebSocket connection/auth/subscribe wiring extracted from api/app.py.
-
-Behavior-preserving (BE-6042b): these are the exact helpers ``app.py`` used to
-host as module-level free functions, moved verbatim. They are invoked by the
-``/ws/{client_id}`` endpoint registered in ``api.wiring.events``.
-"""
 
 from __future__ import annotations
 
@@ -37,22 +31,6 @@ async def authenticate_ws_connection(
     api_key: str | None,
     token: str | None,
 ) -> dict | None:
-    """Authenticate an incoming WebSocket connection and return the auth context.
-
-    Obtains a short-lived database session (None in setup mode), delegates to
-    authenticate_websocket, validates that a tenant_key is present for normal
-    connections, and then cleans up the session.  On failure the connection is
-    closed with code 1008 and None is returned.
-
-    Args:
-        websocket: The incoming WebSocket connection (not yet accepted).
-        client_id: Caller-supplied client identifier.
-        api_key: Optional API-key query param.
-        token: Optional JWT query param.
-
-    Returns:
-        auth_context dict on success, or None if the connection was rejected.
-    """
     try:
         session = None
         session_cm = None
@@ -109,15 +87,6 @@ async def authenticate_ws_connection(
 
 
 def ws_entity_resolution_scope(session, *, is_setup: bool, tenant_key: str | None):
-    """Return the guard scope for a WS subscribe entity-resolution read.
-
-    Authenticated connections pass their validated ``tenant_key`` into
-    ``get_session_async`` so the session already carries tenant context and the
-    guard applies its normal per-tenant filter — no bypass needed (nullcontext).
-
-    Setup-mode connections have no tenant yet, so resolving the entity's tenant
-    is a genuine pre-auth cross-tenant lookup; authorize it with a scoped bypass.
-    """
     if is_setup or not tenant_key:
         return tenant_isolation_bypass(
             session,
@@ -133,19 +102,6 @@ async def handle_ws_subscribe(
     data: dict,
     auth_context: dict,
 ) -> None:
-    """Handle a WebSocket subscribe message with tenant isolation enforcement.
-
-    Resolves the tenant_key for the requested entity by querying the database,
-    denies the subscription when the tenant cannot be resolved, and blocks
-    cross-tenant subscriptions (Handover 0769a security fix).
-
-    Args:
-        websocket: Active WebSocket connection.
-        client_id: Caller-supplied client identifier.
-        data: Parsed JSON message containing ``entity_type`` and ``entity_id``.
-        auth_context: Auth context dict from authenticate_ws_connection,
-                      must contain ``tenant_key``.
-    """
     entity_type = data.get("entity_type")
     entity_id = data.get("entity_id")
     connection_tenant_key = auth_context.get("tenant_key")
@@ -154,12 +110,6 @@ async def handle_ws_subscribe(
     try:
         tenant_key = None
         if state.db_manager:
-            # Authenticated connections scope the entity-resolution read to the
-            # connection's validated tenant_key (a client may only subscribe to
-            # entities in its own tenant; the cross-tenant check below is then
-            # belt-and-suspenders). Setup-mode connections have no tenant yet, so
-            # the resolution read is a genuine pre-auth cross-tenant lookup —
-            # authorize it with a scoped bypass.
             async with state.db_manager.get_session_async(tenant_key=connection_tenant_key) as session:
                 with ws_entity_resolution_scope(session, is_setup=is_setup, tenant_key=connection_tenant_key):
                     if entity_type == "project":

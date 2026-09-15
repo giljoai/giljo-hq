@@ -4,17 +4,6 @@
 # [CE] Community Edition.
 
 # ruff: noqa: B904, UP006, PERF401
-"""
-Product Vision Document Endpoints - Handover 0503
-
-Handles vision document upload and retrieval operations using ProductService.
-
-Handover 0503: Consolidated vision endpoints, updated paths, added proper response schemas.
-Handover 0126: Initial implementation with direct database access.
-Handover 0731d: Updated for typed ProductService returns (VisionUploadResult instead of dict).
-SEC-0001 Phase 2: Upload guardrails (size cap, extension allowlist, filename
-    sanitization, strict UTF-8 + byte-sniff, structured error codes).
-"""
 
 import logging
 from typing import List  # noqa: UP035
@@ -51,7 +40,6 @@ router = APIRouter()
 
 
 def _raise_too_large(max_bytes: int) -> None:
-    """Raise the shared structured 413 for oversize uploads (SEC-0001)."""
     raise HTTPException(
         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
         detail={
@@ -63,12 +51,6 @@ def _raise_too_large(max_bytes: int) -> None:
 
 
 async def _read_upload_capped(upload: UploadFile, max_bytes: int) -> bytes:
-    """Stream the upload body, aborting if it exceeds ``max_bytes``.
-
-    FastAPI's ``UploadFile`` does not cap size on its own, so we read in
-    64 KB chunks and track a running total. Used by both upload endpoints
-    as the Layer-2 size guard.
-    """
     chunks: list[bytes] = []
     total = 0
     chunk_size = 65536
@@ -109,12 +91,10 @@ async def upload_vision_document(
     upload_cfg = get_config().upload
     max_bytes = upload_cfg.max_upload_bytes
 
-    # Layer 1 size guard: Content-Length pre-check (fast reject before body read).
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > max_bytes:
         _raise_too_large(max_bytes)
 
-    # Filename sanitization (raw attacker input -- convert to 400 on failure).
     try:
         safe_filename = sanitize_upload_filename(file.filename)
     except UploadFilenameError as exc:
@@ -134,7 +114,6 @@ async def upload_vision_document(
         sanitize(product_id),
     )
 
-    # Extension allowlist -- 415 (type not supported), not 400.
     ext_lower = safe_filename.lower()
     if not any(ext_lower.endswith(ext) for ext in upload_cfg.allowed_extensions):
         raise HTTPException(
@@ -146,10 +125,8 @@ async def upload_vision_document(
             },
         )
 
-    # Layer 2 size guard: streaming read with running byte counter.
     content = await _read_upload_capped(file, max_bytes)
 
-    # Byte-sniff: reject binary payloads that spoof a .txt/.md extension.
     try:
         enforce_text_content(content, sniff_bytes=upload_cfg.sniff_bytes)
     except UploadContentError as exc:
@@ -162,9 +139,6 @@ async def upload_vision_document(
             },
         )
 
-    # Strict UTF-8 decode. ``enforce_text_content`` already verified decode
-    # succeeds; the defensive try/except converts any pathological race into
-    # the same structured 415.
     try:
         content_str = content.decode("utf-8", errors="strict")
     except UnicodeDecodeError:
@@ -177,8 +151,6 @@ async def upload_vision_document(
         )
 
     try:
-        # Upload via ProductVisionService (Handover 0950i: extracted from ProductService)
-        # Handover 0731d: returns VisionUploadResult Pydantic model
         result = await vision_service.upload_vision_document(
             product_id=product_id,
             content=content_str,
@@ -194,11 +166,6 @@ async def upload_vision_document(
             result.total_tokens,
         )
 
-        # BE-5118: a freshly-uploaded doc has no summaries yet, so the
-        # product-level gating flag must drop back to FALSE. The evaluator
-        # handles the general case (TRUE iff every active doc + aggregate
-        # has light + medium summaries) and is idempotent — safe to call
-        # from any write boundary that mutates the doc set.
         try:
             await vision_service.evaluate_vision_analysis_complete(db, product_id)
             await db.commit()
@@ -218,7 +185,6 @@ async def upload_vision_document(
         }
 
     except ValueError as e:
-        # Handover 0508: Catch validation errors from ProductService
         error_msg = str(e).lower()
         if "already exists" in error_msg or "duplicate" in error_msg:
             raise HTTPException(
@@ -228,13 +194,9 @@ async def upload_vision_document(
         logger.warning("Vision upload validation error: %s", e)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid upload request.")
     except (ResourceNotFoundError, ValidationError, AuthorizationError, AlreadyExistsError, HTTPException):
-        # TSK-9205: the service now raises AlreadyExistsError (409) on a duplicate
-        # -name write race; let the global handler map it to 409 rather than the
-        # broad catch below turning it into a 500.
         raise
-    except Exception as e:  # Broad catch: API boundary, converts to HTTP error
+    except Exception as e:
         logger.exception("Vision upload failed")
-        # Handover 0508: Check for IntegrityError (duplicate constraint violation)
         error_str = str(e).lower()
         if "unique" in error_str or "duplicate" in error_str or "uq_vision_doc" in error_str:
             raise HTTPException(
@@ -269,11 +231,6 @@ async def list_vision_documents(
         "User %s listing vision documents for product %s", sanitize(current_user.username), sanitize(product_id)
     )
 
-    # Query vision documents for this product. deleted_at IS NULL is the same
-    # trashed-parent exclusion the chunks reader below needs, and the sibling
-    # router api/endpoints/vision_documents.py already applies it alongside a
-    # dedicated /deleted trash view -- so a trashed doc surfacing in the main
-    # list here contradicted the product's own model of what "trash" means.
     stmt = (
         select(VisionDocument)
         .where(
@@ -289,10 +246,8 @@ async def list_vision_documents(
     result = await db.execute(stmt)
     documents = result.scalars().all()
 
-    # Convert to response models
     response_docs = []
     for doc in documents:
-        # Check if summaries exist
         has_summaries = bool(doc.summary_light or doc.summary_medium)
 
         response_docs.append(
@@ -315,9 +270,8 @@ async def list_vision_documents(
                 display_order=doc.display_order,
                 created_at=doc.created_at,
                 updated_at=doc.updated_at,
-                chunked_at=None,  # VisionDocument model does not have chunked_at field
+                chunked_at=None,
                 meta_data=doc.meta_data or {},
-                # Summary fields (Handover 0246b: light/medium only)
                 summary_light=doc.summary_light,
                 summary_medium=doc.summary_medium,
                 summary_light_tokens=doc.summary_light_tokens,
@@ -358,7 +312,6 @@ async def delete_vision_document(
         sanitize(product_id),
     )
 
-    # Verify document exists and belongs to this product/tenant
     stmt = select(VisionDocument).where(
         and_(
             VisionDocument.id == doc_id,
@@ -373,7 +326,6 @@ async def delete_vision_document(
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vision document not found")
 
-    # Delete associated chunks first
     delete_chunks_stmt = delete(MCPContextIndex).where(
         and_(
             MCPContextIndex.vision_document_id == doc_id,
@@ -382,13 +334,9 @@ async def delete_vision_document(
     )
     await db.execute(delete_chunks_stmt)
 
-    # Delete the vision document
     await db.delete(doc)
     await db.commit()
 
-    # BE-5118: remaining doc set may now satisfy the gate (e.g. the deleted
-    # doc was the only unsummarized one). Re-evaluate so the flag reflects
-    # post-delete reality.
     try:
         await vision_service.evaluate_vision_analysis_complete(db, product_id)
         await db.commit()
@@ -426,17 +374,6 @@ async def get_vision_chunks(
         "User %s retrieving vision chunks for product %s", sanitize(current_user.username), sanitize(product_id)
     )
 
-    # Query context chunks for this product.
-    #
-    # The join to VisionDocument is load-bearing, not decoration. Soft-delete
-    # stamps deleted_at and deliberately LEAVES the chunks intact so a restore
-    # brings the document and its chunks back as one unit, so filtering on the
-    # junction columns alone kept serving a trashed document's full text.
-    # VisionDocumentRepository.soft_delete states the contract in its own
-    # docstring -- "chunk retrieval excludes chunks of a trashed parent" -- and
-    # the sibling reader ContextRepository.search_chunks already honours it.
-    # Matching that sibling exactly: trashed parents only, since it is the
-    # reader doing the identical job.
     stmt = (
         select(MCPContextIndex)
         .join(VisionDocument, VisionDocument.id == MCPContextIndex.vision_document_id)
@@ -455,7 +392,6 @@ async def get_vision_chunks(
     result = await db.execute(stmt)
     chunks = result.scalars().all()
 
-    # Convert to response model
     response_chunks = []
     for chunk in chunks:
         response_chunks.append(
@@ -463,9 +399,9 @@ async def get_vision_chunks(
                 chunk_number=chunk.chunk_order,
                 total_chunks=len(chunks),
                 content=chunk.content,
-                char_start=0,  # Not tracked in current schema
+                char_start=0,
                 char_end=len(chunk.content),
-                boundary_type="semantic",  # Default boundary type
+                boundary_type="semantic",
                 keywords=chunk.keywords or [],
                 headers=chunk.summary.split("\n") if chunk.summary else [],
             )

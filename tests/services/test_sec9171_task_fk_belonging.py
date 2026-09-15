@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-9171 (#15) regression: cross-tenant FK belonging checks on task writes.
-
-Edition Scope: Both (task_service is CE-shared code).
-
-Before the fix, ``_log_task_impl`` passed ``parent_task_id`` to the ORM
-unchecked and ``_update_task_impl`` applied ``parent_task_id`` / ``project_id``
-via the field allowlist with no ownership re-check — the allowlist gates field
-NAMES, not row OWNERSHIP. A tenant-A caller could reference a tenant-B UUID and
-persist a cross-tenant FK on its own row (integrity break, not a disclosure:
-reads stay tenant-scoped).
-
-The guard mirrors the EXISTING ``project_id`` belonging check on create: a
-tenant-scoped repo lookup that raises ``ResourceNotFoundError`` when the row is
-not owned. Same layer as the bug (service), real DB, no mocks; parallel-safe —
-each test mints its own tenants/products, no module-level mutable state.
-"""
 
 from __future__ import annotations
 
@@ -58,7 +42,6 @@ async def tenant_b() -> str:
 
 @pytest_asyncio.fixture
 async def foreign_rows(db_session, tenant_b) -> dict:
-    """A product + task + project owned by tenant B (the victim tenant)."""
     with tenant_session_context(db_session, tenant_b):
         product = Product(
             id=str(uuid4()),
@@ -101,9 +84,6 @@ async def _make_task_a(task_service, product_a, test_tenant_key, *, parent_task_
     )
 
 
-# ---------------------------------------------------------------------------
-# Create path
-# ---------------------------------------------------------------------------
 
 
 async def test_create_rejects_cross_tenant_parent_task(
@@ -112,7 +92,6 @@ async def test_create_rejects_cross_tenant_parent_task(
     with pytest.raises(ResourceNotFoundError):
         await _make_task_a(task_service, product_a, test_tenant_key, parent_task_id=foreign_rows["task_id"])
 
-    # Nothing persisted pointing at the foreign parent.
     with tenant_session_context(db_session, test_tenant_key):
         rows = (
             await db_session.execute(
@@ -133,9 +112,6 @@ async def test_create_accepts_same_tenant_parent_task(task_service, db_session, 
     assert child.parent_task_id == parent_id
 
 
-# ---------------------------------------------------------------------------
-# Update path
-# ---------------------------------------------------------------------------
 
 
 async def test_update_rejects_cross_tenant_parent_task(
@@ -169,7 +145,6 @@ async def test_update_accepts_same_tenant_parent_and_unset(task_service, db_sess
     result = await task_service.update_task(task_id, parent_task_id=parent_id)
     assert "parent_task_id" in result.updated_fields
 
-    # Unsetting (None) stays allowed — belonging applies to non-null refs only.
     result = await task_service.update_task(task_id, parent_task_id=None)
     assert "parent_task_id" in result.updated_fields
 

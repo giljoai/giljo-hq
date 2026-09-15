@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Migration regression for ce_0085 -- heal the "GiljoAI MCP" -> "Giljo HQ"
-bootstrap rebrand (BE-9275b) for existing tenants.
-
-Real scratch PostgreSQL DB, real alembic. Mirrors
-tests/integration/migrations/test_ce_0084_heal_neutralized_seed_personas.py.
-Covers ce_0085's byte-exact heal:
-
-- A row whose ``system_instructions`` still byte-matches the pre-rebrand
-  bootstrap text is rewritten to the new "Giljo HQ" wording.
-- A row that was genuinely user-edited (diverges from the old bootstrap) is
-  left byte-identical -- the migration must never guess at user prose.
-- A row already healed (matches the NEW text, e.g. a tenant seeded after
-  BE-9275b shipped) is a no-op.
-- Idempotency: re-running against an already-migrated DB changes nothing
-  further and does not crash (the "CE reruns upgrade head on every boot"
-  scenario).
-"""
 
 from __future__ import annotations
 
@@ -51,8 +34,6 @@ PRODUCTION_DB_NAME = "giljo_mcp"
 _PRE = "ce_0084_heal_neutralized_seed_personas"
 _REV = "ce_0085_heal_giljo_hq_bootstrap_rebrand"
 
-# Load the migration module directly so the test's expected OLD/NEW text can
-# never drift from what the migration itself writes (single source of truth).
 _MIGRATION_PATH = PROJECT_ROOT / "migrations" / "versions" / f"{_REV}.py"
 _spec = importlib.util.spec_from_file_location(_REV, _MIGRATION_PATH)
 _migration = importlib.util.module_from_spec(_spec)
@@ -154,7 +135,6 @@ def scratch_engine():
 
 @pytest.fixture
 def scratch_at_pre(scratch_engine: sa.Engine):
-    """Fresh schema built up to ce_0084 (the pre-revision), ready for seeding."""
     _drop_all_objects(scratch_engine)
     up = _run_alembic("upgrade", _PRE)
     assert up.returncode == 0, f"upgrade to {_PRE} failed:\n{up.stdout}\n{up.stderr}"
@@ -162,9 +142,6 @@ def scratch_at_pre(scratch_engine: sa.Engine):
     _drop_all_objects(scratch_engine)
 
 
-# --------------------------------------------------------------------------- #
-# Seed helper (raw SQL -- the ORM models are not needed for a migration test) #
-# --------------------------------------------------------------------------- #
 
 TK = "tk_ce0085"
 
@@ -222,7 +199,6 @@ class TestCe0085HealGiljoHqBootstrapRebrand:
         assert _fetch_system_instructions(scratch_at_pre, tid) == NEW_BOOTSTRAP
 
     def test_user_edited_row_survives_byte_identical(self, scratch_at_pre: sa.Engine) -> None:
-        """A tenant's hand-edited system_instructions must NOT be touched by the heal."""
         edited = OLD_BOOTSTRAP + "\n\nCUSTOM: also check our internal deploy checklist."
         tid = _insert_template(scratch_at_pre, name="implementer", system_instructions=edited)
 
@@ -232,7 +208,6 @@ class TestCe0085HealGiljoHqBootstrapRebrand:
         assert _fetch_system_instructions(scratch_at_pre, tid) == edited
 
     def test_already_healed_row_is_noop(self, scratch_at_pre: sa.Engine) -> None:
-        """A tenant seeded AFTER BE-9275b already has the new text -- must stay put."""
         tid = _insert_template(scratch_at_pre, name="documenter", system_instructions=NEW_BOOTSTRAP)
 
         up = _run_alembic("upgrade", _REV)
@@ -241,7 +216,6 @@ class TestCe0085HealGiljoHqBootstrapRebrand:
         assert _fetch_system_instructions(scratch_at_pre, tid) == NEW_BOOTSTRAP
 
     def test_rerun_is_idempotent(self, scratch_at_pre: sa.Engine) -> None:
-        """Re-running ce_0085 (boot-rerun / stamp-behind) heals once, then no-ops."""
         healed_tid = _insert_template(scratch_at_pre, name="reviewer", system_instructions=OLD_BOOTSTRAP)
         edited = OLD_BOOTSTRAP.replace("STARTUP", "STARTUP-ish")
         edited_tid = _insert_template(scratch_at_pre, name="reviewer", system_instructions=edited, version="1.0.1")

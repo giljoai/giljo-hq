@@ -1,13 +1,4 @@
-/**
- * Date formatting composable.
- *
- * Provides consistent date formatting across the application.
- * Replaces 11 ad-hoc formatDate implementations.
- */
 export function useFormatDate() {
-  /**
-   * Format a date string as "Mar 30, 2026".
-   */
   function formatDate(dateString) {
     if (!dateString) return 'N/A'
     try {
@@ -21,9 +12,6 @@ export function useFormatDate() {
     }
   }
 
-  /**
-   * Format a date string as "Mar 30, 2026, 02:45 PM".
-   */
   function formatDateTime(dateString) {
     if (!dateString) return 'N/A'
     try {
@@ -39,9 +27,6 @@ export function useFormatDate() {
     }
   }
 
-  /**
-   * Format a date string as "Mar 30, 2026 14:05" (24h military time).
-   */
   function formatDateWithTime(dateString) {
     if (!dateString) return 'N/A'
     try {
@@ -59,9 +44,6 @@ export function useFormatDate() {
     }
   }
 
-  /**
-   * Format a date string as compact "30/03/26 14:05" (24h military time).
-   */
   function formatDateCompactWithTime(dateString) {
     if (!dateString) return '—'
     try {
@@ -77,9 +59,6 @@ export function useFormatDate() {
     }
   }
 
-  /**
-   * Format a date string as compact "30/03/26".
-   */
   function formatDateCompact(dateString) {
     if (!dateString) return '—'
     try {

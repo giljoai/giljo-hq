@@ -1,13 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { commitTitle, shortSha } from './gitCommitDisplay'
 
-// BE-9256 layer 4 — UI floor for legacy titleless git_commits rows.
-//
-// Stored 360/closeout rows already contain git_commits entries with an EMPTY
-// message (legacy bare-SHA normalization, pre-validator). The backend now
-// rejects NEW titleless commits, but old rows stay as-is (tolerance per the
-// data-facing-convention DoD). Every render surface must show a floor: the
-// short SHA, never a blank string or a bare "-".
 
 describe('shortSha', () => {
   it('truncates a full SHA to the first 8 characters', () => {

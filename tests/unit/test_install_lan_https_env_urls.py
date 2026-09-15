@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression: LAN/WAN + HTTPS installs must not write localhost/HTTP frontend URLs.
-
-Bug (INF-6039): update_env_with_real_credentials() built the .env settings dict
-without external_host / ssl_enabled / network_mode, so generate_env_file() fell
-back to localhost/HTTP defaults. A LAN/HTTPS install loaded the dashboard over
-https://<lan-ip> but every API call went to http://localhost -> CSP + mixed-content
-block -> create-first-admin failed. These tests exercise the .env generator (the
-layer the bug lived at) directly.
-"""
 
 from __future__ import annotations
 
@@ -21,7 +12,6 @@ from installer.core.config import ConfigManager
 
 
 def _parse_env(path: Path) -> dict[str, str]:
-    """Parse a generated .env file into a key->value dict (last value wins)."""
     values: dict[str, str] = {}
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
@@ -33,7 +23,6 @@ def _parse_env(path: Path) -> dict[str, str]:
 
 
 def _base_settings(tmp_path: Path) -> dict:
-    """Minimal settings with the passwords generate_env_file() requires."""
     return {
         "install_dir": str(tmp_path),
         "owner_password": "owner-secret",  # pragma: allowlist secret
@@ -55,7 +44,6 @@ def _generate(tmp_path: Path, extra: dict) -> dict[str, str]:
 
 class TestLanHttpsEnvUrls:
     def test_lan_https_does_not_write_localhost_http_urls(self, tmp_path):
-        """The exact failure: LAN/HTTPS install must never emit http://localhost."""
         env = _generate(
             tmp_path,
             {
@@ -68,26 +56,20 @@ class TestLanHttpsEnvUrls:
             },
         )
 
-        # Frontend URLs left empty -> resolver falls through to same-origin (ADR-001).
         assert env["VITE_API_URL"] == ""
         assert env["VITE_WS_URL"] == ""
-        # Never the broken values.
         assert "localhost" not in env["VITE_API_URL"]
         assert "http://" not in env["VITE_API_URL"]
 
-        # Server/agent-facing URL must carry the real host + https.
         assert env["GILJO_PUBLIC_URL"] == "https://192.0.2.163:7272"
 
-        # Informational fields reflect the real network choice, not "localhost".
         assert env["VITE_APP_MODE"] == "auto"
         assert env["DEPLOYMENT_CONTEXT"] == "auto"
 
-        # Bind registered correctly (proves the network choice reached the dict).
         assert env["SERVICE_BIND"] == "0.0.0.0"
         assert env["GILJO_API_HOST"] == "0.0.0.0"
 
     def test_lan_http_no_ssl_still_avoids_localhost(self, tmp_path):
-        """A LAN install without HTTPS must still use same-origin, not localhost."""
         env = _generate(
             tmp_path,
             {
@@ -103,7 +85,6 @@ class TestLanHttpsEnvUrls:
         assert env["VITE_APP_MODE"] == "static"
 
     def test_localhost_install_unchanged(self, tmp_path):
-        """Localhost installs keep the explicit absolute http://localhost URL."""
         env = _generate(
             tmp_path,
             {
@@ -119,7 +100,6 @@ class TestLanHttpsEnvUrls:
         assert env["DEPLOYMENT_CONTEXT"] == "localhost"
 
     def test_required_env_keys_present_even_when_empty(self, tmp_path):
-        """validate_config() checks key presence; empty VITE_API_URL must keep the key."""
         _generate(
             tmp_path,
             {

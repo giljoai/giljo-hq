@@ -3,29 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9083b — lifecycle breadcrumb footers, proven at the MCP transport boundary.
-
-The footers are just-in-time next-step guidance emitted on the lifecycle ACTION
-tools (spawn_job, complete_job, update_project_mission). BE-5042 precedent: the
-failing layer for instruction-delivery is the MCP boundary, not the service in
-isolation — so every seedable tool x phase cell is exercised through the REAL
-FastMCP transport (``create_connected_server_and_client_session``):
-
-  * spawn_job                      (staging)
-  * spawn_job                      (implementation)
-  * update_project_mission         (staging)
-  * complete_job — staging_end     (solo orchestrator)
-  * complete_job — staging_end     (chain sub-orchestrator: dashboard ALREADY advanced)
-  * complete_job — closeout        (solo orchestrator)
-  * complete_job — deliverable     (worker)
-
-The chain-conductor cells (project-less; awkward to seed at the transport) are
-covered exhaustively by the pure-function unit test
-(tests/unit/test_be9083b_lifecycle_footers.py).
-
-Parallel-safe: DB-touching tests use the db_session fixture (TransactionalTestContext,
-rollback at teardown). No module-level mutable state. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -36,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.organizations import Organization
@@ -45,14 +23,12 @@ from giljo_mcp.models.sequence_runs import SequenceRun
 from giljo_mcp.models.templates import AgentTemplate
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.product_crew_helper import adopt_all_templates
 
 
 pytestmark = pytest.mark.asyncio
 
 
-# ---------------------------------------------------------------------------
-# Payload helpers
-# ---------------------------------------------------------------------------
 
 
 def _payload(result) -> dict:
@@ -69,10 +45,6 @@ def _error_text(result) -> str:
     return "\n".join(b.text for b in result.content if getattr(b, "text", None))
 
 
-# ---------------------------------------------------------------------------
-# Transport fixture — all services on the rolled-back test session (mirrors
-# test_be9083a_next_required_actions_mcp_boundary).
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
@@ -110,9 +82,6 @@ async def mcp_client(db_manager, db_session, monkeypatch):
         state.db_manager = prior_db_manager
 
 
-# ---------------------------------------------------------------------------
-# Seed helpers
-# ---------------------------------------------------------------------------
 
 
 async def _seed_project(
@@ -149,6 +118,7 @@ async def _seed_project(
     db_session.add(project)
     db_session.info["tenant_key"] = tenant_key
     await db_session.flush()
+    await adopt_all_templates(db_session, tenant_key, product.id)
     return project.id
 
 
@@ -191,6 +161,8 @@ async def _seed_job(
 async def _seed_template(db_session, tenant_key: str, name: str) -> None:
     db_session.add(AgentTemplate(id=str(uuid.uuid4()), tenant_key=tenant_key, name=name, is_active=True))
     await db_session.commit()
+    for (_pid,) in (await db_session.execute(select(Product.id).where(Product.tenant_key == tenant_key))).all():
+        await adopt_all_templates(db_session, tenant_key, _pid)
 
 
 async def _seed_active_run(db_session, tenant_key: str, project_ids: list[str]) -> None:
@@ -211,9 +183,6 @@ async def _seed_active_run(db_session, tenant_key: str, project_ids: list[str]) 
     await db_session.commit()
 
 
-# ---------------------------------------------------------------------------
-# spawn_job
-# ---------------------------------------------------------------------------
 
 
 async def test_spawn_job_staging_footer(mcp_client):
@@ -266,9 +235,6 @@ async def test_spawn_job_implementation_footer(mcp_client):
     assert "INERT" not in footer
 
 
-# ---------------------------------------------------------------------------
-# update_project_mission
-# ---------------------------------------------------------------------------
 
 
 async def test_update_project_mission_staging_footer(mcp_client):
@@ -289,9 +255,6 @@ async def test_update_project_mission_staging_footer(mcp_client):
     assert "spawn_job" in footer
 
 
-# ---------------------------------------------------------------------------
-# complete_job — staging_end (solo + chain sub-orch), closeout, deliverable
-# ---------------------------------------------------------------------------
 
 
 async def test_complete_job_staging_end_solo_footer(mcp_client):
@@ -300,7 +263,6 @@ async def test_complete_job_staging_end_solo_footer(mcp_client):
     orch_job = await _seed_job(
         db_session, tenant_key, project_id, job_type="orchestrator", agent_display_name="orchestrator"
     )
-    # BE-5114: staging-end needs >=1 spawned specialist to proceed.
     await _seed_job(db_session, tenant_key, project_id, job_type="implementer", agent_display_name="implementer")
 
     async with client() as session:

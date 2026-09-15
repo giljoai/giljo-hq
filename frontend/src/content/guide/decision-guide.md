@@ -25,7 +25,7 @@ You can create either from your AI coding tool with `/giljo` — for example, `/
 When you stage a project, you choose how its agents run.
 
 - **Multi-Terminal.** Each agent gets its own prompt, and you run each one in a separate terminal window. You are in control of launching and watching each agent. This suits workflows where you want to supervise agents individually or run them on different machines.
-- **Subagent.** One main agent connects, then spawns its subagents inside a single session. You launch once and the orchestrator manages the rest. This works with Claude Code, Codex CLI, Gemini CLI, and any MCP-enabled tool that supports subagents.
+- **Subagent.** One main agent connects, then spawns its subagents inside a single session. You launch once and the orchestrator manages the rest. This works with Claude Code, Codex CLI, OpenCode, and any MCP-enabled tool that supports subagents.
 
 | | Multi-Terminal | Subagent |
 |---|---|---|

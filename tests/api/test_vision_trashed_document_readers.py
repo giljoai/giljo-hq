@@ -3,36 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Two more readers served trashed vision documents -- including one in the
-router that was cited as the correct-behaviour precedent.
-
-**The AI-summary contradiction.** ``GET /api/vision-documents/{id}`` filters
-``deleted_at IS NULL`` and carries an explicit ``BE-6130b: trashed docs are not
-retrievable here`` comment. Its neighbour in the same file,
-``GET /api/vision-documents/{id}/ai-summary/{level}``, selects on ``id`` +
-``tenant_key`` only. For one trashed document, the two endpoints disagree:
-
-    GET /api/vision-documents/{id}                    -> 404 "not found"
-    GET /api/vision-documents/{id}/ai-summary/medium  -> 200 + the summary text
-
-One says the document is gone; the other hands over its content. This is the
-sharpest instance in the family, and it sat in the file used as the standard --
-which is exactly how the earlier instances survived: the correct predicate was
-present NEARBY, so the file read as clean.
-
-**The vision-stats count.** ``GET /api/v1/products/active/vision-stats`` filters
-``is_active == True`` with no ``deleted_at`` -- the same shape already fixed on
-the product-scoped list endpoint, so trashed documents kept inflating the
-document count and token totals.
-
-Each pair is a defect scenario plus its over-exclusion guard: a LIVE document's
-summary must still be served, and a LIVE document must still be counted. A fix
-that returns 404 for everything, or counts nothing, would pass the defect half
-while destroying the endpoint.
-
-Real rows, committed through ``db_manager`` -- these endpoints resolve their own
-sessions, and a mock cannot see a predicate.
-"""
 
 from __future__ import annotations
 
@@ -60,11 +30,6 @@ def _auth(token: str) -> dict:
 
 @pytest_asyncio.fixture
 async def lab(db_manager):
-    """Committed ACTIVE product + user; torn down afterwards.
-
-    The product must be active because ``/active/vision-stats`` resolves its
-    product through ``ProductService.get_default_product()``.
-    """
     from sqlalchemy import delete
 
     from giljo_mcp.models.auth import User
@@ -134,9 +99,6 @@ async def _add_doc(db_manager, lab, *, label: str, trashed: bool, tokens: int = 
                 summary_medium=f"{label} medium summary",
                 summary_light_tokens=11,
                 summary_medium_tokens=22,
-                # ck_vision_doc_chunked_consistency: a non-zero chunk_count
-                # requires chunked=True, so honour the DB invariant rather than
-                # constructing a row that could not exist in production.
                 chunked=chunks > 0,
                 total_tokens=tokens,
                 chunk_count=chunks,
@@ -146,12 +108,9 @@ async def _add_doc(db_manager, lab, *, label: str, trashed: bool, tokens: int = 
     return doc_id
 
 
-# --- GET /api/vision-documents/{id}/ai-summary/{level} ----------------------
 
 
 async def test_live_document_summary_is_still_served(api_client, db_manager, lab):
-    """THE OVER-EXCLUSION GUARD. A fix that 404s everything would pass the
-    trashed case while breaking the feature."""
     doc_id = await _add_doc(db_manager, lab, label="live", trashed=False)
 
     response = await api_client.get(f"/api/vision-documents/{doc_id}/ai-summary/medium", headers=lab["headers"])
@@ -161,7 +120,6 @@ async def test_live_document_summary_is_still_served(api_client, db_manager, lab
 
 
 async def test_trashed_document_summary_is_not_served(api_client, db_manager, lab):
-    """THE DEFECT. The sibling GET in the same file already 404s this document."""
     doc_id = await _add_doc(db_manager, lab, label="trashed", trashed=True)
 
     response = await api_client.get(f"/api/vision-documents/{doc_id}/ai-summary/medium", headers=lab["headers"])
@@ -173,8 +131,6 @@ async def test_trashed_document_summary_is_not_served(api_client, db_manager, la
 
 
 async def test_the_two_endpoints_agree_about_a_trashed_document(api_client, db_manager, lab):
-    """The contradiction itself, asserted directly: one document must not be
-    simultaneously absent and readable."""
     doc_id = await _add_doc(db_manager, lab, label="ghost", trashed=True)
 
     by_id = await api_client.get(f"/api/vision-documents/{doc_id}", headers=lab["headers"])
@@ -187,7 +143,6 @@ async def test_the_two_endpoints_agree_about_a_trashed_document(api_client, db_m
     )
 
 
-# --- GET /api/v1/products/active/vision-stats ------------------------------
 
 
 async def _stats(api_client, lab) -> dict:
@@ -197,7 +152,6 @@ async def _stats(api_client, lab) -> dict:
 
 
 async def test_live_document_is_counted_in_vision_stats(api_client, db_manager, lab):
-    """THE OVER-EXCLUSION GUARD for the stats count."""
     await _add_doc(db_manager, lab, label="live", trashed=False, tokens=100, chunks=4)
 
     stats = await _stats(api_client, lab)
@@ -208,8 +162,6 @@ async def test_live_document_is_counted_in_vision_stats(api_client, db_manager, 
 
 
 async def test_trashed_document_is_not_counted_in_vision_stats(api_client, db_manager, lab):
-    """THE DEFECT. is_active is filtered but deleted_at is not -- soft-delete
-    deliberately leaves is_active alone, so trashed docs kept inflating totals."""
     await _add_doc(db_manager, lab, label="live", trashed=False, tokens=100, chunks=4)
     await _add_doc(db_manager, lab, label="trashed", trashed=True, tokens=999, chunks=77)
 
@@ -222,7 +174,6 @@ async def test_trashed_document_is_not_counted_in_vision_stats(api_client, db_ma
 
 
 async def test_stats_report_no_documents_when_the_only_one_is_trashed(api_client, db_manager, lab):
-    """has_vision_document must follow the same rule, not just the sums."""
     await _add_doc(db_manager, lab, label="trashed", trashed=True, tokens=999, chunks=77)
 
     stats = await _stats(api_client, lab)

@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Memory & Closeout Tools -- @mcp.tool wrappers (BE-6042d split of mcp_sdk_server.py).
-
-Mechanically extracted verbatim from the pre-split ``mcp_sdk_server.py``. Each
-wrapper registers against the shared ``mcp`` instance from ``_base`` as a decorator
-side effect at import time. Behavior, signatures, names, and descriptions unchanged.
-"""
 
 from typing import Annotated, Any, Literal
 
@@ -32,20 +25,8 @@ from giljo_mcp.services.memory_entry_write_validator import (
 )
 
 
-# BE-3006d: the agent-facing cap text is derived from the SAME constants the
-# server-side validator (memory_entry_write_validator) enforces, so the advertised
-# limit can never drift from the enforced one (it previously claimed "Max 500"
-# while the validator enforced 1500). The boundary validation itself lives in
-# validate_memory_entry_write (raises the structured MemoryEntryWriteValidationError,
-# surfaced clean by the _call_tool catch-all) — the wrappers only advertise it.
 _SUMMARY_CAP_TEXT = f"Max {MEMORY_SUMMARY_MAX} chars (server-enforced)."
 
-# BE-9464: TSK-9450 fixed the message a caller sees AFTER an absorbed call is
-# refused; it never touched what the schema teaches beforehand. Length is not
-# the variable that matters here -- absorption swallows whatever FOLLOWS a long
-# free-text argument in the caller's own tool-call serialization, so send this
-# one LAST and there is nothing left to swallow. Why + measurements:
-# tests/integration/test_tsk9450_absorption_remedy_wording_mcp_boundary.py
 _SUMMARY_ORDER_TEXT = (
     "Send this argument LAST in your call -- anything ordered after a long "
     "free-text argument like this one can be silently absorbed into it and "
@@ -56,11 +37,6 @@ _OUTCOMES_CAP_TEXT = (
 )
 _DECISIONS_CAP_TEXT = f"Max {MEMORY_DECISIONS_COUNT} items, each max {MEMORY_DECISION_MAX} chars (server-enforced)."
 
-# write_memory_entry entry_type allowed set. Mirrors valid_entry_types in
-# tools/write_memory_entry.py plus the back-compat alias 'project_closeout' the
-# service normalises to 'project_completion'. A hard Literal rejects garbage at
-# the FastMCP boundary while the service still owns the worker/orchestrator
-# authorization matrix for the orchestrator-only types.
 _EntryType = Literal[
     "project_completion",
     "project_closeout",
@@ -81,7 +57,6 @@ _EntryType = Literal[
         "report_progress + complete_job). git_commits is REQUIRED when git integration is "
         "enabled -- see that param for the accepted shape."
     ),
-    # BE-9251: closes the project (terminal) -- see _tool_hints docstring.
     annotations=_tool_hints("write_project_closeout", destructive=True),
 )
 async def write_project_closeout(
@@ -142,9 +117,6 @@ async def write_project_closeout(
     ] = False,
     ctx: Context = None,
 ) -> dict[str, Any]:
-    # BE-9165 (wall 1): force was hardcoded False here, so the CLOSEOUT_BLOCKED
-    # hint "pass force=true" was unwirable from the transport. It is now a real
-    # boundary parameter.
     kwargs: dict[str, Any] = {
         "project_id": project_id,
         "summary": summary,

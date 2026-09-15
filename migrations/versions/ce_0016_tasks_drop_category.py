@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Drop tasks.category now that task_type_id has been backfilled.
-
-Revision ID: ce_0016_tasks_drop_category
-Revises: ce_0015_tasks_add_task_type_id
-Create Date: 2026-05-05
-
-Phase B step 2 of agent-parity + unified taxonomy. Removes the legacy
-free-form ``category`` column from tasks. Classification now lives
-exclusively in tasks.task_type_id (FK to taxonomy_types).
-
-Reversible (downgrade re-adds the nullable column) but the original
-free-form values are not recovered -- the backfill in ce_0015 is one-way.
-
-Idempotent.
-"""
 
 import sqlalchemy as sa
 from alembic import op

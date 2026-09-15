@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9083d — phase-scoped protocol + section-fetch recovery at the MCP transport.
-
-The BE-5042 rule: instruction-delivery bugs fail at the MCP boundary, so the
-phase-scoping and the ``section=`` recovery param are proven through the REAL
-FastMCP transport (``create_connected_server_and_client_session``):
-
-  * BRIDGE (fail-first, non-negotiable): a STAGING-phase chain sub-orchestrator
-    get_job_mission payload still carries "call get_job_mission ONCE / no gate /
-    do NOT wait" in next_required_actions AND in the staging protocol slice,
-    while the implementation-only regions are omitted.
-  * the default response advertises protocol_toc (TOC info — names + sizes);
-  * section=<name> returns that section BYTE-IDENTICAL to the corresponding slice
-    of the full render, with the heavy blocks stripped;
-  * an unknown section name is rejected with the valid names listed;
-  * section beats an etag match (the caller explicitly asked for content).
-
-Parallel-safe: DB-touching tests use the db_session fixture (TransactionalTestContext,
-rollback at teardown). No module-level mutable state. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -63,9 +44,6 @@ def _error_text(result) -> str:
     return "\n".join(b.text for b in result.content if getattr(b, "text", None))
 
 
-# ---------------------------------------------------------------------------
-# Transport fixture (mirrors test_be9083a_next_required_actions_mcp_boundary)
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
@@ -103,9 +81,6 @@ async def mcp_client(db_manager, db_session, monkeypatch):
         state.db_manager = prior_db_manager
 
 
-# ---------------------------------------------------------------------------
-# Seed helpers (mirrors test_be9083a)
-# ---------------------------------------------------------------------------
 
 
 async def _seed_org_product(db_session, tenant_key: str) -> str:
@@ -226,9 +201,6 @@ async def _seed_suborch(mcp_client_tuple, *, implementation_launched: bool) -> t
     return client, job_id
 
 
-# ---------------------------------------------------------------------------
-# 1. THE BRIDGE at the transport (fail-first regression guard, BE-6206 class)
-# ---------------------------------------------------------------------------
 
 
 async def test_staging_suborch_fetch_keeps_bridge_and_drops_implementation_regions(mcp_client):
@@ -237,16 +209,13 @@ async def test_staging_suborch_fetch_keeps_bridge_and_drops_implementation_regio
     payload = await _mission_result(client, job_id)
 
     assert payload["project_phase"] == "staging"
-    # Bridge in the checklist (early wire, survives tail truncation).
     joined = "\n".join(payload["next_required_actions"])
     assert "get_job_mission ONCE" in joined
     assert "no gate" in joined
-    # Bridge in the staging protocol slice itself.
     protocol = payload["full_protocol"]
     assert "call get_job_mission ONCE" in protocol
     assert "5. CONTINUE TO IMPLEMENTATION (no gate, no wait)" in protocol
     assert "Do NOT wait for a human" in protocol
-    # Phase-scoping fired: implementation-only regions are deferred.
     assert "THE COORDINATION LOOP" not in protocol
     assert "### RESTING STATES" not in protocol
     assert "Closeout steps (order matters):" not in protocol
@@ -261,15 +230,11 @@ async def test_implementation_suborch_fetch_serves_implementation_regions(mcp_cl
     protocol = payload["full_protocol"]
     assert "THE COORDINATION LOOP" in protocol
     assert "Closeout steps (order matters):" in protocol
-    # The already-done staging steps collapsed; the bridge step numbering survives.
     assert "2. READ YOUR CONTRACT" not in protocol
     assert "STAGING -- ALREADY COMPLETE" in protocol
     assert "7. CLOSE OUT + REPORT" in protocol
 
 
-# ---------------------------------------------------------------------------
-# 2. Section-fetch recovery (the param — NEVER a new tool)
-# ---------------------------------------------------------------------------
 
 
 async def test_default_response_carries_protocol_toc(mcp_client):
@@ -287,9 +252,7 @@ async def test_default_response_carries_protocol_toc(mcp_client):
     toc = payload["protocol_toc"]
     assert toc, "the default response must advertise the section TOC"
     assert all(set(e) >= {"section", "chars", "lines"} for e in toc)
-    # TOC totals reconstruct the full protocol size (the sections are exact slices).
     assert sum(e["chars"] for e in toc) == len(payload["full_protocol"])
-    # The head sentinel names the section recovery.
     assert "section=" in payload["truncation_check"]
 
 
@@ -300,7 +263,6 @@ async def test_section_fetch_returns_byte_identical_slice(mcp_client):
     toc = full["protocol_toc"]
     protocol = full["full_protocol"]
 
-    # Reconstruct every section offsets-wise: TOC order matches slice order.
     offset = 0
     slices: dict[str, str] = {}
     for entry in toc:
@@ -308,14 +270,12 @@ async def test_section_fetch_returns_byte_identical_slice(mcp_client):
         offset += entry["chars"]
     assert offset == len(protocol)
 
-    # Fetch a mid-protocol section and the final one through the transport.
     for target in (toc[len(toc) // 2]["section"], toc[-1]["section"]):
         section_payload = await _mission_result(client, job_id, section=target)
         assert section_payload["protocol_section"] == target
         assert section_payload["protocol_section_content"] == slices[target], (
             f"section {target!r} is not byte-identical to the full-render slice"
         )
-        # Heavy blocks are stripped on a section response; the TOC + checklist ride.
         assert section_payload["full_protocol"] is None
         assert section_payload["mission"] is None
         assert section_payload["agent_identity"] is None
@@ -337,8 +297,6 @@ async def test_unknown_section_is_rejected_with_valid_names(mcp_client):
 
 
 async def test_section_fetch_wins_over_etag_match(mcp_client):
-    """A caller passing BOTH a matching protocol_etag and a section explicitly wants
-    content — the match-strip must not starve the section fetch."""
     client, job_id = await _seed_suborch(mcp_client, implementation_launched=True)
     full = await _mission_result(client, job_id)
     target = full["protocol_toc"][0]["section"]
@@ -351,8 +309,6 @@ async def test_section_fetch_wins_over_etag_match(mcp_client):
 
 
 async def test_etag_match_without_section_still_strips_toc_with_the_block(mcp_client):
-    """An etag-match response omits the static block AND its TOC (the TOC describes
-    the omitted bytes) — the small-response contract of BE-6208g/9083a is unchanged."""
     client, job_id = await _seed_suborch(mcp_client, implementation_launched=True)
     full = await _mission_result(client, job_id)
 

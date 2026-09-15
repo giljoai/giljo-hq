@@ -1,32 +1,3 @@
-/**
- * useHubNotifications.fe9553.spec.js — FE-9553, milestone 1.
- *
- * The one-live-surface rule, pinned against the REAL Hub signal path rather
- * than against a classifier in isolation: every event lives on exactly one
- * live surface (toast XOR banner), and a toast fires ONLY for a user-initiated
- * action. A Hub baton, a mention and an approval are all agent-initiated and
- * all actionable, so by ruling 3 they are BANNERS -- and by ruling 6 they must
- * not also toast.
- *
- * This is the strong red for milestone 1. Pre-FE-9553, handleEvent's away
- * branch fires `showToast` unconditionally (useHubNotifications.js:322), so
- * every assertion below fails on current code with a real behavioural failure,
- * not merely a missing import.
- *
- * WHAT THE USER DOES NOT LOSE when the toast goes away, and why this is safe:
- *   - the durable bell row is written BEFORE the presence gate (FE-9289c), so
- *     the archive is untouched;
- *   - the your-turn banner row already exists, fed by useYourTurnThreads out
- *     of commHubStore, and it is the surface ruling 3 assigns.
- * So this removes a duplicate, not a signal.
- *
- * Mocks are declared relative ('./useToast'), deliberately matching
- * useHubNotifications.spec.js: frontend/tests/setup.js mocks '@/composables/useToast'
- * globally with a fresh vi.fn() per call, and a spec asserting through that
- * global mock would pass whether or not the code toasts.
- *
- * Edition Scope: Both
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { ref } from 'vue'
@@ -157,13 +128,6 @@ describe('FE-9553 M1: an agent-initiated Hub event produces NO toast', () => {
     expect(mockShowToast).not.toHaveBeenCalled()
   })
 
-  // CHECKER-MUST-FIRE. The three assertions above are all negative, and a
-  // negative assertion passes just as happily when the whole signal path is
-  // broken, the listener never registered, or the event was dropped by the
-  // gate. This test proves the harness can still observe the path working:
-  // the same dispatch that must NOT toast MUST still reach the durable bell
-  // row, which is the surface the model keeps. If this goes red, the tests
-  // above are green for the wrong reason and mean nothing.
   it('the same event still reaches the bell -- proving the path is live, not merely silent', async () => {
     const { useHubNotifications } = await import('./useHubNotifications')
     useHubNotifications()

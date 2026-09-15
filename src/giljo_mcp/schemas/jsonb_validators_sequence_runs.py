@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Pydantic validation models for ``SequenceRun`` (sequence_runs) JSONB columns.
-
-Extracted from ``jsonb_validators.py`` (BE-9540 cleanup, mirroring the earlier
-BE-9040 settings extraction) to keep that module under the 800-line file-size
-guardrail. Each model here validates one ``sequence_runs`` JSONB column at the
-``SequenceRunService`` write boundary (BE-6131a).
-
-The names defined here are re-exported from ``jsonb_validators`` for backward
-compatibility, so existing imports keep working unchanged.
-"""
 
 from __future__ import annotations
 
@@ -113,21 +103,18 @@ class SequenceRunReviewedVia(BaseModel):
 
 
 def validate_sequence_run_project_ids(data: list | None) -> list | None:
-    """Validate sequence_runs.project_ids at the service write boundary."""
     if data is None:
         return None
     return SequenceRunProjectIds(items=data).items
 
 
 def validate_sequence_run_reviewed_project_ids(data: list | None) -> list | None:
-    """Validate sequence_runs.reviewed_project_ids at the service write boundary."""
     if data is None:
         return None
     return SequenceRunReviewedProjectIds(items=data).items
 
 
 def validate_sequence_run_reviewed_via(data: dict | None) -> dict | None:
-    """Validate sequence_runs.reviewed_via at the service write boundary."""
     if data is None:
         return None
     if not isinstance(data, dict):
@@ -136,7 +123,6 @@ def validate_sequence_run_reviewed_via(data: dict | None) -> dict | None:
 
 
 def validate_sequence_run_project_statuses(data: dict | None) -> dict | None:
-    """Validate sequence_runs.project_statuses at the service write boundary."""
     if data is None:
         return None
     if not isinstance(data, dict):

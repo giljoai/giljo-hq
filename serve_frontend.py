@@ -5,10 +5,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Simple HTTP server to serve the production-built Vue frontend.
-Serves files from frontend/dist/ directory with SPA routing support.
-"""
 
 import http.server
 import socketserver
@@ -24,10 +20,8 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(DIRECTORY), **kwargs)
 
     def do_GET(self):
-        # Get the file path
         path = self.translate_path(self.path)
 
-        # If the path is a directory or file doesn't exist, serve index.html (SPA routing)
         file_path = Path(path)
         if (file_path.is_dir() or not file_path.exists()) and not self.path.startswith(("/api/", "/ws/")):
             self.path = "/index.html"
@@ -35,7 +29,6 @@ class SPAHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def end_headers(self):
-        # Add CORS headers
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")

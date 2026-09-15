@@ -1,36 +1,11 @@
-// Wording APPROVED as-is by the PM (2026-07-18, FE-9200 review closed).
-// FE-9569 (2026-09-03, operator ruling): D.hint replaced -- the old text
-// asked the user to "come back here when your agent reports done", which is
-// impossible (the user sits at this screen; it refreshes itself). Every
-// other line in this file is unchanged.
-// Written against the REAL update_product_context tool signature
-// (api/endpoints/mcp_tools/_context_tools.py) and the product model /
-// ProductForm tabs (Info / Setup / Tech / Arch / Testing).
-//
-// Prompt-B and Prompt-D share their back half (vision document → populated
-// product card) — one library, two openings. Edition variants keyed by
-// isSaasMode() per the design handoff §5: CE wording references the API-key
-// connection, SaaS references browser sign-in.
-//
-// PROGRESSIVE FILL (design ruling): Prompt-D instructs
-// section-by-section update_product_context calls in the card's own order,
-// consolidated_vision STRICTLY LAST — that final write is the tutorial's
-// done-signal (agentReportsDone seam in TutorialPromptScreen.vue).
 
 import { PRODUCT_NAME } from '@/branding'
 
-/**
- * Screen chrome for the prompt screen — copy VERBATIM from the approved mock.
- */
 export const PROMPT_META = Object.freeze({
   D: Object.freeze({
     eyebrow: 'Existing codebase · one prompt',
     title: 'Let your agent read the repo and build the product card.',
-    sub: 'Copy this into your MCP-connected CLI (Claude Code, Codex, Gemini). No vision document needed — the agent writes one.',
-    // FE-9569 Part 2: the old copy ("...come back here when your agent
-    // reports done") was impossible -- the user sits at this screen while
-    // the agent works, and the screen refreshes ITSELF the moment the
-    // agent's proposal lands. Operator's literal replacement, 2026-09-03.
+    sub: 'Copy this into your MCP-connected CLI (Claude Code, Codex, OpenCode). No vision document needed — the agent writes one.',
     hint: 'Hold on while the agent is working — this screen will refresh when the agent finishes its proposal.',
   }),
   B: Object.freeze({
@@ -41,18 +16,6 @@ export const PROMPT_META = Object.freeze({
   }),
 })
 
-/**
- * Prompt D — "I have an existing codebase". Read-only audit, agent-written
- * vision document, then PROGRESSIVE section-by-section update_product_context
- * calls in the card's own order — the consolidated-vision write comes LAST
- * and is the tutorial's done-signal (design ruling: earlier writes only
- * update the card display, never navigate).
- *
- * @param {object} opts
- * @param {string} opts.productId - UUID of the (empty) product card to populate.
- * @param {boolean} opts.saas - SaaS edition wording toggle.
- * @returns {string}
- */
 export function buildPromptD({ productId = '', saas = false } = {}) {
   const connection = saas
     ? 'You are connected to my GiljoAI workspace (browser sign-in) as an MCP server.'
@@ -75,15 +38,6 @@ My product card is empty. Its product_id is "${productId}".
 4. Work in one pass — no follow-up questions unless something is genuinely blocking. After call 5 succeeds, report done; I will review and activate the product from the GiljoAI dashboard.`
 }
 
-/**
- * Prompt B — "I have an idea — help me shape it". A guided interview for ANY
- * chat tool (no MCP connection required); the output is a vision document the
- * user uploads on the tutorial's upload screen.
- *
- * @param {object} opts
- * @param {boolean} opts.saas - SaaS edition wording toggle.
- * @returns {string}
- */
 export function buildPromptB({ saas = false } = {}) {
   const uploadTarget = saas
     ? `my GiljoAI workspace (${window.location.origin})`

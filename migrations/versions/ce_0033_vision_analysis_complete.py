@@ -3,30 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Add products.vision_analysis_complete flag (BE-5117 Phase 1).
-
-Revision ID: ce_0033_vision_analysis_complete
-Revises: ce_0032_vision_docs_inline_only
-Create Date: 2026-05-27
-
-BE-5117 strips Sumy/NLTK from the product. Per-document and product-aggregate
-summaries are now written exclusively by the AI agent via the
-``update_product_fields`` MCP tool. The new column gates project staging UX
-(BE-5118) — TRUE only when every active vision document and the product
-aggregate both have light + medium summaries populated.
-
-Backfill rule (design decision): legacy products with non-NULL Sumy-era
-consolidated summaries are marked TRUE. New uploads start FALSE until the
-agent writes the summaries.
-
-Idempotency: existence-checks before any DDL — the CE installer reruns
-migrations on every boot.
-
-Downgrade: drops the column (existence-checked).
-
-Edition Scope: Both -- the ``products`` table is a CE model shared by SaaS
-via the CE chain.
-"""
 
 import sqlalchemy as sa
 from alembic import op
@@ -68,7 +44,6 @@ def upgrade() -> None:
             ),
         )
 
-    # Backfill: legacy Sumy-era rows with consolidated summaries are considered complete.
     conn.execute(
         sa.text(
             "UPDATE products SET vision_analysis_complete = TRUE "

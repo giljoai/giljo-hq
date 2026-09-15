@@ -4,36 +4,6 @@
 # [CE] Community Edition.
 # ruff: noqa: T201  # CLI tool: print() to stdout is the conductor-facing interface.
 
-"""
-Codex lane driver - the pinned JSON-RPC client for `codex app-server` lanes.
-
-The conductor drives headless codex lanes by making short-lived WebSocket calls
-against a conductor-owned `codex app-server --listen ws://127.0.0.1:<port>` child:
-start a thread, start a turn, disconnect, then poll until the turn is terminal.
-
-This module exists to PIN three literals that a poll-only driver cannot get wrong
-without hanging silently. All three were established live against codex-cli 0.146.0:
-
-  * ``APPROVAL_POLICY = "never"`` - the stall knob. With any other value the server
-    can emit a server->client approval request; a poll-only driver has no way to
-    answer it and the turn parks at ``item/started`` well past any poll interval.
-  * ``SANDBOX_MODE = "danger-full-access"`` - the capability knob only. A mis-set
-    sandbox degrades to a completed turn carrying a readable failure message, not
-    a hang, so it is not a stall risk - but a lane that cannot write is useless.
-  * ``INCLUDE_TURNS = True`` - ``thread/read`` defaults to ``includeTurns: false``
-    and then reports ``turns: []`` for a turn that has already completed. Thread
-    status is NOT a substitute: it reads ``idle`` seconds into a running turn.
-    Completion is read from the per-turn status.
-
-None of the three is exposed as a command-line flag. Making them configurable
-would reintroduce the exact failure the module exists to prevent.
-
-The driver never answers a server->client request. Anything inbound carrying both
-a ``method`` and an ``id`` is classified as a server->client request and raised as
-a lane fault. This is deliberately a structural rule rather than a list of known
-method names - codex 0.146.0 already defines ten such requests, and a new one in a
-later version must fault the same way rather than hang.
-"""
 
 from __future__ import annotations
 
@@ -55,18 +25,13 @@ from giljo_mcp.port_manager import PortManager
 
 logger = logging.getLogger(__name__)
 
-# --- The pinned literals. Deliberately not configurable. -------------------
 APPROVAL_POLICY = "never"
 SANDBOX_MODE = "danger-full-access"
 INCLUDE_TURNS = True
 
-# Turn statuses that mean "still working". Anything else is treated as terminal
-# so an unrecognised status surfaces instead of polling forever.
 RUNNING_TURN_STATUSES = frozenset({"inProgress", "queued", "pending"})
 SUCCESS_TURN_STATUS = "completed"
 
-# Only loopback literals. A hostname is refused rather than resolved: the driver
-# must never dial a codex engine that is not on this machine.
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1"})
 
 CLIENT_NAME = "giljo-codex-lane"
@@ -78,11 +43,10 @@ SERVER_READY_TIMEOUT = 30.0
 
 
 class CodexLaneFaultError(BaseGiljoError):
-    """A lane-visible fault. Never raised for an ordinary agent-side failure."""
+    pass
 
 
 def _loopback_ws_url(host: str, port: int) -> str:
-    """Build a validated loopback ws:// URL."""
     if host not in LOOPBACK_HOSTS:
         raise CodexLaneFaultError(
             f"Refusing non-loopback host {host!r}. The codex app-server child must bind loopback only.",
@@ -94,11 +58,6 @@ def _loopback_ws_url(host: str, port: int) -> str:
 
 
 def assert_loopback_url(url: str) -> str:
-    """Refuse any URL that is not a loopback ws:// endpoint.
-
-    Enforced rather than documented: a caller that passes ``0.0.0.0`` or a remote
-    address gets a fault, not a connection.
-    """
     parsed = urlparse(url)
     if parsed.scheme != "ws":
         raise CodexLaneFaultError(
@@ -117,7 +76,6 @@ def assert_loopback_url(url: str) -> str:
 
 
 def resolve_codex_binary() -> str:
-    """Locate the codex CLI, or fault with an actionable message."""
     found = shutil.which("codex")
     if not found:
         raise CodexLaneFaultError(
@@ -129,7 +87,6 @@ def resolve_codex_binary() -> str:
 
 
 def _import_websockets():
-    """Import the ws client lazily so a missing extra is a fault, not an ImportError at module load."""
     try:
         import websockets
     except ImportError as exc:
@@ -142,11 +99,6 @@ def _import_websockets():
 
 
 class LaneConnection:
-    """One short-lived JSON-RPC connection to a codex app-server.
-
-    Deliberately dumb: it makes a call, classifies every inbound frame, and closes.
-    It holds no lane state, because the conductor pattern is connect-call-disconnect.
-    """
 
     def __init__(self, url: str):
         self.url = assert_loopback_url(url)
@@ -204,11 +156,6 @@ class LaneConnection:
 
     @staticmethod
     def classify(message: dict) -> str:
-        """Classify one inbound JSON-RPC message.
-
-        A server->client REQUEST carries both a method and an id. That is the whole
-        rule - no list of known method names to keep current.
-        """
         has_method = message.get("method") is not None
         has_id = message.get("id") is not None
         if has_method and has_id:
@@ -220,12 +167,6 @@ class LaneConnection:
         return "unknown"
 
     def _reject_server_request(self, message: dict) -> None:
-        """Surface an unanswered server->client request as a lane fault.
-
-        The driver cannot answer these - answering is an autonomy decision it is not
-        authorised to make - and an unanswered request stalls the turn silently. So
-        it becomes a visible error instead.
-        """
         raise CodexLaneFaultError(
             f"codex app-server sent a server->client request the lane driver cannot answer: "
             f"{message.get('method')!r}. The turn would stall. Check that approvalPolicy is "
@@ -235,7 +176,6 @@ class LaneConnection:
         )
 
     async def call(self, method: str, params: dict | None, timeout: float = DEFAULT_CALL_TIMEOUT) -> dict:
-        """Send a request and return its result, faulting on any server->client request."""
         request_id = await self._send(method, params)
         deadline = time.monotonic() + timeout
         while True:
@@ -282,15 +222,9 @@ def _client_version() -> str:
     return __version__
 
 
-# --- Lane operations -------------------------------------------------------
 
 
 def probe() -> dict:
-    """§6.1 capability probe: is this codex app-server capable?
-
-    Capability, not version parsing - the flag's presence IS the capability, and
-    codex version semantics churn.
-    """
     binary = resolve_codex_binary()
     try:
         completed = subprocess.run(
@@ -331,7 +265,6 @@ def _wait_for_server(host: str, port: int, timeout: float = SERVER_READY_TIMEOUT
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            # create_connection rather than a bare AF_INET socket so ::1 works too.
             with socket.create_connection((host, port), timeout=1.0):
                 return True
         except OSError:
@@ -340,11 +273,6 @@ def _wait_for_server(host: str, port: int, timeout: float = SERVER_READY_TIMEOUT
 
 
 def start_server(port: int | None = None, host: str = "127.0.0.1", cwd: str | None = None) -> dict:
-    """Start a conductor-owned `codex app-server` child bound to loopback.
-
-    The child is detached so it outlives this helper invocation - the conductor owns
-    its lifetime and stops it with ``stop-server``.
-    """
     binary = resolve_codex_binary()
     url = _loopback_ws_url(host, _pick_loopback_port(port))
     resolved_port = urlparse(url).port
@@ -367,8 +295,6 @@ def start_server(port: int | None = None, host: str = "127.0.0.1", cwd: str | No
     )
 
     if not _wait_for_server(host, resolved_port):
-        # Tree, not just the pid: a half-started shim can already have spawned the
-        # binary that holds the port, and terminating the shim alone orphans it.
         _terminate_process_tree(child.pid)
         raise CodexLaneFaultError(
             f"codex app-server did not accept connections on {url} within {SERVER_READY_TIMEOUT:.0f}s.",
@@ -380,11 +306,6 @@ def start_server(port: int | None = None, host: str = "127.0.0.1", cwd: str | No
 
 
 def _listen_url_of(pid: int) -> str | None:
-    """The loopback ws:// address a codex app-server was launched to listen on.
-
-    None unless the process really is an app-server started with an explicit
-    loopback ``--listen``, which is the signature of a driver-owned child.
-    """
     import psutil
 
     try:
@@ -412,18 +333,6 @@ def _listen_url_of(pid: int) -> str | None:
 
 
 def _is_codex_app_server(pid: int, url: str | None = None) -> bool:
-    """Confirm a pid is a codex app-server THIS driver could have started.
-
-    "Looks like codex" is not enough, and getting this wrong is not a small
-    mistake. The Codex desktop app runs its own app-server whose command line
-    also contains both `codex` and `app-server`, so a substring test on those
-    two words returns True for it - and a lane passing that pid would terminate
-    the operator's editor session along with its whole process tree.
-
-    The discriminator is an explicit loopback ``--listen``, which every child
-    this module starts carries and the desktop app does not. When the caller
-    knows the URL it was given, that must match too.
-    """
     listening_on = _listen_url_of(pid)
     if listening_on is None:
         return False
@@ -431,15 +340,6 @@ def _is_codex_app_server(pid: int, url: str | None = None) -> bool:
 
 
 def _terminate_process_tree(pid: int, timeout: float = 10.0) -> dict:
-    """Stop a process and everything it spawned, then verify they are really gone.
-
-    The whole tree, not just the pid, because on Windows `codex` on PATH is a
-    ``codex.CMD`` shim: the launched process is cmd.exe, which spawns node, which
-    spawns the codex binary that actually holds the socket. Terminating only the
-    pid we launched leaves that grandchild listening while reporting a clean stop.
-    Children are collected BEFORE the parent is signalled - once the parent dies
-    the tree links are gone and the orphans are unreachable from this pid.
-    """
     import psutil
 
     try:
@@ -482,12 +382,6 @@ def _terminate_process_tree(pid: int, timeout: float = 10.0) -> dict:
 
 
 def stop_server(pid: int, url: str | None = None, timeout: float = 10.0) -> dict:
-    """Stop a codex app-server child, refusing to signal anything else.
-
-    The pid is verified against its own command line first: a lane must never be
-    able to terminate an unrelated process by passing a stale or wrong pid. Pass
-    the URL start-server returned to narrow that to the exact child you started.
-    """
     if not _is_codex_app_server(pid, url):
         raise CodexLaneFaultError(
             f"pid {pid} is not a loopback-listening `codex app-server` this driver started; refusing to signal it.",
@@ -499,7 +393,6 @@ def stop_server(pid: int, url: str | None = None, timeout: float = 10.0) -> dict
 
 
 async def thread_start(url: str, cwd: str, model: str | None = None) -> dict:
-    """Start a thread with the pinned autonomy literals."""
     params: dict[str, Any] = {
         "cwd": cwd,
         "approvalPolicy": APPROVAL_POLICY,
@@ -527,12 +420,6 @@ async def thread_start(url: str, cwd: str, model: str | None = None) -> dict:
 
 
 async def turn_start(url: str, thread_id: str, prompt: str, model: str | None = None) -> dict:
-    """Start one turn and disconnect immediately - the conductor pattern."""
-    # Autonomy is set once, at thread/start. TurnStartParams accepts its own
-    # approvalPolicy/sandboxPolicy overrides, but those were never exercised live and
-    # sandboxPolicy takes a different enum shape from thread-level sandbox. This wire
-    # shape is byte-identical to the one validated against 0.146.0; a driver that ever
-    # resumes or forks a thread it did not start must re-assert the policy itself.
     params: dict[str, Any] = {
         "threadId": thread_id,
         "input": [{"type": "text", "text": prompt}],
@@ -569,7 +456,6 @@ def _turn_texts(turn: dict) -> list[str]:
 
 
 async def read_turn(url: str, thread_id: str, turn_id: str) -> dict | None:
-    """One `thread/read` with the pinned ``includeTurns``, narrowed to this turn."""
     async with LaneConnection(url) as connection:
         result = await connection.call(
             "thread/read",
@@ -585,11 +471,6 @@ async def poll_turn(
     timeout: float = DEFAULT_POLL_TIMEOUT,
     interval: float = DEFAULT_POLL_INTERVAL,
 ) -> dict:
-    """Poll until this specific turn is terminal.
-
-    Narrowed to ``turn_id`` on purpose: a thread can carry several turns, and
-    "any turn is done" is the wrong question once a thread is reused.
-    """
     started = time.monotonic()
     deadline = started + timeout
     polls = 0
@@ -627,7 +508,6 @@ async def poll_turn(
     )
 
 
-# --- CLI -------------------------------------------------------------------
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tests for task-service Pydantic response models.
-
-Split from test_service_responses.py — covers TaskListResponse, TaskUpdateResult,
-TaskSummary, ConversionResult.
-
-BE-9012d: the message-service models (SendMessageResult, BroadcastResult,
-MessageListResult) and their tests were removed with the bus retirement —
-those response shapes no longer have any producer.
-
-Created: Handover 0731
-"""
 
 import pytest
 from pydantic import ValidationError
@@ -27,13 +15,9 @@ from giljo_mcp.schemas.service_responses import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Task Service Models
-# ---------------------------------------------------------------------------
 
 
 class TestTaskListResponse:
-    """Tests for TaskListResponse model."""
 
     def test_creation_defaults(self):
         result = TaskListResponse()
@@ -51,7 +35,6 @@ class TestTaskListResponse:
         assert result.tasks[0]["title"] == "Task 1"
 
     def test_tasks_default_factory_isolation(self):
-        """Each instance should get its own list."""
         r1 = TaskListResponse()
         r2 = TaskListResponse()
         r1.tasks.append({"id": "t1"})
@@ -68,7 +51,6 @@ class TestTaskListResponse:
 
 
 class TestTaskUpdateResult:
-    """Tests for TaskUpdateResult model."""
 
     def test_creation_with_required_fields(self):
         result = TaskUpdateResult(task_id="task-123")
@@ -104,7 +86,6 @@ class TestTaskUpdateResult:
 
 
 class TestTaskSummary:
-    """Tests for TaskSummary model."""
 
     def test_creation_defaults(self):
         summary = TaskSummary()
@@ -126,7 +107,6 @@ class TestTaskSummary:
         assert summary.by_category["backend"] == 12
 
     def test_dict_default_factory_isolation(self):
-        """Each dict field should have its own instance."""
         s1 = TaskSummary()
         s2 = TaskSummary()
         s1.by_status["pending"] = 5
@@ -144,7 +124,6 @@ class TestTaskSummary:
 
 
 class TestConversionResult:
-    """Tests for ConversionResult model."""
 
     def test_creation_with_required_fields(self):
         result = ConversionResult(
@@ -171,12 +150,6 @@ class TestConversionResult:
     def test_model_dump(self):
         result = ConversionResult(task_id="t", project_id="p", project_name="N")
         dumped = result.model_dump()
-        # BE-9382: project_taxonomy_alias is optional -- the REST convert
-        # endpoint builds its own response and never reads it, so a caller that
-        # omits it still gets an explicit None rather than a missing key.
-        # BE-9415: product_id/product_name join it on the same terms -- the
-        # promotion binds to the task's own product and names it, and a caller
-        # that omits them (the REST convert endpoint) still gets explicit Nones.
         assert dumped == {
             "task_id": "t",
             "project_id": "p",
@@ -187,7 +160,6 @@ class TestConversionResult:
         }
 
     def test_bound_product_round_trips(self):
-        """BE-9415: the MCP promotion path echoes where the project landed."""
         result = ConversionResult(
             task_id="t",
             project_id="p",
@@ -199,7 +171,6 @@ class TestConversionResult:
         assert result.product_name == "Giljo HQ"
 
     def test_taxonomy_alias_round_trips(self):
-        """BE-9382: the MCP promotion path reads the promoted project's serial back."""
         result = ConversionResult(task_id="t", project_id="p", project_name="N", project_taxonomy_alias="0017")
         assert result.project_taxonomy_alias == "0017"
 

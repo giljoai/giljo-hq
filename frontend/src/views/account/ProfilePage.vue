@@ -13,10 +13,6 @@
           class="mb-3"
         />
 
-        <!-- Workspace/Organization + Role (read-only) - Handover 0424o, 0875.
-             CE-only display (FE-9172): hosted SaaS is single-user/account-owner,
-             so the Owner/Admin badges are hidden there. Display only — role
-             logic and guards are unchanged. -->
         <div v-if="isCe" class="mb-4 pa-4 bg-surface-variant rounded" data-test="workspace-role-box">
           <div v-if="userStore.currentOrg" class="d-flex align-center mb-3">
             <v-icon size="small" color="primary" class="mr-2">mdi-office-building</v-icon>
@@ -69,7 +65,6 @@
           :disabled="!!emailPending"
         />
 
-        <!-- SaaS-only: pending email change banner (injected via import.meta.glob) -->
         <div
           v-if="emailPending"
           class="email-pending-banner smooth-border mt-3 pa-3 rounded"
@@ -128,7 +123,6 @@
     </v-card-text>
   </v-card>
 
-  <!-- Password & Security (IMP-5042) — self-service credential rotation -->
   <v-card
     v-if="user"
     variant="flat"
@@ -193,7 +187,6 @@
         </div>
       </v-form>
 
-      <!-- CE only: recovery PIN. Hosted editions use email-based reset, not a PIN. -->
       <template v-if="isCe">
         <v-divider class="my-5" />
         <div class="text-body-large font-weight-medium mb-1">Recovery PIN</div>
@@ -266,8 +259,6 @@ const form = ref({ username: '', first_name: '', last_name: '', email: '' })
 const error = ref('')
 const saving = ref(false)
 
-// IMP-5042: self-service credential rotation.
-// isCe gates the recovery-PIN section (hosted editions use email-based reset).
 const isCe = ref(true)
 const pwFormRef = ref(null)
 const pinFormRef = ref(null)
@@ -295,13 +286,10 @@ const canSubmitPin = computed(
   () => /^[0-9]{4}$/.test(pinForm.value.next) && pinForm.value.next === pinForm.value.confirm,
 )
 
-// SaaS email-change state — null = CE mode or no pending change
-// Populated via import.meta.glob (ADR-004) — CE bundle never ships saas/ code.
-const emailPending = ref(null) // string (pending email) or null
+const emailPending = ref(null)
 const resending = ref(false)
 const cancelling = ref(false)
 
-// SaaS emailChangeApi — loaded lazily in SaaS mode only (ADR-004)
 let emailChangeApi = null
 
 const firstNameRules = [
@@ -333,8 +321,6 @@ onMounted(async () => {
     const isSaas = (status?.mode ?? 'ce') !== 'ce'
     isCe.value = !isSaas
     if (isSaas) {
-      // ADR-004: import.meta.glob keeps SaaS code out of CE bundle.
-      // saas/ is stripped on CE export — loader absent = graceful no-op.
       const loaders = import.meta.glob('@/saas/services/emailChange.js')
       const [loader] = Object.values(loaders)
       if (loader) {
@@ -359,11 +345,6 @@ async function save() {
   const u = userStore.currentUser
   if (!u) return
 
-  // Gate submit on client validation: when the form is invalid (e.g. the
-  // required First Name is empty) show ONLY the friendly inline field error —
-  // do NOT also fire the PUT, which returns 422 and surfaces a redundant raw
-  // "Request failed with status code 422" banner (perf-findings 2026-06-11,
-  // same class as the project-create silent-submit fix).
   if (typeof formRef.value?.validate === 'function') {
     const { valid } = await formRef.value.validate()
     if (!valid) return
@@ -373,12 +354,9 @@ async function save() {
   error.value = ''
 
   const emailChanged = form.value.email !== (u.email || '')
-  // CE mode: email routes through a direct PUT (emailChangeApi is null).
-  // SaaS mode: email routes through verification flow — never include it in the PUT.
   const ceModeEmailChange = emailChanged && !emailChangeApi
 
   try {
-    // Save name fields (and email in CE mode when changed) in a single PUT.
     const payload = {
       first_name: form.value.first_name.trim(),
       last_name: form.value.last_name.trim() || null,
@@ -398,11 +376,9 @@ async function save() {
       }
     }
 
-    // SaaS: route email change through verification flow.
     if (emailChanged && emailChangeApi) {
       const res = await emailChangeApi.request(form.value.email)
       emailPending.value = res?.data?.new_email || form.value.email
-      // Reset email field back to current (unconfirmed) value
       form.value.email = u.email || ''
       showToast({
         message: `Verification link sent to ${emailPending.value}. Check your inbox to confirm.`,
@@ -462,8 +438,6 @@ async function changePassword() {
     })
     pwForm.value = { current: '', next: '', confirm: '' }
     showToast({ message: 'Password changed. Please sign in again.', type: 'success' })
-    // SEC-6001: the server revoked this session on success. Clear local auth and
-    // return to the sign-in screen so the now-invalid cookie can't half-authenticate.
     await userStore.logout()
     router.push('/login')
   } catch (err) {
@@ -483,7 +457,6 @@ async function changePin() {
   changingPin.value = true
   pinError.value = ''
   try {
-    // Self-service PIN set reuses the tenant-scoped recovery_pin write (BE-6003).
     await api.auth.updateUser(u.id, { recovery_pin: pinForm.value.next })
     pinForm.value = { next: '', confirm: '' }
     showToast({ message: 'Recovery PIN updated.', type: 'success' })
@@ -494,8 +467,6 @@ async function changePin() {
   }
 }
 
-// Expose internal state for testing (seam injection — mirrors AccountDeletionConfirm pattern).
-// Tests can set emailChangeApi directly to bypass import.meta.glob loader.
 defineExpose({
   form,
   emailPending,

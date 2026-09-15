@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Prompt generation module - Generate structured prompts for agents and orchestrators.
-
-Exports:
-- generate_serena_instructions: Generate simplified Serena MCP notice (~50 tokens)
-- for_role: Generate role-specific Serena MCP guidance (INF-6007)
-"""
 
 from .serena_instructions import for_role, generate_serena_instructions
 

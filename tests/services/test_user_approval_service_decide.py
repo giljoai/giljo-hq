@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Service-layer tests for ``UserApprovalService.mark_decided`` (BE-5059 Phase B).
-
-Covers the atomicity contract: status flip + decided_* fields + agent resume
-all happen in one transaction, plus the rejection paths (already-decided,
-invalid option_id, cross-tenant).
-"""
 
 from __future__ import annotations
 
@@ -54,8 +48,6 @@ async def approval_seed(db_session, test_tenant_key):
     db_session.add(project)
     await db_session.flush()
 
-    # BE-9054 (a): request_approval is orchestrator-only, so the seed job must be
-    # an orchestrator for create_pending to accept it.
     job = AgentJob(
         job_id=str(uuid4()),
         tenant_key=test_tenant_key,
@@ -113,11 +105,6 @@ async def _create_pending_approval(service, seed, tenant_key):
 async def test_mark_decided_atomic_flip_resume_and_fields(
     approval_service, approval_seed, test_tenant_key, test_user, db_session
 ):
-    """Decide flips status, sets decided_* fields, and resumes the awaiting agent.
-
-    Single transaction: pending->decided + awaiting_user->working + decided_at/by
-    persist together; WebSocket broadcast fires on the existing channel.
-    """
     pending = await _create_pending_approval(approval_service, approval_seed, test_tenant_key)
     assert pending.status == "pending"
 
@@ -199,14 +186,6 @@ async def test_mark_decided_unknown_id_raises_not_found(approval_service, test_t
 async def test_mark_decided_notifies_orchestrator_via_inbox(
     db_manager, db_session, approval_seed, test_tenant_key, test_user
 ):
-    """Regression: decide() must post a Hub message to the awaiting agent's bound
-    thread so the agent learns the chosen option on its next get_thread_history poll.
-
-    Before this fix the gate cleared server-side but the agent had no semantic
-    channel to discover which option the user picked — users were forced to
-    relay the decision verbally in chat. The Hub post is the explicit
-    loop-closure path. BE-9012d: retargeted from the retired bus send_message.
-    """
     ws = MagicMock()
     ws.broadcast_to_tenant = AsyncMock()
     comm = MagicMock()
@@ -249,13 +228,6 @@ async def test_mark_decided_notifies_orchestrator_via_inbox(
 async def test_mark_decided_survives_inbox_delivery_failure(
     db_manager, db_session, approval_seed, test_tenant_key, test_user
 ):
-    """If the Hub-notify hiccups, the decide transaction must still succeed.
-
-    The status flip + WebSocket broadcast have already committed by the time
-    we hit the Hub post; a delivery failure logs a warning but cannot raise
-    (otherwise a transient Hub-service outage would leave the gate visibly
-    cleared in the DB but bubble a 5xx to the user).
-    """
     ws = MagicMock()
     ws.broadcast_to_tenant = AsyncMock()
     comm = MagicMock()
@@ -284,14 +256,6 @@ async def test_mark_decided_survives_inbox_delivery_failure(
 
 @pytest.mark.asyncio
 async def test_mark_decided_restores_pre_approval_status(approval_service, approval_seed, test_tenant_key, db_session):
-    """BE-9054 (b) regression: decide must restore the pre-approval status, not
-    hardcode 'working'.
-
-    An orchestrator that already completed (status='complete') and then requests
-    approval used to be resurrected to 'working' on decide — permanently blocking
-    its own closeout. create_pending records the pre-approval status; mark_decided
-    restores it.
-    """
     execution = approval_seed["execution"]
     execution.status = "complete"
     await db_session.commit()
@@ -318,9 +282,6 @@ async def test_mark_decided_restores_pre_approval_status(approval_service, appro
 async def test_create_pending_ignores_agent_spoofed_pre_approval_status(
     approval_service, approval_seed, test_tenant_key, db_session
 ):
-    """The pre_approval_status context key is server-reserved: an agent-supplied
-    value must be stripped, never trusted (it could smuggle in 'complete' and
-    skip the completion gates on decide)."""
     pending = await approval_service.create_pending(
         tenant_key=test_tenant_key,
         job_id=approval_seed["job"].job_id,
@@ -331,7 +292,6 @@ async def test_create_pending_ignores_agent_spoofed_pre_approval_status(
     )
 
     row = (await db_session.execute(select(UserApproval).where(UserApproval.id == pending.id))).scalar_one()
-    # Pre-approval status was 'working' -> nothing recorded; the spoofed key is gone.
     assert "pre_approval_status" not in (row.context or {})
     assert (row.context or {}).get("note") == "legit payload"
 
@@ -350,8 +310,6 @@ async def test_create_pending_ignores_agent_spoofed_pre_approval_status(
 
 @pytest.mark.asyncio
 async def test_create_pending_rejects_worker_job(approval_service, approval_seed, test_tenant_key, db_session):
-    """BE-9054 (a) service-layer half: a non-orchestrator job is rejected with
-    error_code=ORCHESTRATOR_ONLY_APPROVAL and the execution status is untouched."""
     worker_job = AgentJob(
         job_id=str(uuid4()),
         tenant_key=test_tenant_key,
@@ -396,7 +354,6 @@ async def test_create_pending_rejects_worker_job(approval_service, approval_seed
 async def test_mark_decided_cross_tenant_returns_not_found(
     approval_service, approval_seed, test_tenant_key, db_session
 ):
-    """Cross-tenant attempts must not leak existence (ResourceNotFoundError)."""
     pending = await _create_pending_approval(approval_service, approval_seed, test_tenant_key)
     other_tenant = TenantManager.generate_tenant_key()
 

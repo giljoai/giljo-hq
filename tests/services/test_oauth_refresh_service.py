@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Unit tests for oauth_refresh_service helpers (API-0021e Phase 2).
-
-The full /refresh business contract is exercised at the FastAPI route
-boundary in ``tests/api/test_oauth_refresh.py`` (CLAUDE.md regression-test
-rule: failing-layer is the API). These unit tests cover the small
-deterministic helpers that don't need a DB:
-
-  - ``hash_refresh_token``: deterministic sha256 hex digest
-  - ``new_family_id``: UUIDv4 string shape
-
-Together with the API-level coverage these satisfy the "new service =
-new test" guardrail.
-"""
 
 from __future__ import annotations
 
@@ -31,19 +18,11 @@ def test_hash_refresh_token_is_deterministic() -> None:
 
 
 def test_hash_refresh_token_ascii_digest_unchanged_by_utf8_encode() -> None:
-    """SEC-9227 (L1): switching ascii→utf-8 must not change any stored digest.
-
-    Real refresh tokens are ascii (url-safe base64); utf-8 is a superset of
-    ascii, so the digest is byte-identical — no migration, all existing stored
-    hashes stay valid. This pins that equivalence.
-    """
-    raw = "aGVsbG8td29ybGQtcmVmcmVzaC10b2tlbg"  # ascii, url-safe-base64 shape
+    raw = "aGVsbG8td29ybGQtcmVmcmVzaC10b2tlbg"
     assert hash_refresh_token(raw) == hashlib.sha256(raw.encode("ascii")).hexdigest()
 
 
 def test_hash_refresh_token_accepts_non_ascii_without_raising() -> None:
-    """SEC-9227 (L1): a non-ascii token now hashes cleanly instead of raising
-    UnicodeEncodeError (a 500). ascii.encode would have thrown on this input."""
     raw = "réfresh-töken-ünïcode"
     digest = hash_refresh_token(raw)
     assert digest == hashlib.sha256(raw.encode("utf-8")).hexdigest()

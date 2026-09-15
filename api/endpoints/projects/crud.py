@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Project CRUD Endpoints - Handover 0125
-
-Handles project CRUD operations:
-- POST   / - Create project
-- GET    / - List projects
-- GET    /{project_id} - Get project details
-- PATCH  /{project_id} - Update project
-
-All operations use ProjectService (no direct DB access where possible).
-"""
 
 import logging
 
@@ -40,10 +29,6 @@ from .models import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Dashboard list default: active-lifecycle projects only (excludes
-# completed/cancelled/terminated/deleted). Same set the MCP ``list_projects``
-# tool defaults to (``_mcp_adapter_mixin._build_mcp_project_list`` pushdown) so
-# the two surfaces agree on what "active" means. Sorted for stable SQL IN order.
 _ACTIVE_LIFECYCLE_STATUSES: list[str] = sorted(
     {s.value for s in ProjectStatus} - {s.value for s in LIFECYCLE_FINISHED_STATUSES}
 )
@@ -56,18 +41,6 @@ def _to_project_response(
     agent_count: int | None = None,
     message_count: int | None = None,
 ) -> ProjectResponse:
-    """BE-8000d item 7: the ~20-field ``ProjectResponse`` constructor, shared by
-    every REST endpoint that returns one (was written out at 5 call sites).
-
-    ``proj`` may be the raw ``Project`` ORM row (create_project) or any of the
-    service-layer response shapes (``ProjectDetail`` / ``ProjectData`` /
-    ``ActiveProjectDetail``) -- they all share ``ProjectBase``'s field surface.
-    ``getattr(..., default)`` covers the fields a given shape omits (e.g.
-    ``ProjectData`` has no ``alias``/``staging_status``/counts), matching what
-    each call site already did with its own hardcoded/omitted values.
-    ``agents``/``agent_count``/``message_count`` vary by call site (list
-    endpoint vs. detail vs. post-update) so stay explicit overrides.
-    """
     return ProjectResponse(
         id=str(proj.id),
         alias=getattr(proj, "alias", "") or "",
@@ -83,11 +56,10 @@ def _to_project_response(
         implementation_launched_at=getattr(proj, "implementation_launched_at", None),
         agent_count=agent_count if agent_count is not None else getattr(proj, "agent_count", 0),
         message_count=message_count if message_count is not None else getattr(proj, "message_count", 0),
-        execution_mode=proj.execution_mode,  # NULL-state: report real mode (None until user picks); no fabricated default
+        execution_mode=proj.execution_mode,
         auto_checkin_enabled=getattr(proj, "auto_checkin_enabled", False),
         auto_checkin_interval=getattr(proj, "auto_checkin_interval", 10),
         agents=agents if agents is not None else [],
-        # Handover 0440a/0440c: taxonomy fields + nested type info
         project_type_id=proj.project_type_id,
         project_type=proj.project_type,
         series_number=proj.series_number,
@@ -123,10 +95,6 @@ async def create_project(
     """
     logger.debug("User %s creating project: %s", sanitize(current_user.username), sanitize(project.name))
 
-    # FE-5073 / BE-5122 follow-up: when the resolved project type is CTX, render
-    # the mission server-side from the shared bootstrap helper (same one the MCP
-    # path calls). For non-CTX project types bootstrap_template_vars is silently
-    # ignored, keeping the REST contract forgiving.
     mission = project.mission
     if project.project_type_id and project.bootstrap_template_vars is not None:
         resolved_type = await project_service.get_project_type_by_id(
@@ -140,7 +108,6 @@ async def create_project(
                 bootstrap_template_vars=project.bootstrap_template_vars,
             )
 
-    # Create project via ProjectService (raises exceptions on error - Handover 0730b)
     created_project = await project_service.create_project(
         name=project.name,
         mission=mission,
@@ -148,7 +115,6 @@ async def create_project(
         product_id=project.product_id,
         tenant_key=current_user.tenant_key,
         status=project.status,
-        # Handover 0440a: Pass taxonomy fields
         project_type_id=project.project_type_id,
         series_number=project.series_number,
         subseries=project.subseries,
@@ -156,7 +122,6 @@ async def create_project(
 
     logger.info("Created project %s for tenant %s", created_project.id, sanitize(current_user.tenant_key))
 
-    # Build response
     return _to_project_response(created_project, agents=[], agent_count=0, message_count=0)
 
 
@@ -276,9 +241,6 @@ async def list_projects(
         sanitize(str(hidden_only)),
     )
 
-    # BE-6076: the multi-status `statuses` param (dashboard Status multi-select)
-    # wins over the legacy single `status_filter` and the include_completed
-    # default. Absent (None) -> prior single/lifecycle-default behavior intact.
     if statuses:
         effective_status: str | list[str] | None = statuses
     elif status_filter is not None:
@@ -288,8 +250,6 @@ async def list_projects(
     else:
         effective_status = _ACTIVE_LIFECYCLE_STATUSES
 
-    # BE-6078: hidden is a SEPARATE axis from status. hidden_only wins over
-    # include_hidden; default excludes hidden at the SQL layer.
     if hidden_only:
         hidden_filter: bool | None = True
     elif include_hidden:
@@ -297,12 +257,6 @@ async def list_projects(
     else:
         hidden_filter = False
 
-    # List projects via ProjectService (raises exceptions on error). The
-    # active-lifecycle default pushes its status set down through the existing
-    # repo IN-clause path (no parallel query). include_cancelled only matters
-    # on the bare-tenant (status=None) branch the show-all path takes.
-    # BE-6076: search/sort/limit/offset are opt-in. Default (none passed) ->
-    # byte-compatible with the pre-BE-6076 bare list response.
     projects = await project_service.list_projects(
         status=effective_status,
         tenant_key=current_user.tenant_key,
@@ -316,11 +270,6 @@ async def list_projects(
         offset=offset,
     )
 
-    # BE-6076: emit the FILTERED total for v-data-table :items-length via the
-    # X-Total-Count header (body stays the bare list -> backward-compatible).
-    # Default (non-paginated) path: total == rows returned, so skip the extra
-    # COUNT query — one round-trip, unchanged from before. Paginated path: run
-    # ONE matching COUNT (identical WHERE) so the total reflects the filtered set.
     if limit is not None or offset is not None:
         total = await project_service.count_projects(
             status=effective_status,
@@ -336,8 +285,6 @@ async def list_projects(
 
     logger.info(f"Found {len(projects)} projects for tenant {current_user.tenant_key}")
 
-    # Convert to thin list-wire models (IMP-1002: mission/description omitted —
-    # fetched lazily on row-open via the single-project detail endpoint).
     return [
         ProjectListResponse(
             id=proj.id,
@@ -348,23 +295,14 @@ async def list_projects(
             product_id=proj.product_id,
             created_at=proj.created_at,
             updated_at=proj.updated_at,
-            # BE-6078: emit the real completion timestamp (un-hardcoded) so the
-            # Completed column + sort are accurate now that finished projects are
-            # listable. ProjectListItem.completed_at is an isoformat str|None.
             completed_at=proj.completed_at,
-            # FE-6061: emit the real timestamp so the frontend store can
-            # correctly derive implementationLaunched on the list wire.
-            # Hardcoding None here caused setProject to clobber the
-            # WS-set implementationLaunched=true, unlocking a Re-Stage
-            # button on projects that had already launched implementation.
             implementation_launched_at=proj.implementation_launched_at,
             agent_count=0,
             message_count=0,
             agents=[],
-            execution_mode=proj.execution_mode,  # NULL-state: report real mode, not a hardcoded default
-            # Handover 0440a: Taxonomy fields
+            execution_mode=proj.execution_mode,
             project_type_id=proj.project_type_id,
-            project_type=proj.project_type,  # Handover 0440c: Nested type info
+            project_type=proj.project_type,
             series_number=proj.series_number,
             subseries=proj.subseries,
             taxonomy_alias=proj.taxonomy_alias,
@@ -402,16 +340,12 @@ async def get_deleted_projects(
     """
     logger.debug(f"User {sanitize(current_user.username)} listing deleted projects (product={sanitize(product_id)})")
 
-    # List deleted projects via ProjectService (raises exceptions on error)
-    # SECURITY: Explicit tenant_key prevents cross-tenant data leak
     projects = await project_service.list_projects(
         status="deleted", tenant_key=current_user.tenant_key, product_id=product_id
     )
 
     logger.info(f"Found {len(projects)} deleted projects for tenant {current_user.tenant_key}")
 
-    # Convert to thin list-wire models (IMP-1002: mission/description omitted —
-    # the deleted list mirrors the main list shape).
     return [
         ProjectListResponse(
             id=proj.id,
@@ -422,17 +356,14 @@ async def get_deleted_projects(
             product_id=proj.product_id,
             created_at=proj.created_at,
             updated_at=proj.updated_at,
-            # BE-6078: emit the real completion timestamp on the deleted list too.
             completed_at=proj.completed_at,
-            # FE-6061: emit the real timestamp on the deleted list too (mirrors main list fix).
             implementation_launched_at=proj.implementation_launched_at,
             agent_count=0,
             message_count=0,
-            execution_mode=proj.execution_mode,  # NULL-state: report real mode, not a hardcoded default
+            execution_mode=proj.execution_mode,
             agents=[],
-            # Handover 0440a: Taxonomy fields
             project_type_id=proj.project_type_id,
-            project_type=proj.project_type,  # Handover 0440c: Nested type info
+            project_type=proj.project_type,
             series_number=proj.series_number,
             subseries=proj.subseries,
             taxonomy_alias=proj.taxonomy_alias,
@@ -472,7 +403,6 @@ async def get_active_project(
     """
     logger.debug(f"User {current_user.username} fetching active project (product={sanitize(str(product_id))})")
 
-    # Get active projects via ProjectService (raises exceptions on error, empty list if none active)
     projects = await project_service.query.get_active_projects(product_id=product_id)
 
     if not projects:
@@ -481,8 +411,6 @@ async def get_active_project(
 
     logger.info(f"Retrieved {len(projects)} active project(s) for tenant {current_user.tenant_key}")
 
-    # NOTE: proj.deleted_at is not a ProjectResponse field (Pydantic v2 default
-    # extra="ignore" already made passing it here a silent no-op).
     return [_to_project_response(proj) for proj in projects]
 
 
@@ -508,12 +436,10 @@ async def get_project(
     """
     logger.debug("User %s getting project %s", sanitize(current_user.username), sanitize(project_id))
 
-    # Get project via ProjectService (raises exceptions on error)
     proj = await project_service.get_project(project_id=project_id, tenant_key=current_user.tenant_key)
 
     logger.info(f"Retrieved project {sanitize(project_id)} for tenant {sanitize(current_user.tenant_key)}")
 
-    # Production-grade: Use agents from service response (not hardcoded empty array)
     agents_from_service = proj.agents
 
     return _to_project_response(
@@ -543,7 +469,6 @@ async def get_project_review(
     """
     logger.debug("User %s getting project review %s", sanitize(current_user.username), sanitize(project_id))
 
-    # Get base project data
     proj = await project_service.get_project(project_id=project_id, tenant_key=current_user.tenant_key)
     agents_from_service = proj.agents
 
@@ -551,7 +476,6 @@ async def get_project_review(
         proj, agents=agents_from_service, agent_count=proj.agent_count or len(agents_from_service)
     )
 
-    # Fetch agent job details and memory entries
     agent_details = await project_service.query.get_project_agent_details(
         project_id=project_id, tenant_key=current_user.tenant_key
     )
@@ -594,17 +518,14 @@ async def update_project(
     """
     logger.debug("User %s updating project %s", sanitize(current_user.username), sanitize(project_id))
 
-    # Convert updates to dict, excluding unset fields
     update_dict = updates.dict(exclude_unset=True)
 
     if not update_dict:
-        # No fields to update, just return current project (raises exceptions on error)
         detail = await project_service.get_project(project_id=project_id, tenant_key=current_user.tenant_key)
         response = _to_project_response(
             detail, agents=[], agent_count=detail.agent_count, message_count=detail.message_count
         )
     else:
-        # Update via ProjectService (raises exceptions on error, returns ProjectData)
         proj = await project_service.update_project(project_id=project_id, updates=update_dict)
         response = _to_project_response(proj, agents=[], agent_count=0, message_count=0)
 

@@ -3,28 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6184/BE-9440: direct unit tests for the project-less conductor minter helpers.
-
-``conductor_job_minter`` mints the dedicated, project-less chain conductor's
-AgentJob + AgentExecution (the conductor owns no project). Regression at the
-helper layer:
-
-1. test_mint_conductor_job_creates_projectless_orchestrator
-   mint_conductor_job inserts an orchestrator AgentJob with project_id IS NULL +
-   its AgentExecution, and returns the {agent_id, job_id, execution_id} identity.
-2. test_projectless_conductor_staging_directive_shape
-   the staging directive is the STOP-shaped USE_RUNTIME_MISSION payload (never a
-   misleading 404), pointing the conductor at get_job_mission.
-3. test_broadcast_conductor_created_emits_agent_created
-   BE-9440 Phase 1: the mint previously broadcast nothing; broadcast_conductor_created
-   now emits agent:created with project_id=None (conductor is project-less) and the
-   minted identity.
-4. test_broadcast_conductor_created_noop_without_websocket_manager
-   no websocket_manager injected -> no-op, never raises (mirrors every other
-   agent:created emitter's fire-and-forget contract).
-
-Parallel-safe: db_session fixture (TransactionalTestContext). Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -128,8 +106,6 @@ async def test_broadcast_conductor_created_emits_agent_created() -> None:
 
 @pytest.mark.asyncio
 async def test_broadcast_conductor_created_noop_without_websocket_manager() -> None:
-    # Must never raise when no websocket_manager is injected (mirrors every other
-    # agent:created emitter's fire-and-forget contract).
     await broadcast_conductor_created(
         None,
         tenant_key="tenant-1",

@@ -1,9 +1,3 @@
-/**
- * WelcomeQuickGrid.spec.js — FE-6006 unit 3a
- *
- * Tests quick-grid card rendering and click behavior.
- * Edition scope: CE
- */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'

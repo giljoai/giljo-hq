@@ -1,22 +1,3 @@
-/**
- * useProjectDeletion Composable
- *
- * Owns the destructive project-lifecycle workflow extracted from ProjectsView
- * (INF-6055, to keep that view under the 800-line guardrail): soft-delete,
- * cancel, restore, and permanent purge (single + all). A cohesive group — every
- * function here removes or unwinds a project — mirroring the existing
- * useProjectFilters / useProjectCloseout / useProjectStaging split.
- *
- * Confirmation-dialog visibility refs and the "in-flight purge" flags live here;
- * the view binds them to its BaseDialog confirmation modals. The view still owns
- * the Deleted-Projects list dialog (`showDeletedDialog`) and the page re-fetch
- * (`reloadProjects`), both passed in, since those are shared with non-deletion
- * concerns.
- *
- * Behavior is byte-for-byte the prior in-view implementation; only the location
- * changed. Functions stay top-level setup bindings in the view (re-destructured),
- * so `wrapper.vm.<fn>` test access is preserved.
- */
 import { ref } from 'vue'
 import { useProjectStore } from '@/stores/projects'
 import { useNotificationStore } from '@/stores/notifications'
@@ -34,7 +15,6 @@ export function useProjectDeletion({ showDeletedDialog, reloadProjects }) {
   const notificationStore = useNotificationStore()
   const { showToast } = useToast()
 
-  // Confirmation-dialog visibility + target state
   const showDeleteDialog = ref(false)
   const projectToDelete = ref(null)
   const projectToCancel = ref(null)
@@ -43,7 +23,6 @@ export function useProjectDeletion({ showDeletedDialog, reloadProjects }) {
   const showPurgeSingleDialog = ref(false)
   const showPurgeAllDialog = ref(false)
 
-  // In-flight purge guards
   const purgingProjectId = ref(null)
   const purgingAllDeleted = ref(false)
 

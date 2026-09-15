@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-9274 Workstream A: read-only tenant-scoped credential-status aggregation.
-
-``get_credential_status(session, tenant_key)`` computes, purely by querying the
-EXISTING ``api_keys`` + ``oauth_refresh_tokens`` tables (no new table, no
-migration), whether the current tenant has durable connection credentials:
-
-- has_valid_api_key: >=1 active, non-expired api_keys row for the tenant.
-- has_valid_oauth: >=1 non-revoked, non-expired oauth_refresh_tokens row.
-- has_expired_oauth: oauth_refresh_tokens rows exist for the tenant, but NONE
-  of them are valid (all revoked and/or expired).
-
-DB-touching: TransactionalTestContext (``db_session``, rolled back at
-teardown), no module-level mutable state, random per-test tenant/user ids
--- parallel-safe under pytest-xdist -n auto.
-
-Edition Scope: Both.
-"""
 
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -37,16 +20,11 @@ pytestmark = pytest.mark.asyncio
 
 
 async def _get_status(session, tenant_key: str):
-    """Call get_credential_status with the session's ambient tenant context
-    stamped -- production traffic gets this for free from ``get_db_session``
-    (which stamps ``session.info["tenant_key"]`` from the request), but the
-    bare TransactionalTestContext session here has no ambient tenant set."""
     with tenant_session_context(session, tenant_key):
         return await get_credential_status(session, tenant_key)
 
 
 async def _create_user(session, tenant_key: str) -> User:
-    """Minimal User row -- FK target for APIKey.user_id / OAuthRefreshToken.user_id."""
     unique_id = uuid4().hex[:8]
     user = User(
         id=str(uuid4()),
@@ -169,7 +147,6 @@ class TestCredentialStatusOAuth:
     async def test_only_revoked_and_expired_rows_sets_expired_flag(self, db_session):
         tenant_key = f"tk_{uuid4().hex[:12]}"
         user = await _create_user(db_session, tenant_key)
-        # Revoked but not yet time-expired.
         await _create_oauth_token(
             db_session,
             tenant_key=tenant_key,
@@ -177,7 +154,6 @@ class TestCredentialStatusOAuth:
             revoked=True,
             expires_at=datetime.now(UTC) + timedelta(days=30),
         )
-        # Not revoked, but time-expired.
         await _create_oauth_token(
             db_session,
             tenant_key=tenant_key,
@@ -191,7 +167,6 @@ class TestCredentialStatusOAuth:
         assert result.has_expired_oauth is True
 
     async def test_one_valid_among_expired_rows_is_valid_not_expired(self, db_session):
-        """A mix of dead + live rows must report the LIVE state, not the dead one."""
         tenant_key = f"tk_{uuid4().hex[:12]}"
         user = await _create_user(db_session, tenant_key)
         await _create_oauth_token(
@@ -240,11 +215,6 @@ class TestCredentialStatusTenantIsolation:
 
 
 class TestCredentialStatusEndpointBoundary:
-    """Drives ``GET /api/connect/credential-status``'s route function directly
-    (not the service) -- proves the FastAPI wrapper actually threads
-    ``current_user.tenant_key`` into the service call and returns the typed
-    ``CredentialStatusResult``, without the full ASGI/JWT-cookie stack a live
-    HTTP round-trip would need."""
 
     async def test_route_reflects_seeded_api_key_for_authenticated_tenant(self, db_session):
         from api.endpoints.connect import get_connect_credential_status

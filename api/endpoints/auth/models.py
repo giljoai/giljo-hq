@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Pydantic request/response models for the auth endpoints.
-
-Extracted verbatim from api/endpoints/auth.py (BE-6042f route-group split).
-Field names, validators, and defaults are unchanged — these models define the
-public request/response contract of the /api/auth surface.
-"""
 
 from typing import Literal
 
@@ -22,7 +16,7 @@ class LoginRequest(BaseModel):
     """Login request with username/email identifier and password."""
 
     username: str = Field(..., min_length=3, max_length=255)
-    password: str = Field(..., min_length=1)  # Allow default "admin" password (5 chars)
+    password: str = Field(..., min_length=1)
 
 
 class LoginResponse(BaseModel):
@@ -32,7 +26,7 @@ class LoginResponse(BaseModel):
     username: str
     role: str
     tenant_key: str
-    password_change_required: bool | None = None  # v3.0 Unified: UX improvement
+    password_change_required: bool | None = None
 
 
 class LogoutResponse(BaseModel):
@@ -49,26 +43,24 @@ class UserProfileResponse(BaseModel):
     email: str | None
     first_name: str | None = None
     last_name: str | None = None
-    # full_name retained for one release as a derived display field.
     full_name: str | None
     role: str
     tenant_key: str
     is_active: bool
     created_at: str
     last_login: str | None
-    password_change_required: bool | None = None  # v3.0 Unified: Indicates default password must be changed
-    org_id: str | None = None  # Handover 0424h: User's organization ID
-    org_name: str | None = None  # Handover 0424h: User's organization name
-    org_role: str | None = None  # Handover 0424h: User's role in organization
-    setup_complete: bool = False  # Handover 0855a: Setup wizard completed
-    setup_selected_tools: list[str] | None = None  # Handover 0855a: Selected AI coding agents
-    setup_step_completed: int = 0  # Handover 0855a: Last completed wizard step
-    learning_complete: bool = False  # How to Use guide completed
-    learning_beat: int | None = None  # BE-9201: tutorial re-entry beat (1-6)
-    router_choice: str | None = None  # BE-9201: tutorial router door (A|B|C|D)
+    password_change_required: bool | None = None
+    org_id: str | None = None
+    org_name: str | None = None
+    org_role: str | None = None
+    setup_complete: bool = False
+    setup_selected_tools: list[str] | None = None
+    setup_step_completed: int = 0
+    learning_complete: bool = False
+    learning_beat: int | None = None
+    router_choice: str | None = None
 
 
-# 0371: Removed UserListResponse - was only used by duplicate /users endpoint
 
 
 class APIKeyResponse(BaseModel):
@@ -99,11 +91,6 @@ class SetupStateUpdate(BaseModel):
     setup_step_completed: int | None = Field(None, ge=0, le=4)
     setup_complete: bool | None = None
     learning_complete: bool | None = None
-    # BE-9201: onboarding-tutorial re-entry state (companion FE-9200).
-    # learning_beat = last beat reached (the tutorial has 6 rail stops);
-    # router_choice = which router door was picked (drives the bootstrap-card
-    # spotlight). Older frontends simply never send them (Pydantic leaves
-    # absent fields None, and this model ignores unknown extras by default).
     learning_beat: int | None = Field(None, ge=1, le=6)
     router_choice: Literal["A", "B", "C", "D"] | None = None
 
@@ -113,7 +100,7 @@ class APIKeyCreateResponse(BaseModel):
 
     id: str
     name: str
-    api_key: str  # Plaintext key - only shown once!
+    api_key: str
     key_prefix: str
     message: str
     expires_at: str | None
@@ -174,7 +161,6 @@ class RegisterUserResponse(BaseModel):
     email: str | None
     first_name: str | None = None
     last_name: str | None = None
-    # full_name retained for one release as a derived/legacy display field.
     full_name: str | None = None
     role: str
     tenant_key: str

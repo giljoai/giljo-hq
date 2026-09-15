@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""REST adapter for the Agent Message Hub (BE-6054ef).
-
-Thin shim over CommThreadService — no business logic here. Registration:
-  prefix="/api/v1/threads", tags=["comm-threads"]
-
-WS broadcasts are best-effort (post + baton mutations only). A WS failure
-NEVER turns a successful DB write into a 500 — see _comm_ws helpers.
-"""
 
 from __future__ import annotations
 
@@ -35,15 +27,11 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Max content length accepted from the UI (mirrors MCP_MESSAGE_MAX on the tool path).
 _CONTENT_MAX = 20_000
 _SUBJECT_MAX = 255
 _ID_MAX = 64
 
 
-# ---------------------------------------------------------------------------
-# Request models
-# ---------------------------------------------------------------------------
 
 
 class CreateThreadRequest(BaseModel):
@@ -79,9 +67,6 @@ class PostToThreadRequest(BaseModel):
     set_status: Literal["open", "active", "resolved", "closed"] | None = None
     requires_action: bool = False
     loop_directive: bool = False
-    # FE-6140: auto-check-in cadence (minutes) carried on a loop_directive post.
-    # Round-trips FE -> backend -> persisted; surfaced on the poll responses. Bounds
-    # mirror the service (1..1440); the FE slider stays within 5..60.
     loop_interval_minutes: int | None = Field(None, ge=1, le=1440)
     priority: str = Field("normal", max_length=20)
 
@@ -90,9 +75,6 @@ class PassBatonRequest(BaseModel):
     to: str = Field(..., min_length=1, max_length=_ID_MAX)
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.get("")
@@ -125,9 +107,6 @@ async def list_threads(
         project_id=project_id,
         limit=limit,
         before_id=before_id,
-        # BE-9289b: the dashboard is a card surface, so it gets the enriched payload —
-        # project_name, participants, last_message and a per-viewer unread flag — in one
-        # extra round trip instead of the follow-up call per thread it used to make.
         viewer_id=current_user.id,
         tenant_key=current_user.tenant_key,
     )
@@ -331,22 +310,11 @@ async def post_to_thread(
         loop_interval_minutes=body.loop_interval_minutes,
         priority=body.priority,
         user_id=current_user.id,
-        # BE-9379: the dashboard poster IS the authenticated human — say so explicitly.
-        # The service no longer infers user attribution from a bare user_id.
         as_user=True,
         tenant_key=current_user.tenant_key,
     )
-    # BE-9292a-F1 / BE-9560: this route now forwards a baton on every directed reply,
-    # so a directed post naming a display label (or any unreachable target) is
-    # declined -- and a rejection carries no message_id, so returning early is what
-    # keeps `result["message_id"]` honest instead of turning a clean refusal into a 500.
     if result.get("success") is False:
         return result
-    # BE-9012b (D5): a human posting a DIRECTED, action-required post to a
-    # project-bound thread SHOULD wake the completed agent (that's the feature) —
-    # the same relocated auto-block the MCP wrapper runs. Town-square / informational
-    # / broadcast posts are inert (guarded inside auto_block_for_thread_post). Best-
-    # effort: never unwind the already-committed post if reactivation hiccups.
     if body.requires_action and body.to_participant:
         try:
             outcome = await routing_service.auto_block_for_thread_post(
@@ -356,9 +324,6 @@ async def post_to_thread(
                 requires_action=body.requires_action,
                 tenant_key=current_user.tenant_key,
             )
-            # BE-9247: surface the forward-on-send outcome in the SAME response so the
-            # sender learns immediately (e.g. "Tester was closed -- your message was
-            # forwarded to the orchestrator"), rather than discarding it silently.
             if outcome.notice:
                 result["forward_notice"] = outcome.notice
         except Exception:  # noqa: BLE001 - reactivation is a follow-on side-effect; post stays authoritative
@@ -378,22 +343,14 @@ async def post_to_thread(
             message_id=result["message_id"],
             from_agent_id=current_user.id,
             from_display_name=result.get("from_display_name", current_user.display_name),
-            from_kind=result.get("from_kind", "user"),  # BE-9289a (REST post = the operator)
+            from_kind=result.get("from_kind", "user"),
             content=body.content,
             message_type="direct" if body.to_participant else "broadcast",
             priority=body.priority,
             requires_action=body.requires_action,
             project_id=None,
-            # FE-9546: the service-RESOLVED addressee, not the raw request field — an
-            # agent/user can address the operator via the "user" alias, which only the
-            # service can expand to the real id (see comm_thread_service.post_to_thread).
             to_participant=result.get("to_participant"),
         )
-        # BE-9560: parity with the MCP wrapper's baton broadcast (fires on
-        # baton_passed there) -- so every OTHER open tab/viewer on this tenant sees
-        # the your-turn banner move live, not just on their next reload. One history
-        # read covers either trigger; each still emits its own update_type, matching
-        # the MCP boundary's rename+baton pattern of separate events for separate facts.
         baton_changed = bool(result.get("baton_passed") or result.get("baton_cleared"))
         if body.set_status or baton_changed:
             history = await service.get_thread_history(thread_id=thread_id, tenant_key=current_user.tenant_key)
@@ -529,13 +486,9 @@ async def pass_baton(
     result = await service.pass_baton(
         thread_id=thread_id,
         to=body.to,
-        # BE-9296a: on this path the hander is the authenticated operator, so their
-        # identity comes from the session rather than being declared.
         from_agent=current_user.id,
         tenant_key=current_user.tenant_key,
     )
-    # BE-9292a: an undeliverable target is refused and the owner is unchanged —
-    # broadcasting here would tell the Hub the baton had moved when it had not.
     if result.get("success") is False:
         return result
     from api.app_state import state
@@ -551,7 +504,6 @@ async def pass_baton(
             status=t["status"],
             next_action_owner=result.get("next_action_owner"),
             update_type="baton",
-            # BE-9296a: name the hander so the recipient's alert says who is waiting.
             from_display_name=result.get("from_display_name") or current_user.display_name,
             from_kind=result.get("from_kind") or "user",
         )

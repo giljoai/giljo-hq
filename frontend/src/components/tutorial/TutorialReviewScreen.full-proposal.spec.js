@@ -1,23 +1,3 @@
-/**
- * TutorialReviewScreen.full-proposal.spec.js
- *
- * The review screen is the approval moment: "Activating makes it the brief
- * every agent reads." Two defects made that approval partially blind:
- *
- *  1. The description was hard-sliced at 220 chars in code (the old
- *     descriptionExcerpt computed) — the full text never reached the DOM, so
- *     there was nothing to scroll and no way to read the rest.
- *  2. Only name + a few tech chips were rendered. Architecture, standards,
- *     testing, infra/dev-tools/platforms — most of what the agent proposes —
- *     were activated sight-unseen.
- *
- * This spec pins the fix: the FULL description renders, every category section
- * is present (accordion rows with honest one-line summaries), and an empty
- * field shows a muted "Not provided" instead of disappearing — a thin proposal
- * must look thin at the approval moment.
- *
- * Edition scope: Both (shared frontend/src).
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
@@ -28,9 +8,6 @@ const h = vi.hoisted(() => ({
   toggleProductActivation: vi.fn(async () => {}),
 }))
 
-// FE-9569: a REAL Vue ref, so the component's `computed(() =>
-// productStore.getProductById(id))` tracks it the same way it tracks the
-// genuine store's own computed-of-function getter (stores/products.js:55).
 const cache = ref({})
 
 vi.mock('@/stores/products', () => ({
@@ -63,8 +40,6 @@ const stubs = {
   },
 }
 
-// 400+ chars: comfortably past the old 220-char slice, so a regression to any
-// excerpt length in that range turns this red.
 const LONG_DESCRIPTION =
   'TrailKit is a trip-planning workspace for hiking clubs: members propose routes, ' +
   'attach GPX tracks and photos, and the club votes on the next outing. ' +
@@ -173,8 +148,6 @@ describe('category sections (the sight-unseen fix)', () => {
     expect(wrapper.find('[data-testid="tutorial-section-toggle-testing"]').text()).toContain(
       'TDD · pytest, Vitest · 80% coverage target'
     )
-    // 6 non-empty groups (languages, frontend, backend, databases, dev tools,
-    // platforms) — infrastructure is empty and does not count. 2+3+1+1+2+2 = 11.
     expect(wrapper.find('[data-testid="tutorial-section-toggle-tech"]').text()).toContain('6 groups · 11 entries')
   })
 
@@ -182,7 +155,6 @@ describe('category sections (the sight-unseen fix)', () => {
     const wrapper = await mountScreen(fullRow())
     await wrapper.find('[data-testid="tutorial-section-toggle-architecture"]').trigger('click')
     const fields = wrapper.find('[data-testid="tutorial-section-fields-architecture"]')
-    // architecture_notes is empty in the fixture
     expect(fields.text()).toContain('Not provided')
   })
 

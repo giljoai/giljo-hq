@@ -1,11 +1,3 @@
-/**
- * commHubStore.fe9012c.spec.js — FE-9012c (D2)
- *
- * The two-tab Hub split derives from ONE thread list: "Project comms" (threads
- * with a project_id) vs "Town square" (standalone). Per-tab unread badges sum the
- * (a) cursor-derived per-thread unread counts. Plus: normalizeMessage passes the
- * D3/D4 recipient junction state through unchanged.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useCommHubStore } from './commHubStore'
@@ -26,7 +18,6 @@ describe('commHubStore — two-tab split + unread badges (FE-9012c)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     commHub = useCommHubStore()
-    // Two project-bound threads, one standalone.
     commHub._testSeedThread({ thread_id: 'p1', project_id: 'projA', updated_at: '2026-07-03T00:00:03Z' })
     commHub._testSeedThread({ thread_id: 'p2', project_id: 'projB', updated_at: '2026-07-03T00:00:02Z' })
     commHub._testSeedThread({ thread_id: 't1', project_id: null, updated_at: '2026-07-03T00:00:01Z' })
@@ -46,15 +37,14 @@ describe('commHubStore — two-tab split + unread badges (FE-9012c)', () => {
   })
 
   it('per-tab unread totals sum only that tab’s threads', () => {
-    // Unread arrives via the WS handler on non-selected threads.
     commHub.selectedThreadId = 'unrelated'
     commHub.handleThreadMessage({ thread_id: 'p1', message_id: 'm1', content: 'a' })
     commHub.handleThreadMessage({ thread_id: 'p1', message_id: 'm2', content: 'b' })
     commHub.handleThreadMessage({ thread_id: 'p2', message_id: 'm3', content: 'c' })
     commHub.handleThreadMessage({ thread_id: 't1', message_id: 'm4', content: 'd' })
 
-    expect(commHub.projectUnreadTotal).toBe(3) // p1(2) + p2(1)
-    expect(commHub.townSquareUnreadTotal).toBe(1) // t1(1)
+    expect(commHub.projectUnreadTotal).toBe(3)
+    expect(commHub.townSquareUnreadTotal).toBe(1)
   })
 
   it('normalizeMessage passes D3/D4 recipient junction state through, null when absent', () => {
@@ -76,16 +66,10 @@ describe('commHubStore — two-tab split + unread badges (FE-9012c)', () => {
 
     expect(withState.recipients).toEqual(['beta'])
     expect(withState.pending_for).toEqual(['beta'])
-    // Absent junction state is null (not []), so a reader can tell "not loaded".
     expect(noState.recipients).toBeNull()
     expect(noState.pending_for).toBeNull()
   })
 
-  // FE-9289c: the waiting/read/sent filter row was the ONLY thing that rendered the
-  // junction state, and DoD 7 deletes it — so the Hub stops asking for it. The service
-  // parameter and REST query param survive (a clean opt-in read a future caller may
-  // want); this pins that the HUB does not opt in, because re-adding the flag would
-  // silently reintroduce a per-thread-open payload that nothing displays.
   it('loadThread does NOT request recipient state — nothing renders it any more', async () => {
     const api = (await import('@/services/api')).default
     api.threads.history.mockClear()
@@ -97,14 +81,6 @@ describe('commHubStore — two-tab split + unread badges (FE-9012c)', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// TSK-9300 / TSK-9297 — a 200 does not mean it worked.
-//
-// BE-9292a gave the post and baton routes a structured DECLINE returned at HTTP 200
-// (`{success: false, error, hint, ...}`), so axios does not throw. These calls were
-// written when a 200 on these routes always DID mean success, and they trusted it —
-// which turned a declined post into "Message sent." with the operator's text wiped.
-// ---------------------------------------------------------------------------
 
 const POST_REFUSAL = {
   success: false,
@@ -151,9 +127,6 @@ describe('commHubStore refuses to treat a 200 refusal as success (TSK-9300 / TSK
 
   it('passBaton does NOT move the local baton on a refusal, though it carries a thread_id', async () => {
     commHub._testSeedThread({ thread_id: 'b1', project_id: null, next_action_owner: 'orchestrator' })
-    // The refusal reports the UNCHANGED owner, so a naive patch happens to land on the
-    // truth — the server being careful, not this store being correct. Assert the store
-    // does not patch AT ALL, so the guarantee stops depending on the payload.
     api.threads.passBaton = vi.fn().mockResolvedValue({
       data: { ...POST_REFUSAL, thread_id: 'b1', field: 'pass_baton_to' },
     })

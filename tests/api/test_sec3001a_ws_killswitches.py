@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-3001a items 4 + 5 — WebSocket auth kill-switches.
-
-Failing layer = the WS auth functions in ``api/auth_utils.py`` (the exact code
-the ``/ws/{client_id}`` handshake runs):
-
-  - item 4: ``validate_api_key`` excluded ``expires_at`` from its key lookup, so
-    an expired-but-still-active API key authenticated a WS connection. The fix
-    mirrors the REST/MCP predicate (``expires_at > now OR expires_at IS NULL``).
-  - item 5: ``get_setup_state`` returned ``database_initialized=False`` on a DB
-    error, routing ``authenticate_websocket`` into the unauthenticated setup
-    branch — a transient DB fault on a live install granted an unauth WS. The fix
-    fails CLOSED (treat as initialized -> require credentials) while leaving the
-    genuine-setup ``db is None`` branch untouched.
-
-Both items are two-sided. xdist-safe: unique tenant_key per test, no
-module-level mutable state, ``db_session`` is transaction-rolled-back.
-"""
 
 from __future__ import annotations
 
@@ -39,12 +22,6 @@ from giljo_mcp.tenant import TenantManager
 
 
 async def _seed_api_key(db_session, *, expires_at: datetime | None) -> str:
-    """Seed org+user+api_key with the given ``expires_at`` (flushed, not committed).
-
-    Returns the raw key string. The key_prefix is computed with the SAME
-    ``get_key_prefix`` ``validate_api_key`` uses, so the prefix-narrowed lookup
-    resolves exactly this row.
-    """
     tk = TenantManager.generate_tenant_key()
     unique = uuid4().hex[:8]
     raw_key = f"gk_{uuid4().hex}{uuid4().hex}"
@@ -90,20 +67,15 @@ async def _seed_api_key(db_session, *, expires_at: datetime | None) -> str:
 
 
 class _NoCredWebSocket:
-    """Minimal WebSocket stand-in with no auth credentials (query/cookie/header)."""
 
     def __init__(self) -> None:
         self.query_params: dict[str, str] = {}
         self.headers: dict[str, str] = {}
 
 
-# ---------------------------------------------------------------------------
-# Item 4 — API-key WS expiry
-# ---------------------------------------------------------------------------
 
 
 class TestApiKeyWebSocketExpiry:
-    """An expired API key must NOT authenticate a WS connection; valid keys still do."""
 
     @pytest.mark.asyncio
     async def test_expired_key_rejected(self, db_session):
@@ -120,19 +92,14 @@ class TestApiKeyWebSocketExpiry:
 
     @pytest.mark.asyncio
     async def test_null_expiry_key_accepted(self, db_session):
-        # A NULL expires_at means "never expires" — must keep connecting.
         raw_key = await _seed_api_key(db_session, expires_at=None)
         result = await validate_api_key(raw_key, db_session)
         assert result is not None, "a NULL-expiry API key never expires and must still authenticate"
 
 
-# ---------------------------------------------------------------------------
-# Item 5 — WS setup-context fail-closed on DB error
-# ---------------------------------------------------------------------------
 
 
 class TestWebSocketSetupFailClosed:
-    """A DB error on the WS setup probe must fail CLOSED (require auth), not open."""
 
     @pytest.mark.asyncio
     async def test_get_setup_state_fails_closed_on_db_error(self, db_session, monkeypatch):
@@ -159,9 +126,6 @@ class TestWebSocketSetupFailClosed:
 
     @pytest.mark.asyncio
     async def test_genuine_setup_still_allowed_without_db(self):
-        # Allow-good side: a genuinely-uninitialized install (db is None, the
-        # db_manager-absent setup window) must STILL grant the unauth setup
-        # connection — the fix only touches the DB-error path, not this branch.
         state = await get_setup_state(None)
         assert state["database_initialized"] is False
 

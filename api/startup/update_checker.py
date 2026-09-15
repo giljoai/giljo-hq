@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Background task that checks for available updates.
-
-Two strategies:
-  1. Git-based (cloned installs): git fetch + rev-list to count commits behind origin/master.
-  2. GitHub releases API (zip installs): compare local __version__ against latest release tag.
-
-Runs every 6 hours. Sets state.update_available when an update is detected
-and broadcasts a WebSocket event on state transitions.
-Silently no-ops if no network is available.
-"""
 
 import asyncio
 import json
@@ -33,18 +23,13 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-_CHECK_INTERVAL_SECONDS = 21600  # 6 hours
+_CHECK_INTERVAL_SECONDS = 21600
 _SUBPROCESS_TIMEOUT_SECONDS = 10
 _GITHUB_RELEASES_URL = "https://api.github.com/repos/giljoai/giljo-hq/releases/latest"
 _HTTP_TIMEOUT_SECONDS = 10
 
 
 async def _run_git(*args: str) -> tuple[int, str, str]:
-    """Run a git subcommand and return (returncode, stdout, stderr).
-
-    Raises FileNotFoundError if the git binary is not on PATH.
-    Raises asyncio.TimeoutError if the process does not complete in time.
-    """
     proc = await asyncio.create_subprocess_exec(
         "git",
         *args,
@@ -61,7 +46,6 @@ async def _run_git(*args: str) -> tuple[int, str, str]:
 
 
 async def _is_git_repo() -> bool:
-    """Return True if the working directory is inside a git repository."""
     try:
         code, _, _ = await _run_git("rev-parse", "--is-inside-work-tree")
         return code == 0
@@ -70,7 +54,6 @@ async def _is_git_repo() -> bool:
 
 
 async def _has_remote(remote: str = "origin") -> bool:
-    """Return True if the named remote exists."""
     try:
         code, _, _ = await _run_git("remote", "get-url", remote)
         return code == 0
@@ -79,7 +62,6 @@ async def _has_remote(remote: str = "origin") -> bool:
 
 
 async def _fetch_remote(remote: str = "origin") -> bool:
-    """Fetch the remote to populate FETCH_HEAD. Returns True on success."""
     try:
         code, _, stderr = await _run_git("fetch", remote)
         if code != 0:
@@ -92,15 +74,6 @@ async def _fetch_remote(remote: str = "origin") -> bool:
 
 
 async def _resolve_default_branch(remote: str = "origin") -> str:
-    """Resolve the remote's default branch ref (e.g. ``origin/main``).
-
-    TSK-9262: the branch was hardcoded to ``<remote>/master``, so a CE fork
-    whose default branch is ``main`` silently never saw update notices. Reads
-    the symbolic ref git records at clone time; if it is unset (older clones),
-    asks git to re-detect it via ``git remote set-head <remote> --auto`` and
-    retries. Falls back to ``<remote>/master`` on any failure so behavior for
-    stock clones is unchanged.
-    """
     head_ref = f"refs/remotes/{remote}/HEAD"
     try:
         code, stdout, _ = await _run_git("symbolic-ref", "--short", head_ref)
@@ -119,11 +92,6 @@ async def _resolve_default_branch(remote: str = "origin") -> str:
 
 
 async def _commits_behind(branch: str) -> int | None:
-    """Return the number of commits HEAD is behind the remote branch.
-
-    Returns None if the count cannot be determined (network error, branch
-    does not exist, etc.).
-    """
     try:
         code, stdout, stderr = await _run_git("rev-list", f"HEAD..{branch}", "--count")
         if code != 0:
@@ -136,10 +104,6 @@ async def _commits_behind(branch: str) -> int | None:
 
 
 async def _emit_update_event(state, update_info: dict | None) -> None:
-    """Broadcast a system:update_available WebSocket event to all tenants.
-
-    Does nothing if the WebSocket manager is not ready.
-    """
     ws_manager = getattr(state, "websocket_manager", None)
     if ws_manager is None:
         return
@@ -150,7 +114,6 @@ async def _emit_update_event(state, update_info: dict | None) -> None:
     }
 
     try:
-        # broadcast_json sends to all connected clients across all tenants
         await ws_manager.broadcast_json(
             {
                 "type": "system:update_available",
@@ -163,12 +126,6 @@ async def _emit_update_event(state, update_info: dict | None) -> None:
 
 
 async def _refresh_update_banner(state) -> None:
-    """Re-emit per-tenant system banners after an update-state transition.
-
-    The DB-backed banner (``system.update_available``) is the durable authority;
-    the WS event above is the live nudge. Banner emission must never crash the
-    update loop, so failures are swallowed at this boundary.
-    """
     try:
         from api.startup.background_tasks import emit_system_banners
 
@@ -178,15 +135,8 @@ async def _refresh_update_banner(state) -> None:
 
 
 async def _update_check_loop(state) -> None:
-    """Periodic loop that checks for remote commits every 6 hours.
-
-    Runs an initial fetch at startup so rev-list has accurate data, then
-    polls on the configured interval. State transitions trigger WebSocket
-    broadcasts.
-    """
     remote = "origin"
 
-    # Initial fetch to populate FETCH_HEAD before the first check
     fetched = await _fetch_remote(remote)
     if not fetched:
         logger.debug("Initial fetch failed — update checks will rely on stale FETCH_HEAD if present")
@@ -198,7 +148,6 @@ async def _update_check_loop(state) -> None:
             count = await _commits_behind(branch)
 
             if count is None:
-                # Network or branch error — leave current state unchanged
                 logger.debug("Could not determine commits behind %s — skipping this cycle", branch)
             elif count > 0:
                 from giljo_mcp import branding
@@ -232,12 +181,10 @@ async def _update_check_loop(state) -> None:
 
         await asyncio.sleep(_CHECK_INTERVAL_SECONDS)
 
-        # Fetch before each subsequent check
         await _fetch_remote(remote)
 
 
 def _get_local_version() -> str:
-    """Return the local application version string."""
     try:
         from giljo_mcp import __version__
 
@@ -247,11 +194,6 @@ def _get_local_version() -> str:
 
 
 async def _check_github_release() -> dict | None:
-    """Check the GitHub releases API for a newer version.
-
-    Returns update info dict if a newer release exists, None if up to date.
-    Runs the blocking HTTP request in a thread executor to avoid blocking the event loop.
-    """
     loop = asyncio.get_running_loop()
     try:
         local_version = Version(_get_local_version())
@@ -274,7 +216,6 @@ async def _check_github_release() -> dict | None:
         return None
 
     tag = data.get("tag_name", "")
-    # Strip leading 'v' from tag (e.g. "v1.1.0" -> "1.1.0")
     version_str = tag.lstrip("v")
 
     try:
@@ -299,7 +240,6 @@ async def _check_github_release() -> dict | None:
 
 
 async def _release_check_loop(state) -> None:
-    """Periodic loop for zip-based installs that checks GitHub releases."""
     while True:
         try:
             update_info = await _check_github_release()
@@ -329,26 +269,14 @@ async def _release_check_loop(state) -> None:
 
 
 async def start_update_checker(state) -> asyncio.Task | None:
-    """Start the background update checker task.
-
-    Uses git-based checking for cloned installs, falls back to GitHub
-    releases API for zip-based installs.
-
-    Returns the asyncio.Task if started, or None if the environment does not
-    support it. This function never raises.
-    """
-    # Hosted SaaS controls its own rollout — never poll git/GitHub for updates
-    # (belt-and-suspenders; the caller also gates this, BE-6031c).
     if os.environ.get("GILJO_MODE") == "saas":
         return None
 
     try:
-        # Strategy 1: Git-based (cloned installs)
         if await _is_git_repo() and await _has_remote("origin"):
             logger.info("Update checker started (git mode)")
             return asyncio.create_task(_update_check_loop(state))
 
-        # Strategy 2: GitHub releases API (zip installs)
         if not _HAS_PACKAGING:
             logger.debug("packaging library not available — release check disabled")
             return None
@@ -356,7 +284,6 @@ async def start_update_checker(state) -> asyncio.Task | None:
         return asyncio.create_task(_release_check_loop(state))
 
     except FileNotFoundError:
-        # No git binary — use release mode
         if not _HAS_PACKAGING:
             logger.debug("packaging library not available — release check disabled")
             return None

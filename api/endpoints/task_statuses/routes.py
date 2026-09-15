@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Task Statuses API endpoint (FE-5041 Phase 1).
-
-Routes
-------
-- ``GET /`` -- return the canonical :class:`TaskStatus` metadata in
-  declaration order.
-
-The endpoint is read-only (no DB query -- the metadata is produced from
-the in-memory :data:`TASK_STATUS_META` dict). Tenant isolation still
-applies via the standard auth dependency: only authenticated users can
-fetch the metadata. The payload is identical for every tenant.
-"""
 
 import logging
 
@@ -37,9 +25,6 @@ async def list_task_statuses(
 ) -> list[TaskStatusResponse]:
     """Return the canonical task-status metadata in declaration order."""
 
-    # Authentication-only gate: ``current_user`` is bound for that
-    # purpose. The metadata payload is the same for every tenant, so we
-    # don't filter by tenant_key here.
     del current_user
 
     return [

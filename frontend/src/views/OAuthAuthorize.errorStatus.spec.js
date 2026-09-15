@@ -1,15 +1,3 @@
-/**
- * OAuthAuthorize.errorStatus.spec.js (FE-9556)
- *
- * OAuthAuthorize.vue had the same latent defect as Login.vue: its catch block
- * branches correctly on 401/429/network, but userStore.login() never threw, so
- * every failure landed in the `if (!loginSuccess)` generic branch ("Invalid
- * credentials."). With the store rethrowing (FE-9556), the catch owns
- * failures. The 429 and network cases were proven RED against the pre-fix
- * code; the 401 case pins that its rendered copy is unchanged.
- *
- * Edition scope: Both (view is CE+SaaS shared; SaaS consent override untouched).
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -69,7 +57,6 @@ const formStub = {
 async function mountView() {
   const pinia = createPinia()
   setActivePinia(pinia)
-  // Not authenticated: me() rejects, so the login form renders.
   h.me.mockRejectedValue({ response: { status: 401 } })
   const wrapper = mount(OAuthAuthorize, {
     global: {

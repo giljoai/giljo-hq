@@ -1,28 +1,3 @@
-/**
- * HubView.reasons.fe9436.spec.js — FE-9436
- *
- * The landing half of the unified "Action needed" surface, end to end, on the REAL
- * ThreadTimeline.
- *
- * FE-9418 established why that last part is not optional. Every other spec in this lane
- * stubs the timeline, so together they prove the behaviour by COMPOSITION: the right id
- * and reason are resolved here, and the timeline marks whatever it is handed. Composition
- * is not connection — FE-9419 shipped a prop that never bound, invisible to the child's
- * own unit spec because VTU maps prop OBJECTS straight through and never exercises the
- * template binding where the defect lived. A stub declaring `focusReason` has exactly
- * that blind spot: it would accept the prop under any name the parent used.
- *
- * FE-9436 adds a second binding on the same element, so it inherits the same exposure and
- * the same remedy: mount the real component, once per reason, and assert the words that
- * land on the exact post.
- *
- * The fixture's anchor is deliberately NOT the newest post. A fixture whose target is
- * already the tail cannot tell "pinned what the notification named" from "fell back to
- * the newest", so every assertion below would pass on code that ignores the anchor
- * entirely.
- *
- * Edition scope: Both
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { reactive, nextTick } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -101,7 +76,6 @@ async function mountHubWithRealTimeline(query) {
   const wrapper = mount(HubView, {
     global: {
       plugins: [pinia, createVuetify()],
-      // Every child stubbed EXCEPT ThreadTimeline — the two bindings under test.
       stubs: { ...childStubs, ThreadTimeline: false },
     },
   })
@@ -119,8 +93,6 @@ const REASONS = [
 describe('HubView -> ThreadTimeline, per reason, end to end (FE-9436)', () => {
   beforeEach(() => {
     h.push.mockClear()
-    // jsdom has no scrollIntoView; install rather than spy, or the timeline's scroll
-    // would throw and read as "it chose not to scroll".
     Element.prototype.scrollIntoView = vi.fn()
   })
 
@@ -137,24 +109,17 @@ describe('HubView -> ThreadTimeline, per reason, end to end (FE-9436)', () => {
       expect(named.exists()).toBe(true)
       expect(newest.exists()).toBe(true)
 
-      // The reason reached the real component's template — the binding FE-9419 proved
-      // a stub cannot check — and it says the right thing.
       expect(named.find(`[data-testid="${testid}"]`).text()).toBe(copy)
       expect(named.classes()).toContain('timeline-msg--focus')
 
-      // The assertion that makes mounting the real component worth it: the tail is
-      // present, plausible, and must NOT be the one marked.
       expect(newest.find(`[data-testid="${testid}"]`).exists()).toBe(false)
       expect(newest.classes()).not.toContain('timeline-msg--focus')
 
-      // One mark in the whole timeline, on every reason. Three surfaces, one mechanism.
       expect(wrapper.findAll('.timeline-msg__focus-flag')).toHaveLength(1)
     })
   }
 
   it('never puts the hand-off words on a mention or an approval, end to end', async () => {
-    // The defect the operator ruling exists to prevent, asserted at the only layer where
-    // "the mention was labelled Waiting on you" could actually be observed by a user.
     for (const focus of ['mention', 'approval']) {
       const wrapper = await mountHubWithRealTimeline({
         thread: THREAD_ID,
@@ -167,8 +132,6 @@ describe('HubView -> ThreadTimeline, per reason, end to end (FE-9436)', () => {
   })
 
   it('falls back to the tail when the reason names no post, on every reason', async () => {
-    // The hand-off travels this path on every arrival from a bell row, because its event
-    // names no post. Pinned for all three so a later change cannot quietly drop it.
     for (const { focus, testid } of REASONS) {
       const wrapper = await mountHubWithRealTimeline({ thread: THREAD_ID, focus })
       const newest = wrapper.find(`[data-testid="timeline-message-${NEWER_MESSAGE}"]`)
@@ -180,9 +143,6 @@ describe('HubView -> ThreadTimeline, per reason, end to end (FE-9436)', () => {
   })
 
   it('marks NOTHING for an arrival whose reason it does not recognise', async () => {
-    // A hand-typed or stale URL. The helper refuses to resolve an id for an unknown
-    // reason, so the timeline has nothing to mark — rather than marking the tail under
-    // words nobody chose.
     const wrapper = await mountHubWithRealTimeline({
       thread: THREAD_ID,
       focus: 'urgent-ish',
@@ -193,8 +153,6 @@ describe('HubView -> ThreadTimeline, per reason, end to end (FE-9436)', () => {
   })
 
   it('marks nothing on an ordinary deep link that merely names a post', async () => {
-    // FE-9410's guarantee, re-asserted rather than assumed because this lane rewrote the
-    // gate that carries it: the reason decides WHETHER to mark, the anchor only WHICH.
     const wrapper = await mountHubWithRealTimeline({
       thread: THREAD_ID,
       message: TARGET_MESSAGE,

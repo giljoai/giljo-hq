@@ -1,17 +1,7 @@
-/**
- * ThreadCreatedDialog.spec.js — FE-6121
- *
- * Tests:
- *  - renders the copyable thread id (thread_id) + friendly CHT-#### label
- *  - copy button copies the thread_id (not the chat id)
- *  - "Don't show again" persists to localStorage; isThreadCreatedHintHidden reads it
- *  - closing without the checkbox does NOT persist the opt-out
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createVuetify } from 'vuetify'
 
-// ---- mocks ----
 const copyMock = vi.fn(() => Promise.resolve(true))
 const showToastMock = vi.fn()
 
@@ -27,7 +17,6 @@ import ThreadCreatedDialog, {
   isThreadCreatedHintHidden,
 } from '@/components/hub/ThreadCreatedDialog.vue'
 
-// Mirrors the (intentionally un-exported) localStorage key inside the component.
 const HIDE_HINT_KEY = 'giljo.hub.threadCreatedHintHidden'
 
 const vuetify = createVuetify()
@@ -49,7 +38,6 @@ describe('ThreadCreatedDialog', () => {
   beforeEach(() => {
     copyMock.mockClear()
     showToastMock.mockClear()
-    // localStorage is globally stubbed with vi.fn() spies (tests/setup.js).
     window.localStorage.getItem.mockReset()
     window.localStorage.setItem.mockReset()
     window.localStorage.getItem.mockReturnValue(null)

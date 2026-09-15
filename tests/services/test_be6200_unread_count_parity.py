@@ -3,32 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6200 (Unit F) — unread-count correctness: get_workflow_status reads the LIVE
-pending count, not the drifted denormalized counter.
-
-The bug: get_workflow_status.unread_messages read the denormalized
-AgentExecution.messages_waiting_count column, which drifts from the live pending
-count. This is the COUNT-DISAGREEMENT bug — the benign auto-completion_reports are
-correct behavior and are NOT touched here.
-
-Fix (failing layer = WorkflowStatusService.get_workflow_status): read the LIVE
-pending-per-agent count (pending + addressed to the agent) instead of the
-denormalized column.
-
-BE-9012d: the retired bus's ``MessageService.receive_messages`` cross-check (the
-original "two independent readers must agree" oracle) was removed with the bus.
-The get_workflow_status assertions below are unaffected — they seed pending
-Message/MessageRecipient rows directly (independent of MessageService) and assert
-against the actual seeded count.
-
-Covered:
-  - N unacknowledged messages -> get_workflow_status reports N (even when the
-    denormalized messages_waiting_count is deliberately drifted to a wrong value).
-  - acknowledge some -> get_workflow_status drops to the new remaining count.
-
-Parallel-safe: db_session (TransactionalTestContext). No module-level mutable
-state; each test owns its setup. Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -55,12 +29,6 @@ def _workflow_svc(session: AsyncSession) -> WorkflowStatusService:
 
 
 async def _ack_messages_for(session: AsyncSession, tenant_key: str, agent_id: str, n: int) -> None:
-    """Acknowledge the oldest N messages addressed to agent_id via the REAL drain
-    (BE-9108): insert ``message_acknowledgments`` rows for (message_id, agent_id) —
-    exactly what ``get_thread_history(mark_read=true)`` writes — so the live unread
-    count ``get_live_unread_counts_by_agent`` reports drops accordingly. (This used
-    to flip ``Message.status``, a column nothing in src/ ever advances; the badge
-    query no longer keys on it, so the ack must be a real junction row.)"""
     message_ids = (
         (
             await session.execute(
@@ -83,8 +51,6 @@ async def _ack_messages_for(session: AsyncSession, tenant_key: str, agent_id: st
 async def _seed_project_with_two_agents(
     session: AsyncSession, tenant_key: str
 ) -> tuple[str, AgentExecution, AgentExecution]:
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_proj = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -171,8 +137,6 @@ async def test_unread_count_parity_with_drifted_denormalized_counter(db_session:
     pid, orchestrator, analyzer = await _seed_project_with_two_agents(db_session, tenant)
     await _send_pending(db_session, tenant, pid, from_agent=orchestrator, to_agent=analyzer, n=3)
 
-    # Deliberately drift the denormalized column the OLD code read. The fix must
-    # ignore this and report the live pending count (3).
     analyzer.messages_waiting_count = 99
     await db_session.commit()
 
@@ -188,8 +152,6 @@ async def test_unread_count_parity_drops_after_acknowledge(db_session: AsyncSess
     ws_before = await _workflow_svc(db_session).get_workflow_status(pid, tenant)
     assert _unread_for(ws_before, analyzer.agent_id) == 4
 
-    # Acknowledge 2 (BE-9012d: flips Message.status directly — replaces the retired
-    # MessageService.receive_messages auto-ack).
     await _ack_messages_for(db_session, tenant, analyzer.agent_id, 2)
 
     ws_after = await _workflow_svc(db_session).get_workflow_status(pid, tenant)
@@ -205,14 +167,6 @@ def _detail_for(workflow_status, agent_id: str):
 
 
 async def test_per_thread_unread_breakdown_sums_to_project_wide_total(db_session: AsyncSession) -> None:
-    """BE-9242 deliverable #2: sum(per-thread) == project-whole total.
-
-    Seeds messages on TWO distinct threads plus one legacy no-thread message
-    (thread_id=None, grouped under the "" key), all addressed to the same
-    agent, and asserts the per-thread breakdown sums exactly to the existing
-    project-wide unread_messages total -- proving the breakdown is a genuine
-    partition, not a second, possibly-disagreeing count.
-    """
     tenant = TenantManager.generate_tenant_key()
     pid, orchestrator, analyzer = await _seed_project_with_two_agents(db_session, tenant)
 
@@ -235,7 +189,6 @@ async def test_per_thread_unread_breakdown_sums_to_project_wide_total(db_session
             db_session.add(msg)
             await db_session.flush()
             db_session.add(MessageRecipient(message_id=msg.id, agent_id=analyzer.agent_id, tenant_key=tenant))
-    # One legacy no-thread message (thread_id left NULL).
     await _send_pending(db_session, tenant, pid, from_agent=orchestrator, to_agent=analyzer, n=1)
     await db_session.commit()
 
@@ -255,13 +208,9 @@ async def test_per_thread_unread_breakdown_sums_to_project_wide_total(db_session
 
 
 async def test_action_required_unread_is_distinct_subset_of_badge_total(db_session: AsyncSession) -> None:
-    """BE-9242 deliverable #3: action_required_unread is the gate-matching
-    subset of the broader badge total, not a re-derivation that can disagree.
-    """
     tenant = TenantManager.generate_tenant_key()
     pid, orchestrator, analyzer = await _seed_project_with_two_agents(db_session, tenant)
 
-    # 3 informational (requires_action=False) + 2 genuinely action-required.
     await _send_pending(db_session, tenant, pid, from_agent=orchestrator, to_agent=analyzer, n=3)
     for i in range(2):
         msg = Message(

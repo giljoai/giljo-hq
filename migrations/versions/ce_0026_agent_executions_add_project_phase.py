@@ -3,29 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Add project_phase column to agent_executions.
-
-Revision ID: ce_0026_agent_executions_add_project_phase
-Revises: ce_0025_export_extend_download_type_allowlist
-Create Date: 2026-05-16
-
-Phase disambiguation for orchestrator executions. The orchestrator runs in
-two distinct sessions over a project's lifetime — staging (planning) and
-implementation (work). Both sessions share the same AgentJob (mission), but
-each session is its own AgentExecution. The new column records which phase
-an execution belongs to so ``complete_job`` can branch deterministically
-without inferring from project state.
-
-Values:
-  - 'staging'        — orchestrator session for the staging phase
-  - 'implementation' — orchestrator session for the implementation phase
-                       (default for back-compat; matches the only phase that
-                       exists for completed historical executions)
-
-Idempotent: existence-check before ADD, and before constraint creation.
-
-Edition Scope: CE — ``agent_executions`` is a CE table.
-"""
 
 import sqlalchemy as sa
 from alembic import op

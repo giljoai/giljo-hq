@@ -3,28 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9103 — git toggle engine unification + self-adopt commit duty (regression).
-
-Pins the failing-layer behavior for the "solo/self-adopt runs never commit" bug:
-
-  (a) the SELF-ADOPT orchestrator rung's work loop carries a commit step, and the
-      ":632" no-commit constraint is scoped to DELEGATION only — a self-adopted job
-      inherits the worker's commit duty (prose render).
-  (b) the worker commit block AND the orchestrator closeout-commit lines render from
-      the canonical git-integration flag alone (the SETTINGS toggle), with NO legacy
-      per-product ``product_memory.git_integration`` blob involved.
-  (c) SettingsService.git_integration_enabled() — the single unified read path — reads
-      ``integrations.git_integration.enabled`` and is decoupled from both the legacy
-      product_memory blob and the git_history CONTEXT (UserFieldPriority) toggle.
-
-Root cause (one sentence): solo/self-adopt sessions never committed because the
-self-adopt rung had no commit step (the coordinator "do not commit" rule leaked into it)
-and three closeout/history readers gated commit prose on a legacy product_memory blob the
-current UI never writes instead of the canonical settings toggle.
-
-Edition Scope: Both. Pure-string tests are DB-free; the helper test uses the shared
-transactional session (parallel-safe — no module-level mutable state).
-"""
 
 from __future__ import annotations
 
@@ -41,28 +19,21 @@ from giljo_mcp.services.protocol_sections.worker_body import _build_conditional_
 from giljo_mcp.services.settings_service import SettingsService
 
 
-# ---------------------------------------------------------------------------
-# (a) SELF-ADOPT rung carries the worker commit duty
-# ---------------------------------------------------------------------------
 
 
 class TestSelfAdoptCommitDuty:
     def test_capable_self_adopt_rung_contains_the_commit_step(self):
         ch3 = _build_ch3_spawning_rules("generic_mcp")
-        # The anchor phrasing is preserved (no regression to the ladder shape)...
         assert "SELF-ADOPT the queued jobs" in ch3
         assert "SELF-ADOPT is the LAST resort" in ch3
-        # ...and the work loop now carries the commit step with the -A guard.
         assert "commit the work" in ch3
         assert "NEVER git add -A" in ch3
         assert "commit duty" in ch3
 
     def test_chat_self_adopt_rung_has_no_git_commit_instruction(self):
-        # A chat/shell-less session self-adopts PLANNING/PM only — nothing to commit and
-        # no shell to run git. The commit step must NOT leak into that rung.
         chat = reg.get_preset("chat")
         ch3 = _build_ch3_spawning_rules("generic_mcp", preset=chat)
-        assert "CANNOT self-adopt a CODE job" in ch3  # anchor preserved
+        assert "CANNOT self-adopt a CODE job" in ch3
         assert "no commit step" in ch3
         assert "git add the specific files you changed" not in ch3
 
@@ -76,15 +47,11 @@ class TestSelfAdoptCommitDuty:
             job_type="orchestrator",
             tool="multi_terminal",
         )
-        # The blanket "you coordinate, you do not commit" is gone...
         assert "You coordinate, you do not commit." not in body
-        # ...replaced by a delegation-scoped constraint that hands self-adopt the commit duty.
         assert "while you are delegating" in body
         assert "carries that worker's commit duty" in body
 
     def test_git_warning_prose_flags_self_adopted_no_commits(self):
-        # Item 4: the softened git_warning must not let a self-adopting session wave its
-        # own no-commits through.
         body = _generate_agent_protocol(
             job_id="J",
             tenant_key="T",
@@ -98,9 +65,6 @@ class TestSelfAdoptCommitDuty:
         assert "RED FLAG" in body
 
 
-# ---------------------------------------------------------------------------
-# (b) worker commit block + orchestrator closeout lines gate on the flag alone
-# ---------------------------------------------------------------------------
 
 
 class _MinimalBuilder(ExecutionPromptBuilderBase):
@@ -118,8 +82,6 @@ def _make_project() -> SimpleNamespace:
 
 class TestRenderFromFlagAlone:
     def test_worker_commit_block_renders_when_flag_true(self):
-        # mission_assembly sources this flag from settings integrations.git_integration.enabled;
-        # here we pin the render contract: flag True -> REQUIRED commit block with the -A guard.
         git_block, _ = _build_conditional_blocks(
             git_integration_enabled=True, execution_mode="subagent", tool="claude-code"
         )
@@ -133,7 +95,6 @@ class TestRenderFromFlagAlone:
         assert git_block == ""
 
     def test_orchestrator_closeout_backstop_renders_when_flag_true(self):
-        # Item 3: committer-of-last-resort dirty-tree backstop, gated by the flag alone.
         builder = _MinimalBuilder()
         prompt = builder.build_execution_prompt("orch-1", _make_project(), [], git_enabled=True)
         assert "Git Closeout Commit" in prompt
@@ -148,17 +109,11 @@ class TestRenderFromFlagAlone:
         assert "Committer of last resort" not in prompt
 
 
-# ---------------------------------------------------------------------------
-# (c) unified read path: SettingsService.git_integration_enabled()
-# ---------------------------------------------------------------------------
 
 
 class TestUnifiedToggleReadPath:
     @pytest.mark.asyncio
     async def test_enabled_true_from_settings_alone(self, db_session, test_tenant_key):
-        """Settings toggle ON + NO product_memory blob + NO git_history priority row ->
-        the canonical helper returns True (proves the read is settings-only, decoupled
-        from both the legacy blob and the git_history CONTEXT toggle)."""
         db_session.add(
             Settings(
                 tenant_key=test_tenant_key,
@@ -173,7 +128,6 @@ class TestUnifiedToggleReadPath:
 
     @pytest.mark.asyncio
     async def test_enabled_false_when_no_settings_row(self, db_session, test_tenant_key):
-        """No integrations row at all -> helper returns False (safe default)."""
         svc = SettingsService(db_session, test_tenant_key)
         assert await svc.git_integration_enabled() is False
 

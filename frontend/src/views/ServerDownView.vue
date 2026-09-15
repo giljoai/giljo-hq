@@ -109,11 +109,8 @@ const retryConnection = async () => {
   lastAttempt.value = new Date().toLocaleTimeString()
 
   try {
-    // Try to reach the server
     await api.setup.status()
 
-    // Success! Redirect to appropriate page
-    // Check if user is authenticated
     try {
       await api.auth.me()
       router.push('/')
@@ -121,7 +118,6 @@ const retryConnection = async () => {
       router.push('/login')
     }
   } catch {
-    // Server still unreachable - reset auto-retry countdown
     autoRetrySeconds.value = 10
     autoRetryProgress.value = 100
   } finally {
@@ -130,21 +126,17 @@ const retryConnection = async () => {
 }
 
 const logout = () => {
-  // Clear any local state
   localStorage.clear()
   sessionStorage.clear()
 
-  // Redirect to login
   router.push('/login')
 }
 
 onMounted(() => {
-  // Auto-retry every 10 seconds
   autoRetryInterval = setInterval(() => {
     retryConnection()
   }, 10000)
 
-  // Countdown timer
   autoRetryCountdown = setInterval(() => {
     autoRetrySeconds.value -= 1
     autoRetryProgress.value = (autoRetrySeconds.value / 10) * 100

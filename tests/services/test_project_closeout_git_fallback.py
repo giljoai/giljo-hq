@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tests for graceful git-unavailable fallback in project closeout.
-
-Wave 1 IMP-0019 Item 5 (code): a hosted test environment has no git binary, so agents
-cannot pass `git_commits` and there is no SaaS GitHub fallback. The closeout
-previously succeeded silently with `git_commits_count: 0` and no marker on the
-response, leaving callers unable to distinguish "git was unavailable" from
-"git was available but the project had no commits in range."
-
-Fix contract: when the server resolves an empty commit list AND the agent did
-not supply commits, surface `git_unavailable: true` plus a human-readable
-`git_unavailable_reason` in the response. Closeout must still succeed.
-"""
 
 import sys
 from typing import Any
@@ -23,9 +10,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-# Import the function under test and grab the module from sys.modules so we
-# can patch its private helpers (the package's __init__ may shadow attributes
-# when accessed via "as" import).
 from giljo_mcp.tools.project_closeout import close_project_and_update_memory
 
 
@@ -60,10 +44,6 @@ class _FakeEntry:
 
 
 def _patch_common(monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    Patch the closeout module's external collaborators so tests can drive
-    only the git-resolution branches without standing up a real DB.
-    """
     project = _FakeProject()
     product = _FakeProduct()
 
@@ -80,9 +60,6 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         closeout_module,
         "_handle_force_close",
-        # BE-9246: _handle_force_close now returns list[AgentStatusChangeEvent]
-        # (empty when nothing was force-decommissioned) instead of None -- the
-        # caller iterates the return value to broadcast post-commit events.
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
@@ -93,6 +70,7 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch) -> None:
 
     fake_memory_service = AsyncMock()
     fake_memory_service.get_next_sequence = AsyncMock(return_value=1)
+    fake_memory_service.get_closeout_entry_for_project = AsyncMock(return_value=None)
     fake_memory_service.create_entry = AsyncMock(return_value=_FakeEntry())
 
     monkeypatch.setattr(
@@ -110,7 +88,6 @@ def _patch_common(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _make_db_manager() -> Any:
-    """Build a minimal db_manager whose async session context manager yields a sentinel session."""
     from contextlib import asynccontextmanager
 
     @asynccontextmanager
@@ -124,11 +101,6 @@ def _make_db_manager() -> Any:
 
 @pytest.mark.asyncio
 async def test_git_unavailable_marker_when_no_commits_supplied(monkeypatch: pytest.MonkeyPatch):
-    """
-    CE mode (default), no GILJO_MODE=saas, no agent-supplied git_commits → the
-    response must include `git_unavailable: true` with a reason string AND a
-    zero git_commits_count. Closeout must succeed (no exception).
-    """
     _patch_common(monkeypatch)
     monkeypatch.delenv("GILJO_MODE", raising=False)
 
@@ -155,10 +127,6 @@ async def test_git_unavailable_marker_when_no_commits_supplied(monkeypatch: pyte
 
 @pytest.mark.asyncio
 async def test_no_git_unavailable_when_agent_supplies_commits(monkeypatch: pytest.MonkeyPatch):
-    """
-    When the agent supplies a non-empty git_commits list, the response must
-    NOT carry git_unavailable — git was clearly available on the agent side.
-    """
     _patch_common(monkeypatch)
     monkeypatch.delenv("GILJO_MODE", raising=False)
 
@@ -190,19 +158,6 @@ async def test_no_git_unavailable_when_agent_supplies_commits(monkeypatch: pytes
 
 @pytest.mark.asyncio
 async def test_subprocess_filenotfound_simulated_via_empty_input(monkeypatch: pytest.MonkeyPatch):
-    """
-    Mission-described scenario: on a hosted test environment, git is unavailable so the
-    agent's `git log` subprocess would raise FileNotFoundError. The agent then
-    sends git_commits=None to the server. The server must still close the
-    project successfully and surface the unavailable marker.
-
-    We simulate the boundary by patching subprocess.run to raise
-    FileNotFoundError (proves the test infra honors the mock) AND by passing
-    git_commits=None (the actual data shape the failed subprocess produces on
-    the agent side). The server-side path itself does not run subprocess --
-    that is correct; the server is passive. The contract under test is the
-    server response shape when commits arrive empty.
-    """
     _patch_common(monkeypatch)
     monkeypatch.delenv("GILJO_MODE", raising=False)
 
@@ -227,11 +182,6 @@ async def test_subprocess_filenotfound_simulated_via_empty_input(monkeypatch: py
         git_commits=None,
     )
 
-    # This project is solo (no active chain run), so the truthful closeout message
-    # does not start with "Project closed" -- it never did for a solo project even
-    # before the wording fix; this assertion only checked for a fixed prefix as a
-    # stand-in for "the call succeeded". Assert that directly instead: a non-empty
-    # success message confirming the memory write, which genuinely happened.
     assert response["message"], "closeout must succeed, not raise"
     assert "memory" in response["message"].lower(), "the success message must confirm the memory write"
     assert response["git_commits_count"] == 0

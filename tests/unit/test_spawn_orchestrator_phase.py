@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Unit tests for CE-0026 + CE-0032: orchestrator project_phase invariants.
-
-Behaviors covered:
-  a. create_orchestrator_fixture sets project_phase='staging'.
-  b. ProjectLaunchService._spawn_orchestrator (via launch_project) sets phase='staging'.
-  c. ThinClientPromptGenerator._find_or_create_orchestrator (create path) sets phase='staging'.
-  d. (CE-0032) launch_project reuses the same orch row across phases; no second exec is spawned.
-  e. Back-compat default: AgentExecution without explicit project_phase reads as 'implementation'.
-  f. CHECK constraint: inserting project_phase='garbage' raises an IntegrityError.
-
-Under CE-0032's single-orchestrator-entity model, every spawn path writes
-project_phase='staging' (the column persists for back-compat; new logic
-keys on project flags). No code ever writes 'implementation' to a new row.
-"""
 
 from __future__ import annotations
 
@@ -37,9 +22,6 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.repositories.project_lifecycle_repository import ProjectLifecycleRepository
 
 
-# ============================================================================
-# Shared helpers
-# ============================================================================
 
 
 async def _seed_product(db_session: AsyncSession, tenant_key: str) -> Product:
@@ -80,7 +62,6 @@ async def _seed_active_project(
 
 
 def _make_launch_service(db_session: AsyncSession, tenant_key: str):
-    """Build a ProjectLaunchService bound to the test session."""
     from giljo_mcp.services.project_launch_service import ProjectLaunchService
 
     db_manager = MagicMock()
@@ -93,9 +74,6 @@ def _make_launch_service(db_session: AsyncSession, tenant_key: str):
     )
 
 
-# ============================================================================
-# (a) create_orchestrator_fixture sets project_phase='staging'
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -103,12 +81,6 @@ async def test_create_orchestrator_fixture_sets_staging_phase(
     db_session: AsyncSession,
     test_tenant_key: str,
 ):
-    """create_orchestrator_fixture (called on project activation) must set
-    project_phase='staging' on the AgentExecution it creates.
-
-    CE-0026: The fixture is created before staging has begun — the first
-    orchestrator execution always belongs to the staging phase.
-    """
     product = await _seed_product(db_session, test_tenant_key)
     project = await _seed_active_project(db_session, test_tenant_key, product.id)
     await db_session.commit()
@@ -124,9 +96,6 @@ async def test_create_orchestrator_fixture_sets_staging_phase(
     )
 
 
-# ============================================================================
-# (b) ProjectLaunchService._spawn_orchestrator sets phase='staging'
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -134,11 +103,6 @@ async def test_launch_project_spawn_orchestrator_sets_staging_phase(
     db_session: AsyncSession,
     test_tenant_key: str,
 ):
-    """launch_project on a fresh project calls _spawn_orchestrator which must
-    set project_phase='staging' on the created AgentExecution.
-
-    CE-0026: spawn at launch is the staging session.
-    """
     product = await _seed_product(db_session, test_tenant_key)
     project = await _seed_active_project(db_session, test_tenant_key, product.id)
     await db_session.commit()
@@ -148,7 +112,6 @@ async def test_launch_project_spawn_orchestrator_sets_staging_phase(
 
     assert result.orchestrator_job_id is not None
 
-    # Find the execution created for this job.
     execution = (
         await db_session.execute(
             select(AgentExecution).where(
@@ -162,7 +125,6 @@ async def test_launch_project_spawn_orchestrator_sets_staging_phase(
     assert execution.project_phase == "staging", (
         f"CE-0026: _spawn_orchestrator must set project_phase='staging', got {execution.project_phase!r}"
     )
-    # launch should also set staging_status on the project.
     refreshed_project = (
         await db_session.execute(select(Project).where(Project.id == project.id, Project.tenant_key == test_tenant_key))
     ).scalar_one()
@@ -171,9 +133,6 @@ async def test_launch_project_spawn_orchestrator_sets_staging_phase(
     )
 
 
-# ============================================================================
-# (c) ThinClientPromptGenerator._find_or_create_orchestrator (create path)
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -181,11 +140,6 @@ async def test_thin_prompt_generator_creates_orchestrator_with_staging_phase(
     db_session: AsyncSession,
     test_tenant_key: str,
 ):
-    """ThinClientPromptGenerator._find_or_create_orchestrator, when no orchestrator
-    exists, creates a new execution with project_phase='staging'.
-
-    CE-0026: thin_client_generator creation path is the staging session.
-    """
     from giljo_mcp.thin_prompt_generator import ThinClientPromptGenerator
 
     product = await _seed_product(db_session, test_tenant_key)
@@ -205,7 +159,6 @@ async def test_thin_prompt_generator_creates_orchestrator_with_staging_phase(
 
     assert orchestrator_id is not None
 
-    # Read back the execution that was created.
     execution = (
         await db_session.execute(
             select(AgentExecution).where(
@@ -221,16 +174,6 @@ async def test_thin_prompt_generator_creates_orchestrator_with_staging_phase(
     )
 
 
-# ============================================================================
-# (d) Was: _spawn_implementation_execution tests.
-#     CE-0032 removed the helper and the multi-exec model entirely; under the
-#     single-orchestrator-entity model launch_project reuses the existing orch
-#     exec across phases (waiting at staging-end, working at impl start). The
-#     spawn-time tests below were deleted in CE-0032 along with the helper.
-#     CE-0027 billing-unstick + idempotency-for-active tests also deleted
-#     (msg-006 in the private agentcomms log) because the bug class no longer
-#     exists once the multi-exec model is gone.
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -238,17 +181,6 @@ async def test_launch_project_reuses_orch_across_phases_ce_0032(
     db_session: AsyncSession,
     test_tenant_key: str,
 ):
-    """CE-0032 single-orchestrator-entity invariant.
-
-    Pre-CE-0032 launch_project would call _spawn_implementation_execution
-    when it saw a completed staging orch + staging_complete project. Under
-    CE-0032 the same orch row persists; launch_project must NOT create a
-    second exec row regardless of the existing orch's status.
-
-    Seeds a post-staging orch at status='waiting' (the truth post-CE-0032)
-    and confirms launch_project returns _build_reuse_result with the same
-    row and no new exec is created.
-    """
     product = await _seed_product(db_session, test_tenant_key)
     project = await _seed_active_project(db_session, test_tenant_key, product.id, staging_status="staging_complete")
 
@@ -268,7 +200,7 @@ async def test_launch_project_reuses_orch_across_phases_ce_0032(
         job_id=job_id,
         tenant_key=test_tenant_key,
         agent_display_name="orchestrator",
-        status="waiting",  # CE-0032 truth: orch row sits at 'waiting' post-staging
+        status="waiting",
         started_at=datetime.now(UTC) - timedelta(minutes=10),
         project_phase="staging",
     )
@@ -298,9 +230,6 @@ async def test_launch_project_reuses_orch_across_phases_ce_0032(
     assert executions[0].agent_id == orch_exec.agent_id
 
 
-# ============================================================================
-# (e) Back-compat default: no explicit project_phase → 'implementation'
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -308,12 +237,6 @@ async def test_agent_execution_default_project_phase_is_implementation(
     db_session: AsyncSession,
     test_tenant_key: str,
 ):
-    """AgentExecution inserted without an explicit project_phase must read back
-    as 'implementation' (the migration DEFAULT).
-
-    This guards the back-compat promise: existing rows from before CE-0026
-    appear as implementation-phase, which is the safe fallback.
-    """
     product = await _seed_product(db_session, test_tenant_key)
     project = await _seed_active_project(db_session, test_tenant_key, product.id)
 
@@ -329,7 +252,6 @@ async def test_agent_execution_default_project_phase_is_implementation(
     )
     db_session.add(job)
 
-    # Insert WITHOUT specifying project_phase — relies on the column default.
     execution = AgentExecution(
         agent_id=str(uuid4()),
         job_id=job_id,
@@ -337,7 +259,6 @@ async def test_agent_execution_default_project_phase_is_implementation(
         agent_display_name="orchestrator",
         status="working",
         started_at=datetime.now(UTC),
-        # project_phase deliberately omitted — testing the default
     )
     db_session.add(execution)
     await db_session.commit()
@@ -348,9 +269,6 @@ async def test_agent_execution_default_project_phase_is_implementation(
     )
 
 
-# ============================================================================
-# (f) CHECK constraint rejects invalid project_phase values
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -358,15 +276,6 @@ async def test_agent_execution_check_constraint_rejects_invalid_phase(
     db_session: AsyncSession,
     test_tenant_key: str,
 ):
-    """Inserting project_phase='garbage' must raise an IntegrityError.
-
-    The CHECK constraint ck_agent_execution_project_phase restricts values
-    to ('staging', 'implementation'). Anything else must be rejected at the
-    DB level, not silently accepted.
-
-    Note: we insert via raw SQL to bypass SQLAlchemy's Python-layer defaults
-    and exercise the actual DB constraint.
-    """
     product = await _seed_product(db_session, test_tenant_key)
     project = await _seed_active_project(db_session, test_tenant_key, product.id)
 
@@ -417,7 +326,6 @@ async def test_agent_execution_check_constraint_rejects_invalid_phase(
     with pytest.raises((IntegrityError, Exception)) as exc_info:
         await _insert_invalid_phase()
 
-    # Verify the exception is constraint-related.
     err_str = str(exc_info.value).lower()
     assert any(term in err_str for term in ("check", "constraint", "project_phase", "integrity")), (
         f"CE-0026: expected a CHECK constraint IntegrityError for project_phase='garbage', got: {exc_info.value!r}"

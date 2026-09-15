@@ -3,32 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Rename project_types to taxonomy_types (unified Type taxonomy).
-
-Revision ID: ce_0014_rename_project_types_to_taxonomy_types
-Revises: ce_0013_drop_orphan_cols_batch
-Create Date: 2026-05-05
-
-Phase A of the agent-parity + unified taxonomy project.
-
-The project_types table predates Tasks gaining a typed classification.
-Tasks will reuse the same taxonomy in Phase B (tasks.task_type_id FK).
-Renaming to taxonomy_types reflects that the table is no longer
-project-specific.
-
-Operations (all idempotent via information_schema guards):
-
-1. Rename table project_types -> taxonomy_types
-2. Rename unique constraint uq_project_type_abbr -> uq_taxonomy_type_abbr
-3. Rename index idx_project_type_tenant -> idx_taxonomy_type_tenant
-4. Rename FK constraint on projects.project_type_id from
-   projects_project_type_id_fkey to projects_taxonomy_type_id_fkey
-
-The projects.project_type_id COLUMN is deliberately NOT renamed --
-it stays as the in-row pointer to the type row. Only the target
-table and the constraint pointing at it move. This keeps the
-projects model and every projects-side query unchanged.
-"""
 
 import sqlalchemy as sa
 from alembic import op

@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Template service response models."""
 
 from pydantic import BaseModel, ConfigDict
 

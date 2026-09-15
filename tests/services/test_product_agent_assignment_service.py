@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tests for ProductAgentAssignment service, repository, and model.
-
-Covers:
-- Model creation and constraints
-- Repository CRUD (tenant-isolated)
-- Service validation, toggle, bulk assign
-- Tenant isolation (cross-tenant access denied)
-"""
 
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -31,9 +22,6 @@ from giljo_mcp.services.product_agent_assignment_service import (
 from giljo_mcp.tenant import TenantManager
 
 
-# ============================================================================
-# Fixtures
-# ============================================================================
 
 
 @pytest_asyncio.fixture
@@ -79,13 +67,13 @@ async def product_b(db_session, tenant_b_key):
 
 
 @pytest_asyncio.fixture
-async def templates_a(db_session, tenant_a_key):
-    """Create 3 agent templates for tenant A."""
+async def templates_a(db_session, tenant_a_key, product_a):
     templates = []
     for name in ["orchestrator", "implementer", "analyzer"]:
         t = AgentTemplate(
             id=str(uuid4()),
             tenant_key=tenant_a_key,
+            product_id=product_a.id,
             name=f"{name}-{uuid4().hex[:4]}",
             role=name,
             description=f"Test {name} template",
@@ -101,11 +89,11 @@ async def templates_a(db_session, tenant_a_key):
 
 
 @pytest_asyncio.fixture
-async def templates_b(db_session, tenant_b_key):
-    """Create a template for tenant B."""
+async def templates_b(db_session, tenant_b_key, product_b):
     t = AgentTemplate(
         id=str(uuid4()),
         tenant_key=tenant_b_key,
+        product_id=product_b.id,
         name=f"other-template-{uuid4().hex[:4]}",
         role="implementer",
         description="Other tenant template",
@@ -141,13 +129,9 @@ def service_b(db_manager, tenant_b_key, db_session):
     )
 
 
-# ============================================================================
-# Model Tests
-# ============================================================================
 
 
 class TestProductAgentAssignmentModel:
-    """Test the ORM model structure."""
 
     def test_table_name(self):
         assert ProductAgentAssignment.__tablename__ == "product_agent_assignments"
@@ -191,13 +175,9 @@ class TestProductAgentAssignmentModel:
         assert "tpl-1" in r
 
 
-# ============================================================================
-# Repository Tests
-# ============================================================================
 
 
 class TestProductAgentAssignmentRepository:
-    """Test the repository layer with real database."""
 
     @pytest.mark.asyncio
     async def test_upsert_creates_new_assignment(self, db_session, repo, product_a, templates_a, tenant_a_key):
@@ -211,9 +191,7 @@ class TestProductAgentAssignmentRepository:
 
     @pytest.mark.asyncio
     async def test_upsert_updates_existing_assignment(self, db_session, repo, product_a, templates_a, tenant_a_key):
-        # Create
         await repo.upsert_assignment(db_session, product_a.id, templates_a[0].id, tenant_a_key, is_active=True)
-        # Update
         updated = await repo.upsert_assignment(
             db_session, product_a.id, templates_a[0].id, tenant_a_key, is_active=False
         )
@@ -249,23 +227,26 @@ class TestProductAgentAssignmentRepository:
         assert templates_a[1].id not in active_ids
 
     @pytest.mark.asyncio
-    async def test_bulk_assign_all_templates(self, db_session, repo, product_a, templates_a, tenant_a_key):
-        new_assignments = await repo.bulk_assign_all_templates(db_session, product_a.id, tenant_a_key)
+    async def test_enable_templates_for_product(self, db_session, repo, product_a, templates_a, tenant_a_key):
+        ids = [t.id for t in templates_a]
+        new_assignments = await repo.enable_templates_for_product(db_session, product_a.id, tenant_a_key, ids)
         assert len(new_assignments) == 3
 
     @pytest.mark.asyncio
-    async def test_bulk_assign_skips_existing(self, db_session, repo, product_a, templates_a, tenant_a_key):
-        # Assign one first
-        await repo.upsert_assignment(db_session, product_a.id, templates_a[0].id, tenant_a_key, is_active=True)
+    async def test_enable_templates_skips_existing(self, db_session, repo, product_a, templates_a, tenant_a_key):
+        await repo.upsert_assignment(db_session, product_a.id, templates_a[0].id, tenant_a_key, is_active=False)
         await db_session.flush()
 
-        # Bulk assign should only create 2 new
-        new_assignments = await repo.bulk_assign_all_templates(db_session, product_a.id, tenant_a_key)
+        ids = [t.id for t in templates_a]
+        new_assignments = await repo.enable_templates_for_product(db_session, product_a.id, tenant_a_key, ids)
         assert len(new_assignments) == 2
+
+        existing = await repo.get_assignment(db_session, product_a.id, templates_a[0].id, tenant_a_key)
+        assert existing.is_active is False, "skip-existing must not flip a deliberate OFF back on"
 
     @pytest.mark.asyncio
     async def test_remove_assignments_for_product(self, db_session, repo, product_a, templates_a, tenant_a_key):
-        await repo.bulk_assign_all_templates(db_session, product_a.id, tenant_a_key)
+        await repo.enable_templates_for_product(db_session, product_a.id, tenant_a_key, [t.id for t in templates_a])
         await db_session.flush()
 
         count = await repo.remove_assignments_for_product(db_session, product_a.id, tenant_a_key)
@@ -278,22 +259,16 @@ class TestProductAgentAssignmentRepository:
     async def test_tenant_isolation_get_assignments(
         self, db_session, repo, product_a, templates_a, tenant_a_key, tenant_b_key
     ):
-        """Assignments for product_a with tenant_a_key must not appear under tenant_b_key."""
-        await repo.bulk_assign_all_templates(db_session, product_a.id, tenant_a_key)
+        await repo.enable_templates_for_product(db_session, product_a.id, tenant_a_key, [t.id for t in templates_a])
         await db_session.flush()
 
-        # Query with wrong tenant key
         assignments = await repo.get_assignments_for_product(db_session, product_a.id, tenant_b_key)
         assert len(assignments) == 0
 
 
-# ============================================================================
-# Service Tests
-# ============================================================================
 
 
 class TestProductAgentAssignmentService:
-    """Test the service layer with validation and write discipline."""
 
     @pytest.mark.asyncio
     async def test_toggle_creates_assignment(self, service_a, product_a, templates_a):
@@ -315,44 +290,59 @@ class TestProductAgentAssignmentService:
 
         assignments = await service_a.list_assignments(product_a.id)
         assert len(assignments) == 3
-        # Check template info is populated
         for a in assignments:
             assert a["template_name"] is not None
             assert a["template_role"] is not None
 
     @pytest.mark.asyncio
-    async def test_assign_all_templates(self, service_a, product_a, templates_a):
-        count = await service_a.assign_all_templates(product_a.id)
+    async def test_enable_for_product(self, db_session, service_a, product_a, templates_a):
+        count = await service_a.enable_for_product(db_session, product_a.id, [t.id for t in templates_a])
+        await db_session.commit()
         assert count == 3
 
     @pytest.mark.asyncio
-    async def test_assign_all_skips_existing(self, db_session, service_a, product_a, templates_a, tenant_a_key):
-        # BE-9385a: the single pre-existing row is now written through the
-        # REPOSITORY rather than through service.toggle_assignment. The service
-        # toggle deliberately materialises the product's whole junction before
-        # flipping one row (otherwise the first toggle on an uncurated product
-        # switches selection tolerance off and blanks every other agent), so it
-        # is no longer a way to create exactly one row. The behaviour under test
-        # -- assign_all creates only the MISSING pairs -- is unchanged, and this
-        # setup states it directly instead of relying on a side effect.
+    async def test_enable_for_product_skips_existing(self, db_session, service_a, product_a, templates_a, tenant_a_key):
         await ProductAgentAssignmentRepository().upsert_assignment(
             db_session, product_a.id, templates_a[0].id, tenant_a_key, True
         )
-        count = await service_a.assign_all_templates(product_a.id)
-        assert count == 2  # Only 2 new ones
+        count = await service_a.enable_for_product(db_session, product_a.id, [t.id for t in templates_a])
+        await db_session.commit()
+        assert count == 2
 
     @pytest.mark.asyncio
-    async def test_get_active_template_ids(self, service_a, product_a, templates_a):
+    async def test_toggle_changes_exactly_one_agent(
+        self, service_a, product_a, templates_a, db_session, repo, tenant_a_key
+    ):
         await service_a.toggle_assignment(product_a.id, templates_a[0].id, is_active=True)
-        await service_a.toggle_assignment(product_a.id, templates_a[1].id, is_active=False)
 
-        active_ids = await service_a.get_active_template_ids(product_a.id)
-        assert templates_a[0].id in active_ids
-        assert templates_a[1].id not in active_ids
+        rows = await repo.get_assignments_for_product(db_session, product_a.id, tenant_a_key)
+        assert len(rows) == 1, f"one toggle must write one row, wrote {len(rows)}"
+        assert rows[0].template_id == templates_a[0].id
 
     @pytest.mark.asyncio
-    async def test_remove_assignments(self, service_a, product_a, templates_a):
-        await service_a.assign_all_templates(product_a.id)
+    async def test_toggle_refuses_another_products_agent(
+        self, db_session, service_a, product_a, templates_a, tenant_a_key
+    ):
+        from giljo_mcp.exceptions import ValidationError
+
+        other = Product(
+            id=str(uuid4()),
+            name=f"Other product {uuid4().hex[:6]}",
+            description="owns nothing under test",
+            tenant_key=tenant_a_key,
+            is_active=True,
+            created_at=datetime.now(UTC),
+        )
+        db_session.add(other)
+        await db_session.commit()
+
+        with pytest.raises(ValidationError, match="different product"):
+            await service_a.toggle_assignment(other.id, templates_a[0].id, is_active=True)
+
+    @pytest.mark.asyncio
+    async def test_remove_assignments(self, db_session, service_a, product_a, templates_a):
+        await service_a.enable_for_product(db_session, product_a.id, [t.id for t in templates_a])
+        await db_session.commit()
         count = await service_a.remove_assignments(product_a.id)
         assert count == 3
 
@@ -386,17 +376,15 @@ class TestProductAgentAssignmentService:
 
     @pytest.mark.asyncio
     async def test_tenant_isolation_toggle(self, service_b, product_a, templates_a):
-        """Service B (tenant B) cannot toggle assignments for tenant A's template."""
         from giljo_mcp.exceptions import ResourceNotFoundError
 
         with pytest.raises(ResourceNotFoundError):
             await service_b.toggle_assignment(product_a.id, templates_a[0].id, is_active=True)
 
     @pytest.mark.asyncio
-    async def test_tenant_isolation_list(self, service_a, service_b, product_a, templates_a):
-        """Service B cannot see assignments created by service A."""
-        await service_a.assign_all_templates(product_a.id)
+    async def test_tenant_isolation_list(self, db_session, service_a, service_b, product_a, templates_a):
+        await service_a.enable_for_product(db_session, product_a.id, [t.id for t in templates_a])
+        await db_session.commit()
 
-        # Service B with different tenant key sees nothing
         assignments = await service_b.list_assignments(product_a.id)
         assert len(assignments) == 0

@@ -81,10 +81,10 @@ The wizard has four steps shown in a progress bar:
 |---|---|---|
 | 1 | Choose Tools | Pick one or more of the six AI coding tools you use (you can add the rest later) |
 | 2 | Connect | The wizard walks you through your chosen tools one at a time, with a live status card that flips green the moment each one connects |
-| 3 | Install | Ask your tool to run `giljo_setup`, which installs the `/giljo` skill and your agent templates |
+| 3 | Install | Ask your tool to run `giljo_setup`, which installs the `/giljo` skill and writes the Giljo HQ marker block into your project's `CLAUDE.md` / `AGENTS.md` |
 | 4 | Launch | Confirm you are set up and jump to creating your first product |
 
-The six pickable tools are **Claude Code**, **Codex CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenCode**, and **Generic MCP client** (which covers anything else that speaks open MCP). Claude Desktop and other chat clients connect a little differently — see **AI Tool Configuration (Connect)** for the exact steps. The wizard can be restarted any time from **Tools → Startup**.
+The four pickable tools are **Claude Code**, **Codex CLI**, **OpenCode**, and **Generic MCP client** (which covers anything else that speaks open MCP). Claude Desktop and other chat clients connect a little differently — see **AI Tool Configuration (Connect)** for the exact steps. The wizard can be restarted any time from **Tools → Startup**.
 
 ### System Banners
 
@@ -499,7 +499,7 @@ Navigate to **Tools** via the left navigation. Five tabs are available:
 
 The Connect tab is a single directory of your tools. A left rail headed **"YOUR TOOLS"** lists each one with a live status — **Connected**, **Waiting**, or **Not set up**. Click **"+ Add a tool"** to pick from the six supported tools and walk through the same one-at-a-time connect flow the Setup Wizard uses; each tool card lets you copy its connection command and, later, **Remove tool**.
 
-The six directly supported tools are **Claude Code**, **Codex CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenCode**, and **Generic MCP client**. **Claude Desktop** and other chat clients are not in that pickable list — they connect either by adding GiljoAI as a connector (a one-click **browser sign-in**) or by pasting a JSON config into the client's own MCP settings.
+The four directly supported tools are **Claude Code**, **Codex CLI**, **OpenCode**, and **Generic MCP client**. **Claude Desktop** and other chat clients are not in that pickable list — they connect either by adding GiljoAI as a connector (a one-click **browser sign-in**) or by pasting a JSON config into the client's own MCP settings.
 
 Each tool connects one of three ways, and the card shows the right steps for the one you pick:
 
@@ -521,32 +521,36 @@ The Git integration card (Connect tab) works with any local git repository, not 
 
 ### Agent Templates (Agents tab)
 
-The **Agents** tab is where you shape your agent crew. You have **16 active slots**: one is reserved for the Orchestrator (managed in Admin Settings), leaving **15 for your own agents**. When 15 are active, activating another is blocked with: *"Maximum 15 active agent roles allowed (currently 15). Deactivate another role first."* Deactivate one to free a slot. There is **no limit on how many templates you can create** — the cap is only on how many are *active* at once.
+The **Agents** tab is where you shape your agent crew. **Each product has its own 16 active slots**: one is reserved for the Orchestrator (managed in Admin Settings), leaving **15 for your own agents**. The budget is per product, so a second product starts with a full 15 of its own — filling one product's roster never uses up another's.
 
-**Add Default Agents.** The **"Add Default Agents"** button safely re-imports the starter set at any time. It is purely additive: your edited templates are never touched. A fresh default whose name you have already customized lands as a separate `-duplicate` copy, and defaults you already have are skipped.
+Slots are counted by **role**, not by agent: three agents that all have the role `implementer` take one slot between them, so a second copy of a role the product already runs is free. When a product has 15 roles switched on, switching on an agent with a sixteenth role is blocked with: *"Maximum 15 active agent roles allowed for this product (currently 15). Switch another role off first."* Switch a role off to free a slot. There is **no limit on how many templates you can create** — the cap is only on how many distinct roles are *active at once, within one product*.
 
-**Agents follow the product you are working in.** Every agent's active state is tracked per product. A newly added agent — whether from **Add Default Agents** or created by hand — arrives ready to configure but **switched off**: it will not appear on your orchestrator's roster or install to your tool until you turn it on for the product you are working in. The **Active here** column/switch in the templates list controls exactly that — the product you currently have open — and a product you have never customized keeps every agent it already had.
+**Add Default Agents.** The **"Add Default Agents"** button safely re-imports the starter set into **the product you are currently viewing**, at any time. It is purely additive: your edited templates are never touched. A fresh default whose name you have already customized lands as a separate `-duplicate` copy, and defaults you already have are skipped. Imported agents arrive **switched on** — this is the "give me the standard crew" button, so the crew is ready to work rather than waiting to be turned on one at a time.
 
-**Finding templates.** Filter by free-text **Search**, by **Role**, and by **Status** (Active / Inactive). The **Export Status** column is sortable, so out-of-date templates are easy to find. The **Updated** column reads "Added today" for an agent you just added and have not switched on yet, "Never edited" for an untouched stock agent, and the real date (with the exact time on hover) once you have changed something — newest first, so agents needing your attention sit at the top.
+**Agents follow the product you are working in.** Every agent belongs to one product, and its active state is tracked there. Where an agent came from decides whether it starts on or off: a **new product arrives with its own full crew already switched on**, and agents from **Add Default Agents** arrive switched on too — but an agent you **create by hand arrives switched off**, ready to configure, and will not appear on your orchestrator's roster until you turn it on. The **Active here** column/switch in the templates list controls exactly that, for the product you currently have open.
+
+**Finding templates.** Filter by free-text **Search**, by **Role**, and by **Status** (Active / Inactive). The **Updated** column reads "Added today" for an agent you just added and have not switched on yet, "Never edited" for an untouched stock agent, and the real date (with the exact time on hover) once you have changed something — newest first, so agents needing your attention sit at the top.
 
 **Editing a template.** The editor has these fields:
 
 - **Role** (required) — the agent's role, e.g. implementer, tester, reviewer.
 - **Custom Suffix (optional)** — appended to the display name (a live preview shows the result).
-- **Coding tool** — the tool this agent runs in (Claude, Codex, Gemini, or Antigravity).
+- **Coding tool** — the tool this agent runs in (Claude, Codex, OpenCode, or Generic).
+- **Model** and **Effort** — free-text hints passed to the agent's tool when it launches, e.g. a model name or "high". Both default to **`inherit`**, meaning "the same as the orchestrator". They are plain prose, not a validated list: a tool that cannot honour a value simply ignores it.
 - **Description** — a short summary.
 - **Role & Expertise** — describe the agent's specialization, expertise, and personality. This is the field that shapes how the agent behaves.
-- **Available in all products** (existing templates only) — a separate, tenant-wide switch that retires the agent everywhere at once, distinct from the per-product **Active here** switch in the templates list. Turning an agent off for one product cannot retire it everywhere, and turning off **Available in all products** cannot be undone by switching it on for just one product.
 
-### Installing Skills and Agents (`giljo_setup`)
+**Your agents reach your tool by themselves.** There is no export, sync, or install step, and nothing about an agent lives on your machine. Every agent your orchestrator starts is handed its own profile — role, description, tool, model and effort hints, instructions, behaviour rules, and success criteria — by the server at the moment it begins work. Edit a template here and the very next agent that starts uses the new version.
 
-`giljo_setup` is a tool you run **from inside your AI coding tool**, not from the dashboard, and it is available in both editions. It installs the `/giljo` skill and your agent templates onto your machine:
+**Download a profile.** If you want to run an agent yourself rather than let the orchestrator start it, open the row menu in the agents list and choose **Download profile (.md)**. You get that agent's profile as plain Markdown, ready to paste or drop into whatever tool you like.
 
-- The **first** run installs both skills and agents.
-- **Later** runs always refresh your skills, and **ask before replacing** any agents you have edited.
-- Choose **"Agents only"** to push just your active templates to your tool. A refresh **preserves your edits**; a **reset** restores the shipped defaults. Exports carry up to **16 enabled agents**, and your own agents are prioritized so a full default set can never crowd them out.
+### Installing Skills (`giljo_setup`)
 
-A download link is valid for a short window. If a link goes stale because your templates changed after it was created, the download reports itself as stale — just re-run `giljo_setup` to get a fresh one.
+`giljo_setup` is a tool you run **from inside your AI coding tool**, not from the dashboard, and it is available in both editions. It installs the `/giljo` skill and writes the Giljo HQ marker block — the short primer, plus the binding for the product this repository belongs to — into your project's `CLAUDE.md` / `AGENTS.md`. Run it once after connecting, and again whenever your skills are out of date.
+
+It does **not** install agents, and it has no "agents only" option: agents receive their profiles from the server, so there is nothing to push or keep in sync.
+
+A download link is valid for a short window. If a link goes stale, just re-run `giljo_setup` to get a fresh one.
 
 ### Shaping How Agents Behave
 
@@ -811,7 +815,7 @@ After providing the certificate, enable HTTPS from **Settings → Network** and 
 Switching between HTTP and HTTPS changes the server's URL (`http://…` becomes `https://…`), which invalidates your existing MCP connections. After you enable HTTPS in **Settings → Network**:
 
 1. **Re-generate your connection commands** from the in-app Configurator (**Tools → Connect**) so each AI coding agent uses the new `https://` URL, then remove and re-add the connection in your tool.
-2. **Trust the certificate in the agent's runtime** when it is self-signed or from a private CA. Node-based tools (Claude Code, Codex, Gemini CLI) keep their own trust store, so follow the Node.js trust step below — some agents (e.g. Gemini CLI) may need additional certificate-trust configuration for self-signed certificates.
+2. **Trust the certificate in the agent's runtime** when it is self-signed or from a private CA. Node-based tools (Claude Code, Codex) keep their own trust store, so follow the Node.js trust step below.
 
 #### First Connection
 

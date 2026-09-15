@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""REST endpoint tests for the Agent Message Hub (BE-6054ef).
-
-Tests the full contract of /api/v1/threads:
-- CRUD: create, list, history, participants, post, baton, search, my-turn
-- Tenant isolation: tenant B cannot read or post to tenant A's threads
-- WS broadcast: broadcast_event_to_tenant is called on post and baton
-- Input validation: 422 on empty content, 404 on unknown thread
-- Username injection: post stamped with user's display_name, not an agent id
-
-Parallel-safe: uses api_client fixture (fresh db_manager session per test),
-no module-level mutable state, no test ordering dependencies.
-"""
 
 from __future__ import annotations
 
@@ -38,13 +26,9 @@ from giljo_mcp.tenant import TenantManager
 _TEST_CSRF_TOKEN = secrets.token_urlsafe(32)
 
 
-# ---------------------------------------------------------------------------
-# Seed helper
-# ---------------------------------------------------------------------------
 
 
 async def _seed_tenant(db_manager) -> dict:
-    """Create org + user in a fresh isolated tenant. Returns auth headers + ids."""
     async with db_manager.get_session_async() as session:
         suffix = uuid.uuid4().hex[:8]
         tenant_key = TenantManager.generate_tenant_key()
@@ -72,7 +56,6 @@ async def _seed_tenant(db_manager) -> dict:
         session.add(user)
         await session.flush()
 
-        # Seed the CHT taxonomy type required by CommThreadRepository.
         with tenant_session_context(session, tenant_key):
             await ensure_default_types_seeded(session, tenant_key)
 
@@ -96,9 +79,6 @@ async def _seed_tenant(db_manager) -> dict:
         }
 
 
-# ---------------------------------------------------------------------------
-# Helper: create a thread via REST
-# ---------------------------------------------------------------------------
 
 
 async def _create_thread(api_client: AsyncClient, headers: dict, subject: str = "Test Thread") -> dict:
@@ -107,9 +87,6 @@ async def _create_thread(api_client: AsyncClient, headers: dict, subject: str = 
     return resp.json()
 
 
-# ---------------------------------------------------------------------------
-# Core CRUD tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -135,17 +112,6 @@ async def test_list_threads_shows_created(api_client: AsyncClient, db_manager) -
 
 @pytest.mark.asyncio
 async def test_list_threads_carries_the_last_message_anchor(api_client: AsyncClient, db_manager) -> None:
-    """FE-9418: the listed card names the POST it summarises, not just the thread.
-
-    Asserted at the HTTP boundary and not only at the repository, because the enrichment
-    is OPT-IN on ``viewer_id`` and this endpoint is where that opt-in is made
-    (``comm_threads.py`` passes ``current_user.id``). A repository-only test would stay
-    green if the anchor never reached a client.
-
-    The anchor is compared against the thread id: an unlabelled projection would collide
-    with ``CommThread.id`` in the row tuple and serve the thread id here, which every
-    weaker check ("present", "a string", "a UUID") would accept.
-    """
     seed = await _seed_tenant(db_manager)
     thread = await _create_thread(api_client, seed["headers"], subject="AnchorMe")
     thread_id = thread["thread_id"]
@@ -167,7 +133,6 @@ async def test_list_threads_carries_the_last_message_anchor(api_client: AsyncCli
 
 @pytest.mark.asyncio
 async def test_post_to_thread_username_injection(api_client: AsyncClient, db_manager) -> None:
-    """post_to_thread stamps the user's display_name, not an agent id."""
     seed = await _seed_tenant(db_manager)
     thread = await _create_thread(api_client, seed["headers"])
     thread_id = thread["thread_id"]
@@ -185,7 +150,6 @@ async def test_post_to_thread_username_injection(api_client: AsyncClient, db_man
     assert len(messages) >= 1
     last = messages[-1]
     assert last["content"] == "Hello from user"
-    # The service stamps the user's display_name, not the agent id string
     assert last["from_display_name"] != seed["user_id"]
 
 
@@ -212,7 +176,6 @@ async def test_pass_baton_shows_in_my_turn(api_client: AsyncClient, db_manager) 
     thread = await _create_thread(api_client, seed["headers"])
     thread_id = thread["thread_id"]
 
-    # Pass baton to the user themselves
     baton_resp = await api_client.post(
         f"/api/v1/threads/{thread_id}/baton",
         headers=seed["headers"],
@@ -259,14 +222,10 @@ async def test_participants_endpoint_returns_creator(api_client: AsyncClient, db
     assert seed["user_id"] in participant_ids
 
 
-# ---------------------------------------------------------------------------
-# Tenant isolation
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_tenant_isolation_get_thread(api_client: AsyncClient, db_manager) -> None:
-    """Tenant B gets 404 on tenant A's thread id."""
     a = await _seed_tenant(db_manager)
     b = await _seed_tenant(db_manager)
 
@@ -279,7 +238,6 @@ async def test_tenant_isolation_get_thread(api_client: AsyncClient, db_manager) 
 
 @pytest.mark.asyncio
 async def test_tenant_isolation_post_to_thread(api_client: AsyncClient, db_manager) -> None:
-    """Tenant B cannot post to tenant A's thread."""
     a = await _seed_tenant(db_manager)
     b = await _seed_tenant(db_manager)
 
@@ -294,9 +252,6 @@ async def test_tenant_isolation_post_to_thread(api_client: AsyncClient, db_manag
     assert resp.status_code == 404, resp.text
 
 
-# ---------------------------------------------------------------------------
-# Input validation gates
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -327,14 +282,10 @@ async def test_search_missing_query_returns_422(api_client: AsyncClient, db_mana
     assert resp.status_code == 422, resp.text
 
 
-# ---------------------------------------------------------------------------
-# WS broadcast assertions
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_ws_broadcast_on_post(api_client: AsyncClient, db_manager) -> None:
-    """broadcast_event_to_tenant is called with type=thread_message on post."""
     from api.app_state import state
 
     seed = await _seed_tenant(db_manager)
@@ -361,7 +312,6 @@ async def test_ws_broadcast_on_post(api_client: AsyncClient, db_manager) -> None
 
 @pytest.mark.asyncio
 async def test_ws_broadcast_on_baton(api_client: AsyncClient, db_manager) -> None:
-    """broadcast_event_to_tenant is called with type=thread_update on baton."""
     from api.app_state import state
 
     seed = await _seed_tenant(db_manager)
@@ -386,14 +336,10 @@ async def test_ws_broadcast_on_baton(api_client: AsyncClient, db_manager) -> Non
     assert "thread_update" in event_types
 
 
-# ---------------------------------------------------------------------------
-# Soft delete (ce_0057)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_delete_thread_removes_from_reads(api_client: AsyncClient, db_manager) -> None:
-    """DELETE soft-deletes: the thread drops out of list, history (404), and search."""
     seed = await _seed_tenant(db_manager)
     thread = await _create_thread(api_client, seed["headers"], subject="DeleteMe42")
     thread_id = thread["thread_id"]
@@ -404,15 +350,12 @@ async def test_delete_thread_removes_from_reads(api_client: AsyncClient, db_mana
     assert body["deleted"] is True
     assert body["thread_id"] == thread_id
 
-    # No longer listed
     listed = await api_client.get("/api/v1/threads", headers=seed["headers"])
     assert thread_id not in [t["thread_id"] for t in listed.json()["threads"]]
 
-    # History now 404s (read filters deleted_at IS NULL)
     hist = await api_client.get(f"/api/v1/threads/{thread_id}", headers=seed["headers"])
     assert hist.status_code == 404, hist.text
 
-    # Not surfaced by search either
     found = await api_client.get("/api/v1/threads/search", headers=seed["headers"], params={"query": "DeleteMe42"})
     assert thread_id not in [t["thread_id"] for t in found.json()["threads"]]
 
@@ -427,7 +370,6 @@ async def test_delete_missing_thread_returns_404(api_client: AsyncClient, db_man
 
 @pytest.mark.asyncio
 async def test_delete_twice_returns_404(api_client: AsyncClient, db_manager) -> None:
-    """A second delete on the same thread 404s — it is already soft-deleted."""
     seed = await _seed_tenant(db_manager)
     thread = await _create_thread(api_client, seed["headers"])
     thread_id = thread["thread_id"]
@@ -440,7 +382,6 @@ async def test_delete_twice_returns_404(api_client: AsyncClient, db_manager) -> 
 
 @pytest.mark.asyncio
 async def test_tenant_isolation_delete_thread(api_client: AsyncClient, db_manager) -> None:
-    """Tenant B cannot delete tenant A's thread (404), and A's thread survives."""
     a = await _seed_tenant(db_manager)
     b = await _seed_tenant(db_manager)
 
@@ -450,14 +391,12 @@ async def test_tenant_isolation_delete_thread(api_client: AsyncClient, db_manage
     resp = await api_client.delete(f"/api/v1/threads/{thread_id}", headers=b["headers"])
     assert resp.status_code == 404, resp.text
 
-    # A's thread is untouched
     still = await api_client.get(f"/api/v1/threads/{thread_id}", headers=a["headers"])
     assert still.status_code == 200, still.text
 
 
 @pytest.mark.asyncio
 async def test_ws_broadcast_on_delete(api_client: AsyncClient, db_manager) -> None:
-    """broadcast_event_to_tenant fires thread_update(update_type=deleted) on delete."""
     from api.app_state import state
 
     seed = await _seed_tenant(db_manager)
@@ -479,15 +418,9 @@ async def test_ws_broadcast_on_delete(api_client: AsyncClient, db_manager) -> No
     assert deleted, "expected a thread_update(deleted) broadcast"
 
 
-# ---------------------------------------------------------------------------
-# BE-9142: bounded GET /{thread_id} history via the existing service params
-# (after_message_id / since / tail — BE-6226). The bound is OPT-IN: with none
-# of the three the read is the full timeline, unchanged for existing consumers.
-# ---------------------------------------------------------------------------
 
 
 async def _post_messages(api_client: AsyncClient, headers: dict, thread_id: str, contents: list[str]) -> None:
-    """Post each content string to the thread in order (distinct created_at per post)."""
     for content in contents:
         resp = await api_client.post(
             f"/api/v1/threads/{thread_id}/post",
@@ -499,11 +432,6 @@ async def _post_messages(api_client: AsyncClient, headers: dict, thread_id: str,
 
 @pytest.mark.asyncio
 async def test_history_no_params_returns_full_timeline(api_client: AsyncClient, db_manager) -> None:
-    """Characterization: with NO bounding params the REST read is the full timeline.
-
-    Guards the DoD invariant that BE-9142 does not change the existing (frontend)
-    caller's result — the bound is opt-in.
-    """
     seed = await _seed_tenant(db_manager)
     thread = await _create_thread(api_client, seed["headers"])
     thread_id = thread["thread_id"]
@@ -513,13 +441,12 @@ async def test_history_no_params_returns_full_timeline(api_client: AsyncClient, 
     assert resp.status_code == 200, resp.text
     body = resp.json()
     contents = [m["content"] for m in body["messages"]]
-    assert contents == [f"m{i}" for i in range(6)]  # all present, oldest-first
+    assert contents == [f"m{i}" for i in range(6)]
     assert body["count"] == 6
 
 
 @pytest.mark.asyncio
 async def test_history_tail_returns_last_n(api_client: AsyncClient, db_manager) -> None:
-    """?tail=N returns only the last N messages, oldest-first."""
     seed = await _seed_tenant(db_manager)
     thread = await _create_thread(api_client, seed["headers"])
     thread_id = thread["thread_id"]
@@ -534,14 +461,13 @@ async def test_history_tail_returns_last_n(api_client: AsyncClient, db_manager) 
 
 @pytest.mark.asyncio
 async def test_history_after_message_id_returns_only_newer(api_client: AsyncClient, db_manager) -> None:
-    """?after_message_id=<id> returns only messages created after that message."""
     seed = await _seed_tenant(db_manager)
     thread = await _create_thread(api_client, seed["headers"])
     thread_id = thread["thread_id"]
     await _post_messages(api_client, seed["headers"], thread_id, [f"m{i}" for i in range(4)])
 
     full = (await api_client.get(f"/api/v1/threads/{thread_id}", headers=seed["headers"])).json()["messages"]
-    cursor_id = full[1]["message_id"]  # after m1
+    cursor_id = full[1]["message_id"]
 
     resp = await api_client.get(
         f"/api/v1/threads/{thread_id}", headers=seed["headers"], params={"after_message_id": cursor_id}
@@ -552,14 +478,13 @@ async def test_history_after_message_id_returns_only_newer(api_client: AsyncClie
 
 @pytest.mark.asyncio
 async def test_history_since_filters_by_timestamp(api_client: AsyncClient, db_manager) -> None:
-    """?since=<iso ts> returns only messages created strictly after it."""
     seed = await _seed_tenant(db_manager)
     thread = await _create_thread(api_client, seed["headers"])
     thread_id = thread["thread_id"]
     await _post_messages(api_client, seed["headers"], thread_id, [f"m{i}" for i in range(4)])
 
     full = (await api_client.get(f"/api/v1/threads/{thread_id}", headers=seed["headers"])).json()["messages"]
-    since_ts = full[1]["created_at"]  # strictly after m1 -> m2, m3
+    since_ts = full[1]["created_at"]
 
     resp = await api_client.get(f"/api/v1/threads/{thread_id}", headers=seed["headers"], params={"since": since_ts})
     assert resp.status_code == 200, resp.text
@@ -569,7 +494,6 @@ async def test_history_since_filters_by_timestamp(api_client: AsyncClient, db_ma
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bad_tail", [0, 501])
 async def test_history_tail_out_of_bounds_returns_422(api_client: AsyncClient, db_manager, bad_tail: int) -> None:
-    """?tail outside 1..500 is rejected at the API layer (422), never a 500."""
     seed = await _seed_tenant(db_manager)
     thread = await _create_thread(api_client, seed["headers"])
     resp = await api_client.get(
@@ -580,7 +504,6 @@ async def test_history_tail_out_of_bounds_returns_422(api_client: AsyncClient, d
 
 @pytest.mark.asyncio
 async def test_history_after_and_since_mutually_exclusive_returns_400(api_client: AsyncClient, db_manager) -> None:
-    """after_message_id + since together is a clean 400 (both name a start marker)."""
     seed = await _seed_tenant(db_manager)
     thread = await _create_thread(api_client, seed["headers"])
     thread_id = thread["thread_id"]
@@ -596,22 +519,10 @@ async def test_history_after_and_since_mutually_exclusive_returns_400(api_client
 
 @pytest.mark.asyncio
 async def test_post_to_a_display_label_is_refused_cleanly_not_a_500(api_client: AsyncClient, db_manager) -> None:
-    """BE-9292a-F1 second-order guard at the REST layer.
-
-    Before BE-9560 this route forwarded no baton, so before the ADDRESSEE was
-    screened the service could never refuse it and every ``result["message_id"]``
-    access below was safe. A directed post naming a display label is declined
-    (BE-9560 forwards ``pass_baton_to=to_participant`` on every directed reply, so
-    the SAME screening the baton hand-off already ran now runs here too), and a
-    rejection carries no ``message_id`` — so without the early return the clean
-    refusal became a KeyError 500 on the reactivation hop and the WS fan-out.
-    """
     seed = await _seed_tenant(db_manager)
     thread = await _create_thread(api_client, seed["headers"])
     thread_id = thread["thread_id"]
 
-    # No REST route enrols a participant (join_thread is MCP-side), so the conductor's
-    # id-with-a-display-name row is seeded directly.
     async with db_manager.get_session_async() as session:
         session.add(
             CommParticipant(
@@ -624,11 +535,6 @@ async def test_post_to_a_display_label_is_refused_cleanly_not_a_500(api_client: 
         )
         await session.commit()
 
-    # The websocket manager MUST be live for this test to mean anything. The
-    # reactivation hop's own result["message_id"] read sits inside a best-effort
-    # try/except that swallows the KeyError, so the only place the missing key
-    # actually reaches the client is the WS fan-out — with no manager installed this
-    # test passes whether or not the guard exists.
     from api.app_state import state
 
     mock_ws = AsyncMock()
@@ -648,5 +554,4 @@ async def test_post_to_a_display_label_is_refused_cleanly_not_a_500(api_client: 
     assert body["success"] is False
     assert body["error"] == "TARGET_IS_A_DISPLAY_NAME"
     assert body["registered_id"] == "36eac157-uuid"
-    # A refusal is not a post: nothing was persisted, so nothing may be announced.
     mock_ws.broadcast_event_to_tenant.assert_not_called()

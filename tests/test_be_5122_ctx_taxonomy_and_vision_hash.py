@@ -3,31 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression tests for BE-5122: Context Update Feature backend.
-
-Covers D1-D6 deliverables at the failing layer:
-
-D1 -- DEFAULT_TAXONOMY_TYPES includes CTX (service-layer seed list).
-D2 -- vision_inputs_hash derivation: stability, sensitivity, empty sentinel.
-D3 -- CTX bootstrap template rendering snapshot.
-D4 -- create_project_for_mcp CTX branch:
-      * rejects CTX without bootstrap_template_vars (clean ValidationError -> 422)
-      * happy path renders mission from product + vision state
-D5 -- get_context_update_project repository-shape lookup + hash_matches helper.
-D6 -- _maybe_build_ctx_self_close_directive: matches hash => SELF_CLOSE, else None.
-
-Review fix-up additions (BE-5122 review F1, F2, F18):
-* F1 -- non-circular round-trip via the real ConsolidationService to prove the
-        derived ``vision_inputs_hash`` and persisted ``consolidated_vision_hash``
-        share one algorithm.
-* F2 -- end-to-end server-side CTX self-close: project transitions to
-        ``completed`` and no agents are spawned.
-* F18 -- HTTP endpoint integration test for GET
-        ``/api/v1/products/{product_id}/context_update_project``.
-
-All DB-touching tests use the ``db_session`` fixture (TransactionalTestContext)
-per CLAUDE.md test discipline. Pure-function tests do not need a DB.
-"""
 
 from __future__ import annotations
 
@@ -53,9 +28,6 @@ from giljo_mcp.services.vision_hash import (
 from giljo_mcp.tenant import TenantManager
 
 
-# --------------------------------------------------------------------------- #
-# D1: CTX is registered in the default taxonomy seed list                     #
-# --------------------------------------------------------------------------- #
 
 
 def test_d1_default_taxonomy_includes_ctx() -> None:
@@ -66,18 +38,9 @@ def test_d1_default_taxonomy_includes_ctx() -> None:
     assert ctx_entry["color"].startswith("#")
 
 
-# --------------------------------------------------------------------------- #
-# D2: vision_inputs_hash semantics                                            #
-# --------------------------------------------------------------------------- #
 
 
 class _FakeDoc:
-    """Stand-in for a VisionDocument ORM row.
-
-    Mirrors the attributes the shared ``build_vision_aggregate`` reads:
-    ``is_active`` (filter), ``display_order`` (sort key), ``document_name`` +
-    ``vision_document`` (content), ``id`` (for source_doc_ids).
-    """
 
     def __init__(
         self,
@@ -149,14 +112,6 @@ def test_d2_hash_matches_consolidated_helper() -> None:
 
 
 def test_f1_algorithm_matches_consolidation_service_build_aggregate() -> None:
-    """BE-5122 F1: derived hash uses the same algorithm as the persisted hash.
-
-    Non-circular: invokes the real ``ConsolidationService._build_aggregate``
-    on a fixture-shaped product, then asserts the raw hex it returned equals
-    the derived ``vision_inputs_hash`` (with the ``sha256:`` prefix stripped).
-    A divergence here is the exact production bug the BE-5122 reviewer caught
-    on commit b3f1e4537.
-    """
     from giljo_mcp.services.consolidation_service import ConsolidatedVisionService
 
     docs = [
@@ -181,9 +136,6 @@ def test_f1_algorithm_matches_consolidation_service_build_aggregate() -> None:
     assert "Gamma" not in aggregate_text
 
 
-# --------------------------------------------------------------------------- #
-# D3: CTX bootstrap template rendering                                        #
-# --------------------------------------------------------------------------- #
 
 
 def test_d3_template_renders_all_placeholders() -> None:
@@ -220,9 +172,6 @@ def test_d3_template_constant_exposed() -> None:
     assert "{{vision_inputs_hash}}" in CTX_BOOTSTRAP_TEMPLATE
 
 
-# --------------------------------------------------------------------------- #
-# D4: create_project CTX branch -- validation + happy path                    #
-# --------------------------------------------------------------------------- #
 
 
 @pytest_asyncio.fixture
@@ -278,13 +227,6 @@ async def ctx_vision_doc(db_session: AsyncSession, ctx_tenant_key: str, ctx_prod
 
 
 def _make_project_service(db_session: AsyncSession, tenant_key: str):
-    """Build a ProjectService bound to the test session.
-
-    The service's ``_get_session`` is patched so every internal session-with()
-    yields the test session tagged as a service-sourced session (matching the
-    established service-test pattern and mirroring how the real _get_session
-    tags sessions via tenant_session_context).
-    """
     from giljo_mcp.database import tenant_session_context
     from giljo_mcp.services.project_service import ProjectService
 
@@ -360,9 +302,6 @@ async def test_d4_create_project_ctx_renders_mission_from_state(
     assert "Architecture (architecture)" in rendered
 
 
-# --------------------------------------------------------------------------- #
-# D6: CTX self-close hook                                                     #
-# --------------------------------------------------------------------------- #
 
 
 class _StubProduct:
@@ -407,10 +346,6 @@ def test_d6_no_directive_for_non_ctx_project_type() -> None:
 
 
 def test_d6_no_directive_when_inputs_empty() -> None:
-    # Empty inputs hash sentinel must never match a real consolidated hash --
-    # an empty product should NOT auto-close (the consolidated aggregates are
-    # vacuously "fresh" but there is nothing to consolidate either; defer to
-    # the orchestrator).
     ctx = {
         "project_type_abbreviation": "CTX",
         "product": _StubProduct(None, []),
@@ -418,9 +353,6 @@ def test_d6_no_directive_when_inputs_empty() -> None:
     assert MissionOrchestrationService._maybe_build_ctx_self_close_directive(ctx) is None
 
 
-# --------------------------------------------------------------------------- #
-# F2: Server-side CTX self-close end-to-end                                   #
-# --------------------------------------------------------------------------- #
 
 
 @pytest_asyncio.fixture
@@ -431,14 +363,6 @@ async def ctx_orchestrator_setup(
     ctx_taxonomy: TaxonomyType,
     ctx_vision_doc: VisionDocument,
 ):
-    """Build a hash-equal CTX project + orchestrator job/execution.
-
-    Runs the real ConsolidationService against the fixture product so the
-    persisted ``consolidated_vision_hash`` is produced by production code
-    (not stuffed in by the test). The derived ``vision_inputs_hash`` MUST
-    equal it after this — that's the F1 invariant under test from another
-    angle.
-    """
     from giljo_mcp.domain.project_status import ProjectStatus
     from giljo_mcp.models import Project
     from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
@@ -506,14 +430,6 @@ async def test_f2_server_side_ctx_self_close_transitions_project_to_completed(
     db_session: AsyncSession,
     ctx_orchestrator_setup,
 ) -> None:
-    """BE-5122 F2: hash-equal CTX project triggers server-side close + STOP directive.
-
-    Verifies:
-      * staging_directive.action == 'STOP' (existing handler chain recognizes it)
-      * project.status transitioned to COMPLETED
-      * orchestrator AgentExecution status == 'complete'
-      * no agent jobs were spawned (only the orchestrator job exists)
-    """
     from sqlalchemy import func, select
 
     from giljo_mcp.domain.project_status import ProjectStatus
@@ -546,9 +462,6 @@ async def test_f2_server_side_ctx_self_close_transitions_project_to_completed(
     assert job_count == 1, "Only the orchestrator job should exist; no agents spawned."
 
 
-# --------------------------------------------------------------------------- #
-# F18: HTTP endpoint integration test for /context_update_project             #
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.asyncio
@@ -559,13 +472,6 @@ async def test_f18_context_update_project_endpoint_returns_open_ctx_project(
     ctx_taxonomy: TaxonomyType,
     ctx_vision_doc: VisionDocument,
 ) -> None:
-    """Endpoint integration: open CTX project found, hash_matches reflects state.
-
-    Direct service-style invocation of the endpoint handler against the real
-    ``db_session`` fixture (bypassing httpx + auth middleware so the test
-    runs under TransactionalTestContext). Tenant isolation, status filtering,
-    and hash_matches behavior are all asserted.
-    """
     from api.endpoints.products.lifecycle import get_context_update_project
     from giljo_mcp.domain.project_status import ProjectStatus
     from giljo_mcp.models import Project
@@ -614,7 +520,6 @@ async def test_f18_context_update_project_endpoint_404_when_no_open_project(
     ctx_product: Product,
     ctx_taxonomy: TaxonomyType,
 ) -> None:
-    """No open CTX project for this product => HTTP 404."""
     from fastapi import HTTPException
 
     from api.endpoints.products.lifecycle import get_context_update_project
@@ -636,7 +541,6 @@ async def test_f18_context_update_project_endpoint_tenant_isolation(
     ctx_product: Product,
     ctx_taxonomy: TaxonomyType,
 ) -> None:
-    """A CTX project owned by a different tenant must not leak through."""
     from fastapi import HTTPException
 
     from api.endpoints.products.lifecycle import get_context_update_project

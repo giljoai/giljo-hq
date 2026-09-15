@@ -3,69 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-9423 -- the SEC-9126 fail-closed authorization invariant, pinned at the SDK level.
-
-SEC-9126's scope gating is installed on the SDK server AFTER the server object is
-built, so nothing about the module importing cleanly proves the gate is actually in
-force: the boot assert only checks registry completeness, and the SEC-9126 step-1
-tests reach the gate through an in-memory client session. If the SDK changed where
-handlers are installed -- silently ignoring our installation, or moving the point --
-the module would still import, the boot assert would still pass, and scope gating
-would revert to unfiltered.
-
-INF-9371 RE-POINT (SDK 2.0). This file was written against 1.x, where the gate was
-installed by re-invoking ``mcp._mcp_server.list_tools()`` / ``.call_tool()`` to
-overwrite entries in the lowlevel ``request_handlers`` dict. 2.0 deletes those
-decorators and hardcodes MCPServer's own handlers into the lowlevel slots, so the
-gate now rides the public ``MCPServer.middleware`` chain
-(``mcp_sdk_server._scope_gate``). **The installation point moved; the invariant did
-not.** These tests were re-pointed, not weakened and not deleted -- which is exactly
-what the ``_SHAPE_MOVED`` message below instructs the next migrator to do.
-
-This file pins the INVARIANT, not the mechanism, at three layers:
-
-  1. ``TestOverwriteTookEffectAtTheDispatchTable`` -- the gate ACTUALLY INSTALLED on
-     the SDK server object applies the filter/refusal. This is the assertion the
-     surface lacked; it names the installation point, so a migration that moves it
-     fails HERE, loudly, with instructions rather than a silent revert to fail-open.
-  2. ``TestTheseAssertionsCanFail`` -- negative controls. With the gate absent from the
-     chain (i.e. simulating an installation that never took effect) the same
-     assertions must FLIP. Without these, layer 1 could pass for reasons unrelated to
-     the gate and nobody would know (a test can only fail in the dimension it was
-     pointed at). This is the SEC-9423 mutation probe made permanent: the file
-     re-proves on every run that it is capable of going red.
-  3. ``TestInvariantThroughTheRealDispatchPath`` -- shape-agnostic end-to-end. Reaches
-     the gate the way a real client does and touches no SDK internals, so it survives a
-     handler-registration shape change unchanged. This is the form INF-9371's DoD 2
-     ("the fail-closed invariant is re-proven, not re-compiled") is measured against.
-
-Layer 3 deliberately does NOT monkeypatch the scope/profile resolvers the way
-``test_mcp_authz_fail_closed.py`` does: outside an HTTP request ``_request_from_context()``
-already returns ``None``, so both resolvers naturally yield the no-restriction posture.
-Asserting against the unpatched resolvers keeps the API-key-equivalent bypass path
-honest -- the registry filter must hold with nothing stubbed out.
-
-``TestBootAssertRejectsBothDirections`` closes a real gap in the existing coverage:
-``_assert_tool_scope_completeness`` checks two directions and only ``missing``
-(registered-but-unmapped) was asserted. ``orphaned`` (mapped-but-unregistered) is
-covered here.
-
-Zero behavior change -- test-only, no production edit, no introspection hook (the SDK
-already exposes the installed handlers read-only).
-
-Parallel-safe: the synthetic tool is added/removed in a fixture ``finally``, so the
-roster-locked tool count is never left mutated for a co-scheduled test in the same
-xdist worker. (1.x also had to refresh the SDK's ``_tool_cache`` on teardown because
-an ungated list handler would cache the synthetic tool; 2.0 has no such cache, so that
-step is gone rather than kept as cargo.) The negative controls restore the SAVED gate
-object at its original chain position -- deliberate, so a control cannot re-install a
-freshly-built gate mid-session and mask its own RED. ``TOOL_SCOPES`` is mutated only
-through ``monkeypatch.setitem``. No DB writes
-(the synthetic tool is a pure no-op and dispatch is refused before any tool body runs),
-so no ``TransactionalTestContext``. No module-level mutable state.
-
-Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -75,20 +12,13 @@ import pytest_asyncio
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
-# A distinctive name so a leak into another test is unmistakable.
 _SYNTHETIC_TOOL_NAME = "sec9423_synthetic_unmapped_tool"
 _MAPPED_BUT_UNREGISTERED = "sec9423_mapped_but_never_registered"
 
-# The fail-closed rejection text returned by _dispatch_refusal_reason.
 _REFUSAL_FRAGMENT = "no authorization scope mapping"
 
-# The name of the middleware that carries the gate. Resolved by name rather than by
-# identity so this file does not have to import the production callable to find it --
-# what is asserted is that the INSTALLED chain contains it and that it works.
 _GATE_NAME = "_scope_gate"
 
-# Emitted when the SDK's handler-installation shape has moved. Spelled out because the
-# next reader is a migration author deciding whether to re-point or delete this file.
 _SHAPE_MOVED = (
     "SEC-9423: the MCP SDK no longer exposes the authorization gate at its known "
     "installation point, so SEC-9126's fail-closed gate can no longer be located. "
@@ -100,18 +30,10 @@ _SHAPE_MOVED = (
 
 
 async def _synthetic_noop() -> dict:
-    """A pure no-op tool with NO ``TOOL_SCOPES`` entry. Returns a dict; no DB touch."""
     return {"sec9423_synthetic": True}
 
 
 class _Ctx:
-    """The slice of the SDK's per-request context the gate reads.
-
-    ``ServerRequestContext`` is a dataclass the SDK builds per message; the gate only
-    touches ``method``, ``params`` and ``request``. Standing this up directly is what
-    lets layer 1 invoke the INSTALLED gate object in isolation. ``request=None`` is the
-    no-HTTP-request posture, i.e. the same unaided posture layer 3 exercises.
-    """
 
     def __init__(self, method: str, params: dict | None = None):
         self.method = method
@@ -120,12 +42,6 @@ class _Ctx:
 
 
 def _installed_gate():
-    """Return the authorization middleware ACTUALLY installed on the SDK server.
-
-    Reaching for the live chain entry -- rather than the module-level ``_scope_gate``
-    function -- is the whole point: the module-level function exists whether or not the
-    installation that puts it in the chain took effect.
-    """
     from api.endpoints.mcp_sdk_server import mcp
 
     chain = getattr(mcp, "middleware", None)
@@ -139,14 +55,6 @@ def _installed_gate():
 
 
 async def _unfiltered_list_result() -> dict:
-    """What the SDK's own tools/list handler hands the middleware chain: a plain dict.
-
-    INF-9371/F1: 2.0 middleware observes results as ``dict`` (declared as
-    ``BaseModel | dict | None``), NOT as a typed ``ListToolsResult`` -- the exact
-    detail that makes an ``isinstance``-based filter silently fail OPEN. The stand-in
-    handler below therefore returns the dict shape, so layer 1 exercises the branch
-    production actually takes.
-    """
     from api.endpoints.mcp_sdk_server import mcp
 
     tools = await mcp.list_tools()
@@ -163,12 +71,6 @@ def _error_text(result) -> str:
 
 @pytest_asyncio.fixture
 async def unmapped_tool():
-    """Register a synthetic tool that has NO ``TOOL_SCOPES`` entry, then remove it.
-
-    Teardown also refreshes the SDK's ``_tool_cache`` through the installed list
-    handler: the negative-control tests deliberately run an ungated list handler, which
-    caches the synthetic tool, and the cache must not outlive the tool itself.
-    """
     from api.endpoints.mcp_sdk_server import mcp
 
     mcp._tool_manager.add_tool(_synthetic_noop, name=_SYNTHETIC_TOOL_NAME)
@@ -178,17 +80,11 @@ async def unmapped_tool():
         mcp._tool_manager.remove_tool(_SYNTHETIC_TOOL_NAME)
 
 
-# ---------------------------------------------------------------------------
-# Layer 1 -- the overwrite took effect on the SDK server object
-# ---------------------------------------------------------------------------
 
 
 class TestOverwriteTookEffectAtTheDispatchTable:
     @pytest.mark.asyncio
     async def test_installed_list_handler_applies_the_fail_closed_filter(self, unmapped_tool):
-        """The gate the SDK will actually run must drop a tool with no scope mapping.
-        Fails if the installation was ignored, replaced, or never ran -- the exact
-        silent revert SEC-9423 exists to catch."""
         result = await _installed_gate()(_Ctx("tools/list"), lambda _ctx: _unfiltered_list_result())
 
         advertised = _advertised(result)
@@ -201,12 +97,6 @@ class TestOverwriteTookEffectAtTheDispatchTable:
 
     @pytest.mark.asyncio
     async def test_installed_call_handler_applies_the_fail_closed_gate(self, unmapped_tool):
-        """Same assertion on the dispatch half: the installed gate must refuse an
-        unmapped tool rather than let it reach the handler.
-
-        The stand-in ``call_next`` records whether it was reached, so this asserts
-        NON-EXECUTION directly rather than inferring it from an error flag.
-        """
         reached = False
 
         async def call_next(_ctx):
@@ -226,9 +116,6 @@ class TestOverwriteTookEffectAtTheDispatchTable:
 
     @pytest.mark.asyncio
     async def test_unregistered_name_still_gets_the_sdk_error(self, unmapped_tool):
-        """Overshoot guard: the fail-closed gate must fire only for registered-but-
-        unmapped names. A name that was never registered is passed through to the SDK's
-        own error path, so the gate cannot be credited for a rejection it did not make."""
         reached = False
 
         async def call_next(_ctx):
@@ -243,29 +130,12 @@ class TestOverwriteTookEffectAtTheDispatchTable:
         assert reached, "an unregistered name must fall through to the SDK, not be claimed by the gate"
 
 
-# ---------------------------------------------------------------------------
-# Layer 2 -- negative controls: prove the layer-1 assertions can fail
-# ---------------------------------------------------------------------------
 
 
 class TestTheseAssertionsCanFail:
-    """The SEC-9423 mutation probe, kept as standing tests.
-
-    Each control removes the gate from the installed chain -- i.e. simulates the
-    installation never having happened -- and asserts the protection is ABSENT, through
-    the REAL dispatch path. A control that goes green under a real fail-open regression
-    would mean layer 1 is watching the wrong dimension; a control that FAILS means the
-    simulation itself is broken and layer 1's green must not be trusted until it is
-    explained.
-    """
 
     @staticmethod
     def _remove_gate():
-        """Pull the gate out of the installed chain; returns a restore callable.
-
-        The SAVED object is put back at its original index, so a control can never
-        re-install a freshly-built gate and mask its own RED.
-        """
         from api.endpoints.mcp_sdk_server import mcp
 
         gate = _installed_gate()
@@ -307,26 +177,15 @@ class TestTheseAssertionsCanFail:
 
     @pytest.mark.asyncio
     async def test_the_gate_is_restored_after_the_controls(self, unmapped_tool):
-        """Guards the controls' own cleanup: whatever order the two tests above ran in,
-        the gate must be back in the installed chain and filtering."""
         result = await _installed_gate()(_Ctx("tools/list"), lambda _ctx: _unfiltered_list_result())
         assert unmapped_tool not in _advertised(result), (
             "a negative control leaked an ungated server back into the middleware chain"
         )
 
 
-# ---------------------------------------------------------------------------
-# Layer 3 -- shape-agnostic: the invariant through the real dispatch path
-# ---------------------------------------------------------------------------
 
 
 class TestInvariantThroughTheRealDispatchPath:
-    """Touches no SDK internals, so it holds across a handler-registration shape change.
-
-    No resolver monkeypatching: with no HTTP request the scope and profile resolvers
-    already return the no-restriction posture, which is the one the registry filter has
-    to hold on unaided.
-    """
 
     @pytest.mark.asyncio
     async def test_unmapped_tool_is_not_advertised(self, unmapped_tool):
@@ -348,16 +207,10 @@ class TestInvariantThroughTheRealDispatchPath:
         assert _REFUSAL_FRAGMENT in "\n".join(getattr(block, "text", "") for block in result.content)
 
 
-# ---------------------------------------------------------------------------
-# Boot assert -- both directions
-# ---------------------------------------------------------------------------
 
 
 class TestBootAssertRejectsBothDirections:
     def test_mapped_but_unregistered_tool_aborts_boot(self, monkeypatch):
-        """The ``orphaned`` direction of ``_assert_tool_scope_completeness``: a scope
-        entry naming a tool that is not registered must abort boot. Previously
-        unasserted -- only the ``missing`` direction was covered."""
         from api.endpoints import mcp_sdk_server
         from api.endpoints.mcp_tools import _base
 
@@ -367,9 +220,6 @@ class TestBootAssertRejectsBothDirections:
             mcp_sdk_server._assert_tool_scope_completeness()
 
     def test_registered_but_unmapped_tool_aborts_boot(self, monkeypatch):
-        """The ``missing`` direction, asserted here WITHOUT registering a tool: dropping
-        a live tool's scope entry is the realistic regression (someone renames a tool and
-        forgets the registry), and it exercises the same branch without touching the roster."""
         from api.endpoints import mcp_sdk_server
         from api.endpoints.mcp_tools import _base
 
@@ -379,7 +229,6 @@ class TestBootAssertRejectsBothDirections:
             mcp_sdk_server._assert_tool_scope_completeness()
 
     def test_clean_registry_is_silent(self):
-        """The guard must not cry wolf on the shipped roster."""
         from api.endpoints import mcp_sdk_server
 
         mcp_sdk_server._assert_tool_scope_completeness()

@@ -5,13 +5,11 @@
     </div>
     <v-card variant="flat" class="smooth-border network-card">
     <v-card-text>
-      <!-- Loading State -->
       <div v-if="loading" class="d-flex justify-center py-8">
         <v-progress-circular indeterminate color="primary" />
       </div>
 
       <template v-else>
-        <!-- Server Configuration (read-only; set at install time) -->
         <h3 class="text-title-large mb-1">Server Configuration</h3>
         <p class="text-body-medium mb-4">Network settings are configured during installation. To modify the external host or ports, update config.yaml and restart the server. Authentication is always enabled for all connections (local and remote). Use OS firewall to control network access.</p>
 
@@ -26,7 +24,6 @@
           </div>
         </div>
 
-        <!-- HTTPS Configuration -->
         <v-divider class="my-6" />
 
         <div data-test="https-status-section">
@@ -45,7 +42,6 @@
             />
           </div>
 
-          <!-- Toggle is gated until a certificate is provisioned -->
           <p
             v-if="!sslStatus.ssl_enabled && !sslStatus.has_certificate"
             class="text-body-small text-muted-a11y mb-3"
@@ -54,7 +50,6 @@
             Provide a certificate below to enable HTTPS.
           </p>
 
-          <!-- INF-6236: HTTP (no secure context) awareness cue -->
           <v-alert
             v-if="isHttpContext && !httpCueDismissed"
             type="warning"
@@ -83,7 +78,6 @@
                   v-if="sslStatus.has_certificate && !sslStatus.ssl_enabled"
                   class="text-body-small ml-1"
                 >(certificate provided)</span>
-                <!-- Certificate status, inline after the HTTPS state -->
                 <span
                   v-if="sslStatus.has_certificate"
                   class="text-body-small ml-4 cert-status"
@@ -99,7 +93,6 @@
             </div>
           </v-alert>
 
-          <!-- Restart required banner -->
           <v-alert
             v-if="sslRestartRequired"
             type="warning"
@@ -115,7 +108,6 @@
             </div>
           </v-alert>
 
-          <!-- MCP re-attachment warning after protocol change -->
           <v-alert
             v-if="showMcpReattachWarning"
             type="warning"
@@ -129,14 +121,13 @@
             every existing MCP tool connection. You must remove and re-add your AI coding agents,
             and re-authenticate:
             <ol class="mt-2 ml-4 text-body-medium">
-              <li>Remove existing connections: <code>claude mcp remove giljo_mcp</code>, <code>codex mcp remove giljo_mcp</code>, <code>gemini mcp remove giljo_mcp</code></li>
+              <li>Remove existing connections: <code>claude mcp remove giljo_mcp</code>, <code>codex mcp remove giljo_mcp</code>, <code>opencode mcp remove giljo_mcp</code></li>
               <li>Delete old API keys from User Settings and regenerate them</li>
               <li>Re-authenticate: API-key agents use the new key; OAuth agents must re-consent on the new URL</li>
               <li>Use the Configurator to generate new connection commands</li>
             </ol>
           </v-alert>
 
-          <!-- Error banner -->
           <v-alert
             v-if="sslError"
             type="error"
@@ -149,7 +140,6 @@
             {{ sslError }}
           </v-alert>
 
-          <!-- bring-your-own-cert provisioning (upload PEM or reference by path) -->
           <v-divider class="my-6" />
 
           <h3 class="text-title-large mb-1">Provide a certificate (bring your own)</h3>
@@ -262,7 +252,6 @@
             {{ certProvisionSuccess }}
           </v-alert>
 
-          <!-- How to obtain a cert + trust it on clients lives in the CE user guide -->
           <p class="text-body-medium text-muted-a11y mb-0" data-test="https-guide-link">
             <v-icon size="small" class="mr-1">mdi-book-open-variant</v-icon>
             Need a certificate, or need to trust it on other machines?
@@ -273,7 +262,6 @@
           </p>
         </div>
 
-        <!-- Cookie Domain Whitelist (FE-6245: moved from Security tab) -->
         <v-divider class="my-6" />
 
         <div data-test="cookie-whitelist-section">
@@ -285,7 +273,6 @@
             same machine. IP addresses are automatically allowed. Only add domain names here (e.g., app.example.com, localhost).
           </p>
 
-          <!-- Loading Indicator -->
           <v-progress-linear
             v-if="cookieLoading"
             data-test="cookie-loading-indicator"
@@ -294,7 +281,6 @@
             class="mb-4"
           />
 
-          <!-- Domain List -->
           <div v-if="cookieDomains.length > 0" class="mb-4">
             <v-list density="compact" class="mb-3">
               <v-list-item v-for="domain in cookieDomains" :key="domain" :title="domain">
@@ -314,12 +300,10 @@
             </v-list>
           </div>
 
-          <!-- Empty State -->
           <v-alert v-else type="info" variant="outlined" class="mb-4" data-test="cookie-empty-state">
             No domain names configured. IP-based access only.
           </v-alert>
 
-          <!-- Add Domain Form -->
           <v-text-field
             v-model="newCookieDomain"
             data-test="cookie-new-domain-input"
@@ -347,7 +331,6 @@
             </template>
           </v-text-field>
 
-          <!-- Success/Error Feedback -->
           <v-alert
             v-if="cookieFeedback"
             :type="cookieFeedback.type"
@@ -395,7 +378,6 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  // Cookie Domain Whitelist (FE-6245: moved from SecuritySettingsTab)
   cookieDomains: {
     type: Array,
     default: () => [],
@@ -412,7 +394,6 @@ const props = defineProps({
 
 const emit = defineEmits(['refresh', 'add-domain', 'remove-domain', 'reload-domains', 'clear-cookie-feedback'])
 
-// SSL state
 const sslStatus = ref({
   ssl_enabled: false,
   has_certificate: false,
@@ -427,12 +408,9 @@ const sslRestartRequired = ref(false)
 const sslError = ref('')
 const showMcpReattachWarning = ref(false)
 
-// INF-6236: serving over plain HTTP means no secure context (no OS-level desktop
-// notifications, in-app toast fallback). Surface it honestly as an awareness cue.
 const isHttpContext = ref(typeof window !== 'undefined' && !window.isSecureContext)
 const httpCueDismissed = ref(false)
 
-// INF-6236: bring-your-own-cert provisioning (upload PEM or reference by path).
 const uploadCertFile = ref(null)
 const uploadKeyFile = ref(null)
 const refCertPath = ref('')
@@ -441,14 +419,12 @@ const certProvisioning = ref(false)
 const certProvisionError = ref('')
 const certProvisionSuccess = ref('')
 
-// Methods
 function handleRefresh() {
   emit('refresh')
   emit('reload-domains')
   loadSslStatus()
 }
 
-// Cookie Domain Whitelist state (FE-6245: moved from SecuritySettingsTab)
 const newCookieDomain = ref('')
 const cookieDomainError = ref('')
 
@@ -508,7 +484,6 @@ async function loadSslStatus() {
     }
   } catch (error) {
     console.error('[NETWORK] Failed to load SSL status:', error)
-    // Fall back to prop value
     sslStatus.value.ssl_enabled = props.sslEnabled
   }
 }
@@ -548,7 +523,6 @@ async function toggleSsl(enabled) {
 }
 
 function _firstFile(model) {
-  // v-file-input may yield a File, an array of File, or null depending on config.
   if (!model) return null
   return Array.isArray(model) ? model[0] : model
 }

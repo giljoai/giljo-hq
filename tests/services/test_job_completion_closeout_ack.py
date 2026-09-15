@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Self-referential closeout TODO handling on JobCompletionService.complete_job.
-
-Original bug: complete_job rejected with COMPLETION_BLOCKED when an in_progress
-TODO describes the closeout itself (chicken-and-egg). BE-6083 made the
-orchestrator-closeout phase auto-clear it without a flag; BE-9012b (D7) makes that
-auto-clear STRUCTURAL — it keys on ``agent_todo_items.todo_kind`` (stamped at
-write), falling back to the shared classifier for legacy NULL-kind rows. The
-``acknowledge_closeout_todo`` flag is retired to accepted-and-ignored, so these
-tests pass whether or not it is supplied (is_closeout_phase drives the auto-clear).
-"""
 
 from __future__ import annotations
 
@@ -34,9 +23,6 @@ from giljo_mcp.models.tasks import Message, MessageRecipient
 from giljo_mcp.services.job_completion_service import JobCompletionService
 
 
-# ============================================================================
-# Fixtures
-# ============================================================================
 
 
 @pytest.fixture
@@ -95,7 +81,6 @@ async def _seed_orchestrator_with_todos(
     project_id: str,
     todos: list[dict],
 ) -> tuple[AgentJob, AgentExecution]:
-    """Seed an orchestrator job + working execution + N todos."""
     job_id = str(uuid4())
     job = AgentJob(
         job_id=job_id,
@@ -137,9 +122,6 @@ async def _seed_orchestrator_with_todos(
     return job, execution
 
 
-# ============================================================================
-# Tests
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -149,10 +131,6 @@ async def test_closeout_todo_auto_acks_without_flag(
     test_tenant_key: str,
     active_project: Project,
 ):
-    """BE-6083: in the orchestrator-closeout phase the self-referential closeout
-    TODO auto-acknowledges even when acknowledge_closeout_todo is NOT passed —
-    the chicken-and-egg flag is gone. (Pre-BE-6083 this raised COMPLETION_BLOCKED.)
-    """
     job, _ = await _seed_orchestrator_with_todos(
         db_session,
         test_tenant_key,
@@ -166,7 +144,6 @@ async def test_closeout_todo_auto_acks_without_flag(
         job_id=job.job_id,
         result={"summary": "test"},
         tenant_key=test_tenant_key,
-        # acknowledge_closeout_todo deliberately NOT passed (defaults False).
     )
     assert result.status == "success"
     assert result.phase == "closeout"
@@ -194,7 +171,6 @@ async def test_ack_only_closeout_todo_succeeds(
     test_tenant_key: str,
     active_project: Project,
 ):
-    """acknowledge_closeout_todo=True + only closeout TODO -> success, TODO marked completed."""
     job, _ = await _seed_orchestrator_with_todos(
         db_session,
         test_tenant_key,
@@ -238,7 +214,6 @@ async def test_ack_with_non_closeout_still_blocks(
     test_tenant_key: str,
     active_project: Project,
 ):
-    """ack=True + closeout TODO + unrelated incomplete TODO -> still blocks, names only the unrelated."""
     job, _ = await _seed_orchestrator_with_todos(
         db_session,
         test_tenant_key,
@@ -258,7 +233,6 @@ async def test_ack_with_non_closeout_still_blocks(
         )
     err = exc_info.value
     assert err.error_code == "COMPLETION_BLOCKED"
-    # Only the non-closeout item should be in the reasons context.
     ctx = err.context or {}
     assert ctx.get("incomplete_todos") == 1
     reasons_text = " ".join(ctx.get("reasons", []))
@@ -273,7 +247,6 @@ async def test_ack_no_incomplete_todos_succeeds(
     test_tenant_key: str,
     active_project: Project,
 ):
-    """ack=True + no incomplete TODOs -> no-op success."""
     job, _ = await _seed_orchestrator_with_todos(
         db_session,
         test_tenant_key,
@@ -300,7 +273,6 @@ async def test_ack_does_not_bypass_unread_messages_gate(
     test_tenant_key: str,
     active_project: Project,
 ):
-    """ack=True with closeout TODO + unread message -> still blocks via messages gate."""
     job, execution = await _seed_orchestrator_with_todos(
         db_session,
         test_tenant_key,
@@ -310,8 +282,6 @@ async def test_ack_does_not_bypass_unread_messages_gate(
         ],
     )
 
-    # Insert a pending ACTION-REQUIRED message addressed to this orchestrator's
-    # agent_id (BE-9012b/D7: the messages gate keys on requires_action).
     sender_id = str(uuid4())
     msg = Message(
         tenant_key=test_tenant_key,

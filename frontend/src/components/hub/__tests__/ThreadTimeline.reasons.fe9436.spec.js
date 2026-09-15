@@ -1,24 +1,3 @@
-/**
- * ThreadTimeline.reasons.fe9436.spec.js — FE-9436
- *
- * FE-9410 gave the timeline ONE mark, and it said "Waiting on you" because the only
- * thing that could send an operator to a post was a baton. Now three things can, and the
- * operator ruling is that they share the surface and differ only in the reason.
- *
- * So the assertions that carry weight here are about what must NOT have been built:
- *
- *   - one flag element, one class, one scroll rule for all three reasons — a mention that
- *     grew its own marker would be the duplicate this work order exists to prevent;
- *   - a mention must never render the hand-off's words. "Waiting on you" over a post
- *     nobody handed over is the exact defect FE-9418 refused to ship, and it is what a
- *     naive unification reintroduces.
- *
- * FE-9410's own spec mounts this component with `focusMessageId` and NO reason, and it
- * still passes untouched — the default is the hand-off, so the pre-FE-9436 caller keeps
- * pre-FE-9436 behaviour.
- *
- * Edition scope: Both
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
@@ -56,8 +35,6 @@ describe('ThreadTimeline focus reasons (FE-9436)', () => {
     store.selectedThreadId = THREAD_ID
     store.handleThreadMessage(message(OTHER, 'earlier chatter'))
     store.handleThreadMessage(message(TARGET, 'the post that wants you'))
-    // jsdom has no scrollIntoView; install rather than spy, or an absent method reads
-    // as "the component chose not to scroll" (FE-9410's spec, same reason).
     Element.prototype.scrollIntoView = vi.fn()
   })
 
@@ -78,7 +55,6 @@ describe('ThreadTimeline focus reasons (FE-9436)', () => {
 
       expect(focused.classes()).toContain('timeline-msg--focus')
       expect(focused.find(`[data-testid="${testid}"]`).text()).toBe(copy)
-      // The other post is present and plausible, and must carry no mark at all.
       expect(other.exists()).toBe(true)
       expect(other.classes()).not.toContain('timeline-msg--focus')
       expect(other.find('.timeline-msg__focus-flag').exists()).toBe(false)
@@ -86,9 +62,6 @@ describe('ThreadTimeline focus reasons (FE-9436)', () => {
 
     it(`uses the ONE flag mechanism for ${reason} — no second marker`, () => {
       const wrapper = mountTimeline({ focusMessageId: TARGET, focusReason: reason })
-      // Exactly one flag in the whole timeline, and it is the FE-9410 element: same
-      // class, same single instance. A reason that grew its own marker would show up
-      // here as a second node, which is the duplication the ruling forbids.
       expect(wrapper.findAll('.timeline-msg__focus-flag')).toHaveLength(1)
       expect(wrapper.findAll('.timeline-msg--focus')).toHaveLength(1)
       expect(wrapper.find(`[data-testid="${testid}"]`).classes()).toContain(
@@ -98,8 +71,6 @@ describe('ThreadTimeline focus reasons (FE-9436)', () => {
   }
 
   it('never renders the hand-off wording over a mention or an approval', () => {
-    // Stated as its own test because it is the failure the operator ruling is guarding
-    // against, and because it stays true even if the copy above is later reworded.
     for (const reason of [MENTION_FOCUS, APPROVAL_FOCUS]) {
       const wrapper = mountTimeline({ focusMessageId: TARGET, focusReason: reason })
       expect(wrapper.find('.timeline-msg__focus-flag').text()).not.toContain('Waiting on you')
@@ -108,8 +79,6 @@ describe('ThreadTimeline focus reasons (FE-9436)', () => {
   })
 
   it('tints each reason differently, from tokens rather than per-reason markup', () => {
-    // The chip is the ONLY difference between the three surfaces, so it has to actually
-    // differ — and it has to do so by modifier class, not by a second element.
     const seen = CASES.map(({ reason }) => {
       const flag = mountTimeline({ focusMessageId: TARGET, focusReason: reason }).find(
         '.timeline-msg__focus-flag',
@@ -121,7 +90,6 @@ describe('ThreadTimeline focus reasons (FE-9436)', () => {
   })
 
   it('defaults to the hand-off when a caller names no reason (pre-FE-9436 behaviour)', () => {
-    // FE-9410's spec mounts exactly like this and must keep passing untouched.
     const wrapper = mountTimeline({ focusMessageId: TARGET })
     expect(wrapper.find('[data-testid="hub-focus-baton"]').text()).toBe('Waiting on you')
   })

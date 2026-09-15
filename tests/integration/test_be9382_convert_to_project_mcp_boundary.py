@@ -3,39 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9382 — ``update_task(convert_to_project=True)`` MCP-boundary regression test.
-
-Gap closed: an agent could not promote a task to a project headlessly. The
-documented compose-it-yourself recipe (create_project + complete the task +
-re-point the roadmap by hand) produced DIFFERENT semantics from the dashboard's
-convert wizard — task kept instead of deleted, and a forgotten roadmap re-point
-silently orphaned the roadmap card. Mechanism gap, not a prose gap.
-
-Fix: ``update_task`` gained a ``convert_to_project`` flag wired to the SAME
-``TaskConversionService.convert_to_project`` the REST ``POST /tasks/{id}/convert``
-(the UI door) calls, with the UI's exact request defaults (strategy="single",
-include_subtasks=True). No parallel implementation.
-
-Tested THROUGH THE MCP TRANSPORT (BE-5042 precedent: the failing layer for a
-@mcp.tool wrapper is the wrapper, and ~1,392 unit tests did not see it) via the
-SDK's in-memory ``create_connected_server_and_client_session``. Pattern
-reference: ``tests/integration/test_task_tools_mcp_transport.py``.
-
-Coverage:
-- convert → task row GONE, project exists (inactive + UNTYPED, task's title and
-  serial), subtasks re-pointed, roadmap item flipped IN PLACE with an identical
-  ``sort_order``, response says unmistakably that the task is deleted.
-- ``title`` on a convert names the new project (UI wizard's project_name field).
-- convert + a conflicting task field (status / completion_notes / priority) →
-  BE-6081 Tier-2 structured rejection, NOT isError, and nothing written.
-- convert with no resolvable authenticated user → Tier-2 USER_CONTEXT_REQUIRED.
-- a plain (non-convert) ``update_task`` response is unchanged — no convert keys.
-
-Isolation: the ToolAccessor's TaskService is bound to the rollback-isolated
-``db_session``, so every write (including the conversion's own commit-owning
-scope) stays inside the test transaction (``optional_tenant_session`` yields the
-injected session without committing).
-"""
 
 from __future__ import annotations
 
@@ -59,7 +26,7 @@ from tests.helpers.mcp_session_fixture import create_connected_server_and_client
 
 pytestmark = pytest.mark.asyncio
 
-_ROADMAP_SORT_ORDER = 7  # deliberately non-zero: proves "in place", not "re-ranked to 0"
+_ROADMAP_SORT_ORDER = 7
 
 
 def _payload(call_tool_result) -> dict:
@@ -82,7 +49,6 @@ def _error_text(call_tool_result) -> str:
 
 
 class _Seeded:
-    """The row ids one seeded promotion scenario needs."""
 
     def __init__(self, *, user_id: str, product_id: str, task_id: str, subtask_id: str, roadmap_item_id: str):
         self.user_id = user_id
@@ -93,8 +59,6 @@ class _Seeded:
 
 
 async def _seed_promotable_task(db_session, tenant_key: str) -> _Seeded:
-    """Commit (inside the test transaction) an active product + TSK-tagged task
-    with one subtask and one roadmap card pointing at the task."""
     suffix = uuid4().hex[:8]
 
     org = Organization(name=f"Org {suffix}", slug=f"org-{suffix}", tenant_key=tenant_key, is_active=True)
@@ -182,7 +146,6 @@ async def _seed_promotable_task(db_session, tenant_key: str) -> _Seeded:
 
 
 class _Resolved:
-    """Mutable holder for the identity the patched resolvers hand the wrappers."""
 
     def __init__(self, tenant_key: str):
         self.tenant_key = tenant_key
@@ -191,13 +154,6 @@ class _Resolved:
 
 @pytest_asyncio.fixture
 async def convert_client(db_manager, db_session, monkeypatch):
-    """Yield ``(new_client, resolved, tenant_key)``.
-
-    The ToolAccessor's TaskService is bound to the rollback-isolated
-    ``db_session`` so the conversion's writes stay inside the test transaction.
-    ``resolved.user_id`` is what ``_resolve_user_id`` returns (production reads it
-    from the ASGI scope; there is no HTTP scope on the in-memory transport).
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -252,7 +208,6 @@ class TestConvertToProjectMcpBoundary:
         assert result.is_error is False, _error_text(result)
         payload = _payload(result)
 
-        # The response must make the deletion UNMISTAKABLE and hand back a usable project.
         assert payload["success"] is True, payload
         assert payload["converted_to_project"] is True, payload
         assert payload["task_deleted"] is True, payload
@@ -264,11 +219,9 @@ class TestConvertToProjectMcpBoundary:
         assert payload["project_type"] is None, "conversion strips the type (IMP-6262)"
         assert "deleted" in payload["message"].lower()
 
-        # Task row is GONE (hard delete, not a status flip).
         gone = (await db_session.execute(select(Task.id).where(Task.id == seeded.task_id))).scalar_one_or_none()
         assert gone is None, "the converted task row must be hard-deleted"
 
-        # Project exists, inactive, untyped, carrying the task's identity.
         project = (await db_session.execute(select(Project).where(Project.id == new_project_id))).scalar_one_or_none()
         assert project is not None, "the promoted project must exist"
         assert project.tenant_key == tenant_key
@@ -277,13 +230,11 @@ class TestConvertToProjectMcpBoundary:
         assert project.project_type_id is None
         assert project.series_number is not None
 
-        # Subtask followed its parent.
         subtask_project = (
             await db_session.execute(select(Task.project_id).where(Task.id == seeded.subtask_id))
         ).scalar_one()
         assert subtask_project == new_project_id
 
-        # Roadmap card re-pointed IN PLACE: same row, same sort_order, discriminator flipped.
         item_row = (
             await db_session.execute(
                 select(
@@ -345,15 +296,12 @@ class TestConvertToProjectMcpBoundary:
                 {"task_id": seeded.task_id, "convert_to_project": True, **conflicting},
             )
 
-        # BE-6081 Tier 2: a deliberate, agent-actionable rejection is normal
-        # content, never isError.
         assert result.is_error is False, _error_text(result)
         payload = _payload(result)
         assert payload["success"] is False, payload
         assert payload["error"] == "CONVERT_FIELD_CONFLICT", payload
         assert set(payload["conflicting_fields"]) == set(conflicting), payload
 
-        # Nothing written: the task still exists, unmodified, and no project appeared.
         row = (
             await db_session.execute(
                 select(Task.status, Task.priority, Task.hidden, Task.converted_to_project_id).where(
@@ -377,7 +325,7 @@ class TestConvertToProjectMcpBoundary:
     async def test_convert_without_authenticated_user_is_a_structured_rejection(self, convert_client, db_session):
         new_client, resolved, tenant_key = convert_client
         seeded = await _seed_promotable_task(db_session, tenant_key)
-        resolved.user_id = None  # legacy API key: no user_id back-reference
+        resolved.user_id = None
 
         async with new_client() as session:
             result = await session.call_tool(
@@ -394,7 +342,6 @@ class TestConvertToProjectMcpBoundary:
         assert still_there == seeded.task_id
 
     async def test_plain_update_task_response_carries_no_convert_keys(self, convert_client, db_session):
-        """Non-convert behavior is unchanged: same three keys, no convert surface."""
         new_client, resolved, tenant_key = convert_client
         seeded = await _seed_promotable_task(db_session, tenant_key)
         resolved.user_id = seeded.user_id

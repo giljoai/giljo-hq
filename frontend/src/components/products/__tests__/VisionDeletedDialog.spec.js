@@ -1,10 +1,3 @@
-/**
- * VisionDeletedDialog.spec.js — FE-6138
- *
- * DoD: recover-only surface for soft-deleted vision documents.
- *
- * Edition scope: CE
- */
 
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -64,9 +57,7 @@ describe('VisionDeletedDialog', () => {
   it('(d) restore button is disabled while restoringId matches that doc', () => {
     const wrapper = mountDialog({ restoringId: 'doc-aaa1' })
     const buttons = wrapper.findAll('[data-testid="restore-vision"]')
-    // First button (doc-aaa1) must be disabled
     expect(buttons[0].attributes('disabled')).toBeDefined()
-    // Second button (doc-bbb2) must not be disabled
     expect(buttons[1].attributes('disabled')).toBeUndefined()
   })
 })

@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""REST contract for the operator's read watermark (FE-9586).
-
-``POST /api/v1/threads/{id}/read`` is the fact the dashboard could never state.
-The service test (tests/services/test_fe9586_operator_read_watermark.py) pins the
-watermark semantics; this pins the SHIM: the identity comes from the session and
-never from the body, the effect is visible on the caller's own card, tenant
-isolation holds, and an unknown thread is refused rather than silently enrolling
-the caller in nothing.
-
-Parallel-safe: api_client fixture, fresh tenant per test, no ordering deps.
-"""
 
 from __future__ import annotations
 
@@ -36,14 +25,6 @@ _TEST_CSRF_TOKEN = secrets.token_urlsafe(32)
 
 
 async def _seed_tenant(db_manager) -> dict:
-    """Org + user in a fresh isolated tenant.
-
-    Deliberately the SAME construction as tests/api/test_comm_threads_endpoints.py
-    rather than a fresh one: ``User.display_name`` is a derived property with no
-    setter, so a hand-rolled seed passing it fails at ORM construction. Copying the
-    working seed is how this file stays a test of the endpoint instead of a test of
-    my own fixture.
-    """
     async with db_manager.get_session_async() as session:
         suffix = uuid.uuid4().hex[:8]
         tenant_key = TenantManager.generate_tenant_key()
@@ -108,9 +89,6 @@ async def _my_card(api_client: AsyncClient, headers: dict, thread_id: str) -> di
 
 @pytest.mark.asyncio
 async def test_marking_read_clears_the_callers_own_unread_card(api_client: AsyncClient, db_manager) -> None:
-    """The whole point, end to end through the shim: the card stops claiming there is
-    something new. Asserted with a positive control first, so a green here cannot mean
-    "the flag was never true"."""
     seed = await _seed_tenant(db_manager)
     thread_id = await _thread_with_a_post(api_client, seed["headers"])
 
@@ -125,8 +103,6 @@ async def test_marking_read_clears_the_callers_own_unread_card(api_client: Async
 
 @pytest.mark.asyncio
 async def test_the_reader_is_the_session_not_the_body(api_client: AsyncClient, db_manager) -> None:
-    """No body is accepted, so no caller can mark a thread read on someone else's
-    behalf. A declared identity here would be an impersonation surface."""
     seed = await _seed_tenant(db_manager)
     thread_id = await _thread_with_a_post(api_client, seed["headers"])
 
@@ -142,8 +118,6 @@ async def test_the_reader_is_the_session_not_the_body(api_client: AsyncClient, d
 
 @pytest.mark.asyncio
 async def test_marking_read_is_idempotent_over_the_wire(api_client: AsyncClient, db_manager) -> None:
-    """Write-on-open fires on every open, so the second call must be a clean no-op:
-    cursor_advanced false because nothing was newer, not an error."""
     seed = await _seed_tenant(db_manager)
     thread_id = await _thread_with_a_post(api_client, seed["headers"])
 
@@ -157,8 +131,6 @@ async def test_marking_read_is_idempotent_over_the_wire(api_client: AsyncClient,
 
 @pytest.mark.asyncio
 async def test_another_tenant_cannot_mark_this_thread_read(api_client: AsyncClient, db_manager) -> None:
-    """Tenant isolation on a WRITE path: tenant B must not reach tenant A's thread,
-    and A's card must be untouched by the attempt."""
     a = await _seed_tenant(db_manager)
     b = await _seed_tenant(db_manager)
     thread_id = await _thread_with_a_post(api_client, a["headers"])
@@ -171,7 +143,6 @@ async def test_another_tenant_cannot_mark_this_thread_read(api_client: AsyncClie
 
 @pytest.mark.asyncio
 async def test_an_unknown_thread_is_refused(api_client: AsyncClient, db_manager) -> None:
-    """404, not a silent enrolment in a thread that does not exist."""
     seed = await _seed_tenant(db_manager)
 
     resp = await api_client.post(f"/api/v1/threads/{uuid.uuid4()}/read", headers=seed["headers"])

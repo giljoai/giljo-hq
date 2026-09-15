@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""CE-0037 — REST integration regression for ``implementation_launched_at``.
-
-CE-0036 fixed the missing field at the schema layer (api/endpoints/projects/models.py).
-CE-0028b's existing tests cover the Pydantic-model layer only. The bug actually
-lived at the API serialization layer — the construction site in
-api/endpoints/projects/crud.py::get_project had to be updated too, and any
-future refactor that drops the ``implementation_launched_at=proj.implementation_launched_at``
-mapping would silently regress without going through the wire.
-
-This test exercises the actual FastAPI route via HTTP. It stubs ProjectService
-so we don't need the full DB chain, but the test mounts the real router, runs
-the real endpoint handler, and asserts against the JSON body that the frontend
-actually consumes (BE-5042 failing-layer discipline).
-"""
 
 from __future__ import annotations
 
@@ -40,9 +26,6 @@ _FAKE_USER_TENANT = "tenant-ce0037-test"
 
 
 class _FakeUser:
-    """Minimal stand-in for User. ``get_current_active_user`` returns whatever
-    is set as an override, so duck-typing is sufficient — the route only reads
-    ``tenant_key`` and ``username``."""
 
     id = "user-ce0037-test"
     username = "ce0037_tester"
@@ -50,9 +33,6 @@ class _FakeUser:
 
 
 class _StubProjectService:
-    """Returns a fixed ProjectDetail. We exercise the serialization layer, not
-    the DB or repository. The bug lives in how the endpoint maps service-layer
-    ProjectDetail → REST ProjectResponse → JSON."""
 
     def __init__(self, project_detail: ProjectDetail) -> None:
         self._project_detail = project_detail
@@ -62,7 +42,6 @@ class _StubProjectService:
 
 
 def _build_app(stub_service: _StubProjectService) -> FastAPI:
-    """Mount the real projects router with auth + service overrides."""
     app = FastAPI()
     app.include_router(projects_router)
 
@@ -78,8 +57,6 @@ def _build_app(stub_service: _StubProjectService) -> FastAPI:
 
 
 def _detail_with_launch_ts(launch_ts: datetime | None) -> ProjectDetail:
-    """ProjectDetail factory matching the shape ProjectService.get_project()
-    returns (see src/giljo_mcp/services/project_service.py:396-429)."""
     return ProjectDetail(
         id="proj-ce0037",
         alias="CE37",
@@ -103,8 +80,6 @@ def _detail_with_launch_ts(launch_ts: datetime | None) -> ProjectDetail:
 
 
 async def test_get_project_response_includes_implementation_launched_at_when_set():
-    """The exact CE-0036 scenario: DB column is set, frontend expects the field
-    in the JSON body so the Close Project HITL button can render."""
     launch_ts = datetime(2026, 5, 18, 3, 29, 18, tzinfo=UTC)
     detail = _detail_with_launch_ts(launch_ts)
     app = _build_app(_StubProjectService(detail))
@@ -118,17 +93,11 @@ async def test_get_project_response_includes_implementation_launched_at_when_set
         "REST ProjectResponse JSON is missing implementation_launched_at — the CE-0036 bug regressed. "
         "Check api/endpoints/projects/models.py::ProjectResponse and crud.py::get_project construction site."
     )
-    # FastAPI serializes datetimes as ISO 8601 strings; the wire shape must
-    # be parseable back to the same instant.
     assert body["implementation_launched_at"] is not None
     assert datetime.fromisoformat(body["implementation_launched_at"]) == launch_ts
 
 
 async def test_get_project_response_keeps_implementation_launched_at_when_null():
-    """Negative case: the frontend useProjectCloseout guard checks for the
-    property's presence, not just truthiness. Missing-key vs explicit-null
-    have different falsy semantics in JS. The field must always appear in
-    the JSON body, even when null."""
     detail = _detail_with_launch_ts(None)
     app = _build_app(_StubProjectService(detail))
 

@@ -3,31 +3,15 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""IMP-5037b regression: ce_0040 migration idempotency tests.
-
-Exercises upgrade() / downgrade() against a fake bind so the
-information_schema existence guards and op.add_column /
-op.create_check_constraint behavior can be verified without a live database.
-
-Mandated regression #3 (failing layer: migration idempotency).
-"""
 
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 
-# ---------------------------------------------------------------------------
-# Fake connection helpers
-# ---------------------------------------------------------------------------
 
 
 def _build_fake_conn(*, has_columns: tuple[str, ...] = (), has_constraint: bool = False):
-    """Return a mock bind whose information_schema queries are pre-seeded.
-
-    *has_columns* is a tuple of column names that already exist in the table.
-    *has_constraint* controls whether the CHECK constraint is already present.
-    """
     fake_conn = MagicMock()
 
     def execute(stmt, params=None):
@@ -49,9 +33,6 @@ def _build_fake_conn(*, has_columns: tuple[str, ...] = (), has_constraint: bool 
 _ALL_COLUMNS = ("surface", "role_filter", "cta_label", "cta_route", "dismissible")
 
 
-# ---------------------------------------------------------------------------
-# Upgrade — fresh DB (none of the columns exist)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
@@ -117,14 +98,10 @@ def test_upgrade_dismissible_column_not_nullable():
     assert col.nullable is False
 
 
-# ---------------------------------------------------------------------------
-# Upgrade — idempotent (all columns already present, constraint already exists)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 def test_upgrade_is_noop_when_all_columns_and_constraint_present():
-    """Regression: CE installer reruns alembic upgrade head on every boot."""
     from migrations.versions import ce_0040_notifications_banner_columns as mig
 
     fake_conn = _build_fake_conn(has_columns=_ALL_COLUMNS, has_constraint=True)
@@ -143,7 +120,6 @@ def test_upgrade_is_noop_when_all_columns_and_constraint_present():
 
 @pytest.mark.unit
 def test_upgrade_partial_run_adds_missing_columns_skips_existing():
-    """Partial prior run: only 'surface' was added; the other 4 are missing."""
     from migrations.versions import ce_0040_notifications_banner_columns as mig
 
     fake_conn = _build_fake_conn(has_columns=("surface",), has_constraint=False)
@@ -166,9 +142,6 @@ def test_upgrade_partial_run_adds_missing_columns_skips_existing():
     assert create_constraint.call_count == 1
 
 
-# ---------------------------------------------------------------------------
-# CHECK constraint — surface IN ('bell','banner','both')
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
@@ -209,9 +182,6 @@ def test_upgrade_check_constraint_uses_correct_name():
     assert constraint_name == "ck_notifications_surface"
 
 
-# ---------------------------------------------------------------------------
-# Downgrade
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
@@ -250,9 +220,6 @@ def test_downgrade_is_noop_when_already_downgraded():
     assert drop_column.call_count == 0
 
 
-# ---------------------------------------------------------------------------
-# Revision chain
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit

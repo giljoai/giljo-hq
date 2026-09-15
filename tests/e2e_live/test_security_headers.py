@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""(d) Standard security headers present on a live response.
-
-api/middleware/security.py emits the OWASP header set on every response. Over
-the live edge this also implicitly checks that no proxy hop strips them and that
-``X-Forwarded-Proto`` is wired so the app sees ``https`` (HSTS is only emitted
-on https requests — its absence here would flag a forwarded-proto misconfig).
-"""
 
 from __future__ import annotations
 
@@ -32,12 +25,6 @@ def test_static_security_headers_present(http_client):
 
 @pytest.mark.network
 def test_hsts_present_on_https(http_client, target):
-    """HSTS must be emitted on https responses with the hardened directive set.
-
-    Behind a reverse proxy this depends on ``X-Forwarded-Proto`` reaching uvicorn
-    (FORWARDED_ALLOW_IPS). A missing HSTS header on a real https host is a genuine
-    finding, not a test artifact.
-    """
     if target.scheme != "https":
         pytest.skip(reason="HSTS is only emitted over https")
 

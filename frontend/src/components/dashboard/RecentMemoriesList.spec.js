@@ -1,16 +1,3 @@
-/**
- * RecentMemoriesList.spec.js — BE-6078 PART 2.
- *
- * Edition Scope: CE.
- *
- * The dashboard 360-memory list rendered TWO visually-distinct badges
- * (closeout / completion) for what is the same project-finish milestone, split
- * only by write path. BE-6078 collapses the finish family
- * (project_closeout + project_completion + handover_closeout) into ONE
- * "Completed" badge with one shared color, while keeping session_handover and
- * the structural types (decision/architecture/...) distinct. UI tolerance — no
- * migration; legacy rows just render "Completed".
- */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import RecentMemoriesList from '@/components/dashboard/RecentMemoriesList.vue'
@@ -31,8 +18,6 @@ function mountList(memories) {
 }
 
 function badgeColor(el) {
-  // typeStyle binds an inline `color: ...` — the badge's foreground hue is the
-  // single color identity we collapse the finish family onto.
   return el.element.style.color
 }
 
@@ -50,7 +35,6 @@ describe('RecentMemoriesList.vue (BE-6078 finish-family badge collapse)', () => 
     const badges = wrapper.findAll('.memory-type')
     expect(badges).toHaveLength(3)
     const colors = badges.map(badgeColor)
-    // All three collapse onto the same color identity.
     expect(new Set(colors).size).toBe(1)
     expect(colors[0]).toBeTruthy()
   })

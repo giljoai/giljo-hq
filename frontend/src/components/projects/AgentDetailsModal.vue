@@ -6,7 +6,6 @@
     scrollable
     @cancel="handleClose"
   >
-    <!-- Header icon area: agent badge (regular) or info icon (orchestrator) -->
     <template #headerIcon>
       <div
         v-if="!isOrchestrator"
@@ -19,9 +18,7 @@
       <v-icon v-else class="dlg-icon">mdi-information-outline</v-icon>
     </template>
 
-    <!-- Content -->
     <template v-if="agent">
-      <!-- Agent Info Section (non-orchestrator) -->
       <div v-if="!isOrchestrator" class="mb-4">
         <div class="d-flex align-center gap-2 mb-2">
           <span
@@ -37,34 +34,29 @@
         </div>
       </div>
 
-      <!-- Loading State -->
       <div v-if="loading" class="text-center py-8">
         <v-progress-circular indeterminate color="primary"></v-progress-circular>
         <div class="text-body-medium text-muted-a11y mt-3">Loading...</div>
       </div>
 
-      <!-- Error State -->
       <div v-else-if="error" class="py-4">
         <v-alert type="error" variant="tonal" density="compact">
           <strong>Failed to load:</strong> {{ error }}
         </v-alert>
       </div>
 
-      <!-- Template Preview (Regular Agents) — Handover 0814: simplified to match TemplateManager preview -->
       <div v-else-if="!isOrchestrator && previewContent">
         <v-card variant="flat" class="template-content-card smooth-border">
           <pre class="template-content">{{ previewContent }}</pre>
         </v-card>
       </div>
 
-      <!-- Orchestrator Prompt Content -->
       <div v-else-if="isOrchestrator && orchestratorPrompt">
         <v-card variant="flat" class="template-content-card smooth-border">
           <pre class="template-content">{{ orchestratorPrompt }}</pre>
         </v-card>
       </div>
 
-      <!-- No Template Data (after attempting fetch) -->
       <div v-else-if="!isOrchestrator && !previewContent && !loading">
         <v-alert type="info" variant="tonal" density="compact">
           No template information available for this agent.
@@ -72,7 +64,6 @@
       </div>
     </template>
 
-    <!-- No Agent Data -->
     <v-alert v-else type="warning" variant="tonal" density="compact">
       No agent information available.
     </v-alert>
@@ -104,17 +95,14 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue'])
 
-// Get API instance (use injected $api if available, otherwise use imported api)
 const instance = getCurrentInstance()
 const apiClient = instance?.appContext.config.globalProperties.$api || api
 
-// State
 const loading = ref(false)
 const error = ref(null)
 const previewContent = ref(null)
 const orchestratorPrompt = ref(null)
 
-// Computed
 const isOpen = computed({
   get: () => props.modelValue,
   set: (val) => emit('update:modelValue', val),
@@ -130,7 +118,6 @@ const dialogTitle = computed(() => {
     : `Agent Details: ${props.agent?.agent_name || 'Unknown Agent'}`
 })
 
-// Methods
 const handleClose = () => {
   emit('update:modelValue', false)
 }
@@ -139,10 +126,6 @@ const getAgentDisplayNameColor = (agentEntity) => {
   return getAgentColorConfig(getAgentColorKey(agentEntity)).hex
 }
 
-/**
- * Fetch template and generate preview content (Handover 0814)
- * Resolves template by template_id or name matching, then calls preview API
- */
 const fetchTemplateData = async () => {
   const hasTemplateId = !!props.agent?.template_id
   const displayName = props.agent?.agent_display_name
@@ -163,7 +146,6 @@ const fetchTemplateData = async () => {
     if (hasTemplateId) {
       templateId = props.agent.template_id
     } else {
-      // Fetch all active templates and find matching one by name
       const response = await apiClient.templates.list({ is_active: true })
       const templates = Array.isArray(response.data) ? response.data : (response.data?.templates || [])
 
@@ -213,17 +195,14 @@ const fetchOrchestratorPrompt = async () => {
   }
 }
 
-// Watchers
 watch(
   () => props.modelValue,
   (newValue) => {
     if (newValue && props.agent) {
-      // Reset state
       previewContent.value = null
       orchestratorPrompt.value = null
       error.value = null
 
-      // Fetch appropriate data
       if (isOrchestrator.value) {
         fetchOrchestratorPrompt()
       } else {

@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9591 — REST contract for forgetting a tool's stored connection.
-
-The service test (tests/services/test_be9591_remove_tool_clears_connection.py) pins
-the removal semantics; this pins the SHIM: the tenant comes from the authenticated
-principal and is never a request parameter (ADR-009), the effect is visible on the
-caller's own credential-status, and an unauthenticated caller cannot reach it.
-
-Parallel-safe: api_client fixture, fresh tenant per test. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -87,7 +78,6 @@ async def _harnesses(api_client: AsyncClient, headers: dict) -> dict:
 
 
 async def test_removing_a_tool_clears_it_from_credential_status(api_client: AsyncClient, db_manager) -> None:
-    """End to end at the surface the card actually reads."""
     seed = await _seed_tenant(db_manager)
     await _seed_connection(db_manager, seed["tenant_key"], "claude-code")
     assert "claude-code" in await _harnesses(api_client, seed["headers"])
@@ -100,8 +90,6 @@ async def test_removing_a_tool_clears_it_from_credential_status(api_client: Asyn
 
 
 async def test_removing_one_tool_leaves_the_rest(api_client: AsyncClient, db_manager) -> None:
-    """Blast-radius control at the shim: without it, a removal that dropped every row
-    would pass the test above while disconnecting every other tool."""
     seed = await _seed_tenant(db_manager)
     await _seed_connection(db_manager, seed["tenant_key"], "claude-code")
     await _seed_connection(db_manager, seed["tenant_key"], "opencode")
@@ -114,7 +102,6 @@ async def test_removing_one_tool_leaves_the_rest(api_client: AsyncClient, db_man
 
 
 async def test_one_tenant_cannot_remove_anothers_connection(api_client: AsyncClient, db_manager) -> None:
-    """The tenant is taken from the principal, never from the request."""
     a = await _seed_tenant(db_manager)
     b = await _seed_tenant(db_manager)
     await _seed_connection(db_manager, a["tenant_key"], "claude-code")

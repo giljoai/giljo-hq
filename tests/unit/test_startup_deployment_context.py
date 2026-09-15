@@ -2,11 +2,6 @@
 # Licensed under the Elastic License 2.0.
 # See LICENSE in the project root for terms.
 
-"""Unit tests for startup.get_deployment_context() and _get_external_host().
-
-Guards the branching behaviour that controls browser auto-open host and
-status banner content for saas-production / localhost / lan deployments.
-"""
 
 from __future__ import annotations
 
@@ -22,7 +17,6 @@ _STARTUP_PATH = Path(__file__).resolve().parents[2] / "startup.py"
 
 @pytest.fixture(scope="module")
 def startup_module():
-    """Load startup.py as a module without running its CLI entry-point."""
     spec = importlib.util.spec_from_file_location("_giljo_startup_under_test", _STARTUP_PATH)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -49,7 +43,7 @@ def test_returns_saas_production_when_explicitly_set(startup_module, tmp_path, m
 
 
 def test_returns_localhost_when_no_config_file(startup_module, tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)  # no config.yaml
+    monkeypatch.chdir(tmp_path)
     assert startup_module.get_deployment_context() == "localhost"
 
 

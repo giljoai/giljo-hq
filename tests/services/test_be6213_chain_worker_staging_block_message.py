@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6213 P1 — a worker spawned during a chain sub-orch's staging gets a
-chain-worded blocked message, not the non-existent "click Implement" button.
-
-A worker (job_type != orchestrator) spawned while its chain sub-orchestrator is
-still STAGING hits the implementation gate (project.implementation_launched_at
-is None). The legacy worker-branch message told it to "click the 'Implement'
-button in the GiljoAI dashboard" — which does not exist in chain mode → a latent
-infinite human-wait. The fix reuses the existing _is_chain_member helper to
-return a chain-worded message; a SOLO worker keeps the byte-identical legacy
-message (Deletion Test on the solo gate).
-"""
 
 from __future__ import annotations
 
@@ -72,7 +61,6 @@ async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
 
 
 async def _seed_worker_job(session: AsyncSession, tenant_key: str, project_id: str) -> AgentJob:
-    """Hand-mint a project-bound WORKER job + execution (implementation NOT launched)."""
     job_id = str(uuid.uuid4())
     job = AgentJob(
         job_id=job_id,
@@ -110,15 +98,9 @@ def _run_svc(session: AsyncSession) -> SequenceRunService:
     return SequenceRunService(db_manager=None, tenant_manager=TenantManager(), session=session)
 
 
-# ===========================================================================
-# 1. CHAIN — a chain-member worker gets a chain-worded block (no Implement button)
-# ===========================================================================
 
 
 async def test_chain_worker_staging_block_is_chain_worded(db_session: AsyncSession, db_manager) -> None:
-    """A worker spawned while its chain sub-orch is still staging is blocked with a
-    chain-worded message — NOT the 'click the Implement button' wording that does not
-    exist in chain mode. RED before the fix (returned the solo button message)."""
     tenant = TenantManager.generate_tenant_key()
     p1 = await _seed_project(db_session, tenant)
     p2 = await _seed_project(db_session, tenant)
@@ -139,15 +121,11 @@ async def test_chain_worker_staging_block_is_chain_worded(db_session: AsyncSessi
     assert "get_job_mission" in instruction
 
 
-# ===========================================================================
-# 2. SOLO control — a solo worker keeps the byte-identical legacy message
-# ===========================================================================
 
 
 async def test_solo_worker_keeps_byte_identical_message(db_session: AsyncSession, db_manager) -> None:
-    """A solo worker (NO active run) keeps the byte-identical legacy human-gate message."""
     tenant = TenantManager.generate_tenant_key()
-    p1 = await _seed_project(db_session, tenant)  # no run -> solo
+    p1 = await _seed_project(db_session, tenant)
     job = await _seed_worker_job(db_session, tenant, p1)
 
     response = await _mission_svc(db_session, db_manager).get_agent_mission(job.job_id, tenant)

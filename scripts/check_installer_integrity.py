@@ -5,45 +5,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Installer integrity checks. Catches the regression classes that broke
-fresh-machine installs in v1.1.9.x:
-
-  1. UTF-8 BOM in install.ps1 or install.sh.
-     A BOM makes 'irm giljo.ai/install.ps1 | iex' fail because PowerShell
-     treats the BOM as a literal token before '#Requires'.
-
-  2. start-giljoai.bat (the launcher heredoc inside install.ps1) must invoke
-     'python startup.py', not 'python -m api.run_api'. The latter skips
-     frontend, browser auto-open, and migrations.
-
-  2b. The standalone scripts/start-giljoai.bat launcher must obey the same
-     entry-point rule. Only the heredoc inside install.ps1 was ever guarded,
-     so the checked-in launcher drifted unnoticed to 'python -m api.run_api'
-     plus an unconditional 'pause' -- the exact shape check 2 exists to
-     forbid. It also has to survive being run by double-click, so a failure
-     must pause instead of flashing the window shut, while success must NOT
-     pause (that leaves a dead window sitting on a running server).
-
-  3. startup.py must defer third-party imports (click, colorama) until
-     AFTER ensure_project_virtualenv() runs. Otherwise 'python startup.py'
-     from a fresh shell crashes with ModuleNotFoundError before the venv
-     relaunch guard can fire.
-
-  4. Both installers must stage the atomic-extract dir INSIDE the target dir
-     (a hidden child), never as a sibling "<target>.new". A sibling lands in
-     the target's root/admin-owned parent for the default $HOME install and
-     crashes with a permission error right after SHA256-verify. (INF-9102)
-
-  5. install.sh must not capture `shopt -p <opt>` in a bare command
-     substitution `$(shopt -p ...)`. `shopt -p` exits 1 when the option is
-     unset (the default in a curl|bash shell), so under `set -euo pipefail`
-     the assignment silently kills the installer before it moves any file into
-     place. The capture MUST be neutralised with `|| true` (or wrapped in
-     `set +e`/`set -e`). (INF-9106)
-
-Run as a pre-commit hook and in CI. Exits non-zero on any failure.
-"""
 
 from __future__ import annotations
 
@@ -107,16 +68,6 @@ def check_bat_entry_point() -> list[str]:
 
 
 def find_unconditional_pause(bat_text: str) -> list[int]:
-    """Line numbers of every 'pause' a .bat reaches without a preceding test.
-
-    cmd has no indentation rules, so "is this pause on the success path"
-    is answered structurally: a pause is conditional when it sits inside a
-    parenthesised 'if'/'for' block, or when it trails an 'if' on one line.
-    Anything else runs unconditionally.
-
-    Tracked by paren depth rather than by regex over the whole file so that
-    a pause nested two blocks deep still counts as guarded.
-    """
     depth = 0
     offenders: list[int] = []
 
@@ -126,7 +77,6 @@ def find_unconditional_pause(bat_text: str) -> list[int]:
         if not line or lowered.startswith(("rem ", "::", "@rem ")):
             continue
 
-        # ')' closes a block; ') else (' closes and reopens, so depth is unchanged.
         if line.startswith(")"):
             if not line.endswith("("):
                 depth = max(0, depth - 1)
@@ -136,7 +86,6 @@ def find_unconditional_pause(bat_text: str) -> list[int]:
             depth += 1
             continue
 
-        # A bare 'pause' (not 'if errorlevel 1 pause') outside every block.
         if re.match(r"^@?pause\b", lowered) and depth == 0:
             offenders.append(line_no)
 
@@ -144,14 +93,6 @@ def find_unconditional_pause(bat_text: str) -> list[int]:
 
 
 def check_standalone_bat() -> list[str]:
-    """The checked-in launcher must run the canonical entry point, like the heredoc.
-
-    check_bat_entry_point() reads install.ps1 -- the heredoc that WRITES a
-    launcher into the install dir. The launcher committed at
-    scripts/start-giljoai.bat is a second, unguarded file that also ships to
-    users, and it drifted to 'python -m api.run_api'. Same rule, same reason
-    (frontend launch, browser auto-open, migrations), now enforced on both.
-    """
     failures: list[str] = []
     if not STANDALONE_BAT.exists():
         return failures
@@ -170,7 +111,6 @@ def check_standalone_bat() -> list[str]:
             "committed launcher and the one install.ps1 writes must run the "
             "same canonical entry point."
         )
-    # The launcher sits in scripts/, one level below the venv and startup.py.
     if not re.search(r'cd\s+/d\s+"%~dp0\.\.', text):
         failures.append(
             'scripts/start-giljoai.bat: does not cd to the parent of scripts/ '
@@ -213,7 +153,6 @@ def check_startup_import_order() -> list[str]:
         stripped = line.strip()
         if stripped.startswith("#") or not stripped:
             continue
-        # The relaunch guard is invoked here.
         if "ensure_project_virtualenv()" in stripped and not stripped.startswith("def "):
             guard_line = idx
         if stripped.startswith(("import click", "from click")):
@@ -243,24 +182,10 @@ def check_startup_import_order() -> list[str]:
 
 
 def check_staging_inside_target() -> list[str]:
-    """INF-9102 regression guard: both installers MUST stage the atomic-extract
-    dir INSIDE the target dir (a hidden child), never as a sibling "<target>.new".
-
-    A sibling landed in the target's parent, which for the default $HOME install is
-    a root/admin-owned dir (/home on Linux, C:\\Users on Windows) that an
-    unprivileged user cannot write -> the install crashed at
-    "mkdir: <target>.new: Permission denied" right after SHA256-verify. Staging
-    inside the (already user-owned) target keeps the per-entry move same-filesystem
-    /same-volume, preserving INF-0004's atomic-rename guarantee.
-
-    This is a positive assertion (staging IS a child) so it also fails if the
-    sibling pattern is ever reintroduced.
-    """
     failures: list[str] = []
 
     if INSTALL_SH.exists():
         sh_text = INSTALL_SH.read_text(encoding="utf-8", errors="replace")
-        # Expect: staging_dir="${target_dir}/..." (a child of target_dir).
         if not re.search(r'staging_dir\s*=\s*"\$\{target_dir\}/', sh_text):
             failures.append(
                 "install.sh: atomic-extract staging_dir is not created INSIDE "
@@ -272,7 +197,6 @@ def check_staging_inside_target() -> list[str]:
 
     if INSTALL_PS1.exists():
         ps1_text = INSTALL_PS1.read_text(encoding="utf-8", errors="replace")
-        # Expect: $stagingDir = Join-Path $TargetDir "..." (a child of $TargetDir).
         if not re.search(r"stagingDir\s*=\s*Join-Path\s+\$TargetDir", ps1_text):
             failures.append(
                 "install.ps1: atomic-extract $stagingDir is not created INSIDE "
@@ -286,23 +210,11 @@ def check_staging_inside_target() -> list[str]:
 
 
 def check_no_errexit_fatal_shopt() -> list[str]:
-    """INF-9106 regression guard: install.sh must never capture `shopt -p <opt>`
-    in a bare command substitution under `set -euo pipefail`.
-
-    `shopt -p dotglob` prints the restore command but EXITS 1 when the option is
-    unset -- and dotglob/nullglob are off by default in a `curl | bash` shell.
-    A bare `_x="$(shopt -p dotglob)"` therefore trips errexit and silently kills
-    the installer at file-install (before any file is moved into place). The fix
-    is `$(shopt -p dotglob || true)` (or wrapping the capture in `set +e`/`set -e`).
-    This guard flags any `$(... shopt -p ...)` substitution missing that neutraliser.
-    """
     failures: list[str] = []
     if not INSTALL_SH.exists():
         return failures
     sh_text = INSTALL_SH.read_text(encoding="utf-8", errors="replace")
 
-    # Match a command substitution $( ... ) that invokes `shopt -p`, with no
-    # nested parens inside. The captured body includes any trailing `|| true`.
     for m in re.finditer(r"\$\((?P<body>[^()]*\bshopt\s+-p\b[^()]*)\)", sh_text):
         body = m.group("body")
         if "|| true" in body or "|| :" in body:

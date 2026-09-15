@@ -1,6 +1,5 @@
 <template>
   <v-container>
-    <!-- Header -->
     <v-row class="align-center mb-4">
       <v-col>
         <h1 class="text-headline-large">Tasks</h1>
@@ -30,7 +29,6 @@
       </v-col>
     </v-row>
 
-    <!-- Filters Row (0870h: restyled filter bar) -->
     <div class="filter-bar">
       <v-text-field
         v-model="search"
@@ -68,9 +66,6 @@
         class="filter-select"
       />
       <v-btn variant="text" class="filter-clear-btn" @click="clearFilters">Clear Filters</v-btn>
-      <!-- BE-2002: circular "Show archived" toggle (mirrors the projects action bar).
-           Yellow (theme `warning` token) when archived tasks are being shown.
-           Backend field is `hidden`; UI calls it "archived". -->
       <v-btn
         v-if="hiddenCount > 0 || showHidden"
         :color="showHidden ? 'warning' : undefined"
@@ -81,8 +76,6 @@
         class="filter-cta-archive"
         @click="showHidden = !showHidden"
       />
-      <!-- FE-9365f: icon-only, mirroring the Projects action bar — the same action in
-           two rooms should wear the same clothes. Labels live in title/aria. -->
       <v-btn
         color="primary"
         variant="flat"
@@ -101,7 +94,6 @@
       />
     </div>
 
-    <!-- Tasks Table (extracted child component) -->
     <TasksTable
       :tasks="hierarchicalTasks"
       :loading="loading"
@@ -117,7 +109,6 @@
       @update-due-date="updateTaskDueDate"
     />
 
-    <!-- Create/Edit Task Dialog (extracted child component) -->
     <TaskEditDialog
       v-model="showTaskDialog"
       :editing-task="editingTask"
@@ -129,7 +120,6 @@
       @update:current-task="onCurrentTaskUpdate"
     />
 
-    <!-- No Product Open Warning Dialog -->
     <BaseDialog
       v-model="showNoProductDialog"
       type="warning"
@@ -143,7 +133,6 @@
       </p>
     </BaseDialog>
 
-    <!-- Conversion Confirmation Dialog -->
     <BaseDialog
       v-model="showConversionConfirmDialog"
       type="info"
@@ -162,7 +151,6 @@
       </p>
     </BaseDialog>
 
-    <!-- Delete Confirmation Dialog -->
     <BaseDialog
       v-model="showDeleteConfirmDialog"
       type="danger"
@@ -180,7 +168,6 @@
       </v-alert>
     </BaseDialog>
 
-    <!-- Success Dialog -->
     <BaseDialog
       v-model="showSuccessDialog"
       type="success"
@@ -192,7 +179,6 @@
       <p class="text-body-large">{{ successMessage }}</p>
     </BaseDialog>
 
-    <!-- Error Dialog -->
     <BaseDialog
       v-model="showErrorDialog"
       type="danger"
@@ -204,7 +190,6 @@
       <p class="text-body-large">{{ errorMessage }}</p>
     </BaseDialog>
 
-    <!-- Deleted Tasks Dialog (FE-6138) -->
     <TaskDeletedDialog
       v-model="showDeletedTasksDialog"
       :deleted-tasks="deletedTasks"
@@ -229,20 +214,17 @@ import TasksTable from './tasks/TasksTable.vue'
 import TaskEditDialog from './tasks/TaskEditDialog.vue'
 import TaskDeletedDialog from '@/components/tasks/TaskDeletedDialog.vue'
 
-// Stores
 const taskStore = useTaskStore()
 const productStore = useProductStore()
 const notificationStore = useNotificationStore()
 const { showToast } = useToast()
 
-// Dialog state (conversion / delete / success / error stay in view)
 const showNoProductDialog = ref(false)
 const showConversionConfirmDialog = ref(false)
 const showDeleteConfirmDialog = ref(false)
 const showSuccessDialog = ref(false)
 const showErrorDialog = ref(false)
 
-// Deleted tasks dialog state (FE-6138)
 const showDeletedTasksDialog = ref(false)
 const deletedTasks = ref([])
 const restoringId = ref(null)
@@ -253,10 +235,6 @@ const currentDeletingTask = ref(null)
 const successMessage = ref('')
 const errorMessage = ref('')
 
-// Table headers (FE-5046: Serial column folds in the old Type column —
-// taxonomy alias + type color tint render together as a single badge
-// before the Title column). Kept here for test assertion access via
-// wrapper.vm.headers (tests/unit/views/TasksView.spec.js).
 // eslint-disable-next-line no-unused-vars -- exposed on vm for test assertions
 const headers = [
   { title: 'Status', key: 'status', width: '110', align: 'center' },
@@ -268,14 +246,11 @@ const headers = [
   { title: 'Actions', key: 'actions', sortable: false, width: '70', align: 'center' },
 ]
 
-// Filter options
 const priorityOptions = ['low', 'medium', 'high', 'critical']
 
-// Computed
 const loading = computed(() => taskStore.loading)
 const tasks = computed(() => taskStore.tasks)
 
-// Product-filtered tasks (all tasks are bound to a product - Handover 0433)
 const userFilteredTasks = computed(() => {
   const productId = productStore.effectiveProductId
   if (!productId) {
@@ -284,8 +259,6 @@ const userFilteredTasks = computed(() => {
   return tasks.value.filter((task) => task.product_id === productId)
 })
 
-// Filters composable — receives product-scoped task list. Tasks are auto-TSK
-// (BE-6049c), so there is no task-type filter (FE-6049e).
 const {
   search,
   statusFilter,
@@ -297,10 +270,8 @@ const {
   clearFilters,
 } = useTaskFilters(userFilteredTasks)
 
-// Hierarchy feature disabled — return filtered tasks directly
 const hierarchicalTasks = computed(() => filteredTasks.value)
 
-// CRUD composable
 const {
   showTaskDialog,
   showCreateDialog,
@@ -316,18 +287,12 @@ const {
   updateTaskDueDate: _updateTaskDueDate,
 } = useTaskCrud()
 
-// Wrap completeTask: list-row callers pass the task object; the composable
-// expects (taskId, notes?). Keep the row-level UX unchanged.
 async function completeTask(task) {
   try {
     await _completeTask(task.id)
   } catch (error) {
     errorMessage.value = 'Failed to complete task. Please try again.'
     showErrorDialog.value = true
-    // FE-9466: the composable's own catch already pushed a notification for
-    // this same rethrown error -- same operation + entityId + error code
-    // computes the same id, so the store's dedup-by-id collapses this into
-    // the same row rather than showing the failure twice.
     notifyFailure(notificationStore, {
       operation: 'task.complete',
       entityId: task.id,
@@ -338,7 +303,6 @@ async function completeTask(task) {
   }
 }
 
-// Wrap handleNewTask to show the no-product dialog when needed
 function handleNewTask() {
   const result = _handleNewTask()
   if (result?.noProduct) {
@@ -346,16 +310,12 @@ function handleNewTask() {
   }
 }
 
-// Wrap updateTaskField to show the error dialog on failure
 async function updateTaskField(task, field, value) {
   try {
     await _updateTaskField(task, field, value)
   } catch (error) {
     errorMessage.value = `Failed to update ${field}. Please try again.`
     showErrorDialog.value = true
-    // FE-9466: useTaskCrud.updateTaskField has no catch of its own (out of
-    // pass-one scope) -- this is the only layer that sees the failure, so
-    // it is the only one that needs to push.
     notifyFailure(notificationStore, {
       operation: `task.updateField.${field}`,
       entityId: task.id,
@@ -366,15 +326,12 @@ async function updateTaskField(task, field, value) {
   }
 }
 
-// Wrap updateTaskDueDate to show the error dialog on failure
 async function updateTaskDueDate(task, newDate) {
   try {
     await _updateTaskDueDate(task, newDate)
   } catch (error) {
     errorMessage.value = 'Failed to update due date. Please try again.'
     showErrorDialog.value = true
-    // FE-9466: useTaskCrud.updateTaskDueDate has no catch of its own (out of
-    // pass-one scope) -- this is the only layer that sees the failure.
     notifyFailure(notificationStore, {
       operation: 'task.updateDueDate',
       entityId: task.id,
@@ -385,19 +342,10 @@ async function updateTaskDueDate(task, newDate) {
   }
 }
 
-// Delegate saveTask with form ref and fetchTasks callback.
-// TaskEditDialog emits (formRef) as the payload; unwrap it here.
 async function saveTask(formRef) {
   await _saveTask(formRef, fetchTasks)
 }
 
-// Apply the dialog's `update:current-task` payload to the composable's
-// `currentTask` ref. An explicit named handler (writing `.value` in script
-// context where `currentTask` is unambiguously the ref) replaces the prior
-// inline `currentTask = $event` assignment — same runtime effect, but it
-// removes any reliance on the compiler's ref-write heuristic and is covered
-// by the "silent-save regression" contract test in TasksView.spec.js so the
-// dialog → save → POST wiring cannot silently break again.
 function onCurrentTaskUpdate(updated) {
   currentTask.value = updated
 }
@@ -455,7 +403,6 @@ async function confirmDelete() {
   currentDeletingTask.value = null
 }
 
-// FE-6138: Deleted Tasks dialog — open handler fetches soft-deleted list
 async function openDeletedTasksDialog() {
   deletedTasks.value = []
   showDeletedTasksDialog.value = true
@@ -465,7 +412,6 @@ async function openDeletedTasksDialog() {
       params.product_id = productStore.currentProductId
     }
     const response = await api.tasks.getDeleted(params)
-    // Response is a list of TaskResponse directly (not wrapped)
     deletedTasks.value = response.data
   } catch (error) {
     console.error('[TASKS] Failed to load deleted tasks:', error)
@@ -474,14 +420,11 @@ async function openDeletedTasksDialog() {
   }
 }
 
-// FE-6138: Handle restore action from TaskDeletedDialog
 async function handleRestoreTask(task) {
   restoringId.value = task.id
   try {
     await api.tasks.restore(task.id)
-    // Remove from the deleted list
     deletedTasks.value = deletedTasks.value.filter((t) => t.id !== task.id)
-    // Refresh the main task list so the re-minted task appears
     await fetchTasks()
     showToast({ message: `Task "${task.title}" restored successfully`, type: 'success' })
   } catch (error) {
@@ -493,11 +436,6 @@ async function handleRestoreTask(task) {
 }
 
 async function fetchTasks() {
-  // BE-2002: fetch the full set INCLUDING archived (hidden) tasks. The list
-  // endpoint has no server-side hidden filter, so the store holds every task and
-  // useTaskFilters owns visibility — the default view hides archived rows, while
-  // a search OR the "Show archived" toggle reveals them (badged "Archived").
-  // (The prior `{ hidden: false }` param was a silent no-op the endpoint ignored.)
   const params = {}
   if (productStore.currentProductId) {
     params.product_id = productStore.currentProductId
@@ -505,8 +443,6 @@ async function fetchTasks() {
   await taskStore.fetchTasks(params)
 }
 
-// FE-5046 / BE-2002: Archive/Unarchive toggle in the actions menu — mirrors
-// ProjectsView. Backend field stays `hidden`; UI copy says "archived".
 async function toggleHidden(task) {
   try {
     await taskStore.updateTask(task.id, { hidden: !task.hidden })

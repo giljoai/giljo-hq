@@ -3,11 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Staging and thin-prompt builders.
-
-Extracted from ThinClientPromptGenerator (Handover 0950g).
-Builds staging-phase prompts and mission regeneration logic.
-"""
 
 import logging
 from typing import Any
@@ -19,7 +14,6 @@ from giljo_mcp.models import Product, Project
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
 
 
-# BE-9275b: derived from the branding constant instead of a fresh literal.
 _PREFIX = f"mcp__{MCP_ALIAS}__"
 
 logger = logging.getLogger(__name__)
@@ -33,7 +27,6 @@ def _project_title(project: Any) -> str:
 
 
 class StagingPromptBuilder:
-    """Builds staging-phase prompts and handles mission regeneration."""
 
     def build_thin_prompt(
         self,
@@ -47,42 +40,12 @@ class StagingPromptBuilder:
         depth_config: dict[str, Any],
         user_id: str | None = None,
     ) -> str:
-        """Generate thin prompt listing available MCP tools (Handover 0315).
-
-        Returns ~600 token prompt (vs ~3500 in fat prompt) that references MCP tools
-        for on-demand context fetching.
-
-        Args:
-            orchestrator_id: Job ID (WHAT - work order UUID)
-            agent_id: Agent execution ID (WHO - executor UUID, for identity tracking only)
-            project_id: Project UUID
-            project: Project model
-            product: Product model
-            tool: AI coding agent (claude-code, codex, gemini, universal)
-            field_toggles: User field toggle config (True=enabled, False=disabled)
-            depth_config: User depth configuration
-            user_id: Optional user ID
-
-        Returns:
-            Thin prompt with MCP tool references
-        """
         config = get_config()
-        # INF-5012b: prefer GILJO_PUBLIC_URL (set by demo/cloud deploys) over
-        # reading the server's bind address from config, which produces ":7272"
-        # URLs when the server is fronted by a reverse proxy.
-        # BE-9442: via the one accessor, which strips the trailing slash — this
-        # value is interpolated below as "{mcp_url}/health".
         mcp_url = get_public_url()
 
         api_key_configured = bool(config.server.api_key)
         auth_note = "(authenticated)" if api_key_configured else "(check config.yaml for API key)"
 
-        # CE-0034 Task 2: Claude Code defers MCP tool schemas behind ToolSearch.
-        # Without this single up-front call, health_check() and every other
-        # mcp__<alias>__* call below raises InputValidationError. The hint
-        # must live in THIS spawn prompt (not get_staging_instructions —
-        # that's unreachable until ToolSearch loads its schema).
-        # Mirrors ClaudePromptBuilder._build_context_recap (CE-0033 Task 5).
         toolsearch_bootstrap = ""
         if tool == "claude-code":
             toolsearch_bootstrap = (
@@ -95,9 +58,6 @@ class StagingPromptBuilder:
                 "\n"
             )
 
-        # BE-9260: TodoWrite is a Claude-Code-only tool -- this line used to render
-        # unconditionally for every harness. Gate it the same way as the ToolSearch
-        # bootstrap above; every other tool gets harness-neutral phrasing.
         todo_tracking_line = (
             "Claude Code: Use TodoWrite tool to track workflow progress."
             if tool == "claude-code"
@@ -177,31 +137,6 @@ Begin by verifying MCP connection, then fetch complete context, and CREATE the m
         mcp_url: str,
         tool: str = "universal",
     ) -> str:
-        """Build the thin-client staging prompt text (Handover 0415).
-
-        Args:
-            project: Project model
-            product: Product model
-            orchestrator_id: Job ID (WHAT - work order UUID)
-            project_id: Project UUID
-            agent_id: Agent execution ID (WHO)
-            mcp_url: Full MCP server URL
-            tool: AI coding agent (claude-code, codex, gemini, universal).
-                Claude Code defers MCP tool schemas behind ToolSearch and
-                must bootstrap them before any other MCP call. CE-0035.
-
-        Returns:
-            Thin staging prompt (~113 tokens; ~+8 lines for claude-code).
-        """
-        # CE-0035: Claude Code defers MCP tool schemas — without a ToolSearch
-        # bootstrap, the very first health_check() call raises
-        # InputValidationError. Mirrors the block in build_thin_prompt
-        # (CE-0034 Task 2) and ClaudePromptBuilder._build_context_recap
-        # (CE-0033 Task 5). The hint MUST live in this spawn prompt because
-        # get_staging_instructions is unreachable until ToolSearch loads
-        # its schema. build_thin_prompt is a sibling method on a separate
-        # call path; CE-0034 patched it but it does NOT render the
-        # user-facing spawn prompt — this method does.
         toolsearch_bootstrap = ""
         if tool == "claude-code":
             toolsearch_bootstrap = (
@@ -236,20 +171,6 @@ START NOW:
     def regenerate_mission(
         self, product: Product, project: Project, field_toggles: dict[str, bool], user_id: str | None
     ) -> str:
-        """Regenerate orchestrator mission with current toggle config.
-
-        Handover 0276: Enables "Stage Project refresh" — user changes settings,
-        clicks "Stage Project", gets updated instructions immediately.
-
-        Args:
-            product: Product model with vision and config
-            project: Project model with description
-            field_toggles: Field toggle config (True=enabled, False=disabled)
-            user_id: User ID for audit trail
-
-        Returns:
-            Regenerated mission string with current context
-        """
         try:
             mission_parts = []
 
@@ -289,6 +210,6 @@ START NOW:
             logger.warning("[StagingPromptBuilder] No mission parts available for regeneration")
             return project.mission or f"Mission for project: {project.name}"
 
-        except Exception as _exc:  # Broad catch: prompt fallback, returns safe default
+        except Exception as _exc:
             logger.exception("[StagingPromptBuilder] Failed to regenerate mission")
             return project.mission or f"Mission for project: {project.name}"

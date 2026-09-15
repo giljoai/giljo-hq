@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Linux platform handler implementation.
-
-Handles Linux-specific installation operations including:
-- Virtual environment path resolution (bin/)
-- PostgreSQL discovery across distributions
-- Desktop launcher creation (.desktop files)
-- npm command execution with shell=False
-- Distribution-specific guides (Ubuntu, Fedora, etc.)
-"""
 
 import contextlib
 import platform
@@ -27,65 +17,22 @@ from .base import PlatformHandler
 
 
 class LinuxPlatformHandler(PlatformHandler):
-    """
-    Linux-specific platform handler.
-
-    Key Linux behaviors:
-    - venv executables in bin/ directory
-    - PostgreSQL paths vary by distribution
-    - Desktop launchers via .desktop files
-    - npm uses shell=False (direct execution)
-    - Distribution detection for guides
-    """
 
     @property
     def platform_name(self) -> str:
-        """Return 'Linux'"""
         return "Linux"
 
     def get_venv_python(self, venv_dir: Path) -> Path:
-        """
-        Get Linux Python executable path.
-
-        Args:
-            venv_dir: Virtual environment directory
-
-        Returns:
-            Path to venv/bin/python
-        """
         return venv_dir / "bin" / "python"
 
     def get_venv_pip(self, venv_dir: Path) -> Path:
-        """
-        Get Linux pip executable path.
-
-        Args:
-            venv_dir: Virtual environment directory
-
-        Returns:
-            Path to venv/bin/pip
-        """
         return venv_dir / "bin" / "pip"
 
     def get_postgresql_scan_paths(self) -> List[Path]:
-        """
-        Get Linux PostgreSQL scan paths.
-
-        Covers:
-        - Standard system paths (/usr/bin/psql)
-        - Debian/Ubuntu: /usr/lib/postgresql/*/bin/psql
-        - Fedora/RHEL: /usr/pgsql-*/bin/psql
-        - Local installs: /usr/local/bin/psql
-
-        Returns:
-            List of potential psql paths (sorted by version, newest first)
-        """
         paths = []
 
-        # Standard system paths
         paths.extend([Path("/usr/bin/psql"), Path("/usr/local/bin/psql")])
 
-        # Debian/Ubuntu version-specific paths
         pg_lib = Path("/usr/lib/postgresql")
         if pg_lib.exists():
             for version_dir in sorted(pg_lib.glob("*"), reverse=True):
@@ -93,7 +40,6 @@ class LinuxPlatformHandler(PlatformHandler):
                     psql_path = version_dir / "bin" / "psql"
                     paths.append(psql_path)
 
-        # Fedora/RHEL version-specific paths
         pgsql_base = Path("/usr")
         for version_dir in sorted(pgsql_base.glob("pgsql-*"), reverse=True):
             if version_dir.is_dir():
@@ -103,43 +49,24 @@ class LinuxPlatformHandler(PlatformHandler):
         return paths
 
     def _detect_distribution(self) -> Dict[str, str]:
-        """
-        Detect Linux distribution.
-
-        Returns:
-            Dictionary with distribution info (ID, VERSION_ID, NAME)
-        """
         with contextlib.suppress(Exception):
             return platform.freedesktop_os_release()
         return {"ID": "unknown", "VERSION_ID": "", "NAME": "Linux"}
 
     def get_postgresql_install_guide(self, recommended_version: int = 18) -> str:
-        """
-        Get distribution-specific PostgreSQL installation guide.
-
-        Args:
-            recommended_version: Recommended version (default: 18)
-
-        Returns:
-            Multi-line installation instructions
-        """
         dist_info = self._detect_distribution()
         dist_id = dist_info.get("ID", "unknown")
 
-        # Ubuntu/Debian guide
         if dist_id in ["ubuntu", "debian"]:
             return self._get_ubuntu_install_guide(recommended_version)
 
-        # Fedora/RHEL guide
         elif dist_id in ["fedora", "rhel", "centos"]:
             return self._get_fedora_install_guide(recommended_version)
 
-        # Generic guide for unknown distributions
         else:
             return self._get_generic_install_guide(recommended_version)
 
     def _get_ubuntu_install_guide(self, recommended_version: int) -> str:
-        """Ubuntu/Debian-specific guide"""
         return f"""
 {Fore.CYAN}Ubuntu/Debian PostgreSQL Installation:{Style.RESET_ALL}
 
@@ -167,7 +94,6 @@ class LinuxPlatformHandler(PlatformHandler):
 """
 
     def _get_fedora_install_guide(self, recommended_version: int) -> str:
-        """Fedora/RHEL-specific guide"""
         return f"""
 {Fore.CYAN}Fedora/RHEL PostgreSQL Installation:{Style.RESET_ALL}
 
@@ -193,7 +119,6 @@ class LinuxPlatformHandler(PlatformHandler):
 """
 
     def _get_generic_install_guide(self, recommended_version: int) -> str:
-        """Generic guide for unknown distributions"""
         return f"""
 {Fore.CYAN}Generic Linux PostgreSQL Installation:{Style.RESET_ALL}
 
@@ -213,25 +138,10 @@ class LinuxPlatformHandler(PlatformHandler):
 """
 
     def supports_desktop_shortcuts(self) -> bool:
-        """Linux supports .desktop files"""
         return True
 
     def create_desktop_shortcuts(self, install_dir: Path, venv_dir: Path) -> Dict[str, Any]:
-        """
-        Create Linux desktop launchers (.desktop files).
-
-        Creates .desktop files in ~/.local/share/applications/
-        Uses gio trust for GNOME environments.
-
-        Args:
-            install_dir: Installation directory
-            venv_dir: Virtual environment directory
-
-        Returns:
-            Result dictionary with success status
-        """
         try:
-            # Desktop applications directory
             desktop_dir = Path.home() / ".local" / "share" / "applications"
             desktop_dir.mkdir(parents=True, exist_ok=True)
 
@@ -239,7 +149,6 @@ class LinuxPlatformHandler(PlatformHandler):
             python_bin = str(venv_dir / "bin" / "python")
             startup_script = str(install_dir / "startup.py")
 
-            # Start launcher
             main_desktop = desktop_dir / "giljoai-mcp.desktop"
             self._create_desktop_file(
                 main_desktop,
@@ -251,7 +160,6 @@ class LinuxPlatformHandler(PlatformHandler):
             )
             shortcuts_created.append(str(main_desktop))
 
-            # Stop launcher
             stop_desktop = desktop_dir / "giljoai-stop.desktop"
             self._create_desktop_file(
                 stop_desktop,
@@ -263,14 +171,13 @@ class LinuxPlatformHandler(PlatformHandler):
             )
             shortcuts_created.append(str(stop_desktop))
 
-            # Try to trust desktop files (GNOME)
             for desktop_file in shortcuts_created:
                 try:
                     subprocess.run(
                         ["gio", "set", desktop_file, "metadata::trusted", "true"], capture_output=True, timeout=5
                     )
                 except (OSError, subprocess.SubprocessError):
-                    continue  # Not critical if gio trust fails
+                    continue
 
             return {
                 "success": True,
@@ -285,17 +192,6 @@ class LinuxPlatformHandler(PlatformHandler):
     def _create_desktop_file(
         self, path: Path, name: str, exec_path: str, working_dir: Path, description: str, terminal: bool = False
     ) -> None:
-        """
-        Create .desktop file with proper format.
-
-        Args:
-            path: Path to .desktop file
-            name: Application name
-            exec_path: Executable command
-            working_dir: Working directory
-            description: Application description
-            terminal: If True, launch in a terminal window
-        """
         terminal_str = "true" if terminal else "false"
         content = f"""[Desktop Entry]
 Version=1.0
@@ -308,28 +204,14 @@ Terminal={terminal_str}
 Categories=Development;
 """
         path.write_text(content)
-        path.chmod(0o755)  # Make executable
+        path.chmod(0o755)
 
     def run_npm_command(self, cmd: List[str], cwd: Path, timeout: int = 300) -> Dict[str, Any]:
-        """
-        Run npm command with Linux-specific handling.
-
-        Linux uses shell=False for direct execution (more secure).
-
-        Args:
-            cmd: Command list (e.g., ['npm', 'install'])
-            cwd: Working directory
-            timeout: Timeout in seconds
-
-        Returns:
-            Result dictionary with success status and output
-        """
         try:
-            # Linux uses shell=False (direct execution)
             result = subprocess.run(
                 cmd,
                 cwd=str(cwd),
-                shell=False,  # Direct execution for Linux
+                shell=False,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -349,32 +231,22 @@ Categories=Development;
             return {"success": False, "error": str(e)}
 
     def get_network_ips(self) -> List[str]:
-        """
-        Get non-localhost IPv4 addresses on Linux.
-
-        Returns:
-            List of IPv4 address strings
-        """
         with contextlib.suppress(Exception):
             import psutil
 
             ips = []
             for addresses in psutil.net_if_addrs().values():
                 for addr in addresses:
-                    if addr.family == 2:  # AF_INET (IPv4)
+                    if addr.family == 2:
                         ip = addr.address
-                        # Filter out localhost and link-local
                         if not ip.startswith("127.") and not ip.startswith("169.254."):
                             ips.append(ip)
 
-            return sorted(set(ips))  # Deduplicate and sort
+            return sorted(set(ips))
 
         return []
 
     def welcome_screen(self) -> None:
-        """
-        Print Linux-specific welcome screen with distro detection.
-        """
         separator = "=" * 70
 
         print(f"\n{Fore.YELLOW}{Style.BRIGHT}{separator}{Style.RESET_ALL}")
@@ -391,7 +263,6 @@ Categories=Development;
         print("  • API server + Frontend dashboard")
         print("  • MCP server integration\n")
 
-        # Detect and display distribution info
         dist_info = self._detect_distribution()
         platform_info = f"Platform: Linux {platform.release()}"
 
@@ -413,19 +284,10 @@ Categories=Development;
         )
 
     def get_platform_specific_warnings(self) -> List[str]:
-        """
-        Get Linux-specific warnings.
-
-        Ubuntu users should be reminded about UFW firewall configuration.
-
-        Returns:
-            List of warning strings
-        """
         warnings = []
 
         dist_info = self._detect_distribution()
 
-        # Ubuntu UFW firewall reminder
         if dist_info.get("ID") == "ubuntu":
             warnings.append(
                 "Ubuntu UFW Firewall: If accessing from other devices, configure firewall rules. "

@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""API startup modules - Extracted from monolithic lifespan function
-
-This package contains modularized startup/shutdown logic for the FastAPI application.
-Each module is independently testable and focused on a single responsibility.
-
-Modules:
-    database: Database initialization and configuration
-    core_services: Core service initialization (TenantManager, WebSocketManager, etc.)
-    event_bus: Event bus and WebSocket listener setup
-    background_tasks: Background task management (cleanup, metrics sync, purge)
-    health_monitor: Agent health monitoring service
-    silence_detector: Silent agent detection service (Handover 0491)
-    validation: Setup state validation
-    shutdown: Graceful shutdown procedures
-"""
 
 from api.startup.background_tasks import init_background_tasks
 from api.startup.core_services import init_core_services

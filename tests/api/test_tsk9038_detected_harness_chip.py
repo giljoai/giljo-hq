@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""TSK-9038 -- HTTP-boundary test for the "detected: <harness>" chip's read path.
-
-``GET /api/v1/projects/{project_id}/orchestrator`` is the smallest read-only
-surface the dashboard chip reads (BE-9035c follow-up). Gates that
-``OrchestratorJobResponse.detected_harness`` reflects the project's most
-recently touched ``MCPSession.session_data['resolved_harness']`` (BE-9035b) --
-a concrete harness, the ``generic`` fail-safe, or ``None`` when no session has
-ever been stamped for the project. Tenant-scoped by construction (queried by
-``tenant_key`` alongside ``project_id``).
-
-Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -27,7 +15,6 @@ import pytest
 
 
 def _extract_tenant_key(auth_headers: dict) -> str:
-    """Decode the tenant_key baked into the JWT access_token cookie."""
     cookie = auth_headers["Cookie"]
     access_segment = next(p for p in cookie.split(";") if p.strip().startswith("access_token="))
     token = access_segment.split("=", 1)[1]
@@ -37,8 +24,6 @@ def _extract_tenant_key(auth_headers: dict) -> str:
 
 
 async def _seed_project_with_orchestrator(db_manager, tenant_key: str, *, resolved_harness: str | None) -> str:
-    """Create a Project + orchestrator AgentJob/AgentExecution, and (if given) an
-    MCPSession stamped with resolved_harness. Returns the project_id."""
     from giljo_mcp.models import AgentExecution, AgentJob, Product, Project
     from giljo_mcp.models.auth import MCPSession
 
@@ -48,7 +33,6 @@ async def _seed_project_with_orchestrator(db_manager, tenant_key: str, *, resolv
 
     product_id = str(uuid4())
     async with db_manager.get_session_async() as session:
-        # BE-9437: a project belongs to a product.
         session.add(
             Product(
                 id=product_id,
@@ -119,8 +103,6 @@ class TestDetectedHarnessOnOrchestratorEndpoint:
         assert resp.json()["orchestrator"]["detected_harness"] == "claude-code"
 
     async def test_generic_harness_is_surfaced_raw(self, api_client, auth_headers, db_manager):
-        """Backend passes the raw 'generic' token through -- the chip's neutral
-        display decision (show nothing) lives in the frontend, not the API."""
         tenant_key = _extract_tenant_key(auth_headers)
         project_id = await _seed_project_with_orchestrator(db_manager, tenant_key, resolved_harness="generic")
 

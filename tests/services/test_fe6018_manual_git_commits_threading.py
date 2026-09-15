@@ -3,30 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-6018 regression: manual ``git_commits`` threading through Complete-Project.
-
-The Complete-Project closeout path now carries an optional, agent-supplied
-``git_commits`` list from the HTTP request all the way to
-``close_project_and_update_memory``, which persists each commit as a structured
-row in ``product_memory_entries.git_commits`` (JSONB).
-
-The failing layer this guards is the **plumbing**: schema -> endpoint ->
-``ProjectService.complete_project`` -> ``ProjectLifecycleService`` ->
-``close_project_and_update_memory``. A pure-mock unit test would not catch a
-field silently dropped at the Pydantic schema (FastAPI discards undeclared
-request fields) nor a hop that fails to forward the keyword. These tests:
-
-1. Drive the real ``ProjectService.complete_project`` facade against a real
-   per-worker test DB and read the persisted memory entry back, asserting the
-   supplied commits land as structured rows linked to the right
-   project_id/product_id.
-2. Assert the empty/omitted case still completes cleanly with
-   ``git_commits_count == 0`` (omission yields ``[]`` via ``default_factory``).
-3. Assert the request schema retains the field (hop-1 silent-drop guard).
-
-Parallel-safe: real DB writes go through the transactional ``db_session``
-(rolled back at teardown); no module-level mutable state; no test ordering deps.
-"""
 
 import random
 from unittest.mock import AsyncMock
@@ -41,7 +17,6 @@ from giljo_mcp.models.projects import Project
 
 @pytest.fixture
 def manual_git_commits() -> list[dict]:
-    """Two commits exercising required + optional GitCommitEntry fields."""
     return [
         {
             "sha": "a1b2c3d4e5f6",
@@ -52,7 +27,6 @@ def manual_git_commits() -> list[dict]:
             "lines_added": 120,
         },
         {
-            # author/date/files_changed/lines_added omitted -> optional path
             "sha": "0f9e8d7c6b5a",
             "message": "test(fe-6018): add plumbing regression",
         },
@@ -61,12 +35,6 @@ def manual_git_commits() -> list[dict]:
 
 @pytest.fixture
 async def project_linked_to_product(db_session, test_product, test_tenant_key) -> Project:
-    """A project linked to ``test_product`` so closeout can resolve the product.
-
-    No agents are attached, so the closeout readiness gate is trivially
-    satisfied (the lifecycle calls ``close_project_and_update_memory`` with
-    ``force=True`` regardless).
-    """
     project = Project(
         id=str(uuid4()),
         name="FE-6018 Threading Test Project",
@@ -97,7 +65,6 @@ async def test_supplied_git_commits_persist_as_structured_rows(
     project_linked_to_product,
     manual_git_commits,
 ):
-    """Agent-supplied commits reach the persisted 360 memory entry's JSONB."""
     result = await project_service_with_session.complete_project(
         project_id=project_linked_to_product.id,
         summary=(
@@ -116,11 +83,9 @@ async def test_supplied_git_commits_persist_as_structured_rows(
 
     entry = await _fetch_memory_entry(db_session, project_linked_to_product.id)
 
-    # Linked to the correct project and product.
     assert str(entry.project_id) == str(project_linked_to_product.id)
     assert str(entry.product_id) == str(test_product.id)
 
-    # Structured rows landed in the JSONB column, validated/normalized.
     stored = entry.git_commits
     assert isinstance(stored, list)
     assert len(stored) == 2
@@ -134,7 +99,6 @@ async def test_supplied_git_commits_persist_as_structured_rows(
     assert full["files_changed"] == 4
     assert full["lines_added"] == 120
 
-    # Optional fields normalized: missing counts -> 0, missing author/date -> None.
     minimal = by_sha["0f9e8d7c6b5a"]
     assert minimal["message"] == "test(fe-6018): add plumbing regression"
     assert minimal["author"] is None
@@ -149,7 +113,6 @@ async def test_omitted_git_commits_still_completes_cleanly(
     test_tenant_key,
     project_linked_to_product,
 ):
-    """Omitting git_commits (default empty list) still writes the entry with count 0."""
     result = await project_service_with_session.complete_project(
         project_id=project_linked_to_product.id,
         summary=(
@@ -186,17 +149,6 @@ async def test_empty_or_none_commits_pass_none_to_closeout(
     supplied,
     expected_kwarg,
 ):
-    """Regression (reviewer Finding #1): an empty/None manual closeout must forward
-    ``git_commits=None`` to ``close_project_and_update_memory``, NOT ``[]``.
-
-    Passing ``[]`` sets ``agent_supplied_commits=True`` downstream, which suppresses
-    the ``git_unavailable_reason`` marker (BE-9256: the server is passive -- it never
-    fetches commits from a git host itself; ``None`` vs ``[]`` now only distinguishes
-    "commits not collected" from "explicitly none in range"). FE-6018's scope promised
-    not to touch that distinction, so the empty manual case must preserve the
-    pre-FE-6018 ``None`` signal. Asserting the call-arg contract proves that
-    distinction is intact.
-    """
     spy = AsyncMock(return_value={"sequence_number": 1, "git_commits_count": 0, "memory_updated": True})
     monkeypatch.setattr("giljo_mcp.tools.project_closeout.close_project_and_update_memory", spy)
 
@@ -225,7 +177,6 @@ async def test_nonempty_commits_pass_exact_list_to_closeout(
     project_linked_to_product,
     manual_git_commits,
 ):
-    """A non-empty manual list is forwarded verbatim (truthy -> unchanged)."""
     spy = AsyncMock(return_value={"sequence_number": 1, "git_commits_count": 2, "memory_updated": True})
     monkeypatch.setattr("giljo_mcp.tools.project_closeout.close_project_and_update_memory", spy)
 
@@ -246,7 +197,6 @@ async def test_nonempty_commits_pass_exact_list_to_closeout(
 
 
 def test_request_schema_retains_git_commits_field():
-    """Hop-1 guard: the request model must declare git_commits or FastAPI drops it."""
     from api.schemas.prompt import ProjectCompleteRequest
 
     payload = {
@@ -258,6 +208,5 @@ def test_request_schema_retains_git_commits_field():
     model = ProjectCompleteRequest(**payload)
     assert model.git_commits == [{"sha": "deadbeef", "message": "chore: probe"}]
 
-    # Omission yields an empty list (not None), preserving back-compat.
     omitted = ProjectCompleteRequest(summary="y" * 60, key_outcomes=["o1"], confirm_closeout=True)
     assert omitted.git_commits == []

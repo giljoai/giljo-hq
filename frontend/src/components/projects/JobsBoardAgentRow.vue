@@ -44,33 +44,6 @@
 </template>
 
 <script setup>
-/**
- * JobsBoardAgentRow.vue — FE-9548
- *
- * The Jobs board card's COMPACT per-agent row: [Badge] [Steps] [Duration]
- * [Status] [Messages], no agent name text (badges only, per the v4 mock --
- * the operator asked for this to save card real estate). Reuses AgentRow's
- * underlying display logic rather than re-implementing it:
- *   - getAgentBadgeStyle/getAgentInitials for the tinted square badge (same
- *     rgba(color,0.15)+full-brightness-text treatment as design-system-sample-v2.html),
- *     rendered on the SHARED .agent-badge-sq square (main.scss) rather than a
- *     bespoke .jb-badge (FE-9551) -- --sm is the closest existing size
- *     modifier to this row's original 26px/8px-radius badge (20x20/5px)
- *   - getStatusLabel/getStatusColor from statusConfig.js (same vocabulary as
- *     every other status surface in the product)
- *   - formatAgentDuration from durationFormat.js (extracted out of AgentRow
- *     so both rows render byte-identical duration strings)
- *   - getPrimaryAgentLabel/getAgentRoleLabel from agentDisplay.js for the
- *     hover-tooltip identity (name/role/agent UUID/job UUID) the mock asks for
- *   - the messages pill uses the SHARED .msg-badge class (promoted out of
- *     AgentRow.vue's own scoped CSS into main.scss, FE-9551) with its
- *     'zero'/'has-msgs' modifiers, rather than a bespoke .jb-msg
- *
- * No timer of its own -- `now` is a ticking prop owned by the parent (same
- * pattern as AgentRow), so one interval drives every row on the board.
- *
- * Edition scope: Both.
- */
 import { computed } from 'vue'
 import { getStatusLabel, getStatusColor } from '@/utils/statusConfig'
 import { getAgentBadgeStyle } from '@/utils/colorUtils'

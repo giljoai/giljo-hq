@@ -1,13 +1,3 @@
-/**
- * sequenceRunStore.fe6171b.spec.js — FE-6171b
- *
- * Regression tests for FE-6171b additions:
- *   - locked field normalised from raw run (default false)
- *   - isProjectRunLocked getter: true only when run.locked===true
- *   - lockRun / unlockRun actions (PATCH locked=true/false)
- *
- * Edition scope: CE.
- */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useSequenceRunStore } from './sequenceRunStore'
@@ -35,7 +25,6 @@ describe('sequenceRunStore FE-6171b — locked flag', () => {
     store = useSequenceRunStore()
   })
 
-  // ── normalizeRun: locked field ────────────────────────────────────────────
 
   it('normalises locked=true from raw run', () => {
     store.setActiveRun(run('r1', ['pA'], 'pending', { locked: true }))
@@ -55,7 +44,6 @@ describe('sequenceRunStore FE-6171b — locked flag', () => {
     expect(store.activeRun.locked).toBe(false)
   })
 
-  // ── isProjectRunLocked getter ─────────────────────────────────────────────
 
   it('isProjectRunLocked returns true when run.locked=true', () => {
     store._testSeedRuns([run('r1', ['pA', 'pB'], 'pending', { locked: true })])
@@ -81,7 +69,6 @@ describe('sequenceRunStore FE-6171b — locked flag', () => {
     expect(store.isProjectRunLocked('pA')).toBe(true)
   })
 
-  // ── lockRun action ────────────────────────────────────────────────────────
 
   it('lockRun PATCHes locked=true and updates the store', async () => {
     store._testSeedRuns([run('r1', ['pA'], 'pending', { locked: false })])
@@ -95,7 +82,6 @@ describe('sequenceRunStore FE-6171b — locked flag', () => {
     expect(store.activeRun.locked).toBe(true)
   })
 
-  // ── unlockRun action ──────────────────────────────────────────────────────
 
   it('unlockRun PATCHes locked=false and updates the store', async () => {
     store._testSeedRuns([run('r1', ['pA'], 'pending', { locked: true })])
@@ -118,10 +104,8 @@ describe('sequenceRunStore FE-6171b — locked flag', () => {
 
     await store.unlockRun('r1')
 
-    // Both members still in the active-election set.
     expect(store.isProjectInActiveChain('pA')).toBe(true)
     expect(store.isProjectInActiveChain('pB')).toBe(true)
-    // Run NOT removed from runsById.
     expect(store.runsById.has('r1')).toBe(true)
   })
 })

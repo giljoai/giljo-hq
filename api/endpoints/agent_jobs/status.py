@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Agent Job Status Endpoints - Handover 0124
-
-Handles agent job status and query operations:
-- GET /api/agent-jobs/ - List all jobs with filtering (Handover 0135)
-- GET /api/agent-jobs/{job_id} - Get job details
-
-All operations use OrchestrationService (no direct DB access).
-
-BE-9143: the registered-but-dead /pending and /{job_id}/mission (GET) routes were
-retired (no remaining caller — job/mission reads flow through the MCP tools).
-"""
 
 import logging
 
@@ -38,16 +26,6 @@ router = APIRouter()
 
 
 def job_to_response(job: dict) -> JobResponse:
-    """
-    Convert job dict to JobResponse model.
-
-    Args:
-        job: Job dictionary from service
-
-    Returns:
-        JobResponse model
-    """
-    # Handover 0423: Convert todo_items to TodoItemResponse list
     todo_items_raw = job.get("todo_items", [])
     todo_items = [
         TodoItemResponse(content=item.get("content", ""), status=item.get("status", "pending"))
@@ -56,13 +34,13 @@ def job_to_response(job: dict) -> JobResponse:
     ]
 
     return JobResponse(
-        id=job.get("agent_id", job.get("id", "")),  # 0366: prefer agent_id (UUID)
+        id=job.get("agent_id", job.get("id", "")),
         job_id=job["job_id"],
-        agent_id=job.get("agent_id"),  # Handover 0401: Executor UUID for WebSocket event matching
-        execution_id=job.get("execution_id"),  # UNIQUE per row - use as Map key
+        agent_id=job.get("agent_id"),
+        execution_id=job.get("execution_id"),
         tenant_key=job["tenant_key"],
         project_id=job.get("project_id"),
-        chain_conductor=bool(job.get("chain_conductor", False)),  # BE-6200 (#6 follow-up)
+        chain_conductor=bool(job.get("chain_conductor", False)),
         agent_display_name=job["agent_display_name"],
         agent_name=job.get("agent_name"),
         mission=job["mission"],
@@ -71,22 +49,21 @@ def job_to_response(job: dict) -> JobResponse:
         spawned_by=job.get("spawned_by"),
         tool_type=job.get("tool_type", "universal"),
         context_chunks=job.get("context_chunks", []),
-        # Handover 0407: Counter fields for message tracking (used by frontend store)
         messages_sent_count=job.get("messages_sent_count", 0),
         messages_waiting_count=job.get("messages_waiting_count", 0),
-        action_required_unread=job.get("action_required_unread", 0),  # BE-9273
+        action_required_unread=job.get("action_required_unread", 0),
         messages_read_count=job.get("messages_read_count", 0),
         started_at=job.get("started_at"),
         completed_at=job.get("completed_at"),
         created_at=job["created_at"],
         updated_at=job.get("updated_at"),
         steps=job.get("steps"),
-        todo_items=todo_items,  # Handover 0423
-        phase=job.get("phase"),  # Handover 0411a
-        result=job.get("result"),  # Handover 0497e
-        accumulated_duration_seconds=job.get("accumulated_duration_seconds", 0.0),  # Handover 0827d
-        duration_seconds=job.get("duration_seconds"),  # BE-5107
-        reactivation_count=job.get("reactivation_count", 0),  # Handover 0827d
+        todo_items=todo_items,
+        phase=job.get("phase"),
+        result=job.get("result"),
+        accumulated_duration_seconds=job.get("accumulated_duration_seconds", 0.0),
+        duration_seconds=job.get("duration_seconds"),
+        reactivation_count=job.get("reactivation_count", 0),
     )
 
 
@@ -140,7 +117,6 @@ async def list_jobs(
         sanitize(offset),
     )
 
-    # Service raises OrchestrationError on failure, caught by global exception handler
     result = await orchestration_service.list_jobs(
         tenant_key=current_user.tenant_key,
         project_id=project_id,
@@ -150,7 +126,6 @@ async def list_jobs(
         offset=offset,
     )
 
-    # 0731d: OrchestrationService returns JobListResult typed model
     logger.info(
         "Found %d jobs for user %s (total=%d, offset=%s)",
         len(result.jobs),
@@ -159,7 +134,6 @@ async def list_jobs(
         sanitize(offset),
     )
 
-    # Convert job dicts to JobResponse models
     job_responses = [job_to_response(job) for job in result.jobs]
 
     return JobListResponse(
@@ -203,8 +177,6 @@ async def get_job(
     """
     logger.debug("User %s getting job %s", sanitize(current_user.username), sanitize(job_id))
 
-    # Service raises ResourceNotFoundError (-> 404) when no such job exists for
-    # this tenant; caught by the global exception handler.
     job = await orchestration_service.get_job_detail(job_id=job_id, tenant_key=current_user.tenant_key)
 
     logger.info("Retrieved job %s for tenant %s", sanitize(job_id), sanitize(current_user.tenant_key))

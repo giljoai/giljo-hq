@@ -3,32 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Drop orphan SetupState columns (audit cluster 3 / mission batch 3).
-
-Revision ID: ce_0012_drop_setup_state_orphan_cols
-Revises: ce_0011_drop_dead_tables
-Create Date: 2026-05-05
-
-The SetupState table was designed to track installer telemetry per tenant,
-but most of those fields were never wired. Only `database_initialized`,
-`database_initialized_at`, `setup_version`, `python_version`, `first_admin_created`,
-`first_admin_created_at`, and `validation_failures` carry product behavior.
-The 11 columns dropped here are pure define-only -- defaulted in
-state_manager._get_default_state but never persisted by any caller.
-
-Reference: internal design notes sec 3.a /
-analyzer matrix row 3.
-
-Drops (in order: indexes first, then constraints, then columns):
-- Indexes: idx_setup_mode, idx_setup_features_gin, idx_setup_tools_gin
-- Constraints: ck_database_version_format, ck_install_mode_values
-- Columns: database_version, node_version, features_configured, tools_enabled,
-  config_snapshot, validation_passed, validation_warnings, last_validation_at,
-  installer_version, install_mode, install_path
-
-Idempotent. Reversible (downgrade restores columns + GIN indexes + check
-constraints; row data is not preserved).
-"""
 
 import sqlalchemy as sa
 from alembic import op

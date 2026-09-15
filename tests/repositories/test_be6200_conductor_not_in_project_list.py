@@ -3,10 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6200 (#6): a project-less chain conductor (project_id IS NULL +
-job_metadata.chain_conductor) must never be returned by a project-scoped agent/job
-query. A normal project-bound agent IS still returned.
-"""
 
 from __future__ import annotations
 
@@ -23,9 +19,6 @@ from giljo_mcp.repositories.agent_operations_repository import AgentOperationsRe
 
 
 async def _seed_project_agent_and_conductor(db_session: AsyncSession, tenant_key: str) -> tuple[Project, str, str]:
-    """Seed project P1 with one project-bound execution + a project-less conductor."""
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -114,12 +107,6 @@ async def test_list_jobs_paginated_excludes_projectless_conductor(db_session: As
 
 
 def test_job_to_response_serializes_flat_chain_conductor_flag():
-    """#6 follow-up: a conductor's impl-phase execution carries a REAL project_id, so
-    the FE cannot key on project_id IS NULL. The /agent-jobs serializer must surface a
-    FLAT `chain_conductor` field (out of job_metadata, which is never serialized and is
-    clobbered by the WS progress handler) so the FE can filter that row out of a
-    project's agent lane.
-    """
     from datetime import UTC, datetime
 
     from api.endpoints.agent_jobs.status import job_to_response
@@ -127,7 +114,7 @@ def test_job_to_response_serializes_flat_chain_conductor_flag():
     base = {
         "job_id": "j",
         "tenant_key": "t",
-        "project_id": "proj-1",  # conductor's impl-phase execution: REAL project_id
+        "project_id": "proj-1",
         "agent_display_name": "conductor",
         "mission": "m",
         "status": "working",
@@ -135,5 +122,4 @@ def test_job_to_response_serializes_flat_chain_conductor_flag():
     }
     assert job_to_response({**base, "chain_conductor": True}).chain_conductor is True
     assert job_to_response({**base, "chain_conductor": False}).chain_conductor is False
-    # Default (key absent) must be False so non-chain jobs are never hidden.
     assert job_to_response(base).chain_conductor is False

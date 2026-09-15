@@ -3,26 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Service for consolidating vision documents.
-
-Performs aggregate-text + content-hash bookkeeping ONLY. The consolidated
-``light`` / ``medium`` summary text is written by the AI agent through the
-``update_product_context`` MCP tool, NOT here.
-
-Contract:
-- ``consolidate_vision_documents`` is async.
-- Raises ``ResourceNotFoundError`` on missing product.
-- Raises ``ValidationError(NO_CHANGES)`` when the aggregate hash has not
-  changed and ``force=False`` -- callers use this signal to skip the
-  auto-consolidation path after no-op uploads.
-- ``consolidated_vision_hash`` and ``consolidated_at`` are updated when
-  the hash differs; summary text columns are left untouched (the MCP tool
-  owns those writes).
-
-The returned ``ConsolidationResult.light`` / ``.medium`` reflect the
-CURRENT product columns (whatever the agent last wrote), not freshly
-generated summaries.
-"""
 
 import logging
 from datetime import UTC, datetime
@@ -42,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 
 class ConsolidatedVisionService:
-    """Track the consolidated-vision aggregate hash and timestamp."""
 
     def __init__(self):
         self._repo = ProjectRepository()
@@ -50,25 +29,6 @@ class ConsolidatedVisionService:
     async def consolidate_vision_documents(
         self, product_id: str, session: AsyncSession, tenant_key: str, force: bool = False
     ) -> ConsolidationResult:
-        """
-        Refresh the consolidated-vision aggregate hash + timestamp.
-
-        Args:
-            product_id: Product UUID
-            session: Database session
-            tenant_key: Tenant isolation key
-            force: Force update even if no aggregate-text changes detected
-
-        Returns:
-            ConsolidationResult with whatever summary text is currently on the
-            product (agent-written via update_product_context) plus the fresh
-            hash and the list of source-doc ids that contributed to the
-            aggregate.
-
-        Raises:
-            ResourceNotFoundError: Product not found or tenant mismatch
-            ValidationError: No aggregate-text changes detected (unless force=True)
-        """
         with tenant_session_context(session, tenant_key):
             product = await self._repo.get_product_with_vision_docs(session, tenant_key, product_id)
 
@@ -116,11 +76,4 @@ class ConsolidatedVisionService:
         )
 
     def _build_aggregate(self, product: Product) -> tuple[str, list[str], str]:
-        """Aggregate active vision documents with headers.
-
-        Delegates to :func:`giljo_mcp.services.vision_hash.build_vision_aggregate`
-        so the derived ``vision_inputs_hash`` and the persisted
-        ``consolidated_vision_hash`` are computed by the same algorithm
-        (BE-5122 review fix).
-        """
         return build_vision_aggregate(product.vision_documents)

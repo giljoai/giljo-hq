@@ -3,37 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9502b -- the same-product activation race, through the REAL MCP tool.
-
-``tests/services/test_be9502b_concurrent_activation_two_products.py`` proves it
-at the service layer (``ProjectLifecycleService.activate_project`` directly).
-This file proves the SAME thing reachable the way an agent actually reaches
-it: ``update_project(status="active")`` is the one MCP tool (its TOOL_DISPATCH
-key is ``update_project_metadata``, but the wire-facing tool name is
-``update_project``) that can flip a project INACTIVE -> ACTIVE (there is no
-dedicated ``activate_project`` MCP tool -- confirmed by grep of
-``TOOL_DISPATCH``). BE-5042's lesson (an MCP wrapper bug can hide behind green
-service tests) is exactly why this gets its own file rather than trusting the
-service-layer proof alone.
-
-Two independent ``ClientSession``s (real MCP transport, two "sessions"), real
-committed sessions against ``db_manager`` (a genuine race needs two independent
-DB connections -- a single rolled-back session cannot provide it, same
-rationale as the service-layer file). Parallel-safe via a fresh ``tenant_key``
-per test; manual cleanup at teardown.
-
-BE-9525b (ruling 5 amended, 2026-08-28) retired the single-active-per-product
-invariant BE-9519/BE-9521 hardened here -- ``activate_project`` no longer
-deactivates any sibling project, so the "superseded mid-flight" interleaving
-those fixes targeted (a sibling's activation silently flipping THIS project
-back to inactive between its own commit and its response-building re-read) is
-now structurally unreachable: there is no code path left that deactivates a
-sibling at all. The interleaving-forced regression test that pinned it,
-``test_activation_superseded_mid_flight_by_a_sibling_never_reports_false_success``,
-is deleted for that reason (zero-reachability: grep confirms
-``ProjectLifecycleService.activate_project`` has no remaining write to any
-project other than the one being activated) rather than kept red.
-"""
 
 from __future__ import annotations
 
@@ -170,16 +139,6 @@ async def test_cross_product_activation_via_mcp_tool_both_succeed(
 async def test_same_product_activation_race_via_mcp_tool_both_succeed(
     db_manager, activation_race_client, two_products_two_projects
 ):
-    """BE-9525b (ruling 5 amended): race two INACTIVE projects in the SAME
-    product to ACTIVE via ``update_project(status="active")`` from two
-    concurrent MCP sessions -- both must succeed and both must persist ACTIVE.
-
-    Before BE-9525b this asserted the single-active-per-product invariant
-    (exactly one winner, one clean ``ANOTHER_PROJECT_ACTIVE`` rejection) via
-    ``idx_project_single_active_per_product``. That index and the invariant it
-    enforced are retired by operator decision (D5); N active projects per
-    product is now legal, including reached concurrently through the real MCP
-    tool, not just sequentially."""
     client_factory, tenant_key = activation_race_client
     fixture = two_products_two_projects
     product_a = fixture["product_a"]

@@ -3,27 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Chain-role protocol chapter builders (CH_CAPABILITY, CH_CHAIN_STAGING, CH_CHAIN_DRIVE,
-CH_SUB_ORCHESTRATOR).
-
-BE-6165d: Three prose chapters that are injected into the orchestrator protocol ONLY
-when the orchestrator is the CONDUCTOR of a sequential multi-project run, plus
-CH_SUB_ORCHESTRATOR (BE-6196/BE-6206) for chain-member orchestrators that are NOT the
-conductor. When chain_ctx is None (the solo path) none of these render and the
-assembled protocol is byte-identical to the pre-chain solo output (Deletion Test holds;
-all CE).
-
-Chapter placement in the assembled protocol (conductor only):
-  CH_CAPABILITY      — top of conductor chapters ("who am I / how to spawn each project")
-  CH_CHAIN_STAGING   — staging phase only, rendered above CH1
-  CH_CHAIN_DRIVE     — implementation phase only, the auto-continue loop. BE-6215: the
-                       former CH_CONDUCTOR (conductor addressability + user-directive
-                       relay, BE-6131c) is FOLDED in here — they only ever co-rendered.
-
-Each builder returns a prose string. They live here to keep chapters_coordination.py
-under the 800-line CI guardrail (it was 338 lines before; adding three substantial prose chapters
-would push it to ~700+, with no headroom for future changes).
-"""
 
 from __future__ import annotations
 
@@ -39,13 +18,6 @@ _CH_BORDER = "══════════════════════
 
 
 def _ch_capability_preset(mode: str, preset: Platform) -> str:
-    """Preset-active (shell-less) CH_CAPABILITY — inline conducting, no terminal, no
-    $DISPLAY (BE-8003f, D3-S1 / DoD-5 '$DISPLAY retirement').
-
-    A resolved preset means NO OS terminals, so the fresh-terminal-per-sub-orchestrator
-    contract is impossible. The PREFERRED branch becomes INLINE CONDUCTING; the fresh-OS
-    -terminal launch and the $DISPLAY/$WAYLAND_DISPLAY fail-loud clause are NOT rendered
-    (they survive only on the None/CLI path as the legacy sanity check)."""
     preferred = (
         f"{_CH_BORDER}\n"
         "          CH_CAPABILITY: HOW TO RUN THIS CHAIN (shell-less harness)\n"
@@ -73,50 +45,9 @@ def _ch_capability_preset(mode: str, preset: Platform) -> str:
 
 def _build_ch_capability(
     execution_mode: str | None,
-    can_spawn_terminals: bool,  # retained for signature stability; see note below
+    can_spawn_terminals: bool,
     preset: Platform | None = None,
 ) -> str:
-    """Build CH_CAPABILITY: the conductor's flat spawn CONTRACT (BE-6182 / BE-6205).
-
-    BE-6165d originally made the LLM re-probe its harness at runtime ("try wt /
-    osascript / tmux; if unsure downgrade to subagents"). That re-decision is a bug:
-    the server already resolved the execution mode deterministically at staging, the
-    mode is IMMUTABLE after staging, and a silent self-downgrade produces a mode the
-    rest of the chain machinery does not expect. BE-6182 replaced it with a flat
-    contract rendering the server-resolved strategy as FACT.
-
-    BE-6205 REVERSES the BE-6182 clause-2 framing (and the a4c9e7995 header logic that
-    let a claude-code-harness conductor use Task() to spawn its sub-orchestrators). The
-    owner-ratified model:
-
-      1. The execution mode was resolved at staging and is immutable. It governs ONLY
-         how each SUB-ORCHESTRATOR spawns its WORKERS — NOT how the conductor spawns
-         the sub-orchestrators.
-      2. SUB-ORCHESTRATOR SPAWN (mode-INDEPENDENT): the conductor ALWAYS opens each
-         project's sub-orchestrator in its OWN FRESH OS TERMINAL, every execution_mode.
-         A fresh terminal per sub-orch keeps per-project context isolation GUARANTEED;
-         the conductor RUNS the server-rendered launch command itself and NEVER
-         Task()-spawns a sub-orch. execution_mode then governs the WORKER spawn:
-         subagent modes run WORKERS as REAL Task()/subagents inside the sub-orch's
-         terminal (best-effort isolation); multi_terminal opens a fresh terminal per
-         WORKER.
-      3. NO per-project gate (§14 / BE-6206): the conductor's fresh-terminal spawn
-         IS each project's release. There is nothing to "unlock" — a spawned
-         sub-orchestrator reads its mission immediately and runs FREE; the conductor
-         controls only SEQUENCE (when to spawn the next project), never a switch
-         inside a running one.
-      4. Fail-LOUD fallback: a harness that genuinely cannot open the fresh terminal a
-         sub-orch needs (headless) STOPS and asks the user to re-stage in a subagent
-         mode — it never silently switches modes.
-
-    ``can_spawn_terminals`` is accepted (signature stability for both call sites) but
-    no longer branches the prose: sub-orch spawn is terminal-based in EVERY mode now,
-    and the fail-loud fallback is the single honest escape hatch.
-
-    BE-8003f (D3-S1): ``preset`` is None on the CLI path -> today's exact bytes (D1). A
-    resolved (shell-less) preset switches to the inline-conducting ladder — no
-    fresh-terminal contract, no $DISPLAY fail-loud.
-    """
     mode = (execution_mode or "multi_terminal").strip() or "multi_terminal"
     if preset is not None:
         return _ch_capability_preset(mode, preset)
@@ -126,7 +57,7 @@ def _build_ch_capability(
         worker_spawn = (
             "  WORKERS (mode = multi_terminal): inside its own terminal each\n"
             "  sub-orchestrator opens one further FRESH TERMINAL per WORKER (each\n"
-            "  worker's elected harness: claude / codex / gemini / antigravity cli)."
+            "  worker's elected harness: claude / codex / opencode cli)."
         )
     else:
         worker_spawn = (
@@ -177,65 +108,12 @@ def _build_ch_chain_staging(
     product_id: str | None = None,
     agent_id: str | None = None,
 ) -> str:
-    """Build CH_CHAIN_STAGING: the AUTHORITATIVE staging-phase conductor script.
-
-    BE-6186: the conductor is a DEDICATED, PROJECT-LESS orchestrator (it owns no
-    project). It stages the WHOLE chain in one session, spawns NO agents, and ends
-    with complete_job. Every project P_i (the head INCLUDED) is symmetric: the
-    conductor stages each one (minting its own sub-orchestrator). The head is NOT
-    special and gets NO agent team here: each project's sub-orchestrator selects its
-    own agents when it is launched in the implementation phase.
-
-    BE-6177 (UNIT 1): the conductor now READS DEEP before planning (STEP 0.5) and
-    writes ONLY the CHAIN MISSION, carrying a structured per-project CONTRACT block
-    (consumes / produces / must leave) for every project. It NO LONGER writes each
-    project's mission: that mission-write collision is dissolved by making the chain
-    mission the single cross-project source of truth, and each sub-orchestrator
-    authors its OWN per-project mission at its turn (it reads the live chain mission
-    contract plus its own context). update_project_mission is removed from this script.
-
-    This is the SINGLE authoritative staging script. It replaces the prior dual-hat
-    text ("stage the head fully + spawn its agents now") that died with BE-6184's
-    project-less conductor.
-
-    The STOP at the end is deliberate: the conductor stops after staging for the
-    SINGLE chain-level human Implement press — the one human GO that starts the
-    whole rollout (CHAIN_ARCHITECTURE §9), and the boundary that keeps the
-    conductor from self-unlocking implementation. It is NOT a per-call
-    launch_implementation permission prompt: the drive loop no longer makes one,
-    and per-project launch_implementation is auto-approved plumbing (§14).
-
-    BE-9462: ``agent_id`` (the conductor's own agent_id, already resolved by the
-    caller into its identity block) is threaded through so Step 0's create_thread
-    call can pass ``creator_id`` -- create_thread structurally registers a passed
-    creator_id as the first participant and hands it the baton
-    (CommThreadService.create_thread), so the conductor lands on its own thread
-    in ONE call instead of needing a second join_thread to undo the omission.
-    None (the rare legacy self-registration-fallback caller in protocol_builder.py,
-    which has no clean agent_id in scope) renders the prior two-call script
-    byte-identically -- additive, not a behavior change for that path.
-    """
     n = len(resolved_order)
-    # BE-6177 (A2): emit the stage_project SHORT `mode` token (claude / codex /
-    # gemini / antigravity / multi_terminal), NOT a legacy per-CLI execution_mode
-    # token (wrong param name AND wrong vocabulary; the prior text hard-failed the call).
     stage_mode = stage_mode_token(execution_mode)
     order_lines = "\n".join(f"  {i + 1}. {pid}" for i, pid in enumerate(resolved_order))
-    # BE-6177 (UNIT 1): product_id is the deep-read handle. None when the head project
-    # is gone; the conductor then degrades to list_projects (still gets descriptions).
     product_token = product_id or "<your product_id from the identity block>"
     head_pid = resolved_order[0] if resolved_order else "<P_1>"
 
-    # FE-9530 (Finding 3): a chain's hub thread used to carry NO product_id (the
-    # conductor is deliberately project-less) and NO stable link once its
-    # sequence_run_id is nulled by purge_run's ON DELETE SET NULL -- so a completed
-    # chain's thread was structurally unable to ever be tagged. The fix is to
-    # capture the product at CREATE time, before the run exists to be purged, so
-    # nothing downstream has to reconstruct it. When the staging step already knows
-    # a real product_id (the common case -- it is None only when the head project
-    # is gone), the seed instruction passes it straight through; CommThreadService
-    # still exempts a sequence_run_id-bearing create from mandatory resolution as
-    # the fallback for the rare case this token is the placeholder.
     product_id_kwarg = f', product_id="{product_id}"' if product_id else ""
 
     if agent_id:
@@ -372,12 +250,6 @@ time (each runs free; the conductor crosses nothing).
 
 
 def _chain_drive_step_a_preset(run_id: str, preset: Platform) -> str:
-    """Preset-active (shell-less) STEP A — INLINE CONDUCTING (BE-8003f, D3-S1).
-
-    Replaces the fresh-OS-terminal launch block (the ``wt`` / ``gnome-terminal`` /
-    ``osascript`` command) and its $DISPLAY fail-loud clause: a shell-less harness has no
-    terminal to open, so the conductor adopts each sub-project's orchestrator role itself,
-    one at a time, in this session."""
     preferred = f"""  STEP A — CONDUCT P_i INLINE ({preset.display_label} session: no terminal to open):
 
     A1. RESOLVE + REUSE P_i's sub-orch job: read it from
@@ -407,18 +279,6 @@ def _chain_drive_step_a_preset(run_id: str, preset: Platform) -> str:
 
 
 def _build_chain_drive_step_a(run_id: str, spawn_command: str, preset: Platform | None = None) -> str:
-    """STEP A of the drive loop: resolve + reuse the sub-orch, then open its fresh terminal
-    by running ONE direct command (BE-6207, file-less). Extracted so _build_ch_chain_drive
-    stays under the function-length guardrail; the rendered ``spawn_command`` is inlined.
-
-    The hot path is a NEXT-ACTION: A1 resolves the job, A2 is "run ONE command" (a direct
-    wt / gnome-terminal call — no files written, cwd self-resolved via $PWD, the tiny
-    prompt inline), A3 is Hub comms. Per-project variance (<P_i>, <SUB_ORCH_JOB_ID>) are
-    two UUIDs the agent substitutes into the inline prompt — no special chars, no shell risk.
-
-    BE-8003f (D3-S1): ``preset`` is None on the CLI path -> today's exact fresh-terminal STEP A
-    (D1). A resolved (shell-less) preset switches to the inline-conducting STEP A.
-    """
     if preset is not None:
         return _chain_drive_step_a_preset(run_id, preset)
     return f"""  STEP A — OPEN P_i's SUB-ORCHESTRATOR IN A FRESH TERMINAL (you are the SOLE spawner):
@@ -454,57 +314,10 @@ def _build_ch_chain_drive(
     preset: Platform | None = None,
     detected_harness: str | None = None,
 ) -> str:
-    """Build CH_CHAIN_DRIVE: the auto-continue loop for the implementation phase.
-
-    BE-6165d / BE-6181 / BE-6197: rendered for a conductor in the IMPLEMENTATION
-    phase (is_staging=False). Instructs the conductor to advance the chain
-    automatically, project by project, from current_index to N.
-
-    BE-6206 (§14, CHAIN_ARCHITECTURE.md) collapses the per-project cycle to the 4-step
-    model. There is NO per-project gate: the conductor's spawn IS the release, and a
-    released sub-orchestrator runs free (it self-stages → implements → closes out). So the
-    old "wait for staging_complete" (STEP B) + "launch_implementation to cross the gate"
-    (STEP C) wait/cross steps are REMOVED — they implemented a gate the §14 model does not
-    have, and the deadlock was the sub-orch blocked behind it while the conductor waited
-    for a staging_complete the blocked sub-orch could never produce. The cycle is now:
-      - STEP A: spawn_job P_i's sub-orchestrator (sole spawner; idempotent reuse of the
-        eager-minted job). It runs the COMBINED flow free (CH_SUB_ORCHESTRATOR) — no gate
-        to open for it.
-      - STEP B: park/poll get_workflow_status until ready_to_advance is True (BE-6208f's
-        ONE authoritative advance signal; the companion project_closeout_at is the recorded
-        commit-SHA timestamp, kept as human/log evidence only). Do NOT advance on status
-        "complete" alone. Then go to STEP A for P_(i+1) — advancing
-        IS spawning the next project; there is NO launch_implementation and NO PATCH. The
-        run's current_index + per-project "planning" status are advanced SERVER-SIDE
-        at each sub-orch's own staging-end (job_completion_service._handle_staging_end), so
-        the conductor never crosses a gate to make progress.
-    Also preserved:
-      - the conductor-precedence clause (the solo PHASE 3 "complete_job your job"
-        does NOT apply while projects remain; ADVANCE instead)
-      - the dashboard back-out controls (Deactivate / Reset / Cancel / Delete) are
-        the ONLY real exits; there is no terminate MCP tool and no inbox-directive
-        escape hatch (BE-6186 removed the inert terminate-directive prose)
-      - crash-resume (BE-6197: RESPAWN the current sub-orch if its closeout is NULL
-        and it died with the conductor — a dead sub-orch at current_index would
-        otherwise wedge the poll loop forever; re-read via tools, not HTTP)
-      - writing ONE series-summary (write_memory_entry tagged "chore") at end
-    """
     n = len(resolved_order)
     mode_str = execution_mode or "multi_terminal"
     conductor_id_str = conductor_agent_id or "<your agent_id>"
-    # BE-6177 (A4): thread the real orchestrator job_id into the progress/closeout
-    # calls instead of a "<your job_id>" placeholder the agent had to resolve.
     job_id_str = job_id or "<your job_id>"
-    # BE-6207: the conductor ALWAYS opens each sub-orchestrator in its own fresh
-    # terminal by running ONE direct command (no files). $PWD self-resolves the cwd
-    # and the tiny prompt rides inline — replacing both the BE-6205 nested one-liner
-    # (reformatted into wt-breaking array form) AND the interim file-based launcher
-    # (which inherited stale files/ids and cluttered disk).
-    # BE-8003f (D3-S1): on the CLI path render the fresh-terminal spawn command as today;
-    # a shell-less preset renders inline conducting instead, so the terminal command is not
-    # computed or emitted.
-    # BE-9092: pass the session-detected harness so the multi_terminal spawn block narrows
-    # to the elected harness's single row (full matrix when detection is absent/generic).
     spawn_command = (
         render_suborch_spawn_command(mode_str, run_id, detected_harness=detected_harness) if preset is None else ""
     )
@@ -638,40 +451,12 @@ When ALL projects complete, IN ORDER:
 def _build_ch_sub_orchestrator(
     *,
     run_id: str,
-    position: int,  # 1-based index of this project in the run
+    position: int,
     n_projects: int,
     execution_mode: str | None,
     chain_mission: str | None = None,
     phase: str | None = None,
 ) -> str:
-    """Build CH_SUB_ORCHESTRATOR: the COMBINED staging+implementation chain script.
-
-    Injected at staging (via _build_orchestrator_protocol) and at runtime (via
-    conductor_chain_injector) for orchestrators that are chain members but NOT the
-    conductor (every project's own orchestrator after BE-6184).
-
-    BE-6196 / BE-6206 (§14): a chain sub-orchestrator runs a COMBINED flow -- it stages,
-    then flows STRAIGHT INTO implementation. There is NO per-project gate (CHAIN_ARCHITECTURE
-    §9/§14): the conductor's spawn IS the release, so the sub-orch is never blocked behind a
-    "wait for a go" step. launch_implementation stays OUT of the sub-orch toolset (BE-6115a)
-    and out of this prose — the sub-orch self-launches nothing. After its staging-end it
-    calls get_job_mission ONCE (now ungated) to flip waiting→working and receive the
-    implementation protocol; it does NOT sleep-poll a gate. The chapter inlines the live
-    CHAIN MISSION when the caller has it (chain_mission not None), else tells the sub-orch to
-    fetch it via get_context(categories=["chain"]) -- backed by the 'chain' category
-    (get_chain_context.py, BE-6196 follow-up), which resolves the caller's own active
-    run by project_id and returns run_id, chain_mission, resolved_order.
-
-    Best-effort: if not rendered the sub-orch falls through to byte-identical solo
-    (Deletion Test holds; the chain still functions via the conductor's drive loop).
-
-    BE-9083d phase-scoping: ``phase`` None/"staging" renders the FULL combined chapter
-    byte-identically (the staging boot fetch needs the whole script, bridge included).
-    ``phase == "implementation"`` collapses the already-done staging steps 2-4 (and
-    their inlined contract slice — consumed when the project mission was authored) to
-    a compact marker, KEEPING the step numbering that the PHASE-1/PHASE-3 trim notes
-    cross-reference (step 5 / step 7) and the Hub-discovery + escalation seams.
-    """
     mode = execution_mode or "multi_terminal"
 
     if phase == "implementation":
@@ -688,10 +473,6 @@ def _build_ch_sub_orchestrator(
         )
 
     if chain_mission is not None:
-        # BE-9083c: inline only YOUR project's ### P_i contract block, not the whole
-        # cross-project mission (unbounded on long chains; churns the protocol_etag on
-        # any conductor edit of another project's block). Degenerate missions ship whole
-        # (tolerance — see slice_chain_mission_for_position).
         sliced = slice_chain_mission_for_position(chain_mission, position)
         contract_block = (
             "   The conductor wrote your contract into the CHAIN MISSION. YOUR project's\n"
@@ -742,12 +523,6 @@ def _build_ch_sub_orchestrator(
 
 
 def _render_ch_sub_orchestrator(*, run_id: str, position: int, n_projects: int, mode: str, staging_steps: str) -> str:
-    """Shared CH_SUB_ORCHESTRATOR frame: identity + {staging_steps} + steps 5-7.
-
-    Both phase renders flow through this ONE template so the bridge (step 5), the
-    implementation step (6), and the closeout order (step 7) can never diverge
-    between phases — only the staging middle differs.
-    """
     return f"""════════════════════════════════════════════════════════════════════════════
        CH_SUB_ORCHESTRATOR: COMBINED CHAIN FLOW (YOU ARE NOT THE CONDUCTOR)
 ════════════════════════════════════════════════════════════════════════════

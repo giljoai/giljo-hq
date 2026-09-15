@@ -1,6 +1,5 @@
 <template>
   <v-container fluid>
-    <!-- Header with search and add button -->
     <v-row class="mb-4">
       <v-col cols="12" md="8">
         <v-text-field
@@ -25,7 +24,6 @@
       </v-col>
     </v-row>
 
-    <!-- User table -->
     <v-data-table
       :headers="headers"
       :items="filteredUsers"
@@ -33,7 +31,6 @@
       :search="search"
       class="elevation-0"
     >
-      <!-- Username column with icon -->
       <template #item.username="{ item }">
         <div class="d-flex align-center">
           <v-icon size="small" class="mr-2">mdi-account</v-icon>
@@ -41,7 +38,6 @@
         </div>
       </template>
 
-      <!-- Email column -->
       <template #item.email="{ item }">
         <div class="d-flex align-center">
           <v-icon size="small" class="mr-2 text-muted-a11y">mdi-email</v-icon>
@@ -49,7 +45,6 @@
         </div>
       </template>
 
-      <!-- Role badge column -->
       <template #item.role="{ item }">
         <v-chip :color="getRoleColor(item.role)" size="small" label>
           <v-icon start size="small">{{ getRoleIcon(item.role) }}</v-icon>
@@ -57,7 +52,6 @@
         </v-chip>
       </template>
 
-      <!-- Status badge column -->
       <template #item.is_active="{ item }">
         <v-chip :color="item.is_active ? 'success' : 'default'" size="small" label>
           <v-icon start size="small">
@@ -67,7 +61,6 @@
         </v-chip>
       </template>
 
-      <!-- Created date column -->
       <template #item.created_at="{ item }">
         <div class="d-flex align-center">
           <v-icon size="small" class="mr-2 text-muted-a11y">mdi-calendar-plus</v-icon>
@@ -75,12 +68,10 @@
         </div>
       </template>
 
-      <!-- Last login column -->
       <template #item.last_login="{ item }">
         <span class="text-body-small">{{ formatRelativeTime(item.last_login) }}</span>
       </template>
 
-      <!-- Actions column -->
       <template #item.actions="{ item }">
         <v-menu>
           <template #activator="{ props }">
@@ -93,14 +84,12 @@
               </template>
               <v-list-item-title>Edit User</v-list-item-title>
             </v-list-item>
-            <!-- CE-only: local credential management (self-hosted) -->
             <v-list-item v-if="showPasswordPinAction" @click="openPasswordDialog(item)">
               <template #prepend>
                 <v-icon>mdi-key-variant</v-icon>
               </template>
               <v-list-item-title>Change Password &amp; PIN</v-list-item-title>
             </v-list-item>
-            <!-- SaaS-only: injected from saas bundle via import.meta.glob -->
             <v-list-item
               v-if="saasResetAction"
               :disabled="sendingReset"
@@ -112,7 +101,6 @@
               <v-list-item-title>{{ saasResetAction.label }}</v-list-item-title>
             </v-list-item>
             <v-divider />
-            <!-- Deactivate is disabled for the current user (self-service via Settings). -->
             <v-tooltip v-if="item.id === currentUser?.id" location="start" max-width="260">
               <template #activator="{ props: tooltipProps }">
                 <div v-bind="tooltipProps" data-test="deactivate-self-tooltip-anchor">
@@ -143,7 +131,6 @@
       </template>
     </v-data-table>
 
-    <!-- Create/Edit User Dialog -->
     <v-dialog v-model="showUserDialog" max-width="600" persistent scrollable>
       <v-card v-draggable class="smooth-border">
         <div class="dlg-header">
@@ -222,7 +209,6 @@
       </v-card>
     </v-dialog>
 
-    <!-- Change Password & PIN Dialog -->
     <v-dialog v-model="showPasswordDialog" max-width="500" persistent>
       <v-card v-draggable class="smooth-border">
         <div class="dlg-header">
@@ -238,7 +224,6 @@
             Managing credentials for: <strong>{{ passwordUser?.username }}</strong>
           </v-alert>
 
-          <!-- Password Section -->
           <div class="text-title-small mb-2">Password</div>
           <v-text-field
             v-model="newPassword"
@@ -271,7 +256,6 @@
 
           <v-divider class="my-4" />
 
-          <!-- PIN Section -->
           <div class="text-title-small mb-2">Recovery PIN</div>
           <v-text-field
             v-model="newPin"
@@ -318,7 +302,6 @@
       </v-card>
     </v-dialog>
 
-    <!-- Status Toggle Confirmation Dialog -->
     <v-dialog v-model="showStatusDialog" max-width="500">
       <v-card v-draggable class="smooth-border">
         <div :class="['dlg-header', statusUser?.is_active ? 'dlg-header--warning' : '']">
@@ -370,7 +353,6 @@
       </v-card>
     </v-dialog>
 
-    <!-- CE Single-User Limit Dialog -->
     <v-dialog v-model="showCeLimitDialog" max-width="480">
       <v-card class="smooth-border">
         <div class="dlg-header dlg-header--primary">
@@ -417,36 +399,28 @@ import { useFormatDate } from '@/composables/useFormatDate'
 
 const { formatDate } = useFormatDate()
 
-// Store
 const userStore = useUserStore()
 const currentUser = computed(() => userStore.currentUser)
 const { showToast } = useToast()
 
-// State
 const users = ref([])
 const loading = ref(false)
 const search = ref('')
 
-// Template refs
 const formRef = ref(null)
 
-// Edition
 const isCommunityEdition = computed(() => configService.getEdition() === 'community')
 const showCeLimitDialog = ref(false)
 
-// Capability flags — ADR-002: mode via setupService.checkEnhancedStatus().
-// isCe drives all gating; no scattered mode checks elsewhere in this file.
 const isCe = ref(false)
-const showPasswordPinAction = computed(() => isCe.value) // CE-only kebab item
-const saasResetAction = ref(null) // SaaS-only: populated by import.meta.glob
+const showPasswordPinAction = computed(() => isCe.value)
+const saasResetAction = ref(null)
 
 async function loadCapabilities() {
   try {
     const status = await setupService.checkEnhancedStatus()
     isCe.value = (status?.mode ?? 'ce') === 'ce'
     if (!isCe.value) {
-      // ADR-004: import.meta.glob keeps SaaS code out of CE bundle.
-      // saas/ is stripped on CE export — loader absent = graceful no-op.
       const loaders = import.meta.glob('@/saas/components/UserPasswordResetAction.js')
       const [loader] = Object.values(loaders)
       if (loader) {
@@ -464,10 +438,6 @@ async function loadCapabilities() {
   }
 }
 
-// sendPasswordReset: axiosPost(targetUser) => Promise<{data:{email,...}}>
-// Toast copy (DoD exact):
-//   other user → "Reset link emailed to <email> — they'll set a new password from that link."
-//   self        → "Reset link emailed to you — you'll be logged out after you reset."
 const sendingReset = ref(false)
 
 async function sendPasswordReset(targetUser, axiosPost) {
@@ -501,10 +471,8 @@ function triggerSaasResetAction(targetUser) {
   sendPasswordReset(targetUser, saasResetAction.value.handler)
 }
 
-// Multi-user add hidden across all editions until SaaS Team tier ships.
 const canAddUsers = computed(() => false)
 
-// Dialog state
 const showUserDialog = ref(false)
 const showPasswordDialog = ref(false)
 const showStatusDialog = ref(false)
@@ -528,7 +496,6 @@ const confirmPassword = ref('')
 const newPin = ref('')
 const confirmPin = ref('')
 const statusUser = ref(null)
-// Table configuration
 const headers = [
   { title: 'Username', key: 'username', sortable: true },
   { title: 'Email', key: 'email', sortable: true },
@@ -539,14 +506,12 @@ const headers = [
   { title: 'Actions', key: 'actions', sortable: false, align: 'end' },
 ]
 
-// Role configuration
 const roleOptions = [
   { value: 'admin', title: 'Administrator', color: 'error', icon: 'mdi-shield-crown' },
   { value: 'developer', title: 'Developer', color: 'primary', icon: 'mdi-code-tags' },
   { value: 'viewer', title: 'Viewer', color: 'info', icon: 'mdi-eye' },
 ]
 
-// Form validation rules
 const rules = {
   username: (value) => !!value || 'Username is required',
   password: (value) => !!value || 'Password is required',
@@ -650,7 +615,6 @@ async function saveUser() {
   saving.value = true
   try {
     if (isEditMode.value) {
-      // Update existing user
       await api.auth.updateUser(userForm.value.id, {
         username: userForm.value.username,
         email: userForm.value.email || null,
@@ -658,7 +622,6 @@ async function saveUser() {
         is_active: userForm.value.is_active,
       })
     } else {
-      // Create new user
       await api.auth.register({
         username: userForm.value.username,
         email: userForm.value.email || null,
@@ -667,14 +630,11 @@ async function saveUser() {
       })
     }
 
-    // Reload users list
     await loadUsers()
     closeUserDialog()
   } catch (err) {
     console.error('[UserManager] Failed to save user:', err)
-    // Extract error message from response
     const errorMessage = err.response?.data?.detail || err.message || 'Failed to save user'
-    // Show user-friendly message
     if (errorMessage.toLowerCase().includes('already exists')) {
       showToast({
         message: 'Username or email already exists. Please use different values.',
@@ -779,7 +739,6 @@ async function confirmToggleStatus() {
   }
 }
 
-// Lifecycle
 onMounted(() => {
   loadUsers()
   loadCapabilities()

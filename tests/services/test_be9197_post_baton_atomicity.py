@@ -3,26 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Service-layer tests for BE-9197 — atomic post-with-baton.
-
-``CommThreadService.post_to_thread`` gains an optional ``pass_baton_to``: the
-message persist and the ``next_action_owner`` update happen in ONE service
-transaction — not a post followed by a separate ``set_next_actor`` (the gap that
-left addressees' ``get_my_turn`` blind when the second call was forgotten).
-
-The load-bearing test here is the rollback: a post that FAILS mid-transaction
-must roll the baton hand-off back with it. The baton is written before the
-message persist inside the same session, so injecting a persist failure proves
-the two writes share one transaction (a two-write implementation would leave
-the baton moved).
-
-Service semantics under test (the tool-level auto-pass default lives at the
-MCP boundary, NOT here — the REST and internal callers keep prior behavior):
-- non-empty ``pass_baton_to`` (not 'none') moves the baton with the post;
-- ``'none'`` / omitted leaves ``next_action_owner`` untouched (unlike
-  ``set_next_actor(to='none')``, which CLEARS it — posting is never clearing);
-- a failed post rolls the baton back (real ``db_manager`` transaction path).
-"""
 
 from __future__ import annotations
 
@@ -75,9 +55,6 @@ async def test_post_with_baton_moves_owner_in_result_and_db(db_manager, db_sessi
 
 
 async def test_none_and_omitted_leave_owner_untouched(db_manager, db_session):
-    """'none' means post WITHOUT moving the baton — it does NOT clear the owner
-    the way set_next_actor(to='none') does. Omitting the param is identical (the
-    service applies no default; that UX rule lives at the MCP boundary)."""
     tenant = _tk("none")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -111,23 +88,13 @@ async def test_none_and_omitted_leave_owner_untouched(db_manager, db_session):
 
 
 async def test_failed_post_rolls_baton_back(db_manager, monkeypatch):
-    """THE atomicity proof: inject a failure at the message persist, AFTER the
-    baton write has flushed in the same transaction. The whole post fails and
-    the baton hand-off rolls back with it — next_action_owner is unchanged and
-    no message row exists. Runs the REAL db_manager session path (the service
-    owns the transaction), not the savepoint-isolated test session (whose
-    commit never truly commits, so the service's own sessions would not see it).
-
-    Commits real rows (thread + participants + taxonomy seed) — cleaned up in
-    the finally.
-    """
     tenant = _tk("rollback")
     async with db_manager.get_session_async(tenant_key=tenant) as seed_session:
         with tenant_session_context(seed_session, tenant):
             await ensure_default_types_seeded(seed_session, tenant)
             await seed_session.commit()
 
-    svc = CommThreadService(db_manager, TenantManager())  # no injected session
+    svc = CommThreadService(db_manager, TenantManager())
     try:
         thread = await svc.create_thread(subject="atomic", creator_id="alpha", tenant_key=tenant)
         tid = thread["thread_id"]
@@ -147,7 +114,6 @@ async def test_failed_post_rolls_baton_back(db_manager, monkeypatch):
         async with db_manager.get_session_async(tenant_key=tenant) as check:
             with tenant_session_context(check, tenant):
                 row = (await check.execute(select(CommThread).where(CommThread.id == tid))).scalar_one()
-                # Rolled back WITH the failed post — still the creator, not 'beta'.
                 assert row.next_action_owner == "alpha"
                 msg_count = (
                     await check.execute(select(func.count(Message.id)).where(Message.thread_id == tid))

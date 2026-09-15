@@ -1,18 +1,3 @@
-/**
- * SystemStatusBanner.approval.fe9511.spec.js — FE-9511
- *
- * Approval banner: server-derived canned states + project pill, prose demoted
- * to the Review screen. Extends FE-9501b's raised-hand row (see the sibling
- * .fe9501b.spec.js for the base shape: single-vs-multiple collapse, no
- * dismiss button, click-only navigation) with:
- *
- *  - a CANNED text per `banner_state` (never `approval.reason`);
- *  - project pills (taxonomy_alias), capped at 4 with a "+N more" tail;
- *  - the pill renders straight from the payload -- no product-store lookup,
- *    so it works for a project this session never opened (FE-9508's trap).
- *
- * Edition scope: Both
- */
 import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -101,9 +86,6 @@ async function mountBanner({ approvals = [], mode = 'ce' } = {}) {
   setActivePinia(pinia)
   const wrapper = mount(SystemStatusBanner, { global: { plugins: [pinia], stubs: globalStubs } })
   useUserStore().currentUser = { id: 'user-op-1', role: 'admin' }
-  // Deliberately DO NOT populate productStore -- proves the pill needs no
-  // store lookup (FE-9508's trap: the project may not be in the store at all
-  // because the user never opened it this session).
   await flushPromises()
   await flushPromises()
   return wrapper
@@ -155,7 +137,7 @@ describe('SystemStatusBanner approval row -- canned states (FE-9511)', () => {
 
 describe('SystemStatusBanner approval row -- project pills (FE-9511)', () => {
   it('shows a pill for the project even though the product store was never populated', async () => {
-    expect(useProductStore().activeProduct).toBeFalsy() // sanity: store genuinely empty
+    expect(useProductStore().activeProduct).toBeFalsy()
     const wrapper = await mountBanner({ approvals: [approval({ taxonomy_alias: 'FE-9511' })] })
     expect(pillTexts(wrapper)).toEqual(['FE-9511'])
   })

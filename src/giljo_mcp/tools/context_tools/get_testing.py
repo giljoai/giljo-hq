@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Testing Configuration Tool - Handover 0316, updated 0840c
-
-Fetch testing strategy and quality standards for context generation.
-Handover 0840c: Reads from product_test_configs table (normalized from config_data JSONB).
-quality_standards now comes from product_test_configs table.
-
-Always returns FULL data (no truncation).
-"""
-# Read-only tool -- uses direct session.execute() for SELECT queries (no writes)
 
 import logging
 from typing import Any
@@ -28,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 
 def estimate_tokens(data: Any) -> int:
-    """Estimate token count for data (simple heuristic: 1 token ~ 4 chars)"""
     import json
 
     text = json.dumps(data)
@@ -36,22 +25,6 @@ def estimate_tokens(data: Any) -> int:
 
 
 async def get_testing(product_id: str, tenant_key: str, db_manager: DatabaseManager | None = None) -> dict[str, Any]:
-    """
-    Fetch testing strategy and quality standards.
-
-    Handover 0840c: Reads from product_test_configs table (normalized).
-
-    Args:
-        product_id: Product UUID
-        tenant_key: Tenant isolation key
-        db_manager: Database manager instance
-
-    Returns:
-        Dict with testing config from product_test_configs table.
-
-    Multi-Tenant Isolation:
-        All queries filter by tenant_key and product_id.
-    """
     logger.info("fetching_testing_context product_id=%s tenant_key=%s", product_id, tenant_key)
 
     if db_manager is None:

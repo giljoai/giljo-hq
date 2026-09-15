@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Context & Product Tools -- @mcp.tool wrappers (BE-6042d split of mcp_sdk_server.py).
-
-Mechanically extracted verbatim from the pre-split ``mcp_sdk_server.py``. Each
-wrapper registers against the shared ``mcp`` instance from ``_base`` as a decorator
-side effect at import time. Behavior, signatures, names, and descriptions unchanged.
-"""
 
 from typing import Annotated, Any
 
@@ -32,24 +25,10 @@ from giljo_mcp.services.product_memory_service import (
 )
 
 
-# BE-3006d: the update_product_context free-text params flow to unbounded Postgres
-# ``Text`` columns through ProductService (which caps nothing but the
-# target_platforms membership), so cap them here at the boundary. Short labels use
-# the name cap; long-form prose uses the description cap. Bounded well above any
-# realistic value, but enough to stop a runaway agent ballooning a row.
 _PRODUCT_LABEL = Field(max_length=MCP_NAME_MAX)
 _PRODUCT_PROSE = Field(max_length=MCP_DESCRIPTION_MAX)
 
 
-# BE-9118 (Option B): the 17 flat prose params update_product_context used to take
-# are regrouped into four typed dicts. Each model is a MCP-boundary INPUT grouping
-# only -- the wrapper unpacks it verbatim to the SAME flat ProductService kwargs, so
-# the DB/service/columns are untouched. Typing each group as a Pydantic model keeps
-# the per-field length caps at the FastMCP arg-validation boundary (a clean 422-style
-# ToolError, never a service-layer 500 / DB constraint) exactly as the flat
-# Field(max_length=...) params did before -- caps live INSIDE the dicts now.
-# ``extra="forbid"`` rejects an unknown sub-key at the boundary with agent-facing
-# guidance (mirrors FastMCP's rejection of an unknown flat kwarg pre-regroup).
 class _TechStackContext(BaseModel):
     """Grouped tech-stack fields (BE-9118). Unpacked to flat ProductService kwargs."""
 
@@ -106,13 +85,6 @@ class _TestingContext(BaseModel):
 
 
 def _merge_group(kwargs: dict[str, Any], group: BaseModel | None) -> None:
-    """Unpack a grouped context model into flat ProductService kwargs (BE-9118).
-
-    Byte-identical to the pre-regroup flat merge-write: skip unset (``None``) and
-    empty-string fields, forward everything else. The grouped field names ARE the
-    same flat kwargs ProductService.update_product() already consumes, so the
-    service/DB path is unchanged.
-    """
     if group is None:
         return
     for field_name, value in group.model_dump().items():
@@ -128,7 +100,9 @@ def _merge_group(kwargs: dict[str, Any], group: BaseModel | None) -> None:
     description=(
         "Unified context fetcher: retrieves product/project context by category, with depth "
         "control. Pass one or more categories in a single call. For one project's "
-        "description/mission use categories=['project']. Never pass tenant_key. See the "
+        "description/mission use categories=['project'] -- its payload names the project two "
+        "ways: project_alias is the short permanent share code (e.g. A1B2C3), taxonomy_alias "
+        "the human-readable serial (e.g. BE-0007). Never pass tenant_key. See the "
         "categories param for the full category list + token costs, and get_giljo_guide for "
         "read-vs-write routing."
     ),
@@ -302,8 +276,6 @@ async def create_product(
     ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
-    # Merge-write style: forward only provided, non-empty optional values so the
-    # service receives None (not "") for anything the agent omitted.
     kwargs: dict[str, Any] = {"name": name}
     kwargs.update(
         {
@@ -493,8 +465,6 @@ async def update_product_context(
     ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
-    # Merge-write: forward only provided, non-empty values. The grouped dicts unpack
-    # to the SAME flat kwargs ProductService.update_product() consumes (BE-9118).
     kwargs: dict[str, Any] = {"product_id": product_id}
     if is_active is not None:
         kwargs["is_active"] = is_active

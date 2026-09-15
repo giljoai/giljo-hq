@@ -3,27 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-BE6004C-1: ContextVar lifecycle correctness for TenantManager.
-
-The fail-closed tenant guard (BE-6004) makes a lingering tenant value on a
-reused worker task a latent cross-tenant leak. This slice makes every set
-paired with a proper reset, so the ContextVar always returns to its exact
-prior value — even across nesting and exceptions.
-
-Verifies:
-- set_current_tenant returns a contextvars.Token usable for reset().
-- Nested with_tenant / TenantContext unwinds A->B->exit->A->exit->None exactly.
-- An exception inside a with_tenant block still restores the prior value.
-- A simulated request cycle (set + reset via the returned token) leaves the
-  ContextVar exactly as it found it, with no residue on the worker.
-- clear_current_tenant() remains a bare hard-clear to None.
-
-Parallel-safe: pure ContextVar contract, no DB, no module-global mutation,
-each test sets up and tears down its own tenant state; no test-ordering deps.
-xdist workers are separate processes, so the module-level `current_tenant`
-ContextVar is not shared across workers.
-"""
 
 from contextvars import Token
 
@@ -45,11 +24,6 @@ def _key() -> str:
 
 @pytest.fixture(autouse=True)
 def _clean_tenant_context():
-    """Snapshot the ContextVar before each test and restore it after.
-
-    Guarantees no residue leaks out of a test even if an assertion fails
-    mid-flight, so tests remain independent under xdist.
-    """
     token = current_tenant.set(None)
     try:
         yield
@@ -58,7 +32,6 @@ def _clean_tenant_context():
 
 
 def test_set_current_tenant_returns_usable_token():
-    """set_current_tenant must return a contextvars.Token for later reset()."""
     key = _key()
     token = TenantManager.set_current_tenant(key)
     try:
@@ -70,7 +43,6 @@ def test_set_current_tenant_returns_usable_token():
 
 
 def test_reset_with_token_restores_prior_value():
-    """Resetting with the returned token restores the exact prior value."""
     outer = _key()
     outer_token = TenantManager.set_current_tenant(outer)
     inner = _key()
@@ -84,11 +56,6 @@ def test_reset_with_token_restores_prior_value():
 
 
 def test_clear_current_tenant_is_bare_hard_clear():
-    """clear_current_tenant() takes no args and forces the context to None.
-
-    Exercises the module-level convenience function (added in BE6004C-1) and
-    the classmethod; both must hard-clear to None.
-    """
     set_current_tenant(_key())
     assert get_current_tenant() is not None
     clear_current_tenant()
@@ -101,7 +68,6 @@ def test_clear_current_tenant_is_bare_hard_clear():
 
 
 def test_nested_with_tenant_unwinds_to_exact_prior_value():
-    """A -> B -> exit B -> A -> exit A -> None (classmethod context manager)."""
     tenant_a = _key()
     tenant_b = _key()
 
@@ -115,7 +81,6 @@ def test_nested_with_tenant_unwinds_to_exact_prior_value():
 
 
 def test_nested_with_tenant_convenience_function_unwinds():
-    """Module-level with_tenant() convenience function unwinds identically."""
     tenant_a = _key()
     tenant_b = _key()
 
@@ -128,7 +93,6 @@ def test_nested_with_tenant_convenience_function_unwinds():
 
 
 def test_with_tenant_restores_after_exception():
-    """An exception inside a with_tenant block still restores the prior value."""
     tenant_a = _key()
     tenant_b = _key()
 
@@ -148,7 +112,6 @@ def test_with_tenant_restores_after_exception():
 
 
 def test_with_tenant_restores_none_when_no_prior_context():
-    """Entering with_tenant from a None baseline returns to None on exit."""
     assert TenantManager.get_current_tenant() is None
     with TenantManager.with_tenant(_key()):
         assert TenantManager.get_current_tenant() is not None
@@ -156,9 +119,6 @@ def test_with_tenant_restores_none_when_no_prior_context():
 
 
 def test_simulated_request_cycle_leaves_no_residue():
-    """Mirror the AuthMiddleware contract: capture token at entry, reset in
-    finally. On a (simulated) reused worker the ContextVar returns to its
-    pre-request value (None) so no later request can observe this tenant."""
     assert get_current_tenant() is None
 
     def handle_request(tenant_key: str) -> None:
@@ -176,8 +136,6 @@ def test_simulated_request_cycle_leaves_no_residue():
 
 
 def test_simulated_request_cycle_resets_even_on_exception():
-    """If the request handler raises after set, the finally-reset still fires
-    and the worker is left clean (None) for the next request."""
     assert get_current_tenant() is None
     key = _key()
 
@@ -194,7 +152,6 @@ def test_simulated_request_cycle_resets_even_on_exception():
 
 
 def test_invalid_tenant_key_rejected_before_set():
-    """An invalid key still raises ValueError and never mutates the context."""
     assert get_current_tenant() is None
     with pytest.raises(ValueError):
         set_current_tenant("not-a-valid-tenant-key")

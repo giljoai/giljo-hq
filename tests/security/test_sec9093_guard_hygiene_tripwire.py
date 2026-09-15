@@ -2,24 +2,6 @@
 # Licensed under the Elastic License 2.0.
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
-"""SEC-9093 regressions.
-
-D1 -- three genuinely-unscoped Class-B call sites are scoped so the tenant guard stops
-     warning (and the write stays tenant-isolated on the happy path):
-       * APIKey.last_used update   (auth/dependencies.py _record_api_key_usage)
-       * AgentTemplate updated_at restore (services/template_service.py)
-       * TemplateArchive delete    (repositories/template_repository.py delete_archives)
-     The fix targets the RAW table so the guard injects the tenant predicate. A mapped-class
-     bulk UPDATE/DELETE wraps the table in an AnnotatedTable the guard cannot match -- and
-     merely adding an explicit tenant predicate to the mapped class only flips Class-B ->
-     Class-A (still warns); the raw table is what makes it go quiet. These tests pin both the
-     "raw is quiet" and the "mapped warns" halves so a revert is caught.
-
-D2 -- the guard's _audit_warn announces ONLY the predicate-absent (Class-B) UPDATE/DELETE
-     class on the neutral ``signals.SIGNAL_UNSCOPED_WRITE`` hub. What a deployment does with
-     that announcement (Sentry) lives in saas/ and is pinned by
-     tests/saas/test_sec9093_unscoped_write_tripwire.py.
-"""
 
 import types
 from datetime import UTC, datetime
@@ -39,7 +21,6 @@ from giljo_mcp.tenant import TenantManager
 
 @pytest.fixture(autouse=True)
 def _clean_signal_observers():
-    """The signal hub is module state — never leak an observer between tests."""
     signals.clear_signal_observers()
     yield
     signals.clear_signal_observers()
@@ -50,8 +31,6 @@ def _tk() -> str:
 
 
 def _classb_warns(caplog, model_name: str, stype: str) -> list[str]:
-    """Class-B == 'no tenant predicate injectable' for <model>/<stype> WITHOUT the
-    'carries an explicit tenant predicate' clause."""
     out = []
     for rec in caplog.records:
         if rec.name != "giljo_mcp.tenant_guard":
@@ -125,12 +104,8 @@ async def _mk_archive(session, tenant: str, template_id: str) -> TemplateArchive
     return arc
 
 
-# ---------------------------------------------------------------------------
-# D1 -- APIKey.last_used update (real path: _record_api_key_usage)
-# ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_apikey_update_real_path_is_quiet(db_session, caplog):
-    """Real production path (_record_api_key_usage) no longer warns Class-B."""
     from giljo_mcp.auth.dependencies import _record_api_key_usage
 
     tenant_a = _tk()
@@ -149,7 +124,6 @@ async def test_apikey_update_real_path_is_quiet(db_session, caplog):
 
 @pytest.mark.asyncio
 async def test_apikey_update_fixed_stmt_is_scoped(db_session):
-    """The fixed raw-table form stamps only the in-tenant key and leaves other tenants alone."""
     tenant_a, tenant_b = _tk(), _tk()
     user_a = await _mk_user(db_session, tenant_a)
     user_b = await _mk_user(db_session, tenant_b)
@@ -159,17 +133,14 @@ async def test_apikey_update_fixed_stmt_is_scoped(db_session):
     db_session.info["tenant_key"] = tenant_a
     now = datetime.now(UTC)
 
-    # exact fixed form from auth/dependencies.py (guard injects AND tenant_key == <ctx>)
     await db_session.execute(
         sql_update(APIKey.__table__).where(APIKey.__table__.c.id == key_a.id).values(last_used=now)
     )
-    # cross-tenant probe: target B's id under tenant-A context -> guard scopes it out.
     await db_session.execute(
         sql_update(APIKey.__table__).where(APIKey.__table__.c.id == key_b.id).values(last_used=now)
     )
     await db_session.flush()
 
-    # bulk UPDATE bypasses the identity map; populate_existing forces a fresh DB read.
     a = (
         await db_session.execute(select(APIKey).where(APIKey.id == key_a.id).execution_options(populate_existing=True))
     ).scalar_one()
@@ -183,10 +154,6 @@ async def test_apikey_update_fixed_stmt_is_scoped(db_session):
 
 @pytest.mark.asyncio
 async def test_apikey_update_mapped_class_now_injects(db_session, caplog):
-    """SEC-9094 flip: the mapped-class form now INJECTS (matcher unwraps the AnnotatedTable), so it
-    no longer emits a Class-B warn -- it is quiet, exactly like the raw-table form. (Pre-SEC-9094
-    this shape warned; the D1 fix targeted the raw table precisely because the mapped shape could
-    not inject. SEC-9094 closed that gap, so both shapes are now equivalent.)"""
     tenant_a = _tk()
     user_a = await _mk_user(db_session, tenant_a)
     key_a = await _mk_apikey(db_session, tenant_a, user_a.id)
@@ -199,9 +166,6 @@ async def test_apikey_update_mapped_class_now_injects(db_session, caplog):
     assert _classb_warns(caplog, "APIKey", "update") == [], "mapped-class update(APIKey) now injects, no Class-B warn"
 
 
-# ---------------------------------------------------------------------------
-# D1 -- TemplateArchive delete (real path: delete_archives)
-# ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_template_archive_delete_is_quiet_and_tenant_scoped(db_session, caplog):
     tenant_a, tenant_b = _tk(), _tk()
@@ -219,7 +183,6 @@ async def test_template_archive_delete_is_quiet_and_tenant_scoped(db_session, ca
     await db_session.flush()
 
     assert _classb_warns(caplog, "TemplateArchive", "delete") == []
-    # A's archive gone; B's archive survives.
     assert (
         await db_session.execute(select(TemplateArchive).where(TemplateArchive.id == arc_a.id))
     ).scalar_one_or_none() is None
@@ -231,8 +194,6 @@ async def test_template_archive_delete_is_quiet_and_tenant_scoped(db_session, ca
 
 @pytest.mark.asyncio
 async def test_template_archive_delete_mapped_class_now_injects(db_session, caplog):
-    """SEC-9094 flip: mapped-class delete(TemplateArchive) now injects the tenant predicate
-    (matcher unwraps the AnnotatedTable) -- no longer a Class-B warn."""
     tenant_a = _tk()
     tpl_a = await _mk_template(db_session, tenant_a)
     await _mk_archive(db_session, tenant_a, tpl_a.id)
@@ -247,9 +208,6 @@ async def test_template_archive_delete_mapped_class_now_injects(db_session, capl
     )
 
 
-# ---------------------------------------------------------------------------
-# D1 -- AgentTemplate updated_at restore (statement-level: raw quiet vs mapped warns)
-# ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_agent_template_update_raw_is_quiet_and_scoped(db_session, caplog):
     tenant_a, tenant_b = _tk(), _tk()
@@ -262,12 +220,9 @@ async def test_agent_template_update_raw_is_quiet_and_scoped(db_session, caplog)
 
     t = AgentTemplate.__table__
     with caplog.at_level("WARNING", logger="giljo_mcp.tenant_guard"):
-        # exact fixed form from template_service.py (raw table -> guard injects tenant_key)
         await db_session.execute(sql_update(t).where(t.c.id == tpl_a.id).values(updated_at=backdate))
     assert _classb_warns(caplog, "AgentTemplate", "update") == []
 
-    # cross-tenant: target B's id under tenant-A context; the guard-injected tenant predicate
-    # (== tenant_a) must scope it out so B is never touched.
     tenant_guard._AUDIT_WARN_SEEN.clear()
     await db_session.execute(sql_update(t).where(t.c.id == tpl_b.id).values(updated_at=backdate))
     await db_session.flush()
@@ -282,8 +237,6 @@ async def test_agent_template_update_raw_is_quiet_and_scoped(db_session, caplog)
 
 @pytest.mark.asyncio
 async def test_agent_template_update_mapped_class_now_injects(db_session, caplog):
-    """SEC-9094 flip: mapped-class update(AgentTemplate) now injects the tenant predicate
-    (matcher unwraps the AnnotatedTable) -- no longer a Class-B warn."""
     tenant_a = _tk()
     tpl_a = await _mk_template(db_session, tenant_a)
     await db_session.commit()
@@ -299,37 +252,22 @@ async def test_agent_template_update_mapped_class_now_injects(db_session, caplog
     )
 
 
-# ---------------------------------------------------------------------------
-# D2 -- classify-and-capture: only the predicate-absent (Class-B) class hits Sentry
-# ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_classb_triggers_sentry_capture_classa_does_not(db_session, monkeypatch):
-    """After SEC-9094 the mapped-class direct-table shape INJECTS, so it is no longer a tripwire
-    class. The remaining warn/tripwire class is a genuinely-uninjectable UPDATE/DELETE whose target
-    table is NOT itself a detected tenant model. We force that shape deterministically (walk reports
-    an unrelated tenant model while the DELETE targets a different table -- the same technique as
-    test_sec9156_guard_failclosed.py) and re-assert the D2 classification: the predicate-ABSENT
-    (Class-B) case is announced on the neutral unscoped-write signal (and, since SEC-9156 shipped
-    Step 2, now also raises); the explicit-predicate (Class-A) case does neither."""
     calls = []
     signals.register_signal_observer(
         signals.SIGNAL_UNSCOPED_WRITE,
         lambda payload: calls.append((tuple(payload["models"]), payload["statement_type"])),
     )
-    # Walk reports APIKey as "touched" while the DELETE targets TemplateArchive's table -> no model
-    # matches the target -> nothing injectable -> the no-match tripwire branch (never injects/executes
-    # a cross-tenant write here: the guard just classifies + records).
     monkeypatch.setattr(tenant_guard, "_tenant_models_for_statement", lambda statement: frozenset({APIKey}))
     tenant_a = _tk()
     db_session.info["tenant_key"] = tenant_a
 
-    # Class-B: no explicit tenant predicate -> capture fires once, then the guard raises (SEC-9156).
     tenant_guard._AUDIT_WARN_SEEN.clear()
     with pytest.raises(tenant_guard.TenantIsolationError):
         await db_session.execute(sql_delete(TemplateArchive).where(TemplateArchive.id == "no-such-id"))
     assert calls == [(("APIKey",), "delete")], "Class-B (predicate-absent, uninjectable) must announce once"
 
-    # Class-A: an explicit tenant predicate is present -> capture must NOT fire.
     calls.clear()
     tenant_guard._AUDIT_WARN_SEEN.clear()
     await db_session.execute(sql_delete(TemplateArchive).where(TemplateArchive.tenant_key == tenant_a))

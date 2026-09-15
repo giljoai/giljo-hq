@@ -3,28 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9083a — next_required_actions + truncation sentinels, proven at the MCP transport.
-
-The checklist is an authoritative steering wheel computed per (phase x role) cell;
-a wrong cell is an authoritative WRONG steering wheel (CE-0026 frozen-phase
-precedent), and the BE-5042 rule says the failing layer for instruction-delivery
-bugs is the MCP boundary. So every cell is exercised through the REAL FastMCP
-transport (``create_connected_server_and_client_session``), one test per cell:
-
-  1. worker                          (get_job_mission)
-  2. solo orchestrator staging      (get_staging_instructions)
-  3. solo orchestrator implementation (get_job_mission)
-  4. chain sub-orch staging         (get_job_mission, §14 ungated)
-  5. chain sub-orch implementation  (get_job_mission)
-  6. project-less chain conductor   (get_job_mission)
-
-Plus the truncation-survival wire shape: the checklist + truncation_check serialize
-BEFORE the multi-KB blocks, full_protocol ends with the END-OF-PROTOCOL tail marker,
-and an etag-match response strips the sentinel with the block it describes.
-
-Parallel-safe: DB-touching tests use the db_session fixture (TransactionalTestContext,
-rollback at teardown). No module-level mutable state. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -67,9 +45,6 @@ def _error_text(result) -> str:
     return "\n".join(b.text for b in result.content if getattr(b, "text", None))
 
 
-# ---------------------------------------------------------------------------
-# Transport fixture (mirrors test_be9035b_detected_harness_mcp_boundary)
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
@@ -107,9 +82,6 @@ async def mcp_client(db_manager, db_session, monkeypatch):
         state.db_manager = prior_db_manager
 
 
-# ---------------------------------------------------------------------------
-# Seed helpers
-# ---------------------------------------------------------------------------
 
 
 async def _seed_org_product(db_session, tenant_key: str) -> str:
@@ -214,9 +186,6 @@ async def _mission_result(client, job_id: str, **extra_args):
         return _payload(result), _raw_text(result)
 
 
-# ---------------------------------------------------------------------------
-# Cell 1 — worker (+ the truncation-survival wire shape rides along)
-# ---------------------------------------------------------------------------
 
 
 async def test_worker_cell_and_wire_shape(mcp_client):
@@ -238,14 +207,10 @@ async def test_worker_cell_and_wire_shape(mcp_client):
     assert "complete_job" in joined
     assert "write_project_closeout" not in joined
 
-    # Tail sentinel: the FINAL full_protocol ends with the marker line.
     assert payload["full_protocol"].endswith(PROTOCOL_END_MARKER)
-    # Head sentinel present and honest about the size + recovery.
     assert "protocol_etag" in payload["truncation_check"]
     assert PROTOCOL_END_MARKER in payload["truncation_check"]
 
-    # Wire ORDER (the actual serialized bytes): the survival fields come BEFORE the
-    # multi-KB blocks, and full_protocol is the last large field.
     for early in ('"next_required_actions"', '"truncation_check"', '"project_phase"'):
         assert raw.index(early) < raw.index('"mission"')
         assert raw.index(early) < raw.index('"agent_identity"')
@@ -267,15 +232,10 @@ async def test_etag_match_strips_block_and_sentinel_but_keeps_checklist(mcp_clie
 
     assert second["protocol_unchanged"] is True
     assert second["full_protocol"] is None
-    # The head sentinel describes the omitted block — it must be stripped with it.
     assert '"truncation_check"' not in raw
-    # The checklist survives on the small response (it is the recovery payload).
     assert second["next_required_actions"]
 
 
-# ---------------------------------------------------------------------------
-# Cell 2 — solo orchestrator, staging (get_staging_instructions)
-# ---------------------------------------------------------------------------
 
 
 async def test_solo_orchestrator_staging_cell(mcp_client):
@@ -299,13 +259,9 @@ async def test_solo_orchestrator_staging_cell(mcp_client):
     assert "spawn_job" in joined
     assert "Implement" in joined, "solo staging must end at the human Implement gate"
     assert "Hub" not in joined, "solo staging must not carry chain Hub steps"
-    # Early on the wire: before the big protocol block.
     assert raw.index('"next_required_actions"') < raw.index('"orchestrator_protocol"')
 
 
-# ---------------------------------------------------------------------------
-# Cell 3 — solo orchestrator, implementation (get_job_mission)
-# ---------------------------------------------------------------------------
 
 
 async def test_solo_orchestrator_implementation_cell(mcp_client):
@@ -327,15 +283,9 @@ async def test_solo_orchestrator_implementation_cell(mcp_client):
     assert "Hub" not in joined, "solo has no chain Hub protocol"
 
 
-# ---------------------------------------------------------------------------
-# Cells 4 + 5 — chain sub-orchestrator, staging / implementation
-# ---------------------------------------------------------------------------
 
 
 async def test_chain_suborch_staging_cell(mcp_client):
-    """§14: a chain sub-orch is UNGATED during its own staging — get_job_mission
-    delivers the mission plus the STAGING checklist (live phase, not the frozen
-    snapshot), including the protocol_etag refetch step."""
     client, tenant_key, db_session = mcp_client
     product_id = await _seed_org_product(db_session, tenant_key)
     project_id = await _seed_project(
@@ -376,9 +326,6 @@ async def test_chain_suborch_implementation_cell(mcp_client):
     assert joined.index("complete_job") < joined.index("write_project_closeout")
 
 
-# ---------------------------------------------------------------------------
-# Cell 6 — project-less chain conductor
-# ---------------------------------------------------------------------------
 
 
 async def test_conductor_cell(mcp_client):
@@ -403,8 +350,6 @@ async def test_conductor_cell(mcp_client):
     joined = "\n".join(payload["next_required_actions"])
     assert "ready_to_advance" in joined, "the conductor checklist must name the ONE authoritative advance signal"
     assert "update_project_mission" not in joined, "the conductor owns no project mission"
-    # BE-9083a critical-first reorder: the chain chapters lead the protocol, and the
-    # tail marker still terminates it.
     protocol = payload["full_protocol"]
     assert protocol.index("CH_CHAIN_DRIVE") < len(protocol) // 2, "chain drive must ride in the payload HEAD"
     assert protocol.endswith(PROTOCOL_END_MARKER)

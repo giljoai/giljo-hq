@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6208c — self-authored Hub posts must not arm an agent's own completion gate.
-
-An agent that posted a message authored by ITSELF can still complete_job; a
-pending ACTION-REQUIRED message from ANOTHER agent still blocks (BE-9012b/D7: the
-gate now keys on requires_action; the self-authored exclusion of row 14 is
-preserved). The acknowledge_messages_on_complete escape hatch is retired
-(accepted-and-ignored under D7).
-"""
 
 from __future__ import annotations
 
@@ -112,9 +104,6 @@ async def _add_pending_message(
         from_agent_id=from_agent_id,
         content="hub post",
         status="pending",
-        # BE-9012b (D7): the completion gate keys on action-required posts, so a
-        # blocking peer message must be requires_action=True. A self-authored one is
-        # still excluded regardless (row 14), which is what the first test asserts.
         requires_action=True,
         created_at=datetime.now(UTC) - timedelta(minutes=1),
     )
@@ -132,7 +121,6 @@ async def test_self_authored_message_does_not_block_completion(
     active_project: Project,
 ):
     job, execution = await _seed_worker(db_session, test_tenant_key, active_project.id)
-    # Agent's OWN outbound post fanned back to itself.
     await _add_pending_message(db_session, test_tenant_key, active_project.id, execution.agent_id, execution.agent_id)
 
     result = await completion_service.complete_job(

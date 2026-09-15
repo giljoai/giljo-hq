@@ -3,29 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""MCP-transport boundary regression tests for CE-0026 phase-disambiguation.
-
-CLAUDE.md mandates a regression test at the failing layer for every bug-fix /
-refactor project. The CE-0026 staging directive lives inside the FastMCP
-@mcp.tool wrapper's downstream JobCompletionService — this file exercises that
-path through the MCP transport (create_connected_server_and_client_session) so
-the wrapper + _call_tool dispatch + service-layer branch are all covered, not
-just the service in isolation.
-
-Two behaviors under test:
-
-1. staging-end complete_job via MCP returns staging_directive with action=STOP
-   and flips project.staging_status in DB.
-2. implementation-end complete_job via MCP returns no staging_directive.
-
-(A third behavior — a SendMessageResult contract regression guard on
-send_message's response shape — was removed under BE-9012d: the send_message
-MCP tool itself was hard-removed with the bus retirement.)
-
-Pattern reference: tests/integration/test_complete_job_gate.py
-(same in-memory transport, same _resolve_tenant monkeypatch, same
-shared-session service rebinding).
-"""
 
 from __future__ import annotations
 
@@ -49,13 +26,9 @@ from tests.helpers.mcp_session_fixture import create_connected_server_and_client
 pytestmark = pytest.mark.asyncio
 
 
-# ============================================================================
-# Helpers
-# ============================================================================
 
 
 def _payload(call_tool_result) -> dict:
-    """Extract structured payload from an MCP CallToolResult."""
     if getattr(call_tool_result, "structuredContent", None):
         return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
@@ -81,7 +54,6 @@ async def _seed_staging_context(
     project_phase: str = "staging",
     staging_status: str = "staging",
 ) -> dict:
-    """Seed a full project context with an orchestrator in the given phase."""
     suffix = uuid4().hex[:8]
     org = Organization(
         name=f"Org {suffix}",
@@ -159,7 +131,6 @@ async def _add_todo(
     status: str = "in_progress",
     sequence: int = 0,
 ) -> None:
-    """Attach one AgentTodoItem to a job (BE-6083 closeout auto-ack tests)."""
     db_session.add(
         AgentTodoItem(
             job_id=job_id,
@@ -177,7 +148,6 @@ async def _seed_message_sender(
     tenant_key: str,
     project_id: str,
 ) -> AgentExecution:
-    """Seed a minimal implementer execution so send_message has a valid from_agent."""
     job_id = str(uuid4())
     job = AgentJob(
         job_id=job_id,
@@ -206,19 +176,10 @@ async def _seed_message_sender(
     return execution
 
 
-# ============================================================================
-# Fixture: MCP client wired to the rolled-back test session
-# ============================================================================
 
 
 @pytest_asyncio.fixture
 async def phase_mcp_client(db_manager, db_session, monkeypatch):
-    """Wire JobCompletionService to db_session via ToolAccessor.
-
-    Same pattern as gate_mcp_client in test_complete_job_gate.py:
-    replace the accessor's job_completion_service with a shared-session
-    instance so writes land inside the rolled-back test transaction.
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from giljo_mcp.services.job_completion_service import JobCompletionService
@@ -244,8 +205,6 @@ async def phase_mcp_client(db_manager, db_session, monkeypatch):
 
     state.tool_accessor = accessor
 
-    # BE-6042d: _resolve_tenant/_resolve_user_id moved to mcp_tools._base (the
-    # _call_tool call site reads them there). Patch _base, not mcp_sdk_server.
     from api.endpoints.mcp_tools import _base
 
     monkeypatch.setattr(_base, "_resolve_tenant", lambda ctx: tenant_key)
@@ -262,24 +221,12 @@ async def phase_mcp_client(db_manager, db_session, monkeypatch):
         state.db_manager = prior_db_manager
 
 
-# ============================================================================
-# Tests
-# ============================================================================
 
 
 async def test_staging_end_via_mcp_returns_stop_directive_and_flips_db(
     phase_mcp_client,
     db_session,
 ):
-    """(a) End-to-end staging-end via MCP transport.
-
-    Drive complete_job for a staging-phase orchestrator through the FastMCP
-    @mcp.tool wrapper. Assert the response dict carries staging_directive.action
-    == 'STOP' and that project.staging_status flipped to 'staging_complete' in DB.
-
-    This catches any regression where the transport wrapper strips or renames
-    the staging_directive field before it reaches the caller.
-    """
     new_client, tenant_key, session = phase_mcp_client
     seed = await _seed_staging_context(
         session,
@@ -287,9 +234,6 @@ async def test_staging_end_via_mcp_returns_stop_directive_and_flips_db(
         project_phase="staging",
         staging_status="staging",
     )
-    # BE-5114 gate (count_non_orchestrator_agents): a zero-spawn staging end is
-    # rejected with STAGING_END_NO_AGENTS. Seed one spawned specialist so the
-    # staging-end path proceeds, matching real staging where ≥1 agent exists.
     await _seed_message_sender(session, tenant_key, seed["project"].id)
 
     async with new_client() as mcp_session:
@@ -316,7 +260,6 @@ async def test_staging_end_via_mcp_returns_stop_directive_and_flips_db(
         f"CE-0026: staging_directive.status must be 'STAGING_SESSION_COMPLETE', got {directive.get('status')!r}"
     )
 
-    # Verify DB flip happened inside the test transaction.
     refreshed_project = (
         await session.execute(
             select(Project).where(
@@ -335,12 +278,6 @@ async def test_implementation_end_via_mcp_no_staging_directive(
     phase_mcp_client,
     db_session,
 ):
-    """(b) Implementation-phase orchestrator complete_job via MCP returns no
-    staging_directive.
-
-    CE-0026: _handle_staging_end returns None when project_phase='implementation'.
-    The transport wrapper must not inject or populate the field from another source.
-    """
     new_client, tenant_key, session = phase_mcp_client
     seed = await _seed_staging_context(
         session,
@@ -363,28 +300,17 @@ async def test_implementation_end_via_mcp_no_staging_directive(
     )
     payload = _payload(result)
 
-    # staging_directive should either be absent or explicitly null.
     directive = payload.get("staging_directive")
     assert directive is None, (
         f"CE-0026: implementation-phase complete_job must NOT return a staging_directive; got {directive!r}"
     )
 
 
-# BE-9012d: test_send_message_response_has_no_staging_directive_key removed —
-# the send_message MCP tool was hard-removed with the bus retirement, so this
-# SendMessageResult contract regression guard has no surface left to test
-# (the deleted tool errors before staging_directive would ever be at issue).
 
 
-# ============================================================================
-# BE-6083 — phase-aware self-explaining response + closeout auto-ack, through
-# the MCP transport boundary (the FastMCP @mcp.tool wrapper). BE-5042 precedent:
-# the failing layer is the boundary, not the service in isolation.
-# ============================================================================
 
 
 async def test_be6083_staging_end_response_self_explains(phase_mcp_client, db_session):
-    """staging-end complete_job returns phase='staging_end' + an Implement-gate next_action."""
     new_client, tenant_key, session = phase_mcp_client
     seed = await _seed_staging_context(
         session,
@@ -392,7 +318,6 @@ async def test_be6083_staging_end_response_self_explains(phase_mcp_client, db_se
         project_phase="staging",
         staging_status="staging",
     )
-    # BE-5114 gate: staging-end needs >=1 spawned specialist.
     await _seed_message_sender(session, tenant_key, seed["project"].id)
 
     async with new_client() as mcp_session:
@@ -415,7 +340,6 @@ async def test_be6083_staging_end_response_self_explains(phase_mcp_client, db_se
 
 
 async def test_be6083_closeout_response_self_explains(phase_mcp_client, db_session):
-    """orchestrator-closeout complete_job returns phase='closeout' + a write_project_closeout next_action."""
     new_client, tenant_key, session = phase_mcp_client
     seed = await _seed_staging_context(
         session,
@@ -444,7 +368,6 @@ async def test_be6083_closeout_response_self_explains(phase_mcp_client, db_sessi
 
 
 async def test_be6083_deliverable_response_self_explains(phase_mcp_client, db_session):
-    """deliverable (worker) complete_job returns phase='deliverable', no staging_directive."""
     new_client, tenant_key, session = phase_mcp_client
     seed = await _seed_staging_context(
         session,
@@ -471,8 +394,6 @@ async def test_be6083_deliverable_response_self_explains(phase_mcp_client, db_se
 
 
 async def test_be6083_closeout_auto_acks_without_flag(phase_mcp_client, db_session):
-    """In closeout phase, complete_job AUTO-ACKS the self-referential closeout TODO
-    WITHOUT passing acknowledge_closeout_todo — the chicken-and-egg flag is gone."""
     new_client, tenant_key, session = phase_mcp_client
     seed = await _seed_staging_context(
         session,
@@ -494,7 +415,6 @@ async def test_be6083_closeout_auto_acks_without_flag(phase_mcp_client, db_sessi
             {
                 "job_id": seed["job"].job_id,
                 "result": {"summary": "BE-6083 closeout no-flag"},
-                # NOTE: acknowledge_closeout_todo deliberately NOT passed.
             },
         )
 
@@ -518,8 +438,6 @@ async def test_be6083_closeout_auto_acks_without_flag(phase_mcp_client, db_sessi
 
 
 async def test_be6083_closeout_back_compat_with_flag(phase_mcp_client, db_session):
-    """Back-compat: passing acknowledge_closeout_todo=True still works (accepted-and-ignored
-    path) — in-flight callers (REST endpoint, protocol text) do not break."""
     new_client, tenant_key, session = phase_mcp_client
     seed = await _seed_staging_context(
         session,

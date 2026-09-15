@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Shared post_to_thread WS-broadcast helper (BE-9197 / BE-9502a).
-
-Split out of _comm_tools.py (already at its 800-line file-size cap): the baton
-and rename follow-ons re-read the thread through the MCP tool accessor and push
-the SAME thread_update shape, so they share one function rather than two
-near-identical inline blocks.
-"""
 
 from __future__ import annotations
 
@@ -34,11 +27,6 @@ async def broadcast_thread_metadata_update(
     from_kind: str | None = None,
     include_subject: bool = False,
 ) -> None:
-    """Best-effort thread_update shared by post_to_thread's baton (BE-9197) and
-    rename (BE-9502a) follow-ons -- re-reads the thread fresh; never fails the
-    post. ``include_subject`` defaults False so baton stays parity-tested
-    byte-identical with standalone ``pass_baton`` (which omits it, BE-9289b).
-    """
     try:
         from api.app_state import state as _state
 

@@ -1,9 +1,10 @@
 /**
- * FE-6105: AgentTipsDialog — Antigravity (agy) spawn chip.
+ * AgentTipsDialog — INF-9605a
  *
- * Verifies the Antigravity option is additive alongside the existing
- * Claude/Codex/Gemini chips, and that selecting it surfaces the agy spawn
- * command (Gemini-successor; reuses Gemini's @-syntax spawn behavior).
+ * The dialog's "AI coding agent" chip group offers spawn tips for the CLIs that
+ * still have a per-CLI spawn command (Claude Code CLI, Codex); the retired
+ * Gemini/Antigravity chips and their agy/gemini commands are gone.
+ * Edition scope: Both
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -13,16 +14,13 @@ import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
 import AgentTipsDialog from '@/components/common/AgentTipsDialog.vue'
 
-describe('AgentTipsDialog — Antigravity spawn chip (FE-6105)', () => {
+describe('AgentTipsDialog — tool chips after the preset retirement (INF-9605a)', () => {
   let vuetify
 
   beforeEach(() => {
     vuetify = createVuetify({ components, directives })
   })
 
-  // Stub structural containers so the (normally lazy / teleported) panel
-  // content renders synchronously, while keeping the real v-chip-group so its
-  // v-model selection actually drives the spawn-command v-if.
   const passthrough = (cls) => ({ template: `<div class="${cls}"><slot /></div>` })
 
   const createWrapper = () =>
@@ -41,30 +39,25 @@ describe('AgentTipsDialog — Antigravity spawn chip (FE-6105)', () => {
       },
     })
 
-  it('renders an Antigravity chip alongside the existing tool chips (additive)', () => {
+  it('renders and offers exactly the Claude Code CLI and Codex spawn chips', () => {
     const wrapper = createWrapper()
-    const chipLabels = wrapper.findAll('.v-chip-group .v-chip').map((c) => c.text())
-    expect(chipLabels).toContain('Antigravity')
-    // The existing tool chips remain — Antigravity is additive, not a replacement.
-    expect(chipLabels.some((l) => l.includes('Claude Code CLI'))).toBe(true)
-    expect(chipLabels.some((l) => l.includes('Codex'))).toBe(true)
-    expect(chipLabels.some((l) => l.includes('Gemini'))).toBe(true)
+    const chipLabels = wrapper.findAll('.tool-selector .v-chip').map((c) => c.text().trim())
+    expect(chipLabels).toEqual(['Claude Code CLI', 'Codex'])
   })
 
-  it('shows the agy spawn command when Antigravity is selected', async () => {
+  it('shows the claude spawn command by default and the codex one when Codex is selected', async () => {
     const wrapper = createWrapper()
-    // Default selection is claude — the agy block must be hidden initially.
-    expect(wrapper.text()).not.toContain('cmd /k agy')
+    expect(wrapper.text()).toContain('cmd /k claude')
+    expect(wrapper.text()).not.toContain('cmd /k codex')
 
-    // Drive the real v-chip-group v-model so the spawn-command v-if flips.
-    const group = wrapper.findComponent('.v-chip-group')
-    group.vm.$emit('update:modelValue', 'antigravity')
+    wrapper.vm.selectedTool = 'codex'
     await nextTick()
+    expect(wrapper.text()).toContain('cmd /k codex')
+    expect(wrapper.text()).not.toContain('cmd /k claude')
+  })
 
-    const text = wrapper.text()
-    expect(text).toContain('cmd /k agy')
-    expect(text).toContain('--yolo')
-    // Successor-to-Gemini note is present so the user understands the lineage.
-    expect(text).toContain('successor to Gemini CLI')
+  it('never mentions the retired presets or their launchers', () => {
+    const text = createWrapper().text()
+    expect(text).not.toMatch(/gemini|antigravity|cmd \/k agy/i)
   })
 })

@@ -1,16 +1,3 @@
-/**
- * FE-6059 — Home/Welcome first-paint defer.
- *
- * Edition Scope: Both.
- *
- * Tools-domain reads (agent templates list + active-count, git settings, serena
- * status) must NOT fire on Home's cold first paint — they only feed the "Your
- * Team" section (shown once onboarded) and the onboarding-reminder banner. They
- * are deferred behind those render conditions. This spec asserts:
- *   (1) onboarding/cold state -> none of the four endpoints are requested;
- *   (2) onboarded state -> the team-template reads DO fire (defer is
- *       conditional, not a removal).
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -32,14 +19,18 @@ vi.mock('@/services/configService', () => ({
   },
 }))
 
-// Tools-domain endpoints under test — spies so we can assert call counts.
 const templatesList = vi.fn().mockResolvedValue({ data: [] })
 const templatesActiveCount = vi.fn().mockResolvedValue({ data: { max_slots: 16 } })
+const assignmentsList = vi.fn().mockResolvedValue({ data: { assignments: [], count: 0 } })
+
 vi.mock('@/services/api', () => ({
   default: {
     templates: {
       list: (...a) => templatesList(...a),
       activeCount: (...a) => templatesActiveCount(...a),
+    },
+    assignments: {
+      list: (...a) => assignmentsList(...a),
     },
     stats: {
       getDashboard: vi.fn().mockResolvedValue({ data: { project_status_dist: {} } }),
@@ -47,7 +38,6 @@ vi.mock('@/services/api', () => ({
   },
 }))
 
-// git/serena integration status flows through setupService.
 const getGitSettings = vi.fn().mockResolvedValue({ enabled: false })
 const getSerenaStatus = vi.fn().mockResolvedValue({ enabled: false })
 vi.mock('@/services/setupService', () => ({
@@ -57,7 +47,6 @@ vi.mock('@/services/setupService', () => ({
   },
 }))
 
-// Heavy child components stubbed to avoid their full graphs.
 vi.mock('@/components/GilMascot.vue', () => ({ default: { name: 'GilMascot', template: '<div />' } }))
 vi.mock('@/components/setup/SetupWizardOverlay.vue', () => ({
   default: { name: 'SetupWizardOverlay', template: '<div />' },
@@ -72,7 +61,6 @@ vi.mock('@/components/projects/ProjectReviewModal.vue', () => ({
   default: { name: 'ProjectReviewModal', template: '<div />' },
 }))
 
-// ---- store mocks (mutated per-test via the refs below) ----
 const userState = {
   currentUser: {
     full_name: 'Test User',
@@ -115,8 +103,6 @@ describe('WelcomeView — FE-6059 first-paint defer', () => {
   })
 
   it('does NOT request templates / git / serena on cold (onboarding) first paint', async () => {
-    // No active product AND no projects -> onboardingComplete is false and the
-    // onboarding reminder cannot show, so nothing should fetch Tools data.
     productsState = {
       activeProduct: null,
       hasProducts: false,

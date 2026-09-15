@@ -1,21 +1,3 @@
-/**
- * SystemStatusBanner.yourturn.fe9368.spec.js — FE-9368 (E)
- *
- * The Message Hub handover, surfaced on the app-wide banner strip. The operator is
- * normally not in the Hub when an agent hands them the turn, so the Hub's own
- * attention strip reaches nobody; this row does.
- *
- * What these pin:
- *  - one pending thread names it and opens THAT thread;
- *  - several pending threads collapse to one row that opens the Hub list, because we
- *    cannot pick for them;
- *  - the row is a live read of the BATON: no baton, no row, and a resolved thread is
- *    never "waiting on you" however its baton was parked (FE-9365i);
- *  - it is client-armed off the store, so it behaves identically in CE and SaaS
- *    without either banner emitter carrying it.
- *
- * Edition scope: Both
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -67,10 +49,6 @@ vi.mock('@/services/api', () => {
   const apiObj = {
     stats: { getDashboard: vi.fn(() => Promise.resolve({ data: { project_status_dist: {} } })) },
     notifications: { list: vi.fn(), markRead: vi.fn(), markDismissed: vi.fn() },
-    // The banner reads the thread list ONCE per mount: a baton that was already
-    // pointing at the operator when the page loaded fires no live event, so without
-    // this read the row could only ever appear for a handover that happened while
-    // they watched.
     threads: { list: vi.fn(() => Promise.resolve({ data: { threads: h.threads.value } })) },
   }
   return { default: apiObj, api: apiObj }
@@ -97,10 +75,6 @@ function thread(overrides = {}) {
   }
 }
 
-// tests/setup.js installs ONE shared pinia via config.global.plugins, so store state
-// would otherwise carry from test to test (a thread seeded in one case still pending
-// in the next). A per-test pinia passed at mount wins over the global one — VTU
-// installs per-mount plugins last — which is what keeps each case honest.
 async function mountBanner({ threads = [], userId = ME, mode = 'ce' } = {}) {
   h.threads.value = threads
   h.mode.value = mode
@@ -113,9 +87,6 @@ async function mountBanner({ threads = [], userId = ME, mode = 'ce' } = {}) {
   return wrapper
 }
 
-// tests/setup.js replaces window.localStorage with no-op vi.fn()s; FE-9589's
-// dismissal state IS localStorage, so this spec installs a working in-memory one
-// (same helper shape as SystemStatusBanner.reserve.fe9377.spec.js).
 function installFunctionalLocalStorage() {
   const store = new Map()
   Object.defineProperty(window, 'localStorage', {
@@ -135,8 +106,6 @@ function row(wrapper) {
 
 describe('SystemStatusBanner your-turn row (FE-9368)', () => {
   beforeEach(() => {
-    // FE-9589: dismissals persist in localStorage. A fresh in-memory one per
-    // case, or one dismissal would hide the row for every test after it.
     installFunctionalLocalStorage()
   })
 
@@ -162,10 +131,6 @@ describe('SystemStatusBanner your-turn row (FE-9368)', () => {
   })
 
   it('opens THAT thread when only one is pending', async () => {
-    // FE-9410 added `focus` to this route: the click now carries WHICH MESSAGE raised
-    // it, not just which thread. The FE-9368 rule under test here is unchanged — one
-    // baton opens its own thread — and the route shape itself is owned by
-    // hubThreadRoute.spec.js.
     const wrapper = await mountBanner({ threads: [thread({ thread_id: 'thr-42' })] })
     await wrapper.find('[data-testid="your-turn-cta"]').trigger('click')
     expect(h.push).toHaveBeenCalledWith({
@@ -198,20 +163,12 @@ describe('SystemStatusBanner your-turn row (FE-9368)', () => {
   })
 
   it('never claims a resolved thread is waiting on you', async () => {
-    // "Done" and "waiting on you" cannot both be true; the baton simply stops where
-    // the conversation stopped. Same rule the cards and the attention strip apply.
     const wrapper = await mountBanner({
       threads: [thread({ status: 'resolved' }), thread({ thread_id: 't2', status: 'closed' })],
     })
     expect(row(wrapper).exists()).toBe(false)
   })
 
-  // FE-9589 REVERSES this case. It used to assert the row carried NO dismiss
-  // button ("it leaves when the turn does, not when it is waved away"), and the
-  // operator has overruled that: anything on screen must be closeable from
-  // where it is on screen. It is still a live read -- dismissal writes no
-  // server state, the baton stays yours -- so what changed is only whether the
-  // operator has to look at the strip until they act.
   it('carries a dismiss X that closes the row', async () => {
     const wrapper = await mountBanner({ threads: [thread()] })
     const x = row(wrapper).find('[data-testid="your-turn-dismiss"]')
@@ -221,7 +178,6 @@ describe('SystemStatusBanner your-turn row (FE-9368)', () => {
     await flushPromises()
 
     expect(row(wrapper).exists()).toBe(false)
-    // Dismissing announces nothing to the server: no navigation, no write.
     expect(h.push).not.toHaveBeenCalled()
   })
 

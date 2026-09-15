@@ -12,11 +12,6 @@ from api.broker.base import BrokerHandler, WebSocketBrokerMessage, WebSocketEven
 
 
 class InMemoryWebSocketEventBroker(WebSocketEventBroker):
-    """
-    Default broker for single-process LAN/WAN deployments.
-
-    Note: This broker is per-process and does not provide cross-worker delivery.
-    """
 
     def __init__(self) -> None:
         self._handlers: set[BrokerHandler] = set()
@@ -31,7 +26,6 @@ class InMemoryWebSocketEventBroker(WebSocketEventBroker):
         return _unsubscribe
 
     async def publish(self, message: WebSocketBrokerMessage) -> None:
-        # Snapshot handlers to avoid mutation during await.
         async with self._lock:
             handlers_snapshot = list(self._handlers)
 

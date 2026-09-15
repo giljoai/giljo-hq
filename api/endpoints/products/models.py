@@ -3,11 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Pydantic Models for Product Endpoints - Handover 0126
-
-Request/response models for product operations.
-"""
 
 from datetime import datetime
 from typing import Any
@@ -48,13 +43,6 @@ class TestConfigSchema(BaseModel):
 class ProductCreate(BaseModel):
     """Request model for creating a product"""
 
-    # FE-9320: a blank name is DELIBERATELY accepted here and must stay that way.
-    # The onboarding "existing codebase" door pre-creates a nameless draft so the
-    # agent can name it -- update_product_context writes product_name only while the
-    # existing name is blank, and skips it once non-empty (locked by
-    # tests/test_fe9200_tutorial_prompt_contract.py). A min_length here forces that
-    # door's fallback to "My product", which the agent can then never rename. The
-    # nameless-product problem is guarded at ACTIVATION instead, in the wizard.
     name: str = Field(..., max_length=255, description="Product name")
     description: str | None = Field(None, description="Product description")
     project_path: str | None = Field(None, description="File system path to product folder (required for agent export)")
@@ -100,8 +88,6 @@ class ProductUpdate(BaseModel):
     @field_validator("product_memory")
     @classmethod
     def _reject_product_memory(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
-        """TSK-9265: the service allowlist silently dropped this field while the
-        endpoint returned 200 — reject it honestly at the boundary instead."""
         raise ValueError(
             "product_memory cannot be updated via PUT /api/v1/products/{id}; "
             "product memory is written through the 360 memory tools "
@@ -114,11 +100,6 @@ class ProductResponse(BaseModel):
 
     id: str
     name: str
-    # BE-9385b: the stable short name that qualifies exported agent filenames
-    # (``<agent>--<slug>.md``). Exposed because it is user-visible -- it is literally
-    # in the names of the files they install -- and because it never changes, so the
-    # UI can show what an export will be called without guessing. Optional: rows
-    # predating ce_0092 have none, and the render path derives one for them.
     slug: str | None = None
     description: str | None
     vision_path: str | None
@@ -135,10 +116,6 @@ class ProductResponse(BaseModel):
     test_config: TestConfigSchema | None = Field(None, description="Test configuration - Handover 0840i")
     core_features: str | None = Field(None, description="Core product features - Handover 0840i")
     brand_guidelines: str | None = Field(None, description="Brand & design guidelines for frontend agents")
-    # INF-9321: was write-only (ProductUpdate accepted it, ProductResponse never
-    # echoed it), so the wizard's patch map received undefined and VISUALLY
-    # cleared a user's typed custom instructions on analysis completion, and the
-    # form could never display the persisted value at all.
     extraction_custom_instructions: str | None = Field(
         None, description="Custom instructions for vision document extraction"
     )
@@ -156,9 +133,6 @@ class ProductResponse(BaseModel):
         default=["all"],
         description="Target platforms: windows, linux, macos, android, ios, web, or all - Handover 0425",
     )
-    # BE-5117/BE-5118: AI-owned vision analysis surface. The flag gates project
-    # staging UX in the frontend; the consolidated_* fields back the existing
-    # "Consolidated Vision Summaries" panel in ProductDetailsDialog.vue.
     vision_analysis_complete: bool = Field(
         default=False,
         description="True when every active vision doc + the product aggregate have light + medium summaries. Gates ProductForm Next + tab nav (BE-5118).",
@@ -177,10 +151,6 @@ class ProductResponse(BaseModel):
     consolidated_at: datetime | None = Field(
         None, description="Timestamp the consolidated summaries were last regenerated."
     )
-    # BE-5122: derived (NOT a DB column). SHA-256 of the *current* vision
-    # document inputs, prefixed ``sha256:``. Compare against
-    # ``consolidated_vision_hash`` (raw hex) to detect drift. Empty input set
-    # returns the sentinel ``sha256:empty``.
     vision_inputs_hash: str = Field(
         default="sha256:empty",
         description="Derived SHA-256 fingerprint of current vision inputs (BE-5122). Compare to consolidated_vision_hash for drift detection.",
@@ -229,18 +199,15 @@ class ProductListResponse(BaseModel):
     )
     project_path: str | None = Field(None, description="File system path to product folder")
     target_platforms: list[str] | None = Field(default=["all"], description="Target platforms - Handover 0425")
-    # P1 batched count fields (same semantics as ProductResponse).
     project_count: int = 0
     task_count: int = 0
     has_vision: bool = False
     unresolved_tasks: int = 0
     unfinished_projects: int = 0
     vision_documents_count: int = 0
-    # BE-5118 analysis flag backs the card's analysis pill (kept; product column).
     vision_analysis_complete: bool = Field(
         default=False, description="True when vision analysis is complete (BE-5118 card pill)."
     )
-    # BE-6066 P4: vision aggregates that replace the card's vision_documents computeds.
     vision_summary: VisionSummarySchema = Field(default_factory=VisionSummarySchema)
 
 
@@ -372,9 +339,6 @@ class CascadeImpact(BaseModel):
     warning: str = Field(..., description="Warning message about deletion impact")
 
 
-# ============================================================================
-# 360 Memory Entries (Handover 0490)
-# ============================================================================
 
 
 class MemoryEntryResponse(BaseModel):

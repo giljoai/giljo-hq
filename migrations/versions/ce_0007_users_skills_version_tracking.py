@@ -3,31 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Users: track installed skills bundle version + last update reminder timestamp.
-
-Revision ID: ce_0007_users_skills_version_tracking
-Revises: ce_0006_configurations_unique_tenant_key
-Create Date: 2026-04-28
-
-Adds two nullable columns to ``users`` to support skills bundle drift
-detection and the 30-day login reminder cadence:
-
-- ``last_installed_skills_version VARCHAR(32) NULL`` — the SKILLS_VERSION
-  string stamped at the time the user most recently downloaded the
-  combined setup bundle (``/giljo_setup`` flow or
-  ``/api/download/agent-templates.zip``).
-- ``last_update_reminder_at TIMESTAMPTZ NULL`` — the last time the
-  post-login background check pushed a ``system:update_available`` WS
-  event to this user. Used to throttle reminders to one per 30 days.
-
-Both columns are nullable; the post-login cadence treats NULL as
-"never reminded / never installed" and behaves accordingly.
-
-Idempotency: each ADD COLUMN is wrapped in an ``information_schema.columns``
-check so the migration is safe to re-apply.
-
-Reversible: downgrade drops both columns (ditto idempotency guards).
-"""
 
 import sqlalchemy as sa
 from alembic import op

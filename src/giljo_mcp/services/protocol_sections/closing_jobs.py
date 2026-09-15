@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""CH5 final-acceptance prose: closing a job, and accepting a stalled agent.
-
-BE-9292b: extracted VERBATIM from ``chapters_reference._build_ch5_reference`` for
-the 800-line file-size guardrail and that builder's shrink-only length budget --
-the same seam BE-9013 / BE-9035a used to move CH3 prose into ``orchestrator_body``.
-The render is byte-identical; only the location changed.
-
-This is a plain module-level string, NOT an f-string: it is interpolated once into
-CH5's f-string, so braces here are literal and must NOT be doubled. Its composition
-into CH5 is pinned by identity in
-``tests/services/test_protocol_sections_closing_jobs_be9292b.py`` -- without that,
-editing this file could silently render nothing while still looking authoritative.
-"""
 
 from __future__ import annotations
 

@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-6171 BE foundation — chain election lock state machine (service layer).
-
-Regression at the failing layer (SequenceRunService), the owning service for
-sequence_runs. Exercised on a real DB via TransactionalTestContext, tenant-scoped,
-parallel-safe (no module-level mutable state, no ordering deps).
-
-Covers the four BE deliverables:
-  1. ``locked`` flag set (Stage) / clear (Unstage) via update().
-  2. ``remove_member`` — drop one project from a run + tenant isolation.
-  3. Reduce-to-one — removal leaving 1 dissolves the run (status=cancelled); the
-     lone project is NOT auto-activated (FE-6174b removed collapse-to-solo).
-  4. Ultralock gate — Unstage (unlock) + member edits refused once the run is
-     staging-complete / running.
-
-The ``_wipe_sequence_runs`` autouse teardown mirrors test_be6165e_lifecycle.py:
-the service COMMITs through the injected session (escaping rollback), so the
-table is wiped after each test (per-worker DB, serial tests -> safe).
-"""
 
 from __future__ import annotations
 
@@ -58,8 +40,6 @@ async def _wipe_sequence_runs(db_manager):
 
 
 def _svc(session: AsyncSession, tenant_key: str | None = None) -> SequenceRunService:
-    """Service wired with a real TenantManager so tenant-scoped reads/writes
-    resolve get_current_tenant for the fixture."""
     tm = TenantManager()
     if tenant_key:
         tm.set_current_tenant(tenant_key)
@@ -79,7 +59,6 @@ async def _create(svc: SequenceRunService, tenant: str, *, project_ids: list[str
 
 
 async def _make_project(session: AsyncSession, tenant: str, *, status: ProjectStatus = ProjectStatus.INACTIVE) -> str:
-    """Create a real product + project row (so activate_project can run)."""
     product = Product(
         id=str(uuid.uuid4()),
         name="Chain Product",
@@ -107,9 +86,6 @@ async def _make_project(session: AsyncSession, tenant: str, *, status: ProjectSt
     return project.id
 
 
-# ---------------------------------------------------------------------------
-# Deliverable 1 — locked flag set / clear
-# ---------------------------------------------------------------------------
 
 
 async def test_create_defaults_locked_false(db_session: AsyncSession) -> None:
@@ -129,13 +105,9 @@ async def test_stage_sets_locked_unstage_clears(db_session: AsyncSession) -> Non
 
     unstaged = await svc.update(run_id=run["id"], tenant_key=tenant, locked=False)
     assert unstaged["locked"] is False, "Unstage must unlock the run (chain intact)"
-    # Chain intact: membership unchanged.
     assert unstaged["project_ids"] == run["project_ids"]
 
 
-# ---------------------------------------------------------------------------
-# Deliverable 2 — member-remove (+ tenant isolation)
-# ---------------------------------------------------------------------------
 
 
 async def test_remove_member_drops_one_project(db_session: AsyncSession) -> None:
@@ -156,11 +128,9 @@ async def test_remove_member_recomputes_current_index(db_session: AsyncSession) 
     svc = _svc(db_session, tenant)
     p1, p2, p3 = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
     run = await _create(svc, tenant, project_ids=[p1, p2, p3])
-    # Advance to the 2nd project (index 1 -> p2 in-flight... use p3 to keep in-flight after removing p1).
-    await svc.update(run_id=run["id"], tenant_key=tenant, current_index=2)  # in-flight = p3
+    await svc.update(run_id=run["id"], tenant_key=tenant, current_index=2)
 
     updated = await svc.remove_member(run_id=run["id"], project_id=p1, tenant_key=tenant)
-    # p3 still in-flight; its new position is index 1.
     assert updated["resolved_order"] == [p2, p3]
     assert updated["current_index"] == 1
 
@@ -187,7 +157,6 @@ async def test_remove_member_tenant_isolation(db_session: AsyncSession) -> None:
     with pytest.raises(ResourceNotFoundError):
         await svc_b.remove_member(run_id=run_a["id"], project_id=p2, tenant_key=tenant_b)
 
-    # Tenant A's run is untouched.
     still = await svc.get(run_id=run_a["id"], tenant_key=tenant_a)
     assert still["project_ids"] == [p1, p2, p3]
 
@@ -200,9 +169,6 @@ async def test_remove_member_rejects_empty_project_id(db_session: AsyncSession) 
         await svc.remove_member(run_id=run["id"], project_id="   ", tenant_key=tenant)
 
 
-# ---------------------------------------------------------------------------
-# Deliverable 3 — reduce-to-one (run dissolved, lone project NOT auto-activated)
-# ---------------------------------------------------------------------------
 
 
 async def test_reduce_to_one_dissolves_run(db_session: AsyncSession) -> None:
@@ -215,14 +181,11 @@ async def test_reduce_to_one_dissolves_run(db_session: AsyncSession) -> None:
     result = await svc.remove_member(run_id=run["id"], project_id=other, tenant_key=tenant)
     assert result["status"] == "cancelled", "removal leaving 1 dissolves the run"
 
-    # Run drops out of the active list.
     active = await svc.list_active(tenant_key=tenant)
     assert run["id"] not in {r["id"] for r in active}
 
 
 async def test_reduce_to_one_does_not_activate_lone_project(db_session: AsyncSession) -> None:
-    """FE-6174b: collapse-to-solo removed. Reducing to one dissolves the run but
-    the lone project's status is left UNCHANGED — never auto-flipped to active."""
     tenant = TenantManager.generate_tenant_key()
     svc = _svc(db_session, tenant)
     lone = await _make_project(db_session, tenant, status=ProjectStatus.INACTIVE)
@@ -232,23 +195,18 @@ async def test_reduce_to_one_does_not_activate_lone_project(db_session: AsyncSes
     result = await svc.remove_member(run_id=run["id"], project_id=other, tenant_key=tenant)
     assert result["status"] == "cancelled"
 
-    # Lone project stays INACTIVE (seed status) — no auto-activate, no implement launch.
     row = await db_session.execute(select(Project).where(Project.id == lone))
     project = row.scalar_one()
     assert project.status == ProjectStatus.INACTIVE, "reduce-to-1 must NOT auto-activate the lone project"
     assert project.implementation_launched_at is None
 
 
-# ---------------------------------------------------------------------------
-# Deliverable 4 — ultralock gate (Unstage + member-edit refused)
-# ---------------------------------------------------------------------------
 
 
 async def test_ultralock_running_refuses_unstage(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
     svc = _svc(db_session, tenant)
     run = await _create(svc, tenant, status="running")
-    # Lock it, then attempt Unstage on a running run.
     await svc.update(run_id=run["id"], tenant_key=tenant, locked=True)
     with pytest.raises(ValidationError):
         await svc.update(run_id=run["id"], tenant_key=tenant, locked=False)
@@ -266,7 +224,6 @@ async def test_ultralock_running_refuses_member_edit(db_session: AsyncSession) -
 async def test_ultralock_staging_complete_member_refuses_edit(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
     svc = _svc(db_session, tenant)
-    # A pending run whose member project reached staging_complete -> ultralocked.
     staged_member = await _make_project(db_session, tenant)
     row = await db_session.execute(select(Project).where(Project.id == staged_member))
     proj = row.scalar_one()
@@ -282,7 +239,6 @@ async def test_ultralock_staging_complete_member_refuses_edit(db_session: AsyncS
 
 
 async def test_editing_tier_allows_unstage_and_remove(db_session: AsyncSession) -> None:
-    """A pending run with no staging_complete member is editable (control case)."""
     tenant = TenantManager.generate_tenant_key()
     svc = _svc(db_session, tenant)
     p1, p2, p3 = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())

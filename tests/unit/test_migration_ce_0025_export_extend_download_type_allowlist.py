@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-5062: ce_0025 download_type allowlist extension migration tests.
-
-Exercises upgrade() / downgrade() against a fake bind so the
-information_schema constraint guard and op.{drop,create}_check_constraint
-behavior can be verified without booting Alembic against a real database.
-"""
 
 from unittest.mock import MagicMock, patch
 
@@ -87,7 +81,6 @@ def test_downgrade_restores_two_value_allowlist():
     ):
         mig.downgrade()
 
-    # Delete + drop + create
     assert drop_c.call_count == 1
     assert create_c.call_count == 1
     _, _, condition = create_c.call_args.args

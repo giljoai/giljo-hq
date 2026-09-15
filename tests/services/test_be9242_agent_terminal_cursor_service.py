@@ -3,31 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9242 -- phantom/lingering "unread messages" accounting.
-
-Root cause #2 (the load-bearing one): no lifecycle hook ever resolved a
-closed/decommissioned agent's outstanding message cursors. A dead agent's
-unread badge lingered forever (nobody can reactivate it to drain the
-cursor), and -- far worse -- a genuinely action-required post addressed to
-that agent had no path forward at all: silently invisible work.
-
-TWO-SIDED regression test (DoD, deliverable #1):
-  (a) a closed agent's dead unread cursor CLEARS on job close (informational
-      posts are auto-acknowledged).
-  (b) a genuine action-required post to a since-closed agent SURFACES to the
-      live orchestrator (forwarded, never silently swallowed).
-
-Also covers the hard-constraint edge case: with NO live orchestrator to
-forward to, the action-required cursor is left un-acked (fails open,
-visibly) rather than being dropped.
-
-Failing-layer: OrchestrationAgentStateService.close_job (the real job-close
-service call, not a mock) -- this is where the BE-9242 hook was wired in.
-
-Parallel-safe: db_session (TransactionalTestContext). No module-level
-mutable state; each test owns its setup. Edition Scope: Both (platform
-internals, not CE/SaaS-gated).
-"""
 
 from __future__ import annotations
 
@@ -55,8 +30,6 @@ def _state_service(session: AsyncSession) -> OrchestrationAgentStateService:
 
 
 async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_proj = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -159,19 +132,6 @@ async def _is_acked(session: AsyncSession, tenant_key: str, message_id: str, age
 async def test_close_job_clears_informational_cursor_and_forwards_action_required(
     db_session: AsyncSession,
 ) -> None:
-    """Two-sided proof for deliverable #1.
-
-    Seeds a LIVE orchestrator + an implementer about to be closed, with one
-    informational unread post and one action-required unread post addressed
-    to the implementer. After finalize_job:
-      (a) the informational post is acknowledged for the dead implementer
-          (its dead cursor is cleared).
-      (b) the action-required post is ALSO acknowledged for the dead
-          implementer (its cursor is resolved) -- but ONLY because a NEW
-          forwarded Message now addresses the live orchestrator, carrying
-          the original content and requiring action from THEM. Work is
-          never silently dropped.
-    """
     tenant = TenantManager.generate_tenant_key()
     project_id = await _seed_project(db_session, tenant)
     orchestrator = await _seed_execution(db_session, tenant, project_id, display_name="orchestrator", status="working")
@@ -196,27 +156,20 @@ async def test_close_job_clears_informational_cursor_and_forwards_action_require
         requires_action=True,
     )
 
-    # Sanity: before close, neither is acked for the implementer.
     assert not await _is_acked(db_session, tenant, informational.id, implementer.agent_id)
     assert not await _is_acked(db_session, tenant, action_required.id, implementer.agent_id)
 
     result = await _state_service(db_session).close_job(job_id=implementer.job_id, tenant_key=tenant)
     assert result["new_status"] == "closed"
 
-    # (a) informational cursor cleared for the now-closed implementer.
     assert await _is_acked(db_session, tenant, informational.id, implementer.agent_id), (
         "an informational unread post must be auto-acked when its recipient closes"
     )
 
-    # (b) action-required cursor also cleared for the dead implementer...
     assert await _is_acked(db_session, tenant, action_required.id, implementer.agent_id), (
         "the dead agent's action-required cursor must resolve once the work has a new live owner"
     )
 
-    # ...but ONLY because it was forwarded to the live orchestrator: a NEW
-    # message now addresses the orchestrator, still requires_action, carrying
-    # the original content, and is NOT yet acked (i.e. it genuinely gates the
-    # orchestrator's own future complete_job).
     forwarded_stmt = (
         select(Message)
         .join(MessageRecipient, Message.id == MessageRecipient.message_id)
@@ -244,17 +197,9 @@ async def test_close_job_clears_informational_cursor_and_forwards_action_require
 async def test_close_job_with_no_live_orchestrator_leaves_action_required_cursor_unresolved(
     db_session: AsyncSession,
 ) -> None:
-    """Hard-constraint edge case: if there is no live orchestrator to forward
-    to, the action-required post must NOT be silently dropped. It stays
-    un-acked (fails open, visibly) rather than being acked into oblivion.
-    """
     tenant = TenantManager.generate_tenant_key()
     project_id = await _seed_project(db_session, tenant)
-    # No orchestrator execution seeded at all -- find_active_orchestrator_in_project
-    # will find nothing live to forward to.
     implementer = await _seed_execution(db_session, tenant, project_id, display_name="implementer", status="complete")
-    # A from_agent is required by the Message model's FK-free from_agent_id column;
-    # reuse the implementer as its own "sender" for this edge-case fixture.
     action_required = await _post(
         db_session,
         tenant,
@@ -277,16 +222,6 @@ async def test_close_job_no_orchestrator_warning_sanitizes_agent_supplied_agent_
     db_session: AsyncSession,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """TSK-9369 -- CodeQL py/log-injection (public alert 349) hardening.
-
-    The "no live orchestrator to forward to" warning
-    (agent_terminal_cursor_service.py) interpolates ``agent_id``, which can
-    originate from agent-supplied input. A value carrying a newline must not
-    be able to forge an extra line in the operator log. Drives the exact
-    no-live-orchestrator path (see the unresolved-cursor test above) with a
-    malicious agent_id and asserts the emitted record renders as ONE line
-    with the newline neutralized.
-    """
     tenant = TenantManager.generate_tenant_key()
     project_id = await _seed_project(db_session, tenant)
     implementer = await _seed_execution(db_session, tenant, project_id, display_name="implementer", status="complete")
@@ -312,8 +247,6 @@ async def test_close_job_no_orchestrator_warning_sanitizes_agent_supplied_agent_
     assert len(rendered) == 1, "expected exactly one no-live-orchestrator warning"
     message = rendered[0]
 
-    # The rendered message must be a single line -- no forged extra line --
-    # and must not contain the raw, unsanitized newline-bearing agent_id.
     assert "\n" not in message
     assert malicious_agent_id not in message
     assert "evilFORGED LINE" in message
@@ -322,26 +255,10 @@ async def test_close_job_no_orchestrator_warning_sanitizes_agent_supplied_agent_
 async def test_close_job_forwards_to_successor_when_two_orchestrators_active_during_handover(
     db_session: AsyncSession,
 ) -> None:
-    """Regression for the FIX-1 crash: an orchestrator HANDOVER window leaves
-    TWO orchestrator executions active at once (predecessor + successor, both
-    waiting/working/blocked -- job_lifecycle_service allows the successor to
-    spawn while the predecessor is still live). BE-9242 wired
-    find_active_orchestrator_in_project onto the finalize_job forward path, so an
-    UNRELATED agent's finalize_job (with one outstanding action-required post)
-    resolves the live orchestrator during that window.
-
-    Before FIX 1 the resolver ran scalar_one_or_none() with no limit(1) and
-    raised sqlalchemy.exc.MultipleResultsFound -- crashing the innocent
-    finalize_job. After FIX 1 it must NOT raise, and must forward to the
-    most-recently-STARTED orchestrator (the successor -- the correct live
-    forward target during a handover).
-    """
     tenant = TenantManager.generate_tenant_key()
     project_id = await _seed_project(db_session, tenant)
 
     now = datetime.now(UTC)
-    # Predecessor started earlier; successor started later. Both still active
-    # (the handover window) -- exactly what makes the old query match two rows.
     predecessor = await _seed_execution(
         db_session,
         tenant,
@@ -370,15 +287,11 @@ async def test_close_job_forwards_to_successor_when_two_orchestrators_active_dur
         requires_action=True,
     )
 
-    # Must NOT raise MultipleResultsFound (the pre-FIX-1 crash).
     result = await _state_service(db_session).close_job(job_id=implementer.job_id, tenant_key=tenant)
     assert result["new_status"] == "closed"
 
-    # The dead implementer's action-required cursor is resolved (forwarded, then acked).
     assert await _is_acked(db_session, tenant, action_required.id, implementer.agent_id)
 
-    # Exactly one forwarded message, and it addresses the SUCCESSOR (most
-    # recently started), never the predecessor.
     forwarded_stmt = (
         select(Message)
         .join(MessageRecipient, Message.id == MessageRecipient.message_id)

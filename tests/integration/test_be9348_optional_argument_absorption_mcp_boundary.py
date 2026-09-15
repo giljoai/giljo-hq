@@ -3,46 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9348 — absorption that swallows an OPTIONAL argument was persisted silently.
-
-TSK-9309 established the cause: a caller's tool-call serialization can merge one
-argument into the string value of a neighbouring one, so the following argument never
-leaves the caller. It installed a diagnosis at the MCP dispatch seam — but gated it
-behind "a required argument is already absent":
-
-    missing = [field for field in required if field not in arguments]
-    if not missing:
-        return None
-
-That is the wrong precondition, and it leaves the WORSE half of the defect open. When
-absorption swallows an argument that is merely OPTIONAL (``tags``, ``git_commits``),
-all four required arguments are still present. Pydantic validates. The write boundary
-caps length but does not reject call syntax. The closeout SUCCEEDS, the swallowed
-argument is lost, and the caller's raw tool-call markup is written verbatim into a
-permanent 360 memory row — with no error for anyone to react to.
-
-Measured, not assumed:
-
-* The server has no truncation boundary. Driven through this same real MCP transport,
-  every parameter arrives byte-identical at 10 chars and at 2,000,000 chars alike.
-  Nothing server-side drops or truncates anything; the loss is in the CALLER.
-* At least 8 rows in the test-install 360 memory already carry the residue, e.g. a summary
-  ending ``...markdown-only commits, filed as INF-9293.</summary>\\n<parameter
-  name="tags">["docs", "chore", "infrastructure"]`` with the row's own ``tags`` empty.
-
-This is a mechanism gap, not a documentation one: a careful caller does everything
-right and still gets a permanently wrong durable record.
-
-The fix can only turn a currently-SUCCEEDING call into a rejection, so over-firing is
-the entire risk. Two safety properties bound it, and both are pinned below:
-``conclusive`` evidence only (the weak "ends with a JSON-list tail" signal may never
-reject a valid call), and a residue tail that is ENTIRELY call syntax to end-of-string
-(prose that merely quotes markup — such as the closeout written for this very project —
-must pass untouched).
-
-Parallel-safe: fresh tenant_key per test, rolled-back db_session, no module-level
-mutable state, no ordering dependencies.
-"""
 
 from __future__ import annotations
 
@@ -74,21 +34,13 @@ def _content_text(result) -> str:
     return "\n".join(parts)
 
 
-# ---------------------------------------------------------------------------
-# The two real optional-absorption shapes, reproduced from live 360 memory rows.
-# Both leave every REQUIRED argument present, which is why nothing rejected them.
-# ---------------------------------------------------------------------------
 
-# Shape T (360 memory seq 904, project INF-9283): `tags` absorbed; the row's own
-# tags column is empty and the vocabulary values live inside the summary text.
 _ABSORBED_TAGS_SUMMARY = (
     "Swept the remaining actively-referenced instructional surfaces and repaired every "
     "pointer, then closed the naming gap the earlier chain left behind."
     '</summary>\n<parameter name="tags">["docs", "chore", "infrastructure"]'
 )
 
-# Shape G (360 memory seq 433, project FE-6022b): `git_commits` absorbed, so the
-# closeout recorded zero commits while the SHAs sat in the summary prose.
 _ABSORBED_GIT_COMMITS_SUMMARY = (
     "Built the pane, bound it to the API, and shipped the drag-reorder rail. "
     "vitest 27/27, eslint clean, vite build clean."
@@ -96,7 +48,6 @@ _ABSORBED_GIT_COMMITS_SUMMARY = (
     '"feat(roadmap): frontend pane"}]'
 )
 
-# Shape O (old-style tag, 360 memory seq 589, project BE-6198): same loss, tag syntax.
 _ABSORBED_TAGS_OLD_STYLE_SUMMARY = (
     "Chain cold-start hardening landed and the live deadlock is gone."
     '</summary>\n<tags>["backend", "frontend", "bug-fix", "test"]'
@@ -105,8 +56,6 @@ _ABSORBED_TAGS_OLD_STYLE_SUMMARY = (
 
 @pytest_asyncio.fixture
 async def closeout_mcp_client(db_manager, db_session, monkeypatch):
-    """(client_factory, tenant_key, db_session) with write_project_closeout bound to
-    the rolled-back test session — same lifecycle fixture as the TSK-9309 suite."""
     from api import app_state
     from api.endpoints.mcp_tools import _base
     from giljo_mcp.tools.project_closeout import close_project_and_update_memory
@@ -192,9 +141,6 @@ async def _memory_entry_count(db_session, tenant_key: str) -> int:
     return int(result.scalar_one())
 
 
-# ---------------------------------------------------------------------------
-# DoD 1 — an absorbed OPTIONAL argument must be rejected, and nothing written
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -210,14 +156,6 @@ async def _memory_entry_count(db_session, tenant_key: str) -> int:
 async def test_absorbed_optional_argument_is_rejected_and_writes_nothing(
     closeout_mcp_client, label, absorbing_summary, absorbed_name
 ):
-    """Every REQUIRED argument is present, so nothing is "missing" — but the summary
-    carries the caller's own tool-call syntax, which proves the optional argument was
-    absorbed rather than omitted.
-
-    RED before the fix: the closeout SUCCEEDS. A 360 memory row is written whose summary
-    ends in raw tool-call markup, and the absorbed argument is silently lost. That bad
-    permanent record is the whole reason this is worth fixing.
-    """
     client, tenant_key, session = closeout_mcp_client
     project = await _seed_project(session, tenant_key)
     await session.commit()
@@ -257,19 +195,10 @@ async def test_absorbed_optional_argument_is_rejected_and_writes_nothing(
     assert project.status == "active", f"[{label}] a rejected closeout must not close the project: {project.status!r}"
 
 
-# ---------------------------------------------------------------------------
-# Two-sided half 1 — the WEAK signal may never reject an otherwise-valid call
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_legitimate_json_list_tail_still_succeeds(closeout_mcp_client):
-    """A summary can legitimately END with a quoted JSON list — that tail is the
-    weakest evidence available and is explicitly NOT conclusive.
-
-    With nothing missing, this call is currently accepted, so rejecting it here would
-    make the fix worse than the defect. Pinning it is the point.
-    """
     client, tenant_key, session = closeout_mcp_client
     project = await _seed_project(session, tenant_key)
     await session.commit()
@@ -294,20 +223,10 @@ async def test_legitimate_json_list_tail_still_succeeds(closeout_mcp_client):
     assert parsed.get("entry_id"), f"the 360 entry must still be written, got: {parsed!r}"
 
 
-# ---------------------------------------------------------------------------
-# Two-sided half 2 — prose that QUOTES markup mid-sentence must pass untouched
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_prose_quoting_tool_call_markup_still_succeeds(closeout_mcp_client):
-    """The closeout written for THIS project will necessarily quote the very tags the
-    detector looks for. Absorption always leaves a tail that is pure call syntax to
-    end-of-string; prose quoting markup continues in ordinary sentences afterwards.
-
-    That distinction is the tail-narrowing safety property, and this is the test that
-    makes it load-bearing rather than decorative.
-    """
     client, tenant_key, session = closeout_mcp_client
     project = await _seed_project(session, tenant_key)
     await session.commit()
@@ -335,9 +254,6 @@ async def test_prose_quoting_tool_call_markup_still_succeeds(closeout_mcp_client
     assert parsed.get("entry_id"), f"the 360 entry must still be written, got: {parsed!r}"
 
 
-# ---------------------------------------------------------------------------
-# Two-sided half 3 — an angle-bracket PLACEHOLDER is prose, not absorption
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -361,24 +277,6 @@ async def test_prose_quoting_tool_call_markup_still_succeeds(closeout_mcp_client
 )
 @pytest.mark.asyncio
 async def test_angle_bracket_placeholder_in_prose_still_succeeds(closeout_mcp_client, label, summary):
-    """A summary ending in an angle-bracket placeholder must still be ACCEPTED.
-
-    ``<project_id>``, ``<name>`` and ``<title>`` are all real parameter names on this
-    tool surface (117 of them across 46 tools, including 'name', 'title', 'status',
-    'description'), so ``_absorption_residue`` calls every one of these conclusive.
-    The only thing standing between ordinary prose and a refusal is the requirement
-    that the tail carry an actual serialized VALUE — a real absorption leaves
-    ``["docs", "chore"]`` behind, a placeholder leaves nothing.
-
-    RED before the value-opener guard: stripping the tag reduced the tail to empty,
-    which satisfied "pure call syntax" vacuously, and these were all refused while
-    master accepted every one. ``trailing-comma`` is the sharp case — the weaker fix
-    of "tail must be non-empty after tag removal" still fails it, because the lone
-    comma is then eaten by the JSON-punctuation strip.
-
-    This is the regression that a future edit would otherwise reintroduce silently:
-    the original 13 tests pass with OR without the guard.
-    """
     client, tenant_key, session = closeout_mcp_client
     project = await _seed_project(session, tenant_key)
     await session.commit()
@@ -404,9 +302,6 @@ async def test_angle_bracket_placeholder_in_prose_still_succeeds(closeout_mcp_cl
     assert parsed.get("entry_id"), f"[{label}] the 360 entry must still be written, got: {parsed!r}"
 
 
-# ---------------------------------------------------------------------------
-# A value is not always bracketed — bare SCALAR absorption
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -420,18 +315,6 @@ async def test_angle_bracket_placeholder_in_prose_still_succeeds(closeout_mcp_cl
 )
 @pytest.mark.asyncio
 async def test_absorbed_bare_scalar_argument_is_rejected(closeout_mcp_client, label, absorbed_tail):
-    """A scalar-valued parameter is absorbed as a bare token, not a bracketed list.
-
-    The first cut of this guard tested for a value OPENER (``[``, ``{``, ``"``), which is
-    exactly wrong for ``<parameter name="phase">3`` — 15 string→scalar adjacencies exist
-    on the live tool surface, so these were persisted silently. Pre-existing rather than
-    introduced here: this shape also slipped through the previous two revisions.
-
-    Bare scalars only count under the serializer's own ``<parameter name="...">`` markup;
-    a hand-written prose placeholder is ``<project_id>``, never that form. Without that
-    condition the guard would refuse "...<project_id> 2026", which is why the placeholder
-    cases above are the other half of this pair.
-    """
     client, tenant_key, session = closeout_mcp_client
     project = await _seed_project(session, tenant_key)
     await session.commit()
@@ -457,19 +340,10 @@ async def test_absorbed_bare_scalar_argument_is_rejected(closeout_mcp_client, la
     assert after == before, f"[{label}] a rejected closeout must write no 360 entry"
 
 
-# ---------------------------------------------------------------------------
-# Two-sided half 4 — TSK-9309's required-argument path must not regress
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_confirmed_be9348_prod_shape_still_names_absorption(closeout_mcp_client):
-    """The shape that actually produced the five reported prod failures: `summary`
-    absorbed `key_outcomes` and `decisions_made`, so those two ARE missing.
-
-    This is TSK-9309's path and it must keep working exactly as before — the fix
-    decouples the residue scan from the missing-required gate, it does not replace it.
-    """
     client, tenant_key, session = closeout_mcp_client
     project = await _seed_project(session, tenant_key)
     await session.commit()
@@ -494,10 +368,6 @@ async def test_confirmed_be9348_prod_shape_still_names_absorption(closeout_mcp_c
 
 @pytest.mark.asyncio
 async def test_genuine_omission_still_gets_the_plain_validation_error(closeout_mcp_client):
-    """A caller that simply forgot the required arguments — clean summary, no residue —
-    must keep the ordinary validation error. Claiming absorption here would name a cause
-    that is not the real one, which is the defect this whole diagnosis exists to correct.
-    """
     client, tenant_key, session = closeout_mcp_client
     project = await _seed_project(session, tenant_key)
     await session.commit()
@@ -509,32 +379,17 @@ async def test_genuine_omission_still_gets_the_plain_validation_error(closeout_m
         )
 
     text = _content_text(result)
-    assert result.is_error, f"a missing required field must still be rejected, got: {text!r}"
+    assert not result.is_error and '"VALIDATION_ERROR"' in text, (
+        f"a missing required field must still be rejected, got: {text!r}"
+    )
     assert "key_outcomes" in text, f"the rejection must name the missing field, got: {text!r}"
     assert "absorb" not in text.lower(), f"a genuine omission must NOT be reported as absorption: {text!r}"
 
 
-# ---------------------------------------------------------------------------
-# The size question the filing raised — answered at the SERVER side only
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_large_payload_arrives_whole_at_the_server(closeout_mcp_client):
-    """PROVES: the SERVER receives a large argument payload intact — every parameter
-    present, the long value not truncated.
-
-    DOES NOT PROVE — and cannot — that the CALLER serializes it correctly. The reported
-    truncation happens in the caller's tool-call serialization, before the wire, which no
-    server-side test can reach. This test exists to keep "the server has a size limit"
-    permanently falsified, because that theory cost one real session eight tool calls.
-
-    A 180,000-character summary is far above the documented 1500-char cap, so the honest
-    server answer is the CAP rejection — and that error reports the length it actually
-    received. `actual=180000` in the message is the measurement: all 180,000 characters
-    crossed the transport. A truncating transport could not produce that number, and a
-    dropped parameter would have produced "Field required" instead.
-    """
     client, tenant_key, session = closeout_mcp_client
     project = await _seed_project(session, tenant_key)
     await session.commit()

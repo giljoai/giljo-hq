@@ -46,8 +46,6 @@ function hexToRgb(hex) {
 }
 
 function taxonomyStyle(project) {
-  // A converted-from-task project resolves to TSK — render it in the purple
-  // accent (FE-6049e). Non-TSK rows keep their own color / muted fallback.
   const color = isReservedTaskAlias(project.taxonomy_alias)
     ? TSK_TYPE_COLOR
     : project.project_type_color || TEXT_MUTED_MATERIAL

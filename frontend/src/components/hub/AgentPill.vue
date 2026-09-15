@@ -1,15 +1,3 @@
-<!--
-  AgentPill.vue — FE-9365e (extracted during the acceptance sweep)
-
-  One agent's presence: role badge + harness + status dot. No name — the badge is the
-  identity, the full name lives in the title attribute, and it is shown in full in the
-  two places it is actually read (the composer's To dropdown, the message author line).
-
-  Extracted from ThreadCard because the handoff requires the thread header's pills to be
-  IDENTICAL to the card's. Two hand-maintained copies of "identical" drift; one component
-  used by both cannot. The acceptance sweep found the header had no pills at all, which
-  is exactly the gap a shared component closes for good.
--->
 <template>
   <span class="agent-pill smooth-border" :title="pillTitle">
     <span class="agent-pill__badge" :style="badgeStyle">{{ initials }}</span>
@@ -28,8 +16,6 @@ const props = defineProps({
   participant: { type: Object, required: true },
 })
 
-// The harness family, model suffix stripped: `OpenCode · Qwen` -> `OpenCode`. The
-// model changes per session, so keeping it makes one agent look like two.
 const harness = computed(() => {
   const h = props.participant.harness
   if (!h || h === 'generic') return 'Generic Harness'

@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-6120 — missing build assets must 404, not fall through to index.html.
-
-Edition Scope: Both.
-
-The single-port SPA fallback used to serve index.html (text/html) for ANY
-non-API 404, including a missing /assets/<hash>.js. After a deploy, a stale tab
-requesting an old (now-removed) chunk got index.html with a 200/HTML body, which
-a CDN then cached and the browser refused to execute as a JS module — the
-stale-lazy-chunk failure. The fix returns a clean 404 for missing /assets/* so
-the FE detection is unambiguous and the CDN stops caching HTML-as-asset.
-
-Tested through the real `_install_spa_fallback` handler (the layer the bug lived
-in) via a TestClient over a temp dist — no DB, no full app standup.
-"""
 
 from __future__ import annotations
 

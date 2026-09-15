@@ -1,5 +1,3 @@
-// See docs/adr/ADR-002-setup-driven-mode-source-of-truth.md
-// Guards must read mode from setupState.mode (setup store), not configService.getGiljoMode().
 // @vite-ignore dynamic imports are banned — use import.meta.glob instead.
 
 import { createRouter, createWebHistory } from 'vue-router'
@@ -8,9 +6,6 @@ import configService from '@/services/configService'
 import { createAuthGuard } from '@/router/authGuard'
 import { isChunkLoadError, maybeReloadForChunkError } from '@/utils/chunkReload'
 
-// Route definitions - views will be implemented after analyzer results
-// Exported so the route table (e.g. legacy-redirect aliases) can be unit-tested
-// without instantiating the router or its auth guard. See tests/unit/router/.
 // eslint-disable-next-line giljo-internal/no-orphaned-exports -- consumed by tests/
 export const routes = [
   {
@@ -20,9 +15,9 @@ export const routes = [
     meta: {
       layout: 'auth',
       title: 'Login',
-      requiresAuth: false, // Public route, no auth required
-      requiresSetup: false, // Skip setup check for this route
-      requiresPasswordChange: false, // Skip password change check for this route
+      requiresAuth: false,
+      requiresSetup: false,
+      requiresPasswordChange: false,
     },
   },
   {
@@ -32,9 +27,9 @@ export const routes = [
     meta: {
       layout: 'auth',
       title: 'Authorize Application',
-      requiresAuth: false, // Page handles its own auth
-      requiresSetup: false, // Skip setup check for this route
-      requiresPasswordChange: false, // Skip password change check for this route
+      requiresAuth: false,
+      requiresSetup: false,
+      requiresPasswordChange: false,
     },
   },
   {
@@ -44,8 +39,8 @@ export const routes = [
     meta: {
       layout: 'auth',
       title: 'Create Administrator Account',
-      requiresAuth: false, // Public route - fresh install only
-      requiresSetup: false, // Skip setup check for this route
+      requiresAuth: false,
+      requiresSetup: false,
     },
   },
   {
@@ -55,9 +50,9 @@ export const routes = [
     meta: {
       layout: 'auth',
       title: 'Complete Account Setup',
-      requiresAuth: true, // Requires authentication
-      requiresSetup: false, // Skip setup check for this route
-      requiresPasswordChange: false, // Skip password change check (this IS the password change page)
+      requiresAuth: true,
+      requiresSetup: false,
+      requiresPasswordChange: false,
     },
   },
   {
@@ -115,9 +110,6 @@ export const routes = [
     },
   },
   {
-    // FE-5042: searchable 360 Memory browser. Lazy-loaded; registered
-    // statically here (before createRouter) so ADR-005 holds. Sits with the
-    // Projects cluster — memory is the product's cumulative project history.
     path: '/memory',
     name: 'Memory',
     component: () => import('@/views/MemoryBrowserView.vue'),
@@ -139,13 +131,6 @@ export const routes = [
     },
   },
   {
-    // FE-9525d: the sectioned Jobs viewport -- reached when several projects
-    // in the viewed product are in flight at once (single in-flight project
-    // still goes straight to /projects/:projectId, unchanged). NOT `/jobs` --
-    // that bare path is a pre-existing legacy-redirect alias to
-    // /launch?via=jobs (jobsRedirect.spec.js pins it); this route is reached
-    // by NAME (router.push({ name: 'JobsViewport' })), never by literal path,
-    // so the two never collide.
     path: '/jobs-overview',
     name: 'JobsViewport',
     component: () => import('@/views/JobsViewportView.vue'),
@@ -176,8 +161,6 @@ export const routes = [
     },
   },
   {
-    // FE-6022b: AI-driven Roadmapping pane. Lazy-loaded; registered statically
-    // here (before createRouter) so ADR-005 holds.
     path: '/roadmap',
     name: 'Roadmap',
     component: () => import('@/views/RoadmapView.vue'),
@@ -189,8 +172,6 @@ export const routes = [
     },
   },
   {
-    // FE-6054e: Agent Message Hub — BBS-style thread board with composer.
-    // Registered statically before createRouter so ADR-005 holds.
     path: '/hub',
     name: 'Hub',
     component: () => import('@/views/HubView.vue'),
@@ -204,7 +185,7 @@ export const routes = [
   {
     path: '/tools',
     name: 'Tools',
-    alias: '/settings', // back-compat: old bookmarks, deep links, and external docs keep resolving
+    alias: '/settings',
     component: () => import('@/views/ToolsView.vue'),
     meta: {
       layout: 'default',
@@ -233,9 +214,6 @@ export const routes = [
       icon: 'mdi-cog-outline',
       requiresAuth: true,
       requiresAdmin: true,
-      // IMP-5042: the admin panel is a CE-always surface (self-hosted operator
-      // config) and, in SaaS, only meaningful once a Team tier ships. SaaS Solo
-      // has no admin panel — the auth guard redirects non-CE users away.
       ceOrTeamOnly: true,
     },
   },
@@ -249,17 +227,11 @@ export const routes = [
       icon: 'mdi-account-multiple',
       requiresAuth: true,
       requiresAdmin: true,
-      // IMP-5042: admin user-management is CE-always / SaaS-Team-only; the auth
-      // guard redirects SaaS (non-Team) users away.
       ceOrTeamOnly: true,
     },
   },
-  // Account shell with Profile / Billing / Danger sub-tabs (FE-0023).
   {
     path: '/account',
-    // Named so BE-1005's saas/routes.js can nest a SaaS-only "Connected
-    // Accounts" tab under this shell via the two-arg router.addRoute('AccountShell', ...)
-    // form (ADR-004/005) without CE ever seeing the child route or its component.
     name: 'AccountShell',
     component: () => import('@/views/account/AccountShell.vue'),
     meta: {
@@ -270,9 +242,6 @@ export const routes = [
     children: [
       {
         path: '',
-        // Named to silence Vue Router's "empty-path child with no name"
-        // warning now that the parent ('AccountShell') has a name too
-        // (added for BE-1005's nested Connected-Accounts route).
         name: 'AccountIndex',
         redirect: { name: 'AccountProfile' },
       },
@@ -296,7 +265,6 @@ export const routes = [
       },
     ],
   },
-  // Organization Routes (Handover 0424d)
   {
     path: '/organizations/:orgId/settings',
     name: 'OrganizationSettings',
@@ -344,15 +312,8 @@ export const routes = [
       requiresPasswordChange: false,
     },
   },
-  // Legacy deep-link redirects: the Identity tab moved out of /tools to /admin/settings
-  // during the FE-0023 IA reshuffle. Old bookmarks and external links to /tools/identity
-  // (or its /settings alias) used to 404; redirect them to where the tab actually lives.
   { path: '/tools/identity', redirect: '/admin/settings' },
   { path: '/settings/identity', redirect: '/admin/settings' },
-  // The sidebar "Jobs" link routes to /launch?via=jobs (LaunchRedirectView resolves
-  // the active project, else shows the empty state); there is no bare /jobs route.
-  // A stray bookmark or stale tab on /jobs used to fall to the NotFound catch-all;
-  // redirect it to the same destination the nav uses so it resolves instead of 404ing.
   { path: '/jobs', redirect: '/launch?via=jobs' },
   {
     path: '/:pathMatch(.*)*',
@@ -370,26 +331,9 @@ const router = createRouter({
   routes,
 })
 
-// SaaS routes are registered by frontend/src/saas/routes.js
-// which calls router.addRoute() after config loads.
-// CE router never imports from saas/ -- Deletion Test holds.
 
-// Navigation guard (Handover 0034 - simplified fresh install detection;
-// hardened 2026-04-24 to close the route-guard-bypass leak observed on
-// mcp.example.com where typing /home in the address bar after logout rendered
-// the protected view. The full guard now lives in ./authGuard.js so it can
-// be unit-tested in isolation -- see tests/unit/router/authGuard.spec.js).
-//
-// Option A: every navigation to a protected route re-verifies the session
-// by calling /api/auth/me via userStore.checkAuth(). On auth failure the
-// store is reset and the user is redirected to /login.
 router.beforeEach(createAuthGuard({ setupService, configService }))
 
-// FE-6120: a lazy route component import can reject when this tab is running a
-// stale build (the route chunk's hashed filename is gone after a deploy). Detect
-// that specific failure and trigger a one-time guarded reload so the fresh
-// index.html + new chunk hashes load and the intended route mounts. Non-chunk
-// errors propagate unchanged (re-thrown) so real bugs are not swallowed.
 router.onError((error, to) => {
   if (isChunkLoadError(error)) {
     maybeReloadForChunkError(to && to.fullPath)

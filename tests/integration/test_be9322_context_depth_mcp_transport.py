@@ -3,30 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""MCP-boundary regression test for BE-9322 DoD item 3.
-
-Exercises the `tech_stack` category on `get_context` through the @mcp.tool
-wrapper in api/endpoints/mcp_sdk_server.py -- NOT the underlying service
-directly. Per CLAUDE.md "Regression test at the failing layer" rule: depth
-resolves at the get_context MCP boundary (fetch_context.py dispatches
-depth_config through to the category tool kwargs), so a service-layer-only
-test would miss a wrapper regression the same way BE-5042 shipped broken
-with only service coverage.
-
-(The companion `architecture` category's `depth_architecture` control was
-found dead by the same QA harness but is deliberately held unwired -- its
-stored default is "overview", and honoring it would silently shrink every
-existing user's context. Not covered here.)
-
-Same pattern as test_fetch_context_todos_mcp_transport.py: `get_tech_stack`
-opens its own DB session via db_manager, which can't see rows seeded on the
-rollback-isolated transactional test connection, so the category tool
-function is patched at its CATEGORY_TOOLS binding and asserted on the kwargs
-it was invoked with. That is exactly the boundary this test guards: does an
-explicit depth_config override survive the full
-get_context -> ToolAccessor.fetch_context -> internal fetch_context ->
-CATEGORY_TOOLS dispatch chain and arrive as `sections=`.
-"""
 
 from __future__ import annotations
 
@@ -74,10 +50,6 @@ class _TenantSwitch:
 
 @pytest_asyncio.fixture
 async def depth_mcp_client(db_manager, db_session, primary_tenant_key, monkeypatch):
-    """Yield (new_client, tenant_switch) for in-memory FastMCP transport.
-
-    Same pattern as test_fetch_context_todos_mcp_transport.py.
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from giljo_mcp.tools.tool_accessor import ToolAccessor
@@ -118,10 +90,6 @@ async def depth_mcp_client(db_manager, db_session, primary_tenant_key, monkeypat
 async def test_tech_stack_depth_config_forwarded_as_sections_through_mcp_boundary(
     depth_mcp_client, primary_tenant_key, monkeypatch
 ):
-    """An explicit depth_config override on the get_context tool call must
-    reach get_tech_stack as sections=... through the full MCP transport --
-    this is the exact BE-9322 failure mode: the dispatcher never built this
-    kwarg at all, so any caller-supplied override was silently discarded."""
     new_client, _switch = depth_mcp_client
 
     captured_kwargs: dict = {}
@@ -166,10 +134,6 @@ async def test_tech_stack_depth_config_forwarded_as_sections_through_mcp_boundar
 async def test_architecture_depth_config_still_not_forwarded_through_mcp_boundary(
     depth_mcp_client, primary_tenant_key, monkeypatch
 ):
-    """The `architecture` category's depth_config override must NOT reach
-    get_architecture -- BE-9322 deliberately holds this control unwired (see
-    module docstring). This guards against a future change accidentally
-    wiring it back in without the operator decision it needs."""
     new_client, _switch = depth_mcp_client
 
     captured_kwargs: dict = {}
@@ -209,20 +173,11 @@ async def test_architecture_depth_config_still_not_forwarded_through_mcp_boundar
     assert "architecture" in payload.get("categories_returned", [])
 
 
-# ---------------------------------------------------------------------------
-# BE-9322 (second pass): the remaining depth controls, and Finding 3.
-#
-# The first pass covered only tech_stack. These close the other four controls
-# at the same boundary, plus the unknown-key rejection. Every one asserts on
-# the kwarg name the dispatcher must build -- the exact thing that was missing
-# for tech_stack and made its setting dead.
-# ---------------------------------------------------------------------------
 
 
 async def _capture_category_kwargs(
     depth_mcp_client, monkeypatch, *, category: str, depth_value, product_id: str
 ) -> dict:
-    """Call get_context for one category and return the kwargs its tool received."""
     import sys
 
     new_client, _switch = depth_mcp_client
@@ -248,7 +203,6 @@ async def _capture_category_kwargs(
 
 
 async def test_git_history_depth_forwarded_as_commits(depth_mcp_client, monkeypatch):
-    """depth_config={'git_history': N} must arrive as commits=N."""
     captured = await _capture_category_kwargs(
         depth_mcp_client,
         monkeypatch,
@@ -260,7 +214,6 @@ async def test_git_history_depth_forwarded_as_commits(depth_mcp_client, monkeypa
 
 
 async def test_vision_documents_depth_forwarded_as_chunking(depth_mcp_client, monkeypatch):
-    """depth_config={'vision_documents': 'full'} must arrive as chunking='full'."""
     captured = await _capture_category_kwargs(
         depth_mcp_client,
         monkeypatch,
@@ -272,7 +225,6 @@ async def test_vision_documents_depth_forwarded_as_chunking(depth_mcp_client, mo
 
 
 async def test_memory_360_depth_forwarded_as_last_n_projects(depth_mcp_client, monkeypatch):
-    """depth_config={'memory_360': N} must arrive as last_n_projects=N."""
     captured = await _capture_category_kwargs(
         depth_mcp_client,
         monkeypatch,
@@ -284,7 +236,6 @@ async def test_memory_360_depth_forwarded_as_last_n_projects(depth_mcp_client, m
 
 
 async def test_agent_templates_depth_forwarded_as_detail(depth_mcp_client, monkeypatch):
-    """depth_config={'agent_templates': 'full'} must arrive as detail='full'."""
     captured = await _capture_category_kwargs(
         depth_mcp_client,
         monkeypatch,
@@ -296,14 +247,6 @@ async def test_agent_templates_depth_forwarded_as_detail(depth_mcp_client, monke
 
 
 async def test_db_style_depth_key_is_rejected_not_silently_defaulted(depth_mcp_client):
-    """BE-9322 Finding 3: a DB column name as a depth_config key must be REJECTED.
-
-    Before the fix this returned 200 and silently applied the default window,
-    while metadata.depth_config_applied truthfully reported that default -- so
-    nothing in the response named the dropped key. The error must name the
-    offending key AND enumerate the accepted vocabulary, so the agent can
-    correct itself without a second round-trip.
-    """
     new_client, _switch = depth_mcp_client
 
     async with new_client() as session:
@@ -326,7 +269,6 @@ async def test_db_style_depth_key_is_rejected_not_silently_defaulted(depth_mcp_c
 
 
 async def test_valid_category_depth_key_still_accepted(depth_mcp_client, monkeypatch):
-    """Guard against over-correcting: the CATEGORY spelling must still work."""
     captured = await _capture_category_kwargs(
         depth_mcp_client,
         monkeypatch,

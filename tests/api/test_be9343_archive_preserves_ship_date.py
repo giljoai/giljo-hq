@@ -3,35 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9343 audit F3 — the Archive press must not overwrite a real ship date.
-
-``archive_project`` passed ``completed_at=datetime.now(UTC)`` UNCONDITIONALLY. Because
-BE-9343's service-layer stamp is deliberately additive — it steps aside whenever the
-caller supplies the field — that unconditional value won every time, and it destroyed
-the ship date on the ordinary solo flow:
-
-    T1  an agent runs write_project_closeout  -> completed_at = T1 (the real ship date)
-    T2  the user presses Archive              -> completed_at = T2 (the press time)
-
-That is precisely the "archiving a project changed its completion date" defect BE-9343
-exists to remove, and it sat against ``ce_0088``, which deliberately prefers the exact
-``closeout_executed_at`` over a drifted timestamp. The migration and the live archive
-path embodied opposite philosophies.
-
-The fix is subtraction: the archive step stops passing the field and lets the service's
-``is None`` guard decide. So the *composition of the update dict* is the failing layer,
-and that is what these tests pin — a test on the stored value cannot see a field the
-caller chose to send.
-
-BE-9384: that composition moved out of the endpoint and into
-``ProjectService.archive_project`` so the MCP completion path runs the same code
-instead of a private copy. These tests moved with it — they now drive the real
-``ArchiveMixin`` against a recording double, which is strictly closer to the logic
-than going through the endpoint was. The endpoint keeps one test of its own, pinning
-that it still delegates rather than growing a second copy of the sequence.
-
-Edition Scope: Both (the archive lifecycle now serves REST and MCP alike).
-"""
 
 from __future__ import annotations
 
@@ -50,7 +21,6 @@ pytestmark = pytest.mark.asyncio
 
 
 class _RecordingArchiveService(ArchiveMixin):
-    """The real ``archive_project`` over doubles that record every call it makes."""
 
     def __init__(self, *, early_termination: bool = False, status: str = "active") -> None:
         self.update_calls: list[dict] = []
@@ -81,10 +51,6 @@ class _RecordingArchiveService(ArchiveMixin):
         return []
 
     async def _missing_closeout_blockers(self, project_id: str, tenant_key: str):  # noqa: ARG002
-        # BE-9539: every call in this file passes force=True, which still logs a
-        # warning when a closeout is missing (but never raises) -- return None
-        # (closeout present) so this orthogonal fake never needs a real session/
-        # repo/ProjectCloseoutService to answer that unrelated question.
         return None
 
 
@@ -92,17 +58,8 @@ _USER = SimpleNamespace(username="patrik", tenant_key="tk")
 
 
 async def test_archive_does_not_send_completed_at() -> None:
-    """THE regression. Sending the field at all is what destroyed the ship date.
-
-    Asserted on the update dict rather than on a stored value, because the service's
-    stamp is additive by design: any value the archive step sends wins, so "did it
-    send one" IS the defect.
-    """
     service = _RecordingArchiveService()
 
-    # BE-9539: force=True skips the (orthogonal) closeout-required gate this
-    # recording double doesn't stub -- these tests pin the completed_at/deactivate/
-    # agent-closure composition, not gate behaviour.
     await service.archive_project(project_id="p-be9343", tenant_key="tk", force=True)
 
     assert len(service.update_calls) == 1, "archive must issue exactly one update"
@@ -115,23 +72,14 @@ async def test_archive_does_not_send_completed_at() -> None:
 
 
 async def test_archive_of_an_early_terminated_project_also_sends_no_date() -> None:
-    """The early-termination branch picks a different status and must not regress either."""
     service = _RecordingArchiveService(early_termination=True)
 
-    # BE-9539: force=True skips the (orthogonal) closeout-required gate this
-    # recording double doesn't stub -- these tests pin the completed_at/deactivate/
-    # agent-closure composition, not gate behaviour.
     await service.archive_project(project_id="p-be9343", tenant_key="tk", force=True)
 
     assert service.update_calls == [{"status": ProjectStatus.TERMINATED}]
 
 
 async def test_archive_still_deactivates_a_running_project() -> None:
-    """Guard the surrounding behaviour the fix must not disturb.
-
-    Removing an argument is the kind of edit that quietly takes a neighbouring branch
-    with it, so the deactivate-skip gate is pinned in the same file.
-    """
     service = _RecordingArchiveService(status="active")
 
     result = await service.archive_project(project_id="p-be9343", tenant_key="tk", force=True)
@@ -141,7 +89,6 @@ async def test_archive_still_deactivates_a_running_project() -> None:
 
 
 async def test_archive_skips_deactivation_for_an_already_terminal_project() -> None:
-    """The other side of that gate — a completed project must not be deactivated again."""
     service = _RecordingArchiveService(status=ProjectStatus.COMPLETED)
 
     result = await service.archive_project(project_id="p-be9343", tenant_key="tk", force=True)
@@ -151,23 +98,14 @@ async def test_archive_skips_deactivation_for_an_already_terminal_project() -> N
 
 
 async def test_archive_closes_completed_agents() -> None:
-    """The fourth step. BE-9384: skipping it silently is the defect that created that project."""
     service = _RecordingArchiveService()
 
-    # BE-9539: force=True skips the (orthogonal) closeout-required gate this
-    # recording double doesn't stub -- these tests pin the completed_at/deactivate/
-    # agent-closure composition, not gate behaviour.
     await service.archive_project(project_id="p-be9343", tenant_key="tk", force=True)
 
     assert service.closed_for == ["p-be9343"], "archive must always run the agent-closure step"
 
 
 async def test_the_endpoint_delegates_instead_of_keeping_its_own_copy() -> None:
-    """BE-9384: the REST endpoint must call the shared lifecycle, not re-implement it.
-
-    A second inline copy is exactly how the MCP path came to diverge in the first
-    place, so "the endpoint owns no sequence of its own" is worth pinning.
-    """
     calls: list[dict] = []
 
     class _DelegatingService:
@@ -208,6 +146,4 @@ async def test_the_endpoint_delegates_instead_of_keeping_its_own_copy() -> None:
 
     await archive_endpoint(project_id="p-be9343", current_user=_USER, project_service=_DelegatingService())
 
-    # BE-9539: the endpoint is the dashboard's deliberate one-click abandon path,
-    # so it always forces past the closeout-required gate.
     assert calls == [{"project_id": "p-be9343", "tenant_key": "tk", "force": True}]

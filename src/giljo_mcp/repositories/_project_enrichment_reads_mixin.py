@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""ProjectRepository enrichment & summary reads (BE-6005 split).
-
-Cohesive read-only query group extracted from ``ProjectRepository`` to keep that
-module under the 800-line guardrail: per-project and batched (grouped-IN) agent
-job/execution reads, 360-memory and message reads, agent status-count /
-last-activity aggregation, and product / vision-doc lookups. Inherited by
-``ProjectRepository`` so the public repository API is unchanged. All methods
-enforce tenant_key isolation; the session is passed in by the caller. Behavior
-is byte-identical to the pre-split single-class repository.
-"""
 
 from __future__ import annotations
 
@@ -30,11 +20,7 @@ from giljo_mcp.models.tasks import Message
 
 
 class ProjectEnrichmentReadsMixin:
-    """Enrichment, batched-IN, summary, and vision reads. Inherited by ProjectRepository."""
 
-    # ============================================================================
-    # Read Operations — ProjectQueryService
-    # ============================================================================
 
     async def get_active_projects(
         self,
@@ -42,17 +28,6 @@ class ProjectEnrichmentReadsMixin:
         tenant_key: str,
         product_id: str | None = None,
     ) -> list[Project]:
-        """Get every currently active project for a tenant, optionally scoped to one product.
-
-        BE-9525a product-scoped this read; BE-9525b (ruling 5 amended) dropped
-        ``idx_project_single_active_per_product``, so more than one project can
-        legitimately be ACTIVE in the same product now. A ``.limit(1)`` +
-        ``scalar_one_or_none()`` here would be the same arbitrary-but-stable
-        wrong-answer class BE-9521 fixed for a different read (FE-9524 hit it
-        again on ``ProductRepository.get_active_product``) -- there is no
-        single-row guarantee left to lean on, so this returns every match,
-        deterministically ordered, instead of picking one.
-        """
         conditions = [Project.tenant_key == tenant_key, Project.status == ProjectStatus.ACTIVE]
         if product_id is not None:
             conditions.append(Project.product_id == product_id)
@@ -71,7 +46,6 @@ class ProjectEnrichmentReadsMixin:
         tenant_key: str,
         project_id: str,
     ) -> int:
-        """Count agent jobs for a project."""
         stmt = select(func.count(AgentJob.job_id)).where(
             AgentJob.project_id == project_id, AgentJob.tenant_key == tenant_key
         )
@@ -84,7 +58,6 @@ class ProjectEnrichmentReadsMixin:
         tenant_key: str,
         project_id: str,
     ) -> int:
-        """Count messages for a project."""
         stmt = select(func.count(Message.id)).where(Message.project_id == project_id, Message.tenant_key == tenant_key)
         result = await session.execute(stmt)
         return result.scalar() or 0
@@ -95,7 +68,6 @@ class ProjectEnrichmentReadsMixin:
         tenant_key: str,
         project_id: str,
     ) -> list:
-        """Get agent job type counts for a project."""
         query = (
             select(AgentJob.job_type, func.count(AgentJob.job_id).label("count"))
             .where(AgentJob.project_id == project_id, AgentJob.tenant_key == tenant_key)
@@ -110,7 +82,6 @@ class ProjectEnrichmentReadsMixin:
         tenant_key: str,
         project_id: str,
     ) -> list:
-        """Get detailed agent job/execution pairs for a project."""
         query = (
             select(AgentJob, AgentExecution)
             .join(AgentExecution, AgentJob.job_id == AgentExecution.job_id)
@@ -131,13 +102,6 @@ class ProjectEnrichmentReadsMixin:
         project_id: str,
         limit: int | None = None,
     ) -> list[ProductMemoryEntry]:
-        """Get 360 memory entries for a project.
-
-        When ``limit`` is set, returns the most recent ``limit`` entries
-        (highest sequence first), then re-orders ascending so callers see a
-        chronological view of the trailing window. When unset, returns the
-        full chronological history.
-        """
         if limit is not None:
             query = (
                 select(ProductMemoryEntry)
@@ -171,14 +135,6 @@ class ProjectEnrichmentReadsMixin:
         project_id: str,
         limit: int | None = None,
     ) -> list[Message]:
-        """Get messages for a project ordered by creation time.
-
-        BE-6071 F6c: when ``limit`` is set, returns the most recent ``limit``
-        messages (created_at DESC LIMIT pushed to SQL) then re-orders ascending
-        so callers see a chronological view of the trailing window — mirrors
-        ``get_memory_entries_for_project``. When unset, returns the full
-        chronological history (byte-compatible with the prior behavior).
-        """
         if limit is not None:
             query = (
                 select(Message)
@@ -205,13 +161,6 @@ class ProjectEnrichmentReadsMixin:
         result = await session.execute(query)
         return list(result.scalars().all())
 
-    # ============================================================================
-    # BE-6071 F6b: batched (grouped-IN) enrichment reads. Each runs ONE query
-    # over the listed project_ids and groups by project_id in Python (the
-    # established BE-6066 pattern), replacing the per-project N+1 in
-    # _build_mcp_project_list. No window functions — the per-project memory cap
-    # is applied in Python by the query service.
-    # ============================================================================
 
     async def get_agent_job_type_summaries_for_projects(
         self,
@@ -219,7 +168,6 @@ class ProjectEnrichmentReadsMixin:
         tenant_key: str,
         project_ids: list[str],
     ) -> dict[str, list]:
-        """Grouped agent job-type counts for many projects: {project_id: [rows]}."""
         if not project_ids:
             return {}
         query = (
@@ -239,7 +187,6 @@ class ProjectEnrichmentReadsMixin:
         tenant_key: str,
         project_ids: list[str],
     ) -> dict[str, list]:
-        """Grouped agent job/execution pairs for many projects: {project_id: [(job, exec)]}."""
         if not project_ids:
             return {}
         query = (
@@ -264,11 +211,6 @@ class ProjectEnrichmentReadsMixin:
         tenant_key: str,
         project_ids: list[str],
     ) -> dict[str, list[ProductMemoryEntry]]:
-        """Grouped 360 memory entries for many projects: {project_id: [entries asc by sequence]}.
-
-        Returns the full per-project history (ascending by sequence); the caller
-        applies any trailing-window cap in Python.
-        """
         if not project_ids:
             return {}
         query = (
@@ -285,9 +227,6 @@ class ProjectEnrichmentReadsMixin:
             grouped.setdefault(entry.project_id, []).append(entry)
         return grouped
 
-    # ============================================================================
-    # Read Operations — ProjectSummaryService
-    # ============================================================================
 
     async def get_agent_status_counts(
         self,
@@ -295,7 +234,6 @@ class ProjectEnrichmentReadsMixin:
         tenant_key: str,
         project_id: str,
     ) -> dict:
-        """Aggregate agent execution status counts for a project."""
         job_counts_result = await session.execute(
             select(AgentExecution.status, func.count(AgentExecution.agent_id).label("count"))
             .join(AgentJob, AgentExecution.job_id == AgentJob.job_id)
@@ -315,7 +253,6 @@ class ProjectEnrichmentReadsMixin:
         tenant_key: str,
         project_id: str,
     ) -> datetime | None:
-        """Get the most recent activity timestamp for a project's agents."""
         last_activity_result = await session.execute(
             select(
                 func.greatest(
@@ -342,7 +279,6 @@ class ProjectEnrichmentReadsMixin:
         tenant_key: str,
         product_id: str,
     ):
-        """Get a product by ID with tenant isolation."""
         from giljo_mcp.models.products import Product
 
         result = await session.execute(
@@ -355,9 +291,6 @@ class ProjectEnrichmentReadsMixin:
         )
         return result.scalar_one_or_none()
 
-    # ============================================================================
-    # Read Operations — ConsolidatedVisionService
-    # ============================================================================
 
     async def get_product_with_vision_docs(
         self,
@@ -365,7 +298,6 @@ class ProjectEnrichmentReadsMixin:
         tenant_key: str,
         product_id: str,
     ):
-        """Get a product with eagerly loaded vision documents."""
         from giljo_mcp.models.products import Product
 
         result = await session.execute(

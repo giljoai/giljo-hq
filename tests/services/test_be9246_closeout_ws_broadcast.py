@@ -3,47 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9246 — closeout agent-status transitions must broadcast agent:status_changed.
-
-The bug: two closeout transitions land in the DB but emit no per-agent WebSocket
-event, so dashboard agent tiles go stale until a manual refresh:
-
-1. Force-decommission (``ProjectCloseoutService.decommission_project_agents``,
-   driven by ``tools/project_closeout._handle_force_close`` under
-   ``write_project_closeout(force=true)``): active agents -> 'decommissioned'.
-2. Complete -> closed (``ProjectCloseoutService.close_completed_agents``, driven
-   by ``close_completed_agents_with_commit`` from the archive REST endpoint):
-   'complete' agents -> 'closed'.
-
-Fix contract: both service helpers now additionally return one
-``AgentStatusChangeEvent`` per transitioned agent (old_status captured BEFORE the
-status overwrite), and the owning caller broadcasts ``agent:status_changed`` (the
-SAME shape ``OrchestrationAgentStateService._broadcast_completion`` / ``finalize_job``
-already emit) exactly once per agent, strictly POST-COMMIT.
-
-Tests 1-2 exercise ``close_completed_agents_with_commit`` (owns its own commit
-even under an injected test_session, so "post-commit, never mid-flush" is
-directly provable via commit-then-emit ordering).
-
-Tests 3-4 exercise the decommission-side data contract at the service/tool seam
-(``decommission_project_agents`` / ``_handle_force_close``) — the two-hop
-build-then-broadcast split the design mandates so a rollback can never announce
-a status change that didn't happen.
-
-Test 5 drives the real force-close entrypoint end-to-end
-(``close_project_and_update_memory``) with a session it OWNS (the normal
-MCP-tool call shape: ``session=None``), proving the broadcast fires once the
-outer ``async with`` has actually committed. This intentionally uses a real
-committed ``db_manager`` session (not the rollback-based ``db_session``
-TransactionalTestContext fixture): ``close_project_and_update_memory`` only
-broadcasts when it owns the session, and every other seam in this suite is
-covered by tests 1-4, which are TransactionalTestContext-safe.
-
-DB-touching: tests 1-4 use ``db_session`` (TransactionalTestContext, rolled
-back). Test 5 commits through a real ``db_manager`` session and cleans up via
-``purge_tenant_rows``. No module-level mutable state, no ordering dependencies,
-parallel-safe (pytest-xdist -n auto). Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -77,7 +36,6 @@ def _mock_ws() -> MagicMock:
 
 
 def _status_changed_events(mock_ws: MagicMock) -> list[dict[str, Any]]:
-    """Every agent:status_changed payload the mock's broadcast_to_tenant received."""
     events: list[dict[str, Any]] = []
     for call in mock_ws.broadcast_to_tenant.await_args_list:
         kwargs = call.kwargs
@@ -87,13 +45,6 @@ def _status_changed_events(mock_ws: MagicMock) -> list[dict[str, Any]]:
 
 
 async def _seed_project(session: AsyncSession, tenant_key: str, *, product_id: str | None = None) -> str:
-    """Minimal project row (FK target for AgentJob.project_id).
-
-    BE-9437: ``product_id`` is NOT NULL, so an unsupplied one is no longer left
-    NULL -- a product is seeded for this project alone. Its own, because the row
-    is ACTIVE and ``idx_project_single_active_per_product`` permits one active
-    project per product, and several tests here seed more than one.
-    """
     if product_id is None:
         product = Product(
             id=str(uuid.uuid4()),
@@ -128,7 +79,6 @@ async def _seed_execution(
     status: str,
     display_name: str = "implementer",
 ) -> tuple[str, str]:
-    """Seed one AgentJob + AgentExecution; returns (job_id, agent_id)."""
     job_id = str(uuid.uuid4())
     agent_id = str(uuid.uuid4())
     job = AgentJob(
@@ -157,13 +107,9 @@ async def _seed_execution(
     return job_id, agent_id
 
 
-# ---------------------------------------------------------------------------
-# 1-2: close_completed_agents_with_commit (complete -> closed)
-# ---------------------------------------------------------------------------
 
 
 async def test_close_completed_agents_with_commit_broadcasts_post_commit(db_session: AsyncSession) -> None:
-    """The fail-first case: today this never emits anything at all."""
     tenant_key = TenantManager.generate_tenant_key()
     product = Product(
         id=str(uuid.uuid4()),
@@ -196,18 +142,12 @@ async def test_close_completed_agents_with_commit_broadcasts_post_commit(db_sess
     assert event["old_status"] == "complete"
     assert event["status"] == "closed"
     assert event["agent_display_name"] == "implementer"
-    # BE-9518: product_id must ride the payload so a per-tab WS router can filter on it.
     assert event["product_id"] == product.id
 
 
 async def test_close_completed_agents_with_commit_never_emits_before_commit(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Mid-flush guard: if the commit itself fails, no broadcast may have fired.
-
-    Proves the ordering is commit-THEN-emit, not emit-regardless-of-commit --
-    the DoD's "no emit occurs if the transaction rolls back."
-    """
     tenant_key = TenantManager.generate_tenant_key()
     project_id = await _seed_project(db_session, tenant_key)
     await _seed_execution(db_session, tenant_key, project_id, status="complete")
@@ -228,9 +168,6 @@ async def test_close_completed_agents_with_commit_never_emits_before_commit(
     mock_ws.broadcast_to_tenant.assert_not_awaited()
 
 
-# ---------------------------------------------------------------------------
-# 3-4: decommission_project_agents / _handle_force_close data contract
-# ---------------------------------------------------------------------------
 
 
 async def test_decommission_project_agents_captures_old_status_before_overwrite(db_session: AsyncSession) -> None:
@@ -257,9 +194,6 @@ async def test_decommission_project_agents_captures_old_status_before_overwrite(
 
 
 async def test_handle_force_close_returns_events_for_caller_to_broadcast(db_session: AsyncSession) -> None:
-    """The tools-layer seam: _handle_force_close must hand the caller events to
-    broadcast POST-COMMIT rather than emitting (or dropping) anything itself.
-    """
     tenant_key = TenantManager.generate_tenant_key()
     project_id = await _seed_project(db_session, tenant_key)
     job_id, agent_id = await _seed_execution(db_session, tenant_key, project_id, status="blocked")
@@ -283,8 +217,6 @@ async def test_handle_force_close_returns_events_for_caller_to_broadcast(db_sess
 
 
 async def test_handle_force_close_returns_empty_when_not_forced(db_session: AsyncSession) -> None:
-    """force=False (or no blockers) must return an empty list, never None --
-    the caller unconditionally iterates the return value."""
     tenant_key = TenantManager.generate_tenant_key()
     project_id = await _seed_project(db_session, tenant_key)
     closeout_service = ProjectCloseoutService(db_manager=None, tenant_manager=TenantManager())
@@ -301,14 +233,9 @@ async def test_handle_force_close_returns_empty_when_not_forced(db_session: Asyn
     assert events == []
 
 
-# ---------------------------------------------------------------------------
-# 6: extracted builder (closeout_ws_broadcast.build_agent_status_change_events)
-# ---------------------------------------------------------------------------
 
 
 async def test_build_agent_status_change_events_captures_pre_transition_status() -> None:
-    """The extracted builder records each execution's CURRENT status as old_status
-    (BE-9246 contract: build BEFORE the overwrite). Pure, no DB, order-preserving."""
     execs = [
         SimpleNamespace(
             job_id=f"job-{i}",
@@ -328,22 +255,10 @@ async def test_build_agent_status_change_events_captures_pre_transition_status()
     assert events[0].agent_display_name == "implementer"
 
 
-# ---------------------------------------------------------------------------
-# 5: close_project_and_update_memory(force=True) end-to-end, real commit
-# ---------------------------------------------------------------------------
 
 
 async def test_force_close_broadcasts_status_changed_post_commit(db_manager) -> None:
-    """The real MCP-tool call shape: session=None, so this call OWNS its
-    session and genuinely commits before returning -- the exact case the
-    design contract requires the broadcast be gated on.
-    """
     tenant_key = TenantManager.generate_tenant_key()
-    # close_project_and_update_memory, when it owns its session (session=None,
-    # the real MCP-tool shape), opens it via db_manager.get_session_async()
-    # WITHOUT a tenant_key kwarg -- the tenant guard then falls back to the
-    # TenantManager contextvar, which the real MCP boundary sets upstream of
-    # this call. Mirror that here.
     TenantManager.set_current_tenant(tenant_key)
     try:
         async with db_manager.get_session_async(tenant_key=tenant_key) as session:

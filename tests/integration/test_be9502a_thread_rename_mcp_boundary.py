@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9502a — thread rename reachable from the harness via post_to_thread.
-
-Annex Section D#5: PATCH /threads/{id} (rename) was UI-only; agents had no MCP
-door to correct a Hub thread's title. Extends the existing ``post_to_thread``
-tool (the roster lock: no new tool) with an optional ``rename_to`` that routes
-through ``CommThreadService.update_thread`` -- the SAME owning writer the
-dashboard's PATCH uses. A rename on a project-bound thread is REFUSED there
-(that thread takes its name from the project); this file pins that the refusal
-propagates as a clean tool error with NOTHING posted, not a partial success.
-
-Tested over the ACTUAL FastMCP transport (BE-5042 precedent), mirroring the
-fixture in test_be9197_post_with_baton_mcp_boundary.py.
-"""
 
 from __future__ import annotations
 
@@ -132,7 +119,6 @@ async def test_rename_to_lands_with_the_post(rename_mcp_client):
 
 
 async def test_rename_omitted_leaves_the_subject_untouched(rename_mcp_client):
-    """Byte-identical for existing callers: a plain post must not touch the subject."""
     new_client, _tenant_key, session = rename_mcp_client
     tid = await _create_thread(new_client, "untouched subject")
 
@@ -148,9 +134,6 @@ async def test_rename_omitted_leaves_the_subject_untouched(rename_mcp_client):
 
 
 async def test_rename_on_a_project_bound_thread_is_refused_and_posts_nothing(rename_mcp_client):
-    """The refusal (project-bound thread keeps the project's name) must be a clean
-    error, and -- because it is applied BEFORE the post -- the message must not land
-    either. A partial success would be worse than a clean rejection."""
     from giljo_mcp.models.products import Product
     from giljo_mcp.models.projects import Project
 

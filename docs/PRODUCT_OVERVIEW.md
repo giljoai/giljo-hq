@@ -10,7 +10,7 @@ Giljo HQ, a GiljoAI product, is a context engineering platform for AI-assisted s
 
 | User | What they get |
 |---|---|
-| Solo developer using Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, OpenCode, or any MCP client | Multi-agent workflows without manual prompt engineering |
+| Solo developer using Claude Code, Codex CLI, OpenCode, or any MCP client | Multi-agent workflows without manual prompt engineering |
 | Developer building production software across many sessions | Persistent product context and 360 Memory that carry across projects |
 | Anyone coordinating a crew of agents | A shared product definition, a ranked roadmap, task boards, and a message hub with an audit trail |
 
@@ -30,7 +30,7 @@ Giljo HQ sits at the intersection of product thinking and development. Whether y
 
 ## What's Inside
 
-**Your tools, your subscription.** GiljoAI never touches your AI credits. Connect Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, OpenCode, or any generic MCP client — one at a time or several at once. GiljoAI is a passive MCP server: your tool connects over HTTP, reads context and coordination data, and does all the reasoning and coding itself.
+**Your tools, your subscription.** GiljoAI never touches your AI credits. Connect Claude Code, Codex CLI, OpenCode, or any generic MCP client — one at a time or several at once. GiljoAI is a passive MCP server: your tool connects over HTTP, reads context and coordination data, and does all the reasoning and coding itself.
 
 **Products with vision-document context.** A Product holds everything your agents need to know: description, tech stack, architecture, testing strategy, and more. Fill it in by hand, upload a vision document, or point an agent at your codebase and let AI populate the fields for you.
 
@@ -44,7 +44,7 @@ Giljo HQ sits at the intersection of product thinking and development. Whether y
 
 **360 Memory.** Every completed project writes a durable memory entry — what was built, key decisions, patterns found — and the next project inherits it. A searchable Memory browser lets you full-text search your whole history.
 
-**Agent templates.** You get 16 active agent slots: 15 custom roles you define plus 1 reserved orchestrator. Edit each one's role and expertise, then sync them to your tool. A `/giljo` skill installed alongside them lets you create, update, and look up projects and tasks without leaving your session.
+**Agent templates.** You get 16 active agent slots: 15 custom roles you define plus 1 reserved orchestrator. Edit each one's role and expertise; every agent is handed its own profile by the server the moment it starts work, so an edit applies to the very next agent you launch with nothing to install or sync. A `/giljo` skill lets you create, update, and look up projects and tasks without leaving your session.
 
 **A guided start.** An animated welcome tour introduces the platform after setup and offers four ways to create your first product (see Getting Started).
 
@@ -62,7 +62,7 @@ Giljo HQ sits at the intersection of product thinking and development. Whether y
 
 ## How to Get Started
 
-Once you are signed in, the in-app **Setup Wizard** walks you through four steps: choose your tools, connect each one, install your skills and agent templates, and launch. An animated welcome tour then opens and helps you create your first product. The **Getting Started** chapter walks through all of it.
+Once you are signed in, the in-app **Setup Wizard** walks you through four steps: choose your tools, connect each one, install your skills, and launch. An animated welcome tour then opens and helps you create your first product. The **Getting Started** chapter walks through all of it.
 
 > [!CE]
 > Self-hosting? Install Giljo HQ first by following [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md), then sign in and run the Setup Wizard.

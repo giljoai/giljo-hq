@@ -3,36 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9055 — chain completion self-heals from the REAL project statuses.
-
-Whether a chain conductor may ever finish was decided SOLELY by the run's
-denormalized ``project_statuses`` JSON copy — and every write to that copy is
-best-effort with errors swallowed (three writer sites). One swallowed write
-used to mean a chain that could NEVER complete, recoverable only by cancelling
-a successful chain. This exact denormalized-copy drift class shipped bugs twice
-before (pre-BE-6181, pre-BE-6198).
-
-The fix (``heal_chain_member_statuses``, reusing the BE-6200 read-boundary
-rule): when the copy says "not finished", the completion guards re-check the
-member's REAL ``projects`` row and repair the copy before refusing.
-
-Regression tests at the failing layer (the service-layer completion guards):
-
-1. test_guard_heals_stale_copy_and_allows_completion — corrupt the copy while
-   the real projects are completed; the C1 guard heals and does NOT raise, and
-   the repaired copy is persisted.
-2. test_purge_heals_stale_copy_and_completes_run — same corruption; the run
-   purge (chain finish line) heals and purges.
-3. test_guard_still_blocks_genuinely_incomplete_chain — the load-bearing happy
-   path: a member whose real row is still active keeps blocking completion.
-4. test_soft_deleted_member_heals_to_terminated — a soft-deleted member row
-   counts as terminal (BE-6200 rule) and unblocks the chain.
-
-Seeding mirrors tests/services/test_be6198_closeout_chain_sync.py (the real
-closeout path + minted conductor). DB-touching: db_session fixture
-(TransactionalTestContext). No module-level mutable state. No ordering
-dependencies. Parallel-safe. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -54,8 +24,6 @@ from giljo_mcp.tools.project_closeout import close_project_and_update_memory
 
 pytestmark = pytest.mark.asyncio
 
-# See test_be6198_closeout_chain_sync.py: the closeout input gate needs a
-# non-None db_manager, but the injected-session path never dereferences it.
 _DB_MANAGER_SENTINEL = object()
 
 
@@ -146,7 +114,6 @@ async def _conductor_job_and_exec(session: AsyncSession, tenant_key: str, conduc
 
 
 async def _corrupt_copy(session: AsyncSession, run: dict, tenant_key: str, statuses: dict) -> None:
-    """Simulate a swallowed best-effort write: force the copy stale."""
     await _run_svc(session).update(
         run_id=run["id"],
         tenant_key=tenant_key,
@@ -154,9 +121,6 @@ async def _corrupt_copy(session: AsyncSession, run: dict, tenant_key: str, statu
     )
 
 
-# ---------------------------------------------------------------------------
-# 1. THE regression: stale copy + really-completed projects -> guard heals
-# ---------------------------------------------------------------------------
 
 
 async def test_guard_heals_stale_copy_and_allows_completion(db_session: AsyncSession) -> None:
@@ -164,26 +128,21 @@ async def test_guard_heals_stale_copy_and_allows_completion(db_session: AsyncSes
     run = await _seed_two_project_run(db_session, tenant)
     p1, p2 = run["_project_ids"]
 
-    # Both members REALLY finish via the real closeout path...
     for pid in (p1, p2):
         await _close_member(db_session, pid, tenant)
 
-    # ...but the best-effort copy write for p2 was "swallowed" (stale copy).
     await _corrupt_copy(db_session, run, tenant, {p1: "completed", p2: "implementing"})
 
-    # The C1 guard must self-heal from the real project rows and NOT raise.
     job, execution = await _conductor_job_and_exec(db_session, tenant, run["conductor_agent_id"])
     await _completion_svc(db_session)._guard_conductor_chain_incomplete(
         db_session, job, execution, tenant, str(job.job_id)
     )
 
-    # And the repaired copy is persisted through the owning service.
     refetched = await _run_svc(db_session).get(run_id=run["id"], tenant_key=tenant)
     assert refetched["project_statuses"][p2] == "completed", "the guard must repair the stale copy, not just bypass it"
 
 
 async def test_guard_heals_missing_copy_entry(db_session: AsyncSession) -> None:
-    """A member missing from the copy entirely (never written) also heals."""
     tenant = TenantManager.generate_tenant_key()
     run = await _seed_two_project_run(db_session, tenant)
     p1, p2 = run["_project_ids"]
@@ -191,7 +150,7 @@ async def test_guard_heals_missing_copy_entry(db_session: AsyncSession) -> None:
     for pid in (p1, p2):
         await _close_member(db_session, pid, tenant)
 
-    await _corrupt_copy(db_session, run, tenant, {p1: "completed"})  # p2 entry gone
+    await _corrupt_copy(db_session, run, tenant, {p1: "completed"})
 
     job, execution = await _conductor_job_and_exec(db_session, tenant, run["conductor_agent_id"])
     await _completion_svc(db_session)._guard_conductor_chain_incomplete(
@@ -202,36 +161,25 @@ async def test_guard_heals_missing_copy_entry(db_session: AsyncSession) -> None:
 async def test_guard_proceeds_when_persisting_healed_copy_fails(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Persisting the repaired copy is best-effort: if sequence_run_service.update
-    raises, the guard STILL proceeds off the in-memory healed value and does NOT
-    block a really-finished chain (BE-9055 — a second swallowed write must not
-    strand a successful chain either)."""
     tenant = TenantManager.generate_tenant_key()
     run = await _seed_two_project_run(db_session, tenant)
     p1, p2 = run["_project_ids"]
 
-    # Both members REALLY finish, but p2's best-effort copy write was swallowed.
     for pid in (p1, p2):
         await _close_member(db_session, pid, tenant)
     await _corrupt_copy(db_session, run, tenant, {p1: "completed", p2: "implementing"})
 
-    # Now force the persist of the REPAIRED copy to fail as well.
     async def _boom(self, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
         raise RuntimeError("persist of healed statuses failed")
 
     monkeypatch.setattr(SequenceRunService, "update", _boom)
 
-    # The guard heals from the real project rows in memory and must NOT raise
-    # despite the failed persist — the healed in-memory copy drives the decision.
     job, execution = await _conductor_job_and_exec(db_session, tenant, run["conductor_agent_id"])
     await _completion_svc(db_session)._guard_conductor_chain_incomplete(
         db_session, job, execution, tenant, str(job.job_id)
     )
 
 
-# ---------------------------------------------------------------------------
-# 2. the finish line: stale copy no longer blocks the run purge
-# ---------------------------------------------------------------------------
 
 
 async def test_purge_heals_stale_copy_and_completes_run(db_session: AsyncSession) -> None:
@@ -257,10 +205,6 @@ async def test_purge_heals_stale_copy_and_completes_run(db_session: AsyncSession
         await _run_svc(db_session).get(run_id=run["id"], tenant_key=tenant)
 
 
-# ---------------------------------------------------------------------------
-# 3. TWO-SIDED: a genuinely incomplete chain still blocks (the happy path
-#    of the guard is the load-bearing half)
-# ---------------------------------------------------------------------------
 
 
 async def test_guard_still_blocks_genuinely_incomplete_chain(db_session: AsyncSession) -> None:
@@ -268,7 +212,6 @@ async def test_guard_still_blocks_genuinely_incomplete_chain(db_session: AsyncSe
     run = await _seed_two_project_run(db_session, tenant)
     p1, _p2 = run["_project_ids"]
 
-    # Only the FIRST member finishes; p2's row is really still active.
     await _close_member(db_session, p1, tenant)
 
     job, execution = await _conductor_job_and_exec(db_session, tenant, run["conductor_agent_id"])
@@ -288,9 +231,6 @@ async def test_guard_still_blocks_genuinely_incomplete_chain(db_session: AsyncSe
     assert purged is False, "an in-flight chain must not be purged by the self-heal"
 
 
-# ---------------------------------------------------------------------------
-# 4. BE-6200 rule: a soft-deleted member row counts as terminal (terminated)
-# ---------------------------------------------------------------------------
 
 
 async def test_soft_deleted_member_heals_to_terminated(db_session: AsyncSession) -> None:
@@ -300,7 +240,6 @@ async def test_soft_deleted_member_heals_to_terminated(db_session: AsyncSession)
 
     await _close_member(db_session, p1, tenant)
 
-    # p2 is soft-deleted out from under the chain (user deleted the project).
     p2_row = (
         await db_session.execute(select(Project).where(Project.id == p2, Project.tenant_key == tenant))
     ).scalar_one()

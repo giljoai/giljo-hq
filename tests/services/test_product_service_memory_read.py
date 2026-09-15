@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tests for ProductService reading from product_memory_entries table.
-
-Verifies that services use ProductMemoryRepository for reads instead of JSONB.
-Handover 0390b Phase 3.
-"""
 
 from datetime import UTC, datetime
 
@@ -22,11 +16,6 @@ from giljo_mcp.services.product_service import ProductService
 
 @pytest.mark.asyncio
 async def test_product_memory_entries_available_via_repository(db_session, test_tenant_key, test_product):
-    """
-    Test that memory entries can be fetched via repository and match expected structure.
-    This validates the repository interface for service layer integration.
-    """
-    # Arrange - Create memory entries
     repo = ProductMemoryRepository()
 
     entries_data = [
@@ -63,7 +52,6 @@ async def test_product_memory_entries_available_via_repository(db_session, test_
 
     await db_session.commit()
 
-    # Act - Fetch via repository
     entries = await repo.get_entries_by_product(
         session=db_session,
         product_id=test_product.id,
@@ -71,16 +59,13 @@ async def test_product_memory_entries_available_via_repository(db_session, test_
         include_deleted=False,
     )
 
-    # Assert - Verify structure
     assert len(entries) == 2
-    assert entries[0].sequence == 2  # Descending order
+    assert entries[0].sequence == 2
     assert entries[1].sequence == 1
 
-    # Verify to_dict() returns compatible structure
-    # Note: to_dict() returns "type" (not "entry_type") for backwards compatibility with JSONB format
     entry_dict = entries[0].to_dict()
     assert "sequence" in entry_dict
-    assert "type" in entry_dict  # JSONB format compatibility
+    assert "type" in entry_dict
     assert "project_name" in entry_dict
     assert "summary" in entry_dict
     assert "key_outcomes" in entry_dict
@@ -89,11 +74,6 @@ async def test_product_memory_entries_available_via_repository(db_session, test_
 
 @pytest.mark.asyncio
 async def test_get_entries_for_context_returns_lightweight_dicts(db_session, test_tenant_key, test_product):
-    """
-    Test that get_entries_for_context returns lightweight dicts suitable for context injection.
-    This is the primary interface services will use for orchestrator context.
-    """
-    # Arrange
     repo = ProductMemoryRepository()
 
     for i in range(3):
@@ -114,7 +94,6 @@ async def test_get_entries_for_context_returns_lightweight_dicts(db_session, tes
 
     await db_session.commit()
 
-    # Act - Use context method
     context_entries = await repo.get_entries_for_context(
         session=db_session,
         product_id=test_product.id,
@@ -122,28 +101,21 @@ async def test_get_entries_for_context_returns_lightweight_dicts(db_session, tes
         limit=5,
     )
 
-    # Assert
     assert len(context_entries) == 3
     assert all(isinstance(e, dict) for e in context_entries)
-    assert context_entries[0]["sequence"] == 3  # Descending order
+    assert context_entries[0]["sequence"] == 3
 
 
 @pytest.mark.asyncio
 async def test_repository_respects_include_deleted_flag(db_session, test_tenant_key, test_product):
-    """
-    Test that repository correctly filters deleted entries.
-    """
-    # Arrange
     repo = ProductMemoryRepository()
 
-    # Create 2 entries, one with project_id, one without
-    # We use an entry WITHOUT project_id first, then mark it as deleted by setting the flag directly
     entry1 = await repo.create_entry(
         session=db_session,
         params=MemoryEntryCreateParams(
             tenant_key=test_tenant_key,
             product_id=test_product.id,
-            project_id=None,  # No project_id to avoid FK constraint
+            project_id=None,
             sequence=1,
             entry_type="project_closeout",
             source="test",
@@ -167,12 +139,10 @@ async def test_repository_respects_include_deleted_flag(db_session, test_tenant_
 
     await db_session.commit()
 
-    # Mark entry1 as deleted directly (no project_id-based deletion since we don't have a project)
     entry1.deleted_by_user = True
     entry1.user_deleted_at = datetime.now(tz=UTC)
     await db_session.commit()
 
-    # Act - Fetch without deleted
     active_entries = await repo.get_entries_by_product(
         session=db_session,
         product_id=test_product.id,
@@ -180,7 +150,6 @@ async def test_repository_respects_include_deleted_flag(db_session, test_tenant_
         include_deleted=False,
     )
 
-    # Act - Fetch with deleted
     all_entries = await repo.get_entries_by_product(
         session=db_session,
         product_id=test_product.id,
@@ -188,26 +157,18 @@ async def test_repository_respects_include_deleted_flag(db_session, test_tenant_
         include_deleted=True,
     )
 
-    # Assert
     assert len(active_entries) == 1
     assert active_entries[0].sequence == 2
 
     assert len(all_entries) == 2
 
 
-# ============================================================================
-# BE-9261: product_memory seed key renamed github -> git_integration
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_legacy_github_key_still_loads_via_response_builder(
     db_manager, db_session, test_tenant_key, test_product
 ):
-    """A row written before BE-9261 only carries "github". The real reader
-    (_build_product_memory_response, called from ProductService.update_product's
-    websocket-event path) must still surface that data under git_integration --
-    this is the must-leave regression the seed-key rename is coordinated against."""
     test_product.product_memory = {
         "github": {"enabled": True, "commit_limit": 25},
         "context": {},
@@ -224,8 +185,6 @@ async def test_legacy_github_key_still_loads_via_response_builder(
 async def test_git_integration_key_takes_precedence_over_legacy_github(
     db_manager, db_session, test_tenant_key, test_product
 ):
-    """If a row somehow carries both keys (mid-migration), the canonical
-    git_integration key wins over the legacy github fallback."""
     test_product.product_memory = {
         "git_integration": {"enabled": True},
         "github": {"enabled": False, "stale": True},
@@ -241,8 +200,6 @@ async def test_git_integration_key_takes_precedence_over_legacy_github(
 
 @pytest.mark.asyncio
 async def test_new_product_seeds_git_integration_key(db_manager, db_session, test_tenant_key):
-    """New product creation paths write the renamed git_integration seed key,
-    not the legacy github key."""
     service = ProductService(db_manager, tenant_key=test_tenant_key, test_session=db_session)
 
     product = await service.create_product(name="BE-9261 seed check")

@@ -3,27 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6189 — conductor closeout flips run.status="completed".
-
-The alpha failure: a chain conductor self-completed (C1 guard let its FINAL
-complete_job through once all projects were terminal) but NOTHING flipped
-run.status to "completed" — so the run sat "running" forever and the chain never
-reached a terminal run state. This unit closes that gap with
-``complete_chain_run_if_finished``, and removes the dead TERMINATE_CHAIN prose
-from the C1 guard message.
-
-Tests target the failing layer directly (the run-status flip + the guard):
-
-1. test_sub_orch_closeout_marks_member_completed — BE-6181 writer (precondition).
-2a. test_c1_guard_passes_when_all_terminal — the guard no-ops once all terminal.
-2b. test_complete_chain_run_if_finished_flips_run — THE ALPHA REGRESSION CORE.
-3. test_complete_chain_run_if_finished_noop_when_incomplete — no premature flip.
-4. test_complete_chain_run_if_finished_solo_noop — no run => clean no-op.
-5. test_c1_guard_message_no_terminate_chain — dead prose gone, back-out present.
-
-DB-touching: db_session fixture (TransactionalTestContext). No module-level
-mutable state. No ordering dependencies. Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -50,14 +29,9 @@ from tests.helpers.taxonomy_seeds import next_series_number
 pytestmark = pytest.mark.asyncio
 
 
-# ---------------------------------------------------------------------------
-# Helpers (mirrored from test_be6186_conductor_staging_builder.py)
-# ---------------------------------------------------------------------------
 
 
 async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -74,8 +48,6 @@ async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
         status="active",
         tenant_key=tenant_key,
         product_id=_owning_product_project.id,
-        # BE-9429: uq_project_taxonomy_active is NULLS NOT DISTINCT, so these
-        # NULL-product/NULL-type rows collide unless the serial differs.
         series_number=next_series_number(),
         execution_mode="claude_code_cli",
         created_at=datetime.now(UTC),
@@ -91,7 +63,6 @@ def _run_svc(session: AsyncSession) -> SequenceRunService:
 
 
 async def _seed_run_with_conductor(session: AsyncSession, tenant_key: str) -> dict:
-    """Create a 2-project run + its minted conductor; return the serialized run."""
     p1 = await _seed_project(session, tenant_key)
     p2 = await _seed_project(session, tenant_key)
     run = await _run_svc(session).create(
@@ -127,9 +98,6 @@ def _completion_svc(session: AsyncSession) -> JobCompletionService:
     return JobCompletionService(db_manager=None, tenant_manager=TenantManager(), test_session=session)
 
 
-# ---------------------------------------------------------------------------
-# 1. BE-6181 precondition: sub-orch closeout marks its member completed
-# ---------------------------------------------------------------------------
 
 
 async def test_sub_orch_closeout_marks_member_completed(db_session: AsyncSession) -> None:
@@ -152,9 +120,6 @@ async def test_sub_orch_closeout_marks_member_completed(db_session: AsyncSession
     assert refetched["project_statuses"][p0] == "completed"
 
 
-# ---------------------------------------------------------------------------
-# 2a. C1 guard no-ops once every project is terminal
-# ---------------------------------------------------------------------------
 
 
 async def test_c1_guard_passes_when_all_terminal(db_session: AsyncSession) -> None:
@@ -174,15 +139,11 @@ async def test_c1_guard_passes_when_all_terminal(db_session: AsyncSession) -> No
 
     job, execution = await _conductor_job_and_exec(db_session, tenant, run["conductor_agent_id"])
 
-    # No raise — the conductor may legitimately self-complete now.
     await _completion_svc(db_session)._guard_conductor_chain_incomplete(
         db_session, job, execution, tenant, str(job.job_id)
     )
 
 
-# ---------------------------------------------------------------------------
-# 2b. THE ALPHA REGRESSION CORE: the finished run is PURGED (Option A)
-# ---------------------------------------------------------------------------
 
 
 async def test_complete_chain_run_if_finished_purges_run(db_session: AsyncSession) -> None:
@@ -210,14 +171,10 @@ async def test_complete_chain_run_if_finished_purges_run(db_session: AsyncSessio
     )
     assert purged is True
 
-    # Option A: the finished run is DELETED, not flipped to "completed".
     with pytest.raises(ResourceNotFoundError):
         await _run_svc(db_session).get(run_id=run["id"], tenant_key=tenant)
 
 
-# ---------------------------------------------------------------------------
-# 3. no premature flip while a project is still in flight
-# ---------------------------------------------------------------------------
 
 
 async def test_complete_chain_run_if_finished_noop_when_incomplete(db_session: AsyncSession) -> None:
@@ -255,9 +212,6 @@ async def test_complete_chain_run_if_finished_noop_when_incomplete(db_session: A
     assert final["status"] != "completed", "run must NOT flip while a project is in flight"
 
 
-# ---------------------------------------------------------------------------
-# 4. solo / no-run: clean no-op, no exception
-# ---------------------------------------------------------------------------
 
 
 async def test_complete_chain_run_if_finished_solo_noop(db_session: AsyncSession) -> None:
@@ -272,9 +226,6 @@ async def test_complete_chain_run_if_finished_solo_noop(db_session: AsyncSession
     assert flipped is False
 
 
-# ---------------------------------------------------------------------------
-# 5. C1 guard message: TERMINATE_CHAIN prose is gone, back-out present
-# ---------------------------------------------------------------------------
 
 
 async def test_c1_guard_message_no_terminate_chain(db_session: AsyncSession) -> None:
@@ -282,7 +233,6 @@ async def test_c1_guard_message_no_terminate_chain(db_session: AsyncSession) -> 
     run = await _seed_run_with_conductor(db_session, tenant)
     p1, _p2 = run["_project_ids"]
 
-    # Only p1 terminal — at least one project remains in flight.
     await mark_chain_member_status(
         db_manager=None,
         tenant_manager=TenantManager(),

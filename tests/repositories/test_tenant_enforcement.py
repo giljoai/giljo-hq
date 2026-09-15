@@ -222,12 +222,6 @@ async def test_product_repository_find_expired_deleted_scans_all_tenants_without
         if previous_tenant:
             TenantManager.set_current_tenant(previous_tenant)
 
-    # BE-9373: find_expired_deleted scans ALL tenants by design, and the reused
-    # test DB accumulates soft-deleted residue from other suites/runs, so a
-    # set-equality over everything returned fails on any dirty DB (it did,
-    # repeatably, even solo). Scope to the rows THIS test seeded (same pattern
-    # as the eager-load test above): both expired tenants returned without
-    # tenant context, the fresh row excluded by the cutoff.
     returned_seeded_ids = {
         product.id for product in products if product.id in {product_a.id, product_b.id, product_fresh.id}
     }

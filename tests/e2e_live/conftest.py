@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Gating + shared fixtures for the live black-box E2E suite.
-
-Edition Scope: Both. These tests exercise standard contracts (TLS, health,
-RFC 9728 OAuth metadata, security headers, WebSocket upgrade) that hold in CE
-and SaaS alike — only the *target* host differs.
-
-The ENTIRE suite is SKIPPED unless ``GILJO_E2E_LIVE=1`` (it makes real network
-calls to a deployed host). The target base URL is read from
-``GILJO_E2E_BASE_URL`` — there is intentionally NO committed default host:
-operator topology (hostnames/IPs) must never live in the repo, and this path is
-export-bound to public CE. See ``README.md``.
-"""
 
 from __future__ import annotations
 
@@ -29,7 +17,6 @@ import pytest
 E2E_LIVE_ENV = "GILJO_E2E_LIVE"
 E2E_BASE_URL_ENV = "GILJO_E2E_BASE_URL"
 
-# Per-call network timeout (seconds) for live requests; override via env.
 DEFAULT_TIMEOUT = float(os.environ.get("GILJO_E2E_TIMEOUT", "15"))
 
 
@@ -41,7 +28,6 @@ _HERE = Path(__file__).resolve().parent
 
 
 def _is_live_item(item) -> bool:
-    """True only for items collected from THIS directory (the live E2E suite)."""
     try:
         item_path = Path(str(item.fspath)).resolve()
     except Exception:
@@ -50,19 +36,6 @@ def _is_live_item(item) -> bool:
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip the live suite unless ``GILJO_E2E_LIVE=1``.
-
-    Applied at collection time so an unset flag yields a clean run of all-SKIPs
-    with ZERO network calls — no fixtures run, no live host is contacted. Each
-    test is still collected (so it shows as SKIPPED individually), it just never
-    executes.
-
-    SCOPE GUARD (FE-6174b): ``pytest_collection_modifyitems`` is a GLOBAL hook —
-    even though this conftest lives under ``tests/e2e_live/``, pytest invokes it
-    with the WHOLE session's ``items``. Without the ``_is_live_item`` filter a
-    full-from-root run skipped the ENTIRE suite (every test gained the skip
-    marker). Only gate items that actually live in this directory.
-    """
     if _live_enabled():
         return
     skip = pytest.mark.skip(reason=f"live E2E disabled ({E2E_LIVE_ENV} != '1')")
@@ -80,12 +53,6 @@ class Target(NamedTuple):
 
 @pytest.fixture(scope="session")
 def target() -> Target:
-    """Resolve the live target from ``GILJO_E2E_BASE_URL``.
-
-    Skips (does not fail) when the URL is unset or malformed, so the suite stays
-    individually skippable: an operator can flip ``GILJO_E2E_LIVE=1`` but still
-    get a clean skip if they forget the URL, rather than a confusing error.
-    """
     raw = os.environ.get(E2E_BASE_URL_ENV, "").strip()
     if not raw:
         pytest.skip(reason=f"{E2E_BASE_URL_ENV} not set (no committed default host)")
@@ -98,11 +65,6 @@ def target() -> Target:
 
 @pytest.fixture(scope="session")
 def http_client(target):
-    """Session-scoped httpx client bound to the live target.
-
-    ``follow_redirects=False`` keeps assertions about a specific endpoint honest
-    (a redirect to the SPA must not masquerade as a 200 from the real route).
-    """
     import httpx
 
     with httpx.Client(

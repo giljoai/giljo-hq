@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-TDD Tests for Handover 0411a: Phase Labels on AgentJob - Template ID and List Jobs.
-
-Change B: template_id populated on AgentJob when template found.
-Change C: list_jobs includes `phase` in the response dict.
-
-Split from test_orchestration_service_phase_labels.py during test reorganization.
-"""
 
 import pytest
 from sqlalchemy import select
@@ -18,19 +10,14 @@ from sqlalchemy import select
 from giljo_mcp.models import AgentJob, AgentTemplate
 
 
-# ============================================================================
-# Change B: template_id populated on AgentJob when template found
-# ============================================================================
 
 
 @pytest.mark.asyncio
 class TestSpawnPopulatesTemplateId:
-    """Tests that spawn_job populates template_id on AgentJob when template is found."""
 
     async def test_template_id_set_in_multi_terminal_mode(
         self, db_session, db_manager, test_project_multi_terminal, test_tenant_key
     ):
-        """Verify template_id is set on AgentJob when template found in multi-terminal mode."""
         from giljo_mcp.services.orchestration_service import OrchestrationService
         from giljo_mcp.tenant import TenantManager
 
@@ -46,13 +33,11 @@ class TestSpawnPopulatesTemplateId:
             phase=1,
         )
 
-        # Verify template_id is set on AgentJob
         job_stmt = select(AgentJob).where(AgentJob.job_id == result.job_id)
         job_result = await db_session.execute(job_stmt)
         job = job_result.scalar_one()
         assert job.template_id is not None
 
-        # Verify it matches the actual template
         template_stmt = select(AgentTemplate).where(
             AgentTemplate.name == "analyzer-1",
             AgentTemplate.tenant_key == test_tenant_key,
@@ -62,7 +47,6 @@ class TestSpawnPopulatesTemplateId:
         assert job.template_id == template.id
 
     async def test_template_id_none_when_no_template_found(self, db_session, db_manager, test_project, test_tenant_key):
-        """Verify template_id remains None for orchestrator (no template lookup)."""
         from giljo_mcp.services.orchestration_service import OrchestrationService
         from giljo_mcp.tenant import TenantManager
 
@@ -80,28 +64,21 @@ class TestSpawnPopulatesTemplateId:
         job_stmt = select(AgentJob).where(AgentJob.job_id == result.job_id)
         job_result = await db_session.execute(job_stmt)
         job = job_result.scalar_one()
-        # Orchestrator skips agent_name validation and template lookup
         assert job.template_id is None
 
 
-# ============================================================================
-# Change C: list_jobs includes phase in response
-# ============================================================================
 
 
 @pytest.mark.asyncio
 class TestListJobsIncludesPhase:
-    """Tests that list_jobs includes `phase` in each job dict."""
 
     async def test_list_jobs_returns_phase_value(self, db_session, db_manager, test_project, test_tenant_key):
-        """Verify list_jobs response includes phase for jobs with phase set."""
         from giljo_mcp.services.orchestration_service import OrchestrationService
         from giljo_mcp.tenant import TenantManager
 
         tenant_manager = TenantManager()
         service = OrchestrationService(db_manager=db_manager, tenant_manager=tenant_manager, test_session=db_session)
 
-        # Create a job with phase
         await service.spawn_job(
             agent_display_name="analyzer",
             agent_name="analyzer-1",
@@ -111,7 +88,6 @@ class TestListJobsIncludesPhase:
             phase=1,
         )
 
-        # List jobs
         result = await service.list_jobs(
             tenant_key=test_tenant_key,
             project_id=test_project.id,
@@ -125,14 +101,12 @@ class TestListJobsIncludesPhase:
     async def test_list_jobs_returns_none_phase_when_not_set(
         self, db_session, db_manager, test_project, test_tenant_key
     ):
-        """Verify list_jobs response includes phase=None for jobs without phase."""
         from giljo_mcp.services.orchestration_service import OrchestrationService
         from giljo_mcp.tenant import TenantManager
 
         tenant_manager = TenantManager()
         service = OrchestrationService(db_manager=db_manager, tenant_manager=tenant_manager, test_session=db_session)
 
-        # Create a job without phase
         await service.spawn_job(
             agent_display_name="impl",
             agent_name="impl-1",
@@ -147,22 +121,18 @@ class TestListJobsIncludesPhase:
         )
 
         assert len(result.jobs) >= 1
-        # Find the job we just created (may not be first due to ordering)
         impl_jobs = [j for j in result.jobs if j["agent_display_name"] == "impl"]
         assert len(impl_jobs) >= 1
         assert "phase" in impl_jobs[0]
         assert impl_jobs[0]["phase"] is None
 
     async def test_list_jobs_returns_multiple_phases(self, db_session, db_manager, test_project, test_tenant_key):
-        """Verify list_jobs correctly returns different phases for different jobs."""
         from giljo_mcp.services.orchestration_service import OrchestrationService
         from giljo_mcp.tenant import TenantManager
 
         tenant_manager = TenantManager()
         service = OrchestrationService(db_manager=db_manager, tenant_manager=tenant_manager, test_session=db_session)
 
-        # Create jobs with different phases. CE-0033 Task 11: phase > 1 requires
-        # a non-empty predecessor_job_id chained from the previous phase.
         analyzer_result = await service.spawn_job(
             agent_display_name="analyzer",
             agent_name="analyzer-1",

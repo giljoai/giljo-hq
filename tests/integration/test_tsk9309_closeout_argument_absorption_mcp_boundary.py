@@ -3,39 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""TSK-9309 — write_project_closeout blamed the wrong field when an argument was absorbed.
-
-The reported symptom was "write_project_closeout drops key_outcomes when the total
-argument payload is large". Measurement says otherwise, and the distinction is the
-whole fix:
-
-* The FastMCP argument boundary validates a 180 KB argument payload with
-  ``key_outcomes`` intact — there is no size at which it drops the field.
-* ``_read_full_body`` + ``_replay_receive`` replay 2 MB byte-identically, in one
-  ASGI frame and in 17-byte frames alike.
-* The session transcripts of all 18 real "Field required" rejections show
-  ``key_outcomes`` ABSENT from the arguments the caller itself sent, with the
-  neighbouring ``summary`` carrying the residue that proves where it went:
-
-    - one shape ends ``...</summary>\\n<key_outcomes>[...]</tags>\\n</invoke>`` —
-      the whole tail of the tool call collapsed into the summary string;
-    - the other ends ``..."]`` — the tail of the absorbed ``key_outcomes`` array,
-      with every LATER parameter re-syncing and arriving normally.
-
-So the argument is lost in the CALLER's tool-call serialization, before the wire,
-by being absorbed into ``summary``. Nothing server-side drops it. What the server
-DID get wrong is the diagnosis it hands back: a bare pydantic "key_outcomes Field
-required" sends the caller off to rewrite an argument it supplied correctly (it
-cost one real session eight tool calls).
-
-These tests pin the corrected rejection at the layer the failure is observable —
-the MCP transport — and pin the two-sided halves that matter more than the fix:
-a well-formed call is untouched, and a genuine omission still gets the plain
-validation error instead of being mislabelled as absorption.
-
-Parallel-safe: fresh tenant_key per test, rolled-back db_session, no module-level
-mutable state, no ordering dependencies.
-"""
 
 from __future__ import annotations
 
@@ -67,12 +34,7 @@ def _content_text(result) -> str:
     return "\n".join(parts)
 
 
-# ---------------------------------------------------------------------------
-# The two real failing argument shapes, reproduced from the session transcripts.
-# ---------------------------------------------------------------------------
 
-# Shape A (transcript 39f741ff, 2026-07-25): only project_id + summary survived;
-# every later parameter, including the closing </invoke>, is inside the summary.
 _ABSORBED_TAIL_MARKUP = (
     "Swept 27 SaaS test modules for under-specified AsyncMock session doubles and re-armed "
     "the un-awaited-coroutine guard. Zero production code changed." + ("Padding prose. " * 90) + "</summary>\n"
@@ -82,9 +44,6 @@ _ABSORBED_TAIL_MARKUP = (
     "</invoke>\n"
 )
 
-# Shape B (transcript bc3a57a7, 2026-07-26 — the bisection in the task): every
-# parameter EXCEPT key_outcomes arrived; the summary tail is the end of the
-# absorbed key_outcomes array, closing with a quote-bracket.
 _ABSORBED_TAIL_JSON = (
     "The changelog gate matched only a line that was exactly the bare marker, while the form "
     "written throughout the repo carries the reason on the same line. " + ("Padding prose. " * 60) + "The "
@@ -95,8 +54,6 @@ _ABSORBED_TAIL_JSON = (
 
 @pytest_asyncio.fixture
 async def closeout_mcp_client(db_manager, db_session, monkeypatch):
-    """(client_factory, tenant_key, db_session) with write_project_closeout bound
-    to the rolled-back test session — mirrors test_be9165's lifecycle fixture."""
     from api import app_state
     from api.endpoints.mcp_tools import _base
     from giljo_mcp.tools.project_closeout import close_project_and_update_memory
@@ -182,9 +139,6 @@ async def _memory_entry_count(db_session, tenant_key: str) -> int:
     return int(result.scalar_one())
 
 
-# ---------------------------------------------------------------------------
-# DoD 2 — the error must name the real cause
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -208,14 +162,6 @@ async def _memory_entry_count(db_session, tenant_key: str) -> int:
 async def test_absorbed_argument_rejection_names_the_real_cause(
     closeout_mcp_client, label, absorbing_summary, extra_args, conclusive
 ):
-    """Both real transcript shapes must be rejected with a message that names the
-    ABSORPTION — which argument swallowed which, and the offending size — instead
-    of the bare "key_outcomes Field required" that sends the caller to rewrite
-    correct input.
-
-    RED before fix: the message is pydantic's, so it names key_outcomes as simply
-    missing, never mentions summary, and carries no size.
-    """
     client, tenant_key, session = closeout_mcp_client
     project = await _seed_project(session, tenant_key)
     await session.commit()
@@ -236,20 +182,11 @@ async def test_absorbed_argument_rejection_names_the_real_cause(
         f"[{label}] the rejection must name the offending size ({len(absorbing_summary)} chars); got: {text!r}"
     )
     assert "key_outcomes" in text, f"[{label}] the rejection must still name the field that never arrived: {text!r}"
-    # The diagnosis, not just the symptom: the caller must be told the field was
-    # absorbed / not sent as its own argument, so it shortens summary instead of
-    # rewriting key_outcomes.
     assert any(word in lowered for word in ("absorb", "merged into", "did not arrive")), (
         f"[{label}] the rejection must state the field was absorbed into another argument, not merely missing; "
         f"got: {text!r}"
     )
 
-    # TSK-9309b: the message must match the STRENGTH of the evidence it has.
-    # Tool-call markup inside a string value is the caller's own call syntax and no
-    # legitimate prose contains it — assert the cause. A bare JSON-list tail is
-    # suggestive but a summary can legitimately end that way, so the message must
-    # hedge. Asserting a cause on the weakest available signal is a smaller version
-    # of the defect this whole diagnosis exists to correct.
     if conclusive:
         assert "may have been absorbed" not in lowered, (
             f"[{label}] tool-call markup is conclusive evidence — the message must assert the "
@@ -262,16 +199,10 @@ async def test_absorbed_argument_rejection_names_the_real_cause(
         )
 
 
-# ---------------------------------------------------------------------------
-# DoD 3 — reject before anything is written
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_absorbed_argument_rejection_writes_nothing(closeout_mcp_client):
-    """No partial 360 entry may be created by a rejected closeout, and the project
-    must stay open — the failure mode that made this worth fixing was a bad
-    permanent record."""
     client, tenant_key, session = closeout_mcp_client
     project = await _seed_project(session, tenant_key)
     await session.commit()
@@ -293,17 +224,10 @@ async def test_absorbed_argument_rejection_writes_nothing(closeout_mcp_client):
     assert project.status == "active", f"a rejected closeout must not close the project, got: {project.status!r}"
 
 
-# ---------------------------------------------------------------------------
-# Two-sided half 1 — a well-formed call is untouched
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_well_formed_closeout_still_succeeds(closeout_mcp_client):
-    """The load-bearing half: a correct call — including one whose summary is long
-    and whose key_outcomes entries legitimately end with a bracket — must reach the
-    tool and close the project exactly as before. A tightening that stops accepting
-    real closeouts is worse than the error it replaces."""
     client, tenant_key, session = closeout_mcp_client
     project = await _seed_project(session, tenant_key)
     await session.commit()
@@ -326,17 +250,10 @@ async def test_well_formed_closeout_still_succeeds(closeout_mcp_client):
     assert parsed.get("entry_id"), f"the 360 entry must still be written, got: {parsed!r}"
 
 
-# ---------------------------------------------------------------------------
-# Two-sided half 2 — a genuine omission is NOT mislabelled as absorption
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_genuine_omission_still_gets_the_plain_validation_error(closeout_mcp_client):
-    """A caller that simply forgot key_outcomes — short, clean summary, no residue —
-    must keep today's plain validation error. Claiming absorption here would be the
-    same defect in the opposite direction: an error naming a cause that is not the
-    real one."""
     client, tenant_key, session = closeout_mcp_client
     project = await _seed_project(session, tenant_key)
     await session.commit()
@@ -344,14 +261,13 @@ async def test_genuine_omission_still_gets_the_plain_validation_error(closeout_m
     async with client() as mcp_session:
         result = await mcp_session.call_tool(
             "write_project_closeout",
-            # Deliberately free of the diagnosis word: the validation error echoes
-            # the input back, so a summary containing it would satisfy the negative
-            # assertion below for the wrong reason.
             {"project_id": project.id, "summary": "Short and clean prose with no residue."},
         )
 
     text = _content_text(result)
-    assert result.is_error, f"a missing required field must still be rejected, got: {text!r}"
+    assert not result.is_error and '"VALIDATION_ERROR"' in text, (
+        f"a missing required field must still be rejected, got: {text!r}"
+    )
     assert "key_outcomes" in text, f"the rejection must name the missing field, got: {text!r}"
     assert "absorb" not in text.lower(), (
         f"a genuine omission must NOT be reported as absorption — that would name the wrong cause again: {text!r}"

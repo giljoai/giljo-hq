@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-ProductTuningService - On-demand product context drift detection (Handover 0831)
-
-Assembles comparison prompts from current product context vs 360 memory history,
-stores agent-submitted tuning proposals, and manages the review lifecycle.
-
-Design: User-initiated, not automatic. GiljoAI assembles context and generates
-the comparison prompt. The user's AI coding agent does the reasoning.
-"""
 
 import logging
 from datetime import UTC, datetime
@@ -36,20 +27,8 @@ from giljo_mcp.services.product_field_map import assemble_update_kwargs
 
 logger = logging.getLogger(__name__)
 
-# BE-9473 (F2/F4): single source of truth for the per-value char cap. Previously
-# redefined at the wire (api/endpoints/mcp_tools/_setup_tools.py) as a private
-# copy; the wire now imports this constant so the wire description and the
-# enforced limit cannot drift apart. Applies PER STRING -- a structured section's
-# dict value is capped per sub-key, not on the dict as a whole.
 TUNING_PROPOSED_VALUE_MAX = 10_000
 
-# Maps tuning section keys to product fields for applying proposals.
-# Handover 0840c: Rewritten for normalized tables.
-# BE-6225d: this map only translates the tuning INPUT vocabulary (section keys) into
-# canonical product columns. The column->update_product-block grouping is shared with
-# the vision-extraction writer via the product-field translator
-# (services/product_field_map.py) -- there is no longer a parallel block mapper to keep
-# in sync.
 SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
     "description": {"type": "direct", "field": "description"},
     "tech_stack": {
@@ -112,12 +91,6 @@ SECTION_FIELD_MAP: dict[str, dict[str, str]] = {
     "target_platforms": {"type": "direct", "field": "target_platforms"},
 }
 
-# BE-9473 (F2/F4): the bare section keys whose SECTION_FIELD_MAP entry is a
-# multi-field relation ("tech_stack", "architecture") -- these cannot take a
-# single flat string; the caller must address one field via a dotted sub-key
-# (e.g. "tech_stack.infrastructure") or pass proposed_value as a dict keyed by
-# field name. Every other section key (including the dotted sub-keys) is FLAT:
-# one string (or list[str] for target_platforms) is the whole value.
 STRUCTURED_TUNING_SECTIONS: frozenset[str] = frozenset(
     key for key, mapping in SECTION_FIELD_MAP.items() if mapping["type"] == "relation"
 )
@@ -279,7 +252,6 @@ vision and current reality, and suggest updates to other sections
 
 
 class ProductTuningService:
-    """Service for product context tuning: prompt assembly, proposal storage, and review lifecycle."""
 
     def __init__(
         self,
@@ -298,7 +270,6 @@ class ProductTuningService:
         self._user_repo = UserRepository()
 
     def _get_session(self):
-        """Yield a tenant-scoped DB session, honoring an injected test session (shared helper, BE-8000d)."""
         return tenant_scoped_session(self.db_manager, self.tenant_key, self._test_session)
 
     async def _get_product(self, session: AsyncSession, product_id: str) -> Product:
@@ -311,14 +282,12 @@ class ProductTuningService:
         return product
 
     async def _get_user_configs(self, session: AsyncSession, user_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
-        """Get user's toggle and depth configurations from normalized tables/columns."""
         from giljo_mcp.config.defaults import DEFAULT_CATEGORY_TOGGLES
 
         user = await self._user_repo.get_user_by_id(session, user_id, self.tenant_key)
         if not user:
             raise ResourceNotFoundError(message="User not found", context={"user_id": user_id})
 
-        # Build toggle_config from user_field_priorities table
         rows = await self._user_repo.get_field_priorities(session, user_id, self.tenant_key)
 
         if rows:
@@ -332,7 +301,6 @@ class ProductTuningService:
         else:
             toggle_config = DEFAULT_FIELD_PRIORITY
 
-        # Build depth_config from columns
         depth_config = {
             "vision_documents": user.depth_vision_documents,
             "memory_last_n_projects": user.depth_memory_last_n,
@@ -345,7 +313,6 @@ class ProductTuningService:
         return toggle_config, depth_config
 
     def _get_eligible_sections(self, toggle_config: dict[str, Any]) -> list[str]:
-        """Return section keys whose parent toggle is ON."""
         priorities = toggle_config.get("priorities", {})
         eligible = []
         for section_key, parent_toggle in TUNING_SECTION_TOGGLE_MAP.items():
@@ -355,7 +322,6 @@ class ProductTuningService:
         return eligible
 
     def _serialize_current_context(self, product: Product, sections: list[str]) -> str:
-        """Serialize current product context for selected sections."""
         parts = []
         for section in sections:
             mapping = SECTION_FIELD_MAP.get(section)
@@ -400,21 +366,6 @@ class ProductTuningService:
         user_id: str,
         sections: list[str],
     ) -> dict[str, Any]:
-        """
-        Assemble a comparison prompt for the user to paste into their AI coding agent.
-
-        Args:
-            product_id: Target product ID
-            user_id: User ID for toggle/depth config
-            sections: List of section keys to include
-
-        Returns:
-            Dict with prompt, sections_included, lookback_depth, git_enabled
-
-        Raises:
-            ResourceNotFoundError: If product or user not found
-            ValidationError: If no valid sections provided
-        """
         async with self._get_session() as session:
             product = await self._get_product(session, product_id)
             toggle_config, _ = await self._get_user_configs(session, user_id)
@@ -456,23 +407,12 @@ class ProductTuningService:
             }
 
     async def get_eligible_sections(self, product_id: str, user_id: str) -> list[str]:
-        """Get sections eligible for tuning based on user's toggle settings."""
         async with self._get_session() as session:
             await self._get_product(session, product_id)
             toggle_config, _ = await self._get_user_configs(session, user_id)
             return self._get_eligible_sections(toggle_config)
 
     def _build_update_kwargs(self, proposals: list[dict[str, Any]]) -> tuple[dict[str, Any], list[str]]:
-        """Convert drift proposals into kwargs for ProductService.update_product().
-
-        Translates each drift proposal's section key into the canonical product
-        column(s) it targets (via SECTION_FIELD_MAP), then groups the flat
-        ``{column: value}`` mapping into update_product blocks through the shared
-        product-field translator (services/product_field_map.py) -- the same translator
-        the vision-extraction writer uses.
-
-        Returns (update_kwargs, sections_applied).
-        """
         column_values: dict[str, Any] = {}
         sections_applied: list[str] = []
 
@@ -509,14 +449,6 @@ class ProductTuningService:
         mapping: dict[str, Any],
         value: Any,
     ) -> dict[str, Any] | None:
-        """Resolve a whole-relation-section proposal into ``{column: value}`` pairs.
-
-        Returns the resolved columns, or ``None`` (with a warning logged) when the
-        proposed value cannot be applied -- an unstructured string for a multi-field
-        relation, a dict with no recognized fields, or a non-dict/non-string value.
-        Mirrors the prior per-section accept semantics; the column->block grouping is
-        handled by the shared translator afterwards.
-        """
         known_fields = mapping.get("fields", {})
 
         if isinstance(value, dict):
@@ -533,9 +465,6 @@ class ProductTuningService:
             return None
 
         if isinstance(value, str):
-            # Agent sent a flat string for a structured relation. Use it as a
-            # single-field update only when the relation has exactly one field;
-            # otherwise reject with guidance on the sub-section keys.
             field_keys = list(known_fields.keys())
             if len(field_keys) == 1:
                 return {field_keys[0]: value}
@@ -562,40 +491,10 @@ class ProductTuningService:
         overall_summary: str | None = None,
         force: bool = False,
     ) -> dict[str, Any]:
-        """
-        Apply agent-approved tuning proposals directly to product fields.
-
-        Routes all writes through ProductService.update_product() — the same
-        validated path used by the Edit Product dialog. Only proposals where
-        drift_detected is True are applied.
-
-        Args:
-            product_id: Target product ID
-            proposals: List of per-section proposal dicts
-            overall_summary: Optional high-level drift assessment (informational)
-
-        Returns:
-            Dict with success, applied_count, sections_applied. A DELIBERATE
-            domain rejection (BE-6081 Tier-2: no exception, agent-actionable) when
-            every drift-flagged proposal failed to resolve to a real field --
-            {success: False, error: "NO_SECTIONS_APPLIED", ...} instead of a
-            silent success (BE-9473 F2).
-
-        Raises:
-            ResourceNotFoundError: If product not found
-        """
         from giljo_mcp.services.product_service import ProductService
 
         update_kwargs, sections_applied = self._build_update_kwargs(proposals)
 
-        # BE-9473 (F3): every proposal that asked for a write (drift_detected=True)
-        # resolved to NOTHING -- distinct from the documented "nothing needed
-        # updating, record the review" no-op (that path never sets drift_detected
-        # =True on any item). Reporting success:true/applied_count:0 here was the
-        # self-contradicting response class the post-0480 raise-rule and the
-        # BE-6081 boundary contract both forbid. Reject before touching the DB --
-        # no tuning_state stamp, no websocket emit -- so a failed write cannot be
-        # mistaken for a completed review.
         intended_sections = [p.get("section") for p in proposals if p.get("drift_detected")]
         if intended_sections and not sections_applied:
             return {
@@ -617,7 +516,6 @@ class ProductTuningService:
             product_service = ProductService(self.db_manager, self.tenant_key)
             await product_service.update_product(product_id, force=force, **update_kwargs)
 
-        # Stamp tuning metadata
         async with self._get_session() as session:
             product = await self._get_product(session, product_id)
             current_sequence = await self._memory_repo.get_next_sequence(session, product_id, self.tenant_key) - 1
@@ -640,7 +538,6 @@ class ProductTuningService:
             f"Applied {len(sections_applied)} tuning updates for product {product_id}: {sections_applied}"
         )
 
-        # Report skipped sections so agents know why their update didn't apply
         all_drift_sections = [p.get("section") for p in proposals if p.get("drift_detected")]
         skipped = [s for s in all_drift_sections if s and s not in sections_applied]
 
@@ -659,20 +556,9 @@ class ProductTuningService:
         return result
 
     async def check_tuning_staleness(self, product_id: str, user_id: str) -> dict[str, Any]:
-        """
-        Check if product context needs tuning based on completed projects since last tune.
-
-        Args:
-            product_id: Product to check
-            user_id: User for notification preference lookup
-
-        Returns:
-            Dict with is_stale, projects_since_tune, threshold
-        """
         async with self._get_session() as session:
             product = await self._get_product(session, product_id)
 
-            # Get user's notification preferences
             user = await self._user_repo.get_user_by_id(session, user_id, self.tenant_key)
 
             prefs = (user.notification_preferences if user else None) or {}
@@ -681,10 +567,8 @@ class ProductTuningService:
 
             threshold = max(prefs.get("tuning_reminder_threshold", 10), 3)
 
-            # Get current sequence
             current_sequence = await self._memory_repo.get_next_sequence(session, product_id, self.tenant_key) - 1
 
-            # Get last tuned sequence
             tuning_state = product.tuning_state or {}
             last_tuned_seq = tuning_state.get("last_tuned_at_sequence") or 0
 
@@ -698,7 +582,6 @@ class ProductTuningService:
             }
 
     async def _emit_websocket_event(self, event_type: str, data: dict[str, Any]) -> None:
-        """Emit WebSocket event with graceful degradation."""
         if not self._websocket_manager:
             self._logger.debug(f"No WebSocket manager available for event: {event_type}")
             return

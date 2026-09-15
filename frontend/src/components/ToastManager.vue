@@ -40,12 +40,10 @@ import { useSettingsStore } from '@/stores/settings'
 
 const MAX_TOASTS = 5
 
-// State
 const toasts = ref([])
 const toastId = ref(0)
 const settingsStore = useSettingsStore()
 
-// Map user-facing position values to Vuetify location strings
 const positionMap = {
   'top-left': 'top start',
   'top-center': 'top center',
@@ -62,9 +60,6 @@ const vuetifyLocation = computed(() => {
 
 const storeDuration = computed(() => settingsStore.notificationDuration)
 
-// Toast types configuration
-// Timeout policy: success/info/warning fall through to the user's
-// configured duration (Settings → Notifications). Errors stay sticky.
 const toastTypes = {
   success: {
     color: 'success',
@@ -85,12 +80,9 @@ const toastTypes = {
   },
 }
 
-// Methods
 function showToast(options) {
-  // Get type configuration
   const typeConfig = toastTypes[options.type] || {}
 
-  // Create toast object
   const toast = {
     id: ++toastId.value,
     show: true,
@@ -104,14 +96,12 @@ function showToast(options) {
     action: options.action,
   }
 
-  // Limit number of toasts
   if (toasts.value.length >= MAX_TOASTS) {
     toasts.value.shift()
   }
 
   toasts.value.push(toast)
 
-  // Auto-remove after timeout if specified
   if (toast.timeout > 0) {
     setTimeout(() => {
       const index = toasts.value.findIndex((t) => t.id === toast.id)
@@ -132,8 +122,6 @@ function clearToasts() {
   toasts.value = []
 }
 
-// Register global toast immediately after functions are defined
-// This prevents race conditions where showToast is called before onMounted runs
 if (typeof window !== 'undefined') {
   window.$toast = {
     show: showToast,
@@ -152,20 +140,16 @@ function handleAction(toast) {
   toast.show = false
 }
 
-// Event handlers for global toast events
 function handleToastEvent(event) {
   showToast(event.detail)
 }
 
-// Expose methods for external use
 defineExpose({
   showToast,
   clearToasts,
 })
 
-// Lifecycle
 onMounted(() => {
-  // Listen for global toast events (fallback for event-based dispatching)
   window.addEventListener('show-toast', handleToastEvent)
 })
 

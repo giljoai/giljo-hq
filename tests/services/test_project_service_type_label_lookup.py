@@ -3,11 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Integration tests for ProjectService.get_project_type_by_label() (Handover 0837b).
-
-Verifies case-insensitive lookup of TaxonomyType by label within a tenant.
-"""
 
 from uuid import uuid4
 
@@ -23,11 +18,9 @@ async def project_service(project_service_with_session):
 
 
 class TestGetTaxonomyTypeByLabel:
-    """Test case-insensitive TaxonomyType label lookup."""
 
     @pytest.mark.asyncio
     async def test_exact_match(self, project_service: ProjectService, test_tenant_key: str, db_session):
-        """Exact label match returns the TaxonomyType."""
         pt = TaxonomyType(
             id=str(uuid4()),
             tenant_key=test_tenant_key,
@@ -44,7 +37,6 @@ class TestGetTaxonomyTypeByLabel:
 
     @pytest.mark.asyncio
     async def test_case_insensitive_match(self, project_service: ProjectService, test_tenant_key: str, db_session):
-        """Lowercase input matches capitalized label."""
         pt = TaxonomyType(
             id=str(uuid4()),
             tenant_key=test_tenant_key,
@@ -60,7 +52,6 @@ class TestGetTaxonomyTypeByLabel:
 
     @pytest.mark.asyncio
     async def test_uppercase_input_matches(self, project_service: ProjectService, test_tenant_key: str, db_session):
-        """All-caps input matches mixed-case label."""
         pt = TaxonomyType(
             id=str(uuid4()),
             tenant_key=test_tenant_key,
@@ -76,19 +67,11 @@ class TestGetTaxonomyTypeByLabel:
 
     @pytest.mark.asyncio
     async def test_not_found_returns_none(self, project_service: ProjectService, test_tenant_key: str):
-        """Non-existent label returns None (no error)."""
         result = await project_service.get_project_type_by_label("NonExistent", test_tenant_key)
         assert result is None
 
     @pytest.mark.asyncio
     async def test_tenant_isolation(self, project_service: ProjectService, test_tenant_key: str, db_session):
-        """Another tenant's row is never returned.
-
-        INF-6174d: the resolve path now seeds the tenant's own defaults first,
-        so a fresh tenant legitimately resolves "Frontend" — to ITS OWN seeded
-        row. The isolation property under test is that the OTHER tenant's row
-        is not the one returned.
-        """
         other_tenant = f"tk_{uuid4().hex}"
         pt = TaxonomyType(
             id=str(uuid4()),

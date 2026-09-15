@@ -3,20 +3,12 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tests for Setup Wizard WebSocket Events (Handover 0855b)
-
-Validates schema definitions, EventFactory methods, and regression
-safety for existing event types.
-"""
 
 import pytest
 from pydantic import ValidationError
 
 from giljo_mcp.events.schemas import (
     EventFactory,
-    SetupAgentsDownloadedData,
-    SetupAgentsDownloadedEvent,
     SetupCommandsInstalledData,
     SetupCommandsInstalledEvent,
     SetupToolConnectedData,
@@ -25,13 +17,9 @@ from giljo_mcp.events.schemas import (
 )
 
 
-# ============================================================================
-# SetupToolConnectedData / SetupToolConnectedEvent
-# ============================================================================
 
 
 class TestSetupToolConnectedData:
-    """Unit tests for SetupToolConnectedData schema validation."""
 
     def test_valid_data(self):
         data = SetupToolConnectedData(
@@ -82,7 +70,6 @@ class TestSetupToolConnectedData:
 
 
 class TestSetupToolConnectedEvent:
-    """Unit tests for SetupToolConnectedEvent structure."""
 
     def test_correct_type_literal(self):
         event = SetupToolConnectedEvent(
@@ -109,7 +96,6 @@ class TestSetupToolConnectedEvent:
         assert event.schema_version == "1.0"
 
     def test_type_is_immutable_literal(self):
-        """Type field must always be the exact literal value."""
         with pytest.raises(ValidationError):
             SetupToolConnectedEvent(
                 type="wrong:type",
@@ -123,13 +109,9 @@ class TestSetupToolConnectedEvent:
             )
 
 
-# ============================================================================
-# SetupCommandsInstalledData / SetupCommandsInstalledEvent
-# ============================================================================
 
 
 class TestSetupCommandsInstalledData:
-    """Unit tests for SetupCommandsInstalledData schema validation."""
 
     def test_valid_data(self):
         data = SetupCommandsInstalledData(
@@ -179,7 +161,6 @@ class TestSetupCommandsInstalledData:
 
 
 class TestSetupCommandsInstalledEvent:
-    """Unit tests for SetupCommandsInstalledEvent structure."""
 
     def test_correct_type_literal(self):
         event = SetupCommandsInstalledEvent(
@@ -206,81 +187,9 @@ class TestSetupCommandsInstalledEvent:
         assert event.schema_version == "1.0"
 
 
-# ============================================================================
-# SetupAgentsDownloadedData / SetupAgentsDownloadedEvent
-# ============================================================================
-
-
-class TestSetupAgentsDownloadedData:
-    """Unit tests for SetupAgentsDownloadedData schema validation."""
-
-    def test_valid_data(self):
-        data = SetupAgentsDownloadedData(
-            tenant_key="tenant_123",
-            user_id="user_456",
-            agent_count=4,
-        )
-        assert data.tenant_key == "tenant_123"
-        assert data.agent_count == 4
-
-    def test_zero_agent_count_allowed(self):
-        data = SetupAgentsDownloadedData(
-            tenant_key="t1",
-            user_id="u1",
-            agent_count=0,
-        )
-        assert data.agent_count == 0
-
-    def test_rejects_negative_agent_count(self):
-        with pytest.raises(ValidationError):
-            SetupAgentsDownloadedData(
-                tenant_key="t1",
-                user_id="u1",
-                agent_count=-3,
-            )
-
-    def test_rejects_empty_tenant_key(self):
-        with pytest.raises(ValidationError):
-            SetupAgentsDownloadedData(
-                tenant_key="",
-                user_id="u1",
-                agent_count=2,
-            )
-
-
-class TestSetupAgentsDownloadedEvent:
-    """Unit tests for SetupAgentsDownloadedEvent structure."""
-
-    def test_correct_type_literal(self):
-        event = SetupAgentsDownloadedEvent(
-            timestamp="2026-03-29T10:00:00Z",
-            data=SetupAgentsDownloadedData(
-                tenant_key="t1",
-                user_id="u1",
-                agent_count=2,
-            ),
-        )
-        assert event.type == "setup:agents_downloaded"
-
-    def test_default_schema_version(self):
-        event = SetupAgentsDownloadedEvent(
-            timestamp="2026-03-29T10:00:00Z",
-            data=SetupAgentsDownloadedData(
-                tenant_key="t1",
-                user_id="u1",
-                agent_count=2,
-            ),
-        )
-        assert event.schema_version == "1.0"
-
-
-# ============================================================================
-# EventFactory Static Methods
-# ============================================================================
 
 
 class TestEventFactorySetupToolConnected:
-    """Unit tests for EventFactory.setup_tool_connected()."""
 
     def test_returns_dict_with_correct_type(self):
         result = EventFactory.setup_tool_connected(
@@ -315,7 +224,6 @@ class TestEventFactorySetupToolConnected:
 
 
 class TestEventFactorySetupCommandsInstalled:
-    """Unit tests for EventFactory.setup_commands_installed()."""
 
     def test_returns_dict_with_correct_type(self):
         result = EventFactory.setup_commands_installed(
@@ -343,34 +251,9 @@ class TestEventFactorySetupCommandsInstalled:
         assert result["data"]["tool_name"] == "gemini_cli"
 
 
-class TestEventFactorySetupAgentsDownloaded:
-    """Unit tests for EventFactory.setup_agents_downloaded()."""
-
-    def test_returns_dict_with_correct_type(self):
-        result = EventFactory.setup_agents_downloaded(tenant_key="t1", user_id="u1", agent_count=4)
-        assert isinstance(result, dict)
-        assert result["type"] == "setup:agents_downloaded"
-
-    def test_agent_count_in_data(self):
-        result = EventFactory.setup_agents_downloaded(tenant_key="t1", user_id="u1", agent_count=8)
-        assert result["data"]["agent_count"] == 8
-
-    def test_has_timestamp(self):
-        result = EventFactory.setup_agents_downloaded(tenant_key="t1", user_id="u1", agent_count=0)
-        assert result["timestamp"].endswith("Z")
-
-    def test_schema_version_present(self):
-        result = EventFactory.setup_agents_downloaded(tenant_key="t1", user_id="u1", agent_count=3)
-        assert result["schema_version"] == "1.0"
-
-
-# ============================================================================
-# WebSocketEvent Union Includes New Types
-# ============================================================================
 
 
 class TestWebSocketEventUnion:
-    """Verify new setup events are included in the WebSocketEvent union."""
 
     def test_setup_tool_connected_in_union(self):
         event = SetupToolConnectedEvent(
@@ -382,7 +265,6 @@ class TestWebSocketEventUnion:
                 connected_at="2026-03-29T10:00:00Z",
             ),
         )
-        # If the union is correct, isinstance check should pass for the union members
         assert isinstance(event, SetupToolConnectedEvent)
 
     def test_setup_commands_installed_in_union(self):
@@ -397,34 +279,17 @@ class TestWebSocketEventUnion:
         )
         assert isinstance(event, SetupCommandsInstalledEvent)
 
-    def test_setup_agents_downloaded_in_union(self):
-        event = SetupAgentsDownloadedEvent(
-            timestamp="2026-03-29T10:00:00Z",
-            data=SetupAgentsDownloadedData(
-                tenant_key="t1",
-                user_id="u1",
-                agent_count=2,
-            ),
-        )
-        assert isinstance(event, SetupAgentsDownloadedEvent)
-
     def test_all_setup_types_in_union_args(self):
-        """Verify the union type includes all three setup event types."""
         import typing
 
         union_args = typing.get_args(WebSocketEvent)
         assert SetupToolConnectedEvent in union_args
         assert SetupCommandsInstalledEvent in union_args
-        assert SetupAgentsDownloadedEvent in union_args
 
 
-# ============================================================================
-# Regression: Existing Event Types Still Work
-# ============================================================================
 
 
 class TestExistingEventFactoryRegression:
-    """Regression tests ensuring existing factory methods still work."""
 
     def test_project_mission_updated(self):
         result = EventFactory.project_mission_updated(

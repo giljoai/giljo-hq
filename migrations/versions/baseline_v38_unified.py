@@ -3,59 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Unified v38 baseline: guarded full-schema TIP of the CE chain (v1.3.0 boundary)
-
-Revision ID: baseline_v38
-Revises: ce_0077_sequence_run_reviewed_project_ids
-Create Date: 2026-07-10
-
-INF-5060 squash, "squash as guarded tip" topology:
-
-- This revision sits at the TIP of the existing chain (down_revision =
-  ce_0077), NOT as a second root. Single head; nothing is removed from the
-  chain, so every historical revision ID stays resolvable (SaaS prod's
-  ``alembic upgrade heads`` keeps working on a DB whose CE pointer is any
-  chain revision).
-- FRESH installs take the fast path: the installer/boot seams
-  (installer/core/database_setup.py, startup_support/migration_stamp.py)
-  detect a database with no alembic_version table, create it as VARCHAR(64)
-  and stamp ce_0077 -- so ``alembic upgrade head`` executes ONLY this
-  revision: one guarded baseline instead of a 77-migration replay.
-- EXISTING mid-chain databases replay the real incremental chain (all data
-  backfills intact), then every guard here no-ops.
-- AT-HEAD databases (SaaS prod / staging / dev) run this as a pure no-op.
-
-Every create is existence-guarded, so this revision is safe to execute on
-any database state from empty through fully migrated.
-
-The body is generated from (and hand-verified against) a pg_dump of the
-chain-built schema at ce_0077. Parity invariant: the SCHEMA SHAPE built by a
-fresh install via this baseline is IDENTICAL to that of a database upgraded
-through the chain -- column order, types, nullability, server defaults;
-PRIMARY KEY / FOREIGN KEY / UNIQUE / CHECK constraint definitions; indexes;
-and comments.
-
-Parity deliberately does NOT compare PostgreSQL's *named NOT-NULL catalog
-constraints*. PG18 materializes every NOT NULL as a pg_constraint object
-(e.g. ``roadmap_items_sort_order_not_null``); PG17-and-earlier -- including
-postgres:16, the CI container and de-facto portability floor -- represent
-NOT NULL only as the ``pg_attribute.attnotnull`` flag with no catalog
-object. Emitting DDL that
-renames or references those objects (as an earlier draft of this file did,
-carried over from a PG18 pg_dump) crashes on PG16 with ``UndefinedObject``.
-NOT NULL is therefore expressed only portably here -- ``nullable=False`` on
-the column -- and the parity proof asserts nullability via each column's
-``is_nullable``, excluding named NOT-NULL constraints (contype='n') from the
-constraint comparison so it holds on BOTH a PG18 and a PG16 schema.
-
-Data note (deliberate): the chain seeded two tolerated-if-absent
-system_settings rows (skills_version_announced -- retired by IMP-6038, no
-readers; agent_silence_threshold_minutes -- readers fall back to the same
-code default). Fresh v38 installs omit them by design; all other chain
-INSERTs are backfills over existing rows, no-ops on a fresh database.
-
-Tables created: 46. Indexes: 167. Foreign keys: 56.
-"""
 
 from collections.abc import Sequence
 
@@ -64,7 +11,6 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 
-# revision identifiers, used by Alembic.
 revision: str = "baseline_v38"
 down_revision: str | Sequence[str] | None = "ce_0077_sequence_run_reviewed_project_ids"
 branch_labels: str | Sequence[str] | None = None
@@ -72,10 +18,6 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Create the full v38 schema (guarded; no-op on an already-migrated DB)."""
-    # Widen alembic_version.version_num to VARCHAR(64) FIRST (carried from
-    # ce_0003): alembic creates the table as VARCHAR(32), which truncates any
-    # future revision ID longer than 32 chars. Idempotent.
     conn = op.get_bind()
     current_len = conn.execute(
         sa.text(
@@ -89,7 +31,6 @@ def upgrade() -> None:
     if current_len is not None and current_len < 64:
         op.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)")
 
-    # Enum type used by projects.status (guarded)
     op.execute(
         """
         DO $$ BEGIN
@@ -322,7 +263,7 @@ def upgrade() -> None:
             sa.Column("tool", sa.String(length=50), nullable=False),
             sa.Column("cli_tool", sa.String(length=20), nullable=False),
             sa.Column("background_color", sa.String(length=7), nullable=True),
-            sa.Column("model", sa.String(length=20), nullable=True),
+            sa.Column("model", sa.String(length=120), nullable=True),
             sa.Column("tools", sa.String(length=50), nullable=True),
             sa.Column("avg_generation_ms", sa.Float(precision=53), nullable=True),
             sa.Column("last_exported_at", sa.DateTime(timezone=True), nullable=True),
@@ -342,6 +283,7 @@ def upgrade() -> None:
                 nullable=True,
                 comment="Timestamp when template was soft deleted (NULL for live templates)",
             ),
+            sa.Column("effort", sa.String(length=120), nullable=False, server_default="inherit"),
             sa.PrimaryKeyConstraint("id", name="agent_templates_pkey"),
         )
 
@@ -436,8 +378,6 @@ def upgrade() -> None:
             ),
             sa.Column("last_read_message_id", sa.String(length=36), nullable=True),
             sa.Column("last_read_at", sa.DateTime(timezone=True), nullable=True),
-            # BE-9289a parity (ce_0086 appends these; declared last so fresh-install and
-            # chain-replay column ORDER stay byte-identical -- the INF-5060 invariant).
             sa.Column(
                 "harness",
                 sa.String(length=32),
@@ -450,8 +390,6 @@ def upgrade() -> None:
                 nullable=True,
                 comment="BE-9289a: last post/read/poll on this thread; drives the live-idle indicator",
             ),
-            # BE-9475 parity (ce_0097 appends these; declared last, after the BE-9289a
-            # pair, for the same INF-5060 column-ORDER invariant noted above).
             sa.Column(
                 "self_reported_status",
                 sa.String(length=20),
@@ -490,16 +428,6 @@ def upgrade() -> None:
                 "updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=True
             ),
             sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
-            # BE-9291 parity (ce_0087 appends this; declared last so fresh-install and
-            # chain-replay column ORDER stay byte-identical -- the INF-5060 invariant).
-            #
-            # The COLUMN belongs here, but its index and FK deliberately do NOT go in
-            # the module-level _INDEXES / _FOREIGN_KEYS lists. Those run unconditionally
-            # on every baseline execution, including against a mid-chain ce_0077
-            # database where comm_threads already exists and this create_table is
-            # skipped -- so referencing sequence_run_id there fails with "column does
-            # not exist" (caught by test_at_head_ce0077_db_upgrades_as_pure_noop).
-            # ce_0087 adds both, guarded, for the fresh and the mid-chain path alike.
             sa.Column(
                 "sequence_run_id",
                 sa.String(length=36),
@@ -564,9 +492,6 @@ def upgrade() -> None:
                 comment="Token expiry timestamp (15 minutes after creation)",
             ),
             sa.Column("filename", sa.String(length=255), nullable=True),
-            # TSK-9210 parity: ce_0081 APPENDS this column on existing DBs, so it must be
-            # declared LAST here to keep the fresh-install and chain-replay schemas
-            # byte-identical (the INF-5060 parity invariant covers column ORDER).
             sa.Column(
                 "staged_at",
                 sa.DateTime(timezone=True),
@@ -658,7 +583,7 @@ def upgrade() -> None:
             "message_acknowledgments",
             sa.Column("id", sa.String(length=36), server_default=sa.text("(gen_random_uuid())::text"), nullable=False),
             sa.Column("message_id", sa.String(length=36), nullable=False),
-            sa.Column("agent_id", sa.String(length=64), nullable=False),  # BE-9214
+            sa.Column("agent_id", sa.String(length=64), nullable=False),
             sa.Column("tenant_key", sa.String(length=255), nullable=False),
             sa.Column("acknowledged_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
             sa.PrimaryKeyConstraint("id", name="message_acknowledgments_pkey"),
@@ -670,7 +595,7 @@ def upgrade() -> None:
             "message_completions",
             sa.Column("id", sa.String(length=36), server_default=sa.text("(gen_random_uuid())::text"), nullable=False),
             sa.Column("message_id", sa.String(length=36), nullable=False),
-            sa.Column("agent_id", sa.String(length=64), nullable=False),  # BE-9214
+            sa.Column("agent_id", sa.String(length=64), nullable=False),
             sa.Column("tenant_key", sa.String(length=255), nullable=False),
             sa.Column("completed_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
             sa.PrimaryKeyConstraint("id", name="message_completions_pkey"),
@@ -682,7 +607,7 @@ def upgrade() -> None:
             "message_recipients",
             sa.Column("id", sa.String(length=36), server_default=sa.text("(gen_random_uuid())::text"), nullable=False),
             sa.Column("message_id", sa.String(length=36), nullable=False),
-            sa.Column("agent_id", sa.String(length=64), nullable=False),  # BE-9214
+            sa.Column("agent_id", sa.String(length=64), nullable=False),
             sa.Column("tenant_key", sa.String(length=255), nullable=False),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
             sa.PrimaryKeyConstraint("id", name="message_recipients_pkey"),
@@ -704,7 +629,7 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
             sa.Column("acknowledged_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
-            sa.Column("from_agent_id", sa.String(length=64), nullable=True),  # BE-9214
+            sa.Column("from_agent_id", sa.String(length=64), nullable=True),
             sa.Column("from_display_name", sa.String(length=255), nullable=True),
             sa.Column("auto_generated", sa.Boolean(), server_default=sa.text("false"), nullable=False),
             sa.Column(
@@ -716,8 +641,6 @@ def upgrade() -> None:
             ),
             sa.Column("loop_interval_minutes", sa.Integer(), nullable=True),
             sa.Column("thread_id", sa.String(length=36), nullable=True),
-            # BE-9289a parity (ce_0086 appends this; declared last so fresh-install and
-            # chain-replay column ORDER stay byte-identical -- the INF-5060 invariant).
             sa.Column(
                 "from_kind",
                 sa.String(length=10),
@@ -867,12 +790,6 @@ def upgrade() -> None:
             sa.Column("tenant_key", sa.String(length=36), nullable=False),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
-            # BE-9396 removed export_alias here, paired with ce_0093's drop: ce_0092
-            # still adds it on an existing DB and ce_0093 takes it away again, so both
-            # paths converge on it being absent (the INF-5060 parity invariant).
-            # BE-9385e: paired with ce_0094, which adds this column (and the same
-            # comment) on an existing DB. Declared last so no other column's ordinal
-            # moves between the fast path and a chain replay.
             sa.Column(
                 "last_exported_at",
                 sa.DateTime(timezone=True),
@@ -1184,18 +1101,6 @@ def upgrade() -> None:
                 "((target_platforms <@ ARRAY['windows'::character varying, 'linux'::character varying, 'macos'::character varying, 'android'::character varying, 'ios'::character varying, 'web'::character varying, 'all'::character varying]))",
                 name="ck_product_target_platforms_valid",
             ),
-            # BE-9385b parity (ce_0092 adds this on an existing DB). DECLARED LAST,
-            # like BE-9291's sequence_run_id above, so fresh-install and chain-replay
-            # column ORDER stay byte-identical -- the INF-5060 invariant, which
-            # test_parity_fast_path_vs_chain_replay compares by ordinal position.
-            # ALTER TABLE ADD COLUMN appends, so anywhere but last is a parity break.
-            #
-            # Its unique index deliberately does NOT go in the module-level _INDEXES
-            # list either: that list runs unconditionally, including against a
-            # mid-chain ce_0077 database where products already exists and this
-            # create_table is SKIPPED, so referencing slug there fails with "column
-            # does not exist". ce_0092 creates the index, existence-guarded, for both
-            # paths. Both halves of this note were learned the hard way.
             sa.Column(
                 "slug",
                 sa.String(length=64),
@@ -1229,8 +1134,8 @@ def upgrade() -> None:
                     "cancelled",
                     "terminated",
                     "deleted",
-                    "superseded",  # BE-9157
-                    "parked",  # IMP-9258
+                    "superseded",
+                    "parked",
                     name="project_status",
                     create_type=False,
                 ),
@@ -1324,11 +1229,6 @@ def upgrade() -> None:
                 nullable=False,
                 comment="Whether project is hidden from default list view",
             ),
-            # BE-9157: successor pointer for the "superseded" status (parity with
-            # ce_0078). The self-referential FK is created by ce_0078 on BOTH the
-            # fresh and existing-DB paths -- deliberately NOT added to _FOREIGN_KEYS
-            # here (that list runs unconditionally on an existing DB where this
-            # column does not exist yet, since ce_0078 runs after baseline_v38).
             sa.Column(
                 "successor_project_id",
                 sa.String(length=36),
@@ -1413,7 +1313,7 @@ def upgrade() -> None:
             ),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
             sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
-            sa.Column("conductor_agent_id", sa.String(length=64), nullable=True),  # BE-9214
+            sa.Column("conductor_agent_id", sa.String(length=64), nullable=True),
             sa.Column("conductor_project_id", sa.String(length=36), nullable=True),
             sa.Column("conductor_label", sa.String(length=80), nullable=True),
             sa.Column("locked", sa.Boolean(), server_default=sa.text("false"), nullable=False),
@@ -1626,11 +1526,6 @@ def upgrade() -> None:
             sa.Column("decided_by_user_id", sa.String(length=36), nullable=True),
             sa.Column("requested_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
             sa.Column("decided_at", sa.DateTime(timezone=True), nullable=True),
-            # BE-9514: declared LAST, matching physical column order -- Postgres
-            # ALTER TABLE ADD COLUMN (the incremental migration path) always
-            # appends at the end regardless of source declaration order, and
-            # test_inf5060_squash_baseline_v38.py's parity check compares
-            # column ORDER between the two paths, not just names/types.
             sa.Column(
                 "decided_via",
                 sa.String(length=10),
@@ -1756,9 +1651,6 @@ def upgrade() -> None:
             ),
             sa.Column("registration_ip", sa.String(length=45), nullable=True),
             sa.Column("token_revocation_epoch", sa.Integer(), server_default=sa.text("0"), nullable=False),
-            # BE-9201 parity pair with ce_0079 (which APPENDS these two columns on
-            # existing DBs) — they must stay LAST here so fresh-install and
-            # chain-replay column order converge (INF-5060 parity invariant).
             sa.Column(
                 "learning_beat",
                 sa.Integer(),
@@ -1899,23 +1791,15 @@ def upgrade() -> None:
             sa.PrimaryKeyConstraint("id", name="vision_documents_pkey"),
         )
 
-    # ---- indexes (verbatim from the chain-built schema; IF NOT EXISTS) ----
     for _idx_sql in _INDEXES:
         op.execute(_idx_sql)
 
-    # ---- foreign keys (verbatim; guarded by constraint name) ----
     for _fk_sql in _FOREIGN_KEYS:
         op.execute(_fk_sql)
 
 
 def downgrade() -> None:
-    """No-op by design.
-
-    baseline_v38 captures the EXACT schema state of ce_0077 -- the schema
-    delta between the two revisions is empty, so moving the pointer back to
-    ce_0077 requires no DDL. (Dropping the schema here would be wrong: the
-    ce_0077 state is the full schema, not an empty database.)
-    """
+    pass
 
 
 _INDEXES = [
@@ -2081,12 +1965,6 @@ _INDEXES = [
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_username ON public.users USING btree (username)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_notifications_tenant_dedupe_open ON public.notifications USING btree (tenant_key, dedupe_key) WHERE (resolved_at IS NULL)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_project_taxonomy_active ON public.projects USING btree (tenant_key, product_id, project_type_id, series_number, subseries) NULLS NOT DISTINCT WHERE (deleted_at IS NULL)",
-    # BE-9431 parity edit -- NOT what a pg_dump at ce_0077 renders, and that is
-    # deliberate: ce_0059 had silently dropped NULLS NOT DISTINCT from this index
-    # and this file inherited the weakened shape. ce_0095 restores it (healing) on
-    # every existing database, so a fresh install must build it strict here or the
-    # two paths would converge only after ce_0095 re-created the index. If this
-    # baseline is ever re-derived from a dump, keep this flag.
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_task_taxonomy_active ON public.tasks USING btree (tenant_key, product_id, task_type_id, series_number, subseries) NULLS NOT DISTINCT WHERE ((series_number IS NOT NULL) AND (deleted_at IS NULL))",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_template_tenant_name_version ON public.agent_templates USING btree (tenant_key, name, version) WHERE (deleted_at IS NULL)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_vision_doc_product_name ON public.vision_documents USING btree (product_id, document_name) WHERE (deleted_at IS NULL)",

@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Protocol interfaces for dependency inversion between layers."""
 
 from giljo_mcp.protocols.websocket import WebSocketBroadcaster
 

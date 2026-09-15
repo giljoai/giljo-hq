@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Windows platform handler implementation.
-
-Handles Windows-specific installation operations including:
-- Virtual environment path resolution (Scripts/)
-- PostgreSQL discovery in Program Files
-- Desktop shortcut creation (.lnk files)
-- npm command execution with shell=True
-"""
 
 import contextlib
 import platform
@@ -26,63 +17,24 @@ from .base import PlatformHandler
 
 
 class WindowsPlatformHandler(PlatformHandler):
-    """
-    Windows-specific platform handler.
-
-    Key Windows behaviors:
-    - venv executables in Scripts/ directory
-    - PostgreSQL in C:\\Program Files\\PostgreSQL\\
-    - Desktop shortcuts via win32com (.lnk files)
-    - npm requires shell=True (batch file)
-    """
 
     @property
     def platform_name(self) -> str:
-        """Return 'Windows'"""
         return "Windows"
 
     def get_venv_python(self, venv_dir: Path) -> Path:
-        """
-        Get Windows Python executable path.
-
-        Args:
-            venv_dir: Virtual environment directory
-
-        Returns:
-            Path to venv/Scripts/python.exe
-        """
         return venv_dir / "Scripts" / "python.exe"
 
     def get_venv_pip(self, venv_dir: Path) -> Path:
-        """
-        Get Windows pip executable path.
-
-        Args:
-            venv_dir: Virtual environment directory
-
-        Returns:
-            Path to venv/Scripts/pip.exe
-        """
         return venv_dir / "Scripts" / "pip.exe"
 
     def get_postgresql_scan_paths(self) -> List[Path]:
-        """
-        Get Windows PostgreSQL scan paths.
-
-        Scans:
-        - C:\\Program Files\\PostgreSQL\\*\\bin\\psql.exe
-        - C:\\Program Files (x86)\\PostgreSQL\\*\\bin\\psql.exe
-
-        Returns:
-            List of potential psql.exe paths (sorted by version, newest first)
-        """
         paths = []
 
         program_files_locations = [Path("C:/Program Files/PostgreSQL"), Path("C:/Program Files (x86)/PostgreSQL")]
 
         for base in program_files_locations:
             if base.exists():
-                # Sort versions in reverse order (newest first)
                 for version_dir in sorted(base.glob("*"), reverse=True):
                     if version_dir.is_dir():
                         psql_path = version_dir / "bin" / "psql.exe"
@@ -91,15 +43,6 @@ class WindowsPlatformHandler(PlatformHandler):
         return paths
 
     def get_postgresql_install_guide(self, recommended_version: int = 18) -> str:
-        """
-        Get Windows PostgreSQL installation guide.
-
-        Args:
-            recommended_version: Recommended version (default: 18)
-
-        Returns:
-            Multi-line installation instructions
-        """
         return f"""
 {Fore.CYAN}Windows PostgreSQL Installation:{Style.RESET_ALL}
 
@@ -119,25 +62,10 @@ class WindowsPlatformHandler(PlatformHandler):
 """
 
     def supports_desktop_shortcuts(self) -> bool:
-        """Windows supports desktop shortcuts"""
         return True
 
     def create_desktop_shortcuts(self, install_dir: Path, venv_dir: Path) -> Dict[str, Any]:
-        """
-        Create Windows desktop shortcuts.
-
-        Creates .lnk files using win32com if available,
-        falls back to .bat files if win32com not installed.
-
-        Args:
-            install_dir: Installation directory
-            venv_dir: Virtual environment directory
-
-        Returns:
-            Result dictionary with success status and created shortcuts
-        """
         try:
-            # Try win32com method first (proper .lnk files)
             try:
                 import win32com.client  # noqa: F401 — availability check
 
@@ -145,7 +73,6 @@ class WindowsPlatformHandler(PlatformHandler):
                 return result
 
             except ImportError:
-                # Fallback to batch file shortcuts
                 result = self._create_shortcuts_batch(install_dir, venv_dir)
                 return result
 
@@ -153,16 +80,6 @@ class WindowsPlatformHandler(PlatformHandler):
             return {"success": False, "error": str(e), "message": f"Failed to create shortcuts: {e}"}
 
     def _create_shortcuts_win32com(self, install_dir: Path, venv_dir: Path) -> Dict[str, Any]:
-        """
-        Create .lnk shortcuts using win32com.
-
-        Args:
-            install_dir: Installation directory
-            venv_dir: Virtual environment directory
-
-        Returns:
-            Result dictionary
-        """
         import win32com.client
 
         shell = win32com.client.Dispatch("WScript.Shell")
@@ -172,12 +89,6 @@ class WindowsPlatformHandler(PlatformHandler):
         python_exe = str(venv_dir / "Scripts" / "python.exe")
         icons_dir = install_dir / "frontend" / "public"
 
-        # Start shortcut (launches backend + frontend + opens browser).
-        # BE-9361: the .lnk FILENAME stays on the pre-rebrand name deliberately —
-        # it is an on-disk identifier already shipped to users (registry-frozen).
-        # Renaming it would leave existing desktops with two shortcuts and break
-        # the uninstall/reset cleanup lists that match on it. The user-visible
-        # Description below carries the current product name instead.
         start_path = desktop / "GiljoAI MCP.lnk"
         start_shortcut = shell.CreateShortcut(str(start_path))
         start_shortcut.TargetPath = python_exe
@@ -190,7 +101,6 @@ class WindowsPlatformHandler(PlatformHandler):
         start_shortcut.save()
         shortcuts_created.append(str(start_path))
 
-        # Stop shortcut (graceful shutdown)
         stop_path = desktop / "Stop GiljoAI.lnk"
         stop_shortcut = shell.CreateShortcut(str(stop_path))
         stop_shortcut.TargetPath = python_exe
@@ -211,19 +121,6 @@ class WindowsPlatformHandler(PlatformHandler):
         }
 
     def _create_shortcuts_batch(self, install_dir: Path, venv_dir: Path) -> Dict[str, Any]:
-        """
-        Create .lnk shortcuts via PowerShell (fallback when win32com unavailable).
-
-        Uses PowerShell COM interop to create proper .lnk files with icons,
-        since batch files cannot have custom icons on the desktop.
-
-        Args:
-            install_dir: Installation directory
-            venv_dir: Virtual environment directory
-
-        Returns:
-            Result dictionary
-        """
         desktop = Path.home() / "Desktop"
         shortcuts_created = []
         python_exe = str(venv_dir / "Scripts" / "python.exe")
@@ -231,7 +128,6 @@ class WindowsPlatformHandler(PlatformHandler):
 
         shortcuts = [
             {
-                # Frozen on-disk name — see the note on the win32com path above.
                 "name": "GiljoAI MCP.lnk",
                 "args": f'"{install_dir / "startup.py"}" --verbose',
                 "icon": icons_dir / "Start.ico",
@@ -270,7 +166,6 @@ class WindowsPlatformHandler(PlatformHandler):
                 )
                 shortcuts_created.append(str(lnk_path))
             except Exception as _exc:
-                # Final fallback: create .bat if PowerShell fails too
                 bat_path = desktop / sc["name"].replace(".lnk", ".bat")
                 with open(bat_path, "w") as f:
                     f.write("@echo off\n")
@@ -287,25 +182,11 @@ class WindowsPlatformHandler(PlatformHandler):
         }
 
     def run_npm_command(self, cmd: List[str], cwd: Path, timeout: int = 300) -> Dict[str, Any]:
-        """
-        Run npm command with Windows-specific shell handling.
-
-        CRITICAL: Windows MUST use shell=True because npm is a batch file.
-
-        Args:
-            cmd: Command list (e.g., ['npm', 'install'])
-            cwd: Working directory
-            timeout: Timeout in seconds
-
-        Returns:
-            Result dictionary with success status and output
-        """
         try:
-            # Windows MUST use shell=True for npm (batch file)
             result = subprocess.run(
                 cmd,
                 cwd=str(cwd),
-                shell=True,  # CRITICAL for Windows
+                shell=True,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -325,32 +206,22 @@ class WindowsPlatformHandler(PlatformHandler):
             return {"success": False, "error": str(e)}
 
     def get_network_ips(self) -> List[str]:
-        """
-        Get non-localhost IPv4 addresses on Windows.
-
-        Returns:
-            List of IPv4 address strings
-        """
         with contextlib.suppress(Exception):
             import psutil
 
             ips = []
             for addresses in psutil.net_if_addrs().values():
                 for addr in addresses:
-                    if addr.family == 2:  # AF_INET (IPv4)
+                    if addr.family == 2:
                         ip = addr.address
-                        # Filter out localhost and link-local
                         if not ip.startswith("127.") and not ip.startswith("169.254."):
                             ips.append(ip)
 
-            return sorted(set(ips))  # Deduplicate and sort
+            return sorted(set(ips))
 
         return []
 
     def welcome_screen(self) -> None:
-        """
-        Print Windows-specific welcome screen.
-        """
         separator = "=" * 70
 
         print(f"\n{Fore.YELLOW}{Style.BRIGHT}{separator}{Style.RESET_ALL}")
@@ -367,7 +238,6 @@ class WindowsPlatformHandler(PlatformHandler):
         print("  • API server + Frontend dashboard")
         print("  • MCP server integration\n")
 
-        # Windows platform info
         windows_version = platform.win32_ver()[0] if hasattr(platform, "win32_ver") else platform.release()
         print(f"{Fore.YELLOW}Platform: Windows {windows_version}{Style.RESET_ALL}")
         print(
@@ -375,13 +245,4 @@ class WindowsPlatformHandler(PlatformHandler):
         )
 
     def get_platform_specific_warnings(self) -> List[str]:
-        """
-        Get Windows-specific warnings.
-
-        Windows Firewall will typically prompt the user automatically,
-        so no explicit warnings needed.
-
-        Returns:
-            Empty list (no warnings needed)
-        """
         return []

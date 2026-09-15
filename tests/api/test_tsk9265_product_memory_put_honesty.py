@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""TSK-9265 REST regression: ``PUT /api/v1/products/{id}`` must be honest about
-``product_memory``.
-
-Bug: ``ProductUpdate`` advertised ``product_memory`` and crud.py forwarded it
-verbatim, but ``ProductService.update_product()``'s field allowlist (a
-deliberate security gate) silently dropped it — the caller got 200 + the stale
-value, every browser got a stale ``product:memory:updated`` broadcast, and
-nothing was persisted. Product memory has its own owning write path
-(ProductMemoryService via the 360 memory tools); this endpoint must reject the
-field with a clear 422 instead of lying with a 200.
-
-Tests live at the REST layer (api_client) because the failing layer is the
-schema + endpoint wiring (same failing-layer rule as BE-5056).
-"""
 
 from __future__ import annotations
 
@@ -39,7 +25,6 @@ _ORIGINAL_MEMORY = {"learnings": ["seeded learning"], "marker": "original"}
 
 
 async def _seed_user_with_product(db_manager) -> dict:
-    """Create org + user + product (with populated product_memory) in a fresh tenant."""
     async with db_manager.get_session_async() as session:
         suffix = uuid.uuid4().hex[:8]
         tenant_key = TenantManager.generate_tenant_key()
@@ -105,11 +90,6 @@ async def _fetch_product_memory(db_manager, product_id: str, tenant_key: str) ->
 async def test_put_product_memory_is_rejected_not_silently_dropped(
     api_client: AsyncClient, db_manager, seeded: dict
 ) -> None:
-    """product_memory in the PUT body -> 422 naming the field, nothing persisted.
-
-    Fail-first on the buggy code: the endpoint returned 200 with the stale value
-    (silent drop) and fired a stale broadcast.
-    """
     resp = await api_client.put(
         f"/api/v1/products/{seeded['product_id']}",
         headers=seeded["headers"],
@@ -125,7 +105,6 @@ async def test_put_product_memory_is_rejected_not_silently_dropped(
 
 @pytest.mark.asyncio
 async def test_put_without_product_memory_still_updates(api_client: AsyncClient, db_manager, seeded: dict) -> None:
-    """Mainline guard: normal field updates keep working after the rejection gate."""
     resp = await api_client.put(
         f"/api/v1/products/{seeded['product_id']}",
         headers=seeded["headers"],

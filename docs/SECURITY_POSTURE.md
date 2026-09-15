@@ -24,7 +24,7 @@ This property is formally audited and grep-verified as of 2026-04-23.
 ## What this means for you
 
 - **Your code and prompts never leave your machine for AI processing.** Your
-  AI coding tool (Claude Code, Codex CLI, Gemini CLI, or any MCP-compatible
+  AI coding tool (Claude Code, Codex CLI, OpenCode, or any MCP-compatible
   client) runs on your workstation, using your own API key. The GiljoAI
   server receives only structured tool calls and structured results — never
   raw prompts, never raw completions, never embeddings.

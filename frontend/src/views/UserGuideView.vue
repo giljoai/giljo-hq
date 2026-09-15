@@ -1,6 +1,5 @@
 <template>
   <div class="guide-layout">
-    <!-- Mobile TOC chip row (< 768px) -->
     <div v-if="isMobile" class="guide-toc-mobile">
       <div class="guide-toc-mobile-search">
         <v-icon size="16" class="guide-search-icon">mdi-magnify</v-icon>
@@ -34,19 +33,13 @@
           @click="goToSearchResult(result)"
         >
           <span class="guide-search-result-section">{{ result.section }}</span>
-          <!-- SEC-0003: snippet is built from bundled static markdown with
-               a `<mark>` tag wrapped around the user's search query; the
-               final string is hardened via sanitizeHtml in searchResults.
-               v-html sanctioned via eslint.config.js file override. -->
           <span class="guide-search-result-snippet" v-html="result.snippet" />
         </button>
       </div>
       <div v-else class="guide-search-empty">No results for "{{ searchQuery }}"</div>
     </div>
 
-    <!-- Desktop layout: sidebar + content -->
     <div class="guide-inner">
-      <!-- Left sidebar TOC (>= 768px) — fixed to viewport -->
       <aside v-if="!isMobile" class="guide-sidebar">
         <div class="guide-sidebar-header">
           <div class="guide-sidebar-title">Contents</div>
@@ -65,7 +58,6 @@
           </div>
         </div>
 
-        <!-- Search results in sidebar -->
         <div v-if="searchQuery && searchResults.length" class="guide-search-results">
           <button
             v-for="result in searchResults"
@@ -74,10 +66,6 @@
             @click="goToSearchResult(result)"
           >
             <span class="guide-search-result-section">{{ result.section }}</span>
-            <!-- SEC-0003: snippet is built from bundled static markdown with
-                 a `<mark>` tag wrapped around the user's search query; the
-                 final string is hardened via sanitizeHtml in searchResults.
-                 v-html sanctioned via eslint.config.js file override. -->
             <span class="guide-search-result-snippet" v-html="result.snippet" />
           </button>
         </div>
@@ -85,7 +73,6 @@
           No results
         </div>
 
-        <!-- TOC (hidden during search) -->
         <nav v-else class="guide-toc" aria-label="Table of contents">
           <button
             v-for="entry in tocEntries"
@@ -99,14 +86,7 @@
         </nav>
       </aside>
 
-      <!-- Content area -->
       <main ref="contentRef" class="guide-content">
-        <!-- SEC-0003: renderedMarkdown is produced from bundled static
-             markdown (docs/*.md imported at build-time), run through
-             marked.parse() with the custom heading renderer (which
-             HTML-escapes heading text and slugifies the id), and finally
-             hardened via sanitizeHtml.
-             v-html sanctioned via eslint.config.js file override. -->
         <div class="guide-prose" v-html="renderedMarkdown" />
       </main>
     </div>
@@ -127,23 +107,15 @@ import './userGuideProse.scss'
 import overviewMd from '../../../docs/PRODUCT_OVERVIEW.md?raw'
 import gettingStartedMd from '../../../docs/GETTING_STARTED.md?raw'
 import userGuideMd from '../../../docs/USER_GUIDE.md?raw'
-// TSK-8055: net-new CE guide chapters live under frontend/src/content/guide/
-// (not docs/, which is a protected zone) and ship to public CE. They fill the
-// glossary / chains / decision-guidance coverage gaps in the shared guide.
 import decisionGuideMd from '../content/guide/decision-guide.md?raw'
 import chainsMd from '../content/guide/chains.md?raw'
 import headlessFlowMd from '../content/guide/headless-flow.md?raw'
 import glossaryMd from '../content/guide/glossary.md?raw'
 
-// ADR-004: SaaS-only docs loaded via import.meta.glob so the CE bundle never
-// ships them. The glob is empty in CE builds (saas/ tree is stripped on export).
-// Keys are sorted for deterministic ordering when multiple SaaS docs exist.
 const saasMdModules = import.meta.glob('../saas/docs/*.md', { query: '?raw', import: 'default', eager: true })
 
 const route = useRoute()
 const { width } = useDisplay()
-// Edition detection via the CE-safe configService (NOT the saas/ tree, which
-// is stripped from the CE export). isSaas gates the SaaS-only billing chapter.
 const isSaas = ref(false)
 const { isSaasMode } = useGiljoMode()
 
@@ -152,20 +124,11 @@ const contentRef = ref(null)
 const activeTocAnchor = ref('')
 const searchQuery = ref('')
 
-// Build combined markdown: overview + getting started + user guide + SaaS docs
-// SaaS docs are appended ONLY in SaaS mode AND when the glob produced files
-// (defense-in-depth: glob is empty in CE builds, but the isSaas guard ensures
-// the chapter is never rendered in CE even if a file was somehow present).
 const combinedMarkdown = computed(() => {
   const parts = [overviewMd]
   if (gettingStartedMd) {
     parts.push(gettingStartedMd)
   }
-  // TSK-8055: decision guidance + chains follow the first-day flow; the User
-  // Guide reference then follows; the Glossary closes as a reference appendix
-  // (before the SaaS billing chapter, which stays last).
-  // FE-9503b: headless-flow follows chains (drives from the same lifecycle,
-  // and references the chain conductor) and precedes the User Guide reference.
   parts.push(decisionGuideMd)
   parts.push(chainsMd)
   parts.push(headlessFlowMd)
@@ -183,22 +146,13 @@ const combinedMarkdown = computed(() => {
   return parts.join('\n\n---\n\n')
 })
 
-// Install heading anchor renderer + edition callout blockquote renderer.
-// See @/utils/guideCalloutRenderer for SEC-0003 posture and implementation.
 installGuideCalloutRenderer(marked)
 
-// SEC-0003: hardened sanitization. `marked.parse()` is called directly (not
-// via the useSanitizeMarkdown composable) because the custom heading renderer
-// configured via `marked.use()` above must apply; we then funnel the output
-// through the composable's sanitizeHtml for the hardened cleanup step.
-// HARDENED_CONFIG covers every tag this guide emits (headings, lists,
-// code/pre, blockquote, tables, links, images) so no overrides are needed.
 const renderedMarkdown = computed(() => {
   const html = marked.parse(combinedMarkdown.value)
   return sanitizeHtml(html)
 })
 
-// Build TOC from ## headings
 const tocEntries = computed(() => {
   const entries = []
   const lines = combinedMarkdown.value.split('\n')
@@ -212,9 +166,7 @@ const tocEntries = computed(() => {
   return entries
 })
 
-// ─── SEARCH ───
 
-// Build searchable sections: split markdown by ## headings
 const searchableSections = computed(() => {
   const sections = []
   const lines = combinedMarkdown.value.split('\n')
@@ -256,10 +208,6 @@ const searchResults = computed(() => {
       const start = Math.max(0, idx - 30)
       const end = Math.min(plainText.length, idx + q.length + 50)
       const raw = (start > 0 ? '...' : '') + plainText.slice(start, end) + (end < plainText.length ? '...' : '')
-      // SEC-0003: route through sanitizeHtml for consistency -- data flows
-      // from bundled static markdown + user-typed `searchQuery`, the latter
-      // is regex-escaped for the pattern but the capture group ($1) lands
-      // in the output verbatim, so we harden before v-html binding.
       snippet = sanitizeHtml(raw.replace(
         new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'),
         '<mark>$1</mark>'
@@ -280,7 +228,6 @@ function goToSearchResult(result) {
   nextTick(() => scrollToAnchor(result.anchor))
 }
 
-// ─── TOC HELPERS ───
 
 function scrollToAnchor(anchor) {
   const el = document.getElementById(anchor)
@@ -289,7 +236,6 @@ function scrollToAnchor(anchor) {
   }
 }
 
-// IntersectionObserver for active section tracking
 let observer = null
 
 function setupObserver() {
@@ -319,7 +265,6 @@ function setupObserver() {
   headings.forEach((h) => observer.observe(h))
 }
 
-// Handle anchor from URL (e.g. /guide#products)
 function handleUrlAnchor() {
   const hash = route.hash?.replace('#', '')
   if (hash) {
@@ -330,8 +275,6 @@ function handleUrlAnchor() {
 }
 
 onMounted(async () => {
-  // Resolve edition before first render so the SaaS chapter gate is correct.
-  // configService is CE-safe and cached; fetchConfig() is a no-op if already loaded.
   await configService.fetchConfig()
   isSaas.value = isSaasMode()
   await nextTick()

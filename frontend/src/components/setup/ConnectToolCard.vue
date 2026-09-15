@@ -1,6 +1,5 @@
 <template>
   <div class="connect-tool-card" :data-testid="`connect-card-${toolId}`">
-    <!-- SERVER mono line — SaaS locked ("managed"), CE pencil (inline host/port edit, FE-6055) -->
     <div class="server-line">
       <span class="server-line-label">SERVER</span>
       <span class="server-line-url" data-testid="server-url-field">{{ serverUrl }}</span>
@@ -40,7 +39,6 @@
       </div>
     </v-expand-transition>
 
-    <!-- Key-only note (tools without browser sign-in, e.g. Antigravity) -->
     <p v-if="method === 'key' && baseMethod === 'key'" class="connect-subline" data-testid="apikey-only-note">
       {{ toolLabel }} uses an API key. Browser sign-in is not supported. Two moves:
     </p>
@@ -54,10 +52,6 @@
       Paste one command. Your browser opens for a one-click sign-in.
     </p>
 
-    <!-- Web-app connector endpoint (generic card only, FE-9225). Carried over from the
-         retired configurator's "Web & app" route: apps that accept an MCP connector URL
-         (claude.ai, ChatGPT, IDEs) need the endpoint itself, not the key-bearing JSON
-         below — they run their own browser sign-in. Shown regardless of key state. -->
     <div v-if="method === 'manual'" class="command-card" data-testid="web-endpoint-block">
       <div class="command-card-head">
         <span class="command-label">Connector URL</span>
@@ -72,7 +66,6 @@
       </p>
     </div>
 
-    <!-- Key flow (key + manual methods): Card 1 Generate + config/env/cert extras -->
     <SetupStep2KeyFlow
       v-if="showKeyStep"
       :checking-key="checkingKey"
@@ -97,15 +90,6 @@
       @copy-text="({ text }) => copyText(text)"
     />
 
-    <!-- FE-9339: cert-trust entry point, standing where the failure happens. A CE
-         self-hoster on HTTPS copies the command above, their Node-based CLI refuses
-         on a certificate error, and the walkthrough used to be reachable only from
-         Tools > Startup. Same modal, no navigation. Hidden on plain HTTP (nothing to
-         trust) and on SaaS (a hosted tenant has no server certificate of its own). -->
-    <!-- FE-9383: name the failure before it happens. A CE self-hoster on a private or
-         self-signed certificate gets a TLS verification error from Node-based CLIs, which
-         reads as "the command is wrong" rather than "the certificate is untrusted". The
-         fix is the trust store (the walkthrough below) — never disabling verification. -->
     <p v-if="showCertTrustLink" class="connect-subline" data-testid="node-tls-note">
       Node-based clients such as OpenCode, Claude Code, and Codex reject a private or
       self-signed certificate until it is in your trust store.
@@ -123,13 +107,9 @@
       </span>
     </div>
 
-    <!-- Command card — sign-in path (no bearer). Key/manual paths show their command inside KeyFlow. -->
     <div v-if="method === 'oauth'" class="command-card" data-testid="oauth-section">
       <div class="command-card-head">
         <span class="command-step">1.</span>
-        <!-- FE-9383: the snippet names the client it targets. Each client's CLI has its
-             own flag syntax, so a command that does not say which tool it is for invites
-             pasting it into the wrong one. -->
         <span class="command-label" data-testid="oauth-command-label">Paste in your {{ toolLabel }} terminal</span>
         <button class="copy-pill" data-testid="oauth-copy-btn" @click="copyText(oauthCommand)">
           <v-icon size="11">mdi-content-copy</v-icon>COPY
@@ -137,7 +117,6 @@
       </div>
       <pre class="command-code config-code">{{ oauthCommand }}</pre>
 
-      <!-- Cert-trust: conditional disclosure when the backend serves its own TLS -->
       <div v-if="needsCertTrust" class="cert-note" data-testid="oauth-cert-note">
         <v-icon size="13" :color="COLOR_MUTED">mdi-shield-lock-outline</v-icon>
         <span>
@@ -156,7 +135,6 @@
       </div>
     </div>
 
-    <!-- STATUS HERO — waiting (amber pulse) → connected (green pop + advance) -->
     <div :class="['status-hero', connected ? 'status-hero--connected' : 'status-hero--waiting']" data-testid="status-hero">
       <template v-if="!connected">
         <span class="hero-dot hero-dot--waiting" data-testid="hero-dot" />
@@ -177,7 +155,6 @@
       </template>
     </div>
 
-    <!-- Fallback links (per method matrix) + "I already configured this" -->
     <div class="fallback-row">
       <span
         v-if="showFallback"
@@ -204,9 +181,6 @@
       </span>
     </div>
 
-    <!-- FE-9339: the card owns its own instance rather than emitting up — both of
-         this card's hosts (the wizard step and the tools directory) would otherwise
-         need identical plumbing for a modal that holds no state worth sharing. -->
     <CertTrustModal
       v-model="showCertTrust"
       @continue="recordCertTrustDismissal"
@@ -238,17 +212,11 @@ import CertTrustModal from './CertTrustModal.vue'
 import { recordCertTrustDismissal } from '@/utils/certTrustPreference'
 
 const props = defineProps({
-  // Wizard tool id (claude_code, codex_cli, gemini_cli, antigravity_cli, opencode, generic).
   toolId: { type: String, required: true },
-  // Whether this tool's connection is confirmed (walk/session state, owned by the host).
   connected: { type: Boolean, default: false },
-  // Per-tool fallback toggle (host owns the map so the walk keeps it isolated per tool).
   keyMode: { type: Boolean, default: false },
-  // Sub-line under the hero title when connected (host supplies "Next tool…" / "This tool is live…").
   connectedNext: { type: String, default: '' },
-  // Label for the advance button inside the connected hero ('' hides it).
   advanceLabel: { type: String, default: '' },
-  // Show the quiet "I already configured this" link (wizard yes; directory hides it).
   showAlreadyConfigured: { type: Boolean, default: true },
 })
 
@@ -262,8 +230,6 @@ const normalizedId = computed(() => normalizeToolId(props.toolId))
 const caps = computed(() => getAuthCapabilities(props.toolId))
 const supportsOauth = computed(() => caps.value?.supports_oauth === true)
 
-// Edition + server config (INF-5012 / FE-6055). isCe unlocks the editable server URL,
-// positively confirmed 'ce' only — never default editable on uncertainty.
 const isCe = ref(false)
 const backendConfig = ref(null)
 const serverHostname = ref(window.location.hostname)
@@ -284,9 +250,6 @@ const serverUrl = computed(() => {
   })
 })
 
-// Method resolution (ported from the mock state machine):
-//   baseMethod: manual (generic) | key (CE, or SaaS key-only tools) | oauth (SaaS sign-in tools)
-//   method: baseMethod, but an oauth tool flips to 'key' when the fallback is toggled on.
 const baseMethod = computed(() => {
   if (props.toolId === 'generic') return 'manual'
   if (isCe.value) return 'key'
@@ -295,12 +258,9 @@ const baseMethod = computed(() => {
 const method = computed(() =>
   baseMethod.value === 'oauth' && props.keyMode ? 'key' : baseMethod.value,
 )
-// Fallback toggle exists only for SaaS sign-in-capable tools (FE-6242: never on CE).
 const showFallback = computed(() => baseMethod.value === 'oauth')
-// Generate-key card shows for key + manual methods.
 const showKeyStep = computed(() => method.value === 'key' || method.value === 'manual')
 
-// Platform + API-key state
 const platform = ref(detectPlatform())
 const checkingKey = ref(false)
 const existingKeyPrefix = ref(null)
@@ -310,24 +270,17 @@ const keyError = ref('')
 const hasKey = computed(() => !!generatedKey.value)
 const currentApiKey = computed(() => generatedKey.value || '')
 
-// Config command (bearer / manual JSON) shown inside KeyFlow.
 const configCommand = computed(() =>
   generateConfigForTool(props.toolId, serverUrl.value, currentApiKey.value),
 )
-// Sign-in command (no bearer) shown by this card for the oauth method.
 const oauthCommand = computed(() =>
   generateConfigForTool(props.toolId, serverUrl.value, '', { authMethod: 'oauth' }),
 )
-// Bare MCP endpoint for web/IDE connectors (FE-9225 — the generic card's connector URL).
 const mcpEndpoint = computed(() => `${serverUrl.value}/mcp`)
 const envVarText = computed(() => generateCodexEnvVar(currentApiKey.value, platform.value))
 const certCommand = computed(() => getCertTrustCommand(platform.value))
 const needsCertTrust = computed(() => isBackendHttps(backendConfig.value))
 
-// FE-9339 cert-trust link gate. Keyed on the resolved server URL the user is about
-// to paste, not on `needsCertTrust` (ssl_enabled): a CE box behind a reverse proxy
-// reports ssl_enabled=false while still handing the user an https URL whose CA their
-// CLI may not trust. If the URL is https, the failure is reachable.
 const showCertTrust = ref(false)
 const showCertTrustLink = computed(() => isCe.value && serverUrl.value.startsWith('https:'))
 
@@ -379,9 +332,6 @@ async function loadBackendConfig() {
     const cfg = await configService.fetchConfig()
     if (!cfg?.api) return
     backendConfig.value = cfg.api
-    // Unlock the editable server URL only when positively CE (self-hosted). Reads
-    // giljo_mode straight off the payload — the useSaasMode funnel lives under saas/
-    // and a CE component must not import it (edition-isolation Deletion Test).
     // eslint-disable-next-line giljo-internal/no-scattered-mode-checks
     isCe.value = cfg.giljo_mode === 'ce'
     if (cfg.api.host) serverHostname.value = cfg.api.host
@@ -391,7 +341,6 @@ async function loadBackendConfig() {
   }
 }
 
-// Re-check for an existing key when the walk moves to another tool.
 watch(() => props.toolId, () => {
   generatedKey.value = null
   existingKeyPrefix.value = null

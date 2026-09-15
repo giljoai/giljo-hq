@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""INF-5070: BaseGiljoError exception handler log-severity must follow the
-HTTP status class so the Sentry LoggingIntegration's default event_level
-(ERROR) does not auto-create Sentry issues for ordinary 4xx client errors.
-
-Background: mcp.example.com was flooding Sentry's giljoai-backend project
-with one issue per failed login because the global exception handler logged
-ALL BaseGiljoError subclasses (including 401 AuthenticationError and 404
-NotFoundError) at ERROR level. With public traffic + bot probes that would
-burn the 5K/month free-tier quota in days. Fix: 4xx -> WARNING (visible in
-journalctl, breadcrumb in Sentry, no issue); 5xx -> ERROR (real alerts).
-
-These tests assert that the log call site picks the right severity for
-each status-code class. They do NOT depend on Sentry being installed --
-the LoggingIntegration coupling is tested via the before_send filter in
-test_inf5063_sentry_init.py.
-"""
 
 from __future__ import annotations
 
@@ -100,9 +84,6 @@ def _get_handler(app: FastAPI):
     ],
 )
 async def test_4xx_logged_at_warning(caplog, exc_cls):
-    """Every 4xx domain error must log at WARNING -- below Sentry's default
-    ERROR event_level. Anonymous probes, invalid credentials, missing
-    records, validation failures are not server bugs."""
     app = _build_app()
     handler = _get_handler(app)
     exc = exc_cls("client did something wrong")
@@ -110,9 +91,7 @@ async def test_4xx_logged_at_warning(caplog, exc_cls):
     with caplog.at_level(logging.DEBUG, logger="api.exception_handlers"):
         response = await handler(_make_request(), exc)
 
-    # Status code in response unchanged
     assert response.status_code == exc.default_status_code
-    # Exactly one log record from the handler
     records = [r for r in caplog.records if r.name == "api.exception_handlers"]
     assert len(records) == 1
     assert records[0].levelno == logging.WARNING, (
@@ -124,8 +103,6 @@ async def test_4xx_logged_at_warning(caplog, exc_cls):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("exc_cls", [_Boom5xxError, _BoomBadGatewayError, _BoomServiceUnavailableError])
 async def test_5xx_logged_at_error(caplog, exc_cls):
-    """5xx must stay at ERROR -- those are real failures that warrant a
-    Sentry issue + alert email."""
     app = _build_app()
     handler = _get_handler(app)
     exc = exc_cls("backend exploded")
@@ -144,7 +121,6 @@ async def test_5xx_logged_at_error(caplog, exc_cls):
 
 @pytest.mark.asyncio
 async def test_response_shape_preserved(caplog):
-    """The severity change must not alter the JSON response body."""
     app = _build_app()
     handler = _get_handler(app)
     exc = _BoomNotFoundError("project xyz", context={"id": "xyz"})
@@ -163,8 +139,6 @@ async def test_response_shape_preserved(caplog):
 
 @pytest.mark.asyncio
 async def test_log_message_carries_error_code(caplog):
-    """The log line still contains the error_code so journalctl operators
-    can grep for specific failures even when severity is WARNING."""
     app = _build_app()
     handler = _get_handler(app)
     exc = _Boom4xxError("invalid password", error_code="AUTHENTICATION_ERROR")

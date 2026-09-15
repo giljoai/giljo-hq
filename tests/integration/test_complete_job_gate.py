@@ -3,29 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Transport-layer regression tests for the BE-5059 Phase B close gates.
-
-CLAUDE.md mandates a regression test at the failing layer for every bug-fix /
-primitive project. The Phase B gates live inside the FastMCP ``@mcp.tool``
-wrappers' downstream services -- this file exercises them through the MCP
-transport (``create_connected_server_and_client_session``) so the wrapper +
-``_call_tool`` dispatch + service-layer gate logic are all covered, not just
-the service in isolation.
-
-Two gates under test:
-
-1. ``complete_job`` MUST refuse when the active execution is ``awaiting_user``
-   and surface the pending ``approval_id`` in the error context.
-2. ``write_project_closeout`` (force=False) MUST refuse when ANY
-   team member is ``awaiting_user`` and surface a per-agent ``approval_id`` in
-   the blockers list with ``issue_type="awaiting_user_approval"``.
-
-Pattern reference: ``tests/integration/test_request_approval_mcp_transport.py``
-(Phase A) and ``tests/integration/test_task_tools_mcp_transport.py`` (BE-5057).
-Same in-memory transport, same ``_resolve_tenant`` monkeypatch, same shared-
-session service rebinding so writes happen inside the rolled-back test
-transaction.
-"""
 
 from __future__ import annotations
 
@@ -101,8 +78,6 @@ async def _seed_full_context(db_session, tenant_key: str) -> dict:
     db_session.add(project)
     await db_session.flush()
 
-    # BE-9054 (a): request_approval is orchestrator-only, so the awaiting_user
-    # seed must be an orchestrator job (the gates under test are job-type-agnostic).
     job = AgentJob(
         job_id=str(uuid4()),
         tenant_key=tenant_key,
@@ -131,14 +106,6 @@ async def _seed_full_context(db_session, tenant_key: str) -> dict:
 
 @pytest_asyncio.fixture
 async def gate_mcp_client(db_manager, db_session, monkeypatch):
-    """Wire ToolAccessor's user_approval AND job_completion services to db_session.
-
-    Same pattern as ``approval_mcp_client`` in
-    ``tests/integration/test_request_approval_mcp_transport.py`` -- replace the
-    accessor's services with shared-session instances so writes land inside the
-    rolled-back test transaction. JobCompletionService also accepts a
-    test_session, so the complete_job gate sees the same seed rows.
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from giljo_mcp.services.job_completion_service import JobCompletionService
@@ -168,9 +135,6 @@ async def gate_mcp_client(db_manager, db_session, monkeypatch):
         test_session=db_session,
     )
 
-    # write_project_closeout tool opens a new session via db_manager,
-    # which won't see the test-transaction seed rows. Override the accessor's
-    # method to forward the rolled-back db_session into the tool function.
     from giljo_mcp.tools.project_closeout import (
         close_project_and_update_memory as _close_tool,
     )
@@ -191,8 +155,6 @@ async def gate_mcp_client(db_manager, db_session, monkeypatch):
 
     state.tool_accessor = accessor
 
-    # BE-6042d: _resolve_tenant/_resolve_user_id moved to mcp_tools._base (the
-    # _call_tool call site reads them there). Patch _base, not mcp_sdk_server.
     from api.endpoints.mcp_tools import _base
 
     monkeypatch.setattr(_base, "_resolve_tenant", lambda ctx: tenant_key)
@@ -210,7 +172,6 @@ async def gate_mcp_client(db_manager, db_session, monkeypatch):
 
 
 async def _request_approval_via_transport(new_client, seed):
-    """Drive request_approval through the MCP wrapper to flip status atomically."""
     async with new_client() as session:
         result = await session.call_tool(
             "request_approval",
@@ -229,19 +190,9 @@ async def _request_approval_via_transport(new_client, seed):
     return _payload(result)["approval_id"]
 
 
-# ---------------------------------------------------------------------------
-# complete_job gate
-# ---------------------------------------------------------------------------
 
 
 async def test_complete_job_blocked_when_agent_is_awaiting_user(gate_mcp_client, db_session):
-    """complete_job through the MCP transport must refuse on awaiting_user.
-
-    The error must surface ``approval_id`` in its context so callers can route
-    directly to the decide endpoint. Service-layer-only coverage would miss the
-    @mcp.tool wrapper's exception serialization shape, which is the actual
-    surface the orchestrator sees.
-    """
     new_client, tenant_key = gate_mcp_client
     seed = await _seed_full_context(db_session, tenant_key)
 
@@ -264,26 +215,9 @@ async def test_complete_job_blocked_when_agent_is_awaiting_user(gate_mcp_client,
     )
 
 
-# ---------------------------------------------------------------------------
-# write_project_closeout gate (was close_project_and_update_memory, renamed INF-6052a)
-# ---------------------------------------------------------------------------
 
 
 async def test_close_project_blocked_when_any_team_member_awaiting_user(gate_mcp_client, db_session):
-    """close_project (force=False) must refuse when any agent is awaiting_user.
-
-    BE-9016 (Sentry GILJOAI-BACKEND-5): CLOSEOUT_BLOCKED is an EXPECTED,
-    agent-actionable domain rejection (BE-6081 Tier 2) -- it must be RETURNED
-    as structured content, NOT raised as isError (was: isError is True; the
-    raise reached Sentry as an error-level event for a routine, resolvable
-    workspace state, not an internal failure).
-
-    Asserts:
-    1. The transport result is NOT an error (Tier 2: normal content).
-    2. The payload carries success=False, error="CLOSEOUT_BLOCKED", and a
-       blocker with ``issue_type="awaiting_user_approval"`` plus the resolved
-       ``approval_id`` (so the UI can deep-link to the decide route).
-    """
     new_client, tenant_key = gate_mcp_client
     seed = await _seed_full_context(db_session, tenant_key)
 
@@ -317,26 +251,15 @@ async def test_close_project_blocked_when_any_team_member_awaiting_user(gate_mcp
     )
 
 
-# ---------------------------------------------------------------------------
-# BE-9153: signal-gated closeout_mode enforcement THROUGH the MCP boundary.
-# The gate auto-creates the approval (the agent does NOT call request_approval
-# first). BE-5042 lesson: the failing layer (the @mcp.tool complete_job wrapper +
-# _call_tool dispatch) must be exercised through the transport, not just the
-# service in isolation.
-# ---------------------------------------------------------------------------
 
 
 async def _make_closeout_phase(db_session, project) -> None:
-    """Flip the seeded project past staging so complete_job classifies the
-    orchestrator call as the CLOSEOUT phase (where the BE-9153 gate lives)."""
     project.staging_status = "staging_complete"
     project.implementation_launched_at = datetime.now(UTC)
     await db_session.commit()
 
 
 async def test_complete_job_gate_blocks_signal_bearing_closeout_under_hitl(gate_mcp_client, db_session):
-    """Through the MCP transport: closeout_mode='hitl' + a signal-bearing closeout
-    result auto-creates a blocking user_approval and complete_job refuses."""
     from giljo_mcp.services.settings_service import SettingsService
 
     new_client, tenant_key = gate_mcp_client
@@ -359,8 +282,6 @@ async def test_complete_job_gate_blocks_signal_bearing_closeout_under_hitl(gate_
 
 
 async def test_complete_job_gate_allows_clean_closeout_under_hitl(gate_mcp_client, db_session):
-    """Through the MCP transport: a CLEAN closeout completes under hitl (the gate
-    blocks ONLY on signal — this is the fix for the April 'blocked EVERY closeout')."""
     from giljo_mcp.services.settings_service import SettingsService
 
     new_client, tenant_key = gate_mcp_client

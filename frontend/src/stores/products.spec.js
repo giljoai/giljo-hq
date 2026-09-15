@@ -1,16 +1,3 @@
-/**
- * products.spec.js — FE-9121
- *
- * productsById is the store's per-id write-through cache: the freshest full
- * ProductResponse for an arbitrary product, independent of the global
- * selection (currentProductId/currentProduct). These specs prove:
- *   - fetchProductById populates productsById[id] unconditionally.
- *   - it ALSO syncs currentProduct, but ONLY when id === currentProductId.
- *   - a non-selected product's fetch leaves currentProduct untouched.
- *   - clearProductData empties the cache.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 

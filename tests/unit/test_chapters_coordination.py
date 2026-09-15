@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression guard for the BE-6008 coordination-chapter extraction.
-
-The three coordination-chapter builders were moved out of chapters_reference.py
-into chapters_coordination.py to restore their full docstrings under the 800-line
-CI ceiling. These tests lock the module boundary: the builders must be importable
-from the new module, must NOT have leaked back into chapters_reference.py, and
-must still render their chapter content. They do not re-test rendering semantics
-(that lives in test_be6008_staged_agent_mailboxes.py) — they guard the move.
-"""
 
 from __future__ import annotations
 
@@ -53,22 +44,14 @@ def test_ch_messaging_states_authority_rule() -> None:
 
 
 def test_ch_messaging_includes_board_reply_protocol() -> None:
-    # BE-6054b: the message-board reply protocol is encoded into CH_MESSAGING
-    # (extend, not a fresh blob) so agents know the baton + append-only + close rules.
     rendered = _build_ch_messaging()
     assert "MESSAGE BOARD" in rendered
     assert "get_my_turn" in rendered
-    # BE-9554: set_next_actor -> set_next_actor ("baton" was undefined jargon in a tool
-    # name). The guarantee is unchanged -- the messaging chapter must still teach the
-    # tool that hands the turn on -- so the pin follows the prose to the new name.
     assert "set_next_actor" in rendered
     assert "append-only" in rendered.lower()
 
 
 def test_thread_loop_directive_states_loop_and_termination() -> None:
-    # BE-6054c: the thread loop/sleep directive tells the agent to loop until the
-    # thread is resolved/closed (the termination condition) using the existing
-    # sleep-and-check mechanism.
     from giljo_mcp.services.protocol_sections.chapters_coordination import _build_thread_loop_directive
 
     rendered = _build_thread_loop_directive()
@@ -78,7 +61,6 @@ def test_thread_loop_directive_states_loop_and_termination() -> None:
     assert "closed" in rendered
     assert "get_my_turn" in rendered
     assert "set_agent_status" in rendered
-    # The Claude Code sleep workaround must be preserved.
     assert "sleep 1" in rendered
 
 

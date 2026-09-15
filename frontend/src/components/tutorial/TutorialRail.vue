@@ -38,7 +38,6 @@
 import { TUTORIAL_STOPS } from '@/composables/useTutorialState'
 
 defineProps({
-  /** 1-based active rail stop (sub-screens map to stop 6). */
   activeStop: {
     type: Number,
     required: true,

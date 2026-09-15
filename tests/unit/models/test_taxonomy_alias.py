@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression tests for taxonomy_alias as a SELECT-time column_property.
-
-BE-5058: ``Project.taxonomy_alias`` (and the new ``Task.taxonomy_alias`` mirror)
-must be resolvable on a freshly-fetched ORM instance WITHOUT eager-loading the
-``taxonomy_types`` relationship. Before this fix, ``taxonomy_alias`` was a
-Python ``@property`` that dereferenced ``self.project_type`` and triggered an
-async lazy load -- crashing as ``MissingGreenlet`` whenever a sync consumer
-read the field after the loader scope closed.
-
-The fix promotes the alias to a ``column_property`` whose value is computed at
-SELECT time via correlated subquery, so subsequent attribute access never
-issues IO.
-
-The tests below assert:
-* alias resolves with no eager loading on Project (regression case)
-* alias respects ``tenant_key`` isolation in the correlated subquery
-* fallback to the random ``alias`` column when no taxonomy fields are set
-* equivalent behaviour for Task.taxonomy_alias mirror, including ``subseries``
-"""
 
 import uuid
 
@@ -62,8 +43,6 @@ async def _make_product(session: AsyncSession, tenant_key: str) -> Product:
 
 @pytest.mark.asyncio
 async def test_project_taxonomy_alias_resolves_without_eager_load(db_session: AsyncSession):
-    """A project read back without ``joinedload(project_type)`` must still
-    return the taxonomy alias without triggering a lazy load."""
     tenant_key = TenantManager.generate_tenant_key()
     tt = await _make_taxonomy(db_session, tenant_key, "BE")
     product = await _make_product(db_session, tenant_key)
@@ -82,14 +61,12 @@ async def test_project_taxonomy_alias_resolves_without_eager_load(db_session: As
     db_session.add(project)
     await db_session.commit()
 
-    # Drop everything from the identity map so re-fetch is forced.
     db_session.expunge_all()
 
     stmt = select(Project).where(Project.id == project.id)
     result = await db_session.execute(stmt)
     fetched = result.scalar_one()
 
-    # Sync attribute access -- must NOT trigger async lazy load.
     assert fetched.taxonomy_alias == "BE-0042a"
 
 
@@ -165,13 +142,6 @@ async def test_project_taxonomy_alias_series_no_subseries(db_session: AsyncSessi
 
 @pytest.mark.asyncio
 async def test_project_taxonomy_alias_respects_tenant_key(db_session: AsyncSession):
-    """The correlated taxonomy_types lookup MUST filter by tenant_key.
-
-    A taxonomy row in tenant A with the same id as one in tenant B must not
-    leak its abbreviation across the boundary. We simulate this by writing a
-    project whose project_type_id points to an id from a different tenant --
-    the correlated subquery should return NULL and the alias should fall back.
-    """
     tenant_a = TenantManager.generate_tenant_key()
     tenant_b = TenantManager.generate_tenant_key()
     tt_a = await _make_taxonomy(db_session, tenant_a, "BE")
@@ -184,7 +154,7 @@ async def test_project_taxonomy_alias_respects_tenant_key(db_session: AsyncSessi
         name="Cross Tenant",
         description="desc",
         mission="mission",
-        project_type_id=tt_a.id,  # belongs to tenant_a, not tenant_b
+        project_type_id=tt_a.id,
         series_number=1,
         alias="zz9999",
     )
@@ -193,8 +163,6 @@ async def test_project_taxonomy_alias_respects_tenant_key(db_session: AsyncSessi
     db_session.expunge_all()
 
     fetched = (await db_session.execute(select(Project).where(Project.id == project.id))).scalar_one()
-    # Abbreviation must NOT leak; alias should be just the series since the
-    # tenant-scoped subquery returned NULL for the abbreviation.
     assert "BE" not in fetched.taxonomy_alias
     assert fetched.taxonomy_alias == "0001"
 
@@ -224,8 +192,6 @@ async def test_task_taxonomy_alias_resolves_without_eager_load(db_session: Async
 
 @pytest.mark.asyncio
 async def test_task_taxonomy_alias_no_taxonomy_returns_empty(db_session: AsyncSession):
-    """A task with no taxonomy fields has no random fallback alias column;
-    the alias should resolve to an empty string (or None coerced to '')."""
     tenant_key = TenantManager.generate_tenant_key()
     product = await _make_product(db_session, tenant_key)
 
@@ -243,23 +209,17 @@ async def test_task_taxonomy_alias_no_taxonomy_returns_empty(db_session: AsyncSe
     assert fetched.taxonomy_alias == ""
 
 
-# ---------------------------------------------------------------------------
-# BE-6049a: no-truncation display + SQL<->Python parity
-# ---------------------------------------------------------------------------
 
 
 def test_format_taxonomy_alias_helper_pads_min4_never_truncates():
-    """Pure-function contract for the shared formatter."""
     from giljo_mcp.utils.taxonomy_alias import format_taxonomy_alias
 
     assert format_taxonomy_alias("BE", 17) == "BE-0017"
     assert format_taxonomy_alias("BE", 17, "a") == "BE-0017a"
     assert format_taxonomy_alias("BE", 1) == "BE-0001"
     assert format_taxonomy_alias("BE", 9999) == "BE-9999"
-    # The bug this fixes: 5-/6-digit serials must render in FULL, not truncate.
     assert format_taxonomy_alias("BE", 10000) == "BE-10000"
     assert format_taxonomy_alias("TSK", 99999) == "TSK-99999"
-    # Untyped / unnumbered / fallback branches mirror the SQL column_property.
     assert format_taxonomy_alias(None, 17) == "0017"
     assert format_taxonomy_alias("BE", None) == "BE"
     assert format_taxonomy_alias(None, None) == ""
@@ -269,10 +229,6 @@ def test_format_taxonomy_alias_helper_pads_min4_never_truncates():
 
 @pytest.mark.asyncio
 async def test_project_taxonomy_alias_no_truncation_5_and_6_digits(db_session: AsyncSession):
-    """A grandfathered 5-/6-digit serial must render in full (lpad bug regression).
-
-    The old fixed ``lpad(..., 4, '0')`` truncated 10000 -> '1000'.
-    """
     tenant_key = TenantManager.generate_tenant_key()
     tt = await _make_taxonomy(db_session, tenant_key, "BE")
     product = await _make_product(db_session, tenant_key)
@@ -297,12 +253,6 @@ async def test_project_taxonomy_alias_no_truncation_5_and_6_digits(db_session: A
 
 @pytest.mark.asyncio
 async def test_sql_and_python_alias_builders_are_in_parity(db_session: AsyncSession):
-    """The SQL column_property and the Python helper MUST agree for every input.
-
-    This is the cross-cutting risk the scope flags (two builders drifting).
-    Creates a Project and a Task per boundary case and asserts the DB-rendered
-    ``taxonomy_alias`` equals ``format_taxonomy_alias(...)``.
-    """
     from giljo_mcp.utils.taxonomy_alias import format_taxonomy_alias
 
     tenant_key = TenantManager.generate_tenant_key()
@@ -351,18 +301,10 @@ async def test_sql_and_python_alias_builders_are_in_parity(db_session: AsyncSess
 
 @pytest.mark.asyncio
 async def test_empty_abbreviation_renders_no_leading_dash(db_session: AsyncSession):
-    """BE-6079 (L4): an EMPTY-string abbreviation must render ``0017``, not ``-0017``.
-
-    The SQL builders previously keyed the separator dash on a merely NON-NULL
-    abbreviation, so an empty-string abbr produced a stray leading dash that the
-    Python helper (``sep = "-" if abbr else ""``) never emits. The ``nullif(abbr,
-    '')`` guard collapses empty -> NULL so both builders agree. Abbreviations are
-    regex-gated non-empty in normal flow, so this pins the theoretical edge.
-    """
     from giljo_mcp.utils.taxonomy_alias import format_taxonomy_alias
 
     tenant_key = TenantManager.generate_tenant_key()
-    tt = await _make_taxonomy(db_session, tenant_key, "")  # empty abbreviation
+    tt = await _make_taxonomy(db_session, tenant_key, "")
     product = await _make_product(db_session, tenant_key)
 
     proj = Project(

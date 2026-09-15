@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Smoke tests for ``giljo_mcp.services.memory_entry_write_validator``.
-
-The exhaustive acceptance suite for INF-WriteShape lives in
-``tests/unit/test_inf_writeshape_memory_caps.py``. This file exists so
-the CI guardrail (Guardrail 2: new service = new test) sees a test file
-matching the service module name; it doubles as a sanity check that the
-public surface (``validate_memory_entry_write``,
-``MemoryEntryWriteSchema``, ``MemoryEntryWriteValidationError``) imports
-cleanly and short-circuits the obvious cases.
-"""
 
 from __future__ import annotations
 
@@ -64,13 +54,11 @@ def test_validator_rejects_oversize_summary_with_structured_error():
 
 
 def test_batch_reports_all_failing_caps_together():
-    # BE-6208a: more than one cap failure -> all_failures lists every offending
-    # field so the agent fixes them in one round-trip.
     with pytest.raises(MemoryEntryWriteValidationError) as exc_info:
         validate_memory_entry_write(
             {
                 "summary": "x" * 1600,
-                "key_outcomes": ["a", "b", "c", "d", "e", "f"],  # > 5 items
+                "key_outcomes": ["a", "b", "c", "d", "e", "f"],
                 "decisions_made": [],
                 "deliverables": [],
                 "tags": ["not-a-real-tag"],
@@ -80,7 +68,6 @@ def test_batch_reports_all_failing_caps_together():
     assert err.all_failures is not None
     offending = {f["field"] for f in err.all_failures}
     assert {"summary", "key_outcomes", "tags"} <= offending
-    # to_dict surfaces the batch for the agent.
     assert "all_failures" in err.to_dict()
 
 
@@ -115,14 +102,6 @@ def test_validator_rejects_unknown_tag():
 
 
 def test_str_skips_only_the_primarys_own_entry_not_every_same_field_entry():
-    """TSK-9003: ``__str__`` used to skip every ``all_failures`` entry whose
-    ``field`` matched the primary's field. That's wrong when a genuine SECOND
-    violation lands on the SAME field as the primary (not reachable through
-    the public validator today -- its field_validators early-raise on the
-    first bad item -- but the surface contract must hold regardless of how
-    ``all_failures`` gets built). Construct the error directly to pin the
-    ``__str__`` contract: skip index 0 (the primary's own redundant copy)
-    only, not every same-field entry."""
     err = MemoryEntryWriteValidationError(
         field="decisions_made",
         actual_size=300,

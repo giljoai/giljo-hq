@@ -1,18 +1,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-/**
- * useTokenActionPage — shared state machine for email-link "token action"
- * landing pages (dup-10: AccountDeletionCancel, AccountDeletionConfirm,
- * VerifyEmailChangePage). Token IS the auth for these public routes — no
- * JWT required.
- *
- * Reads `?token` from the route, calls `performAction(token)` once on
- * mount, and tracks loading/success/error state. On success `response`
- * holds the resolved API response (callers derive their own success text /
- * fields from it); on failure `errorDetail` holds
- * `err?.response?.data?.detail || ''`.
- */
 export function useTokenActionPage(performAction) {
   const route = useRoute()
   const router = useRouter()

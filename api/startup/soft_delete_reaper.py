@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""TSK-6132 soft-delete reaper (startup maintenance task).
-
-Extracted from ``api/startup/background_tasks.py`` to keep that module under the
-800-line guardrail. Completes the BE-6130b/BE-6137 trash/recover lifecycle by
-hard-deleting soft-deleted rows past the recovery window, through each entity's
-owning service. Wired into ``init_background_tasks`` at startup.
-"""
 
 import logging
 
@@ -23,16 +16,6 @@ logger = logging.getLogger(__name__)
 
 
 async def purge_expired_soft_deleted_entities(db_manager: DatabaseManager, tenant_manager: TenantManager):
-    """TSK-6132: reap soft-deleted trash/recover rows past the recovery window.
-
-    Completes the BE-6130b trash/recover lifecycle for the self-service entities
-    (CommThread, Task, VisionDocument, AgentTemplate): a row trashed longer than
-    ``RECOVER_WINDOW_DAYS`` ago is no longer recoverable, so this permanently
-    hard-deletes it through its OWNING service — cascade/FK handling stays with
-    the service that owns the row, and ``tenant_key`` scopes every query. Reuses
-    the shared ``domain.soft_delete`` policy (no schema change), is FK-safe and
-    idempotent, and runs once at startup alongside ``purge_expired_deleted_items``.
-    """
     from giljo_mcp.domain.soft_delete import recover_window_cutoff
     from giljo_mcp.models import AgentTemplate, Task, VisionDocument
     from giljo_mcp.models.comm import CommThread
@@ -46,18 +29,6 @@ async def purge_expired_soft_deleted_entities(db_manager: DatabaseManager, tenan
         cutoff = recover_window_cutoff()
 
         async def _tenants_with_expired(session, model) -> set[str]:
-            """Enumerate every tenant owning an expired soft-deleted row of ``model``.
-
-            BE-9319: this took a caller-supplied ``needs_bypass`` flag — an opinion
-            about registry membership that the caller had to REMEMBER. Three of four
-            call sites remembered right and one remembered wrong, and the wrong one
-            killed the whole sweep. The flag is gone: every model this reaper handles
-            is tenant-scoped, so the cross-tenant enumeration always needs the audited
-            bypass, and ``tenant_isolation_bypass`` validates that itself — hand it a
-            model that is NOT tenant-scoped and it raises naming the model, which is
-            the loud answer a future caller deserves instead of a boolean that can be
-            silently wrong.
-            """
             stmt = select(model.tenant_key).distinct().where(model.deleted_at.isnot(None), model.deleted_at < cutoff)
             with tenant_isolation_bypass(
                 session,
@@ -107,6 +78,6 @@ async def purge_expired_soft_deleted_entities(db_manager: DatabaseManager, tenan
             )
         else:
             logger.debug("[TSK-6132] No expired soft-deleted rows to reap")
-    except Exception as e:  # Broad catch: background startup task, non-fatal
+    except Exception as e:
         logger.error("Failed to reap expired soft-deleted rows (TSK-6132): %s", e, exc_info=True)
         logger.warning("Continuing startup despite reaper failure")

@@ -1,15 +1,3 @@
-/**
- * useChainLifecycle.fe6171b.spec.js — FE-6171b
- *
- * Regression tests for the FE-6171b redefinitions:
- *   - stageChain: lockRun (PATCH locked=true) + copy staging prompt + toast
- *   - unstageChain: UNLOCK ONLY (PATCH locked=false) — chain stays intact, NOT dissolve
- *   - unstageChain: surfaces 422 as an error toast
- *   - releaseChain: still calls release endpoint (dissolve behavior preserved from FE-6170)
- *
- * Global test setup (tests/setup.js) mocks @/services/api and @/composables/useToast.
- * Edition scope: CE.
- */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import api from '@/services/api'
@@ -67,7 +55,7 @@ describe('useChainLifecycle — FE-6171b stageChain', () => {
 
   it('succeeds without a staging prompt (graceful no-prompt path)', async () => {
     api.sequenceRuns.update.mockResolvedValueOnce({ data: makeRun({ locked: true }) })
-    api.prompts.chainStaging.mockResolvedValueOnce({ data: {} }) // no prompt field
+    api.prompts.chainStaging.mockResolvedValueOnce({ data: {} })
 
     const { stageChain } = useChainLifecycle()
     const updated = await stageChain(makeRun())
@@ -117,7 +105,6 @@ describe('useChainLifecycle — FE-6171b unstageChain (UNLOCK, not dissolve)', (
     const { unstageChain } = useChainLifecycle()
     await unstageChain(makeRun({ locked: true }))
 
-    // Run stays in runsById (status still 'pending' = active).
     expect(sequenceRunStore.runsById.has('run-1')).toBe(true)
     expect(sequenceRunStore.isProjectInActiveChain('p1')).toBe(true)
     expect(sequenceRunStore.isProjectInActiveChain('p2')).toBe(true)

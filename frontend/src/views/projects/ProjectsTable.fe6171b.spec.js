@@ -1,13 +1,3 @@
-/**
- * ProjectsTable.fe6171b.spec.js — FE-6171b
- *
- * Regression tests for the FE-6171b changes in ProjectsTable.vue:
- *   D5: Tickbox disabled by lockedChainIds prop (not raw inChainIds).
- *   D7: Unlink hamburger menu item appears for in-chain+unlocked rows.
- *   D9: Single "In chain" badge replaces the double [inactive][In chain] display.
- *
- * Edition scope: CE.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
@@ -37,10 +27,7 @@ vi.mock('@/config/colorTokens', () => ({
 
 import ProjectsTable from './ProjectsTable.vue'
 
-// Slot-rendering stub: renders item.select + item.status + item.menu slots so we
-// can inspect tickbox state, badge rendering, and the Unlink menu item.
 const rowStubs = {
-  // BE-9157: stub the store/Vuetify-dependent Supersede dialog (own spec covers it).
   SupersedeProjectModal: true,
   'v-data-table-server': {
     template:
@@ -109,18 +96,15 @@ describe('ProjectsTable FE-6171b — D5: tickbox locked by lockedChainIds, NOT i
   })
 
   it('tickbox enabled when in-chain but NOT locked (Editing tier)', () => {
-    // p1 in chain but unlocked → tickbox should NOT be disabled.
     const wrapper = mountTable({
       inChainIds: ['p1'],
       lockedChainIds: [],
     })
     const checkboxes = wrapper.findAll('input[type="checkbox"]')
-    // Find the one for p1 — it should exist and not be disabled.
     const p1Checkbox = checkboxes.find((cb) => cb.element.closest('[data-project-id="p1"]'))
     if (p1Checkbox) {
       expect(p1Checkbox.attributes('disabled')).toBeUndefined()
     }
-    // Component renders without error.
     expect(wrapper.exists()).toBe(true)
   })
 
@@ -129,10 +113,7 @@ describe('ProjectsTable FE-6171b — D5: tickbox locked by lockedChainIds, NOT i
       inChainIds: ['p1'],
       lockedChainIds: ['p1'],
     })
-    // The select slot renders a checkbox with :disabled="lockedChainIds.includes(item.id)"
-    // We verify the prop is accepted and component renders without error.
     expect(wrapper.exists()).toBe(true)
-    // data-testid on the checkbox: data-testid="select-chain-checkbox-p1"
     const locked = wrapper.find('[data-testid="select-chain-checkbox-p1"]')
     if (locked.exists()) {
       expect(locked.attributes('disabled')).toBeDefined()
@@ -144,7 +125,6 @@ describe('ProjectsTable FE-6171b — D5: tickbox locked by lockedChainIds, NOT i
       inChainIds: ['p1'],
       lockedChainIds: ['p1'],
     })
-    // p2 not in chain — its checkbox must not be disabled.
     const p2Checkbox = wrapper.find('[data-testid="select-chain-checkbox-p2"]')
     if (p2Checkbox.exists()) {
       expect(p2Checkbox.attributes('disabled')).toBeUndefined()
@@ -170,9 +150,6 @@ describe('ProjectsTable FE-6171b — D9: single "In chain" badge replaces double
   })
 
   it('FE-6221b: renders in-chain-pill for active project in chain (active member stays identified)', () => {
-    // FE-6221b: active/implementing chain members now also show the "In chain" pill
-    // alongside their status badge — so chain membership is visible regardless of the
-    // member's run phase, matching the /roadmap indicator.
     const wrapper = mountTable({
       projects: [makeProject('p1', 'active')],
       total: 1,

@@ -3,30 +3,6 @@
   Licensed under the Elastic License 2.0.
   See LICENSE in the project root for terms.
   [CE] Community Edition.
-
-  YourTurnBannerRow.vue — FE-9368 (E), extracted FE-9589
-
-  The Message Hub handover row, app-wide. The Hub's own attention strip and gold
-  card only reach an operator who is already in the Hub, and they normally are
-  not. Leads with the raised hand rather than the Gil avatar: this row is an
-  agent waiting on you, not Gil talking.
-
-  Extracted out of SystemStatusBanner.vue on the ApprovalBannerRow (FE-9511)
-  precedent, for the same reason: Guardrail 1, the 800-line cap. It picks up
-  the shared banner-unified chrome its two siblings already use, which is what
-  "same visual language for an agent needs you" was always describing.
-
-  Presentational: the parent owns the thread list (its count also feeds the
-  FE-9377 space reservation) and this emits rather than navigating (ruling 3).
-
-  FE-9589: dismissible, superseding "not dismissible on purpose, it is a live
-  read of the baton, so it leaves when the turn does". Still a live read --
-  dismissal writes no server state, the baton stays yours, the thread stays in
-  the Hub and the bell keeps its row -- but the operator can close the strip
-  where it stands. The FE-9589 survey listed four families and missed this one;
-  a baton row with no X would have been the last banner nobody could close.
-
-  Edition Scope: Both
 -->
 <template>
   <div
@@ -69,7 +45,6 @@ import { computed } from 'vue'
 import { threadDisplayName } from '@/components/hub/threadDisplayName'
 
 const props = defineProps({
-  /** Non-terminal threads whose baton points at the current user, newest first. */
   threads: {
     type: Array,
     default: () => [],
@@ -77,12 +52,8 @@ const props = defineProps({
 })
 defineEmits(['open', 'dismiss'])
 
-// FE-9436: the shared naming rule. Two copies of a fallback list cannot keep the
-// promise below, and one of the two had already drifted into printing a UUID.
 const threadLabel = (thread) => threadDisplayName(thread)
 
-// Wording is the Hub's, kept word for word so the two surfaces do not describe
-// the same event two different ways.
 const message = computed(() => {
   if (props.threads.length > 1) return 'Multiple chat threads are waiting for you'
   const thread = props.threads[0]

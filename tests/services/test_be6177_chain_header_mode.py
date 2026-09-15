@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6177 / BE-6205 — full_protocol header mode agrees with CH_CAPABILITY.
-
-The generic full_protocol header (the EXECUTION_MODE / FORBIDDEN-Task banner built in
-agent_lifecycle.py) is gated on the mode passed to _generate_agent_protocol. It MUST
-agree with CH_CAPABILITY for the same run.
-
-BE-6177 first resolved the header mode from the RUN. BE-6205 REVERSES the conductor side
-of that: under the owner-ratified model the project-less CONDUCTOR ALWAYS spawns each
-sub-orchestrator in a FRESH TERMINAL (every execution_mode) and NEVER via Task(), so its
-header must be TERMINAL-based — _resolve_chain_execution_mode now PINS the conductor
-header to ``multi_terminal`` (the terminal / FORBIDDEN-Task banner), agreeing with the
-reversed CH_CAPABILITY. A project-BOUND sub_orchestrator still resolves the RUN's mode
-(its header describes how IT spawns its WORKERS). Failing layer = the rendered
-protocol/header string.
-
-Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -39,11 +22,6 @@ _HEADER_MULTI = "EXECUTION_MODE: multi_terminal"
 _HEADER_USER_TERMINALS = "The USER opens each agent's new session"
 
 
-# ---------------------------------------------------------------------------
-# Layer 1 — the pure renderer: the banner is gated on the resolved mode.
-# multi_terminal renders the terminal header; a subagent mode (tool form
-# "claude-code") suppresses it. Header MUST agree with CH_CAPABILITY.
-# ---------------------------------------------------------------------------
 
 
 def test_renderer_multi_terminal_renders_terminal_header():
@@ -55,8 +33,6 @@ def test_renderer_multi_terminal_renders_terminal_header():
 
 
 def test_renderer_claude_code_cli_omits_terminal_header():
-    # claude_code_cli resolves to tool "claude-code"; the banner gate suppresses the
-    # multi_terminal / FORBIDDEN-Task header for any non-multi_terminal mode.
     out = _generate_orchestrator_protocol(
         "job-1", "tenant-1", "exec-1", execution_mode="claude-code", tool="claude-code"
     )
@@ -64,10 +40,6 @@ def test_renderer_claude_code_cli_omits_terminal_header():
     assert "FORBIDDEN in this mode" not in out
 
 
-# ---------------------------------------------------------------------------
-# Layer 2 — the resolution: a chained orchestrator's header mode comes from the
-# RUN, not the project column. This is the run-breaker that was RED before the fix.
-# ---------------------------------------------------------------------------
 
 
 def _svc(db_manager) -> MissionService:
@@ -117,9 +89,6 @@ class _FakeExec:
 
 @pytest.mark.asyncio
 async def test_projectless_conductor_header_pinned_to_multi_terminal(db_manager):
-    """BE-6205: a project-less conductor on a claude_code_cli run PINS its header mode to
-    multi_terminal (it always spawns sub-orchs in fresh terminals, never via Task()),
-    NOT the run's worker-spawn mode."""
     p1, p2 = str(uuid.uuid4()), str(uuid.uuid4())
     tenant_key = await _seed_run(
         db_manager, project_ids=[p1, p2], conductor_agent_id="cond-1", execution_mode="claude_code_cli"
@@ -128,7 +97,7 @@ async def test_projectless_conductor_header_pinned_to_multi_terminal(db_manager)
     async with svc._get_session(tenant_key) as session:
         mode = await svc._resolve_chain_execution_mode(
             session,
-            _FakeJob(project_id=None),  # dedicated conductor is project-less
+            _FakeJob(project_id=None),
             _FakeExec("cond-1"),
             tenant_key,
         )
@@ -137,7 +106,6 @@ async def test_projectless_conductor_header_pinned_to_multi_terminal(db_manager)
 
 @pytest.mark.asyncio
 async def test_sub_orchestrator_resolves_run_mode(db_manager):
-    """A project-bound sub_orchestrator resolves the RUN's mode via its project."""
     p1, p2 = str(uuid.uuid4()), str(uuid.uuid4())
     tenant_key = await _seed_run(
         db_manager, project_ids=[p1, p2], conductor_agent_id="cond-1", execution_mode="claude_code_cli"
@@ -155,7 +123,6 @@ async def test_sub_orchestrator_resolves_run_mode(db_manager):
 
 @pytest.mark.asyncio
 async def test_solo_orchestrator_resolves_none(db_manager):
-    """No active run → None, caller keeps the project-derived mode (byte-identical)."""
     svc = _svc(db_manager)
     tenant_key = TenantManager.generate_tenant_key()
     async with svc._get_session(tenant_key) as session:
@@ -170,11 +137,6 @@ async def test_solo_orchestrator_resolves_none(db_manager):
 
 @pytest.mark.asyncio
 async def test_conductor_header_is_terminal_based_agreeing_with_ch_capability(db_manager):
-    """BE-6205 follow-up: end-to-end at the assembly layer, a project-less conductor on a
-    claude_code_cli run renders the multi_terminal / FORBIDDEN-Task header — but with the
-    CONDUCTOR-AUTONOMY banner variant, NOT the stock "the USER opens terminals" prose. The
-    conductor self-spawns each sub-orch in a fresh terminal (CH_CHAIN_DRIVE STEP A), so the
-    stock user-mediated banner would be false and could stall a cold conductor."""
     p1 = str(uuid.uuid4())
     tenant_key = await _seed_run(
         db_manager, project_ids=[p1], conductor_agent_id="cond-1", execution_mode="claude_code_cli"
@@ -192,7 +154,7 @@ async def test_conductor_header_is_terminal_based_agreeing_with_ch_capability(db
     resp = svc._assemble_mission_context(
         job=job,
         execution=execution,
-        project=None,  # project-less dedicated conductor
+        project=None,
         agent_identity=None,
         all_project_executions=[execution],
         mission_lookup={job.job_id: ""},
@@ -202,25 +164,14 @@ async def test_conductor_header_is_terminal_based_agreeing_with_ch_capability(db
         chain_execution_mode=chain_mode,
     )
 
-    # BE-6216: the conductor banner no longer prints the contradictory
-    # "EXECUTION_MODE: multi_terminal" token (CH_CAPABILITY, injected at runtime, is now
-    # the single authoritative execution-mode print). The banner is relabeled to a
-    # non-colliding sub-orch-spawn header. (Was _HEADER_MULTI present.) Single-value proof
-    # across banner + CH_CAPABILITY lives in test_be6216_conductor_execution_mode_label.
     assert _HEADER_MULTI not in resp.full_protocol
     assert "SUB-ORCH SPAWN: FRESH TERMINAL" in resp.full_protocol
-    # Conductor-autonomy variant: self-spawn wording present, stock user-mediated prose gone.
     assert "you spawn each sub-orchestrator YOURSELF" in resp.full_protocol
     assert _HEADER_USER_TERMINALS not in resp.full_protocol
 
 
 @pytest.mark.asyncio
 async def test_multi_terminal_chain_still_renders_terminal_header(db_manager):
-    """A multi_terminal chain run still renders the conductor's fresh-terminal sub-orch
-    header (no regression). BE-6216: the header is the relabeled SUB-ORCH SPAWN token, and
-    CH_CAPABILITY prints the single authoritative real mode ("EXECUTION MODE =
-    multi_terminal", space form) -- not the old colliding "EXECUTION_MODE: multi_terminal"
-    banner token."""
     p1 = str(uuid.uuid4())
     tenant_key = await _seed_run(
         db_manager, project_ids=[p1], conductor_agent_id="cond-1", execution_mode="multi_terminal"

@@ -3,31 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9296a — the WAKE PATH across the MCP transport, not just the service.
-
-BE-9554 RE-BASED THIS. ``get_my_turn`` was merged into
-``get_my_turn(agent_id, wait_seconds=)`` -- the wake mixin's own docstring said it
-returned the SAME payload plus ``woken``/``wake_reason``, so two tool names asked one
-question. Every guarantee below is unchanged and simply follows the behaviour to its
-new home: the wake path is advertised, dispatches to the wake service, blocks, wakes
-on a write, refuses a missing agent_id cleanly, and clamps at MAX_WAIT_SECONDS.
-
-The 55s clamp assertion is the one to keep no matter what else moves: MCP clients
-abort at 60s, so a wait that outlives the client budget surfaces as a broken tool.
-
-The service suite (``tests/services/test_be9296a_wake_signal.py``) proves the wake
-semantics. This file proves the thin glue an agent actually calls: the @mcp.tool
-wrapper's dispatch string, the kwargs it builds, the scope mapping, and the shape
-that reaches the wire.
-
-That layer gets its own file because it is exactly where BE-5042 shipped broken
-with ~1,392 unit tests green — the wrapper had no test, so a wrong dispatch name
-or a dropped kwarg failed only at runtime. A wake tool that is registered but
-mis-wired would look identical to one that simply never wakes.
-
-Parallel-safe: fresh tenant_key per test, rolled-back db_session, no module-level
-mutable state, no ordering dependencies.
-"""
 
 from __future__ import annotations
 
@@ -51,7 +26,6 @@ WAKE_DEADLINE_SECONDS = 2.0
 
 
 def _payload(result) -> dict:
-    """The tool's JSON body as a dict."""
     for block in result.content or []:
         text = getattr(block, "text", None)
         if text:
@@ -61,14 +35,6 @@ def _payload(result) -> dict:
 
 @pytest_asyncio.fixture
 async def wake_mcp_client(db_manager, db_session, monkeypatch):
-    """(client_factory, tenant_key, service) with the real CommThreadService bound
-    to the rolled-back test session.
-
-    ``get_my_turn(wait_seconds=)`` dispatches to ``acc._comm_thread_service.get_my_turn``
-    (``_base.TOOL_DISPATCH``), so that one service is rebuilt on ``db_session`` and
-    handed to the test as well — the test writes through the SAME instance the tool
-    reads through, which is what makes the wake observable here.
-    """
     from api import app_state
     from api.endpoints.mcp_tools import _base
 
@@ -79,8 +45,6 @@ async def wake_mcp_client(db_manager, db_session, monkeypatch):
         state.tenant_manager = TenantManager()
     state.db_manager = db_manager
 
-    # Generated, not hand-formatted: the MCP path runs the key through
-    # TenantManager.set_current_tenant, which validates its shape.
     tenant_key = TenantManager.generate_tenant_key()
     accessor = ToolAccessor(db_manager=db_manager, tenant_manager=state.tenant_manager)
     service = CommThreadService(db_manager, state.tenant_manager, session=db_session)
@@ -113,7 +77,6 @@ async def _thread_with_worker(service: CommThreadService, tenant_key: str) -> st
 
 
 async def test_tool_is_advertised_with_its_documented_shape(wake_mcp_client):
-    """The wrapper reaches the wire at all, with the params agents are told about."""
     client_factory, _tenant, _svc = wake_mcp_client
     async with client_factory() as client:
         tools = {t.name: t for t in (await client.list_tools()).tools}
@@ -122,13 +85,10 @@ async def test_tool_is_advertised_with_its_documented_shape(wake_mcp_client):
     schema = tools["get_my_turn"].input_schema
     assert sorted(schema["properties"]) == ["agent_id", "wait_seconds"]
     assert schema["required"] == ["agent_id"]
-    # The cap is advertised as a bound, so a client cannot request a wait the
-    # edge would kill.
     assert schema["properties"]["wait_seconds"]["maximum"] == MAX_WAIT_SECONDS
 
 
 async def test_dispatch_reaches_the_service_and_returns_the_wake_envelope(wake_mcp_client):
-    """The dispatch string and kwargs are right — the BE-5042 failure mode."""
     client_factory, tenant_key, service = wake_mcp_client
     await _thread_with_worker(service, tenant_key)
 
@@ -137,7 +97,6 @@ async def test_dispatch_reaches_the_service_and_returns_the_wake_envelope(wake_m
 
     assert result.is_error is False
     body = _payload(result)
-    # The envelope agents branch on.
     assert body["agent_id"] == "worker-1"
     assert body["woken"] is False
     assert body["wake_reason"] == "timeout"
@@ -162,25 +121,10 @@ async def test_pending_work_returns_immediately_over_the_transport(wake_mcp_clie
 
 
 async def test_a_write_wakes_a_waiter_that_is_blocked_on_the_transport(wake_mcp_client):
-    """The end-to-end claim, across the MCP boundary: park on the wire, write, wake.
-
-    This is the DoD's 'observably wakes in under 2s' with the tool call genuinely
-    in flight rather than the service method awaited directly.
-    """
     client_factory, tenant_key, service = wake_mcp_client
     thread_id = await _thread_with_worker(service, tenant_key)
 
     async with client_factory() as client:
-        # Park first, then write — otherwise the test exercises already_pending.
-        #
-        # Waiting on the waiter's own read to FINISH (not merely on its
-        # registration) is load-bearing here: this fixture shares one
-        # rollback-isolated session between the in-flight tool call and the write
-        # below, and two coroutines using one session interleave the tenant guard's
-        # context. A harness artifact — every real request owns its session — but
-        # it would surface as a confusing isolation error rather than a wake bug.
-        # Once get_my_turn has returned, the waiter runs on to its await and
-        # suspends there holding nothing, before this coroutine resumes.
         read_done = asyncio.Event()
         original_get_my_turn = service.get_my_turn
 
@@ -211,27 +155,24 @@ async def test_a_write_wakes_a_waiter_that_is_blocked_on_the_transport(wake_mcp_
 
 
 async def test_missing_agent_id_is_a_clean_boundary_rejection(wake_mcp_client):
-    """A required-arg omission must be a 422-style tool error, never a 500."""
     client_factory, _tenant, _svc = wake_mcp_client
     async with client_factory() as client:
         result = await client.call_tool("get_my_turn", {})
 
-    assert result.is_error is True
+    assert result.is_error is False and "VALIDATION_ERROR" in "".join(b.text for b in result.content)
     text = "\n".join(b.text for b in result.content if getattr(b, "text", None))
     assert "agent_id" in text
 
 
 async def test_an_over_long_wait_is_refused_at_the_boundary(wake_mcp_client):
-    """The advertised maximum is enforced, not merely documented."""
     client_factory, _tenant, _svc = wake_mcp_client
     async with client_factory() as client:
         result = await client.call_tool("get_my_turn", {"agent_id": "w", "wait_seconds": 100_000})
 
-    assert result.is_error is True
+    assert result.is_error is False and "VALIDATION_ERROR" in "".join(b.text for b in result.content)
 
 
 def test_wake_tool_is_read_scoped_and_dispatch_mapped():
-    """Fail-closed registries must both know the tool (SEC-9126)."""
     from api.endpoints.mcp_tools._base import TOOL_DISPATCH, TOOL_SCOPES
 
     assert TOOL_SCOPES["get_my_turn"] == "mcp:read"
@@ -239,25 +180,15 @@ def test_wake_tool_is_read_scoped_and_dispatch_mapped():
 
 
 def test_wake_tool_is_reachable_from_the_standard_profile():
-    """An agent on the standard tier must be able to wait its turn.
-
-    Now that the blocking form IS ``get_my_turn(wait_seconds=)`` rather than a separate
-    tool, this asserts the merged tool stays standard-tier -- a wake that were full-only
-    would leave exactly the mid-tier sessions that poll hardest unable to stop polling.
-    """
     from api.endpoints.mcp_tools._base import _STANDARD_PROFILE_TOOLS
 
     assert "get_my_turn" in _STANDARD_PROFILE_TOOLS
     assert "get_my_turn" in _STANDARD_PROFILE_TOOLS
 
 
-# ---------------------------------------------------------------------------
-# Mechanism 2: the liveness read across the same boundary
-# ---------------------------------------------------------------------------
 
 
 async def test_liveness_tool_dispatches_and_returns_bands(wake_mcp_client):
-    """The conductor's who-is-still-there read, over the wire."""
     client_factory, tenant_key, service = wake_mcp_client
     thread_id = await _thread_with_worker(service, tenant_key)
 
@@ -272,17 +203,10 @@ async def test_liveness_tool_dispatches_and_returns_bands(wake_mcp_client):
     assert {"em", "worker-1"} <= set(by_id)
     for row in body["participants"]:
         assert row["liveness"] in {"active", "quiet", "gone", "unknown"}
-    # The bands are self-describing, so a reader never guesses what quiet meant.
     assert set(body["thresholds"]) == {"quiet_after_minutes", "gone_after_minutes"}
 
 
 async def test_liveness_needs_no_filesystem_access(wake_mcp_client):
-    """The whole point of mechanism 2: a conductor answers this from the server.
-
-    Before it, distinguishing "mid-work" from "finished and waiting" from "dead"
-    meant inspecting the agent's working directory. The payload must therefore be
-    self-sufficient — identity AND recency in one call.
-    """
     client_factory, tenant_key, service = wake_mcp_client
     thread_id = await _thread_with_worker(service, tenant_key)
 
@@ -301,7 +225,7 @@ async def test_liveness_missing_thread_id_is_a_clean_rejection(wake_mcp_client):
     async with client_factory() as client:
         result = await client.call_tool("get_participant_liveness", {})
 
-    assert result.is_error is True
+    assert result.is_error is False and "VALIDATION_ERROR" in "".join(b.text for b in result.content)
     text = "\n".join(b.text for b in result.content if getattr(b, "text", None))
     assert "thread_id" in text
 

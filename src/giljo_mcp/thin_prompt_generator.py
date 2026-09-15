@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Thin Client Prompt Generator (Handover 0088, 0315, 0950g)
-
-Generates thin orchestrator prompts (~600 tokens) with MCP tool references.
-Orchestrators fetch context on-demand via MCP tools (context prioritization enabled).
-
-Architecture (Handover 0315):
-- User configures priorities (0313) and depth (0314)
-- Generator creates thin prompt listing available MCP tools by priority
-- Orchestrator fetches context on-demand via MCP tool calls
-
-Platform-specific prompt builders extracted to giljo_mcp.prompts/ (Handover 0950g):
-- ClaudePromptBuilder: Claude Code CLI execution prompts
-- CodexPromptBuilder: Codex CLI execution prompts
-- GeminiPromptBuilder: Gemini CLI execution prompts
-- MultiTerminalPromptBuilder: Platform-agnostic multi-terminal orchestrator prompts
-- StagingPromptBuilder: Staging-phase prompts and mission regeneration
-
-Author: GiljoAI Development Team
-"""
 
 import logging
 from datetime import UTC, datetime
@@ -37,7 +18,6 @@ from giljo_mcp.models import Project
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.prompts.claude_prompt_builder import ClaudePromptBuilder
 from giljo_mcp.prompts.codex_prompt_builder import CodexPromptBuilder
-from giljo_mcp.prompts.gemini_prompt_builder import GeminiPromptBuilder
 from giljo_mcp.prompts.multi_terminal_prompt_builder import MultiTerminalPromptBuilder
 from giljo_mcp.prompts.staging_prompt_builder import StagingPromptBuilder
 from giljo_mcp.prompts.subagent_prompt_builder import SubagentPromptBuilder
@@ -60,28 +40,6 @@ def build_continuation_prompt(
     resolved_order: list[str] | None = None,
     overarching_mission: str | None = None,
 ) -> str:
-    """Build a continuation prompt for orchestrator session refresh.
-
-    Canonical prompt builder for all handover paths (REST endpoint, slash command,
-    ThinClientPromptGenerator). Reads the MCP URL via
-    giljo_mcp.http.url_resolver.get_public_url (BE-9442) — GILJO_PUBLIC_URL
-    (INF-5012b), trailing slash stripped, with http://localhost:7272 as the
-    CE-localhost fallback.
-
-    Args:
-        project_id: Project UUID
-        agent_id: Agent execution ID (WHO - executor ID for MCP calls)
-        job_id: Job ID (WHAT - work order ID)
-        project_name: Optional project display name (for human readability)
-        product_id: Optional product UUID (for get_context call)
-
-    Returns:
-        Continuation prompt string
-    """
-    # INF-5012b: prefer GILJO_PUBLIC_URL (demo/cloud deploys) over reading
-    # the server's bind address from config, which produces ":7272" URLs
-    # when the server is fronted by a reverse proxy.
-    # BE-9442: normalisation moved into the accessor; behaviour here is unchanged.
     public_base = get_public_url()
     mcp_url = f"{public_base}/mcp"
 
@@ -149,9 +107,6 @@ CRITICAL RULES:
   more advanced state than described in the handover. Check workflow_status for current truth.
 """
 
-    # BE-6165e: chain continuation brief. Appended ONLY when this continuation is
-    # driving a SequenceRun (handover/resume of a chain conductor). Absent => the
-    # prompt is byte-identical to a solo continuation (Deletion Test holds).
     if run_id is None:
         return base_prompt
 
@@ -192,22 +147,6 @@ def build_retirement_prompt(
     git_enabled: bool = False,
     project_taxonomy: str = "",
 ) -> str:
-    """Build a retirement prompt for the old orchestrator terminal session.
-
-    This prompt instructs the orchestrator to write rich session context to 360 Memory
-    before the terminal session ends.
-
-    Args:
-        project_id: Project UUID
-        agent_id: Agent execution ID (WHO - executor ID)
-        job_id: Job ID (WHAT - work order ID)
-        project_name: Optional project display name
-        git_enabled: Whether git integration is enabled for this product
-        project_taxonomy: Project taxonomy alias (e.g. "BE-0042a")
-
-    Returns:
-        Retirement prompt string for the old orchestrator
-    """
     project_display = f' "{project_name}"' if project_name else ""
 
     git_closeout_section = ""
@@ -315,27 +254,12 @@ CRITICAL: Do NOT modify other agents in any way — no force-complete, no messag
 
 
 class ThinClientPromptGenerator(ThinClientLifecycleMixin):
-    """Generates thin client prompts for orchestrators.
-
-    Architecture:
-    - Prompt contains only identity (~10 lines, 50 tokens)
-    - Mission fetched via get_staging_instructions() MCP tool
-    - Field priorities applied at fetch time, not embed time
-
-    Platform-specific prompt builders are in giljo_mcp.prompts/ (0950g):
-    - ClaudePromptBuilder: Claude Code CLI mode
-    - CodexPromptBuilder: Codex CLI mode
-    - GeminiPromptBuilder: Gemini CLI mode
-    - MultiTerminalPromptBuilder: Platform-agnostic multi-terminal mode
-    - StagingPromptBuilder: Staging and mission regeneration
-    """
 
     def __init__(self, db: AsyncSession, tenant_key: str):
         self.db = db
         self.tenant_key = tenant_key
         self._claude_builder = ClaudePromptBuilder()
         self._codex_builder = CodexPromptBuilder()
-        self._gemini_builder = GeminiPromptBuilder()
         self._multi_terminal_builder = MultiTerminalPromptBuilder()
         self._staging_builder = StagingPromptBuilder()
 
@@ -348,22 +272,6 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
         depth_config: dict[str, Any | None] = None,
         continuation_mode: bool = False,
     ) -> dict[str, Any]:
-        """Generate a thin orchestrator prompt for a specified project.
-
-        Args:
-            project_id: Project UUID
-            user_id: Optional user ID for tracking and fetching toggle/depth config
-            tool: AI coding agent (claude-code, codex, gemini, universal)
-            field_toggles: Optional field toggle config (True=enabled, False=disabled)
-            depth_config: Optional depth configuration (v2.0 depth settings)
-            continuation_mode: If True, generate continuation prompt (reads 360 Memory)
-
-        Returns:
-            Dict with orchestrator_id and thin_prompt
-        """
-        # BE-5058: ``Project.taxonomy_alias`` is now a SELECT-time
-        # column_property, so no eager-load of ``project_type`` is required
-        # for sync consumers to read the alias.
         project_stmt = select(Project).where(and_(Project.id == project_id, Project.tenant_key == self.tenant_key))
         project_result = await self.db.execute(project_stmt)
         project = project_result.scalar_one_or_none()
@@ -435,7 +343,7 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
             "estimated_prompt_tokens": estimated_tokens,
             "mission": regenerated_mission,
             "estimated_mission_tokens": estimated_mission_tokens,
-            "product_id": str(product.id) if product else None,  # BE-9518
+            "product_id": str(product.id) if product else None,
         }
 
     async def _resolve_user_config(
@@ -444,7 +352,6 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
         field_toggles: dict[str, bool | None] | None,
         depth_config: dict[str, Any | None] | None,
     ) -> tuple[dict | None, dict]:
-        """Resolve field toggles and depth config from user preferences if not provided."""
         if user_id and (not field_toggles or not depth_config):
             from giljo_mcp.models.auth import User, UserFieldPriority
 
@@ -500,11 +407,6 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
         user_id: str | None,
         tool: str,
     ) -> tuple[str, str, int]:
-        """Find existing orchestrator or create a new one.
-
-        Returns:
-            Tuple of (orchestrator_id, agent_id, execution_id)
-        """
         existing_exec_stmt = (
             select(AgentExecution)
             .options(joinedload(AgentExecution.job))
@@ -572,9 +474,6 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
             )
             self.db.add(agent_job)
 
-            # CE-0026: thin_client_generator creation path is the staging
-            # session — it also flips project.staging_status to 'staging'
-            # below. Mark the execution with project_phase='staging'.
             agent_execution = AgentExecution(
                 agent_id=agent_id,
                 job_id=orchestrator_id,
@@ -605,14 +504,6 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
         return orchestrator_id, agent_id, execution_id
 
     async def _fetch_product(self, project_id: str) -> Any | None:
-        """Fetch product for a given project.
-
-        Args:
-            project_id: Project UUID
-
-        Returns:
-            Product model or None if not found
-        """
         from giljo_mcp.models.products import Product
         from giljo_mcp.models.projects import Project as ProjectModel
 
@@ -640,7 +531,6 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
         return product_result.scalar_one_or_none()
 
     async def _fetch_project(self, project_id: str) -> Any | None:
-        """Fetch project by ID."""
         from giljo_mcp.models.projects import Project as ProjectModel
 
         project_stmt = select(ProjectModel).where(
@@ -650,19 +540,6 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
         return project_result.scalar_one_or_none()
 
     def _get_public_base_url(self) -> str:
-        """Get the public MCP server base URL (INF-5012b).
-
-        Prefers GILJO_PUBLIC_URL (set on demo/cloud deployments where the
-        server is fronted by a reverse proxy such as Cloudflare Tunnel).
-        Falls back to http://localhost:7272 for vanilla CE installs.
-
-        Note: this is used from MCP tool call context where no FastAPI
-        Request is available; when a Request is in scope, callers should
-        use giljo_mcp.http.url_resolver.get_public_base_url(request)
-        instead (honors X-Forwarded-* headers per request).
-
-        BE-9442: thin wrapper over the one accessor; behaviour unchanged.
-        """
         return get_public_url()
 
     async def generate_staging_prompt(
@@ -672,23 +549,6 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
         agent_id: str = None,
         tool: str = "universal",
     ) -> str:
-        """Generate thin-client orchestrator staging prompt (Handover 0415).
-
-        Args:
-            orchestrator_id: Job ID (WHAT - work order UUID)
-            project_id: Project UUID
-            agent_id: Agent execution ID (WHO - executor UUID for MCP tool calls)
-            tool: AI coding agent harness (claude-code, codex, gemini, universal).
-                CE-0035: plumbed through so Claude Code orchestrator spawn prompts
-                receive the ToolSearch bootstrap that lets the first MCP call
-                succeed without an InputValidationError round-trip.
-
-        Returns:
-            Thin staging prompt (~113 tokens) OR continuation prompt for successors
-
-        Raises:
-            ValueError: If project or product not found
-        """
         project = await self._fetch_project(project_id)
         product = await self._fetch_product(project_id)
 
@@ -710,7 +570,7 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
             if execution:
                 agent_id = execution.agent_id
             else:
-                agent_id = orchestrator_id  # Fallback (legacy)
+                agent_id = orchestrator_id
         else:
             exec_stmt = select(AgentExecution).where(
                 AgentExecution.agent_id == agent_id,
@@ -731,30 +591,10 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
         )
 
     def generate_implementation_prompt(self, prompt_type: str, *, resolved_harness: str | None = None, **kwargs) -> str:
-        """Generate an implementation prompt by type.
-
-        Args:
-            prompt_type: One of 'multi_terminal_orchestrator', 'claude_code_execution',
-                         'codex_execution', 'gemini_execution', 'subagent_execution'
-            resolved_harness: BE-9099 — the effective harness token (generic / opencode /
-                         ...) that seeds the harness-neutral SubagentPromptBuilder's
-                         registry-sourced spawn prose; ignored by the CLI builders.
-            **kwargs: Parameters passed to the underlying builder
-
-        Returns:
-            The generated prompt string
-
-        Raises:
-            ValueError: If prompt_type is unknown
-        """
         builders = {
             "multi_terminal_orchestrator": self._multi_terminal_builder,
             "claude_code_execution": self._claude_builder,
             "codex_execution": self._codex_builder,
-            "gemini_execution": self._gemini_builder,
-            # BE-9099: harness-neutral subagent builder, seeded per-call with the
-            # resolved harness so opencode renders its own spawn_syntax and the generic
-            # floor renders the universal subagent prose (both from the registry).
             SUBAGENT_EXECUTION_PROMPT_TYPE: SubagentPromptBuilder(resolved_harness),
         }
         builder = builders.get(prompt_type)
@@ -771,7 +611,6 @@ class ThinClientPromptGenerator(ThinClientLifecycleMixin):
         product_id: str | None,
         mcp_url: str,
     ) -> str:
-        """Generate continuation prompt. Delegates to module-level build_continuation_prompt()."""
         return build_continuation_prompt(
             project_id=project_id,
             agent_id=agent_id,

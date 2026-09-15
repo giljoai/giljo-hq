@@ -3,35 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9491 -- stop delivering messages to agents that have finished.
-
-The bug (measured): 3,503 unread broadcasts sitting on 120 finished agents,
-plus a smaller tail of direct posts. A broadcast/direct post used to deliver to
-EVERY registered participant regardless of whether their AgentExecution had
-long since gone terminal (complete/closed/decommissioned) -- a message that
-will never be read, on an agent that will never come back to read it.
-
-Fix, at the layer the bug lives (``CommThreadService._resolve_recipients``,
-exercised here via the public ``post_to_thread`` entry point):
-
-- gap (c): a BROADCAST drops terminal 'agent' participants from delivery. A
-  'user' participant is NEVER dropped, regardless of status (a human is never
-  "finished" -- load-bearing scoping, tested explicitly).
-- gap (b): a DIRECT, NON-action-required post to a terminal agent is dropped
-  the same way. Direct + action-required is completely untouched -- this is
-  the reactivate-on-message path (BE-9012b) the operator explicitly protected
-  (gap (a), rejected in the project description): 'complete' must keep
-  auto-blocking/reactivating on a directed action-required post. That
-  regression is pinned here too (not just in test_be9012b_reactivation_as_post.py).
-- an all-terminal broadcast candidate set produces a LOUD "delivered to 0 of N"
-  notice, never a silent success with nobody actually reached.
-- the Message row is ALWAYS written (BE-6054b carve-out untouched); only the
-  MessageRecipient fan-out shrinks. The post never fails.
-
-Parallel-safe: real DB via the rollback-isolated ``db_session`` fixture
-(TransactionalTestContext), no module-level mutable state, each test owns its
-setup, every query is tenant-scoped. Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -67,7 +38,6 @@ async def _seed(db_session, tenant: str) -> None:
 
 
 async def _seed_project_with_agents(db_session, tenant: str, agents: list[tuple[str, str]]) -> str:
-    """Create a project plus one AgentJob+AgentExecution per ``(agent_id, status)``."""
     with tenant_session_context(db_session, tenant):
         owning_product = Product(
             id=str(uuid.uuid4()),
@@ -142,9 +112,6 @@ async def _message_exists(db_session, tenant: str, message_id: str) -> bool:
 
 
 async def test_broadcast_skips_terminal_agent_kept_live_agent_and_user(db_manager, db_session):
-    """A mix of live/terminal AGENT participants + a USER participant: the
-    terminal agent is dropped, the live agent and the user are both delivered
-    to (a human is never "finished")."""
     tenant = _tk("mix")
     await _seed(db_session, tenant)
     project_id = await _seed_project_with_agents(
@@ -172,8 +139,6 @@ async def test_broadcast_skips_terminal_agent_kept_live_agent_and_user(db_manage
 
 
 async def test_broadcast_all_terminal_candidates_gives_loud_zero_delivered_notice(db_manager, db_session):
-    """No live candidate at all: the notice must be LOUD, never a silent success
-    with an empty effective delivery."""
     tenant = _tk("allterminal")
     await _seed(db_session, tenant)
     project_id = await _seed_project_with_agents(db_session, tenant, [("agent-done", "complete")])
@@ -192,15 +157,12 @@ async def test_broadcast_all_terminal_candidates_gives_loud_zero_delivered_notic
     assert result["recipients"] == []
     assert "0 of" in result["skipped_recipients"]
     assert "all were finished" in result["skipped_recipients"]
-    # The Message row is still written -- the post SUCCEEDS, it is not a Tier-2 rejection.
     assert await _message_exists(db_session, tenant, result["message_id"])
 
 
 async def test_direct_non_action_required_post_to_terminal_agent_writes_message_no_recipient_row(
     db_manager, db_session
 ):
-    """gap (b): direct + requires_action=False to a terminal agent -- the Message
-    persists, but no MessageRecipient row for the dead agent."""
     tenant = _tk("directskip")
     await _seed(db_session, tenant)
     project_id = await _seed_project_with_agents(db_session, tenant, [("agent-done", "closed")])
@@ -225,10 +187,6 @@ async def test_direct_non_action_required_post_to_terminal_agent_writes_message_
 
 
 async def test_direct_action_required_post_to_complete_agent_still_delivers(db_manager, db_session):
-    """Regression guard for the REJECTED gap (a): 'complete' must NOT join the
-    dead set for the direct+action-required path -- reactivate-on-message
-    depends on this recipient still being delivered to (auto_block_for_thread_post
-    reactivates it separately, at the MCP boundary layer)."""
     tenant = _tk("stillreach")
     await _seed(db_session, tenant)
     project_id = await _seed_project_with_agents(db_session, tenant, [("agent-done", "complete")])
@@ -254,10 +212,6 @@ async def test_direct_action_required_post_to_complete_agent_still_delivers(db_m
 
 
 async def test_direct_non_action_required_post_to_never_tracked_id_is_not_dropped(db_manager, db_session):
-    """Two-EXISTS regression at the service layer: an id with ZERO AgentExecution
-    rows (a human user_id, or a headless agent never tracked by the job system)
-    must never be silently dropped -- a naive single-EXISTS liveness check would
-    be vacuously "terminal" for it."""
     tenant = _tk("neverdrop")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)

@@ -3,24 +3,6 @@
   Licensed under the Elastic License 2.0.
   See LICENSE in the project root for terms.
   [CE] Community Edition.
-
-  OnboardingNudgeRow.vue — FE-9552
-
-  The tutorial "activate your product" row and the two converted onboarding
-  nudges (FE-9202) were three near-identical copies of the same
-  avatar+text+CTA+dismiss shape, extracted out of SystemStatusBanner.vue
-  (to keep that file within the project's file-size budget -- the same reason ApprovalBannerRow.vue and
-  LifecycleBannerRow.vue were split out before it). Presentational only: the
-  parent still owns every trigger condition (localStorage/composable reads),
-  dismissal side-effect, and CTA destination -- this component only renders
-  whichever ONE of the three is currently on top of the fold and emits `cta`
-  / `dismiss` for the parent to act on (FE-9552's "the CTA also dismisses"
-  rule lives in the parent's handlers, not here).
-
-  Class names and markup are BYTE-IDENTICAL to the pre-extraction inline rows
-  (`system-banner-alert` / `system-banner-btn`, not a renamed set) so every
-  existing assertion on this shape (`img.system-banner-alert__avatar`, etc.)
-  keeps passing unchanged.
 -->
 <template>
   <div

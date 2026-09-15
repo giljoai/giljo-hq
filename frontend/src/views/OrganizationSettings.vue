@@ -13,7 +13,6 @@
     </v-row>
 
     <template v-else-if="currentOrg">
-      <!-- Organization Details -->
       <v-row>
         <v-col cols="12" md="6">
           <div class="tab-header mb-4">
@@ -47,7 +46,6 @@
           </v-card>
         </v-col>
 
-        <!-- Members Section -->
         <v-col cols="12" md="6">
           <div class="tab-header mb-4 d-flex align-center">
             <h2 class="text-title-large">Members</h2>
@@ -78,7 +76,6 @@
         </v-col>
       </v-row>
 
-      <!-- Danger Zone (Owner only) -->
       <v-row v-if="isOwner">
         <v-col cols="12">
           <div class="tab-header mb-4">
@@ -107,7 +104,6 @@
       Organization not found or you don't have access.
     </v-alert>
 
-    <!-- Invite Dialog -->
     <InviteMemberDialog
       v-if="currentOrg"
       v-model="showInviteDialog"
@@ -115,7 +111,6 @@
       @invited="handleMemberInvited"
     />
 
-    <!-- Delete Confirmation -->
     <v-dialog v-model="showDeleteDialog" max-width="400">
       <v-card v-draggable class="smooth-border">
         <div class="dlg-header dlg-header--danger">
@@ -141,13 +136,6 @@
 </template>
 
 <script setup>
-/**
- * OrganizationSettings - Main organization management page.
- * Handover 0424d: Organization settings view with member management.
- *
- * @view
- * @route /organizations/:orgId/settings
- */
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useOrgStore } from '@/stores/orgStore'
@@ -165,7 +153,6 @@ const saving = ref(false)
 const showInviteDialog = ref(false)
 const showDeleteDialog = ref(false)
 
-// Computed from store
 const loading = computed(() => orgStore.loading)
 const currentOrg = computed(() => orgStore.currentOrg)
 const members = computed(() => orgStore.members)
@@ -173,7 +160,6 @@ const isOwner = computed(() => orgStore.isOwner)
 const isAdmin = computed(() => orgStore.isAdmin)
 const canManageMembers = computed(() => orgStore.canManageMembers)
 
-// Show notification
 function showNotification(message, type = 'success') {
   showToast({ message, type })
 }
@@ -186,16 +172,10 @@ async function loadOrg(orgId) {
   }
 }
 
-// Load org on mount
 onMounted(() => {
   loadOrg(route.params.orgId)
 })
 
-// FE-9000e: DefaultLayout's router-view now keys on the matched route record,
-// not the resolved path, so a param-only nav (e.g. switching :orgId on this
-// same route) reuses this instance instead of remounting it. Refetch on param
-// change to avoid showing the previous org's stale data (mirrors the FE-6174b
-// pattern in ProjectLaunchView.vue).
 watch(
   () => route.params.orgId,
   (newOrgId) => {
@@ -203,7 +183,6 @@ watch(
   },
 )
 
-// Watch for org changes
 watch(currentOrg, (newOrg) => {
   if (newOrg) {
     orgForm.value.name = newOrg.name

@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-5065: Shared series_number counter across tasks and projects.
-
-Under the same ``(tenant_key, product_id, taxonomy_type_id)`` bucket, creating a
-task assigned to type BE then a project of type BE (or vice versa) must produce
-``BE-N`` and ``BE-N+1`` — never two ``BE-N``. The repository helpers
-``lock_rows_for_series_shared`` + ``get_next_series_number_shared`` enforce this
-by computing ``max(series_number)`` across both ``tasks`` and ``projects`` for
-the bucket inside a row-locked transaction.
-"""
 
 from datetime import UTC
 from uuid import uuid4
@@ -108,7 +99,6 @@ class TestSharedSeriesCounter:
             tenant_key=test_tenant_key,
         )
 
-        # Project should be N (probably 1), task should be N+1.
         from giljo_mcp.models import Task
 
         task = (
@@ -159,21 +149,12 @@ class TestSharedSeriesCounter:
         active_product: Product,
         be_taxonomy: TaxonomyType,
     ):
-        """A soft-deleted project at 9999 must NOT inflate ``max+1`` to 10000.
-
-        Regression for the prod minting bug: ``get_next_series_number_shared``
-        computed ``max(series_number)+1`` over ALL projects, so a soft-deleted
-        ``9999`` (e.g. ``SEC-9999``) pushed the next serial to ``10000`` —
-        out of the 4-digit domain. Soft-deleted projects must be excluded from
-        the active high-water mark (decision C).
-        """
         from datetime import datetime
 
         from sqlalchemy import select
 
         from giljo_mcp.models.projects import Project
 
-        # Project created and then soft-deleted at 9999 in the BE bucket.
         doomed = await project_service.create_project(
             name="Doomed-9999",
             mission="m",
@@ -187,7 +168,6 @@ class TestSharedSeriesCounter:
         doomed_row.deleted_at = datetime.now(UTC)
         await db_session.commit()
 
-        # Next project in the same bucket must ignore the soft-deleted 9999.
         survivor = await project_service.create_project(
             name="Survivor",
             mission="m",
@@ -198,17 +178,10 @@ class TestSharedSeriesCounter:
         )
 
         assert survivor.series_number != 10000
-        # Active pool is empty (only the soft-deleted 9999 exists) → first-free is 1.
         assert survivor.series_number == 1
 
 
 class TestGlobalSerialCounter:
-    """BE-6049b: ONE global serial line per product, shared across ALL tags.
-
-    Widened from the BE-5065 per-``(tenant, product, type)`` bucket. The tag
-    (FE/BE/...) is decoupled from the number — every project/task in a product
-    draws from a single continue-upward ``max+1`` sequence.
-    """
 
     @pytest.mark.asyncio
     async def test_counter_is_global_across_two_tags(
@@ -221,11 +194,6 @@ class TestGlobalSerialCounter:
         be_taxonomy: TaxonomyType,
         fe_taxonomy: TaxonomyType,
     ):
-        """A BE project then an FE project then a BE task get 1, 2, 3 — one line for all tags.
-
-        Pre-BE-6049b these would have been BE=1, FE=1, BE-task=2 (separate per-type
-        buckets). The global counter makes the number continue upward regardless of tag.
-        """
         from sqlalchemy import select
 
         from giljo_mcp.models import Task
@@ -255,8 +223,8 @@ class TestGlobalSerialCounter:
         task = (await db_session.execute(select(Task).where(Task.id == task_result["task_id"]))).scalar_one()
 
         assert be_project.series_number == 1
-        assert fe_project.series_number == 2  # continues across tag, not a fresh FE=1
-        assert task.series_number == 3  # task continues the same global line
+        assert fe_project.series_number == 2
+        assert task.series_number == 3
 
     @pytest.mark.asyncio
     async def test_project_cap_rejected_above_9999(
@@ -267,7 +235,6 @@ class TestGlobalSerialCounter:
         active_product: Product,
         be_taxonomy: TaxonomyType,
     ):
-        """Auto-assign must reject a serial > 9999 with a clear 'serial space exhausted' error."""
         from sqlalchemy import select
 
         from giljo_mcp.models.projects import Project
@@ -281,7 +248,7 @@ class TestGlobalSerialCounter:
             project_type_id=be_taxonomy.id,
         )
         seed_row = (await db_session.execute(select(Project).where(Project.id == seed.id))).scalar_one()
-        seed_row.series_number = 9999  # active high-water mark at the cap
+        seed_row.series_number = 9999
         await db_session.commit()
 
         with pytest.raises(ValidationError, match="exhausted"):
@@ -304,7 +271,6 @@ class TestGlobalSerialCounter:
         active_product: Product,
         be_taxonomy: TaxonomyType,
     ):
-        """Task auto-assign must also reject a serial > 9999 (shares the global counter)."""
         from sqlalchemy import select
 
         from giljo_mcp.models.projects import Project
@@ -338,7 +304,6 @@ class TestGlobalSerialCounter:
         active_product: Product,
         be_taxonomy: TaxonomyType,
     ):
-        """Soft-delete frees the serial; restore assigns a FRESH continue-upward number (decision C)."""
         from sqlalchemy import select
 
         from giljo_mcp.models.projects import Project
@@ -353,10 +318,8 @@ class TestGlobalSerialCounter:
         )
         assert first.series_number == 1
 
-        # Soft-delete frees serial 1 from the active high-water mark.
         await project_service.deletion.delete_project(first.id)
 
-        # A new project reclaims the freed number (active pool empty again).
         second = await project_service.create_project(
             name="Second",
             mission="m",
@@ -367,10 +330,9 @@ class TestGlobalSerialCounter:
         )
         assert second.series_number == 1
 
-        # Restoring the first must NOT reuse 1 — it gets a fresh continue-upward number.
         await project_service.deletion.restore_project(first.id, tenant_key=test_tenant_key)
         restored = (await db_session.execute(select(Project).where(Project.id == first.id))).scalar_one()
 
         assert restored.deleted_at is None
-        assert restored.series_number == 2  # max+1 over active pool {second=1}
+        assert restored.series_number == 2
         assert restored.series_number != second.series_number
