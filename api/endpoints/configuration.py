@@ -3,9 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Configuration management API endpoints
-"""
 
 import logging
 from pathlib import Path
@@ -22,8 +19,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# INF-6236: SSL/HTTPS endpoints live in configuration_ssl.py (kept this module under
-# the 800-line guardrail); they mount on the same /api/v1/config prefix.
 router.include_router(configuration_ssl.router)
 
 
@@ -60,24 +55,19 @@ async def get_system_configuration(
     if not config:
         raise HTTPException(status_code=500, detail="config.yaml is empty or not found")
 
-    # Mask sensitive data for security
     if "database" in config and "password" in config.get("database", {}):
-        # Mask database password
         config["database"]["password"] = "****" if config["database"]["password"] else ""
 
     if "security" in config and "api_keys" in config.get("security", {}):
-        # Mask API keys
         api_keys = config["security"].get("api_keys", {})
         if isinstance(api_keys, dict):
             for key in api_keys:
                 if isinstance(api_keys[key], str):
                     api_keys[key] = "****"
 
-    # Return the full structure (matches config.yaml format)
     return config
 
 
-# Database-specific endpoints
 
 
 class DatabaseConfigResponse(BaseModel):
@@ -88,14 +78,12 @@ class DatabaseConfigResponse(BaseModel):
     password_masked: str
 
 
-# SERVER-LEVEL: reads .env file (DB_HOST, DB_PORT, DB_PASSWORD), CE-only
 @router.get("/database", response_model=DatabaseConfigResponse)
 async def get_database_configuration(
     current_user: User = Depends(require_admin),
     _ce: None = Depends(require_ce_mode),
 ):
     """Get database configuration (password masked) - reads from .env file"""
-    # Read directly from .env file
     from dotenv import dotenv_values
 
     env_path = Path.cwd() / ".env"
@@ -105,14 +93,12 @@ async def get_database_configuration(
 
     env_vars = dotenv_values(env_path)
 
-    # Get database config (these should match what installer created)
     host = env_vars.get("DB_HOST", "localhost")
     port = int(env_vars.get("DB_PORT", "5432"))
     name = env_vars.get("DB_NAME", "giljo_mcp")
     user = env_vars.get("DB_USER", "giljo_user")
     password = env_vars.get("DB_PASSWORD", "")
 
-    # Mask password (show actual length for reference)
     password_masked = "*" * len(password) if password else "****"
 
     return DatabaseConfigResponse(host=host, port=port, name=name, user=user, password_masked=password_masked)
@@ -136,18 +122,13 @@ async def get_frontend_configuration(request: Request):
     if not state.config:
         raise HTTPException(status_code=503, detail="Configuration manager not available")
 
-    # Extract non-URL frontend configuration via ConfigManager
     api_keys_required = state.config.get_nested("features.api_keys_required", default=False)
     ssl_enabled = state.config.get_nested("features.ssl_enabled", default=False)
 
-    # Derive api.host/port/protocol from the request's public base URL (INF-5012b).
-    # Honors X-Forwarded-Host / X-Forwarded-Proto via uvicorn proxy_headers so
-    # Cloudflare Tunnel, customer nginx, and self-signed/LAN deployments all emit
-    # the user-facing URL rather than the server's bind address.
     base = str(request.base_url).rstrip("/")
     parsed = urlparse(base)
     api_host = parsed.hostname or "localhost"
-    api_port = parsed.port  # None when implicit (standard 443/80 through proxy)
+    api_port = parsed.port
     api_protocol = parsed.scheme or ("https" if ssl_enabled else "http")
 
     ws_url = base.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
@@ -155,13 +136,12 @@ async def get_frontend_configuration(request: Request):
 
     default_tenant_key = state.config.tenant.default_tenant_key or ""
 
-    # Detect remote client: compare request IP against local addresses and server's own host
     is_remote_client = _is_remote_client(request, api_host)
 
     return {
         "api": {
-            "host": api_host,  # Public host derived from request.base_url
-            "port": api_port,  # None when implicit (standard 443/80)
+            "host": api_host,
+            "port": api_port,
             "protocol": api_protocol,
             "ssl_enabled": ssl_enabled,
             "is_remote_client": is_remote_client,
@@ -181,7 +161,6 @@ async def get_frontend_configuration(request: Request):
 
 
 def _get_client_ip(request: Request) -> str:
-    """Extract client IP from request, respecting proxy headers."""
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
         return forwarded.split(",")[0].strip()
@@ -192,17 +171,11 @@ def _get_client_ip(request: Request) -> str:
 
 
 def _is_remote_client(request: Request, server_host: str) -> bool:
-    """Check if the requesting client is on a different machine than the server.
-
-    Returns False for localhost, loopback, and the server's own external_host IP.
-    Returns True for any other client IP (i.e., a remote machine on the LAN).
-    """
     client_ip = _get_client_ip(request)
     local_addresses = {"127.0.0.1", "::1", "localhost", server_host}
     return client_ip not in local_addresses
 
 
-# SERVER-LEVEL: the host IP(s) + port the server actually responds on, CE-only
 @router.get("/network-info", response_model=NetworkInfoResponse)
 async def get_network_info(
     current_user: User = Depends(require_admin),
@@ -223,7 +196,7 @@ async def get_network_info(
     services = config.get("services", {}) or {}
     api_cfg = services.get("api") if isinstance(services.get("api"), dict) else {}
     api_cfg = api_cfg or {}
-    bind_host = api_cfg.get("host") or "0.0.0.0"  # mirrors run_api.get_default_host()
+    bind_host = api_cfg.get("host") or "0.0.0.0"
     port = api_cfg.get("port") or (services.get("frontend") or {}).get("port") or 7272
 
     loopback_hosts = {"127.0.0.1", "localhost", "::1"}
@@ -238,7 +211,6 @@ async def get_network_info(
         hosts = get_network_ips() or ["localhost"]
         bind_all = True
     else:
-        # Bound to one explicit IP/host -> that is the only responding address.
         hosts = [bind_host]
         bind_all = False
 
@@ -279,7 +251,6 @@ async def download_root_ca():
     )
 
 
-# SERVER-LEVEL: pings server-global database connection, CE-only
 @router.get("/health/database")
 async def check_database_health(
     current_user: User = Depends(get_current_active_user),

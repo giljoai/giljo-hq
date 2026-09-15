@@ -1,6 +1,5 @@
 <template>
   <v-container>
-    <!-- Header (harmonized with ProjectsView / TasksView) -->
     <v-row class="align-center mb-4 main-window-reveal main-window-reveal--hero main-window-delay-1">
       <v-col>
         <h1 class="text-headline-large">Roadmap</h1>
@@ -22,7 +21,6 @@
       </v-col>
     </v-row>
 
-    <!-- No Product Open -->
     <v-alert
       v-if="noActiveProduct"
       type="info"
@@ -33,7 +31,6 @@
     </v-alert>
 
     <template v-else>
-      <!-- Toolbar (filter-bar pattern; NO roadmap selector — one per product) -->
       <div class="filter-bar main-window-reveal main-window-delay-2">
         <span class="rm-product-label">
           <span class="rm-product-dot" :class="{ 'rm-product-dot--off': !activeProduct }"></span>
@@ -49,10 +46,6 @@
           inset
           class="rm-fold-toggle"
         />
-        <!-- Two-state copy-prompt bridge: empty roadmap -> Create, else Refresh.
-             Copies a build/re-rank prompt (with the viewed product + host baked
-             in) for the user to paste into the agent connected to THIS account;
-             the passive MCP server can't start analysis itself. -->
         <v-btn
           color="primary"
           variant="flat"
@@ -65,9 +58,6 @@
         </v-btn>
       </div>
 
-      <!-- FE-6240: optional user-authored prompt. The checkbox reveals the
-           generated prompt in an editable field; the copy button then copies
-           the edited text instead of the canned prompt. -->
       <div class="rm-custom-prompt main-window-reveal main-window-delay-2">
         <v-checkbox
           :model-value="customPromptEnabled"
@@ -90,11 +80,6 @@
         />
       </div>
 
-      <!-- "Waiting for your agent…" indicator: UI-SET on the copy click (the
-           passive MCP server cannot know analysis started), WS-CLEARED on the
-           roadmap:updated event (debounced on the LAST write of a conversational
-           multi-write), with a manual dismiss + ~2.5min safety timeout. Never
-           "Analyzing" — the agent does the work, not the server. -->
       <v-alert
         v-if="waiting"
         type="info"
@@ -113,7 +98,6 @@
         </div>
       </v-alert>
 
-      <!-- AI-insight banner (sourced from roadmap.summary) -->
       <v-alert
         v-if="roadmap && roadmap.summary"
         type="info"
@@ -125,12 +109,10 @@
         {{ roadmap.summary }}
       </v-alert>
 
-      <!-- Loading -->
       <div v-if="loading && items.length === 0" class="rm-loading">
         <v-progress-circular indeterminate color="primary" size="32" />
       </div>
 
-      <!-- Empty state (product active, but no roadmap items yet) -->
       <v-alert
         v-else-if="items.length === 0"
         type="info"
@@ -141,20 +123,6 @@
         (it writes the roadmap via the <code>save_roadmap</code> MCP tool), then refresh.
       </v-alert>
 
-      <!-- Card list (vuedraggable; drag scoped to the dotted .rm-grip handle so
-           the action buttons stay clickable).
-           History + FE-9568 reversal: FE-6131e wrapped this list in
-           SequenceLauncher so a link-mode checkbox on every card (FE-6176)
-           could feed the shared "select projects -> Run sequential" bulk-bar
-           flow (the same SequenceLauncher /projects still uses today).
-           FE-6180 made an already-linked card's checkbox grey + click through
-           to /projects instead of managing the chain here.
-           FE-9568 (2026-09-02, operator ruling) reverses plan+launch: /roadmap
-           only orders work now. With the selection checkbox gone, nothing on
-           this page can ever populate SequenceLauncher's selection, so its
-           bulk-bar could never render here again — the wrapper was removed as
-           unreachable. Chain launch is unaffected: the identical
-           SequenceLauncher still drives "Run sequential" on /projects. -->
       <draggable
         v-else
         :model-value="displayItems"
@@ -182,7 +150,6 @@
       </draggable>
     </template>
 
-    <!-- Project open: existing create/edit dialog (reused, not rebuilt) -->
     <ProjectCreateEditDialog
       ref="projectDialogRef"
       v-model="showProjectDialog"
@@ -194,7 +161,6 @@
       @type-created="onTypeCreated"
     />
 
-    <!-- Clear Mission confirm (mirrors ProjectsView) -->
     <BaseDialog
       v-model="showClearMissionDialog"
       type="warning"
@@ -207,7 +173,6 @@
       <p>Clear the mission? It will be regenerated on next staging.</p>
     </BaseDialog>
 
-    <!-- Task open: existing task modal (reused via useTaskCrud) -->
     <TaskEditDialog
       v-model="showTaskDialog"
       :editing-task="editingTask"
@@ -220,7 +185,6 @@
       @update:current-task="onCurrentTaskUpdate"
     />
 
-    <!-- Convert confirmation (mirrors TasksView) -->
     <BaseDialog
       v-model="showConvertConfirm"
       type="info"
@@ -264,31 +228,23 @@ const wsStore = useWebSocketStore()
 const sequenceRunStore = useSequenceRunStore()
 const { showToast } = useToast()
 
-// Canonical task statuses (mirrors TaskStatus enum surfaced in TasksView).
 const TASK_STATUS_OPTIONS = ['pending', 'in_progress', 'completed', 'blocked', 'cancelled']
 
-// --- State ---
 const loading = ref(false)
 const noActiveProduct = ref(false)
 const roadmap = ref(null)
-const items = ref([]) // full, sort_order-ordered (source of truth for reorder)
+const items = ref([])
 const foldInTasks = ref(true)
 const projectTypes = ref([])
 
-// FE-9502c: same fix as ProjectsView.vue — follows the viewed tab now, not
-// the server's single active product (display-only; fetch already used effectiveProductId).
 const activeProduct = computed(() => productStore.currentProduct)
 const isEmptyRoadmap = computed(() => items.value.length === 0)
 
-// Fold toggle is a pure view filter; reorder always operates on `items` (by id).
 const displayItems = computed(() =>
   foldInTasks.value ? items.value : items.value.filter((it) => it.item_type !== 'task'),
 )
 
-// --- "Waiting for your agent…" indicator + WS live refresh (Part 4) ---
 const waiting = ref(false)
-// True while a reorder PATCH is in flight; guards a WS-driven re-fetch from
-// clobbering the optimistic order mid-persist.
 const isPersisting = ref(false)
 let waitingTimeout = null
 let refetchDebounce = null
@@ -298,16 +254,9 @@ let unsubProjectUpdate = null
 let unsubHeadlessLifecycle = []
 let unsubResync = null
 
-const WAITING_TIMEOUT_MS = 150000 // ~2.5 min safety auto-clear
-const REFETCH_DEBOUNCE_MS = 600 // collapse a conversational multi-write burst
+const WAITING_TIMEOUT_MS = 150000
+const REFETCH_DEBOUNCE_MS = 600
 
-// TSK-6243: the waiting spinner is view-local + in-memory, so a browser reload
-// while an agent is mid-build drops it. Stamp the last roadmap:agent_active time
-// per active product in localStorage (migration-free, same idiom as
-// useProjectFilters; promote to a user-settings DB field only if cross-device
-// continuity is later wanted) and re-raise the spinner on mount when the stamp
-// is still inside the WAITING_TIMEOUT_MS window. Reuses the existing WS event —
-// no @mcp.tool, no schema change, no new store/service.
 const AGENT_ACTIVE_STORAGE_PREFIX = 'giljo.roadmap.agentActiveAt.'
 
 function agentActiveStorageKey() {
@@ -341,7 +290,7 @@ function startWaiting(durationMs = WAITING_TIMEOUT_MS) {
   waitingTimeout = setTimeout(() => {
     waiting.value = false
     waitingTimeout = null
-    clearPersistedAgentActive() // window lapsed — drop the persisted stamp
+    clearPersistedAgentActive()
   }, durationMs)
 }
 
@@ -351,15 +300,9 @@ function dismissWaiting() {
     clearTimeout(waitingTimeout)
     waitingTimeout = null
   }
-  // Agent saved (roadmap:updated) or user dismissed — the build is over, so the
-  // reload-continuity stamp is no longer wanted.
   clearPersistedAgentActive()
 }
 
-// TSK-6243: on mount, re-raise the spinner if a roadmap:agent_active landed
-// within the safety window before a reload. Re-show for the REMAINING time only
-// (never re-arm the full window per reload). Skips if a live event already
-// raised it during this mount.
 function rehydrateWaitingFromStorage() {
   if (waiting.value) return
   const key = agentActiveStorageKey()
@@ -372,7 +315,6 @@ function rehydrateWaitingFromStorage() {
   }
   if (raw === null) return
   const stampedAt = Number(raw)
-  // FE-9407: the agent already answered this wait while we were away.
   if (agentSavedAfter(roadmap.value, items.value, stampedAt)) {
     clearPersistedAgentActive()
     return
@@ -381,24 +323,15 @@ function rehydrateWaitingFromStorage() {
   if (Number.isFinite(stampedAt) && elapsed >= 0 && elapsed < WAITING_TIMEOUT_MS) {
     startWaiting(WAITING_TIMEOUT_MS - elapsed)
   } else {
-    clearPersistedAgentActive() // absent/stale/garbage — drop it
+    clearPersistedAgentActive()
   }
 }
 
-// FE-6240: the agent's first touch of the roadmap tool (MCP get_roadmap) emits
-// a tenant-scoped roadmap:agent_active WS event — THAT raises the waiting
-// spinner now, so the trigger is the real agent connection, not the user's
-// copy-prompt click. Cleared as before by roadmap:updated (the agent's save)
-// or the safety timeout.
 function onAgentActive() {
   startWaiting()
-  persistAgentActive() // TSK-6243: survive a reload mid-build
+  persistAgentActive()
 }
 
-// FE-6240: "Add my own instructions" — reveal the generated prompt in an
-// editable field; copyRoadmapPrompt then copies the edited text. Repopulated
-// from the current mode each time it is enabled so it always starts from the
-// canned prompt.
 const customPromptEnabled = ref(false)
 const customPromptText = ref('')
 
@@ -409,20 +342,6 @@ function onCustomPromptToggle(enabled) {
   }
 }
 
-// project_update arrives when a project changes OUTSIDE the roadmap (project
-// list or an agent). Two display fields on the card are read LIVE from the
-// project on every get_roadmap and go stale in the mounted view unless we
-// re-fetch:
-//   - status      → 'status_changed' | 'activated' | 'deactivated' (a card left
-//                    on its old status stays LOCKED).
-//   - title+alias → 'updated' (a rename/series change; the backend already
-//                    joins title + taxonomy_alias live, so a re-fetch is all
-//                    that is needed — bug-2 / alias 0005). Without 'updated' the
-//                    card showed the old name/alias until a manual refresh.
-// Reuse the same debounced fetchRoadmap so a burst (agent renames/deactivates
-// several projects) collapses into one fetch instead of N. Other update types
-// (e.g. description-only edits) still re-fetch under 'updated' — cheap and
-// debounced, and the read is the single source of truth.
 const REFETCH_UPDATE_TYPES = new Set(['status_changed', 'activated', 'deactivated', 'updated'])
 
 function onProjectUpdated(payload) {
@@ -430,14 +349,10 @@ function onProjectUpdated(payload) {
   onRoadmapUpdated()
 }
 
-// roadmap:updated arrives once per agent write; debounce so a multi-write
-// conversation re-fetches + clears the indicator on the LAST event only.
 function onRoadmapUpdated() {
   if (refetchDebounce) clearTimeout(refetchDebounce)
   refetchDebounce = setTimeout(async () => {
     refetchDebounce = null
-    // Don't stomp an in-flight optimistic reorder — re-arm and try again once
-    // the PATCH settles.
     if (isPersisting.value) {
       onRoadmapUpdated()
       return
@@ -447,16 +362,11 @@ function onRoadmapUpdated() {
   }, REFETCH_DEBOUNCE_MS)
 }
 
-// --- Copy-prompt bridge (Part 1) ---
-// The prompt TEXT lives in content/roadmap/prompts.js; this only supplies the
-// product being viewed and the host.
 function buildRoadmapPrompt(mode) {
   const host = typeof window !== 'undefined' ? window.location.host : ''
   return buildRoadmapPromptText(mode, activeProduct.value, host)
 }
 
-// Clipboard write with a secure-context fallback (LAN HTTP has no
-// navigator.clipboard). Always wrapped so a failure never throws into the UI.
 async function copyToClipboard(text) {
   try {
     if (navigator.clipboard && window.isSecureContext) {
@@ -484,10 +394,6 @@ async function copyToClipboard(text) {
 
 async function copyRoadmapPrompt() {
   const mode = isEmptyRoadmap.value ? 'create' : 'refresh'
-  // FE-6240: copy the user's edited prompt when "Add my own instructions" is
-  // on, otherwise the generated one. The waiting spinner is NO LONGER raised
-  // here — it is raised by the roadmap:agent_active WS signal the moment the
-  // agent actually touches the roadmap tool, not on this copy click.
   const text = customPromptEnabled.value ? customPromptText.value : buildRoadmapPrompt(mode)
   const ok = await copyToClipboard(text)
   if (ok) {
@@ -503,11 +409,6 @@ async function copyRoadmapPrompt() {
   }
 }
 
-// --- Fetch ---
-// FE-9553: `notify` defaults to FALSE -- silent by default, so a new call site
-// cannot add a spurious toast by omission. Reachable from onMounted, a debounced
-// WS refetch, and four user actions; only the last may speak. Reasoning pinned
-// in tests/unit/views/RoadmapView.spec.js.
 async function fetchRoadmap({ notify = false } = {}) {
   loading.value = true
   try {
@@ -531,10 +432,6 @@ async function fetchRoadmap({ notify = false } = {}) {
   }
 }
 
-// --- vuedraggable reorder (drag scoped to the .rm-grip handle) ---
-// vuedraggable hands back the reordered VISIBLE list. Because "Fold in tasks" is
-// a view-only filter, rebuild the FULL items order from that visible order —
-// folded-out tasks keep their absolute slots — then persist over the whole set.
 function rebuildFullOrder(newVisibleOrder) {
   const visibleIds = new Set(displayItems.value.map((i) => i.id))
   let vi = 0
@@ -554,17 +451,16 @@ async function demote(item) {
   await persistOrder(arr)
 }
 
-// Recompute sort_order = position, PATCH the whole (small) list. Idempotent.
 async function persistOrder(orderedArr) {
   const previous = items.value
-  items.value = orderedArr // optimistic
+  items.value = orderedArr
   isPersisting.value = true
   try {
     const payload = orderedArr.map((it, i) => ({ id: it.id, sort_order: i }))
     await api.roadmap.reorder(payload)
   } catch (error) {
     console.error('[ROADMAP] Failed to persist new order:', error)
-    items.value = previous // rollback
+    items.value = previous
     showToast({ message: 'Could not save the new order. Please try again.', type: 'error' })
     await fetchRoadmap()
   } finally {
@@ -572,7 +468,6 @@ async function persistOrder(orderedArr) {
   }
 }
 
-// FE-6022c: optimistic remove → DELETE roadmap_item; rollback on failure.
 async function removeItem(item) {
   if (!item?.id) return
   const previous = items.value
@@ -582,7 +477,7 @@ async function removeItem(item) {
     showToast({ message: 'Removed from roadmap', type: 'success' })
   } catch (error) {
     console.error('[ROADMAP] Failed to remove item:', error)
-    items.value = previous // rollback
+    items.value = previous
     showToast({ message: 'Could not remove from the roadmap. Please try again.', type: 'error' })
   }
 }
@@ -601,8 +496,6 @@ async function openItem(item) {
 }
 
 async function openProject(item) {
-  // IMP-1002: GET /roadmap returns trimmed items (no description/mission).
-  // Fetch the full project first or saving would wipe the orchestrator mission.
   const full = await projectStore.fetchProject(item.project_id)
   if (!full) {
     showToast({ message: 'Could not load project details. Please try again.', type: 'error' })
@@ -644,7 +537,6 @@ const taskTypeOptions = computed(() => {
 
 async function openTask(item) {
   try {
-    // Fetch the full task (roadmap rows are trimmed) before seeding the dialog.
     const { data } = await api.tasks.get(item.task_id)
     editTask(data)
   } catch (error) {
@@ -658,8 +550,6 @@ function onCurrentTaskUpdate(updated) {
 }
 
 async function onTaskSave(formRef) {
-  // Wrapped, not bare: saveTask calls this with its own args, which would both
-  // lose the opt-in and risk landing in the options object.
   await saveTask(formRef, () => fetchRoadmap({ notify: true }))
 }
 
@@ -694,29 +584,16 @@ async function confirmConvert() {
 }
 
 onMounted(async () => {
-  // Live refresh: the agent's roadmap write broadcasts roadmap:updated; re-fetch
-  // and clear the waiting indicator. Direct wsStore subscription (same pattern as
-  // ActiveProductDisplay.vue) — RoadmapView owns view-local state, no store.
   unsubRoadmap = wsStore.on('roadmap:updated', onRoadmapUpdated)
-  // FE-6240: the agent's first roadmap-tool touch (MCP get_roadmap) broadcasts
-  // roadmap:agent_active — raise the waiting spinner on the real agent
-  // connection (replaces the old optimistic copy-click trigger).
   unsubAgentActive = wsStore.on('roadmap:agent_active', onAgentActive)
-  // Live-sync: a project changed OUTSIDE the roadmap fires project_update
-  // (status_changed/activated/deactivated/updated, bug-2); reuses the debounced re-fetch.
   unsubProjectUpdate = wsStore.on('project_update', onProjectUpdated)
-  // D3 (Headless S3a): a harness-only stage/launch never fired project_update.
   unsubHeadlessLifecycle = ['project:staging_complete', 'project:implementation_launched'].map((t) => wsStore.on(t, onRoadmapUpdated))
-  // FE-6165f: hydrate active-chain state at mount + on WS reconnect (a run that
-  // finished while disconnected unlocks immediately). FE-9407: a dropped roadmap:updated never replays.
   unsubResync = registerReconnectResync(async () => {
     await Promise.allSettled([sequenceRunStore.hydrate(), fetchRoadmap()])
     if (waitIsSuperseded(roadmap.value, items.value, agentActiveStorageKey())) dismissWaiting()
   })
   try {
     await Promise.all([productStore.fetchActiveProduct(), fetchRoadmap(), sequenceRunStore.hydrate()])
-    // TSK-6243: product id is known now — re-show the spinner if an agent was
-    // active within the safety window just before this reload.
     rehydrateWaitingFromStorage()
     try {
       const { data } = await api.taxonomyTypes.list()
@@ -739,7 +616,6 @@ onUnmounted(() => {
   if (refetchDebounce) clearTimeout(refetchDebounce)
 })
 
-// Exposed for unit tests.
 defineExpose({
   items,
   displayItems,

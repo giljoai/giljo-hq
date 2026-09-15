@@ -1,20 +1,3 @@
-/**
- * useProjectFilters.spec.js — BE-6076 (server-driven; supersedes the BE-6078
- * client-side filtering spec).
- *
- * Edition Scope: CE.
- *
- * BE-6076 moved search + multi-status + hidden filtering AND sort + pagination
- * into SQL, so the composable no longer slices the list client-side — it owns
- * the control state and builds the SERVER query. These tests preserve the
- * BE-6078 UX intent, now asserted on `buildServerParams`:
- *  - Status MULTI-SELECT defaults to all-checked, persisted in localStorage; the
- *    selection becomes the server `statuses` param. Unchecking removes a status
- *    from the emitted set; an empty selection emits `[]` (empty page).
- *  - Search is "nuclear": a query drops the status multi-select server-side.
- *  - Hidden is a separate axis: "Show hidden" sets `includeHidden`; `hiddenCount`
- *    still drives the "Show hidden (N)" badge.
- */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ref, nextTick } from 'vue'
 import { useProjectFilters } from './useProjectFilters'
@@ -35,8 +18,6 @@ describe('useProjectFilters (BE-6076 server-driven params)', () => {
   let showHidden
 
   beforeEach(() => {
-    // The global test setup stubs localStorage with no-op vi.fn()s; back it with
-    // a real in-memory store so the persistence path is exercised end-to-end.
     const store = new Map()
     Object.defineProperty(window, 'localStorage', {
       value: {
@@ -81,7 +62,6 @@ describe('useProjectFilters (BE-6076 server-driven params)', () => {
       'cancelled',
       'terminated',
     ])
-    // pagination + default sort travel with the query
     expect(params.limit).toBe(10)
     expect(params.offset).toBe(0)
     expect(params.sort).toBe('created_at')
@@ -109,8 +89,6 @@ describe('useProjectFilters (BE-6076 server-driven params)', () => {
     await nextTick()
     expect(JSON.parse(localStorage.getItem('giljo.projects.selectedStatuses'))).toEqual(['active'])
 
-    // A fresh instance (simulating reload) loads the persisted selection and
-    // emits it as the server filter.
     const second = make()
     expect(second.selectedStatuses.value).toEqual(['active'])
     expect(second.buildServerParams().statuses).toEqual(['active'])
@@ -119,20 +97,17 @@ describe('useProjectFilters (BE-6076 server-driven params)', () => {
   it('search is "nuclear" — emits search and DROPS the status multi-select', async () => {
     const { buildServerParams, searchQuery, selectedStatuses } = make()
     await nextTick()
-    selectedStatuses.value = [] // even with nothing checked...
+    selectedStatuses.value = []
     searchQuery.value = 'cancelled'
     const params = buildServerParams()
-    expect(params.search).toBe('cancelled') // ...search still matches across statuses
+    expect(params.search).toBe('cancelled')
     expect(params.statuses).toBeUndefined()
   })
 
   it('search is "nuclear" over the hidden axis too — emits includeHidden so archived rows are findable (BE-2002)', async () => {
     const { buildServerParams, searchQuery } = make()
     await nextTick()
-    // Default (no search, no toggle) leaves archived excluded — default view unchanged.
     expect(buildServerParams().includeHidden).toBeUndefined()
-    // A non-empty search must reveal archived (hidden) rows so a user can find
-    // something they archived (the SEC-0013 miss this project fixes).
     searchQuery.value = 'sec-0013'
     expect(buildServerParams().includeHidden).toBe(true)
   })

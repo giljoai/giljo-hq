@@ -1,21 +1,3 @@
-/**
- * AgentTimingSettings.spec.js — FE-9553
- *
- * The behavioural half of what used to be
- * tests/unit/views/ToolsView.agent-silence-threshold.spec.js. Those three tests
- * mounted the whole view to assert that two inputs loaded and saved, which
- * worked only because the inputs happened to live on the tab the view rendered
- * eagerly. FE-9553 moved them to Tools -> Agents, so the behaviour is tested
- * here at the component that now OWNS it and the view spec keeps only the
- * placement claim.
- *
- * Nothing was dropped in the move: load, save, the CE/hosted question and the
- * value each API call receives are all still asserted, and there are now cases
- * the view-level spec could not reach at all -- an invalid keystroke, and one
- * load failing without taking the other down.
- *
- * Edition Scope: Both
- */
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 
@@ -99,19 +81,8 @@ describe('AgentTimingSettings (FE-9553, relocated from the Notifications tab)', 
   })
 
   it('has NO edition gate -- it takes no mode dependency at all', () => {
-    // The old view-level spec covered this by mounting twice, with mode 'ce'
-    // and 'demo', and asserting identical behaviour. The stronger claim is
-    // structural: this component cannot be edition-gated because it imports
-    // nothing that knows the edition.
-    //
-    // My first draft asserted `wrapper.html()` did not contain the string
-    // 'mode', which failed on incidental matches in rendered attributes -- a
-    // substring search over markup is not a structural claim, and it would
-    // have been just as worthless had it passed. Reading the source and naming
-    // the actual mode sources is provable.
     const source = readFileSync(resolve(__dirname, 'AgentTimingSettings.vue'), 'utf8')
 
-    // Known-positive: prove the read reached the real file.
     expect(source).toContain('silence-threshold-input')
 
     for (const modeSource of ['useGiljoMode', 'setupService', 'isCeModeValue', 'GILJO_MODE']) {
@@ -123,27 +94,22 @@ describe('AgentTimingSettings (FE-9553, relocated from the Notifications tab)', 
     it('does NOT save a value the rules reject', async () => {
       const wrapper = await mountIt()
 
-      wrapper.vm.silenceMinutes = 0 // below the 1-minute floor
+      wrapper.vm.silenceMinutes = 0
       await wrapper.vm.saveSilence()
-      wrapper.vm.silenceMinutes = 5000 // above the 1440 ceiling
+      wrapper.vm.silenceMinutes = 5000
       await wrapper.vm.saveSilence()
-      wrapper.vm.silenceMinutes = 12.5 // not a whole number
+      wrapper.vm.silenceMinutes = 12.5
       await wrapper.vm.saveSilence()
 
       expect(apiMock.settings.updateAgentSilenceThreshold).not.toHaveBeenCalled()
     })
 
     it('one failing load does not take the other down', async () => {
-      // This is why the loads moved out of ToolsView's onMounted: they were
-      // unguarded awaits there, so either one rejecting aborted every load
-      // after it -- including loadGitSettings, which is unrelated.
       apiMock.settings.getAgentSilenceThreshold.mockRejectedValueOnce(new Error('boom'))
 
       const wrapper = await mountIt()
 
-      // The failed one keeps its default rather than rendering blank...
       expect(wrapper.vm.silenceMinutes).toBe(10)
-      // ...and the other still loaded.
       expect(wrapper.vm.cadenceMinutes).toBe(15)
     })
 

@@ -3,37 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Project Series-Number Endpoints (INF-6055 extraction from crud.py).
-
-Cohesive group: series-number management for the project taxonomy.
-
-- GET /next-series      - Next available series number for a type
-- GET /available-series - Available series numbers (gaps + next) for a type
-- GET /check-series     - Whether a specific series number is available
-- GET /used-subseries   - Subseries letters already used for a type + series
-
-All endpoints default to the DEFAULT product and delegate the lookup logic to
-``api.endpoints.taxonomy_types.crud_ops``. Extracted verbatim from
-``api/endpoints/projects/crud.py`` to keep that module under the 800-line
-guardrail; paths, params, and response contracts are unchanged.
-
-FE-9502c: each endpoint also accepts an optional ``product_id`` query param
-that OVERRIDES the default-product resolution. A caller that omits it keeps
-today's default-product-fallback behaviour byte-for-byte (BE-9509's pin
-stays valid). The override exists because the tabbed product shell can have
-a viewed tab that is not the tenant's single DEFAULT product (FE-9524:
-several products may be SHOWN at once, but exactly one is DEFAULT) --
-without an explicit override, series/subseries lookups for a non-default tab
-would silently resolve against the wrong product's taxonomy. The underlying
-service/repo layer already applies ``product_id`` unconditionally and scopes
-every query by ``tenant_key`` (BE-9515), so an explicit override is exactly
-as tenant-safe as the fallback it replaces.
-
-Router registration order matters: this router is included BEFORE ``crud.router``
-in ``__init__.py`` so the static ``/next-series`` etc. paths are matched before
-``crud``'s catch-all ``/{project_id}`` route.
-"""
 
 import logging
 
@@ -116,9 +85,6 @@ async def available_series_numbers(
 @router.get("/check-series", response_model=SeriesCheckResponse)
 async def check_series_number(
     type_id: str | None = None,
-    # Lookup tolerates up to 6 digits (decision D) so grandfathered 5-digit
-    # serials can be queried without a 422. Assignment is capped elsewhere;
-    # this is a read/availability check, not a write.
     series_number: int = Query(ge=1, le=999999),
     subseries: str | None = Query(default=None, pattern=r"^[a-z]$"),
     exclude_project_id: str | None = None,
@@ -157,8 +123,6 @@ async def check_series_number(
 @router.get("/used-subseries", response_model=UsedSubseriesResponse)
 async def used_subseries(
     type_id: str | None = None,
-    # Lookup tolerates up to 6 digits (decision D) so grandfathered 5-digit
-    # serials can be queried without a 422 (read-only availability check).
     series_number: int = Query(ge=1, le=999999),
     exclude_project_id: str | None = None,
     product_id: str | None = None,

@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Version checking service.
-
-Reads the installed version from the VERSION file and fetches the latest
-release metadata from the GitHub API. Results are cached for 1 hour to
-respect rate limits (60 req/hr unauthenticated).
-"""
 
 import logging
 import time
@@ -23,13 +16,12 @@ import httpx
 logger = logging.getLogger(__name__)
 
 GITHUB_RELEASES_URL = "https://api.github.com/repos/giljoai/giljo-hq/releases/latest"
-CACHE_TTL_SECONDS = 3600  # 1 hour
+CACHE_TTL_SECONDS = 3600
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
 @dataclass
 class VersionInfo:
-    """Structured version check result."""
 
     installed_version: str
     latest_version: str | None = None
@@ -41,7 +33,6 @@ class VersionInfo:
 
 @dataclass
 class _CacheEntry:
-    """Internal cache entry with timestamp."""
 
     data: VersionInfo
     fetched_at: float = field(default_factory=time.monotonic)
@@ -51,10 +42,6 @@ _cache_store: dict[str, _CacheEntry] = {}
 
 
 def get_installed_version(root: Path | None = None) -> str:
-    """Read installed version from the VERSION file.
-
-    Returns 'unknown' if the file is missing or unreadable.
-    """
     version_path = (root or PROJECT_ROOT) / "VERSION"
     try:
         return version_path.read_text(encoding="utf-8").strip()
@@ -64,10 +51,6 @@ def get_installed_version(root: Path | None = None) -> str:
 
 
 def _parse_version_tuple(version_str: str) -> tuple[int, ...] | None:
-    """Parse a semver-like string into a comparable tuple.
-
-    Returns None if the string cannot be parsed.
-    """
     try:
         return tuple(int(p) for p in version_str.split("."))
     except (ValueError, AttributeError):
@@ -75,7 +58,6 @@ def _parse_version_tuple(version_str: str) -> tuple[int, ...] | None:
 
 
 def compare_versions(installed: str, latest: str) -> bool:
-    """Return True if latest is newer than installed."""
     inst = _parse_version_tuple(installed)
     lat = _parse_version_tuple(latest)
     if inst is None or lat is None:
@@ -86,10 +68,6 @@ def compare_versions(installed: str, latest: str) -> bool:
 async def _fetch_latest_from_github(
     client: httpx.AsyncClient | None = None,
 ) -> tuple[str | None, str | None, str | None]:
-    """Fetch latest release info from GitHub API.
-
-    Returns (version, tarball_url, sha256) or (None, None, None) on failure.
-    """
     own_client = client is None
     if own_client:
         client = httpx.AsyncClient(timeout=10.0)
@@ -151,13 +129,6 @@ async def get_version_info(
     client: httpx.AsyncClient | None = None,
     _now: float | None = None,
 ) -> VersionInfo:
-    """Return installed + latest version info, with 1-hour caching.
-
-    Args:
-        root: Override project root for VERSION file lookup.
-        client: Optional httpx.AsyncClient (for testing).
-        _now: Override monotonic time (for testing cache expiry).
-    """
     installed = get_installed_version(root)
     now = _now if _now is not None else time.monotonic()
 
@@ -195,5 +166,4 @@ async def get_version_info(
 
 
 def clear_cache() -> None:
-    """Clear the version cache (for testing)."""
     _cache_store.clear()

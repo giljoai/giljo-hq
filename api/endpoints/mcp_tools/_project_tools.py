@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Project Management Tools -- @mcp.tool wrappers (BE-6042d split of mcp_sdk_server.py).
-
-Mechanically extracted verbatim from the pre-split ``mcp_sdk_server.py``. Each
-wrapper registers against the shared ``mcp`` instance from ``_base`` as a decorator
-side effect at import time. Behavior, signatures, names, and descriptions unchanged.
-"""
 
 from typing import Annotated, Any, Literal
 
@@ -29,6 +22,7 @@ from api.endpoints.mcp_tools._base import (
     _call_tool,
     _detected_harness,
     _parse_iso_datetime_param,
+    blank_text_rejection,
     mcp,
 )
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
@@ -39,26 +33,12 @@ from giljo_mcp.services.project_service._mcp_list_bounds import (
 )
 
 
-# BE-9554: update_project's `status` carried NO description and NO enum -- a small
-# model saw `status: string` on the one parameter that runs the whole archive
-# lifecycle. The values here are the SETTABLE set, and they must stay identical to
-# the domain's ``VALID_UPDATE_STATUSES`` (which is the writer's own gate). They are
-# restated rather than derived because a ``Literal`` must be statically analysable;
-# ``tests/unit/test_be9554_update_status_enum_matches_domain.py`` imports that
-# frozenset and fails if the two ever diverge, so adding a status to the domain
-# demands adding it here rather than silently narrowing the tool.
-# "" is the keep-current sentinel every other update_project field already uses.
 _UpdatableStatus = Literal["", "active", "cancelled", "completed", "inactive", "parked", "superseded"]
 
 
 def _normalize_list_projects_filters(
     status: str, project_type: str, hidden: str
 ) -> tuple[list[str] | str | None, list[str] | str | None, bool | None]:
-    """Normalize list_projects' comma-separated/tri-state wire filters (BE-9499a extraction).
-
-    Split out of ``list_projects`` verbatim to hold it under the 200-line
-    guardrail -- behavior unchanged.
-    """
     status_arg: list[str] | str | None
     if not status:
         status_arg = None
@@ -117,8 +97,11 @@ async def diagnose_project_state(
         "valid here. series_number is auto-assigned server-side -- omit it for a normal create. "
         "Project is created inactive; activation and the implementation-launch gate are both "
         "separate, explicit steps (either door -- see get_giljo_guide). The response names the "
-        "product the project landed on. See get_giljo_guide for chain creation (shared series_number "
-        "+ a/b/c suffix), taxonomy errors, and Edition Scope."
+        "product the project landed on and carries TWO aliases: alias is the short permanent "
+        "share code (e.g. A1B2C3, never changes), taxonomy_alias is the human-readable serial "
+        "(e.g. BE-0007) -- quote taxonomy_alias to people, use project_id in tool calls. See "
+        "get_giljo_guide for chain creation (shared series_number + a/b/c suffix), taxonomy "
+        "errors, and Edition Scope."
     ),
     annotations=_tool_hints("create_project"),
 )
@@ -227,6 +210,8 @@ async def create_project(
             account is rejected and nothing is created; it never falls back to
             the active or default product.
     """
+    if not name.strip():
+        return blank_text_rejection("name", entity="Project")
     params = {
         "name": name,
         "description": description,
@@ -268,7 +253,7 @@ async def create_project(
         "default product; pass product_id to list a specific product's projects instead. See "
         "get_giljo_guide for read-vs-write routing."
     ),
-    meta=MCP_HEAVY_TOOL_META,  # BE-9083c: raise Claude Code's inline-truncation ceiling
+    meta=MCP_HEAVY_TOOL_META,
     annotations=_tool_hints("list_projects"),
 )
 async def list_projects(
@@ -460,8 +445,6 @@ async def list_projects(
         "500. To find a project to update, call list_projects first. See get_giljo_guide for chain "
         "repositioning routing."
     ),
-    # BE-9251: status accepts terminal values (completed/cancelled) -- a general
-    # editor tool that CAN produce a terminal transition, not just rename/redescribe.
     annotations=_tool_hints("update_project", destructive=True),
 )
 async def update_project(
@@ -561,6 +544,8 @@ async def update_project(
     """
     params: dict = {"project_id": project_id, "force": force}
     if name:
+        if not name.strip():
+            return blank_text_rejection("name", entity="Project")
         params["name"] = name
     if description:
         params["description"] = description
@@ -630,13 +615,6 @@ async def update_project_mission(
 async def stage_project(
     project_id: str,
     mode: Annotated[
-        # BE-9554: the schema advertises only the two REAL choices -- the four legacy
-        # harness-name aliases (claude/codex/gemini/antigravity) were 4 of 6 enum values a
-        # small model could pick from, and the description spent ~700 chars warning it off
-        # them. Typed `str` rather than a narrowed Literal ON PURPOSE: a Literal would make
-        # the boundary REJECT the legacy names, and the ruling is tolerance, not removal --
-        # old callers keep working, they just are not offered the dead options any more.
-        # Pinned by tests/unit/test_be9554_stage_mode_advertises_two_tolerates_legacy.py.
         str,
         Field(
             json_schema_extra={"enum": ["multi_terminal", "subagent"]},
@@ -647,12 +625,6 @@ async def stage_project(
                 "user for this one; omitting it is refused, not defaulted."
             ),
         ),
-        # FE-9555: the sentinel means NOT ANSWERED. It used to default to
-        # 'multi_terminal', so a caller that never considered the question had it decided
-        # for its user silently. Kept as "" rather than a required param on purpose --
-        # a required param 422s at the schema layer with no words the agent can relay,
-        # whereas the sentinel reaches the accessor, which either applies the account
-        # default or returns the EXECUTION_MODE_REQUIRED refusal carrying both choices.
     ] = "",
     mission: Annotated[
         str,
@@ -668,14 +640,6 @@ async def stage_project(
     action: Literal["stage", "unstage", "restage", "cancel_staging"] = "stage",
     ctx: Context = None,
 ) -> dict[str, Any]:
-    # FE-9555 ride-along. Five blind routing tests across three model families sent
-    # "the orchestrator writes the goal statement" HERE in every case, including the
-    # variant whose prompt explicitly said update_project owns the mission -- models
-    # do not merely guess wrong, they override the instruction. Accepting the
-    # parameter swims with that instinct instead of fighting it with prose they
-    # demonstrably ignore, and it is product-consistent: the mission IS authored
-    # during staging. NOT a second writer -- it routes through the one
-    # update_project_mission writer, same as launch_implementation's identical param.
     kwargs: dict[str, Any] = {
         "project_id": project_id,
         "mode": mode,
@@ -710,9 +674,6 @@ async def get_implementation_prompt(
     the order between them was not guessable from either name. This one FETCHES A PROMPT
     and the other AUTHORISES THE START, so the names now say which is which.
     """
-    # BE-9099: resolve the session's detected harness (claude-code / codex / gemini /
-    # antigravity / opencode / generic) from clientInfo and thread it down so a subagent
-    # orchestrator gets its harness's native spawn render — never the multi_terminal seed.
     return await _call_tool(
         ctx,
         "implement_project",
@@ -741,10 +702,6 @@ async def get_implementation_prompt(
         "single writer the standalone tool uses) before the gate is stamped. Omit to launch a "
         "project whose mission was already authored during staging."
     ),
-    # BE-9251 audit F3: stamps project.implementation_launched_at -- a
-    # one-way phase gate set once and never reset, the same terminal-transition
-    # class as update_project/update_task/complete_job/close_job/
-    # write_project_closeout.
     annotations=_tool_hints("launch_implementation", destructive=True),
 )
 async def launch_implementation(

@@ -3,26 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-9217a — force-logout must evict OAuth refresh families, not just access tokens.
-
-Before SEC-9217a, ``UserAuthService.force_logout`` (SEC-6011) bumped the user's
-``token_revocation_epoch`` but did NOT revoke their outstanding OAuth refresh
-tokens -- unlike ``change_password`` (SEC-9047), which does both. Consequence:
-an admin "force logout this user" invalidated only the user's ACCESS tokens (the
-``rev`` claim gate in principal.py). A held refresh token was untouched and on
-its next ``/api/oauth/refresh`` re-read the user, stamped the NEW (bumped) epoch
-into a fresh access token, and minted a new refresh row -- sailing straight past
-the epoch gate. No race needed; purely sequential.
-
-Regression test at the failing layer -- the service method
-``UserAuthService.force_logout`` -- proven two-sided against the real
-``/api/oauth/refresh`` seam: after force-logout the outstanding refresh token can
-no longer mint (``invalid_grant``) AND the epoch behavior is unchanged (a stale
-access token is rejected while a fresh token minted at the new epoch works).
-
-Parallel-safe: unique tenant/user per test, monkeypatch-only module patching, no
-module-level mutable state.
-"""
 
 from __future__ import annotations
 
@@ -48,7 +28,6 @@ AUTH_PROBE = "/api/v1/users/me/field-priority"
 
 
 async def _seed_user(db_manager) -> tuple[str, str, str]:
-    """Create org+user (epoch 0); return (user_id, username, tenant_key)."""
     from giljo_mcp.models.auth import User
     from giljo_mcp.models.organizations import Organization
     from giljo_mcp.tenant import TenantManager
@@ -103,7 +82,6 @@ def _mint(user_id: str, username: str, tenant_key: str, *, revocation_epoch: int
 
 
 def _install_confidential_resolver(client_id: str, secret_hash: str):
-    """Stub resolver recognizing one confidential client (test_sec9047 pattern)."""
     from giljo_mcp.services import oauth_service as svc
 
     prior = svc.get_client_resolver()
@@ -128,7 +106,6 @@ def _install_confidential_resolver(client_id: str, secret_hash: str):
 
 
 async def _seed_refresh_token(db_manager, *, client_id: str, tenant_key: str, user_id: str) -> str:
-    """Persist a live refresh-token row; return the raw token."""
     async with db_manager.get_session_async(tenant_key=tenant_key) as session:
         raw = await issue_refresh_token(
             session,
@@ -180,10 +157,6 @@ async def _unrevoked_refresh_count(db_manager, *, tenant_key: str, user_id: str)
 
 @pytest.mark.asyncio
 async def test_force_logout_revokes_refresh_families_and_kills_access(api_client, db_manager, monkeypatch):
-    """force_logout evicts the user's OAuth refresh families: the outstanding
-    refresh token can no longer mint (invalid_grant), every refresh row is
-    revoked, and the epoch behavior is unchanged (stale access token rejected,
-    fresh token at the new epoch works)."""
     from giljo_mcp.services import oauth_refresh_service as _refresh_svc
 
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
@@ -192,7 +165,6 @@ async def test_force_logout_revokes_refresh_families_and_kills_access(api_client
 
     user_id, username, tk = await _seed_user(db_manager)
 
-    # A stale access token minted before the force-logout (epoch 0).
     stale_access = _mint(user_id, username, tk, revocation_epoch=0)
     probe = await api_client.get(AUTH_PROBE, headers=_cookie_headers(stale_access))
     assert probe.status_code == 200, probe.text
@@ -208,25 +180,20 @@ async def test_force_logout_revokes_refresh_families_and_kills_access(api_client
         rotated = before.json()["refresh_token"]
         assert await _unrevoked_refresh_count(db_manager, tenant_key=tk, user_id=user_id) >= 1
 
-        # Force-logout at the failing layer: the service method the bug lived in.
         auth_service = UserAuthService(db_manager=db_manager, tenant_key=tk)
         updated = await auth_service.force_logout(user_id)
         assert updated.token_revocation_epoch == 1
 
-        # Every refresh row for the user is now revoked (all families).
         assert await _unrevoked_refresh_count(db_manager, tenant_key=tk, user_id=user_id) == 0
 
-        # The outstanding (rotated) refresh token can no longer mint.
         clear_revocation_cache()
         after = await _refresh_call(api_client, refresh_token=rotated, client_id=client_id, client_secret=client_secret)
         assert after.status_code == 401, after.text
         assert "invalid_grant" in _oauth_err_text(after.json()).lower()
 
-        # Epoch behavior unchanged: the stale access token is rejected...
         stale = await api_client.get(AUTH_PROBE, headers=_cookie_headers(stale_access))
         assert stale.status_code == 401, stale.text
 
-        # ...and a fresh token minted at the NEW epoch authenticates (re-login works).
         fresh = _mint(user_id, username, tk, revocation_epoch=1)
         relogin = await api_client.get(AUTH_PROBE, headers=_cookie_headers(fresh))
         assert relogin.status_code == 200, relogin.text

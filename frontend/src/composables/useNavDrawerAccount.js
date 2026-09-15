@@ -1,26 +1,12 @@
-/**
- * useNavDrawerAccount.js — FE-6006 unit 3a
- *
- * Extracted from NavigationDrawer.vue: lazy-loaded SaaS account-state badge +
- * store handle, and all computed account-status display properties.
- * CE builds: this composable is always present but SaaS-specific refs stay null.
- * Edition scope: Both (CE no-ops, SaaS lazy-loads via import.meta.glob)
- */
 import { ref, computed, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from '@/composables/useToast'
 import { isCeModeValue } from '@/composables/useGiljoMode'
 
-/**
- * @param {Object} options
- * @param {import('vue').Ref<string>} options.giljoMode - reactive edition mode ('ce' | 'saas')
- */
 export function useNavDrawerAccount({ giljoMode }) {
   const router = useRouter()
   const { showToast } = useToast()
 
-  // Lazy-loaded badge component + account-state store handle.
-  // CE bundle never imports them — saas/ is stripped before vite build.
   const AccountStatusBadgeComponent = shallowRef(null)
   const accountStateStoreRef = shallowRef(null)
 
@@ -110,7 +96,6 @@ export function useNavDrawerAccount({ giljoMode }) {
       AccountStatusBadgeComponent.value = badgeMod.default
       accountStateStoreRef.value = storeMod.useAccountStateStore()
     } catch (err) {
-      // CE export safety: glob returns empty on CE — never reaches here.
       console.warn('[useNavDrawerAccount] Account-state UI unavailable:', err?.message)
     }
   }

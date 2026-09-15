@@ -13,7 +13,6 @@
         Copy this and tell agents to message you in this thread.
       </p>
 
-      <!-- Thread identifier card: friendly chat id + copyable thread id -->
       <div class="thread-created__id-card smooth-border" data-testid="thread-created-id-card">
         <div v-if="chatId" class="thread-created__chat-id" data-testid="thread-created-chat-id">
           {{ chatId }}
@@ -61,10 +60,8 @@
 </template>
 
 <script>
-/** localStorage key — persists the operator's "don't show again" preference. */
 const HIDE_HINT_KEY = 'giljo.hub.threadCreatedHintHidden'
 
-/** True when the operator has previously dismissed the hint forever. */
 export function isThreadCreatedHintHidden() {
   try {
     return localStorage.getItem(HIDE_HINT_KEY) === '1'

@@ -1,12 +1,3 @@
-/**
- * sequenceOrder.spec.js — FE-6131e
- *
- * Pure unit tests for the run-order resolution + dependency-chain locking that
- * back the confirm modal. Covers the DoD's "dependency-locked ordering" and the
- * cap=5 constant.
- *
- * Edition scope: CE.
- */
 import { describe, it, expect } from 'vitest'
 import {
   MAX_SEQUENCE_PROJECTS,
@@ -55,9 +46,7 @@ describe('sequenceOrder — computeChains / isChainLocked', () => {
     const chains = computeChains(rows)
     expect(chains.has('BE-0001')).toBe(true)
     expect(chains.get('BE-0001')).toEqual(['a', 'b', 'c'])
-    // A lone suffixed member is NOT a chain (needs >= 2 selected members).
     expect(chains.has('API-0002')).toBe(false)
-    // A suffix-less alias is never a chain base.
     expect(chains.has('FE-0009')).toBe(false)
   })
 
@@ -74,7 +63,7 @@ describe('sequenceOrder — orderByRoadmap', () => {
     const rows = [
       { project_id: 'x' },
       { project_id: 'y' },
-      { project_id: 'z' }, // absent from roadmap
+      { project_id: 'z' },
       { project_id: 'w' },
     ]
     const orderMap = new Map([
@@ -96,15 +85,12 @@ describe('sequenceOrder — normalizeChainOrder (dependency-locked ordering)', (
 
   it('keeps a chain contiguous and in suffix order even when scrambled', () => {
     const chains = computeChains(rows)
-    // Simulate a drag that put b before a and split the chain with `free`.
     const scrambled = [
       { project_id: 'b', taxonomy_alias: 'BE-0001b' },
       { project_id: 'free', taxonomy_alias: 'FE-0009' },
       { project_id: 'a', taxonomy_alias: 'BE-0001a' },
     ]
     const normalized = normalizeChainOrder(scrambled, chains).map((r) => r.project_id)
-    // The chain emits a→b together at the chain's first-encountered slot; `free`
-    // keeps its (post-chain) position.
     expect(normalized).toEqual(['a', 'b', 'free'])
   })
 

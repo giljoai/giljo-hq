@@ -3,39 +3,23 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Project domain tools mixin for ToolAccessor (BE-6042a split)."""
 
 from __future__ import annotations
 
 from typing import Any
 
+from giljo_mcp.platform_registry import RETIRED_HARNESS_TOKENS
 from giljo_mcp.schemas.service_responses import build_next_action
 
 
-# INF-6049b / BE-9035c: stage_project's user-facing ``mode`` -> the engine's
-# (tool, execution_mode) vocabulary. The public MCP ``mode`` param KEEPS accepting
-# multi_terminal | subagent | claude | codex | gemini | antigravity (agent-facing
-# contract preserved — DESIGN §3). Post-collapse the stored execution_mode is one of
-# the 2 canonical modes; the per-CLI short tokens map to ``subagent`` + a HARNESS
-# HINT (the ``tool`` slot — the staging prose flavor) so a caller may still name its
-# CLI without breaking, while the persisted mode is the collapsed ``subagent``.
 _STAGE_MODE_MAP: dict[str, tuple[str, str]] = {
     "multi_terminal": ("claude-code", "multi_terminal"),
     "subagent": ("claude-code", "subagent"),
     "claude": ("claude-code", "subagent"),
     "codex": ("codex", "subagent"),
-    "gemini": ("gemini", "subagent"),
-    "antigravity": ("antigravity", "subagent"),
 }
+_STAGE_MODE_MAP.update(dict.fromkeys(RETIRED_HARNESS_TOKENS, _STAGE_MODE_MAP["subagent"]))
 
-# FE-9555: "Execution mode must be ASKED, both doors." The dashboard door
-# asks at staging (ExecutionModeSelector); this is the harness door's equivalent. It is
-# the BE-9523b PRODUCT_AMBIGUOUS shape -- a Tier-2 structured rejection that reaches the
-# agent as normal tool content with the remedy inline, never an isError -- because the
-# caller can FIX this, and the fix is one question to its user.
-#
-# The two explanations are not decoration. The agent has to relay the choice to a human
-# who has never seen this tool's schema, and it cannot relay words it was not given.
 _EXECUTION_MODE_CHOICES: tuple[tuple[str, str], ...] = (
     ("multi_terminal", "Multi-Terminal -- a separate terminal per agent, and you watch the fleet."),
     ("subagent", "Subagent -- one session drives the worker agents itself, inside this conversation."),
@@ -43,7 +27,6 @@ _EXECUTION_MODE_CHOICES: tuple[tuple[str, str], ...] = (
 
 
 def _execution_mode_required_rejection() -> dict[str, Any]:
-    """The refusal returned when staging was not told how the work should run."""
     return {
         "success": False,
         "error": "EXECUTION_MODE_REQUIRED",
@@ -56,8 +39,6 @@ def _execution_mode_required_rejection() -> dict[str, Any]:
     }
 
 
-# The explicit stop instruction the staging payload + tool description must end on
-# (feedback_staging_stop_do_not_execute — the human gate is sacred).
 _STAGING_STOP_INSTRUCTION = (
     "STAGING COMPLETE — STOP HERE. Do NOT begin implementation. The user must review "
     "the staged plan in the GiljoAI dashboard and MANUALLY press Implement. Only after "
@@ -65,13 +46,6 @@ _STAGING_STOP_INSTRUCTION = (
     "intentional and cannot be bypassed."
 )
 
-# BE-9015: the chain-mode counterpart. A chain sub-orchestrator has NO per-project
-# human Implement gate — the conductor already released it — so returning the SOLO
-# STOP instruction to a chain member wedges it waiting for a dashboard click that
-# never comes. When stage_project detects an active chain run for the project it
-# emits THIS instead (mirrors mission_orchestration_service._check_staging_redirect's
-# chain-member branch: staging complete -> get_job_mission carries you straight into
-# implementation).
 _STAGING_CHAIN_CONTINUE_INSTRUCTION = (
     "STAGING COMPLETE — chain mode. There is NO per-project human Implement gate in a "
     "chain; the conductor already released you. Continue to implementation now: call "
@@ -82,24 +56,8 @@ _STAGING_CHAIN_CONTINUE_INSTRUCTION = (
 
 
 class ProjectToolsMixin:
-    """Project lifecycle ADAPTER tools. Composed into ToolAccessor.
-
-    BE-6118: the pure create_project / list_projects / update_project_metadata
-    pass-throughs were deleted (``_call_tool`` dispatches them straight to
-    ProjectService via ``TOOL_DISPATCH``). What remains are ADAPTERs resolved
-    through the ``getattr`` fallback: diagnose_project_state (constructs
-    ProjectCloseoutService), update_project_mission (injects the current tenant),
-    and the stage/implement/launch gate tools (mode mapping + structured gate
-    errors + the human-gate stop instruction).
-    """
 
     async def diagnose_project_state(self, project_id: str, tenant_key: str) -> dict[str, Any]:
-        """Read-only project lifecycle diagnostic (BE-6111c / BE-5055).
-
-        Delegates to ProjectCloseoutService, constructed with the accessor's bound
-        deps so the diagnostic owns its tenant-scoped session (no ad-hoc session
-        here). Reports status/gates + agent counts + readiness + stuck conditions.
-        """
         from giljo_mcp.services.project_closeout_service import ProjectCloseoutService
 
         service = ProjectCloseoutService(
@@ -111,8 +69,6 @@ class ProjectToolsMixin:
         return await service.diagnose_project_state(project_id, tenant_key=tenant_key)
 
     async def update_project_mission(self, project_id: str, mission: str) -> dict[str, Any]:
-        """Update the mission field (delegates to ProjectService)"""
-        # SECURITY FIX (Handover 0424): Always pass tenant_key for isolation
         tenant_key = self.tenant_manager.get_current_tenant()
         return await self._project_service.update_project_mission(project_id, mission, tenant_key=tenant_key)
 
@@ -125,25 +81,6 @@ class ProjectToolsMixin:
         action: str = "stage",
         mission: str = "",
     ) -> dict[str, Any]:
-        """Drive the staging endpoint for a project (INF-6049b).
-
-        Produces exactly what the dashboard "copy staging prompt" button does, but
-        the driving agent acts on it directly. Reuses the existing prompt engine
-        (ThinClientPromptGenerator.stage -> generate / generate_staging_prompt /
-        StagingPromptBuilder) — ZERO duplicated prompt-building.
-
-        The returned payload ENDS with the explicit stop instruction: staging
-        completes -> STOP -> the user reviews the dashboard -> the user manually
-        triggers implementation. This tool NEVER launches implementation.
-
-        BE-9499b: ``action`` is the staging reverse gear. ``action="stage"``
-        (default) is the behavior above, unchanged. Any other value skips
-        prompt generation entirely and drives the matching ProjectStagingService
-        method through the SAME lifecycle facade the REST endpoints at
-        ``api/endpoints/projects/lifecycle.py`` use (``unstage`` / ``restage`` /
-        ``cancel_staging``) -- one owning writer, two doors.
-        ``reset_to_prestage`` (destructive) and purge/restore stay UI-only and are NOT reachable through this parameter.
-        """
         if action != "stage":
             return await self._stage_project_reverse_gear(project_id, action)
 
@@ -154,29 +91,11 @@ class ProjectToolsMixin:
         )
         from giljo_mcp.thin_prompt_generator import ThinClientPromptGenerator
 
-        # BE-6177/BE-9035c backstop: accept the short token (claude / subagent) OR a full
-        # project/run execution_mode — the 2 canonical modes AND the 5 legacy ``*_cli``
-        # tokens (tolerance) — and normalize to the short token. The conductor's staging
-        # chapter emits the execution_mode vocabulary; this keeps the boundary forgiving
-        # so a chain stage never hard-fails on a spelling axis. ONLY a recognized
-        # execution_mode is translated — an unknown value is left untouched so it still
-        # errors below (no silent coercion).
-        # FE-9555: an omitted mode is the ONE question staging asks, not something to
-        # answer on the caller's behalf. The boundary sends "" for "not answered"; the
-        # account default decides whether that becomes a mode or the refusal above.
         if not mode:
             mode = await self._resolve_stage_mode_default(tenant_key)
             if not mode:
                 return _execution_mode_required_rejection()
 
-        # FE-9555 ride-along: the goal, authored at staging because that is where
-        # every routing test showed models expect to write it. Routed through the
-        # ONE update_project_mission writer rather than touching the project here,
-        # so this is a second DOOR, never a second writer.
-        #
-        # Written BEFORE staging, not after: the staging prompt is generated from
-        # the project's mission, so writing it afterwards would mint an orchestrator
-        # carrying the old goal and silently disagree with what the project now says.
         if mission:
             await self.update_project_mission(project_id, mission)
 
@@ -200,29 +119,11 @@ class ProjectToolsMixin:
             result = await generator.stage(
                 project_id=project_id, user_id=user_id, tool=tool, execution_mode=execution_mode
             )
-            # The mark_staged single-writer transaction fix: stage() no longer
-            # persists the staged state itself -- route it through the OWNING service
-            # on this SAME session, so the whole staging call is one transaction
-            # instead of two. Ordering preserved: write, then chain-membership check
-            # (must see committed state), then the WS broadcast after the session
-            # closes (below).
             await self._project_service.lifecycle.mark_staged(
                 project_id, execution_mode, tenant_key=tenant_key, db_session=db
             )
-            # BE-9015: the next_action must be chain-aware. A SOLO project keeps the
-            # sacred human Implement gate (STOP); a CHAIN member has no such gate (the
-            # conductor released it) and must continue via get_job_mission — else it
-            # wedges waiting for a dashboard click chain mode never has.
             is_chain_member = await self._stage_is_chain_member(db, project_id, tenant_key)
 
-        # BE-9332: staging over MCP is the headless/CLI path, and it used to emit
-        # NOTHING — the orchestrator card never appeared in the dashboard for a
-        # CLI-driven staging. Emission is a TRANSPORT concern and stays with the
-        # caller by design (stage()'s docstring: "Transport concerns (HTTP guards,
-        # WebSocket broadcast, structured errors) stay with the caller"), so the
-        # REST endpoints and this tool are peers, all three going through the one
-        # shared emitter. POST-COMMIT: the session block above has closed, so this
-        # can never announce a state a rollback could still undo.
         await broadcast_orchestrator_prompt_generated(
             self._websocket_manager,
             tenant_key=tenant_key,
@@ -231,7 +132,7 @@ class ProjectToolsMixin:
             agent_id=result.get("agent_id"),
             execution_id=result.get("execution_id"),
             tool=tool,
-            product_id=result.get("product_id"),  # BE-9518
+            product_id=result.get("product_id"),
         )
 
         why = _STAGING_CHAIN_CONTINUE_INSTRUCTION if is_chain_member else _STAGING_STOP_INSTRUCTION
@@ -244,16 +145,6 @@ class ProjectToolsMixin:
         }
 
     async def _resolve_stage_mode_default(self, tenant_key: str) -> str:
-        """The account's Tools -> Agents execution-mode default, as a stage mode token.
-
-        FE-9555. Returns ``""`` when the account says *ask every time* (the default),
-        which is what makes ``stage_project`` refuse rather than choose. A stored value
-        that is not one of the two canonical modes also reads as ask -- see
-        ``default_stage_mode``.
-
-        Read-only, and deliberately its own short session: it runs BEFORE the staging
-        transaction so a refusal costs nothing but a settings lookup.
-        """
         from giljo_mcp.execution_mode_default import (
             EXECUTION_MODE_DEFAULT_KEY,
             STAGE_MODE_ASK,
@@ -270,16 +161,6 @@ class ProjectToolsMixin:
     _STAGE_REVERSE_ACTIONS: frozenset[str] = frozenset({"unstage", "restage", "cancel_staging"})
 
     async def _stage_project_reverse_gear(self, project_id: str, action: str) -> dict[str, Any]:
-        """The staging reverse gear (BE-9499b): unstage / restage / cancel_staging.
-
-        Headless had no way back out of staging before this -- the underlying
-        ``ProjectStagingService`` methods were REST-only. Each branch calls the
-        exact facade the matching REST endpoint calls
-        (``api/endpoints/projects/lifecycle.py``: ``/unstage``, ``/restage``,
-        ``/cancel-staging``), so behavior is byte-identical between doors.
-        ``reset_to_prestage`` and purge/restore are deliberately absent (ruling 4
-        -- destructive actions stay UI-only).
-        """
         from giljo_mcp.exceptions import ValidationError
 
         if action not in self._STAGE_REVERSE_ACTIONS:
@@ -292,7 +173,7 @@ class ProjectToolsMixin:
             result = await self._project_service.lifecycle.unstage(project_id)
         elif action == "restage":
             result = await self._project_service.lifecycle.restage(project_id)
-        else:  # cancel_staging
+        else:
             data = await self._project_service.lifecycle.cancel_staging(
                 project_id, websocket_manager=self._websocket_manager
             )
@@ -305,19 +186,6 @@ class ProjectToolsMixin:
         }
 
     async def _stage_is_chain_member(self, session: Any, project_id: str, tenant_key: str) -> bool:
-        """Best-effort: True if the project belongs to an ACTIVE chain run (BE-9015).
-
-        Mirrors job_lifecycle_service._is_active_chain_member /
-        mission_orchestration_service._is_chain_member: constructs SequenceRunService
-        on the SAME already-open session and calls find_active_run_for_project
-        (tenant_key-scoped, active statuses only).
-
-        On ANY failure this returns False (treat as SOLO) — a DELIBERATE fail-safe, NOT
-        a bug: the human Implement gate is SACRED. A DB error must fail toward "STOP,
-        ask the human" (solo), never toward "continue without approval" (chain). A rare
-        chain wedge on a lookup error is visible and recoverable; a solo project that
-        silently skips the gate is not. Do NOT "fix" this to raise. (BE-9015.)
-        """
         try:
             from giljo_mcp.services.sequence_run_service import SequenceRunService
 
@@ -338,19 +206,6 @@ class ProjectToolsMixin:
         user_id: str | None = None,
         detected_harness: str | None = None,
     ) -> dict[str, Any]:
-        """Return the implementation prompt for an already-staged + launched project (INF-6049b).
-
-        Server-side preconditions are enforced via the SHARED gate
-        (ProjectStagingService.check_implementation_allowed, also used by the REST
-        endpoint): the project must exist for the tenant, staging must be complete,
-        AND the user must have pressed Implement in the dashboard
-        (implementation_launched_at set).
-
-        If the human gate has NOT been pressed this returns a STRUCTURED ERROR (not
-        an exception) telling the agent the exact next action — distinguishing
-        "staging not complete" from "press Implement in the dashboard". This tool
-        NEVER sets implementation_launched_at and offers NO bypass parameter.
-        """
         from giljo_mcp.exceptions import ImplementationNotReadyError
         from giljo_mcp.thin_prompt_generator import ThinClientPromptGenerator
 
@@ -363,8 +218,6 @@ class ProjectToolsMixin:
             except ImplementationNotReadyError as e:
                 return self._implementation_gate_error(e, project_id)
 
-        # BE-9165 (wall 3): every specialist already completed — steer the caller
-        # to closeout instead of telling it to launch agents that no longer exist.
         if payload.get("ready_to_close"):
             return {
                 "status": "ready_to_close",
@@ -398,33 +251,6 @@ class ProjectToolsMixin:
         user_id: str | None = None,
         mission: str | None = None,
     ) -> dict[str, Any]:
-        """CLI door of the two-door implement gate (BE-6115a).
-
-        Stamps ``implementation_launched_at`` through the SAME single-writer the
-        dashboard Implement button uses
-        (``ProjectStagingService.launch_implementation``) — there is NO parallel
-        write path. This is a USER / driving-agent lifecycle tool, deliberately
-        kept OUT of the orchestrator auto-tool bundle (``_canonical_tool_list``):
-        a spawned/staging agent has no schema for it and therefore CANNOT
-        self-unlock implementation. The MCP permission prompt on this tool IS the
-        human authorization — the human gate stays sacred.
-
-        Downstream gates: ``implement_project`` / ``get_job_mission`` / ``spawn_job``
-        still refuse a SOLO project until this flag is set, and this tool offers NO
-        bypass of those checks — it only sets the flag a human authorized via the
-        permission prompt. (A conductor-released CHAIN member has no human Implement
-        button and is exempted from those gates via ``_is_chain_member``; BE-9069 keeps
-        a member parked at the solo Implement gate out of that exemption.)
-
-        BE-9499c (goal-at-launch): an optional ``mission`` collapses "state your
-        goal and say go" into ONE call. When present, it is written through
-        ``update_project_mission`` -- the SAME single writer the standalone
-        ``update_project_mission`` MCP tool uses (``ProjectService`` — ruling 1,
-        single-writer) -- BEFORE the gate is stamped, so a failure to write the
-        mission never leaves the gate flipped with no mission behind it. Omit (or
-        pass ``None``/empty) to launch a project whose mission was already
-        authored during staging, unchanged from before this addition.
-        """
         if mission is not None and mission.strip():
             await self.update_project_mission(project_id, mission)
 
@@ -440,7 +266,6 @@ class ProjectToolsMixin:
             project_id=project_id,
             tenant_key=tenant_key,
             launched_by=user_id,
-            # TSK-6219: the launch_implementation MCP tool is the headless (mcp) door.
             origin="mcp",
         )
         return {
@@ -450,10 +275,6 @@ class ProjectToolsMixin:
 
     @staticmethod
     def _implementation_gate_error(error: Any, project_id: str) -> dict[str, Any]:
-        """Build the distinguishable, actionable structured error for the human gate."""
-        # BE-6225c: each recovery hint points at diagnose_project_state -- the
-        # read-only self-heal diagnostic an orchestrator should call when a gate
-        # won't clear and it isn't sure why, instead of guessing.
         actions = {
             "staging_incomplete": build_next_action(
                 tool="stage_project",

@@ -1,11 +1,3 @@
-/**
- * ProjectDeletedDialog.spec.js — FE-6063
- *
- * Regression test: restore button must use mdi-restore (not mdi-delete-restore)
- * and carry the brand-yellow restore-btn class.
- *
- * Edition scope: Both
- */
 
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'

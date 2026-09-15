@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Agent Job Messages Endpoint - Handover 0387g
-
-Provides message content for MessageAuditModal.
-Fetches messages where the agent is sender or recipient.
-BE-5022a: All DB access routed through JobQueryService.
-"""
 
 import logging
 
@@ -30,35 +23,20 @@ router = APIRouter()
 
 
 def _resolve_sender_display_name(from_agent: str, agent_lookup: dict[str, str]) -> str:
-    """
-    Resolve from_agent to a human-readable display name.
-
-    Args:
-        from_agent: Raw from_agent value (could be 'user', 'orchestrator', agent_id UUID, or display name)
-        agent_lookup: Dict mapping agent_id -> display name (e.g., "Orchestrator #1", "Implementer #2")
-
-    Returns:
-        Resolved display name
-    """
     if not from_agent:
         return "Unknown"
 
-    # Special cases
     if from_agent == "user":
         return "User"
     if from_agent == "system":
         return "System"
 
-    # Check if it's an agent_id UUID - resolve to display name
     if from_agent in agent_lookup:
         return agent_lookup[from_agent]
 
-    # Check if it looks like a display name already (e.g., "orchestrator", "implementer")
-    # Capitalize first letter for display
     if from_agent.lower() in ["orchestrator", "implementer", "analyzer", "tester", "reviewer", "documenter"]:
         return from_agent.capitalize()
 
-    # Return as-is (might be an agent_name like "impl-alpha")
     return from_agent
 
 
@@ -120,14 +98,12 @@ async def get_job_messages(
         sanitize(current_user.tenant_key),
     )
 
-    # Build response with resolved sender names
     message_list = []
     for m in messages:
         raw_from_agent = m.from_agent_id or "unknown"
         resolved_from = _resolve_sender_display_name(raw_from_agent, agent_lookup)
         is_outbound = raw_from_agent == agent_id
 
-        # Resolve recipient display name (Handover 0410)
         recipient_ids = [r.agent_id for r in m.recipients] if m.recipients else []
         to_agent_id = recipient_ids[0] if recipient_ids else None
         if m.message_type == "broadcast":

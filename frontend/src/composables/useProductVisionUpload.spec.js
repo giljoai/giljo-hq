@@ -1,9 +1,3 @@
-/**
- * useProductVisionUpload.spec.js — FE-6006 unit 3b
- *
- * Tests upload flow: validation, auto-create in create mode, per-file upload, error paths.
- * Edition scope: CE
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ref } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'

@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Auto-purge sequence_run on chain completion (Option A) — service-layer regression.
-
-Regression at the FAILING LAYER (SequenceRunService — the owning service and the
-ONLY deleter of ``sequence_runs``). Covers ``purge_run``:
-
-  - THE DELETION TEST: after purge the run row is GONE and the conductor's
-    project-less AgentJob + AgentExecution are GONE, while the durable record —
-    project rows, a 360 memory entry, and a comms message — SURVIVES. Only the
-    chain GROUPING is lost.
-  - Idempotent: re-calling purge_run on an already-purged run is a clean no-op
-    (the hook is best-effort and can fire more than once).
-  - Tenant-scoped: purging tenant A's run does NOT touch tenant B's identical run.
-
-Parallel-safety: DB-touching; uses the db_session fixture (TransactionalTestContext).
-SequenceRunService COMMITs through the injected session (RoadmapService pattern), so
-a function-scoped collector fixture wipes only the tenant_keys each test created — no
-module-level mutable state, each test owns its setup + teardown.
-"""
 
 from __future__ import annotations
 
@@ -51,16 +33,9 @@ _MODE = "claude_code_cli"
 
 @pytest_asyncio.fixture
 async def cleanup_tenants(db_manager):
-    """Collect tenant_keys created by a test; delete their rows at teardown.
-
-    SequenceRunService.create/purge_run COMMIT through the injected session, so
-    rows persist on the per-worker DB past the transactional session. Scoping the
-    wipe to the tenant_keys this test created keeps it parallel-safe (no global
-    truncate, no cross-test interference)."""
     tenants: list[str] = []
     yield tenants
     for tk in tenants:
-        # Per-tenant session so the tenant-scope guard is satisfied; child-before-parent FK order.
         async with db_manager.get_session_async(tenant_key=tk) as session:
             await session.execute(delete(Message).where(Message.tenant_key == tk))
             await session.execute(delete(ProductMemoryEntry).where(ProductMemoryEntry.tenant_key == tk))
@@ -147,15 +122,6 @@ async def _create_run(session: AsyncSession, tenant_key: str, project_ids: list[
 
 
 async def _conductor_job_ids(session: AsyncSession, tenant_key: str, run_id: str) -> list[str]:
-    """Read back a tenant's conductor job ids under an explicit tenant context.
-
-    SEC-9276: this shared session sees back-to-back setup for MULTIPLE tenants
-    (test_purge_is_tenant_scoped seeds tenant A then tenant B), so the session's
-    flush-derived tenant context can be stale relative to this call's explicit
-    tenant_key predicate by the time it runs. tenant_session_context re-anchors the
-    read to the tenant this call is actually asking about -- the guard stays live,
-    it is just told the truth about which tenant this query is for.
-    """
     with tenant_session_context(session, tenant_key):
         rows = await session.execute(
             select(AgentJob.job_id).where(
@@ -168,8 +134,6 @@ async def _conductor_job_ids(session: AsyncSession, tenant_key: str, run_id: str
 
 
 async def _run_exists(session: AsyncSession, tenant_key: str, run_id: str) -> bool:
-    """Read back whether a run row exists, under an explicit tenant context (see
-    _conductor_job_ids above for why: the shared session sees multiple tenants)."""
     with tenant_session_context(session, tenant_key):
         row = await session.execute(
             select(SequenceRun.id).where(SequenceRun.id == run_id, SequenceRun.tenant_key == tenant_key)
@@ -180,7 +144,6 @@ async def _run_exists(session: AsyncSession, tenant_key: str, run_id: str) -> bo
 async def test_purge_deletes_run_and_conductor_but_survivors_live(
     db_session: AsyncSession, cleanup_tenants: list[str]
 ) -> None:
-    """The Deletion Test: run + conductor rows die; project / 360 memory / comms live."""
     tenant = TenantManager.generate_tenant_key()
     cleanup_tenants.append(tenant)
 
@@ -198,14 +161,12 @@ async def test_purge_deletes_run_and_conductor_but_survivors_live(
     assert result["run_deleted"] is True
     assert result["conductor_jobs_deleted"] == len(job_ids)
 
-    # Run row + conductor AgentJob + AgentExecution are GONE.
     assert not await _run_exists(db_session, tenant, run["id"])
     remaining_jobs = await db_session.execute(select(AgentJob.job_id).where(AgentJob.job_id.in_(job_ids)))
     assert remaining_jobs.scalar_one_or_none() is None
     remaining_execs = await db_session.execute(select(AgentExecution.id).where(AgentExecution.job_id.in_(job_ids)))
     assert remaining_execs.scalar_one_or_none() is None
 
-    # The durable record SURVIVES.
     for pid in (p1, p2):
         row = await db_session.execute(select(Project.id).where(Project.id == pid))
         assert row.scalar_one_or_none() == pid, "project row must survive the purge"
@@ -216,7 +177,6 @@ async def test_purge_deletes_run_and_conductor_but_survivors_live(
 
 
 async def test_purge_is_idempotent(db_session: AsyncSession, cleanup_tenants: list[str]) -> None:
-    """A second purge_run on the same (already-gone) run is a clean no-op."""
     tenant = TenantManager.generate_tenant_key()
     cleanup_tenants.append(tenant)
 
@@ -234,7 +194,6 @@ async def test_purge_is_idempotent(db_session: AsyncSession, cleanup_tenants: li
 
 
 async def test_purge_is_tenant_scoped(db_session: AsyncSession, cleanup_tenants: list[str]) -> None:
-    """Purging tenant A's run leaves tenant B's identical-shaped run untouched."""
     tenant_a = TenantManager.generate_tenant_key()
     tenant_b = TenantManager.generate_tenant_key()
     cleanup_tenants.extend([tenant_a, tenant_b])
@@ -253,7 +212,6 @@ async def test_purge_is_tenant_scoped(db_session: AsyncSession, cleanup_tenants:
 
     await _seq_svc(db_session).purge_run(run_id=run_a["id"], tenant_key=tenant_a)
 
-    # Tenant A: gone. Tenant B: fully intact.
     assert not await _run_exists(db_session, tenant_a, run_a["id"])
     assert await _run_exists(db_session, tenant_b, run_b["id"]), "tenant B's run must be untouched"
     b_jobs = await _conductor_job_ids(db_session, tenant_b, run_b["id"])

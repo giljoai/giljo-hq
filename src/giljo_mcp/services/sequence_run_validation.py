@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SequenceRun write-boundary validation helpers (extracted from the service).
-
-Pure, membership/length validation of the enum-like and capped fields before any
-DB write, raising ValidationError (-> 422) rather than letting a DB constraint
-produce a 500. Extracted to keep ``sequence_run_service.py`` under the 800-line CI
-guardrail (BE-6185), mirroring the ``sequence_run_serialization.py`` extraction.
-Internal; the owning service is the only caller.
-
-Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -35,9 +25,6 @@ from giljo_mcp.schemas.jsonb_validators import (
 )
 
 
-# BE-6185: hard cap on the conductor-owned chain mission text, enforced at the
-# write boundary so an over-cap value raises ValidationError (-> 422) rather than
-# letting the DB produce a 500.
 MAX_CHAIN_MISSION_CHARS: int = 100_000
 
 
@@ -58,7 +45,6 @@ def validate_create_fields(
     review_policy: str,
     project_statuses: dict[str, str],
 ) -> None:
-    """Membership-validate all enum-like fields before touching the DB (create path)."""
     if not project_ids:
         raise ValidationError(
             message="project_ids must be a non-empty list",
@@ -97,12 +83,6 @@ def validate_update_fields(
     resolved_order: list[str] | None,
     project_statuses: dict[str, str] | None,
 ) -> tuple[list[str] | None, dict[str, str] | None]:
-    """Membership/length-validate the optional update fields (partial-update path).
-
-    Returns the normalized ``(resolved_order, project_statuses)`` (JSONB-validated
-    when provided, else passed through as None). Raises ValidationError (-> 422) on
-    any invalid value.
-    """
     if status is not None and status not in VALID_RUN_STATUSES:
         raise ValidationError(
             message=f"Invalid status {status!r}. Valid: {sorted(VALID_RUN_STATUSES)}",
@@ -144,32 +124,10 @@ def validate_update_fields(
     return resolved_order, project_statuses
 
 
-# Run statuses that mean implementation is in flight. Mirrors the service's own
-# tier constant; kept here so the mode-freeze refusal is self-contained.
 _RUNNING_STATUSES: frozenset[str] = frozenset({"running", "stalled"})
 
 
 async def refuse_mode_change_if_live(session: AsyncSession, run, run_id: str, tenant_key: str) -> None:
-    """Refuse an execution_mode change once the chain's agents are LIVE (BE-9335).
-
-    The run's mode is what a chain member actually runs in, so changing it while
-    agents already hold rendered prompts would re-point their harness mid-flight
-    — exactly the desync ``projects.execution_mode`` refuses after launch. This
-    is that same per-project lock at the tier that owns a chain, so it keys on
-    the SAME signal: ``implementation_launched_at``.
-
-    Deliberately NOT the ultralock tier. Ultralock means "the Implement button is
-    available" (any member at ``staging_complete``), which is reached while every
-    agent is still cold — refusing there took away a mode change the server had
-    always allowed, and pointed at Unstage, which ultralock itself refuses. It
-    also does not engage on the straight-to-implementation path this fixes:
-    ``GET /prompts/chain-implementation`` is a pure read that sets neither
-    ``status`` nor ``locked``, so a driven chain stays pending + unlocked while
-    its members run. The launch gate is true in exactly that case.
-
-    Re-staging clears ``implementation_launched_at``, so the remedy named in the
-    message is one the user can actually carry out.
-    """
     launched = await _launched_member_names(session, run, tenant_key)
     if launched:
         named = ", ".join(launched)
@@ -195,11 +153,6 @@ async def refuse_mode_change_if_live(session: AsyncSession, run, run_id: str, te
 
 
 async def _launched_member_names(session: AsyncSession, run, tenant_key: str) -> list[str]:
-    """Names of member projects that have crossed their launch gate. Tenant-scoped.
-
-    Names rather than ids: this feeds a user-facing refusal, and a refusal that
-    does not say which member froze the chain makes the user hunt for it.
-    """
     member_ids = list(run.project_ids or [])
     if not member_ids:
         return []

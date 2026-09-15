@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""User approval primitive (BE-5029 Phase A).
-
-A ``user_approvals`` row represents a pending decision the user must make before
-an agent can continue. Replaces the prose ``user_approval_required`` boolean +
-``set_agent_status(blocked, "Closeout: awaiting user review")`` contract.
-
-Edition Scope: Both -- the table is shared across CE and SaaS; the model lives
-in CE because both editions need read/write access.
-"""
 
 from sqlalchemy import (
     CheckConstraint,
@@ -32,13 +23,6 @@ VALID_USER_APPROVAL_STATUSES = ("pending", "decided", "expired", "cancelled")
 
 
 class UserApproval(Base):
-    """One pending approval bound to a specific agent execution.
-
-    Multi-tenant Isolation:
-    - All queries MUST filter by ``tenant_key``.
-    - FK to ``agent_executions.id`` (the executor row, NOT the agent succession key).
-    - FK to ``agent_jobs.job_id`` (note the PK column is ``job_id``, not ``id``).
-    """
 
     __tablename__ = "user_approvals"
 
@@ -82,16 +66,12 @@ class UserApproval(Base):
     decided_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        # BE-8000c: ix_user_approvals_tenant_key dropped — leftmost-covered by
-        # ix_user_approvals_tenant_status (tenant_key, status).
         Index("ix_user_approvals_tenant_status", "tenant_key", "status"),
         Index("ix_user_approvals_agent_status", "agent_execution_id", "status"),
         CheckConstraint(
             "status IN ('pending', 'decided', 'expired', 'cancelled')",
             name="ck_user_approvals_status",
         ),
-        # BE-9514: NULL tolerated (legacy rows predate this column and never
-        # will know their channel) -- only a non-NULL value is constrained.
         CheckConstraint(
             "decided_via IS NULL OR decided_via IN ('ui', 'mcp')",
             name="ck_user_approvals_decided_via",

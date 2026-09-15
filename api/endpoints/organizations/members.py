@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Organization Membership Endpoints - Handover 0424c.
-
-Handles organization membership management using OrgService.
-
-Features:
-- List organization members
-- Invite new members
-- Change member roles
-- Remove members
-- Transfer ownership
-"""
 
 import logging
 
@@ -31,12 +19,10 @@ from .models import MemberInvite, MemberResponse, MemberRoleUpdate, OwnershipTra
 
 logger = logging.getLogger(__name__)
 
-# Router for member operations
 router = APIRouter()
 
 
 def get_org_service(db: AsyncSession = Depends(get_db_session)) -> OrgService:
-    """Dependency for OrgService injection."""
     return OrgService(db)
 
 
@@ -210,7 +196,6 @@ async def remove_member(
     )
 
 
-# Separate router for transfer endpoint (different path pattern)
 transfer_router = APIRouter()
 
 

@@ -3,34 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-3008c — PostgresNotifyWebSocketEventBroker production hardening.
-
-Edition Scope: Both (api/broker/ is CE code; the multi-worker consumer is SaaS
-deployment).
-
-The broker is security-load-bearing since TSK-9006: it fans the
-``disconnect_tenant`` control message (live-session revocation on user
-deactivation) across workers. This file regression-tests the hardening at the
-broker layer:
-
-  * LISTEN registration is actually awaited (asyncpg ``add_listener`` is a
-    coroutine; the pre-BE-3008c code never awaited it, so LISTEN never ran).
-  * The LISTEN connection auto-reconnects with capped exponential backoff after
-    a server-side loss, and delivery resumes on the new connection; a deliberate
-    ``stop()`` does NOT reconnect.
-  * ``publish`` rejects payloads over the pg_notify byte cap with a clear
-    ValueError instead of an opaque server error.
-  * Legacy payloads (a not-yet-upgraded worker during a rolling deploy) missing
-    the ``control``/``origin``/``exclude_client`` keys still deserialize.
-  * The ``disconnect_tenant`` control path: a peer-origin control NOTIFY closes
-    this worker's tenant sockets without re-publishing (no loop); an own-origin
-    echo is ignored.
-  * Startup fails loud on workers>1 + in_memory (and on any broker failure when
-    multi-worker); a single worker keeps the graceful degrade.
-
-Parallel-safe: no DB, no module-level mutable state; asyncpg is replaced with an
-in-test fake via monkeypatch.
-"""
 
 from __future__ import annotations
 
@@ -48,9 +20,6 @@ from api.startup.core_services import init_websocket_broker
 from api.websocket import WebSocketManager
 
 
-# ---------------------------------------------------------------------------
-# asyncpg fakes
-# ---------------------------------------------------------------------------
 
 
 class _FakePostgresError(Exception):
@@ -58,7 +27,6 @@ class _FakePostgresError(Exception):
 
 
 class _FakeConn:
-    """asyncpg.Connection stand-in: listener registry + termination simulation."""
 
     def __init__(self) -> None:
         self.listeners: dict[str, object] = {}
@@ -83,13 +51,10 @@ class _FakeConn:
 
     async def close(self) -> None:
         self.closed = True
-        # asyncpg fires termination listeners on explicit close too; the broker
-        # must deregister BEFORE closing so this cannot arm a reconnect.
         for callback in list(self.termination_listeners):
             callback(self)
 
     def terminate_from_server(self) -> None:
-        """Simulate PG killing the connection (restart/failover/idle reaping)."""
         self.closed = True
         for callback in list(self.termination_listeners):
             callback(self)
@@ -131,7 +96,6 @@ class _FakePool:
 
 
 class _FakeAsyncpg:
-    """Drop-in for the ``asyncpg`` module inside api.broker.postgres_notify."""
 
     PostgresError = _FakePostgresError
 
@@ -157,7 +121,6 @@ class _FakeAsyncpg:
 
 
 class _AsyncioShim:
-    """Delegates to real asyncio but records backoff sleeps and makes them instant."""
 
     def __init__(self) -> None:
         self.sleep_delays: list[float] = []
@@ -198,13 +161,9 @@ def _message(**overrides) -> WebSocketBrokerMessage:
     return WebSocketBrokerMessage(**fields)
 
 
-# ---------------------------------------------------------------------------
-# LISTEN registration + delivery
-# ---------------------------------------------------------------------------
 
 
 async def test_start_awaits_listen_registration(fake_pg):
-    """Regression: add_listener is a coroutine — un-awaited, LISTEN never runs."""
     broker = PostgresNotifyWebSocketEventBroker(dsn="postgresql://fake/db")
     await broker.start()
     try:
@@ -234,9 +193,6 @@ async def test_notification_dispatches_to_subscribed_handler(fake_pg):
         await broker.stop()
 
 
-# ---------------------------------------------------------------------------
-# Reconnect with backoff
-# ---------------------------------------------------------------------------
 
 
 async def test_reconnects_with_backoff_and_delivery_resumes(fake_pg, sleep_shim):
@@ -253,9 +209,7 @@ async def test_reconnects_with_backoff_and_delivery_resumes(fake_pg, sleep_shim)
         fake_pg.connections[0].terminate_from_server()
 
         await _wait_until(lambda: len(fake_pg.connections) == 2)
-        # 1 initial + 2 failed + 1 successful reconnect
         assert fake_pg.connect_attempts == 4
-        # Capped exponential backoff: 0.5s, then doubled.
         assert sleep_shim.sleep_delays == [0.5, 1.0]
 
         new_conn = fake_pg.connections[1]
@@ -311,9 +265,6 @@ async def test_start_failure_cleans_up_and_raises(fake_pg):
     assert broker._publish_pool is None
 
 
-# ---------------------------------------------------------------------------
-# Publish payload guard
-# ---------------------------------------------------------------------------
 
 
 async def test_publish_sends_pg_notify(fake_pg):
@@ -342,9 +293,6 @@ async def test_publish_rejects_oversized_payload_before_reaching_pg(fake_pg):
         await broker.stop()
 
 
-# ---------------------------------------------------------------------------
-# Wire-format backward compatibility (rolling deploy)
-# ---------------------------------------------------------------------------
 
 
 def test_deserialize_tolerates_legacy_payload_missing_optional_keys():
@@ -356,9 +304,6 @@ def test_deserialize_tolerates_legacy_payload_missing_optional_keys():
     assert message.exclude_client is None
 
 
-# ---------------------------------------------------------------------------
-# disconnect_tenant control path at the broker layer (TSK-9006 spine)
-# ---------------------------------------------------------------------------
 
 
 class _FakeWS:
@@ -424,9 +369,6 @@ async def test_own_origin_echo_is_ignored(fake_pg, monkeypatch):
         await broker.stop()
 
 
-# ---------------------------------------------------------------------------
-# Startup guard: workers>1 + in_memory must fail loud
-# ---------------------------------------------------------------------------
 
 
 class _StubDBManager:
@@ -480,7 +422,7 @@ async def test_startup_single_worker_degrades_gracefully_on_broker_failure(monke
     _force_worker_count(monkeypatch, 1)
     monkeypatch.setenv("GILJO_WS_BROKER", "bogus_broker_type")
     state = _StubState()
-    await init_websocket_broker(state)  # must NOT raise
+    await init_websocket_broker(state)
     assert state.websocket_broker is None
 
 

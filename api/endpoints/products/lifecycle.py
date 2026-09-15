@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Product Lifecycle Endpoints - Handover 0127b
-
-Handles product activation, deactivation, restore, and deletion operations
-using ProductService.
-
-Handover 0731d: Updated for typed ProductService returns (Product ORM models,
-DeleteResult, CascadeImpact, ProductStatistics instead of dicts).
-"""
 
 import logging
 
@@ -58,36 +49,21 @@ async def activate_product(
     logger.info("User %s activating product %s", sanitize(current_user.username), sanitize(product_id))
 
     try:
-        # FE-9524: previous_active_product_id now reports the tenant's DEFAULT
-        # product (not "the shown one" -- several may be shown at once), same
-        # as before the split since this response field predates it and no
-        # frontend consumer reads it. BE-6066 P2: only its id is read here, so
-        # fetch it LEAN (eager_load=False) — skips four wasted selectin loads
-        # of relations we never touch.
         default_product = await service.get_default_product(eager_load=False)
         previous_active_id = None
         if default_product:
             previous_active_id = str(default_product.id)
 
-        # Activate new product (return value discarded; re-hydrated below).
         await service.activate_product(product_id)
 
-        # The SINGLE full hydration for the response graph.
         product = await service.get_product(product_id)
 
-        # BE-6066 P2: route the response stats through P1's batched path (mirrors
-        # refresh-active). Identical numbers, but drops the redundant per-product
-        # re-SELECT that the singular get_product_statistics issued.
         stats_map = await service.memory.get_product_statistics_bulk([str(product.id)])
         metrics = stats_map.get(str(product.id))
         stats = _stats_from_metrics(product, metrics) if metrics else None
 
-        # Build ProductResponse
         product_response = _build_product_response(product, stats, override_active=True)
 
-        # FE-9524/D1: activate_product no longer pauses any project -- kept as an
-        # empty list for response-shape compatibility (the frontend polls
-        # project state separately after activation).
         deactivated_projects = []
 
         return ProductActivationResponse(
@@ -99,7 +75,6 @@ async def activate_product(
         )
 
     finally:
-        # Publish WS event via EventBus (tenant-scoped)
         try:
             from api.app_state import state
 
@@ -132,13 +107,11 @@ async def deactivate_product(
     try:
         await service.deactivate_product(product_id)
 
-        # Get full product details and statistics
         product = await service.get_product(product_id)
         stats = await service.memory.get_product_statistics(str(product.id))
 
         return _build_product_response(product, stats)
     finally:
-        # Publish WS event via EventBus (tenant-scoped)
         try:
             from api.app_state import state
 
@@ -197,13 +170,11 @@ async def delete_product(
     """
     logger.info("User %s deleting product %s", sanitize(current_user.username), sanitize(product_id))
 
-    # Get product state before deletion for response
     product = await service.get_product(product_id)
     was_active = product.is_active
 
     await service.lifecycle.delete_product(product_id)
 
-    # Get remaining products count
     remaining_products = await service.list_products()
     remaining_count = len(remaining_products)
 
@@ -212,7 +183,7 @@ async def delete_product(
         deleted_product_id=product_id,
         was_active=was_active,
         remaining_products_count=remaining_count,
-        new_active_product=None,  # Could auto-activate another product if needed
+        new_active_product=None,
     )
 
 
@@ -249,7 +220,6 @@ async def restore_product(
 
     await service.lifecycle.restore_product(product_id)
 
-    # Get full product details and statistics
     product = await service.get_product(product_id)
     stats = await service.memory.get_product_statistics(str(product.id))
 
@@ -301,18 +271,10 @@ async def refresh_active_product(
     if not product:
         return ActiveProductRefreshResponse(has_active_product=False, product=None)
 
-    # BE-6066 P1: this endpoint resolves a SINGLE (the default) product — it is not
-    # the O(N) per-product loop the products list has. It is routed through the
-    # batched stats path anyway so it drops the redundant per-product re-SELECT
-    # that get_product_statistics issued. The numbers are identical.
     stats_map = await service.memory.get_product_statistics_bulk([str(product.id)])
     metrics = stats_map.get(str(product.id))
     stats = _stats_from_metrics(product, metrics) if metrics else None
 
-    # FE-9524: do NOT override_active here. Default and shown are independent
-    # columns now (D2: a hidden product is still a fully valid default) -- the
-    # response must report the product's REAL is_active, not a value forced
-    # true because it happens to be resolved as the default.
     return ActiveProductRefreshResponse(
         has_active_product=True,
         product=_build_product_response(product, stats),
@@ -345,7 +307,6 @@ async def get_vision_document_stats(
     product_id = str(product.id)
     product_name = product.name
 
-    # Query for active vision documents
     from sqlalchemy import and_, select
 
     from giljo_mcp.models import VisionDocument
@@ -357,9 +318,6 @@ async def get_vision_document_stats(
                 VisionDocument.tenant_key == tenant_key,
                 VisionDocument.product_id == product_id,
                 VisionDocument.is_active == True,  # noqa: E712
-                # Soft-delete deliberately leaves is_active alone, so filtering
-                # is_active without deleted_at let trashed docs keep inflating
-                # the token and chunk totals.
                 VisionDocument.deleted_at.is_(None),
             )
         )
@@ -380,7 +338,6 @@ async def get_vision_document_stats(
             summary_tokens=0,
         )
 
-    # Aggregate stats across all active vision documents
     total_tokens = sum(doc.total_tokens or 0 for doc in vision_docs)
     chunk_count = sum(doc.chunk_count or 0 for doc in vision_docs)
     is_summarized = any((doc.meta_data or {}).get("is_summarized", False) for doc in vision_docs)
@@ -397,17 +354,6 @@ async def get_vision_document_stats(
     )
 
 
-# BE-5122: Idempotency lookup for CTX projects. Returns the most recent
-# non-terminal CTX project on the product (status not in completed/cancelled/
-# terminated/deleted), or 404 if none exists. Frontend uses the hash_matches
-# field to decide whether to launch / skip / surface a "context already fresh"
-# state. Tenant isolation: every query filters by tenant_key.
-#
-# BE-5122 review F4: both the product+vision-docs load and the project lookup
-# run on the SAME ``db`` session so the product (and its eager-loaded
-# vision_documents) stays attached for the hash computation below. The previous
-# implementation used ProductService.get_product() in a separate session and
-# only worked by accident because eager_load materialized the collection.
 @router.get("/{product_id}/context_update_project", response_model=ContextUpdateProjectResponse)
 async def get_context_update_project(
     product_id: str,

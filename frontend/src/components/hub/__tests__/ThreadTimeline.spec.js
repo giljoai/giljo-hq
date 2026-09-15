@@ -1,18 +1,3 @@
-/**
- * ThreadTimeline.spec.js — FE-6122, updated by BE-9289a
- *
- * User-vs-agent author rendering:
- *  - A genuine USER post renders the brand-yellow user avatar treatment + the
- *    user's initials.
- *  - An AGENT post renders the tinted role color badge — NOT the user treatment.
- *
- * The signal is `from_kind` ('agent' | 'user'), resolved SERVER-SIDE at post time
- * and carried on every message. It replaced a client-side guess at the SHAPE of
- * from_agent_id ("UUID = user, slug = agent"), which mislabeled every agent that
- * posts under its own agent_id UUID. from_agent_id is a self-declared functional
- * key (recipient self-exclusion, baton matching, read cursors), so its shape never
- * carried the author's kind — only the server knows, and now it says so.
- */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
@@ -76,9 +61,7 @@ describe('ThreadTimeline author rendering (FE-6122)', () => {
     expect(row.classes()).toContain('timeline-msg--user')
     const avatar = row.find('.timeline-msg__avatar')
     expect(avatar.classes()).toContain('timeline-msg__avatar--user')
-    // initials from the real display name, not an agent abbrev
     expect(avatar.text()).toBe('SR')
-    // no inline agent color style applied to the user avatar
     expect(avatar.attributes('style') || '').not.toContain('background-color')
   })
 
@@ -88,23 +71,10 @@ describe('ThreadTimeline author rendering (FE-6122)', () => {
     expect(row.classes()).toContain('timeline-msg--agent')
     const avatar = row.find('.timeline-msg__avatar')
     expect(avatar.classes()).not.toContain('timeline-msg__avatar--user')
-    // agent avatar carries an inline tinted color style from getAgentColor()
     expect(avatar.attributes('style') || '').toContain('background-color')
   })
 })
 
-// ---------------------------------------------------------------------------
-// BE-9289a — author KIND comes from the server, author NAME from the directory.
-//
-// The incident this pins: an agent that declared a UUID as its agent_id and had no
-// participant row rendered as the HUMAN USER — right-aligned, brand-yellow, avatar
-// initials "27", name shown as a raw UUID. The old client-side heuristic ("looks
-// like a UUID therefore human") caused it, and no amount of agent discipline could
-// avoid it: an agent following its instructions exactly still broke the render.
-//
-// These tests must keep passing without ANY participant directory loaded — that is
-// what proves the render no longer depends on a client-side guess.
-// ---------------------------------------------------------------------------
 
 const RESOLVE_THREAD = 'thr-resolve'
 const AGENT_UUID = '277e2ee9-e15d-4339-9730-4ffee559cdcb'
@@ -129,7 +99,6 @@ describe('ThreadTimeline server-resolved author kind (BE-9289a)', () => {
   })
 
   it('REGRESSION: a UUID-authored AGENT post renders as an agent with NO directory loaded', () => {
-    // The exact reported failure. No participants — the only signal is from_kind.
     seedResolveMessage(store)
     const wrapper = mountTimeline(pinia)
     const row = wrapper.find('[data-testid="timeline-message-msg-uuid-agent"]')
@@ -137,7 +106,6 @@ describe('ThreadTimeline server-resolved author kind (BE-9289a)', () => {
     expect(row.classes()).not.toContain('timeline-msg--user')
     const avatar = row.find('.timeline-msg__avatar')
     expect(avatar.classes()).not.toContain('timeline-msg__avatar--user')
-    // tinted agent color applied (from getAgentColor), not the brand-yellow user treatment
     expect(avatar.attributes('style') || '').toContain('background-color')
   })
 
@@ -149,7 +117,6 @@ describe('ThreadTimeline server-resolved author kind (BE-9289a)', () => {
     const wrapper = mountTimeline(pinia)
     const row = wrapper.find('[data-testid="timeline-message-msg-uuid-agent"]')
     expect(row.classes()).toContain('timeline-msg--agent')
-    // friendly role name, not the raw UUID
     expect(row.find('.timeline-msg__sender').text()).toBe('orchestrator')
   })
 
@@ -162,8 +129,6 @@ describe('ThreadTimeline server-resolved author kind (BE-9289a)', () => {
   })
 
   it('a stale directory entry cannot override the server on the author kind', () => {
-    // A directory row claiming 'user' must NOT flip an agent post back to the user
-    // treatment — the server is the authority, the directory is a name lookup.
     seedResolveMessage(store)
     store.participantsByThreadId = new Map([
       [RESOLVE_THREAD, [{ participant_id: AGENT_UUID, participant_type: 'user', display_name: 'Sam' }]],
@@ -175,12 +140,6 @@ describe('ThreadTimeline server-resolved author kind (BE-9289a)', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// FE-9490 — badge consolidation: initials no longer swallow punctuation, and
-// the avatar colour keys off the participant's ROLE (not the display name
-// alone), so the same agent reads the same colour here as it does in the
-// AgentPill/HubComposer badges elsewhere in the Hub.
-// ---------------------------------------------------------------------------
 
 const PUNCT_THREAD = 'thr-fe9490'
 const REVIEWER_ID = 'reviewer-phase5-agent'
@@ -216,27 +175,12 @@ describe('ThreadTimeline agent badge consistency (FE-9490)', () => {
     const wrapper = mountTimeline(pinia)
     const row = wrapper.find('[data-testid="timeline-message-msg-reviewer-phase5"]')
     const avatar = row.find('.timeline-msg__avatar')
-    // jsdom normalizes an inline hex style to rgb() -- compare the hex from the
-    // single source of truth converted the same way, not the literal hex string.
     const reviewerHex = getAgentColor('reviewer').hex
     const [r, g, b] = [1, 3, 5].map((i) => Number.parseInt(reviewerHex.slice(i, i + 2), 16))
     expect(avatar.attributes('style') || '').toContain(`color: rgb(${r}, ${g}, ${b})`)
   })
 })
 
-// ---------------------------------------------------------------------------
-// FE-9289c — the reading surface.
-//
-// DoD 7 deletes the waiting/read/sent filter row (FE-9012c D3) and the always-on
-// broadcast badge. Both were noise: "broadcast" is the server-side DEFAULT, so it
-// marked effectively every message, and the filter row asked the reader to run
-// queries on a surface whose job is reading. The suites that covered them are gone
-// with them; what replaces them is pinned below.
-//
-// `readonly` went with the filter row: its only job was hiding those pills, so
-// after the deletion it would have been an inert prop named for behaviour it no
-// longer had. ProjectReviewModal's call site drops it.
-// ---------------------------------------------------------------------------
 
 const READ_THREAD = 'thr-read'
 
@@ -270,7 +214,6 @@ describe('ThreadTimeline reading surface (FE-9289c)', () => {
     const wrapper = mountTimeline(pinia)
     expect(wrapper.find('[data-testid="thread-filter"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="thread-filter-waiting"]').exists()).toBe(false)
-    // the message itself still renders — the row went, the content did not
     expect(wrapper.find('[data-testid="timeline-message-f1"]').exists()).toBe(true)
   })
 
@@ -317,7 +260,6 @@ describe('ThreadTimeline reading surface (FE-9289c)', () => {
     expect(g2.classes()).toContain('timeline-msg--grouped')
     expect(g2.find('.timeline-msg__avatar').exists()).toBe(false)
     expect(g2.find('.timeline-msg__header').exists()).toBe(false)
-    // a different author starts a new run
     const g3 = wrapper.get('[data-testid="timeline-message-g3"]')
     expect(g3.classes()).not.toContain('timeline-msg--grouped')
     expect(g3.find('.timeline-msg__avatar').exists()).toBe(true)
@@ -365,7 +307,6 @@ describe('ThreadTimeline reading surface (FE-9289c)', () => {
     const wrapper = mountTimeline(pinia)
     const row = wrapper.get('[data-testid="timeline-message-h1"]')
     expect(row.get('[data-testid="message-harness"]').text()).toBe('claude-code')
-    // the host is present in the payload and must not reach the screen
     expect(row.text()).not.toContain('laptop-a')
   })
 
@@ -387,12 +328,6 @@ describe('ThreadTimeline reading surface (FE-9289c)', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// Phase 5 / D1(a): an explicit `threadId` prop lets a read-only surface (the
-// Project Review pane's "Project Comms" section) render a SPECIFIC thread
-// without touching the store's global selectedThreadId. HubView.vue keeps
-// passing no props (falls back to selectedThreadId).
-// ---------------------------------------------------------------------------
 
 describe('ThreadTimeline explicit threadId (Phase 5 / D1(a))', () => {
   let pinia
@@ -403,8 +338,6 @@ describe('ThreadTimeline explicit threadId (Phase 5 / D1(a))', () => {
     pinia = createPinia()
     setActivePinia(pinia)
     store = useCommHubStore()
-    // Point the store's selection at a DIFFERENT, empty thread to prove the
-    // threadId prop wins over selectedThreadId.
     store.selectedThreadId = 'thr-other-empty'
     store.handleThreadMessage({
       thread_id: EXPLICIT, message_id: 'e1', content: 'hello', from_agent_id: 'implementer',

@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Setup & Misc Tools -- @mcp.tool wrappers (BE-6042d split of mcp_sdk_server.py).
-
-Mechanically extracted verbatim from the pre-split ``mcp_sdk_server.py``. Each
-wrapper registers against the shared ``mcp`` instance from ``_base`` as a decorator
-side effect at import time. Behavior, signatures, names, and descriptions unchanged.
-"""
 
 from typing import Annotated, Any, Literal
 
@@ -25,12 +18,11 @@ from api.endpoints.mcp_tools._base import (
     _resolve_preset_name,
     logger,
     mcp,
+    validation_rejection,
 )
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
 from giljo_mcp.platform_registry import (
-    EXPORT_GENERIC,
     EXPORT_PLATFORMS,
-    WORKSPACE_NONE,
     WORKSPACE_SHARED_WORKING_TREE,
     get_preset,
 )
@@ -48,9 +40,6 @@ from giljo_mcp.utils.log_sanitizer import sanitize
     annotations=_tool_hints("health_check"),
 )
 async def health_check(ctx: Context = None) -> dict[str, Any]:
-    # BE-3010b: call the OrchestrationService static directly. health_check is
-    # tenant-independent and never went through _call_tool; routing it past the
-    # ToolAccessor shim removes the last non-dispatch accessor caller.
     from giljo_mcp.services.orchestration_service import OrchestrationService
 
     return await OrchestrationService.health_check()
@@ -67,7 +56,6 @@ async def health_check(ctx: Context = None) -> dict[str, Any]:
     annotations=_tool_hints("get_giljo_guide"),
 )
 async def get_giljo_guide(ctx: Context = None) -> dict[str, Any]:
-    # Static, tenant-independent content -- no _call_tool / accessor dispatch needed.
     from giljo_mcp.tools.giljo_guide import build_giljo_guide
 
     return build_giljo_guide()
@@ -76,29 +64,31 @@ async def get_giljo_guide(ctx: Context = None) -> dict[str, Any]:
 @mcp.tool(
     title="Set Up GiljoAI",
     description=(
-        "First-time setup: installs the /giljo command/skill and agent templates. Run once after "
-        "connecting; re-run with the 'Agents only' scope to refresh templates later. Pass platform "
-        "identifying your CLI tool ('claude_code'|'gemini_cli'|'codex_cli'|'antigravity_cli'|"
-        "'opencode'). NAME YOUR OWN TOOL rather than accepting the default: the wrong platform "
-        "installs that platform's file format into its directories, which your tool never reads, "
-        "and nothing errors. On a "
-        "session with no home directory (web sandbox / pure chat), pass harness to get templates "
-        "and guidance returned inline instead of file-install instructions. Pass product_id "
-        "to bind this repository to a Giljo HQ product: the returned instructions "
-        "include writing a per-repo marker block into CLAUDE.md and AGENTS.md so future calls "
-        "never hit a PRODUCT_AMBIGUOUS rejection for this repo again. Omit it on a tenant with "
-        "zero or multiple products -- the response tells you what to do next (re-run once a "
-        "product exists, or confirm with the user which of several to bind). Every tool response "
-        "carries `_meta.skills_version` (the server's current bundle). When it is ahead of what "
-        "was installed here, TELL the user their Giljo skills are outdated and OFFER to re-run "
-        "this tool -- NEVER rewrite their local skill/agent files without that ask; this call "
-        "only ever installs on an explicit, deliberate invocation."
+        "First-time setup: installs the /giljo command/skill and writes the Giljo HQ marker "
+        "block (primer + product binding) into your harness file (CLAUDE.md / AGENTS.md). Run "
+        "once after connecting; re-run whenever the skills are outdated. It no longer installs "
+        "agent templates and has no agent-install scope: every spawned agent receives "
+        "its full profile from the server in get_job_mission's agent_profile, so nothing needs "
+        "to live in your agents directory (a profile can still be downloaded as Markdown from "
+        "the Template Manager). Pass platform identifying your CLI tool "
+        "('claude_code'|'codex_cli'|'opencode'|'generic'). NAME YOUR OWN TOOL rather than "
+        "accepting the default: the wrong platform installs that platform's skill format into "
+        "its directories, which your tool never reads, and nothing errors. On a session with no "
+        "home directory (web sandbox / pure chat), pass harness to get the primer and guidance "
+        "returned inline instead of file-install instructions. Pass product_id to bind this "
+        "repository to a Giljo HQ product: the returned instructions include writing a per-repo "
+        "marker block into CLAUDE.md and AGENTS.md so future calls never hit a PRODUCT_AMBIGUOUS "
+        "rejection for this repo again. Omit it on a tenant with zero or multiple products -- the "
+        "response tells you what to do next (re-run once a product exists, or confirm with the "
+        "user which of several to bind). Every tool response carries `_meta.skills_version` (the "
+        "server's current bundle). When it is ahead of what was installed here, TELL the user "
+        "their Giljo skills are outdated and OFFER to re-run this tool -- NEVER rewrite their "
+        "local skill files without that ask; this call only ever installs on an explicit, "
+        "deliberate invocation."
     ),
     annotations=_tool_hints("giljo_setup"),
 )
 async def giljo_setup(
-    # BE-9035a: derived from the registry's EXPORT_PLATFORMS (was a hand-copied
-    # literal that would silently drift if a new export platform were added).
     platform: Literal[EXPORT_PLATFORMS] = "claude_code",
     harness: Annotated[str, Field(max_length=MCP_ID_MAX, description=_HARNESS_PARAM_DESCRIPTION)] = "",
     product_id: Annotated[
@@ -111,8 +101,31 @@ async def giljo_setup(
             ),
         ),
     ] = "",
+    scope: Annotated[
+        str,
+        Field(
+            max_length=32,
+            description=(
+                "RETIRED. giljo_setup no longer takes an install scope (agents / both / commands "
+                "only); any value is refused with a structured rejection. Omit it."
+            ),
+        ),
+    ] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
+    if scope.strip():
+        return validation_rejection(
+            field="scope",
+            constraint="retired",
+            message=(
+                "giljo_setup no longer installs or refreshes agent templates, so there is no "
+                "agent-install scope: every spawned agent receives its full profile from the "
+                "server in get_job_mission's agent_profile. To hand a profile to your own harness "
+                "agent, use the Template Manager's per-agent menu -> Download profile (.md). "
+                "Re-run giljo_setup without scope to refresh the skills and the marker block."
+            ),
+        )
+
     logger.info(
         "giljo_setup called with platform=%s harness=%s product_id=%s",
         sanitize(platform),
@@ -120,59 +133,27 @@ async def giljo_setup(
         sanitize(product_id),
     )
 
-    # HO 1028: pass authenticated user_id so the staging layer can stamp the
-    # installed skills version through UserService (single write path).
-    # BE-6042d: resolve through the _base module so the in-memory-transport
-    # monkeypatch (which targets _base) reaches these direct calls too.
     user_id = _base._resolve_user_id(ctx)
 
-    # BE-8003g: a session whose resolved harness preset has no real home directory
-    # (web_sandbox, chat) cannot execute any of build_setup_instructions' filesystem
-    # writes. desktop_app stays on the normal path -- its workspace_model IS
-    # shared_working_tree (a real home dir), same as every CLI.
     preset = get_preset(_resolve_preset_name(harness, ctx))
     if preset is not None and preset.workspace_model != WORKSPACE_SHARED_WORKING_TREE:
         from giljo_mcp.tools.setup_instructions import build_inline_primer_note
 
-        # BE-9327: request the PLATFORM-NEUTRAL renderer, ignoring the caller's
-        # file-install platform. ``platform`` defaults to claude_code and was forwarded
-        # unchanged, so a chat client correctly asking for inline templates received
-        # Claude Code markdown -- YAML frontmatter, a ``color`` field, and a per-agent
-        # ``filename`` for a file it has nowhere to write. The override is
-        # unconditional inside this branch because the branch condition IS "this
-        # session has no filesystem", which no declared platform can change.
-        # BE-9557: forward the caller's product_id -- this used to be dropped
-        # here entirely, so a chat/web-sandbox session's export followed an
-        # arbitrary shown product regardless of what was passed.
-        result = await _call_tool(ctx, "list_agent_templates", {"platform": EXPORT_GENERIC, "product_id": product_id})
-        result.pop("install_paths", None)
-        # AUDIT-9327 F1: strip the per-agent ``filename`` only for a session with NO
-        # filesystem at all. This branch is entered by web_sandbox too, but that preset
-        # carries WORKSPACE_ISOLATED_PR -- an isolated PR checkout it CAN write to -- so
-        # it keeps the suggested name. Only WORKSPACE_NONE (pure chat) has nowhere to put
-        # a file and would be handed a name it cannot use. The renderer override above
-        # stays unconditional: neither preset wants claude_code frontmatter.
-        if preset.workspace_model == WORKSPACE_NONE:
-            for agent in result.get("agents", []):
-                if isinstance(agent, dict):
-                    agent.pop("filename", None)
-        result["mode"] = "inline"
-        result["message"] = (
-            f"This session ({preset.display_label}) has no home directory to install into, so "
-            "GiljoAI setup runs fully inline: there is no slash-command/skill install step here. "
-            "The agent templates below are returned directly in this response instead of files "
-            "written to a local path. For ongoing project/task routing guidance (the equivalent of "
-            "the /giljo command), call get_giljo_guide on demand. There is no repo to write a "
-            "product binding block into either: this session's product identity comes "
-            "from passing product_id on every giljo_hq call, and from the active session, not from "
-            "a file."
-        )
-        # BE-9067: teach the connecting agent the platform mental model durably --
-        # this session has no file to write, so route to memory or keep in-context.
-        result["primer"] = build_inline_primer_note()
+        result: dict[str, Any] = {
+            "mode": "inline",
+            "message": (
+                f"This session ({preset.display_label}) has no home directory to install into, so "
+                "GiljoAI setup runs fully inline: there is no slash-command/skill install step here. "
+                "Agent templates are not installed anywhere any more -- every spawned agent receives "
+                "its full profile from the server in get_job_mission's agent_profile. For ongoing "
+                "project/task routing guidance (the equivalent of the /giljo command), call "
+                "get_giljo_guide on demand. There is no repo to write a product binding block into "
+                "either: this session's product identity comes from passing product_id on every "
+                "giljo_hq call, and from the active session, not from a file."
+            ),
+            "primer": build_inline_primer_note(),
+        }
     else:
-        # BE-9385b: forward the resolved harness so the install prose can target the
-        # repository where the harness supports it, instead of always writing to ~/.
         result = await _call_tool(
             ctx,
             "bootstrap_setup",
@@ -184,11 +165,6 @@ async def giljo_setup(
             },
         )
 
-    # IMP-6038: record THIS tenant's acknowledgement of the bundled
-    # SKILLS_VERSION through the tenant-scoped service (single validated write
-    # path; tenant_key filter enforced by the guard). This is the banner's
-    # clear-path: one tenant re-running /giljo_setup resolves only its own
-    # skills-drift banner on the next emit cycle.
     try:
         from api.app_state import state as app_state
         from giljo_mcp.services.settings_service import TenantSkillsAckService
@@ -201,7 +177,6 @@ async def giljo_setup(
     except (OSError, RuntimeError, ValueError, TypeError, AttributeError, ImportError, KeyError) as e:
         logger.warning("giljo_setup skills ack write failed: %s: %s", type(e).__name__, e)
 
-    # Emit setup:bootstrap_complete WebSocket event
     try:
         from api.app_state import state as app_state
 
@@ -222,18 +197,6 @@ async def giljo_setup(
     return result
 
 
-# INF-6111b: the generate_download_token @mcp.tool wrapper was RETIRED (the one
-# proven dead cut: no live MCP callers; install/agent flows route through
-# giljo_setup). The REST route POST /api/download/generate-token
-# (api/endpoints/downloads.py) is KEPT.
-#
-# BE-6225a: the list_agent_templates @mcp.tool wrapper was RETIRED (no live agent
-# caller — giljo_setup "Agents only" scope installs templates and
-# get_context(categories=['agent_templates']) reads their content). The
-# ToolAccessor.list_agent_templates accessor leg + the REST download path are KEPT
-# for the non-tool callers (e.g. claude_export.py). BE-8003g: giljo_setup's
-# no-filesystem inline branch above is now one of those non-tool callers too, via
-# _call_tool's dispatch (not a new @mcp.tool registration).
 
 
 class _TuningProposal(BaseModel):

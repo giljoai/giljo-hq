@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Unit tests for the OAuth revocation service cache layer (API-0022).
-
-The DB-touching and end-to-end revocation behavior is covered by the
-boundary suite in ``tests/api/test_oauth_endpoints.py``
-(``TestOAuthRevokeEndpoint``) per the BE-5042 layer rule. This file
-covers the pure-Python TTL cache helpers in isolation so cache-only
-regressions can be caught fast without spinning up Postgres.
-"""
 
 from __future__ import annotations
 
@@ -70,7 +62,6 @@ class TestRevocationCacheEviction:
         monkeypatch.setattr(rev, "_REVOCATION_CACHE_MAX_ENTRIES", 4)
         for i in range(10):
             rev._cache_put("tenant", f"jti-{i}", is_revoked=True)
-        # The 4-entry cap is best-effort FIFO eviction; size must not run away.
         assert len(rev._revocation_cache) <= 4
 
 
@@ -83,7 +74,6 @@ class TestClearRevocationCacheHelper:
 
 
 def test_module_exports_expected_symbols():
-    """Reachability smoke: the boundary suite imports these by name."""
     assert callable(rev.revoke_token)
     assert callable(rev.is_access_token_jti_revoked)
     assert callable(rev.clear_revocation_cache)
@@ -91,5 +81,4 @@ def test_module_exports_expected_symbols():
     assert rev.TOKEN_TYPE_REFRESH == "refresh_token"
 
 
-# Reach time so the import is not pruned by lint when monkeypatch is unused above.
 _ = time

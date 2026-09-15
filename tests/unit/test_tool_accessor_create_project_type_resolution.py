@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Unit tests for ToolAccessor.create_project() — type label resolution (Handover 0837b).
-
-Test Coverage:
-- Resolves project type by human-readable label (e.g. 'Frontend')
-- Case-insensitive label matching
-- Unknown project_type values raise ValidationError with valid_types in context
-- Omitting project_type returns valid_types hint in success response
-- Error shape matches update_project_metadata reference implementation
-- Resolved project_type_id is passed to ProjectService
-"""
 
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -24,7 +13,6 @@ from giljo_mcp.tools.tool_accessor import ToolAccessor
 
 
 def _make_tool_accessor():
-    """Create a ToolAccessor with mocked dependencies."""
     db_manager = Mock()
     tenant_manager = Mock()
     tenant_manager.get_current_tenant = Mock(return_value="tenant-abc")
@@ -37,7 +25,6 @@ def _make_tool_accessor():
 
 
 def _mock_project(**overrides):
-    """Create a mock Project object with sensible defaults."""
     defaults = {
         "id": "proj-001",
         "alias": "PRJ-001",
@@ -56,11 +43,9 @@ def _mock_project(**overrides):
 
 
 class TestCreateProjectTypeResolution:
-    """Test suite for optional type label resolution in create_project."""
 
     @pytest.mark.asyncio
     async def test_resolves_type_by_label(self):
-        """Type label 'Frontend' resolves to the correct project_type_id."""
         tool_accessor = _make_tool_accessor()
 
         mock_type = Mock()
@@ -100,7 +85,6 @@ class TestCreateProjectTypeResolution:
 
     @pytest.mark.asyncio
     async def test_type_resolution_is_case_insensitive(self):
-        """Lowercase 'frontend' resolves the same as 'Frontend'."""
         tool_accessor = _make_tool_accessor()
 
         mock_type = Mock()
@@ -134,13 +118,11 @@ class TestCreateProjectTypeResolution:
                 tenant_key="tenant-abc",
             )
 
-            # The label is passed as-is; case-insensitivity is in the service method
             call_kwargs = mock_create.call_args[1]
             assert call_kwargs["project_type_id"] == "pt-frontend-uuid"
 
     @pytest.mark.asyncio
     async def test_unknown_type_raises_validation_error_with_valid_types(self):
-        """Unknown project_type raises ValidationError; context exposes valid_types."""
         tool_accessor = _make_tool_accessor()
 
         valid_types_payload = [
@@ -189,19 +171,10 @@ class TestCreateProjectTypeResolution:
 
     @pytest.mark.asyncio
     async def test_unknown_type_error_shape_matches_update_project_metadata(self):
-        """create_project_for_mcp ValidationError shape mirrors update_project_metadata.
-
-        Both paths must raise ValidationError whose context dict contains the same
-        valid_types schema ({abbreviation, label, color}). This is the contract
-        agents rely on.
-        """
         from giljo_mcp.services.project_service import ProjectService
 
         valid_types_payload = [{"abbreviation": "FE", "label": "Frontend", "color": "#aaa"}]
 
-        # Capture error from update_project_metadata_for_mcp's known-good path
-        # by inspecting the source-shared keys. We assert structural parity here.
-        # The two raise sites build context with: operation + valid_types.
         tool_accessor = _make_tool_accessor()
         with (
             patch("giljo_mcp.services.product_service.ProductService") as mock_ps_cls,
@@ -235,16 +208,13 @@ class TestCreateProjectTypeResolution:
                 )
 
             ctx_keys = set(exc_info.value.context.keys())
-            # Must include the same two keys update_project_metadata's raise site uses
             assert {"operation", "valid_types"}.issubset(ctx_keys)
             assert isinstance(exc_info.value.context["valid_types"], list)
             assert {"abbreviation", "label"} <= set(exc_info.value.context["valid_types"][0].keys())
-            # ProjectService.update_project_metadata_for_mcp uses identical keys at line ~1311
             assert hasattr(ProjectService, "update_project_metadata_for_mcp")
 
     @pytest.mark.asyncio
     async def test_omitted_type_returns_valid_types_hint(self):
-        """Omitting project_type creates the project AND returns valid_types hint."""
         tool_accessor = _make_tool_accessor()
 
         valid_types_payload = [

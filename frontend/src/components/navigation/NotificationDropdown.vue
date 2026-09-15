@@ -7,7 +7,6 @@
     max-width="400"
   >
     <template #activator="{ props: menuProps }">
-      <!-- Compact: orb style for navbar -->
       <v-badge
         v-if="compact"
         :content="unreadCount"
@@ -27,7 +26,6 @@
           <v-icon size="18">mdi-bell</v-icon>
         </div>
       </v-badge>
-      <!-- Default: button style for other contexts -->
       <v-badge
         v-else
         :content="unreadCount"
@@ -48,7 +46,6 @@
     </template>
 
     <v-card class="notification-dropdown" elevation="8">
-      <!-- Header -->
       <v-card-title class="d-flex align-center justify-space-between py-3 px-4 notification-header">
         <span class="text-body-large font-weight-bold">Notifications</span>
         <v-btn
@@ -65,7 +62,6 @@
 
       <v-divider />
 
-      <!-- Notification List -->
       <v-list
         v-if="notifications.length > 0"
         class="notification-list scrollbar-thin pa-0"
@@ -81,7 +77,6 @@
             :aria-label="getNotificationAriaLabel(notification)"
             @click="handleNotificationClick(notification)"
           >
-            <!-- Icon -->
             <template #prepend>
               <v-icon
                 :icon="getNotificationIcon(notification.type)"
@@ -90,7 +85,6 @@
               />
             </template>
 
-            <!-- Content -->
             <v-list-item-title class="notification-title mb-1">
               {{ notification.title }}
             </v-list-item-title>
@@ -109,9 +103,6 @@
               {{ isExpanded(notification.id) ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
             </v-icon>
 
-            <!-- Handover 0259: Project context link. BE-9436b: reads the name via
-                 getProjectName so server rows (payload) light it, not just legacy
-                 in-memory rows (metadata). -->
             <div
               v-if="getProjectName(notification)"
               class="mt-1"
@@ -129,8 +120,6 @@
               </v-chip>
             </div>
 
-            <!-- NB-2: Per-item dismiss button (IMP-5037a). Stops propagation so
-                 the row click (navigate/markRead) handler is NOT triggered. -->
             <button
               :data-test="`dismiss-btn-${notification.id}`"
               class="notification-dismiss-btn"
@@ -142,7 +131,6 @@
               <v-icon size="16" class="notification-dismiss-icon">mdi-close</v-icon>
             </button>
 
-            <!-- Timestamp and Unread Indicator -->
             <template #append>
               <div class="d-flex flex-column align-end">
                 <span class="text-body-small text-muted-a11y">
@@ -163,7 +151,6 @@
         </template>
       </v-list>
 
-      <!-- Empty State -->
       <div v-else class="notification-empty pa-8 text-center">
         <v-icon icon="mdi-bell-outline" size="48" color="grey-lighten-1" class="mb-3" />
         <div class="text-body-medium text-muted-a11y">No notifications</div>
@@ -199,20 +186,10 @@ let unsubscribeNotification = null
 let unsubscribeNotificationUpdated = null
 let unsubscribeNotificationResolved = null
 
-// Computed properties
 const notifications = computed(() => notificationStore.sortedNotifications || [])
 const unreadCount = computed(() => notificationStore.unreadCount || 0)
-// FE-9553 ruling 2: the bell keeps a QUIET unseen-counter only, and never a
-// red/urgent treatment -- urgency lives in banners exclusively. So the badge
-// carries one fixed, calm colour rather than a severity-derived one, and the
-// severity->pulse-class mapping that used to live here is gone along with the
-// animations it drove.
-//
-// `info` is the theme's lightest blue: legible as a count, quiet as a signal.
-// A theme token rather than a literal, per the styling rules.
 const QUIET_BADGE_COLOR = 'info'
 
-// Get icon based on notification type
 const getNotificationIcon = (type) => {
   const iconMap = {
     agent_health: 'mdi-clock-alert',
@@ -221,10 +198,9 @@ const getNotificationIcon = (type) => {
     system_alert: 'mdi-alert-circle',
     connection_lost: 'mdi-wifi-off',
     connection_restored: 'mdi-wifi-check',
-    handover: 'mdi-hand-back-right-outline', // FE-9289c: Message Hub "it's your call"
+    handover: 'mdi-hand-back-right-outline',
     context_tuning: 'mdi-tune',
     vision_analysis: 'mdi-file-document-check',
-    // IMP-5037a Day-1 type
     'api_key.expiring_soon': 'mdi-key-alert',
     success: 'mdi-check-circle',
     error: 'mdi-alert-circle',
@@ -234,7 +210,6 @@ const getNotificationIcon = (type) => {
   return iconMap[type] || 'mdi-bell'
 }
 
-// Get color based on notification type
 const getNotificationColor = (type) => {
   const colorMap = {
     agent_health: 'warning',
@@ -243,10 +218,9 @@ const getNotificationColor = (type) => {
     system_alert: 'error',
     connection_lost: 'error',
     connection_restored: 'success',
-    handover: 'warning', // FE-9289c: the yellow "waiting on you" tone
+    handover: 'warning',
     context_tuning: 'info',
     vision_analysis: 'success',
-    // IMP-5037a Day-1 type
     'api_key.expiring_soon': 'warning',
     success: 'success',
     error: 'error',
@@ -256,7 +230,6 @@ const getNotificationColor = (type) => {
   return colorMap[type] || 'default'
 }
 
-// Format timestamp to relative time (prefer created_at from server, fall back to timestamp)
 const formatTimestamp = (notification) => {
   const ts = notification.created_at || notification.timestamp
   if (!ts) return ''
@@ -268,17 +241,11 @@ const formatTimestamp = (notification) => {
   }
 }
 
-// Return the displayable message body (server sends body; legacy in-memory uses message)
 const getNotificationBody = (notification) => notification.body ?? notification.message ?? ''
 
-// BE-9436b: the project name a notification is about. Server rows carry it in
-// `payload` — `NotificationResponse` has no `metadata` field at all — while the
-// legacy in-memory shape uses `metadata`. Reading `metadata` alone meant the chip
-// and the ARIA branch below never fired for a single server-sourced row.
 const getProjectName = (notification) =>
   notification.payload?.project_name ?? notification.metadata?.project_name ?? ''
 
-// Build descriptive ARIA label for notification items (Handover 0259)
 const getNotificationAriaLabel = (notification) => {
   const projectName = getProjectName(notification)
   const body = getNotificationBody(notification)
@@ -289,7 +256,6 @@ const getNotificationAriaLabel = (notification) => {
   return base
 }
 
-// Toggle message expand/collapse using local reactive Set (not object mutation)
 const isExpanded = (id) => expandedIds.value.has(id)
 const toggleExpand = (id) => {
   const next = new Set(expandedIds.value)
@@ -301,9 +267,6 @@ const toggleExpand = (id) => {
   expandedIds.value = next
 }
 
-// Navigate to the project associated with a notification (Handover 0259).
-// FE-9191: route resolution lives in notificationRouting.js — closeout-family
-// notifications land on the jobs tab, everything else keeps its target.
 const navigateToProject = async (notification) => {
   const route = projectRouteFor(notification)
   if (!route) return
@@ -320,13 +283,6 @@ const navigateToProject = async (notification) => {
   router.push(route)
 }
 
-/**
- * Handle notification click:
- *  1. Mark as read via REST (DB-backed; IMP-5037a)
- *  2. Resolve navigation target via notificationRouting.js (client-side; no
- *     server cta_route): stay-on-page carve-outs, then the type → route map,
- *     then the project-context fallback (closeout family → jobs tab, FE-9191)
- */
 const handleNotificationClick = async (notification) => {
   if (!notification.read) {
     try {
@@ -343,12 +299,6 @@ const handleNotificationClick = async (notification) => {
   }
 }
 
-/**
- * NB-2 (IMP-5037a): Dismiss a single notification.
- * Calls store.markDismissed (REST PATCH + local removal).
- * Propagation is stopped at the template level (@click.stop) so the row's
- * handleNotificationClick (navigate/markRead) is never triggered.
- */
 const handleDismiss = async (id) => {
   try {
     await notificationStore.markDismissed(id)
@@ -357,7 +307,6 @@ const handleDismiss = async (id) => {
   }
 }
 
-// Mark all as read — uses local markAllAsRead (no bulk REST endpoint yet; 5037b concern)
 const handleMarkAllRead = async () => {
   try {
     await notificationStore.markAllAsRead()
@@ -366,14 +315,11 @@ const handleMarkAllRead = async () => {
   }
 }
 
-// Handle notification:new WS event.
-// Filter by user_id: null (broadcast) OR matching current user.
 const handleNewNotification = (payload) => {
   const currentUserId = userStore.currentUser?.id
   const eventUserId = payload?.user_id ?? payload?.data?.user_id ?? null
   const eventData = payload?.data ?? payload
 
-  // Accept broadcasts (user_id null) or targeted at current user
   if (eventUserId !== null && eventUserId !== undefined && eventUserId !== currentUserId) {
     return
   }
@@ -381,9 +327,6 @@ const handleNewNotification = (payload) => {
   notificationStore.handleWsNewNotification(eventData)
 }
 
-// D16 (Headless S3d): handle notification:updated WS event -- an already-open
-// row a scanner refreshed in place (content changed, still unresolved).
-// Same broadcast/targeted filtering as notification:new.
 const handleUpdatedNotification = (payload) => {
   const currentUserId = userStore.currentUser?.id
   const eventUserId = payload?.user_id ?? payload?.data?.user_id ?? null
@@ -396,34 +339,24 @@ const handleUpdatedNotification = (payload) => {
   notificationStore.handleWsUpdatedNotification(eventData)
 }
 
-// D16 (Headless S3d): handle notification:resolved WS event -- the fix for a
-// resolved banner (e.g. an answered agent question) sitting onscreen until
-// refresh. Carries only ids, so no per-user filter is needed: a row this
-// user never had is a no-op drop.
 const handleResolvedNotification = (payload) => {
   const eventData = payload?.data ?? payload
   notificationStore.handleWsResolvedNotification(eventData)
 }
 
-// Lifecycle hooks
-// Note: agent:health_alert events are handled by websocketEventRouter.js (Handover 0424)
 onMounted(async () => {
-  // Load DB-backed notifications on mount (IMP-5037a)
   try {
     await notificationStore.fetch()
   } catch (error) {
     console.warn('[NotificationDropdown] Failed to fetch notifications on mount:', error)
   }
 
-  // Subscribe to real-time notification:new WS events
   try {
     unsubscribeNotification = wsStore.on('notification:new', handleNewNotification)
   } catch (error) {
     console.warn('[NotificationDropdown] Failed to subscribe to notification:new event:', error)
   }
 
-  // D16 (Headless S3d): subscribe to the two events that keep an already-known
-  // row live -- content refresh (:updated) and off-screen removal (:resolved).
   try {
     unsubscribeNotificationUpdated = wsStore.on('notification:updated', handleUpdatedNotification)
   } catch (error) {
@@ -437,7 +370,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  // Cleanup WebSocket subscriptions
   try {
     if (typeof unsubscribeNotification === 'function') {
       unsubscribeNotification()

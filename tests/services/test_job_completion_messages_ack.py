@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-`acknowledge_messages_on_complete` is RETIRED (BE-9012b, D7, §6 row 3).
-
-Originally an escape hatch that DRAINED unread messages before the completion
-gate, for agents stuck in the reactivation-on-stale-message loop. D7 dissolves
-that loop at the source: the gate now blocks ONLY on genuine ``requires_action``,
-non-``auto_generated`` posts, so an informational message never blocks and there
-is nothing to drain past. The flag is now accepted-and-ignored (kept on the
-signature so in-flight callers do not 422); passing it neither drains messages nor
-lets an agent skip a genuine action-required post.
-
-These tests now assert that retirement:
-- With the flag, a genuine action-required post STILL blocks (not drained).
-- An informational post does not block (and is not drained — it stays pending).
-- The TODOs gate is unaffected; cross-tenant messages are never touched.
-"""
 
 from __future__ import annotations
 
@@ -40,9 +24,6 @@ from giljo_mcp.models.tasks import Message, MessageAcknowledgment, MessageRecipi
 from giljo_mcp.services.job_completion_service import JobCompletionService
 
 
-# ============================================================================
-# Fixtures
-# ============================================================================
 
 
 @pytest.fixture
@@ -101,7 +82,6 @@ async def _seed_orchestrator(
     project_id: str,
     todos: list[dict] | None = None,
 ) -> tuple[AgentJob, AgentExecution]:
-    """Seed an orchestrator job + working execution + optional todos."""
     job_id = str(uuid4())
     job = AgentJob(
         job_id=job_id,
@@ -153,7 +133,6 @@ async def _seed_unread_message(
     requires_action: bool = False,
     content: str = "Hello, please read me",
 ) -> Message:
-    """Insert a pending Message with one MessageRecipient row."""
     msg = Message(
         tenant_key=tenant_key,
         project_id=project_id,
@@ -177,9 +156,6 @@ async def _seed_unread_message(
     return msg
 
 
-# ============================================================================
-# Tests
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -189,9 +165,6 @@ async def test_acknowledge_messages_flag_is_retired_no_drain(
     test_tenant_key: str,
     active_project: Project,
 ):
-    """BE-9012b (D7): the retired flag no longer drains. A genuine action-required
-    post STILL blocks even with the flag; the informational post neither blocks nor
-    is drained. Neither message is marked acknowledged and no junction rows appear."""
     job, execution = await _seed_orchestrator(
         db_session,
         test_tenant_key,
@@ -214,7 +187,6 @@ async def test_acknowledge_messages_flag_is_retired_no_drain(
         content="please review",
     )
 
-    # The action-required post still blocks; the retired flag does not drain it.
     with pytest.raises(ValidationError) as exc_info:
         await completion_service.complete_job(
             job_id=job.job_id,
@@ -223,10 +195,8 @@ async def test_acknowledge_messages_flag_is_retired_no_drain(
             acknowledge_messages_on_complete=True,
         )
     assert exc_info.value.error_code == "COMPLETION_BLOCKED"
-    # Only the action-required post gates (informational is not "unread work").
     assert (exc_info.value.context or {}).get("unread_messages") == 1
 
-    # Nothing was drained: both messages stay pending, no acknowledgment junction rows.
     refreshed = (
         (
             await db_session.execute(
@@ -265,7 +235,6 @@ async def test_complete_job_without_flag_still_blocks_unread(
     test_tenant_key: str,
     active_project: Project,
 ):
-    """Regression guard: omitting the flag preserves existing behavior — unread blocks completion."""
     job, execution = await _seed_orchestrator(
         db_session,
         test_tenant_key,
@@ -299,7 +268,6 @@ async def test_acknowledge_messages_does_not_bypass_todos_gate(
     test_tenant_key: str,
     active_project: Project,
 ):
-    """ack_messages=True with incomplete non-closeout TODO -> still blocks via TODO gate."""
     job, execution = await _seed_orchestrator(
         db_session,
         test_tenant_key,
@@ -327,8 +295,6 @@ async def test_acknowledge_messages_does_not_bypass_todos_gate(
     assert err.error_code == "COMPLETION_BLOCKED"
     ctx = err.context or {}
     assert ctx.get("incomplete_todos") == 1
-    # The informational message never gated (D7 keys on requires_action), so it is
-    # not counted in the block — the TODO is the sole blocker.
     assert ctx.get("unread_messages") == 0
 
 
@@ -339,7 +305,6 @@ async def test_acknowledge_messages_does_not_bypass_closeout_todos_gate_combined
     test_tenant_key: str,
     active_project: Project,
 ):
-    """Both flags can be passed; behavior is conjunctive (each gate uses its own flag)."""
     job, execution = await _seed_orchestrator(
         db_session,
         test_tenant_key,
@@ -356,7 +321,6 @@ async def test_acknowledge_messages_does_not_bypass_closeout_todos_gate_combined
         requires_action=False,
     )
 
-    # Both flags True: closeout TODO + unread message both drain -> success.
     result = await completion_service.complete_job(
         job_id=job.job_id,
         result={"summary": "both drained"},
@@ -375,15 +339,11 @@ async def test_retired_flag_leaves_messages_untouched_across_tenants(
     other_tenant_key: str,
     active_project: Project,
 ):
-    """BE-9012b (D7): the retired flag drains nothing. An informational own-tenant
-    message does not block completion (D7) and is left PENDING (not drained); a
-    cross-tenant message is likewise never touched (tenant isolation preserved)."""
     job, execution = await _seed_orchestrator(
         db_session,
         test_tenant_key,
         active_project.id,
     )
-    # Own-tenant message (will be drained).
     own_msg = await _seed_unread_message(
         db_session,
         test_tenant_key,
@@ -392,9 +352,6 @@ async def test_retired_flag_leaves_messages_untouched_across_tenants(
         requires_action=False,
     )
 
-    # Other tenant: full row chain (Product -> Project -> Message) so the FK to
-    # projects holds. The message's recipient agent_id collides with our own
-    # agent_id intentionally — this is the guard for tenant_key filtering.
     other_product = Product(
         id=str(uuid4()),
         tenant_key=other_tenant_key,

@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tenant-isolation + happy-path tests for TaxonomyService.
-
-Phase A of agent-parity + unified Type taxonomy. Real DB; no mocks. Each
-test seeds rows in two tenants and verifies one tenant cannot see, validate,
-or collide with the other tenant's taxonomy types.
-"""
 
 from __future__ import annotations
 

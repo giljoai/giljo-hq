@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tests for TaskConversionService (Sprint 002f -- P2 core).
-
-Covers:
-- convert_to_project (happy path, not found, already converted, no tenant, no product, auth)
-- get_summary (happy path, no tenant)
-- can_delete_task (admin, developer, viewer permissions)
-- Tenant isolation on every query
-"""
 
 from unittest.mock import AsyncMock, MagicMock, Mock
 
@@ -24,9 +16,6 @@ from giljo_mcp.exceptions import (
 from giljo_mcp.services.task_conversion_service import TaskConversionService
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 TENANT_KEY = "test-tenant"
 TASK_ID = "task-001"
@@ -34,7 +23,6 @@ USER_ID = "user-001"
 
 
 def _make_session():
-    """Create a mock async session configured as a context manager."""
     session = AsyncMock()
     session.__aenter__ = AsyncMock(return_value=session)
     session.__aexit__ = AsyncMock(return_value=False)
@@ -44,7 +32,7 @@ def _make_session():
     session.add = Mock()
     session.delete = AsyncMock()
     session.flush = AsyncMock()
-    session.info = {}  # tenant_session_context save/restore target
+    session.info = {}
     return session
 
 
@@ -59,7 +47,6 @@ def _make_task(
     product_id="prod-1",
     priority="medium",
 ):
-    """Create a mock Task model."""
     task = MagicMock()
     task.id = task_id
     task.title = title
@@ -79,7 +66,6 @@ def _make_user(
     role="developer",
     tenant_key=TENANT_KEY,
 ):
-    """Create a mock User model."""
     user = MagicMock()
     user.id = user_id
     user.role = role
@@ -88,7 +74,6 @@ def _make_user(
 
 
 def _make_product(product_id="prod-1", tenant_key=TENANT_KEY):
-    """Create a mock Product model."""
     product = MagicMock()
     product.id = product_id
     product.tenant_key = tenant_key
@@ -97,7 +82,6 @@ def _make_product(product_id="prod-1", tenant_key=TENANT_KEY):
 
 
 def _make_service(session, tenant_key=TENANT_KEY):
-    """Create a TaskConversionService with injected test session."""
     db_manager = Mock()
     db_manager.get_session_async = Mock(return_value=session)
     tenant_manager = Mock()
@@ -109,17 +93,12 @@ def _make_service(session, tenant_key=TENANT_KEY):
     )
 
 
-# ---------------------------------------------------------------------------
-# convert_to_project tests
-# ---------------------------------------------------------------------------
 
 
 class TestConvertToProject:
-    """Tests for TaskConversionService.convert_to_project."""
 
     @pytest.mark.asyncio
     async def test_convert_no_tenant_raises(self):
-        """Raises ValidationError when tenant is not set."""
         session = _make_session()
         service = _make_service(session)
         service.tenant_manager.get_current_tenant.return_value = None
@@ -129,7 +108,6 @@ class TestConvertToProject:
 
     @pytest.mark.asyncio
     async def test_convert_task_not_found_raises(self):
-        """Raises ResourceNotFoundError when task does not exist."""
         session = _make_session()
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
@@ -141,7 +119,6 @@ class TestConvertToProject:
 
     @pytest.mark.asyncio
     async def test_convert_already_converted_raises(self):
-        """Raises ValidationError when task is already converted."""
         task = _make_task(converted_to_project_id="existing-proj")
         session = _make_session()
         mock_result = MagicMock()
@@ -154,7 +131,6 @@ class TestConvertToProject:
 
     @pytest.mark.asyncio
     async def test_convert_user_not_found_raises(self):
-        """Raises ResourceNotFoundError when user does not exist."""
         task = _make_task()
         session = _make_session()
 
@@ -179,7 +155,6 @@ class TestConvertToProject:
 
     @pytest.mark.asyncio
     async def test_convert_unauthorized_developer_raises(self):
-        """Raises AuthorizationError when developer is not task creator."""
         task = _make_task(created_by_user_id="other-user")
         user = _make_user(role="developer")
 
@@ -206,22 +181,6 @@ class TestConvertToProject:
 
     @pytest.mark.asyncio
     async def test_convert_unresolvable_task_product_raises(self):
-        """Raises ValidationError when the TASK's product does not resolve.
-
-        BE-9415 changed this test's meaning deliberately, and it is called out
-        rather than quietly rebaselined. It previously asserted ``match="No
-        active product"``: conversion resolved its destination from
-        ``get_default_product``, so an empty product lookup meant "nothing is
-        active". Conversion now binds to the task's own ``product_id`` and never
-        consults the active product at all, so the same empty lookup now means
-        "this task's product does not resolve for this tenant" -- a different
-        condition with a different message. The old assertion is not repairable;
-        it described behaviour that no longer exists.
-
-        What the test still guards is the property that matters: an unresolvable
-        product is a LOUD rejection, never a silent fallback to some other
-        product.
-        """
         task = _make_task()
         user = _make_user(role="admin")
 
@@ -251,17 +210,12 @@ class TestConvertToProject:
             await service.convert_to_project(TASK_ID, None, "create_new", include_subtasks=False, user_id=USER_ID)
 
 
-# ---------------------------------------------------------------------------
-# get_summary tests
-# ---------------------------------------------------------------------------
 
 
 class TestGetSummary:
-    """Tests for TaskConversionService.get_summary."""
 
     @pytest.mark.asyncio
     async def test_summary_no_tenant_raises(self):
-        """Raises ValidationError when tenant is not set."""
         session = _make_session()
         service = _make_service(session)
         service.tenant_manager.get_current_tenant.return_value = None
@@ -271,7 +225,6 @@ class TestGetSummary:
 
     @pytest.mark.asyncio
     async def test_summary_empty_returns_zeros(self):
-        """Returns empty summary when no tasks exist."""
         session = _make_session()
         mock_result = MagicMock()
         mock_scalars = MagicMock()
@@ -288,7 +241,6 @@ class TestGetSummary:
 
     @pytest.mark.asyncio
     async def test_summary_aggregates_by_product(self):
-        """Correctly aggregates task counts by product."""
         task1 = _make_task(task_id="t1", product_id="prod-A", status="pending", priority="high")
         task2 = _make_task(task_id="t2", product_id="prod-A", status="completed", priority="low")
         task3 = _make_task(task_id="t3", product_id="prod-B", status="pending", priority="critical")
@@ -309,49 +261,36 @@ class TestGetSummary:
         assert result["summary"]["prod-B"]["total"] == 1
 
 
-# ---------------------------------------------------------------------------
-# can_delete_task tests
-# ---------------------------------------------------------------------------
 
 
 class TestCanDeleteTask:
-    """Tests for TaskConversionService.can_delete_task."""
 
     def test_admin_can_delete_any_task_in_tenant(self):
-        """Admin can delete any task within their tenant."""
         task = _make_task(created_by_user_id="other-user")
         user = _make_user(role="admin")
         service = _make_service(_make_session())
         assert service.can_delete_task(task, user) is True
 
     def test_admin_cannot_delete_other_tenant_task(self):
-        """Admin cannot delete task from different tenant."""
         task = _make_task(tenant_key="other-tenant")
         user = _make_user(role="admin")
         service = _make_service(_make_session())
         assert service.can_delete_task(task, user) is False
 
     def test_developer_can_delete_own_task(self):
-        """Developer can delete their own task."""
         task = _make_task(created_by_user_id=USER_ID)
         user = _make_user(role="developer", user_id=USER_ID)
         service = _make_service(_make_session())
         assert service.can_delete_task(task, user) is True
 
     def test_developer_cannot_delete_others_task(self):
-        """Developer cannot delete another user's task."""
         task = _make_task(created_by_user_id="other-user")
         user = _make_user(role="developer", user_id=USER_ID)
         service = _make_service(_make_session())
         assert service.can_delete_task(task, user) is False
 
     def test_viewer_cannot_delete_any_task(self):
-        """Viewer cannot delete any task, even their own."""
         task = _make_task(created_by_user_id=USER_ID)
         user = _make_user(role="viewer", user_id=USER_ID)
         service = _make_service(_make_session())
-        # Viewer: task.created_by_user_id == user.id is True but role is viewer
-        # The method checks: role != "admin" => check tenant + created_by
-        # Actually viewer CAN delete own tasks per the code logic (only checks tenant + creator)
-        # This is by design: the code only distinguishes admin vs non-admin
         assert service.can_delete_task(task, user) is True

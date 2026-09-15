@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""HTTP surface for the user_approvals primitive (BE-5029 Phase B).
-
-Edition Scope: CE. Both editions consume the same router; SaaS does not extend.
-Single endpoint -- ``POST /api/approvals/{approval_id}/decide`` -- which routes
-through ``UserApprovalService.mark_decided`` for the atomic
-status-flip + agent-resume + WebSocket broadcast.
-"""
 
 from __future__ import annotations
 
@@ -168,7 +161,6 @@ async def decide_approval(
             },
         ) from exc
     except ValidationError as exc:
-        # Already-decided is the conflict case; option-not-in-options is 422.
         if "is not pending" in exc.message:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

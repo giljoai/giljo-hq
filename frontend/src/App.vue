@@ -12,17 +12,6 @@ import DefaultLayout from '@/layouts/DefaultLayout.vue'
 
 const route = useRoute()
 
-// Determine layout based on route meta.
-//
-// During the first paint, Vue Router's currentRoute points at START_LOCATION
-// (name: undefined, meta: {}). Without the `!route.name` guard, the fallback
-// branch picks DefaultLayout, which mounts and fires userStore.fetchCurrentUser()
-// in onMounted. On saas deployments that 401s before the router guard has
-// redirected to /landing, and DefaultLayout itself pushes to /login on the
-// auth failure -- bouncing unauthenticated visitors off the public landing page.
-// Default to AuthLayout until the route resolves: AuthLayout is a dumb wrapper
-// with no lifecycle side effects, so it's safe to mount speculatively.
-// Discovered live 2026-04-21 demo go-live.
 const layout = computed(() => {
   if (!route.name) return AuthLayout
   return route.meta.layout === 'auth' ? AuthLayout : DefaultLayout

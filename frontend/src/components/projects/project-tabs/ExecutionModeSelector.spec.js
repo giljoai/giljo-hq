@@ -1,9 +1,3 @@
-/**
- * ExecutionModeSelector.spec.js — FE-6006 unit 3a
- *
- * Smoke tests: pill renders, locked state disables, click emits.
- * Edition scope: CE
- */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -32,7 +26,6 @@ describe('ExecutionModeSelector', () => {
 
   it('renders 2 mode pills (BE-9035c collapse)', () => {
     const wrapper = mountSelector()
-    // multi_terminal, subagent — the 5 legacy per-CLI pills are gone.
     expect(wrapper.findAll('[data-testid^="radio-"]')).toHaveLength(2)
   })
 

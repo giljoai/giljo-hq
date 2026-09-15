@@ -1,6 +1,5 @@
 <template>
   <v-container>
-    <!-- Setup Banner (shown when database not configured) -->
     <AppAlert
       v-if="setupStatus.requires_setup"
       type="warning"
@@ -22,7 +21,6 @@
       </v-btn>
     </AppAlert>
 
-    <!-- LAN Setup Complete Banner -->
     <AppAlert
       v-if="showLanWelcome"
       type="success"
@@ -53,12 +51,10 @@
       </v-btn>
     </AppAlert>
 
-    <!-- Header -->
     <div class="dash-header main-window-reveal main-window-reveal--hero main-window-delay-1">
       <h1 class="text-headline-large">Dashboard</h1>
     </div>
 
-    <!-- Product Filter Pills (centered, scrollable) -->
     <div v-if="products.length > 1" class="product-filter-row main-window-reveal main-window-delay-2">
       <button
         class="product-filter-chevron"
@@ -96,7 +92,6 @@
       </button>
     </div>
 
-    <!-- Stat Pills Row (3 cards: status, taxonomy, agent roles) -->
     <div class="stat-pills">
       <div class="stat-pill smooth-border main-window-reveal main-window-delay-3">
         <div class="stat-pill-label">Status Distribution</div>
@@ -156,7 +151,6 @@
       </div>
     </div>
 
-    <!-- Mini Stats Row (6 compact counters) -->
     <div class="mini-stats main-window-reveal main-window-delay-6">
       <div class="mini-stat smooth-border" style="--stat-accent: var(--agent-documenter-primary)">
         <div class="mini-stat-label">Active</div>
@@ -180,7 +174,6 @@
       </div>
     </div>
 
-    <!-- Projects Panel (full width) -->
     <div class="panel projects-panel smooth-border main-window-reveal main-window-delay-7">
       <div class="panel-header">
         <span class="panel-title">Projects</span>
@@ -191,7 +184,6 @@
       </div>
     </div>
 
-    <!-- Bottom 2-column grid: 360 Memories + Git Commits -->
     <div class="bottom-grid">
       <div class="panel smooth-border main-window-reveal main-window-delay-8">
         <div class="panel-header">
@@ -226,7 +218,6 @@
       </div>
     </div>
 
-    <!-- Project Review Modal (opened from Recently Completed Projects) -->
     <ProjectReviewModal
       :show="showReviewModal"
       :project-id="reviewProjectId"
@@ -263,7 +254,6 @@ const notificationStore = useNotificationStore()
 
 const { showToast } = useToast()
 
-// Product filter
 const selectedProductId = ref(null)
 const products = computed(() => productStore.products)
 const filterScrollContainer = ref(null)
@@ -285,7 +275,6 @@ function scrollFilterRight() {
   filterScrollContainer.value?.scrollBy({ left: 200, behavior: 'smooth' })
 }
 
-// Reactive data
 const setupStatus = ref({
   setup_mode: false,
   setup_complete: true,
@@ -298,7 +287,6 @@ const serverIp = ref('localhost')
 const serverPort = ref(parseInt(window.location.port) || 7272)
 const serverProtocol = computed(() => window.location.protocol === 'https:' ? 'https' : 'http')
 
-// Clock
 const currentTime = ref('')
 let clockInterval = null
 
@@ -308,7 +296,6 @@ function updateClock() {
   currentTime.value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`
 }
 
-// Project Review Modal
 const showReviewModal = ref(false)
 const reviewProjectId = ref(null)
 const reviewProductId = ref(null)
@@ -319,7 +306,6 @@ function openProjectReview(item) {
   if (reviewProjectId.value) showReviewModal.value = true
 }
 
-// Dashboard data from consolidated endpoint
 const dashboardData = ref({
   project_status_dist: {},
   taxonomy_dist: [],
@@ -330,13 +316,12 @@ const dashboardData = ref({
   total_commits: 0,
 })
 
-// Server stats (always global)
 const apiCallCount = ref(0)
 const mcpCallCount = ref(0)
 const recentCommits = ref([])
 
 const statusColors = {
-  active: getAgentColor('implementer').hex, // FE-2004: implementer blue, not COLOR_SURFACE (#fff = unreadable)
+  active: getAgentColor('implementer').hex,
   inactive: COLOR_MUTED,
   completed: COLOR_COMPLETE,
   cancelled: COLOR_BRAND,
@@ -344,7 +329,6 @@ const statusColors = {
   staged: COLOR_STAGED,
 }
 
-// Helper: build segments array from data
 function buildSegments(entries, total) {
   if (total === 0) return []
   return entries
@@ -358,7 +342,6 @@ function buildSegments(entries, total) {
     }))
 }
 
-// Stat pill computeds
 const statusPill = computed(() => {
   const dist = dashboardData.value.project_status_dist || {}
   const entries = []
@@ -390,17 +373,12 @@ const agentRolePill = computed(() => {
   const entries = dist.map(item => ({
     label: item.label || 'Unknown',
     count: item.count || 0,
-    // Use the standardized code palette (implementer=blue, documenter=green, …)
-    // keyed by role label rather than the DB background_color, so the bar always
-    // matches the agent color coding used everywhere else. getAgentColor folds
-    // variants (e.g. "implementer-backend") onto their base role.
     color: getAgentColor(item.label).hex,
   }))
   const total = entries.reduce((a, e) => a + e.count, 0)
   return { total, segments: buildSegments(entries, total) }
 })
 
-// Mini stats
 const miniStats = computed(() => {
   const dist = dashboardData.value.project_status_dist || {}
   const taskDist = dashboardData.value.task_status_dist || {}
@@ -410,13 +388,10 @@ const miniStats = computed(() => {
     tasks: totalTasks,
     apiCalls: apiCallCount.value,
     mcpCalls: mcpCallCount.value,
-    // BE-6078: true cumulative commit count from the dashboard stats payload,
-    // NOT recentCommits.length (which was capped at the 10-item preview).
     commits: dashboardData.value.total_commits || 0,
   }
 })
 
-// Data fetching
 const fetchDashboardData = async () => {
   try {
     const response = await api.stats.getDashboard(selectedProductId.value)
@@ -430,7 +405,6 @@ const fetchDashboardData = async () => {
         task_status_dist: response.data.task_status_dist || {},
         total_commits: response.data.total_commits || 0,
       }
-      // Extract git commits from 360 memory entries, preserving product/project context
       const commits = []
       for (const mem of (response.data.recent_memories || [])) {
         if (mem.git_commits && Array.isArray(mem.git_commits)) {
@@ -460,21 +434,14 @@ const fetchCallCounts = async () => {
     }
   } catch (error) {
     console.error('Failed to fetch call counts:', error)
-    // FE-9553: bell, not toast -- interval- and visibility-driven, never a click.
     notifyFailure(notificationStore, { operation: 'dashboard.callCounts', error, fallbackMessage: 'Unable to load activity counts.', title: 'Activity counts unavailable' })
   }
 }
 
-// Re-fetch dashboard when product filter changes
 watch(selectedProductId, () => fetchDashboardData())
 
-// FE-9501c (D7): live-refresh on project_update/agent:created/task:updated.
 useDashboardRealtime(fetchDashboardData)
 
-// Poll cadence for live counters (Agent Roles, API Calls, MCP Calls).
-// 60s is plenty; the WebSocket broker pushes events for everything else.
-// FE-6059: raised 30s->60s and paused while the tab is hidden (Page Visibility
-// API) so a backgrounded dashboard stops hammering /api/v1/stats/*.
 const POLL_INTERVAL_MS = 60_000
 let fetchInterval = null
 
@@ -492,8 +459,6 @@ function stopPolling() {
   }
 }
 
-// Pause polling when the tab is backgrounded; resume + refetch immediately on
-// re-show so the counters are current the moment the user looks again.
 function handleVisibilityChange() {
   if (document.hidden) {
     stopPolling()
@@ -522,7 +487,6 @@ const navigateToSetup = () => {
   router.push('/setup/database')
 }
 
-// LAN Welcome Banner
 const dismissLanWelcome = () => {
   showLanWelcome.value = false
   localStorage.removeItem('giljo_lan_setup_complete')
@@ -597,14 +561,11 @@ For complete troubleshooting guide, see: docs/LAN_SETUP_GUIDE.md
 `
 }
 
-// Lifecycle
 onMounted(async () => {
   updateClock()
   clockInterval = setInterval(updateClock, 60000)
-  // Initialize scroll chevron state after DOM renders
   setTimeout(updateScrollState, 100)
 
-  // Check for LAN setup completion flag
   const lanSetupComplete = localStorage.getItem('giljo_lan_setup_complete')
   if (lanSetupComplete === 'true') {
     showLanWelcome.value = true
@@ -634,7 +595,6 @@ onMounted(async () => {
     ])
   }
 
-  // Set up periodic refresh for live counters, paused while the tab is hidden.
   startPolling()
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })

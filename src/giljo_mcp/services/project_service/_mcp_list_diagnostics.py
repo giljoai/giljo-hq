@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Payload-size diagnostic logging for the agent-facing project list (IMP-5036).
-
-Extracted from ``_mcp_adapter_query_mixin`` (BE-9471) to free room in that module
-for the lifecycle-hidden advice fix without breaking the 800-line guardrail --
-extract, never shed, never raise. This helper has no ``self`` dependency beyond a
-logger, so the move is behavior-neutral: same log line, same call, one module over.
-
-Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -26,17 +17,6 @@ def log_payload_size_breakdown(
     depth: int,
     mode: str | None,
 ) -> None:
-    """Log per-row JSON payload size and the field contributing the most.
-
-    Emits a single DEBUG log per ``list_projects_for_mcp`` call with:
-    - total payload size (bytes, JSON-encoded)
-    - count of rows
-    - top field per row by serialized byte count
-    - the row's project_id and taxonomy_alias for triage
-
-    Defensive try/except guards JSON serialization at the system boundary
-    (log emission) so instrumentation never breaks the request.
-    """
     try:
         total_bytes = len(json.dumps(projects_out, default=str))
         per_row: list[dict[str, Any]] = []

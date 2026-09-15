@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Staging-response builder helpers for MissionOrchestrationService (BE-9073).
-
-Verbatim split from ``mission_orchestration_service.py`` to keep that module under
-the shrink-only size budget. Every function here takes already-fetched objects (or
-the service's ``db_manager``/``tenant_manager``/``repo`` handles) as explicit params
-and opens no new sessions beyond what the caller passes in — the service keeps thin
-back-compat shims of unchanged name/signature that delegate here. Pure move, no
-behavior change. Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -35,34 +26,32 @@ from giljo_mcp.system_prompts.service import SCOPE_DEFAULT
 logger = logging.getLogger(__name__)
 
 
+STAGING_FILTER_NOTE = (
+    "Filtered to deliverable agents only because you are in the staging phase. "
+    "Verification agents (tester, reviewer) become available in the implementation phase, "
+    "after deliverable agents complete and produce real artifacts to verify."
+)
+
+NO_AGENTS_ASSIGNED_NOTE = (
+    "No agents assigned for this product, use your harness default. "
+    "Assign agents to this product on the Agents screen to spawn them by name."
+)
+
+
 def build_execution_mode_fields(
     execution_mode: str,
     templates: list,
     job_id: str,
     resolved_harness: str | None = None,
 ) -> dict[str, Any]:
-    """Build execution-mode-specific response fields (CLI rules or phase assignment).
-
-    BE-9035c: for a subagent-shaped mode (canonical ``subagent`` or a stored legacy
-    ``*_cli`` token), the per-harness spawn syntax + template install locations come
-    from the resolved HARNESS (``resolved_harness``, produced by ``effective_harness``
-    at the caller — DETECTED harness beats the declared-CLI hint), NOT from the mode.
-    When no concrete harness resolves (``generic`` floor / no detection) the universal
-    subagent spawn guidance is emitted — the harness is runtime-resolved and the
-    orchestrator uses whatever spawn mechanism its harness provides, or self-adopts.
-    """
     fields: dict[str, Any] = {}
 
     if execution_mode in SUBAGENT_EXECUTION_MODES:
         allowed_agent_names = [t.name for t in templates]
 
-        # Handover 0389: Build dynamic example from actual allowed agent names
         example_agents = allowed_agent_names[:2] if len(allowed_agent_names) >= 2 else allowed_agent_names
         example_str = ", ".join(f"'{n}'" for n in example_agents) if example_agents else "'implementer'"
 
-        # Harness-specific spawning syntax + template install locations (BE-6116/9035c).
-        # These per-harness behavior facets live on the HARNESSES registry row.
-        # get_harness() returns None for the generic floor -> universal guidance.
         harness = get_harness(resolved_harness)
         if harness is not None:
             task_tool_mapping = harness.spawn_syntax
@@ -99,7 +88,6 @@ def build_execution_mode_fields(
             },
         )
     else:
-        # Handover 0411a: Phase assignment instructions for multi-terminal mode
         fields["phase_assignment_instructions"] = (
             "## Execution Phase Assignment (Multi-Terminal Mode)\n\n"
             "When creating agent jobs with spawn_job, assign a `phase` number to each agent:\n"
@@ -121,26 +109,16 @@ async def build_category_metadata(
     tenant_key: str,
     repo: Any,
 ) -> dict[str, dict]:
-    """Build category_metadata dict with Modified timestamps for protocol display.
-
-    CE-OPT-001: Enables warm orchestrators to skip unchanged context categories.
-
-    Returns:
-        Dict mapping category name -> {modified: str, entries?: int}
-    """
     metadata: dict[str, dict] = {}
     if not product:
         return metadata
 
-    # Product-level categories use product.updated_at
     product_updated = getattr(product, "updated_at", None)
     if product_updated:
-        # Truncate to minute precision, ISO format
         ts = product_updated.strftime("%Y-%m-%dT%H:%M")
         for cat in ("product_core", "vision_documents", "tech_stack", "architecture", "testing"):
             metadata[cat] = {"modified": ts}
 
-    # memory_360: COUNT + MAX(created_at) from ProductMemoryEntry
     entry_count, max_created = await repo.get_category_metadata(session, tenant_key, product.id)
     if entry_count > 0 and max_created:
         metadata["memory_360"] = {
@@ -148,20 +126,11 @@ async def build_category_metadata(
             "entries": entry_count,
         }
 
-    # git_history: skip (no server-side data, falls back to local git)
 
     return metadata
 
 
 def maybe_build_ctx_self_close_directive(ctx: dict[str, Any]) -> dict[str, Any] | None:
-    """Return a SELF_CLOSE directive when a CTX orchestrator has nothing to do (BE-5122).
-
-    Trigger: project_type abbreviation == 'CTX' AND the derived
-    ``vision_inputs_hash`` of the product's current vision documents equals
-    the persisted ``Product.consolidated_vision_hash``. In that case the
-    consolidated aggregates are already fresh — spawning agents would be a
-    no-op project that just consumes context.
-    """
     if ctx.get("project_type_abbreviation") != "CTX":
         return None
     product = ctx.get("product")
@@ -186,12 +155,6 @@ def maybe_build_ctx_self_close_directive(ctx: dict[str, Any]) -> dict[str, Any] 
 async def is_chain_member(
     session: Any, project_id: str, tenant_key: str, *, db_manager: Any, tenant_manager: Any
 ) -> bool:
-    """Return True if the project belongs to an ACTIVE chain run (BE-6198 Fix #2 / S3).
-
-    Mirrors mission_service.is_chain_member. Best-effort: a resolution failure
-    returns False so the staging redirect falls back to the solo "click Implement"
-    wording and staging instructions are NEVER broken by a chain lookup.
-    """
     try:
         from giljo_mcp.services.sequence_run_service import SequenceRunService
 
@@ -208,7 +171,6 @@ async def is_chain_member(
 
 
 def check_staging_redirect(project: Any, job_id: str, *, is_chain_member: bool = False) -> dict[str, Any] | None:
-    """Return a staging redirect response if applicable, else None."""
     if project.staging_status == "staging_complete":
         identity = {
             "job_id": job_id,
@@ -256,20 +218,6 @@ def check_staging_redirect(project: Any, job_id: str, *, is_chain_member: bool =
 
 
 def build_identity_source_line(ctx: dict[str, Any]) -> str:
-    """The FE-9408 provenance line for a staging orchestrator, from gathered context.
-
-    One place, because the staging response states it TWICE and the two must agree:
-    appended to ``orchestrator_identity`` for a normal orchestrator, and carried in the
-    ``identity`` dict so the chain SUB-ORCHESTRATOR keeps it -- that role takes the
-    BE-6212 early return below and never receives the identity text at all, so the dict
-    is the only channel it has. Two statements of one fact that could disagree is worse
-    than one, since it is the disagreement an operator would then have to resolve.
-
-    Pure formatting off ctx: the product row was loaded during context assembly, so
-    naming it costs no query here. A missing/None ``orchestrator_override`` (the read
-    failed, and the caller fell back to the packaged seed) reports the built-in default,
-    which is what that fallback actually served.
-    """
     override = ctx.get("orchestrator_override")
     product = ctx.get("product")
     return format_identity_source(
@@ -280,17 +228,6 @@ def build_identity_source_line(ctx: dict[str, Any]) -> str:
 
 
 def build_orchestrator_identity_block(ctx: dict[str, Any], *, job_id: str, tenant_key: str) -> dict[str, Any]:
-    """The staging response's ``identity`` block -- who this orchestrator is, and where
-    its persona came from.
-
-    Extracted here (FE-9408) rather than grown in place: ``_build_orchestrator_response``
-    sat at its shrink-only length budget, and a size gate refusing new logic in a
-    full function is a placement signal, not an obstacle to work around. This module is
-    where that file's builders already live (BE-9073).
-
-    ``product_name`` and ``identity_source`` are the additions. The rest is moved
-    verbatim, including CE-0033's hoisted ``product_id`` and the id glossary.
-    """
     project = ctx["project"]
     product = ctx.get("product")
     return {
@@ -298,12 +235,7 @@ def build_orchestrator_identity_block(ctx: dict[str, Any], *, job_id: str, tenan
         "agent_id": ctx["execution"].agent_id,
         "project_id": str(project.id),
         "project_name": project.name,
-        # CE-0033 Task 2: hoist product_id so orchestrators don't have to mine it from a
-        # hardcoded protocol example. get_context requires it; surfacing it here makes
-        # the identity self-sufficient.
         "product_id": str(product.id) if product is not None else None,
-        # FE-9408: the ~10-token breadcrumb -- a staging orchestrator can cross-check the
-        # product it was handed against the one it believes it is working on.
         "product_name": getattr(product, "name", None) if product is not None else None,
         "identity_source": build_identity_source_line(ctx),
         "tenant_key": tenant_key,
@@ -324,15 +256,6 @@ def attach_protocol_and_identity(
     chain_ctx: Any,
     build_kwargs: dict[str, Any],
 ) -> None:
-    """Attach the orchestrator protocol + identity to the staging response.
-
-    BE-6212: a chain SUB-ORCHESTRATOR has ALREADY received the identical static
-    identity + full protocol from its mandatory boot get_job_mission call, so re-shipping
-    them here is the ~52.9 KB duplication the field report flagged. For that role (only)
-    SKIP BUILDING both (saves render compute too) and return a pointer. Solo chain_ctx is
-    None -> the full build runs -> byte-identical; the project-less conductor never reaches
-    this assembler (it uses conductor_staging_builder via the early-return).
-    """
     is_chain_suborch = chain_ctx is not None and getattr(chain_ctx, "role", None) == "sub_orchestrator"
     if is_chain_suborch:
         response["protocol_unchanged"] = True
@@ -345,17 +268,10 @@ def attach_protocol_and_identity(
         )
         return
 
-    # Handover 0431 / SEC-0005b / HO1027: the system harness (MCP Tool Usage,
-    # CHECK-IN PROTOCOL, HARNESS REMINDER OVERRIDE for Claude Code) is ALWAYS appended
-    # via compose_orchestrator_identity even when an admin override is set, so harness
-    # mechanics never leak into the admin textarea but always reach the orchestrator.
     from giljo_mcp.template_seeder import compose_orchestrator_identity
 
     response["orchestrator_protocol"] = _build_orchestrator_protocol(**build_kwargs)
     override_content = ctx.get("orchestrator_prompt_override")
-    # FE-9408: the same composition, plus one line naming the rung it came from. The
-    # append is the only change to this text -- everything before it is byte-for-byte
-    # what a staging orchestrator received yesterday.
     response["orchestrator_identity"] = append_identity_source(
         compose_orchestrator_identity(override_content, tool=protocol_tool),
         build_identity_source_line(ctx),

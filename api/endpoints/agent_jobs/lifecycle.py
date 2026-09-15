@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Agent Job Lifecycle Endpoints - Handover 0124
-
-Handles agent job lifecycle operations:
-- POST /api/agent-jobs/spawn - Spawn new agent job
-
-All operations use OrchestrationService (no direct DB access).
-
-BE-9143: the registered-but-dead /{job_id}/complete and /{job_id}/error routes
-were retired (no remaining caller — agents complete/error via the MCP tools that
-dispatch in-process, never through these REST mirrors).
-"""
 
 import logging
 
@@ -67,7 +55,6 @@ async def spawn_job(
         "User %s spawning agent job: %s", sanitize(current_user.username), sanitize(request.agent_display_name)
     )
 
-    # Permission check - only admins can spawn agents
     if current_user.role != "admin":
         logger.warning(
             "User %s (role=%s) attempted to spawn agent", sanitize(current_user.username), sanitize(current_user.role)
@@ -84,30 +71,24 @@ async def spawn_job(
         context_chunks=request.context_chunks,
     )
 
-    # Broadcast WebSocket event for real-time UI
-    # NOTE: OrchestrationService already broadcasts agent:created, but we broadcast again
-    # to ensure the endpoint's caller gets the event even if the service broadcast failed.
-    # Handover 0457: Include execution_id for frontend Map key consistency
-    # 0731d: OrchestrationService returns SpawnResult typed model
     try:
         await ws_dep.broadcast_to_tenant(
             tenant_key=current_user.tenant_key,
             event_type="agent:created",
             data={
                 "project_id": request.project_id,
-                "execution_id": result.execution_id,  # Handover 0457: Unique row ID for frontend Map key
-                "agent_id": result.agent_id,  # Handover 0457: Executor UUID
+                "execution_id": result.execution_id,
+                "agent_id": result.agent_id,
                 "job_id": result.job_id,
                 "agent_display_name": request.agent_display_name,
                 "agent_name": request.agent_name or request.agent_display_name,
                 "status": "waiting",
-                "mission": request.mission,  # Handover 0464: Include mission for UI display
+                "mission": request.mission,
             },
         )
         logger.info("Agent spawn broadcasted: %s", sanitize(str(result.job_id)))
-    except Exception as _exc:  # Broad catch: API boundary, converts to HTTP error
+    except Exception as _exc:
         logger.exception("Failed to broadcast agent spawn event")
-        # Non-critical - continue without broadcast
 
     logger.info("Spawned agent job %s for tenant %s", sanitize(str(result.job_id)), sanitize(current_user.tenant_key))
 

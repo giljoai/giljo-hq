@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tests for HITL Closeout Checkpoint feature.
-
-Covers:
-- closeout_checklist added to complete_job() for orchestrator jobs
-- closeout_mode config option in general settings
-- Orchestrator protocol text references closeout checklist
-- write_360_memory() callable after complete_job()
-- _resolve_git_commits() helper extraction
-"""
 
 import uuid
 from datetime import UTC, datetime
@@ -26,7 +17,6 @@ from giljo_mcp.services.job_completion_service import JobCompletionService
 
 @pytest.fixture
 def completion_service(db_session, test_tenant_key):
-    """Create a JobCompletionService with a test session."""
     db_manager = MagicMock()
     tenant_manager = MagicMock()
     tenant_manager.get_current_tenant.return_value = test_tenant_key
@@ -39,7 +29,6 @@ def completion_service(db_session, test_tenant_key):
 
 @pytest_asyncio.fixture
 async def orchestrator_job(db_session, test_tenant_key, test_project_id):
-    """Create an orchestrator job + execution for testing."""
     job_id = str(uuid.uuid4())
     job = AgentJob(
         job_id=job_id,
@@ -68,7 +57,6 @@ async def orchestrator_job(db_session, test_tenant_key, test_project_id):
 
 @pytest_asyncio.fixture
 async def implementer_job(db_session, test_tenant_key, test_project_id):
-    """Create an implementer (non-orchestrator) job + execution for testing."""
     job_id = str(uuid.uuid4())
     job = AgentJob(
         job_id=job_id,
@@ -95,24 +83,17 @@ async def implementer_job(db_session, test_tenant_key, test_project_id):
     return job
 
 
-# ---- Task 1: closeout_checklist in complete_job() response ----
 
 
 @pytest.mark.asyncio
 async def test_complete_job_orchestrator_includes_closeout_checklist(
     completion_service, orchestrator_job, test_tenant_key
 ):
-    """Orchestrator complete_job() returns closeout_checklist in response."""
     result = await completion_service.complete_job(
         job_id=orchestrator_job.job_id,
         result={"summary": "Project completed successfully"},
         tenant_key=test_tenant_key,
     )
-    # BE-9153: a CLEAN orchestrator closeout completes even under the default
-    # (hitl) mode — the gate blocks ONLY on signal (deferred findings / protected
-    # surfaces / verification gaps), and this result carries none. (Was the vacuous
-    # ``in ("success", "blocked_hitl")`` — "blocked_hitl" is produced nowhere, so it
-    # passed regardless of mode.)
     assert result.status == "success"
     assert hasattr(result, "closeout_checklist")
     assert result.closeout_checklist is not None
@@ -120,18 +101,12 @@ async def test_complete_job_orchestrator_includes_closeout_checklist(
     checklist = result.closeout_checklist
     assert "follow_up_items" in checklist
     assert "instruction" in checklist
-    # BE-5029: prose HITL boolean removed; gating rides on the user_approvals
-    # primitive + awaiting_user status. The checklist instruction references
-    # request_approval as the gate.
     assert "request_approval" in checklist["instruction"]
-    # BE-9153 instruction-loop repair: the checklist now states the tenant's
-    # closeout_mode so the agent SEES the setting (default hitl).
     assert checklist.get("closeout_mode") == "hitl"
 
 
 @pytest.mark.asyncio
 async def test_complete_job_non_orchestrator_no_checklist(completion_service, implementer_job, test_tenant_key):
-    """Non-orchestrator complete_job() does NOT include closeout_checklist."""
     result = await completion_service.complete_job(
         job_id=implementer_job.job_id,
         result={"summary": "Implementation done"},
@@ -141,11 +116,9 @@ async def test_complete_job_non_orchestrator_no_checklist(completion_service, im
     assert result.closeout_checklist is None
 
 
-# ---- Task 4: Protocol text includes closeout checklist reference ----
 
 
 def test_orchestrator_protocol_references_closeout_checklist():
-    """Orchestrator protocol text references closeout_checklist + the request_approval gate."""
     from giljo_mcp.services.protocol_sections.agent_lifecycle import (
         _build_orchestrator_protocol_body,
     )
@@ -155,25 +128,18 @@ def test_orchestrator_protocol_references_closeout_checklist():
         tenant_key="test-tenant",
         executor_id="test-executor",
         wake_pattern="test-wake",
-        # BE-6209c/6211f: signature gained execution_mode + tool (mode-conditional
-        # phrasing). The assertions below are mode-agnostic, so use the multi_terminal
-        # path (byte-identical to the pre-6209c strings).
         execution_mode="multi_terminal",
         tool="multi_terminal",
     )
     assert "closeout_checklist" in body
-    # BE-5029: prose HITL boolean replaced by the request_approval primitive
-    # + awaiting_user status.
     assert "request_approval" in body
     assert "complete_job" in body
 
 
-# ---- Task 5: write_360_memory works after complete_job ----
 
 
 @pytest_asyncio.fixture
 async def linked_project(db_session, test_tenant_key, test_product):
-    """Create a project linked to a product (required by write_360_memory)."""
     import random
 
     from giljo_mcp.models import Project
@@ -195,14 +161,8 @@ async def linked_project(db_session, test_tenant_key, test_product):
 
 @pytest.mark.asyncio
 async def test_write_360_memory_callable_after_complete_job(db_session, test_tenant_key, test_product, linked_project):
-    """Verify write_360_memory() succeeds after complete_job() for an orchestrator.
-
-    The sequence is: complete_job() -> write_360_memory() -> close_project_and_update_memory().
-    All three must succeed in order.
-    """
     project_id = str(linked_project.id)
 
-    # Create orchestrator job + execution
     job_id = str(uuid.uuid4())
     job = AgentJob(
         job_id=job_id,
@@ -227,7 +187,6 @@ async def test_write_360_memory_callable_after_complete_job(db_session, test_ten
     db_session.add(execution)
     await db_session.commit()
 
-    # Step 1: complete_job()
     db_manager = MagicMock()
     db_manager.get_session_async = MagicMock(return_value=AsyncMock())
     tenant_manager = MagicMock()
@@ -243,16 +202,12 @@ async def test_write_360_memory_callable_after_complete_job(db_session, test_ten
         result={"summary": "All work done"},
         tenant_key=test_tenant_key,
     )
-    # BE-9153: a clean closeout completes under the default hitl mode (this result
-    # carries no signal). Was the vacuous ``in ("success", "blocked_hitl")``.
     assert complete_result.status == "success"
 
-    # Step 2: write_360_memory() after job is complete
     from giljo_mcp.tools.write_memory_entry import write_360_memory
 
     mock_db_manager = MagicMock()
 
-    # Patch tuning staleness check (unrelated side effect, needs full service stack)
     with patch(
         "giljo_mcp.tools.write_memory_entry._check_and_emit_tuning_staleness",
         new_callable=AsyncMock,
@@ -270,20 +225,12 @@ async def test_write_360_memory_callable_after_complete_job(db_session, test_ten
             db_manager=mock_db_manager,
             session=db_session,
         )
-    # Tightened (BE-5083): "is not None" passed even if entry_id were a stray
-    # non-UUID string or sequence_number were 0/negative. write_360_memory returns
-    # entry_id=str(entry.id) (a real UUID) and a positive monotonic sequence_number.
     entry_id = memory_result.get("entry_id")
     assert isinstance(entry_id, str)
-    assert uuid.UUID(entry_id)  # raises if not a real UUID -> guards garbage/None ids
+    assert uuid.UUID(entry_id)
     sequence_number = memory_result.get("sequence_number")
     assert isinstance(sequence_number, int) and sequence_number >= 1
 
-    # BE-9153: this closeout is CLEAN (no signal), so NO approval is involved — the
-    # old "simulate HITL user approval" framing was fiction (nothing ever produced
-    # awaiting_user here). complete_job already advanced the execution to a terminal
-    # state; this only normalizes any non-terminal test-setup remnant so the
-    # subsequent force-close doesn't hit the self-decommission guard.
     from sqlalchemy import select as sa_select
 
     from giljo_mcp.models.agent_identity import AgentExecution as AgentExecutionModel
@@ -299,7 +246,6 @@ async def test_write_360_memory_callable_after_complete_job(db_session, test_ten
         exec_obj.progress = 100
         await db_session.commit()
 
-    # Step 3: close_project_and_update_memory() after write_360_memory
     from giljo_mcp.tools.project_closeout import close_project_and_update_memory
 
     closeout_result = await close_project_and_update_memory(
@@ -317,11 +263,9 @@ async def test_write_360_memory_callable_after_complete_job(db_session, test_ten
     assert closeout_result.get("message") is not None
 
 
-# ---- Bonus: _resolve_git_commits helper ----
 
 
 def test_resolve_git_commits_helper_exists():
-    """Verify _resolve_git_commits is importable as a standalone helper."""
     from giljo_mcp.tools.project_closeout import _resolve_git_commits
 
     assert callable(_resolve_git_commits)

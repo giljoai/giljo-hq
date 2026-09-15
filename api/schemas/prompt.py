@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Prompt Generation API Pydantic schemas for Handover 0073: Static Agent Grid.
-
-Provides request/response models for:
-- Orchestrator prompt generation (Claude Code, Codex, Gemini)
-- Agent prompt generation (universal terminal prompts)
-"""
 
 from typing import Literal
 
@@ -18,7 +11,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from giljo_mcp.platform_registry import SUBAGENT_TOOL_TYPES
 
 
-# Prompt Generation Schemas
 
 
 class AgentPromptResponse(BaseModel):
@@ -31,14 +23,13 @@ class AgentPromptResponse(BaseModel):
     agent_id: str = Field(..., description="Agent job ID")
     agent_name: str = Field(..., description="Agent display name")
     agent_display_name: str = Field(..., description="Human-readable display name for UI")
-    tool_type: str = Field(..., description="Tool assigned: claude-code, codex, gemini, universal")
+    tool_type: str = Field(..., description="Tool assigned: claude-code, codex, universal")
     instructions: str = Field(..., description="User-readable instructions for using the prompt")
     mission_preview: str = Field(..., description="First 200 chars of mission")
 
     model_config = ConfigDict(from_attributes=True)
 
 
-# Project Closeout Schemas
 
 
 class AgentStatusSummary(BaseModel):
@@ -156,7 +147,6 @@ class ProjectCloseoutDataResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-# Thin Client Prompt Schemas (Handover 0088)
 
 
 class OrchestratorPromptRequest(BaseModel):
@@ -166,9 +156,6 @@ class OrchestratorPromptRequest(BaseModel):
     """
 
     project_id: str = Field(..., min_length=1, description="Project UUID")
-    # BE-9035a: derived from the registry so a new subagent platform (Antigravity,
-    # generic_mcp) is accepted here without a second hand-copied literal to forget —
-    # this Literal previously 400'd both.
     tool: Literal[SUBAGENT_TOOL_TYPES] = Field("claude-code", description="Target AI tool")
 
     model_config = ConfigDict(from_attributes=True)
@@ -217,9 +204,6 @@ class ImplementationPromptResponse(BaseModel):
     prompt: str = Field(..., description="Implementation prompt for orchestrator to spawn agents")
     orchestrator_job_id: str = Field(..., description="Orchestrator job UUID")
     agent_count: int = Field(..., description="Number of spawned agents ready to execute")
-    # BE-9165 (wall 3): every specialist already completed — nothing left to
-    # implement. prompt carries closeout guidance and the dashboard can render a
-    # Close action instead of the implementation launch flow.
     ready_to_close: bool = Field(
         default=False,
         description="True when all specialist agents are already complete and the project is ready to close",

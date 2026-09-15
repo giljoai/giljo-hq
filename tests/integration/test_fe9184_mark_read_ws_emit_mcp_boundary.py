@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""MCP-transport boundary tests for FE-9184 — mark_read drain pushes a live
-``thread_update(update_type="read")`` WS event.
-
-An agent's ``get_thread_history(mark_read=True)`` drain writes
-``message_acknowledgments`` rows, which decrement the /jobs "Messages Waiting"
-badge — but until FE-9184 nothing told the dashboard, so a drained badge stayed
-stale through quiet periods. The emit lives at the FastMCP ``@mcp.tool`` wrapper
-(``api/endpoints/mcp_tools/_comm_tools.py``), the same boundary the other three
-hub WS emits use, so per the regression-at-the-failing-layer rule these tests
-exercise the ACTUAL transport (``create_connected_server_and_client_session``).
-
-Behaviors under test (over the wire):
-- a drain that acks >= 1 message emits exactly one thread_update with
-  update_type="read" carrying thread_id/chat_id/status to the right tenant.
-- a plain read (no mark_read) emits nothing.
-- a drain that acks nothing (marked_read == 0) emits nothing.
-- the NOT_A_PARTICIPANT domain rejection emits nothing.
-- the emit is best-effort: a WS manager that raises never fails the drain.
-"""
 
 from __future__ import annotations
 
@@ -45,7 +26,6 @@ pytestmark = pytest.mark.asyncio
 
 
 class _RecordingWsManager:
-    """Captures broadcast_event_to_tenant calls for assertion."""
 
     def __init__(self):
         self.events: list[tuple[str, dict]] = []
@@ -55,7 +35,6 @@ class _RecordingWsManager:
 
 
 class _ExplodingWsManager:
-    """Raises on every broadcast — proves the emit is best-effort."""
 
     async def broadcast_event_to_tenant(self, tenant_key, event):
         raise RuntimeError("ws send failed")
@@ -76,7 +55,6 @@ def _error_text(res) -> str:
 
 
 def _read_events(ws) -> list[tuple[str, dict]]:
-    """Only the thread_update/update_type=read events (create/post also broadcast)."""
     return [
         (tk, e)
         for tk, e in ws.events
@@ -86,11 +64,6 @@ def _read_events(ws) -> list[tuple[str, dict]]:
 
 @pytest_asyncio.fixture
 async def comm_mcp_client_ws(db_manager, db_session, monkeypatch):
-    """Yield ``(new_client, tenant_key, ws_recorder)`` for FastMCP transport tests.
-
-    Same shape as test_be9012a's comm_mcp_client, plus a recording WS manager on
-    app state so the wrapper's best-effort broadcasts become observable.
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -143,7 +116,6 @@ async def comm_mcp_client_ws(db_manager, db_session, monkeypatch):
 
 
 async def _setup_thread_with_beta(new_client):
-    """A thread whose creator is alpha, with beta joined and 2 posts. Returns (thread_id, chat_id)."""
     async with new_client() as s:
         res = await s.call_tool("create_thread", {"subject": "badge drain", "creator_id": "alpha"})
     assert res.is_error is False, _error_text(res)
@@ -160,7 +132,6 @@ async def _setup_thread_with_beta(new_client):
 
 
 async def test_mark_read_drain_emits_thread_update_read(comm_mcp_client_ws):
-    """A drain that acks messages pushes exactly one thread_update/read to the tenant."""
     new_client, tenant_key, ws = comm_mcp_client_ws
     tid, chat_id = await _setup_thread_with_beta(new_client)
 
@@ -182,7 +153,6 @@ async def test_mark_read_drain_emits_thread_update_read(comm_mcp_client_ws):
 
 
 async def test_plain_read_emits_nothing(comm_mcp_client_ws):
-    """No mark_read => no read event (mark_read=False explicit and absent alike)."""
     new_client, _tk, ws = comm_mcp_client_ws
     tid, _chat = await _setup_thread_with_beta(new_client)
 
@@ -200,11 +170,9 @@ async def test_plain_read_emits_nothing(comm_mcp_client_ws):
 
 
 async def test_drain_with_nothing_to_ack_emits_nothing(comm_mcp_client_ws):
-    """marked_read == 0 (already-drained unread cursor) => badge unchanged => no event."""
     new_client, _tk, ws = comm_mcp_client_ws
     tid, _chat = await _setup_thread_with_beta(new_client)
 
-    # First drain acks both posts and emits once.
     async with new_client() as s:
         first = await s.call_tool(
             "get_thread_history",
@@ -214,7 +182,6 @@ async def test_drain_with_nothing_to_ack_emits_nothing(comm_mcp_client_ws):
     assert _payload(first)["marked_read"] == 2
     assert len(_read_events(ws)) == 1
 
-    # Second drain: nothing unread, marked_read == 0 => NO second event.
     async with new_client() as s:
         second = await s.call_tool(
             "get_thread_history",
@@ -226,7 +193,6 @@ async def test_drain_with_nothing_to_ack_emits_nothing(comm_mcp_client_ws):
 
 
 async def test_not_a_participant_rejection_emits_nothing(comm_mcp_client_ws):
-    """The structured NOT_A_PARTICIPANT rejection never emits (no acks written)."""
     new_client, _tk, ws = comm_mcp_client_ws
     tid, _chat = await _setup_thread_with_beta(new_client)
 
@@ -242,7 +208,6 @@ async def test_not_a_participant_rejection_emits_nothing(comm_mcp_client_ws):
 
 
 async def test_emit_is_best_effort_never_fails_the_drain(comm_mcp_client_ws):
-    """A WS manager that raises must not surface: the drain still succeeds and acks."""
     new_client, _tk, _ws = comm_mcp_client_ws
     tid, _chat = await _setup_thread_with_beta(new_client)
 

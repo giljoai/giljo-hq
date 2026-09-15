@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Roadmap Tools -- @mcp.tool wrappers (FE-6022a).
-
-Registers ``update_roadmap_metadata`` against the shared ``mcp`` instance from
-``_base`` as a decorator side effect at import time, mirroring the other domain
-wrapper modules. The local CLI agent does all roadmap reasoning client-side and
-persists the result here; the server only validates + stores.
-"""
 
 from typing import Annotated, Any
 
@@ -135,8 +127,6 @@ async def get_roadmap(
     ] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
-    # FE-6240: flag the agent path so the service emits roadmap:agent_active.
-    # The REST read (the user's browser) calls the service without this flag.
     kwargs: dict[str, Any] = {"emit_agent_active": True}
     if product_id:
         kwargs["product_id"] = product_id

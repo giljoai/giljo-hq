@@ -11,11 +11,11 @@
       <v-card-text>
         <v-container>
           <v-row>
-            <!-- Role / Suffix — single row -->
             <v-col cols="6">
               <v-select
                 :model-value="template.role"
                 :items="roleOptions"
+                data-testid="role-select"
                 label="Role"
                 :rules="[(v) => !!v || 'Role is required']"
                 variant="outlined"
@@ -56,11 +56,10 @@
               </div>
             </v-col>
 
-            <!-- Coding tool (INF-6049c: per-role CLI tool mapping) -->
             <v-col cols="6">
               <v-select
                 :model-value="template.cli_tool || 'claude'"
-                :items="codingToolOptions"
+                :items="codingToolItems"
                 label="Coding tool"
                 variant="outlined"
                 density="compact"
@@ -82,47 +81,36 @@
               </v-select>
             </v-col>
 
-            <!-- BE-9394: the tenant-wide RETIRE switch, and the only writer for it.
-                 Deliberately distinct from the Active switch in the agents list, which
-                 writes just this product's junction row (useProductAgentAssignments).
-                 Two controls, two meanings: that one is "active in the product I am
-                 working in", this one is "available at all, anywhere". Edit-only --
-                 a new agent is created available (BE-9391), so offering the choice on
-                 create would imply a decision nothing acts on. -->
-            <!-- FE-9385c: the heading is gone and the control is one line. The
-                 switch plus its own label already said what the heading said, and
-                 the label no longer rewrites itself when you toggle it -- a caption
-                 that changes as you flip the switch is harder to read at a glance,
-                 not easier, and the switch position already carries the state. -->
-            <v-col v-if="template.id" cols="6">
-              <div class="d-flex align-center">
-                <v-switch
-                  :model-value="!!template.is_active"
-                  label="Available in all products"
-                  color="primary"
-                  density="compact"
-                  hide-details
-                  inset
-                  data-testid="retire-switch"
-                  aria-label="Available in all products"
-                  @update:model-value="update('is_active', $event)"
-                />
-                <v-tooltip location="top" max-width="340">
-                  <template #activator="{ props }">
-                    <v-icon v-bind="props" size="small" color="primary" class="ml-2"
-                      >mdi-help-circle</v-icon
-                    >
-                  </template>
-                  <span
-                    >Covers every product. Turn it off to stop offering this agent
-                    anywhere. The <strong>Active here</strong> switch in the agents list
-                    is separate — it only affects the product you are working in.</span
-                  >
-                </v-tooltip>
-              </div>
+            <v-col cols="6">
+              <v-text-field
+                :model-value="template.model ?? 'inherit'"
+                label="Model"
+                variant="outlined"
+                density="compact"
+                maxlength="120"
+                hint="Prose instruction for the harness; 'inherit' = same as the orchestrator"
+                persistent-hint
+                data-testid="model-input"
+                aria-label="Preferred model for this agent"
+                @update:model-value="update('model', $event)"
+              />
+            </v-col>
+            <v-col cols="6">
+              <v-text-field
+                :model-value="template.effort ?? 'inherit'"
+                label="Effort"
+                variant="outlined"
+                density="compact"
+                maxlength="120"
+                hint="Prose instruction for the harness; 'inherit' = same as the orchestrator"
+                persistent-hint
+                data-testid="effort-input"
+                aria-label="Preferred effort level for this agent"
+                @update:model-value="update('effort', $event)"
+              />
             </v-col>
 
-            <!-- Description -->
+
             <v-col cols="12">
               <v-text-field
                 :model-value="template.description"
@@ -144,7 +132,6 @@
               </v-text-field>
             </v-col>
 
-            <!-- Role & Expertise Editor (Handover 0814: replaces System Prompt) -->
             <v-col cols="12">
               <div class="d-flex align-center mb-2">
                 <span class="text-title-small">Role & Expertise</span>
@@ -196,54 +183,31 @@
 </template>
 
 <script setup>
-/**
- * TemplateEditDialog.vue — FE-6042b
- *
- * Presentational dialog for creating/editing an agent template.
- * No API calls. No composables. All state flows in via props/model,
- * all interactions out via emits.
- *
- * Container (TemplateManager) retains: useTemplateData, editingTemplate ref,
- * generatedName, resetEditingTemplate, saveTemplate, onRoleChange.
- *
- * Edition scope: CE
- */
+import { computed } from 'vue'
+import { foldRetiredHarness, retiredHarnessLabel } from '@/config/retiredHarness'
 
-/**
- * @type {boolean} modelValue - Whether the dialog is open (v-model)
- * @type {Object}  template   - The editing template object
- * @type {boolean} saving     - Whether save is in progress
- * @type {string}  generatedName - Auto-generated agent name preview
- * @type {Array}   roleOptions   - Available role choices for the select
- * @type {boolean} hasChanges    - Whether the form has unsaved changes
- */
+
 const props = defineProps({
-  /** Whether the dialog is open */
   modelValue: {
     type: Boolean,
     default: false,
   },
-  /** The template being created or edited */
   template: {
     type: Object,
     default: () => ({}),
   },
-  /** Whether a save operation is in progress */
   saving: {
     type: Boolean,
     default: false,
   },
-  /** Auto-generated agent name from role + suffix */
   generatedName: {
     type: String,
     default: '',
   },
-  /** Available roles for the select dropdown */
   roleOptions: {
     type: Array,
     default: () => [],
   },
-  /** Whether the form has unsaved changes (controls Save button disabled state) */
   hasChanges: {
     type: Boolean,
     default: false,
@@ -258,21 +222,21 @@ const emit = defineEmits([
   'role-change',
 ])
 
-// INF-6049c: the per-role coding-tool vocabulary (matches the INF-6049b mode enum
-// + the backend agent_templates.cli_tool values). Default is claude when unset.
 const codingToolOptions = [
   { title: 'Claude', value: 'claude' },
   { title: 'Codex', value: 'codex' },
-  { title: 'Gemini', value: 'gemini' },
-  { title: 'Antigravity', value: 'antigravity' },
+  { title: 'Generic', value: 'generic' },
 ]
 
-/**
- * Emit a field update for the template object.
- * Container listens via @update:template and mutates editingTemplate.
- */
+const codingToolItems = computed(() => {
+  const legacy = retiredHarnessLabel(props.template?.cli_tool)
+  return legacy ? [...codingToolOptions, { title: legacy, value: props.template.cli_tool }] : codingToolOptions
+})
+
 function update(field, value) {
-  emit('update:template', { ...props.template, [field]: value })
+  const next = { ...props.template, [field]: value }
+  if (field !== 'cli_tool') next.cli_tool = foldRetiredHarness(next.cli_tool)
+  emit('update:template', next)
 }
 </script>
 

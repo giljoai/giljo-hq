@@ -1,10 +1,8 @@
 <template>
   <v-container>
-    <!-- Page Header -->
     <h1 class="text-headline-large mb-2">Account</h1>
     <p class="text-body-large mb-4 settings-subtitle">Profile, plan, and account management</p>
 
-    <!-- Sub-tab Pills (sub-routes) -->
     <div class="pill-toggle-row">
       <router-link
         v-for="tab in tabs"
@@ -25,7 +23,6 @@
       </router-link>
     </div>
 
-    <!-- Sub-route content -->
     <div class="pill-tabs-content">
       <router-view />
     </div>
@@ -57,11 +54,6 @@ const tabs = ref([
   },
 ])
 
-// BE-1005: "Connected Accounts" is a SaaS-only tab, appended once mode is
-// confirmed non-CE. Mode source of truth per ADR-002: setupService, not
-// configService (avoids the first-paint race). The route it points to
-// ('AccountConnectedAccounts') is registered only in SaaS builds
-// (saas/routes.js), so the tab must stay CE-invisible too.
 onMounted(async () => {
   try {
     const status = await setupService.checkEnhancedStatus()

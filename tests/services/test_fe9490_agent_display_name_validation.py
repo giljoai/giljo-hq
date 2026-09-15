@@ -3,33 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-9490 -- reject punctuation in a NEW agent display name at the write boundary.
-
-Agent badges render an agent's initials by splitting its display name on
-dash/underscore/space only. A name carrying other punctuation -- most often a
-parenthetical annotation like ``"Reviewer (Phase 5)"`` -- leaks a bracket into
-the badge (``"R("``). Rather than only fix the read side (the frontend badge
-helper), the operator asked that the write boundary refuse such a name outright
-so a new agent can't be spawned with one; the fix is not silent stripping,
-because the caller chose the name and should be told.
-
-Two write boundaries exist for ``agent_display_name`` and both are exercised
-here directly against the real service methods (service-layer fix -> service
-test, per CLAUDE.md's regression-test-at-the-failing-layer rule):
-
-1. ``JobLifecycleService.spawn_job`` -- the CREATE path (brand-new AgentJob +
-   AgentExecution).
-2. ``AgentJobManager.spawn_execution`` -- the UPDATE/succession path (a NEW
-   executor for an EXISTING job).
-
-Both delegate to ``giljo_mcp.utils.identity.validate_agent_display_name``,
-which is unit-tested directly below for its edge cases. Real-database tests on
-purpose (``db_session``/``db_manager``, TransactionalTestContext-backed via
-conftest): the defect is in what actually reaches the DB, not in a mocked
-return value.
-
-Project: FE-9490.
-"""
 
 from __future__ import annotations
 
@@ -46,22 +19,15 @@ from giljo_mcp.models import AgentJob, AgentTemplate, Product, Project
 from giljo_mcp.services.agent_job_manager import AgentJobManager
 from giljo_mcp.services.job_lifecycle_service import JobLifecycleService
 from giljo_mcp.utils.identity import validate_agent_display_name
+from tests.helpers.product_crew_helper import adopt_all_templates
 
 
-# This file mixes sync (unit) and async (service-boundary) tests, so
-# pytest.mark.asyncio is applied per-class below rather than as a module-level
-# pytestmark (which would misfire on the sync ones) -- same pattern as
-# tests/services/test_spawn_agent_phase.py.
 
 
-# ============================================================================
-# Unit tests: the shared validator (giljo_mcp.utils.identity)
-# ============================================================================
 
 
 class TestValidateAgentDisplayName:
     def test_parenthetical_name_is_refused(self):
-        """The exact operator-reported shape: a phase annotation in parens."""
         with pytest.raises(ValidationError, match="punctuation"):
             validate_agent_display_name("Reviewer (Phase 5)")
 
@@ -78,8 +44,6 @@ class TestValidateAgentDisplayName:
         ["orchestrator", "Backend-Implementer", "Reviewer 2", "reviewer_2", "Reviewer-2"],
     )
     def test_letters_digits_space_hyphen_underscore_are_allowed(self, clean_name):
-        """The exact separator set the initials helpers already split on -- must
-        keep working; this rule cannot regress a template name that already ships."""
         assert validate_agent_display_name(clean_name) == clean_name
 
     def test_surrounding_whitespace_is_trimmed(self):
@@ -99,16 +63,10 @@ class TestValidateAgentDisplayName:
             validate_agent_display_name("a" * 129)
 
 
-# ============================================================================
-# Fixtures: a project ready to spawn into (execution_mode selected)
-# ============================================================================
 
 
 @pytest_asyncio.fixture
 async def fe9490_project(db_session, test_tenant_key) -> Project:
-    """A project past the NULL-execution-mode gate, with an active template to
-    spawn against -- so a rejection surfaces from THIS validator, not an
-    unrelated gate."""
     owning_product = Product(
         id=str(uuid.uuid4()),
         tenant_key=test_tenant_key,
@@ -143,12 +101,10 @@ async def fe9490_project(db_session, test_tenant_key) -> Project:
     db_session.info["tenant_key"] = test_tenant_key
     await db_session.commit()
     await db_session.refresh(project)
+    await adopt_all_templates(db_session, test_tenant_key, owning_product.id)
     return project
 
 
-# ============================================================================
-# Boundary 1 -- CREATE: JobLifecycleService.spawn_job
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -167,8 +123,6 @@ class TestSpawnJobRejectsPunctuation:
                 mission="Review phase 5",
             )
 
-        # Nothing was written for the refused spawn -- the caller sees the
-        # rejection, not a phantom half-created agent job.
         rows = (
             (await db_session.execute(select(AgentJob).where(AgentJob.tenant_key == test_tenant_key))).scalars().all()
         )
@@ -177,7 +131,6 @@ class TestSpawnJobRejectsPunctuation:
     async def test_clean_display_name_still_spawns(
         self, db_manager, db_session, tenant_manager, test_tenant_key, fe9490_project
     ):
-        """Regression guard: the new gate must not over-reject an ordinary name."""
         service = JobLifecycleService(db_manager=db_manager, tenant_manager=tenant_manager, test_session=db_session)
 
         result = await service.spawn_job(
@@ -192,9 +145,6 @@ class TestSpawnJobRejectsPunctuation:
         assert result.agent_display_name == "Backend Implementer"
 
 
-# ============================================================================
-# Boundary 2 -- UPDATE (succession): AgentJobManager.spawn_execution
-# ============================================================================
 
 
 @pytest.mark.asyncio

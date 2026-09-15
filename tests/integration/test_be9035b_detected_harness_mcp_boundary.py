@@ -3,33 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9035b -- DETECTED harness drives the render, proven LIVE at the MCP transport.
-
-The pure resolver + effective_harness precedence are unit-tested in
-tests/unit/test_be9035b_harness_resolver.py. This proves the OTHER half: that a
-harness DETECTED from the real ``initialize`` handshake's clientInfo actually
-REACHES a render site and flips it -- exactly the BE-5042 class of gap (green units,
-dead seam), so per CLAUDE.md's failing-layer mandate it drives the REAL FastMCP
-transport (``create_connected_server_and_client_session``), passing a genuine
-``clientInfo`` the way a real client would.
-
-The seam wired in step (b) is the orchestrator-protocol tool key (CH3 spawning
-rules). On a ``generic_mcp`` orchestrator:
-
-  * clientInfo name=='claude-code' (the CONFIRMED harvest identifier) -> DETECTED
-    beats the declared generic_mcp -> CH3 renders the CLAUDE CODE CLI block;
-  * clientInfo name=='opencode' (unrecognized -> generic BY DESIGN: detection does
-    NOT rescue opencode; the universal generic prose does) -> CH3 stays the
-    generic_mcp ladder, NOT the claude block;
-  * no clientInfo -> generic floor -> the generic_mcp ladder (byte-identity floor).
-
-And detection must never DOWNGRADE a declared CLI: a ``claude_code_cli`` project
-connected from an unknown client still renders the claude block (generic detection
-is not concrete, so the declared hint stands).
-
-Parallel-safe: DB-touching tests use the db_session fixture (TransactionalTestContext,
-rollback at teardown). No module-level mutable state. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -53,14 +26,9 @@ from tests.helpers.mcp_session_fixture import create_connected_server_and_client
 pytestmark = pytest.mark.asyncio
 
 
-# Render markers (kept in lock-step with chapters_reference._CH3_CLAUDE and the
-# generic_mcp ladder header).
 _CLAUDE_BLOCK = "YOUR PLATFORM: CLAUDE CODE CLI"
 _GENERIC_MCP_BLOCK = "ANY MCP-CONNECTED AGENT (generic_mcp)"
 
-# The confirmed harvest identifiers (rich clientInfo) vs a genuinely-unrecognized one.
-# BE-9035c: opencode is now a FIRST-CLASS detected harness (name=="opencode" in the seed
-# table), so an UNRECOGNIZED example must use a name absent from the table.
 _CLAUDE_CODE_INFO = Implementation(name="claude-code", version="2.1.199")
 _OPENCODE_INFO = Implementation(name="opencode", version="0.3.1")
 _UNKNOWN_INFO = Implementation(name="totally-made-up-harness", version="9.9.9")
@@ -80,10 +48,6 @@ def _error_text(result) -> str:
     return "\n".join(b.text for b in result.content if getattr(b, "text", None))
 
 
-# ---------------------------------------------------------------------------
-# Transport fixture — yields a factory that accepts a clientInfo (so each test
-# drives the initialize handshake with the harness it wants to detect).
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
@@ -121,9 +85,6 @@ async def mcp_client(db_manager, db_session, monkeypatch):
         state.db_manager = prior_db_manager
 
 
-# ---------------------------------------------------------------------------
-# Seed helpers (mirror test_be9013_generic_mcp_mode_mcp_boundary)
-# ---------------------------------------------------------------------------
 
 
 async def _seed_org_product(db_session, tenant_key: str) -> str:
@@ -140,8 +101,6 @@ async def _seed_org_product(db_session, tenant_key: str) -> str:
 
 
 async def _seed_orchestrator(db_session, tenant_key: str, product_id: str, execution_mode: str) -> str:
-    """An orchestrator job in the staging phase for a project of ``execution_mode``, so
-    get_staging_instructions renders the orchestrator protocol (incl. CH3)."""
     now = datetime.now(UTC)
     project = Project(
         id=str(uuid.uuid4()),
@@ -193,14 +152,9 @@ async def _ch3_for(client, client_info, job_id) -> str:
     return payload["orchestrator_protocol"]["ch3_agent_spawning_rules"]
 
 
-# ---------------------------------------------------------------------------
-# Detection FLIPS the render (the whole resolver -> session -> seam -> render stack)
-# ---------------------------------------------------------------------------
 
 
 async def test_detected_claude_code_upgrades_generic_mcp_render(mcp_client):
-    """clientInfo name=='claude-code' on a generic_mcp orchestrator: DETECTED beats the
-    declared mode -> CH3 renders the CLAUDE CODE CLI block, not the generic ladder."""
     client, tenant_key, db_session = mcp_client
     product_id = await _seed_org_product(db_session, tenant_key)
     job_id = await _seed_orchestrator(db_session, tenant_key, product_id, "generic_mcp")
@@ -211,11 +165,6 @@ async def test_detected_claude_code_upgrades_generic_mcp_render(mcp_client):
 
 
 async def test_detected_opencode_renders_the_universal_ladder(mcp_client):
-    """BE-9035c: clientInfo name=='opencode' IS now recognized (first-class detected
-    harness), but opencode has NO dedicated CH3 block, so it renders the UNIVERSAL
-    subagent ladder (the generic block that carries every harness without a dedicated
-    block) — NOT the claude block. Detection sharpens the 3 CLIs with a dedicated block;
-    opencode rides the universal prose, exactly as designed."""
     client, tenant_key, db_session = mcp_client
     product_id = await _seed_org_product(db_session, tenant_key)
     job_id = await _seed_orchestrator(db_session, tenant_key, product_id, "generic_mcp")
@@ -226,8 +175,6 @@ async def test_detected_opencode_renders_the_universal_ladder(mcp_client):
 
 
 async def test_no_client_info_is_the_generic_floor(mcp_client):
-    """No clientInfo -> generic floor -> the generic_mcp ladder renders unchanged (the
-    byte-identity floor the untouched golden proves at the whole-render level)."""
     client, tenant_key, db_session = mcp_client
     product_id = await _seed_org_product(db_session, tenant_key)
     job_id = await _seed_orchestrator(db_session, tenant_key, product_id, "generic_mcp")
@@ -238,12 +185,6 @@ async def test_no_client_info_is_the_generic_floor(mcp_client):
 
 
 async def test_detection_never_downgrades_a_declared_cli(mcp_client):
-    """A claude_code_cli project connected from a GENUINELY-UNRECOGNIZED client still
-    renders the claude block: an unrecognized name resolves to generic, and generic
-    detection is not concrete, so the declared hint stands. This proves generic detection
-    can only leave a declared CLI's render intact, never strip it. (A CONCRETE detected
-    harness — e.g. opencode — legitimately overrides the stale declared hint; that is the
-    precedence flip, not a downgrade.)"""
     client, tenant_key, db_session = mcp_client
     product_id = await _seed_org_product(db_session, tenant_key)
     job_id = await _seed_orchestrator(db_session, tenant_key, product_id, "claude_code_cli")

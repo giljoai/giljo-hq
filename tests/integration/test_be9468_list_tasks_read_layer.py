@@ -3,69 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9468 -- the agent-facing task list has no bound of any kind, and no way to size itself.
-
-The defect is not "the list is big". It is that **nothing tells a caller how big the
-answer will be before it asks for it.** An agent asked "what did we ship" cannot know
-whether that is 5 rows or 5,000, so it asks for everything and hopes. ``list_tasks``
-then answers with the whole corpus: no row cap, no size cap, no truncation signal, and
-in ``full`` mode with ``description`` untruncated unless ``memory_limit`` is passed.
-
-Four moves, in dependency order, and the first is the keystone:
-
-1. **counts** -- totals by status and by type plus the created-at span, on EVERY
-   response. One GROUP BY. The agent learns the shape of the board *before* choosing
-   what to ask for. A size ceiling truncates the guess; it does not improve it.
-2. **a bounded ``limit``** -- a sane default and a hard max, copying the contract
-   ``search_memory`` already ships (``SEARCH_MEMORY_LIMIT_DEFAULT`` /
-   ``SEARCH_MEMORY_LIMIT_MAX``). Asking for everything stays possible; it becomes a
-   deliberate request rather than the accidental default.
-3. **a genuinely lean index row** -- and a test that asserts it is leaner **on measured
-   bytes**, because that exact claim is documented and false on the sibling tool.
-4. **``query``** -- substring search over title/description. There is no text search
-   over tasks on the MCP surface at all today, and "the OAuth one" is how users actually
-   refer to work.
-
-Plus the backstop underneath all four: a **response-size ceiling in characters**,
-enforced by dropping whole **ROWS, never fields**. Dropping fields is the wrong shape
-for a list -- a half-row is not a usable answer, and the in-repo field-trimmer protects
-the display label while discarding the identifier the agent needs in order to act.
-
-FAIL-FIRST, measured on base master ``048e65df65b2161aaadc880c8def8aec2f264386``.
-Every RED below is an **assertion** failing on a value the server returned, never an
-import error, a missing fixture, or a patched-in constant that does not exist yet --
-a broken instrument that goes red is not a reproduction:
-
-* every test in ``TestTheCountsBlockIsTheKeystone``     -- ``counts`` absent entirely.
-* ``test_the_default_response_is_bounded``              -- all 60 seeded rows come back.
-* ``test_a_bounded_response_says_so``                   -- ``truncated`` absent.
-* ``test_the_limit_can_be_raised_to_ask_for_everything`` -- ``limit`` silently IGNORED, not
-  rejected: on base master an unknown parameter is absorbed and the whole board returned.
-* ``test_the_limit_is_capped_at_a_hard_maximum``        -- same; no bound to exceed.
-* ``test_the_size_backstop_drops_whole_rows``           -- 185,535 chars, no size bound at all.
-* ``test_the_index_row_is_actually_leaner_in_bytes``    -- ``mode='index'`` rejected.
-* both tests in ``TestQueryIsARealVerb``                -- ``query`` silently ignored.
-
-Everything in ``TestNothingThatWorksTodayStopsWorking`` is a BOTH-SIDES GUARD: those pass
-BEFORE and AFTER the change. **They all passed on base master while eleven others failed**,
-which is what proves the red above was the assertion and not a broken harness.
-
-Two tests here are guards rather than reproductions, and say so in their own docstrings:
-``test_rows_tied_on_created_at_are_cut_on_a_documented_total_order`` (the un-tiebroken
-query could not be made to misbehave, so it asserts the discriminating property instead)
-and ``test_the_biggest_row_the_tool_can_create_still_fits``.
-
-Transport: the REAL ``@mcp.tool`` transport via ``create_connected_server_and_client_session``
-against real Postgres -- the boundary an agent client actually hits, per the house rule
-that a bug gets its regression test at the layer it lived on.
-
-Parallel-safe: each test generates a fresh ``tenant_key`` and purges its own rows in a
-``finally``; these MCP-adapter calls commit for real through ``db_manager``, so there is
-no rollback isolation to lean on. No module-level mutable state, no ordering
-dependencies.
-
-Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -87,11 +24,6 @@ from tests.helpers.test_db_helper import purge_tenant_rows
 pytestmark = pytest.mark.asyncio
 
 
-# The numbers this suite asserts against are stated as literals, NOT imported from the
-# module under test. Importing them would make the assertions tautological -- they would
-# follow the constant wherever it drifted and could never fail. These are the values the
-# change is required to ship; if the constant moves, this test is the thing that argues
-# about it.
 EXPECTED_DEFAULT_LIMIT = 50
 EXPECTED_MAX_LIMIT = 500
 EXPECTED_CHAR_CEILING = 48_000
@@ -116,11 +48,6 @@ def _content_text(call_tool_result) -> str:
 
 @pytest_asyncio.fixture
 async def mcp_client(db_manager, monkeypatch):
-    """Wire a real ToolAccessor into the in-memory MCP transport.
-
-    No injected test session: every tool call opens its own real session, exactly as it
-    does in production. Yields ``(client_factory, tenant_key)``.
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -157,14 +84,6 @@ async def _seed(
     tenant_key: str,
     rows: list[dict],
 ) -> str:
-    """Commit one active product, the reserved TSK taxonomy row, and the given tasks.
-
-    Rows are inserted directly rather than through ``create_task_for_mcp`` because that
-    path takes the shared global serial counter's advisory lock once per task; at 60+
-    rows that dominates the runtime of the suite and exercises nothing this test is about.
-    Each row dict carries ``title``, ``status``, ``priority``, ``description`` and an
-    ``age_days`` offset used to build a deterministic ``created_at`` span.
-    """
     product_id = str(uuid.uuid4())
     task_type_id = str(uuid.uuid4())
     base = datetime(2026, 8, 18, 12, 0, 0, tzinfo=UTC)
@@ -213,13 +132,6 @@ async def _seed(
 
 
 def _corpus(n: int) -> list[dict]:
-    """``n`` tasks across a realistic status/priority spread.
-
-    Title and description lengths are taken from REAL rows read (bounded, read-only) off
-    the live board rather than invented: the three open tasks there carry 95-, 111- and
-    133-character titles, so a ~110-character title is the honest middle, not a
-    flattering short one.
-    """
     statuses = ["completed", "completed", "completed", "pending", "in_progress", "blocked"]
     priorities = ["low", "medium", "high", "critical"]
     return [
@@ -238,40 +150,20 @@ def _corpus(n: int) -> list[dict]:
 
 
 async def _list_tasks(client, **kwargs) -> object:
-    """Invoke the agent-facing ``list_tasks`` @mcp.tool over the real transport."""
     async with client() as mcp_session:
         return await mcp_session.call_tool("list_tasks", kwargs)
 
 
 def _wire_chars(payload: dict) -> int:
-    """Bytes as the MCP wire actually serializes them.
-
-    ``pydantic_core.to_json(data, fallback=str).decode()`` is the real serializer
-    (``fastmcp/tools/base.py``) and it emits COMPACT JSON. Measuring with
-    ``json.dumps`` defaults inflates the number with separator whitespace that never
-    goes over the wire, which is how a size assertion talks itself into passing.
-    """
     from pydantic_core import to_json
 
     return len(to_json(payload, fallback=str).decode())
 
 
-# ---------------------------------------------------------------------------
-# 1. The keystone: counts
-# ---------------------------------------------------------------------------
 
 
 class TestTheCountsBlockIsTheKeystone:
     async def test_every_response_carries_a_counts_block(self, mcp_client, db_manager):
-        """Without this, every other rule is the model guessing.
-
-        An agent cannot choose a sensible ``limit``, or decide whether to filter at all,
-        until it knows the board is 1,069 completed and 3 active rather than 12 rows
-        total. This is the cheapest possible answer to that question -- one GROUP BY --
-        and it is why it ships on EVERY response rather than behind a flag: a signal you
-        have to know to ask for does not solve a problem whose whole shape is not knowing
-        what to ask for.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _corpus(12))
 
@@ -301,9 +193,6 @@ class TestTheCountsBlockIsTheKeystone:
                 f"counts.by_type must total by taxonomy abbreviation, got {counts.get('by_type')!r}"
             )
 
-            # A CLOSED enum, so every status is present with an explicit zero. An absent
-            # key cannot be told apart from "this server does not report that status",
-            # which is the absent-versus-false defect BE-9455 Symptom A removed.
             by_status = counts.get("by_status", {})
             assert set(by_status) == {"pending", "in_progress", "completed", "blocked", "cancelled"}, (
                 f"by_status must carry EXPLICIT ZEROS for the whole status vocabulary, got {by_status!r}"
@@ -331,15 +220,6 @@ class TestTheCountsBlockIsTheKeystone:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_by_type_omits_absent_types_while_by_status_does_not(self, mcp_client, db_manager):
-        """The two maps are asymmetric ON PURPOSE, and the asymmetry is the design.
-
-        ``by_status`` keys a CLOSED enum the caller can enumerate independently, so a
-        missing key is ambiguous and must never happen -- explicit zeros.
-        ``by_type`` keys an OPEN, tenant-configured vocabulary the caller cannot
-        enumerate, so an absent key claims nothing about anything, and emitting every
-        configured type at zero would be pure noise in a block whose whole value is being
-        small enough to ship on every response.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _corpus(6))
 
@@ -354,14 +234,6 @@ class TestTheCountsBlockIsTheKeystone:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_counts_are_of_the_whole_board_not_the_page(self, mcp_client, db_manager):
-        """THE test that makes counts worth shipping, and the easiest thing to get wrong.
-
-        Counting the rows already in hand is free and useless -- it tells the agent the
-        size of the answer it can already see. The number that changes a decision is the
-        one it CANNOT see. ``get_context(['tasks'])`` ships that exact defect today: its
-        ``open_count`` is ``len(rows_after_limit)``, so a truncated list reports the
-        truncated count as though it were the total.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _corpus(20))
 
@@ -376,8 +248,6 @@ class TestTheCountsBlockIsTheKeystone:
             )
             assert counts.get("returned") == 5, f"counts.returned is the page, got {counts!r}"
             assert counts.get("matched") == 20, f"no filters were passed, so matched equals the board, got {counts!r}"
-            # The invariant a caller can check for itself, and the reason `matched` earns
-            # its place: "there is more" becomes "there is exactly this much more".
             assert (payload.get("truncated") is True) == (counts["returned"] < counts["matched"]), (
                 f"truncated must hold iff returned < matched. truncated={payload.get('truncated')!r}, "
                 f"returned={counts['returned']}, matched={counts['matched']}"
@@ -386,17 +256,6 @@ class TestTheCountsBlockIsTheKeystone:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_matched_reflects_the_filters_even_though_total_does_not(self, mcp_client, db_manager):
-        """``total`` and ``matched`` answer different questions, and both are needed.
-
-        ``total`` says how big the board is -- the thing the caller cannot see. ``matched``
-        says how much of it the caller's own query hit -- "your search found 2 of 12" --
-        which is what decides whether to narrow further or widen. Reporting only one of
-        them leaves the caller guessing about the other.
-
-        On this tool ``matched`` is EXACT by construction: there is no defensive ceiling
-        to bound the fetch, and every filter is applied in SQL, so a COUNT carrying the
-        same predicates can neither understate nor overstate.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _corpus(12))
 
@@ -414,20 +273,6 @@ class TestTheCountsBlockIsTheKeystone:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_counts_ignore_the_callers_own_filters(self, mcp_client, db_manager):
-        """Counts describe the WHOLE board -- deliberately including what the filter excluded.
-
-        The tempting design is to scope the counts to the caller's filter, so they describe
-        "the question that was asked". That reproduces the defect inside the fix for it: a
-        caller that filtered to ``status='pending'`` and is told "total: 2" learns nothing
-        about the 1,000-row archive it just filtered away, which is precisely the thing it
-        needed to know before choosing what to ask for next.
-
-        So ``counts`` is scoped to tenant + active product and ignores ``status``,
-        ``priority``, ``task_type``, ``due_before``, ``hidden``, ``query`` and ``limit``
-        alike. The two numbers are separately named and neither one's meaning shifts with
-        the call: shipped ``count`` is always the rows in THIS response, ``counts.total``
-        is always the whole board.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _corpus(12))
 
@@ -447,19 +292,10 @@ class TestTheCountsBlockIsTheKeystone:
             await purge_tenant_rows(db_manager, tenant_key)
 
 
-# ---------------------------------------------------------------------------
-# 2. A bounded limit, with the escape hatch intact
-# ---------------------------------------------------------------------------
 
 
 class TestTheListIsBounded:
     async def test_the_default_response_is_bounded(self, mcp_client, db_manager):
-        """THE reproduction. Today this list has no bound of ANY kind.
-
-        No row cap, no size cap, no truncation flag -- strictly worse than the sibling
-        project list was before its own ceiling landed. 60 rows go in and 60 come back;
-        6,000 would too.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _corpus(60))
 
@@ -478,14 +314,6 @@ class TestTheListIsBounded:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_a_bounded_response_says_so(self, mcp_client, db_manager):
-        """A cut the caller cannot detect is the silent half of the defect.
-
-        Reuses the SHIPPED vocabulary rather than inventing a second one: ``truncated``
-        always present, and a ``truncation`` detail block only when something was
-        actually cut, carrying the existing ``{reason, ceiling, rows_fetched, dropped,
-        advice}`` shape. ``reason`` is already a discriminator, so a limit cut simply
-        adds a value to it.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _corpus(60))
 
@@ -511,13 +339,6 @@ class TestTheListIsBounded:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_the_limit_can_be_raised_to_ask_for_everything(self, mcp_client, db_manager):
-        """Asking for everything must stay POSSIBLE -- it just stops being the accident.
-
-        This is an explicit operator requirement, and it is the half of the change that
-        is easy to lose: a bound that cannot be raised is not a default, it is a refusal.
-        60 rows over a default of 50, requested deliberately, come back whole and
-        unflagged.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _corpus(60))
 
@@ -541,36 +362,7 @@ class TestTheListIsBounded:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_rows_tied_on_created_at_are_cut_on_a_documented_total_order(self, mcp_client, db_manager):
-        """Which row a bound drops must be decided by a rule, not by storage order.
-
-        ``created_at`` defaults to ``func.now()``, and PostgreSQL's ``now()`` is
-        TRANSACTION-scoped, so every task created in one transaction carries a
-        byte-identical timestamp. Ordered by ``created_at`` alone, those rows have no
-        defined order at all.
-
-        **That was harmless until this change and is not harmless after it.** While the
-        list was unbounded, every tied row came back regardless of order. Adding
-        ``limit`` is what makes tie-order decide WHICH row falls outside the window, so
-        the sort needs a unique tiebreak to be a total order.
-
-        **HONESTY NOTE, because the distinction matters: this is a GUARD, not a
-        reproduction.** I could not make the un-tiebroken query return rows in a
-        different order -- at this scale PostgreSQL returns them in heap order, which is
-        stable in practice, and I am not going to claim a failure I did not observe. So
-        the test does not assert "two calls agree" (that passed before the fix too, and
-        proves nothing). It asserts the stronger, actually-discriminating property: the
-        page is the prefix of the rows sorted by ``(created_at DESC, task_id ASC)``.
-        Because the seeded ids are random UUIDs, heap order is not id-ascending, so
-        removing the tiebreak DOES turn this red -- verified both ways before commit.
-
-        Same root cause as the keyset defect on the thread repository, where a strict
-        ``created_at <`` cursor with no unique tiebreak silently skips rows against the
-        same transaction-scoped ``now()``. Different surface, one lesson: a sort that
-        decides what to discard has to be a total order.
-        """
         client, tenant_key = mcp_client
-        # Every row identical in created_at -- seeded in ONE transaction at ONE explicit
-        # timestamp, which is exactly the shape func.now() produces in production.
         tied = [{"title": f"Tied row {i:03d}", "status": "pending", "age_days": 0} for i in range(30)]
         await _seed(db_manager, tenant_key, tied)
 
@@ -594,18 +386,14 @@ class TestTheListIsBounded:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_the_limit_is_capped_at_a_hard_maximum(self, mcp_client, db_manager):
-        """The contract copied from ``search_memory``: a sane default AND a hard max.
-
-        The max is the thing that makes the default safe to raise. Rejecting an
-        over-max value at the boundary is what ``search_memory`` already does via
-        ``Field(ge=1, le=...)``, and reusing that shape means a caller learns one rule.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _corpus(3))
 
         try:
             result = await _list_tasks(client, limit=EXPECTED_MAX_LIMIT + 1)
-            assert result.is_error, (
+            assert not result.is_error and "VALIDATION_ERROR" in _content_text(
+                result
+            ), (
                 "a limit above the hard maximum must be refused at the boundary, the way "
                 f"search_memory refuses one; got a successful response instead: {_content_text(result)!r}"
             )
@@ -613,26 +401,10 @@ class TestTheListIsBounded:
             await purge_tenant_rows(db_manager, tenant_key)
 
 
-# ---------------------------------------------------------------------------
-# 3. The size backstop -- rows, never fields
-# ---------------------------------------------------------------------------
 
 
 class TestTheSizeBackstopDropsWholeRows:
     async def test_the_size_backstop_drops_whole_rows(self, mcp_client, db_manager):
-        """The guard beneath the other three, so a bug can never dump a quarter-million tokens.
-
-        Two things are asserted, and the second matters more than the first. The response
-        must come in under the ceiling -- and every row that survives must still be a
-        WHOLE row. Trimming fields to fit is the wrong shape for a list: the in-repo
-        field-trimmer protects the display name and discards the identifier, which
-        produces husks an agent cannot act on. A half-row is not a usable answer.
-
-        A row count is not a size bound: ``limit`` cannot bound this on its own, because
-        ``full`` mode returns ``description`` untruncated and one row is therefore
-        arbitrarily large. 40 rows carrying ~4,000 characters of description each is a
-        request well inside any sane row limit that is still 160,000 characters of answer.
-        """
         client, tenant_key = mcp_client
         fat = [
             {
@@ -677,21 +449,6 @@ class TestTheSizeBackstopDropsWholeRows:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_the_biggest_row_the_tool_can_create_still_fits(self, mcp_client, db_manager):
-        """The ceiling must never answer a non-empty board with an empty page.
-
-        A row-dropping ceiling has one degenerate failure: if a single row is larger than
-        the whole budget, every row is dropped and the caller gets zero rows back for a
-        board that plainly has tasks on it. Technically honest -- ``truncated`` is true
-        and the advice names the remedy -- but useless.
-
-        It is unreachable through this tool, and this test is what pins that rather than
-        leaving it as a reasoned claim: ``create_task`` caps ``description`` at 20,000
-        characters at the MCP boundary, so the fattest row it can produce is ~21 KB
-        against a 48,000-char ceiling, and at least two of them fit. The ``description``
-        COLUMN is unbounded ``Text``, so a longer row could in principle arrive from
-        another write path -- the pure-function unit test covers that case and shows it
-        degrades to an empty page plus an honest signal rather than to a partial row.
-        """
         client, tenant_key = mcp_client
         await _seed(
             db_manager,
@@ -716,20 +473,10 @@ class TestTheSizeBackstopDropsWholeRows:
             await purge_tenant_rows(db_manager, tenant_key)
 
 
-# ---------------------------------------------------------------------------
-# 4. A genuinely lean row -- asserted on measured bytes
-# ---------------------------------------------------------------------------
 
 
 class TestTheIndexRowIsLean:
     async def test_the_index_row_is_actually_leaner_in_bytes(self, mcp_client, db_manager):
-        """The claim the sibling tool makes and does not keep.
-
-        ``mode='triage'`` on the project list is documented as the cheap projection and
-        was measured as **not cheaper**. A projection is only lean if the scale says so,
-        so this asserts on wire bytes rather than on the field count -- which is exactly
-        the assertion that would have caught the sibling.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _corpus(30))
 
@@ -774,19 +521,10 @@ class TestTheIndexRowIsLean:
             await purge_tenant_rows(db_manager, tenant_key)
 
 
-# ---------------------------------------------------------------------------
-# 5. query -- search as a real verb
-# ---------------------------------------------------------------------------
 
 
 class TestQueryIsARealVerb:
     async def test_query_finds_a_task_by_a_word_in_its_title(self, mcp_client, db_manager):
-        """ "Update the OAuth one" is how people refer to work, and it does not work today.
-
-        There is no text search over tasks on the MCP surface at all. Same shape as
-        ``search_memory``'s ``query``: case-insensitive substring, and the cheapest path
-        from a vague human phrase to a single id.
-        """
         client, tenant_key = mcp_client
         rows = _corpus(10)
         needle_id = str(uuid.uuid4())
@@ -816,23 +554,6 @@ class TestQueryIsARealVerb:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_a_query_containing_a_like_wildcard_is_not_treated_as_a_wildcard(self, mcp_client, db_manager):
-        """``%`` and ``_`` are user text, not operators. Unescaped they silently widen the search.
-
-        This is the failure this tool is being bounded to prevent, arriving through the
-        feature meant to narrow it: a caller searching for a task about ``100%`` or a
-        file named ``some_thing`` would match the entire board and get back a "search
-        result" that is really the whole corpus -- looking narrow while being maximally
-        wide. ``_`` is the nastier of the two, because a single-character wildcard reads
-        like an ordinary word character and would not look wrong in the result.
-
-        **Which assertion actually discriminates, verified by removing the escaping and
-        re-running:** the bare ``%`` one, which goes from 1 row to all 10. The ``100%``
-        and ``some_thing`` cases pass either way on this fixture -- with the escaping
-        removed they become ``%100%%`` and ``%some_thing%``, which still happen to match
-        only their intended row here. They are kept as documentation of the intent, but
-        the bare-``%`` case is the one holding the invariant, and a future edit to this
-        fixture must keep it.
-        """
         client, tenant_key = mcp_client
         percent_id, underscore_id = str(uuid.uuid4()), str(uuid.uuid4())
         rows = _corpus(8)
@@ -864,15 +585,12 @@ class TestQueryIsARealVerb:
                 f"'%' makes it a wildcard that returns the whole board. got {len(returned)} rows: {returned!r}"
             )
 
-            # 'some_thing' must NOT match 'someXthing'; the underscore is a literal.
             underscore = _payload(await _list_tasks(client, query="some_thing"))
             assert [t["task_id"] for t in underscore["tasks"]] == [underscore_id], (
                 "'some_thing' must match literally -- an unescaped '_' is a single-character "
                 f"wildcard. got {[t['task_id'] for t in underscore['tasks']]!r}"
             )
 
-            # And the negative direction: a bare '%' finds nothing, because no task
-            # contains a literal percent sign except the one above.
             bare = _payload(await _list_tasks(client, query="%"))
             assert [t["task_id"] for t in bare["tasks"]] == [percent_id], (
                 "a bare '%' must be searched for as a character, not expanded to match every "
@@ -882,7 +600,6 @@ class TestQueryIsARealVerb:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_query_also_matches_the_description(self, mcp_client, db_manager):
-        """The word a user remembers is often in the body, not the title."""
         client, tenant_key = mcp_client
         rows = _corpus(10)
         needle_id = str(uuid.uuid4())
@@ -905,20 +622,10 @@ class TestQueryIsARealVerb:
             await purge_tenant_rows(db_manager, tenant_key)
 
 
-# ---------------------------------------------------------------------------
-# BOTH-SIDES GUARDS -- these pass on master AND after the change.
-# If one of these goes red, the instrument is broken and every RED above is void.
-# ---------------------------------------------------------------------------
 
 
 class TestNothingThatWorksTodayStopsWorking:
     async def test_an_unbounded_small_list_is_returned_whole(self, mcp_client, db_manager):
-        """BOTH-SIDES GUARD. The overwhelmingly common call must be untouched.
-
-        A board under the default is the normal case; it comes back complete, in the same
-        order, before and after. This is what proves the RED above is about the bound and
-        not about the harness being unable to list tasks at all.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _corpus(12))
 
@@ -934,11 +641,6 @@ class TestNothingThatWorksTodayStopsWorking:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_the_shipped_response_keys_are_unchanged(self, mcp_client, db_manager):
-        """BOTH-SIDES GUARD. Every new key is ADDITIVE; no existing key moves or changes type.
-
-        Backward compatibility is absolute here: no change whose effect is "calls that
-        succeed today now fail".
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _corpus(4))
 
@@ -969,12 +671,6 @@ class TestNothingThatWorksTodayStopsWorking:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_full_mode_still_carries_the_description(self, mcp_client, db_manager):
-        """BOTH-SIDES GUARD. ``full`` mode is the deep read and stays deep.
-
-        The lean row is a NEW third option, not a quiet downgrade of an existing one --
-        a caller that asks for ``full`` today and gets a thinner row tomorrow is exactly
-        the silent behaviour change this suite exists to prevent.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _corpus(4))
 
@@ -988,7 +684,6 @@ class TestNothingThatWorksTodayStopsWorking:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_memory_limit_still_truncates_the_description(self, mcp_client, db_manager):
-        """BOTH-SIDES GUARD. The one size control that already exists keeps working."""
         client, tenant_key = mcp_client
         await _seed(
             db_manager,

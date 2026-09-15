@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression test for INF-5076: orchestrator complete_job must not emit the
-git-commits warning.
-
-Orchestrators are coordinators, not committers. Commits flow through
-close_project_and_update_memory(git_commits=[...]) on the next call. The
-previous behaviour appended a warning on every correctly-structured closeout,
-producing noise in transcripts (observed in INF-5070 closeout 2026-05-14).
-
-Service-layer coverage is sufficient here — the warning is built inside
-JobCompletionService, not in a transport-wrapper.
-"""
 
 from __future__ import annotations
 
@@ -121,10 +110,6 @@ async def test_orchestrator_complete_job_no_git_warning(
     test_tenant_key: str,
     active_project: Project,
 ):
-    """Orchestrator complete_job without 'commits' in result must NOT append
-    the git-commits warning. Commits flow through close_project_and_update_memory
-    on the next call.
-    """
     job = await _seed_orchestrator(db_session, test_tenant_key, active_project.id)
 
     result = await completion_service.complete_job(
@@ -147,9 +132,6 @@ async def test_orchestrator_complete_job_closeout_checklist_still_built(
     test_tenant_key: str,
     active_project: Project,
 ):
-    """Dropping the git-commits warning must NOT regress the closeout_checklist
-    payload — orchestrators still need the checklist to guide closeout.
-    """
     job = await _seed_orchestrator(db_session, test_tenant_key, active_project.id)
 
     result = await completion_service.complete_job(

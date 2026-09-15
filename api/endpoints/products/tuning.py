@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Product Context Tuning Endpoints - Handover 0831
-
-Handles tuning prompt generation and section eligibility for on-demand
-product context drift detection. Proposals are applied directly by the MCP
-tool after user review in the CLI — no dashboard review flow.
-"""
 
 import logging
 from uuid import UUID
@@ -29,7 +22,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# --- Request/Response Models ---
 
 
 class GeneratePromptRequest(BaseModel):
@@ -47,11 +39,9 @@ class EligibleSectionsResponse(BaseModel):
     sections: list[str]
 
 
-# --- Helper ---
 
 
 def _validate_product_id(product_id: str) -> None:
-    """Validate product_id UUID format."""
     try:
         UUID(product_id)
     except ValueError as e:
@@ -59,7 +49,6 @@ def _validate_product_id(product_id: str) -> None:
 
 
 async def _get_tuning_service(current_user: User, db_manager) -> ProductTuningService:
-    """Create a ProductTuningService with WebSocket manager from app state."""
     from api.app_state import state
 
     ws_manager = getattr(state, "websocket_manager", None)
@@ -70,7 +59,6 @@ async def _get_tuning_service(current_user: User, db_manager) -> ProductTuningSe
     )
 
 
-# --- Endpoints ---
 
 
 @router.get("/{product_id}/tuning/sections")

@@ -1,13 +1,3 @@
-/**
- * tasks.spec.js — FE-9501c (D9)
- *
- * The Tasks filter clobber: a WS-driven refresh must replay the LAST
- * fetchTasks() params (product_id / filter_type), not refetch paramless and
- * reset the user's filter out from under them. Mirrors projects.js's
- * _lastListOpts/refreshList pattern.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 
@@ -50,8 +40,6 @@ describe('tasks store — FE-9501c (D9) refreshList replays the last filter', ()
 
     await taskStore.refreshList()
 
-    // The bug this guards: a WS handler calling fetchTasks() with no args here
-    // would drop filter_type/status and refetch the unfiltered default set.
     const calledWith = mockTasksList.mock.calls[0][0]
     expect(calledWith).toMatchObject({ filter_type: 'all_tasks', status: 'completed' })
   })
@@ -60,7 +48,7 @@ describe('tasks store — FE-9501c (D9) refreshList replays the last filter', ()
     const productStore = useProductStore()
     productStore.$patch({ currentProductId: 'prod-1' })
     const taskStore = useTaskStore()
-    await taskStore.fetchTasks({}) // auto-adds product_id: 'prod-1'
+    await taskStore.fetchTasks({})
     mockTasksList.mockClear()
 
     await taskStore.refreshList()
@@ -70,7 +58,7 @@ describe('tasks store — FE-9501c (D9) refreshList replays the last filter', ()
 
   it('a bare fetchTasks() with no prior call still works and is remembered', async () => {
     const taskStore = useTaskStore()
-    await taskStore.refreshList() // no prior fetchTasks() call yet
+    await taskStore.refreshList()
     expect(mockTasksList).toHaveBeenCalledWith({})
   })
 })

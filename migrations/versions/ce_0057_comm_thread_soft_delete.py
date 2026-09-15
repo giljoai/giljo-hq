@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Add comm_threads.deleted_at (soft delete for the Agent Message Hub) — FE/BE Hub delete.
-
-Revision ID: ce_0057_comm_thread_soft_delete
-Revises: ce_0056_server_runtime_metrics
-Create Date: 2026-06-18
-
-Adds a nullable ``deleted_at`` timestamp to ``comm_threads`` so threads can be
-removed from the Message Hub without destroying their message history. NULL = a
-live thread; non-NULL = soft-deleted (filtered out of every read). The CHT serial
-counter keeps counting deleted rows, so a freed serial is never reused.
-
-Idempotent (column-existence guard) because the CE installer reruns migrations on
-every boot; reversible (downgrade drops the column). No backfill — existing rows
-default to NULL (live), which is the correct pre-feature state.
-"""
 
 import sqlalchemy as sa
 from alembic import op

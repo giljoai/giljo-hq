@@ -4,10 +4,11 @@ Cross-platform installation scripts for token-efficient MCP downloads (Handover 
 
 ## Overview
 
-This directory contains 4 production-ready installation scripts that users can download and execute to install Giljo HQ components:
+This directory contains 2 production-ready installation scripts that users can download and execute to install Giljo HQ components:
 
 1. **Slash Commands Installers** - Install Claude Code slash commands to `~/.claude/commands/`
-2. **Agent Templates Installers** - Install AI agent templates to product or personal directories
+
+Agent templates are not installed as files: agents receive their profile from the server when a job starts.
 
 ## Scripts
 
@@ -27,28 +28,6 @@ bash install_slash_commands.sh
 
 # Windows PowerShell
 powershell -ExecutionPolicy Bypass -File install_slash_commands.ps1
-```
-
-### Agent Templates Installation
-
-| Script | Platform | Lines | Description |
-|--------|----------|-------|-------------|
-| `install_agent_templates.sh` | Unix/Linux/macOS | 68 | Bash installer for agent templates |
-| `install_agent_templates.ps1` | Windows | 77 | PowerShell installer for agent templates |
-
-**Target Directories**:
-- **Product**: `$(pwd)/.claude/agents/` (current project only)
-- **Personal**: `$HOME/.claude/agents/` (all projects)
-
-**Usage**:
-```bash
-# Unix/Linux/macOS
-bash install_agent_templates.sh product    # Install to current project
-bash install_agent_templates.sh personal   # Install to personal folder
-
-# Windows PowerShell
-powershell -ExecutionPolicy Bypass -File install_agent_templates.ps1 product
-powershell -ExecutionPolicy Bypass -File install_agent_templates.ps1 personal
 ```
 
 ## Features
@@ -80,15 +59,8 @@ All scripts implement the following production-grade features:
 - ✅ Clear instructions for next steps
 
 ### Data Safety
-- ✅ Automatic backups before overwriting (agent templates only)
-- ✅ Timestamp-based backup names (`_backup_20231103_215400`)
 - ✅ Automatic temp directory cleanup
 - ✅ Exit traps ensure cleanup on interruption
-
-### Installation Types (Agent Templates Only)
-- ✅ **Product** (default): Install to current project (`./.claude/agents/`)
-- ✅ **Personal**: Install to personal folder (`~/.claude/agents/`)
-- ✅ Command-line parameter support
 
 ## Template Rendering
 
@@ -134,7 +106,6 @@ All scripts have been validated for syntax correctness:
 ### Bash Scripts
 ```bash
 bash -n install_slash_commands.sh      # ✓ Syntax OK
-bash -n install_agent_templates.sh     # ✓ Syntax OK
 ```
 
 ### PowerShell Scripts
@@ -156,8 +127,6 @@ bash -n install_agent_templates.sh     # ✓ Syntax OK
 - ✓ API key validation in all scripts
 - ✓ Cleanup mechanisms (traps/finally blocks) in all scripts
 - ✓ Colored output in all scripts
-- ✓ Backup functionality in agent template scripts
-- ✓ Installation type support in agent template scripts
 - ✓ Cross-platform path handling (no hardcoded paths)
 
 ### Error Handling Verification
@@ -172,11 +141,9 @@ Backend endpoints must implement:
 1. **Template Rendering**: Replace `{{SERVER_URL}}` with actual server URL
 2. **Download Endpoints**:
    - `GET /api/download/slash-commands.zip` - Returns slash commands ZIP
-   - `GET /api/download/agent-templates.zip?active_only=true` - Returns agent templates ZIP
-3. **Authentication**: Slash commands + install scripts are public; agent templates are optional-auth (JWT cookie or X-API-Key)
+3. **Authentication**: Slash commands + install scripts are public
 4. **ZIP Archive Structure**:
    - Slash commands: Flat structure with `*.md` files
-   - Agent templates: Flat structure with `*.md` files
 
 ## File Locations
 
@@ -190,44 +157,3 @@ $HOME/.claude/commands/
 ├── gil_launch.md
 └── gil_handover.md
 ```
-
-### Agent Templates (Product)
-```
-$(pwd)/.claude/agents/
-├── orchestrator.md
-├── implementer.md
-├── tester.md
-├── reviewer.md
-├── documenter.md
-└── debugger.md
-```
-
-### Agent Templates (Personal)
-```
-$HOME/.claude/agents/
-├── orchestrator.md
-├── implementer.md
-├── tester.md
-├── reviewer.md
-├── documenter.md
-└── debugger.md
-```
-
-## Summary
-
-| Metric | Value |
-|--------|-------|
-| **Total Scripts** | 4 |
-| **Total Lines of Code** | 266 |
-| **Platforms Supported** | Windows, macOS, Linux, WSL, Git Bash |
-| **Syntax Validation** | ✓ All passed |
-| **Cross-Platform Testing** | ✓ Completed |
-| **Error Handling** | ✓ Verified |
-| **Ready for Integration** | ✓ Yes |
-
-## Next Steps
-
-1. **Backend Integration**: Implement download endpoints with template rendering
-2. **UI Integration**: Add "Download Install Script" buttons in Settings → MCP Configuration
-3. **Documentation**: Update user guide with installation instructions
-4. **Testing**: Test actual download and installation flow end-to-end

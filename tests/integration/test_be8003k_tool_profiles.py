@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-8003k — server-enforced tool PROFILES (core / standard / full).
-
-Profiles are a curated tool-name lens evaluated ALONGSIDE the 3 API-0021b auth
-scopes: the effective set is the intersection scope-filter ∩ profile. Per the
-CLAUDE.md failing-layer rule, the enforcement lives at the FastMCP transport
-boundary (the tools/list filter + the tools/call dispatch gate) and in the
-``_base`` resolver, so these tests drive that boundary — a roster-style lock on
-core, a byte-identity floor on full, and a dispatch-gate rejection for an
-out-of-profile call — mirroring test_mcp_scope_filtering.py's S4-S9.
-
-Parallel-safe: no DB writes, no module-level mutable state; each test pins its
-own profile/scope via the ``profile_mcp_client`` holder. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -27,10 +14,6 @@ import pytest_asyncio
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
-# The exact 14-tool "one tool per intent" guided loop (EM decision, BE-8003k;
-# BE-9017 added health_check as every prompt's step-1 fresh-connect probe).
-# Hardcoded here as the ROSTER LOCK: a change to the core profile must break this
-# test deliberately, not slip through.
 _EXPECTED_CORE = frozenset(
     {
         "health_check",
@@ -50,21 +33,11 @@ _EXPECTED_CORE = frozenset(
     }
 )
 
-# The three implement-gate tools that must be server-excluded from core AND
-# standard (WO-8003k DoD #3 — turning the advisory exclusion into an enforced one).
 _IMPLEMENT_GATE_TOOLS = ("stage_project", "get_implementation_prompt", "launch_implementation")
 
 
 @pytest_asyncio.fixture
 async def profile_mcp_client(db_manager, monkeypatch):
-    """In-memory MCP client that lets each test pin a profile allow-set + scope.
-
-    Returns (new_client, holder). ``holder.scopes`` is what ``_scopes_from_request``
-    returns (None = API-key bypass, so the scope axis does not interfere with the
-    profile assertion). ``holder.profile_toolset`` is what
-    ``_profile_toolset_from_request`` returns (None = full / no restriction, a
-    frozenset = that profile).
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -84,8 +57,8 @@ async def profile_mcp_client(db_manager, monkeypatch):
     state.tool_accessor = ToolAccessor(db_manager=db_manager, tenant_manager=state.tenant_manager)
 
     class _Holder:
-        scopes: set[str] | None = None  # API-key bypass by default
-        profile_toolset: frozenset[str] | None = None  # full by default
+        scopes: set[str] | None = None
+        profile_toolset: frozenset[str] | None = None
 
     holder = _Holder()
 
@@ -105,9 +78,6 @@ async def profile_mcp_client(db_manager, monkeypatch):
         state.db_manager = prior_db_manager
 
 
-# ---------------------------------------------------------------------------
-# DoD test (a): core tools/list == the exact 14-set
-# ---------------------------------------------------------------------------
 
 
 class TestCoreProfileRoster:
@@ -126,7 +96,6 @@ class TestCoreProfileRoster:
             f"core profile saw {advertised - _EXPECTED_CORE} extra and missed {_EXPECTED_CORE - advertised}"
         )
         assert len(advertised) == 14
-        # BE-9017: health_check is step 1 of every rendered prompt — it MUST be in core.
         assert "health_check" in advertised
 
     @pytest.mark.asyncio
@@ -144,10 +113,6 @@ class TestCoreProfileRoster:
             assert gate_tool not in advertised, f"core profile leaked implement-gate tool {gate_tool}"
 
 
-# ---------------------------------------------------------------------------
-# DoD test (c): full-profile tools/list byte-identical to the current 48
-# (roster-lock parallel — full == the entire registered TOOL_SCOPES surface).
-# ---------------------------------------------------------------------------
 
 
 class TestFullProfileByteIdentity:
@@ -156,7 +121,7 @@ class TestFullProfileByteIdentity:
         from api.endpoints.mcp_sdk_server import TOOL_SCOPES
 
         new_client, holder = profile_mcp_client
-        holder.profile_toolset = None  # full == no restriction
+        holder.profile_toolset = None
 
         async with new_client() as session:
             result = await session.list_tools()
@@ -169,12 +134,8 @@ class TestFullProfileByteIdentity:
 
     @pytest.mark.asyncio
     async def test_full_profile_can_dispatch_an_implement_gate_tool(self, profile_mcp_client):
-        """A full session must NOT be profile-blocked from a tool its scope allows
-        (WO-8003k: "never let a profile block a tool the auth scopes allow for a
-        full session"). The call may still error downstream on missing state — what
-        must NOT appear is the profile-rejection text."""
         new_client, holder = profile_mcp_client
-        holder.profile_toolset = None  # full
+        holder.profile_toolset = None
 
         async with new_client() as session:
             result = await session.call_tool("launch_implementation", {"project_id": str(uuid4())})
@@ -183,10 +144,6 @@ class TestFullProfileByteIdentity:
         assert "not available in this session's tool profile" not in joined
 
 
-# ---------------------------------------------------------------------------
-# DoD test (b): an out-of-profile tools/call is rejected by the dispatch gate
-# (the same defense-in-depth the scope gate provides).
-# ---------------------------------------------------------------------------
 
 
 class TestOutOfProfileDispatchRejected:
@@ -198,8 +155,6 @@ class TestOutOfProfileDispatchRejected:
         holder.profile_toolset = _CORE_PROFILE_TOOLS
 
         async with new_client() as session:
-            # spawn_job is NOT in core -> must be rejected even though the API-key
-            # scope bypass would otherwise allow it.
             result = await session.call_tool(
                 "spawn_job", {"project_id": str(uuid4()), "agent_name": "implementer", "mission": "probe"}
             )
@@ -211,8 +166,6 @@ class TestOutOfProfileDispatchRejected:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("gate_tool", _IMPLEMENT_GATE_TOOLS)
     async def test_standard_profile_rejects_implement_gate_tools(self, profile_mcp_client, gate_tool):
-        """DoD #3 security bonus: a standard-profile session cannot call the
-        implement-gate tools — server-enforced, not advisory."""
         from api.endpoints.mcp_tools._base import _STANDARD_PROFILE_TOOLS
 
         new_client, holder = profile_mcp_client
@@ -226,62 +179,43 @@ class TestOutOfProfileDispatchRejected:
         assert "not available in this session's tool profile" in joined
 
 
-# ---------------------------------------------------------------------------
-# DoD test (d) + precedence: the profile resolver (pure, no transport).
-# ---------------------------------------------------------------------------
 
 
 class TestProfileResolverPrecedence:
     def test_api_key_default_is_full(self):
-        """DoD #4: API-key default = full -> today's behavior unchanged for every
-        existing CLI user (None == no profile restriction)."""
         from api.endpoints.mcp_tools._base import _profile_toolset_from_state
 
         assert _profile_toolset_from_state({"auth_method": "api_key"}) is None
 
     def test_jwt_without_scopes_is_standard(self):
-        """BE-9017: a scope-less jwt (no mcp:agent) still defaults to standard —
-        unchanged from before. Only mcp:agent-scoped sessions widen."""
         from api.endpoints.mcp_tools._base import _STANDARD_PROFILE_TOOLS, _profile_toolset_from_state
 
         assert _profile_toolset_from_state({"auth_method": "jwt"}) == _STANDARD_PROFILE_TOOLS
 
     def test_jwt_with_scopes_but_no_agent_is_standard(self):
-        """BE-9017: a jwt carrying read/write but NOT mcp:agent → standard (unchanged).
-        The (k) security posture for non-agent OAuth sessions is untouched."""
         from api.endpoints.mcp_tools._base import _STANDARD_PROFILE_TOOLS, _profile_toolset_from_state
 
         state = {"auth_method": "jwt", "scopes": ["mcp:read", "mcp:write"]}
         assert _profile_toolset_from_state(state) == _STANDARD_PROFILE_TOOLS
 
     def test_jwt_with_mcp_agent_is_orchestrator(self):
-        """BE-9017 core fix: a jwt/OAuth session carrying mcp:agent (Desktop /
-        connector / OAuth CLI default scope) → orchestrator, NOT standard. This is
-        what unblocks the human-ferried orchestrator flow at staging step 2."""
         from api.endpoints.mcp_tools._base import _ORCHESTRATOR_PROFILE_TOOLS, _profile_toolset_from_state
 
         state = {"auth_method": "jwt", "scopes": ["mcp:read", "mcp:write", "mcp:agent"]}
         assert _profile_toolset_from_state(state) == _ORCHESTRATOR_PROFILE_TOOLS
 
     def test_jwt_with_mcp_agent_as_space_string_is_orchestrator(self):
-        """BE-9017: the resolver tolerates a space-delimited scope string too, not
-        just a list — a future auth path can't silently break the membership check."""
         from api.endpoints.mcp_tools._base import _ORCHESTRATOR_PROFILE_TOOLS, _profile_toolset_from_state
 
         state = {"auth_method": "jwt", "scopes": "mcp:read mcp:write mcp:agent"}
         assert _profile_toolset_from_state(state) == _ORCHESTRATOR_PROFILE_TOOLS
 
     def test_api_key_with_mcp_agent_is_still_full(self):
-        """BE-9017 second-order: the scope check only fires for jwt. An API-key
-        session stays full regardless of scopes (today's CLI behavior unchanged)."""
         from api.endpoints.mcp_tools._base import _profile_toolset_from_state
 
         assert _profile_toolset_from_state({"auth_method": "api_key", "scopes": ["mcp:agent"]}) is None
 
     def test_absent_auth_signal_fails_closed_to_empty(self):
-        # SEC-9126: an absent auth signal now resolves to the fail-CLOSED empty
-        # allow-set (advertise nothing, dispatch nothing), NOT the former
-        # fail-open `full` (None). api_key/jwt are the only recognized signals.
         from api.endpoints.mcp_tools._base import _profile_toolset_from_state
 
         assert _profile_toolset_from_state({}) == frozenset()
@@ -289,25 +223,16 @@ class TestProfileResolverPrecedence:
     def test_declared_profile_wins_over_auth_default(self):
         from api.endpoints.mcp_tools._base import _CORE_PROFILE_TOOLS, _profile_toolset_from_state
 
-        # A jwt session (default standard) that DECLARES core -> core wins.
         state = {"auth_method": "jwt", "tool_profile": "core"}
         assert _profile_toolset_from_state(state) == _CORE_PROFILE_TOOLS
 
     def test_declared_full_no_longer_widens_a_jwt_session(self):
-        """A client-declared profile may only NARROW a session's auth-derived
-        toolset, never widen it -- `clientInfo` is client-authored and untrusted, so
-        a declared `full` must clamp to the auth-derived baseline rather than reach
-        the unrestricted sentinel. This holds for every profile tier."""
         from api.endpoints.mcp_tools._base import _STANDARD_PROFILE_TOOLS, _profile_toolset_from_state
 
-        # jwt without mcp:agent: baseline is standard: full-declared clamps to it.
         state = {"auth_method": "jwt", "tool_profile": "full"}
         assert _profile_toolset_from_state(state) == _STANDARD_PROFILE_TOOLS
 
     def test_declared_full_clamps_a_jwt_agent_session_to_orchestrator(self):
-        """A jwt+mcp:agent session declaring `full` must clamp to the
-        `orchestrator` baseline: the declaration cannot widen it. Admission of the
-        launch gate is a separate, setting-driven channel."""
         from api.endpoints.mcp_tools._base import _ORCHESTRATOR_PROFILE_TOOLS, _profile_toolset_from_state
 
         state = {"auth_method": "jwt", "scopes": ["mcp:read", "mcp:write", "mcp:agent"], "tool_profile": "full"}
@@ -316,43 +241,27 @@ class TestProfileResolverPrecedence:
         assert "launch_implementation" not in resolved
 
     def test_declared_full_still_widens_an_api_key_session(self):
-        """The api_key baseline is already unbounded (None), so declaring `full`
-        there is a no-op widen -- unaffected by the BE-9499c narrow-only rule, and
-        an api_key declaring a KNOWN narrower profile (e.g. core) still narrows."""
         from api.endpoints.mcp_tools._base import _profile_toolset_from_state
 
         assert _profile_toolset_from_state({"auth_method": "api_key", "tool_profile": "full"}) is None
 
     def test_declared_orchestrator_does_not_widen_a_standard_jwt_session(self):
-        """A jwt session WITHOUT mcp:agent (baseline standard) declaring the wider
-        `orchestrator` profile must clamp back to standard -- the same narrow-only
-        rule applies to every profile pair, not just full."""
         from api.endpoints.mcp_tools._base import _STANDARD_PROFILE_TOOLS, _profile_toolset_from_state
 
         state = {"auth_method": "jwt", "tool_profile": "orchestrator"}
         assert _profile_toolset_from_state(state) == _STANDARD_PROFILE_TOOLS
 
     def test_garbage_declared_profile_degrades_to_auth_default(self):
-        # A garbage declared profile still degrades to the AUTH-DERIVED default
-        # (WO-8003k DoD #2 — untouchable). SEC-9126 amendment 1: the auth default
-        # is now fail-CLOSED for an unrecognized signal, so a garbage declaration
-        # can never widen an unknown caller to the full surface.
         from api.endpoints.mcp_tools._base import _STANDARD_PROFILE_TOOLS, _profile_toolset_from_state
 
-        # jwt (recognized) => standard, unchanged.
         assert _profile_toolset_from_state({"auth_method": "jwt", "tool_profile": "not_a_real_profile"}) == (
             _STANDARD_PROFILE_TOOLS
         )
-        # unknown/absent auth signal => the fail-closed empty set (was full/None).
         assert _profile_toolset_from_state(
             {"auth_method": "future-auth-path", "tool_profile": "not_a_real_profile"}
         ) == (frozenset())
 
 
-# ---------------------------------------------------------------------------
-# Profile-set integrity: every profile tool is a registered tool; core is the
-# exact 14; standard is a superset of core that excludes the gate tools.
-# ---------------------------------------------------------------------------
 
 
 class TestProfileSetIntegrity:
@@ -389,22 +298,14 @@ class TestProfileSetIntegrity:
         assert TOOL_PROFILES[PROFILE_FULL] is None
 
 
-# ---------------------------------------------------------------------------
-# BE-9017: the orchestrator profile (jwt + mcp:agent default) + the MANDATORY
-# transport-layer regression — the field bug was in the LIVE tools/list filter,
-# so these drive the actual filtered list, not just set membership.
-# ---------------------------------------------------------------------------
 
-# The connector/human-ferried orchestrator flow needs these visible at staging
-# step 2 — their absence (health_check + get_staging_instructions + spawn_job) is
-# exactly what the Desktop OAuth field test caught.
 _ORCHESTRATOR_MUST_SEE = (
     "health_check",
     "get_staging_instructions",
     "spawn_job",
     "update_project_mission",
     "stage_project",
-    "get_implementation_prompt",  # kept IN: read-only + already gate-gated (BE-9017 fork)
+    "get_implementation_prompt",
 )
 
 
@@ -415,8 +316,6 @@ class TestOrchestratorProfileSet:
 
         assert frozenset({"launch_implementation"}) == _LAUNCH_GATE_TOOLS
         assert frozenset(TOOL_SCOPES) - _LAUNCH_GATE_TOOLS == _ORCHESTRATOR_PROFILE_TOOLS
-        # launch_implementation (the ONLY human-gate writer) is out; the two prep/
-        # read tools stay in (fork decision — they cannot flip the gate).
         assert "launch_implementation" not in _ORCHESTRATOR_PROFILE_TOOLS
         assert "stage_project" in _ORCHESTRATOR_PROFILE_TOOLS
         assert "get_implementation_prompt" in _ORCHESTRATOR_PROFILE_TOOLS
@@ -431,8 +330,6 @@ class TestOrchestratorProfileSet:
         assert TOOL_PROFILES[PROFILE_ORCHESTRATOR] == _ORCHESTRATOR_PROFILE_TOOLS
 
     def test_every_profile_contains_health_check(self):
-        """Two-sided: health_check is reachable from EVERY profile (core/standard/
-        orchestrator explicitly; full via the None no-restriction sentinel)."""
         from api.endpoints.mcp_tools._base import (
             PROFILE_CORE,
             PROFILE_FULL,
@@ -443,14 +340,10 @@ class TestOrchestratorProfileSet:
 
         for name in (PROFILE_CORE, PROFILE_STANDARD, PROFILE_ORCHESTRATOR):
             assert "health_check" in TOOL_PROFILES[name], f"{name} missing health_check"
-        # full == None (no restriction) so health_check is never filtered out.
         assert TOOL_PROFILES[PROFILE_FULL] is None
 
 
 class TestOrchestratorProfileTransportRegression:
-    """The load-bearing regression: through the REAL tools/list filter, assert the
-    ACTUAL advertised set an orchestrator (jwt + mcp:agent) session receives — the
-    filter was the failing layer, so set membership alone is not enough."""
 
     @pytest.mark.asyncio
     async def test_orchestrator_tools_list_shows_connector_flow_hides_launch(self, profile_mcp_client):
@@ -469,9 +362,6 @@ class TestOrchestratorProfileTransportRegression:
 
     @pytest.mark.asyncio
     async def test_resolver_output_feeds_the_filter_end_to_end(self, profile_mcp_client):
-        """Chain the resolver → the live filter: resolve the profile for a jwt +
-        mcp:agent state, pin THAT exact result, and assert the actual list. Proves
-        the scope→orchestrator mapping and the filter agree on the real surface."""
         from api.endpoints.mcp_tools._base import _profile_toolset_from_state
 
         resolved = _profile_toolset_from_state({"auth_method": "jwt", "scopes": ["mcp:read", "mcp:write", "mcp:agent"]})
@@ -488,8 +378,6 @@ class TestOrchestratorProfileTransportRegression:
 
     @pytest.mark.asyncio
     async def test_orchestrator_dispatch_rejects_launch_implementation(self, profile_mcp_client):
-        """Defense-in-depth: even a crafted tools/call to launch_implementation is
-        server-rejected for an orchestrator session (the gate stays sacred)."""
         from api.endpoints.mcp_tools._base import _ORCHESTRATOR_PROFILE_TOOLS
 
         new_client, holder = profile_mcp_client
@@ -504,9 +392,6 @@ class TestOrchestratorProfileTransportRegression:
 
     @pytest.mark.asyncio
     async def test_orchestrator_can_dispatch_stage_project(self, profile_mcp_client):
-        """Two-sided: keeping stage_project IN means an orchestrator session is NOT
-        profile-blocked from it (it may error downstream on missing state — what must
-        NOT appear is the profile-rejection text). Guards the BE-9015 flow."""
         new_client, holder = profile_mcp_client
         from api.endpoints.mcp_tools._base import _ORCHESTRATOR_PROFILE_TOOLS
 
@@ -519,10 +404,6 @@ class TestOrchestratorProfileTransportRegression:
         assert "not available in this session's tool profile" not in joined
 
 
-# ---------------------------------------------------------------------------
-# Declared-profile capture: the middleware stamps the (d) client_info hint onto
-# ASGI state, at the layer that plumbing lives (no second declaration mechanism).
-# ---------------------------------------------------------------------------
 
 
 class TestDeclaredProfileStamping:
@@ -559,13 +440,6 @@ class TestDeclaredProfileStamping:
         assert "tool_profile" not in scope["state"]
 
 
-# ---------------------------------------------------------------------------
-# EM gate ask (WO-8003k DONE review): ONE end-to-end proof of the DECLARED tier
-# through the real middleware — initialize persists giljo_tool_profile via the
-# INF-8003d client_info capture; the NEXT request loads the session row,
-# _stamp_declared_profile stamps request state, and the resolver yields the
-# exact core set. Closes the "proven by composition" seam with real wiring.
-# ---------------------------------------------------------------------------
 class TestDeclaredProfileEndToEnd:
     @pytest.mark.asyncio
     async def test_declared_core_profile_survives_initialize_to_next_request(self, db_manager, monkeypatch):

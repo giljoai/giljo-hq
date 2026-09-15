@@ -3,31 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6008: staged-agent mailboxes -- nullable job mission + 'staged' status.
-
-Revision ID: ce_0042_staged_agent_mailboxes
-Revises: ce_0041_tenant_skills_ack
-Create Date: 2026-06-04
-
-Two CE-table changes enabling the two-phase spawn (create messageable agent
-first, write the mission second):
-
-1. ``agent_jobs.mission`` becomes nullable. A Phase-1 spawn creates the job row
-   (FK target for the execution) before the orchestrator authors the mission.
-
-2. ``agent_executions.status`` gains ``'staged'`` -- the pre-mission state. An
-   agent in ``staged`` is messageable (it has an ``agent_id``) but the play
-   button is locked until the Phase-2 mission write transitions it to
-   ``waiting``.
-
-Idempotent: the mission ALTER is guarded by a NOT NULL inspection; the status
-CheckConstraint is dropped-and-recreated (the drop is existence-guarded). The CE
-installer reruns ``alembic upgrade head`` on every boot.
-
-Edition Scope: CE -- both ``agent_jobs`` and ``agent_executions`` are CE tables;
-this migration lives in ``migrations/versions/`` (NOT ``saas_versions/``). SaaS
-inherits both changes unchanged.
-"""
 
 import sqlalchemy as sa
 from alembic import op

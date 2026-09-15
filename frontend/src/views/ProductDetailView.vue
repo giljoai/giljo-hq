@@ -60,11 +60,6 @@ async function fetchProduct(id) {
   }
 }
 
-// FE-9000e: DefaultLayout's router-view now keys on the matched route record,
-// not the resolved path, so a param-only nav (e.g. /products/A -> /products/B)
-// reuses this instance instead of remounting it. Refetch on param change to
-// avoid showing the previous product's stale data (mirrors the FE-6174b
-// pattern in ProjectLaunchView.vue).
 watch(
   () => route.params.id,
   (newId) => {

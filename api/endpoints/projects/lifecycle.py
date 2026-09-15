@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Project Lifecycle Endpoints - Handover 0125 & 0504
-
-Handles project lifecycle operations:
-- POST /{project_id}/activate - Activate project (Handover 0504)
-- POST /{project_id}/deactivate - Deactivate project (Handover 0504)
-- POST /{project_id}/cancel - Cancel project
-- POST /{project_id}/restore - Restore cancelled project
-- POST /{project_id}/cancel-staging - Cancel staging phase (Handover 0504)
-- POST /{project_id}/restage - Reset staging and create fresh orchestrator
-- POST /{project_id}/unstage - Revert from 'staged' to ready (before agent contact)
-- POST /{project_id}/launch - Launch orchestrator (Handover 0504)
-- POST /{project_id}/archive - Archive completed project (Handover 0412)
-- DELETE /{project_id} - Soft delete project
-- DELETE /deleted - Purge all deleted projects
-- DELETE /{project_id}/purge - Nuclear purge single deleted project
-
-All operations use ProjectService.
-"""
 
 import logging
 from datetime import UTC, datetime
@@ -50,18 +31,6 @@ router = APIRouter()
 
 
 def _build_project_response(proj, agents=None) -> ProjectResponse:
-    """Build a ProjectResponse from a ProjectDetail DTO.
-
-    Centralises the ProjectDetail-to-ProjectResponse mapping used by every
-    lifecycle endpoint so the field list is maintained in exactly one place.
-
-    Args:
-        proj: ProjectDetail DTO returned by ProjectService.get_project().
-        agents: Optional list of agent dicts. Defaults to an empty list.
-
-    Returns:
-        A fully populated ProjectResponse.
-    """
     if agents is None:
         agents = []
     return ProjectResponse(
@@ -119,12 +88,10 @@ async def activate_project(
         sanitize(force),
     )
 
-    # Activate via ProjectService (raises exceptions on error - Handover 0730b)
     await project_service.activate_project(project_id=project_id, force=force, tenant_key=current_user.tenant_key)
 
     logger.info("Activated project %s", sanitize(project_id))
 
-    # Get full project details with agents (raises exceptions on error)
     proj = await project_service.get_project(project_id=project_id, tenant_key=current_user.tenant_key)
 
     return _build_project_response(proj)
@@ -155,12 +122,10 @@ async def deactivate_project(
     """
     logger.info("User %s deactivating project %s", sanitize(current_user.username), sanitize(project_id))
 
-    # Deactivate via ProjectService (raises exceptions on error - Handover 0730b)
     await project_service.deactivate_project(project_id=project_id, tenant_key=current_user.tenant_key)
 
     logger.info("Deactivated project %s", sanitize(project_id))
 
-    # Get updated project with agents (raises exceptions on error)
     proj = await project_service.get_project(project_id=project_id, tenant_key=current_user.tenant_key)
 
     return _build_project_response(proj)
@@ -191,14 +156,12 @@ async def cancel_project(
     """
     logger.info("User %s cancelling project %s", sanitize(current_user.username), sanitize(project_id))
 
-    # Cancel via ProjectService (raises exceptions on error)
     await project_service.lifecycle.cancel_project(
         project_id=project_id, tenant_key=current_user.tenant_key, reason=reason
     )
 
     logger.info("Cancelled project %s", sanitize(project_id))
 
-    # Get updated project (raises exceptions on error)
     proj = await project_service.get_project(project_id=project_id, tenant_key=current_user.tenant_key)
 
     return _build_project_response(proj)
@@ -227,13 +190,10 @@ async def restore_project(
     """
     logger.info("User %s restoring project %s", sanitize(current_user.username), sanitize(project_id))
 
-    # Restore via ProjectService (raises exceptions on error)
-    # SECURITY: Explicit tenant_key prevents cross-tenant project restoration
     await project_service.deletion.restore_project(project_id=project_id, tenant_key=current_user.tenant_key)
 
     logger.info("Restored project %s", sanitize(project_id))
 
-    # Get updated project (raises exceptions on error)
     proj = await project_service.get_project(project_id=project_id, tenant_key=current_user.tenant_key)
 
     return _build_project_response(proj)
@@ -267,12 +227,10 @@ async def cancel_project_staging(
     """
     logger.info("User %s cancelling staging for project %s", sanitize(current_user.username), sanitize(project_id))
 
-    # Cancel staging via ProjectService (raises exceptions on error)
     await project_service.lifecycle.cancel_staging(project_id=project_id)
 
     logger.info("Cancelled staging for project %s", sanitize(project_id))
 
-    # Get updated project (raises exceptions on error)
     proj = await project_service.get_project(project_id=project_id, tenant_key=current_user.tenant_key)
 
     return _build_project_response(proj)
@@ -411,10 +369,8 @@ async def purge_all_deleted_projects(
         sanitize(product_id),
     )
 
-    # Service raises exceptions on error
     result = await project_service.deletion.purge_all_deleted_projects(product_id=product_id)
 
-    # 0731d: ProjectService returns ProjectPurgeResult typed model
     projects = [PurgedProject(**proj) for proj in result.projects]
     return ProjectPurgeResponse(
         success=True,
@@ -442,10 +398,8 @@ async def purge_deleted_project(
         sanitize(project_id),
     )
 
-    # Use nuclear delete for immediate permanent deletion (raises exceptions on error)
     result = await project_service.deletion.nuclear_delete_project(project_id)
 
-    # 0731d: ProjectService returns NuclearDeleteResult typed model
     project_info = {
         "id": project_id,
         "name": result.project_name,
@@ -488,22 +442,10 @@ async def archive_project(
     """
     logger.info("User %s archiving project %s", sanitize(current_user.username), sanitize(project_id))
 
-    # BE-9384: the four archive steps (deactivate-skip gate, early_termination
-    # selection, terminal status write, agent closure) moved into
-    # ProjectService.archive_project so the MCP terminal transition runs the SAME
-    # code instead of reaching the status write alone. Behavior here is unchanged;
-    # this endpoint is one of that service method's two callers, not its owner.
-    # BE-9539: this endpoint IS the dashboard's deliberate one-click abandon path
-    # (see the docstring above -- "wants to archive it without continuing work"),
-    # so it always passes force=True: a human just explicitly pressed Archive,
-    # which is consent enough. The MCP door defaults force=False instead, so an
-    # agent must complete closeout first or opt in explicitly.
-    # (raises exceptions on error)
     await project_service.archive_project(project_id=project_id, tenant_key=current_user.tenant_key, force=True)
 
     logger.info("Archived project %s", sanitize(project_id))
 
-    # Get updated project (raises exceptions on error)
     proj = await project_service.get_project(project_id=project_id, tenant_key=current_user.tenant_key)
 
     return _build_project_response(proj)
@@ -523,10 +465,8 @@ async def delete_project(
     """
     logger.info("User %s deleting project %s", sanitize(current_user.username), sanitize(project_id))
 
-    # Service raises exceptions on error
     result = await project_service.deletion.delete_project(project_id)
 
-    # 0731d: ProjectService returns SoftDeleteResult typed model
     return ProjectDeleteResponse(
         success=True,
         message=result.message,
@@ -562,14 +502,12 @@ async def launch_project(
     """
     logger.info("User %s launching project %s", sanitize(current_user.username), sanitize(project_id))
 
-    # Launch via ProjectService (raises exceptions on error)
     launch_data = await project_service.launch_project(
         project_id=project_id, user_id=str(current_user.id), launch_config=launch_config
     )
 
     logger.info("Launched project %s", sanitize(project_id))
 
-    # 0731d: ProjectService returns ProjectLaunchResult typed model
     return ProjectLaunchResponse(
         project_id=launch_data.project_id,
         orchestrator_job_id=launch_data.orchestrator_job_id,

@@ -1,23 +1,3 @@
-/**
- * UserGuideView.fe9503b.spec.js — FE-9503b
- *
- * The in-app guide gets a new "Driving From Your Terminal" chapter
- * (content/guide/headless-flow.md) describing the harness door alongside
- * the dashboard door.
- *
- * Source-level, not a full mount: UserGuideView.vue statically imports four
- * files under docs/ via `?raw`, and docs/ sits outside vitest's project
- * root — Vite's dev-server fs guard denies that read under test regardless
- * of vi.mock (confirmed: the denial fires before the mock resolves), which
- * is why this view has never had a full-mount unit test. Verifying the
- * import + wiring by source text (same pattern as
- * useActiveProductReconciliation.mount-site.spec.js) proves the chapter is
- * actually wired in without needing docs/ fs access.
- *
- * The chapter content itself is asserted directly against the real file.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'

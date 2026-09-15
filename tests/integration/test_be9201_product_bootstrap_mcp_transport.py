@@ -3,27 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Transport-layer regression tests for the BE-9201 product-bootstrap MCP tools.
-
-The BE-5042 lesson: a tool can pass every service-layer test yet fail at the
-FastMCP ``@mcp.tool`` wrapper (never register, mangle kwargs, drop tenant_key).
-These tests drive ``create_product`` and ``create_vision_document`` THROUGH the
-in-memory MCP transport — the exact layer the tools were added at.
-
-What this file does NOT do: re-test ProductService / ProductVisionService
-internals (duplicate-name rejection shapes, chunking mechanics, consolidation
-hashing). Function-layer coverage lives in
-``tests/services/test_be9201_product_bootstrap.py``.
-
-Pattern reference: ``tests/integration/test_task_tools_mcp_transport.py`` —
-same in-memory ``create_connected_server_and_client_session`` transport, same
-``_resolve_tenant`` monkeypatch (the in-memory transport has no HTTP scope /
-auth middleware). Delta: the ToolAccessor is constructed with
-``test_session=db_session`` so the BE-9201 adapters (which build
-ProductService / ProductVisionService per call honoring ``self._test_session``)
-share the test's transactional session.
-"""
 
 from __future__ import annotations
 
@@ -44,7 +23,6 @@ pytestmark = pytest.mark.asyncio
 
 
 def _payload(call_tool_result) -> dict:
-    """Decode a CallToolResult into a dict (mirrors the harness helper)."""
     if getattr(call_tool_result, "structuredContent", None):
         return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
@@ -55,7 +33,6 @@ def _payload(call_tool_result) -> dict:
 
 
 def _error_text(call_tool_result) -> str:
-    """Concatenate error text blocks from an error CallToolResult."""
     parts = []
     for block in call_tool_result.content:
         text = getattr(block, "text", None)
@@ -75,7 +52,6 @@ async def secondary_tenant_key() -> str:
 
 
 class _TenantSwitch:
-    """Mutable holder so tests can flip the resolved tenant_key per call."""
 
     def __init__(self, value: str):
         self.value = value
@@ -83,13 +59,6 @@ class _TenantSwitch:
 
 @pytest_asyncio.fixture
 async def bootstrap_mcp_client(db_manager, db_session, primary_tenant_key, monkeypatch):
-    """Yield ``(new_client, tenant_switch)`` against the live FastMCP server.
-
-    The accessor carries ``test_session=db_session`` so the BE-9201 adapters'
-    per-call ProductService / ProductVisionService constructions join the
-    test's transaction (writes visible to the test's own queries, rolled back
-    at teardown).
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -128,9 +97,6 @@ async def bootstrap_mcp_client(db_manager, db_session, primary_tenant_key, monke
         state.db_manager = prior_db_manager
 
 
-# ---------------------------------------------------------------------------
-# create_product wrapper
-# ---------------------------------------------------------------------------
 
 
 async def test_create_product_happy_path(bootstrap_mcp_client, db_session, primary_tenant_key):
@@ -148,13 +114,9 @@ async def test_create_product_happy_path(bootstrap_mcp_client, db_session, prima
     assert payload["success"] is True
     assert payload["product_id"]
     assert payload["name"] == name
-    # FE-9524/D1: a bootstrapped product is shown by default -- no on/off
-    # ceremony left for the user to perform.
     assert payload["is_active"] is True
     assert payload["target_platforms"] == ["all"]
 
-    # The row landed tenant-scoped. (tenant_session_context authorizes this
-    # test's own tenant-predicated select against the guard.)
     with tenant_session_context(db_session, primary_tenant_key):
         row = (
             await db_session.execute(
@@ -215,7 +177,6 @@ async def test_create_product_invalid_platform_is_actionable_error(bootstrap_mcp
 
 
 async def test_create_product_whitespace_name_rejected(bootstrap_mcp_client):
-    """min_length=1 catches '' at the FastMCP boundary; the adapter catches '  '."""
     new_client, _switch = bootstrap_mcp_client
 
     async with new_client() as session:
@@ -225,9 +186,6 @@ async def test_create_product_whitespace_name_rejected(bootstrap_mcp_client):
     assert "name" in _error_text(result).lower()
 
 
-# ---------------------------------------------------------------------------
-# create_vision_document wrapper
-# ---------------------------------------------------------------------------
 
 
 async def _create_product_via_tool(new_client) -> str:
@@ -254,8 +212,6 @@ async def test_create_vision_document_happy_path(bootstrap_mcp_client, db_sessio
     assert payload["document_id"]
     assert payload["document_name"] == "Product Vision.md"
 
-    # The doc landed through the SAME ingest path the REST upload uses:
-    # inline storage, active, tenant-scoped.
     with tenant_session_context(db_session, primary_tenant_key):
         doc = (
             await db_session.execute(
@@ -271,8 +227,6 @@ async def test_create_vision_document_happy_path(bootstrap_mcp_client, db_sessio
         assert doc.is_active is True
         assert doc.vision_document == content
 
-        # BE-5118 parity with the REST upload: a fresh unsummarized doc keeps
-        # the completion flag FALSE until the agent writes summaries.
         product = (await db_session.execute(select(Product).where(Product.id == product_id))).scalar_one()
         assert product.vision_analysis_complete is False
 
@@ -281,7 +235,6 @@ async def test_create_vision_document_default_name_and_md_append(bootstrap_mcp_c
     new_client, _switch = bootstrap_mcp_client
     product_id = await _create_product_via_tool(new_client)
 
-    # Omitted name -> the agent default.
     async with new_client() as session:
         result = await session.call_tool(
             "create_vision_document",
@@ -290,7 +243,6 @@ async def test_create_vision_document_default_name_and_md_append(bootstrap_mcp_c
     assert result.is_error is False, _error_text(result)
     assert _payload(result)["document_name"] == "Agent Vision.md"
 
-    # Extensionless name -> .md appended (UI upload allowlist parity).
     async with new_client() as session:
         result2 = await session.call_tool(
             "create_vision_document",
@@ -301,7 +253,6 @@ async def test_create_vision_document_default_name_and_md_append(bootstrap_mcp_c
 
 
 async def test_create_vision_document_blank_content_rejected(bootstrap_mcp_client):
-    """min_length=1 catches '' at the boundary; the tool-function catches '  '."""
     new_client, _switch = bootstrap_mcp_client
     product_id = await _create_product_via_tool(new_client)
 
@@ -328,15 +279,11 @@ async def test_create_vision_document_unknown_product_not_found(bootstrap_mcp_cl
     assert "not found" in _error_text(result).lower()
 
 
-# ---------------------------------------------------------------------------
-# Tenant isolation through the transport
-# ---------------------------------------------------------------------------
 
 
 async def test_create_vision_document_is_tenant_scoped(
     bootstrap_mcp_client, db_session, primary_tenant_key, secondary_tenant_key
 ):
-    """Tenant B must NOT be able to attach a vision doc to tenant A's product."""
     new_client, switch = bootstrap_mcp_client
 
     switch.value = primary_tenant_key
@@ -354,7 +301,6 @@ async def test_create_vision_document_is_tenant_scoped(
         "TENANT LEAK: tenant B attached a vision document to tenant A's product."
     )
 
-    # And no doc row exists for that product (checked as the owning tenant).
     with tenant_session_context(db_session, primary_tenant_key):
         docs = (
             (await db_session.execute(select(VisionDocument).where(VisionDocument.product_id == product_id)))
@@ -365,7 +311,6 @@ async def test_create_vision_document_is_tenant_scoped(
 
 
 async def test_create_product_names_are_per_tenant(bootstrap_mcp_client, primary_tenant_key, secondary_tenant_key):
-    """The duplicate-name guard is tenant-scoped: B may reuse A's product name."""
     new_client, switch = bootstrap_mcp_client
     name = f"Shared Name {uuid4().hex[:8]}"
 

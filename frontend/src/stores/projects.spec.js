@@ -1,19 +1,3 @@
-/**
- * projects.spec.js — FE-3007a
- *
- * The project store is the single normalized owner of the project ENTITY,
- * keyed by id. These specs prove the ENTITY-OWNERSHIP half of FE-3007a:
- *   - fetchProject upserts the complete entity into byId even when the project
- *     is not in the trimmed list array (store writer COMPLETE), without
- *     polluting list views with detail-only entities.
- *   - projectById prefers the complete byId entity over a trimmed list row.
- *   - a single write path (_upsertEntity) feeds both byId and the list row.
- *
- * The full-refetch-on-event WS contract is proven in
- * tests/stores/projects.handleRealtimeUpdate.spec.js.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 
@@ -55,9 +39,7 @@ describe('projects store — FE-3007a normalized entity owner (byId)', () => {
     const result = await store.fetchProject('p1')
 
     expect(result.id).toBe('p1')
-    // Not injected into the trimmed list array (no pollution of list views)…
     expect(store.projects).toHaveLength(0)
-    // …but addressable as the complete entity by id.
     expect(store.projectById('p1')).toMatchObject({
       name: 'Detail',
       description: 'full',
@@ -68,7 +50,6 @@ describe('projects store — FE-3007a normalized entity owner (byId)', () => {
 
   it('projectById prefers the complete byId entity over a trimmed list row', async () => {
     const store = useProjectStore()
-    // Seed a trimmed list row (no description/mission — ProjectListResponse).
     store.projects.push({ id: 'p1', name: 'List Row', status: 'active' })
     expect(store.projectById('p1').description).toBeUndefined()
 
@@ -80,7 +61,6 @@ describe('projects store — FE-3007a normalized entity owner (byId)', () => {
     const entity = store.projectById('p1')
     expect(entity.description).toBe('full')
     expect(entity.mission).toBe('m')
-    // The list row is kept in sync too (single write path feeds both).
     expect(store.projects[0].description).toBe('full')
   })
 
@@ -96,9 +76,6 @@ describe('projects store — FE-3007a normalized entity owner (byId)', () => {
     expect(store.projects[0].name).toBe('edited')
   })
 
-  // BE-6078: the "Show hidden" view fetches hidden rows via the server-side
-  // offload params (hidden_only + include_completed) into a separate array — it
-  // is a pure read (never re-tags) and never pollutes the visible list.
   it('fetchHiddenProjects lists hidden rows via hidden_only + include_completed', async () => {
     const store = useProjectStore()
     mockList.mockResolvedValue({ data: [{ id: 'h1', name: 'Hidden', status: 'active', hidden: true }] })
@@ -110,15 +87,9 @@ describe('projects store — FE-3007a normalized entity owner (byId)', () => {
     expect(params.include_completed).toBe(true)
     expect(store.hiddenProjects).toHaveLength(1)
     expect(store.hiddenProjects[0].id).toBe('h1')
-    // The visible list is untouched (no pollution from the hidden view).
     expect(store.projects).toHaveLength(0)
   })
 
-  // FE-9485: GET /api/v1/projects/ validates limit with `le=200` (BE-6076's
-  // deliberate page-size bound — see api/endpoints/projects/crud.py). The
-  // Supersede picker's candidate fetch must stay inside that bound or the
-  // backend 422s and the dialog can never load. Per crud.py's own docstring,
-  // omitting `limit` returns the full set, which is what the picker needs.
   const REST_LIMIT_MAX = 200
 
   it('fetchSuccessorCandidates sends a limit within the REST endpoint bound (or omits it)', async () => {
@@ -146,11 +117,6 @@ describe('projects store — FE-3007a normalized entity owner (byId)', () => {
     expect(result).toEqual([{ id: 'proj-other', name: 'Other' }])
   })
 
-  // FE-9508: `inactive` was originally swept up with the terminal statuses
-  // this filter meant to exclude (cancelled/terminated/deleted) — an inactive
-  // project is planned-and-not-yet-started and is frequently the exact thing
-  // that replaces older work. `superseded` must stay excluded (a superseded
-  // successor could loop the pointer chain).
   it('fetchSuccessorCandidates requests inactive projects as eligible successors', async () => {
     const store = useProjectStore()
     mockList.mockResolvedValue({ data: [] })
@@ -165,9 +131,6 @@ describe('projects store — FE-3007a normalized entity owner (byId)', () => {
     expect(params.statuses).not.toContain('superseded')
   })
 
-  // BE-9525a: fetchActiveProject used to call getActive() with no product scope
-  // at all, so a project active in product A made hasActiveProject true while
-  // viewing product B — incorrectly greying out product B's Activate button.
   describe('fetchActiveProject — per-product scoping (BE-9525a)', () => {
     it('scopes the read to the viewed product via effectiveProductId', async () => {
       const store = useProjectStore()

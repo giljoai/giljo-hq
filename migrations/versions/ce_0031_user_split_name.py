@@ -3,30 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Split User.full_name into first_name + last_name.
-
-Revision ID: ce_0031_user_split_name
-Revises: ce_0030_agent_executions_add_working_started_at
-Create Date: 2026-05-25
-
-Adds nullable ``first_name`` and ``last_name`` columns to the ``users``
-table. The legacy ``full_name`` column is retained for one release as a
-transition shim -- the model exposes a ``display_name`` property that
-prefers ``first_name``/``last_name`` and falls back to ``full_name`` or
-``username``. A follow-up migration will drop ``full_name`` once all
-callers have been migrated.
-
-Backfill: existing rows have ``first_name`` derived from the first
-whitespace-delimited token of ``full_name`` and ``last_name`` derived from
-the remainder. A single-token full_name yields first_name=<token>,
-last_name=NULL.
-
-Idempotency: existence-check both columns before adding, and only run
-the backfill on rows where ``first_name`` is still NULL (so re-runs are
-no-ops on already-migrated data).
-
-Edition Scope: Both -- the ``users`` table is shared between CE and SaaS.
-"""
 
 import sqlalchemy as sa
 from alembic import op
@@ -64,10 +40,6 @@ def upgrade() -> None:
             sa.Column("last_name", sa.String(length=255), nullable=True),
         )
 
-    # Backfill from legacy full_name. Idempotent: only touches rows where
-    # first_name has not yet been populated. When full_name has no
-    # whitespace, last_name stays NULL (position(' ' in full_name) = 0
-    # would otherwise yield the whole string as last_name).
     op.execute(
         sa.text(
             "UPDATE users "

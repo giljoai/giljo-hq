@@ -29,7 +29,7 @@ working on or integrating with the platform.
 ## System Overview
 
 ```
-AI Coding Tool (Claude Code / Codex CLI / Gemini CLI)
+AI Coding Tool (Claude Code / Codex CLI)
         |
         | MCP over HTTP/SSE
         v
@@ -52,7 +52,7 @@ AI Coding Tool (Claude Code / Codex CLI / Gemini CLI)
    Vue 3 Frontend (browser)
 ```
 
-**AI coding tool:** Claude Code, Codex CLI, Gemini CLI, or any MCP-compatible client.
+**AI coding tool:** Claude Code, Codex CLI, or any MCP-compatible client.
 Connects to the MCP endpoint using an API key. Sends tool calls over HTTP/SSE.
 
 **FastAPI server:** Handles all HTTP traffic. Exposes MCP tool endpoints, REST API
@@ -282,8 +282,8 @@ on top of this foundation.
 
 For the architecture-level rules that endpoints must follow when handling tenant
 data (admin-gate vs. tenant-scope, the role/mode orthogonality invariant, the
-property-A/property-B regression discipline), see
-[`docs/architecture/tenant_scoping_rules.md`](architecture/tenant_scoping_rules.md).
+property-A/property-B regression discipline), the rules are summarized in the
+Passive-Server Property section above and enforced by the test suite.
 
 ---
 
@@ -310,7 +310,7 @@ Three concrete, code-verifiable claims:
 
 1. **No LLM inference server-side.** No import of `anthropic`, `openai`,
    `cohere`, `mistralai`, `replicate`, `together`, `google.generativeai`, or
-   `google.genai` anywhere in `src/giljo_mcp/`, `api/`, or `ops_panel/`. No LLM
+   `google.genai` anywhere in the server source tree. No LLM
    API-key environment variables referenced. Vision document summarization is
    performed by the user's AI coding tool (via the `get_vision_doc` MCP tool);
    the server stores results but runs no inference.
@@ -337,7 +337,7 @@ Three concrete, code-verifiable claims:
 ### LLM locality
 
 Inference runs on the user's own machine via their MCP-compatible client
-(Claude Code, Codex CLI, Gemini CLI, or any other MCP tool). Tokens are paid
+(Claude Code, Codex CLI, or any other MCP tool). Tokens are paid
 from the user's own API key. The server sees only structured tool calls and
 their structured results — never raw model prompts, completions, embeddings,
 or reasoning traces. "Your code and prompts never leave your machine for AI
@@ -402,9 +402,8 @@ notes, messages).
 - **Cross-tenant leakage is not reachable from user content.** Every
   repository query filters by `tenant_key`. An agent cannot read another
   tenant's data even if its prompt is hijacked. The architecture-level rules
-  that guarantee this invariant are codified in
-  [`docs/architecture/tenant_scoping_rules.md`](architecture/tenant_scoping_rules.md)
-  (Rules 1–5, shipped SEC-0005a/b/c).
+  that guarantee this invariant (Rules 1–5, shipped SEC-0005a/b/c) are enforced
+  by the tenant-isolation test suite.
 
 ### Rate-limit threat model
 
@@ -449,7 +448,7 @@ well-behaved clients can self-pace.
 
 ### Cross-tenant rendering in operator views
 
-Super-admin and ops-panel views render user content from multiple tenants
+Administrative views render user content from multiple tenants
 inside a single trusted browser session. This is the only place where
 content from tenant A can reach the DOM of operator B. All user-content
 rendering paths must route through the shared DOMPurify sanitizer. See
@@ -471,8 +470,8 @@ SEC-0003 (admin-view XSS hardening) for the active enforcement.
 - **SEC-0002 passive-server audit** — the grep-evidence backing every claim in
   this section is enumerated inline in the Passive-Server Property definition
   above; the full audit is retained as an internal operator artifact.
-- [`docs/architecture/tenant_scoping_rules.md`](architecture/tenant_scoping_rules.md)
-  — tenant-isolation invariants (SEC-0005a/b/c).
+- Tenant-scoping rules (SEC-0005a/b/c) — tenant-isolation invariants; enforced by
+  the test suite rather than by a separate document.
 - SEC-0004 classic web-stack grep audit (2026-Q2) — zero UNSAFE findings on
   `eval`, `exec`, `pickle`, `yaml.load`, `shell=True`, `os.system`,
   `os.popen`.

@@ -1,9 +1,3 @@
-/**
- * TasksTable.spec.js — FE-6006 unit 3b
- *
- * Tests the task data table presentational component.
- * Edition scope: CE
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
@@ -34,8 +28,6 @@ const stubs = {
     props: ['items', 'loading', 'headers'],
   },
   'v-card': { template: '<div class="v-card"><slot /></div>' },
-  // Vuetify 4 select slot contract: `item` is the raw value, `internalItem` is the
-  // wrapper exposing `.value` (see FE-6013). Bind both so the stub matches v4.
   'v-select': { template: '<div class="v-select"><slot name="selection" v-bind="{ item: modelValue, internalItem: { value: modelValue } }" /></div>', props: ['modelValue'] },
   'v-icon': { template: '<i class="v-icon"><slot /></i>' },
   'v-btn': { template: '<button class="v-btn" v-bind="$attrs"><slot /></button>' },
@@ -93,16 +85,12 @@ describe('TasksTable', () => {
 
   it('passes tasks to data table (items rendered)', () => {
     const wrapper = mountTable()
-    // The stub renders data-table div; tasks are passed as :items
     expect(wrapper.find('[data-table]').exists()).toBe(true)
-    // Component received task data (check via wrapper HTML contains task title)
-    // The stub doesn't render slot content, so just verify component mounted
     expect(wrapper.exists()).toBe(true)
   })
 
   it('shows loading state when loading is true', () => {
     const wrapper = mountTable({ loading: true })
-    // Verify component mounted and prop passed
     expect(wrapper.find('[data-table]').exists()).toBe(true)
     expect(wrapper.exists()).toBe(true)
   })
@@ -116,8 +104,6 @@ describe('TasksTable', () => {
     }
   })
 
-  // BE-2002: archived (hidden) rows carry a visible "Archived" badge so search
-  // results that include archived tasks are clearly tagged.
   const titleSlotStubs = {
     ...stubs,
     'v-data-table': {

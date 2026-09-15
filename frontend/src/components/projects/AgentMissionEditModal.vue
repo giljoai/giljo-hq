@@ -1,7 +1,6 @@
 <template>
   <v-dialog v-model="isOpen" max-width="900" persistent scrollable>
     <v-card v-draggable class="smooth-border">
-      <!-- Header -->
       <div class="dlg-header">
         <div
           class="agent-badge-sq"
@@ -27,7 +26,6 @@
 
       <v-divider></v-divider>
 
-      <!-- Mission Editor -->
       <v-card-text class="pa-4">
         <v-alert
           v-if="error"
@@ -58,7 +56,6 @@
           </template>
         </v-textarea>
 
-        <!-- Helper Text -->
         <v-alert type="info" variant="tonal" density="compact" class="mt-2">
           <div class="text-body-small">
             <strong>Important:</strong>
@@ -72,7 +69,6 @@
           </div>
         </v-alert>
 
-        <!-- Execution Count (if succession has occurred) -->
         <v-alert
           v-if="executionCount > 1"
           type="warning"
@@ -90,7 +86,6 @@
 
       <v-divider></v-divider>
 
-      <!-- Actions -->
       <div class="dlg-footer">
         <v-btn
           variant="text"
@@ -122,7 +117,6 @@
     </v-card>
   </v-dialog>
 
-  <!-- Unsaved Changes Confirmation -->
   <v-dialog v-model="showDiscardDialog" max-width="400" persistent z-index="2600">
     <v-card class="smooth-border">
       <div class="dlg-header dlg-header--warning">
@@ -165,20 +159,16 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'mission-updated'])
 
-// Get API instance (use injected $api if available, otherwise use imported api)
 const instance = getCurrentInstance()
 const apiClient = instance?.appContext.config.globalProperties.$api || api
 
-// State
 const missionText = ref('')
 const originalMission = ref('')
 const loading = ref(false)
-// BE-9416: true while a truncated mission is being topped up by the store.
 const missionPending = ref(false)
 const error = ref(null)
 const showDiscardDialog = ref(false)
 
-// Computed
 const isOpen = computed({
   get: () => props.modelValue,
   set: (val) => emit('update:modelValue', val),
@@ -211,36 +201,17 @@ const agentTintedBg = computed(() => {
 
 const agentAbbr = computed(() => getAgentInitials(props.agent?.agent_display_name))
 
-// Validation rules
 const missionRules = [
   (v) => !!v?.trim() || 'Mission is required',
   (v) => (v?.length || 0) <= 50000 || 'Mission must be less than 50,000 characters',
 ]
 
-// BE-9416: a mission arriving over the WebSocket may be an EXCERPT.
-//
-// agent:created / agent:mission_updated bound the mission they carry so it clears
-// the cross-worker broker's byte cap, and flag it with mission_truncated; the store
-// then fetches the full text and patches the row. Two guards, because this editor
-// SAVES what it is seeded with -- an excerpt seeded here and saved would overwrite
-// the real mission with a fragment of itself.
-//
-// 1. Never seed from a mission known to be truncated. Waiting for the top-up is the
-//    only thing that actually closes the save-back loss: a guard that merely
-//    re-seeds correctly still leaves a fast operator able to save the excerpt in
-//    the few hundred ms before the full text lands.
-// 2. Never re-seed once the operator has edited. The top-up patches the store row,
-//    which re-fires this watch; without this it would silently discard whatever
-//    they had typed. (An external agent:mission_updated could already do this on
-//    master; the top-up makes it routine rather than rare, so it is handled here.)
 watch(
   () => props.agent,
   (newAgent) => {
     if (hasChanges.value) return
 
     if (newAgent?.mission_truncated) {
-      // The full text is on its way; show the field as loading rather than
-      // presenting a fragment (or a bare empty box) as if it were the mission.
       missionPending.value = true
       missionText.value = ''
       originalMission.value = ''
@@ -261,7 +232,6 @@ watch(
   { immediate: true }
 )
 
-// Methods
 async function saveMission() {
   if (!isValid.value || !hasChanges.value) return
 
@@ -274,16 +244,13 @@ async function saveMission() {
     })
 
     if (response.data.success) {
-      // Update original mission to reflect saved state
       originalMission.value = missionText.value
 
-      // Emit event for parent to update
       emit('mission-updated', {
         jobId: props.agent.id,
         mission: missionText.value,
       })
 
-      // Close modal
       isOpen.value = false
     }
   } catch (err) {

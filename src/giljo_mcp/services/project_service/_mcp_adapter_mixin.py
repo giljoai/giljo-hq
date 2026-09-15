@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""MCP-tool adapter mixin for ProjectService (BE-6042c split; BE-6005 list path carved out).
-
-Holds the agent-facing MCP WRITE entry points (create / update-metadata) plus the
-CTX bootstrap render helper. The agent-facing READ path (``list_projects_for_mcp``
-and its projection helpers) lives in the sibling ``McpAdapterQueryMixin``
-(``_mcp_adapter_query_mixin.py``); ``ProjectService`` composes both. References
-``self.*`` / ``self._*`` only. The ``_VALID_*`` / ``_MODE_TO_PROJECTION`` /
-``_MEMORY_LIMIT_CAP`` class attributes and the ``_get_valid_project_types`` /
-``_extract_git_commits`` helpers it calls live on the base class and resolve via
-the MRO. Behavior is byte-identical to the pre-split single-file class.
-"""
 
 import logging
 from typing import Any
@@ -34,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 
 class McpAdapterMixin:
-    """Agent-facing MCP tool entry points + projection helpers. Composed into ProjectService."""
 
     async def create_project_for_mcp(
         self,
@@ -49,10 +37,6 @@ class McpAdapterMixin:
         bootstrap_template_vars: dict[str, Any] | None = None,
         websocket_manager: Any | None = None,
     ) -> dict[str, Any]:
-        """Create a project via MCP tool (validation + active product resolution).
-
-        Pushed down from ToolAccessor.create_project (sprint 002f).
-        """
         if not name or not name.strip():
             raise ValidationError(
                 "Project name is required and cannot be empty.",
@@ -81,10 +65,6 @@ class McpAdapterMixin:
                     context={"operation": "create_project", "valid_types": valid_types},
                 )
 
-        # BE-9411: an explicitly supplied product_id is agent input and is
-        # validated as belonging to this tenant before anything is written; an
-        # omitted one resolves to the active product exactly as before. The
-        # resolver never falls back from a bad id to the active product.
         from giljo_mcp.services.product_service import ProductService
 
         product_service = ProductService(
@@ -99,10 +79,6 @@ class McpAdapterMixin:
         product_id = bound_product.id
         product_name = bound_product.name
 
-        # BE-5122: CTX project_type renders its mission from the CTX bootstrap
-        # template using product + vision-input state. The dict is mandatory
-        # (even if empty) so callers signal intent explicitly; an absent dict
-        # produces a clean 422, never a stale agent prompt.
         if resolved_type_label == "CTX":
             mission = await self.render_ctx_bootstrap_mission(
                 product_id=product_id,
@@ -149,20 +125,12 @@ class McpAdapterMixin:
             "mission": project.mission,
             "status": project.status,
             "product_id": project.product_id,
-            # BE-9411: name the landing, not just its id. An agent can then
-            # self-check where a create actually went for one field read —
-            # which is what the misfiling incident had no way to do.
             "product_name": product_name,
             "project_type": resolved_type_label,
             "series_number": project.series_number or 0,
             "taxonomy_alias": project.taxonomy_alias,
-            # BE-9326: create_project now returns a ProjectDetail whose timestamps
-            # are already ISO strings (the MCP wire format), not datetimes.
             "created_at": project.created_at,
             "message": f"Project '{project.name}' created successfully",
-            # BE-6049d: advertise that numbering is automatic so agents stop
-            # supplying series_number. The serial is minted continue-upward on a
-            # single global (tenant, product) line shared with tasks.
             "numbering": (
                 "auto-assigned (continue-upward, global across all types and tasks); you do not pick the series_number"
             ),
@@ -178,14 +146,6 @@ class McpAdapterMixin:
         tenant_key: str,
         bootstrap_template_vars: dict[str, Any] | None,
     ) -> str:
-        """Render the CTX bootstrap template into a project mission (BE-5122).
-
-        Validates ``bootstrap_template_vars`` shape (must be a dict; optional
-        ``new_documents`` must be a list of dicts), loads the product with its
-        vision documents, computes the derived ``vision_inputs_hash``, and
-        returns the substituted prompt. Validation errors produce a clean
-        ``ValidationError`` (mapped to HTTP 422) — never a 500.
-        """
         if bootstrap_template_vars is None:
             raise ValidationError(
                 "CTX project_type requires bootstrap_template_vars (dict). "
@@ -210,8 +170,6 @@ class McpAdapterMixin:
                     "bootstrap_template_vars.new_documents accepts at most 50 entries.",
                     context={"operation": "create_project", "project_type": "CTX"},
                 )
-            # BE-5122 review F7: per-field length caps. Agent input is untrusted;
-            # a 100KB document_name would otherwise inflate the rendered mission.
             for entry in new_documents:
                 if not isinstance(entry, dict):
                     raise ValidationError(
@@ -234,10 +192,6 @@ class McpAdapterMixin:
                         )
 
         product_repo = ProductRepository()
-        # BE-5122 review F6: this opens a read-only session BEFORE the write
-        # transaction in create_project. Intentional — we pre-validate that the
-        # product exists and render the template against committed state. Do NOT
-        # collapse into a single transaction without re-checking the create flow.
         async with self._get_session(tenant_key) as session:
             product = await product_repo.get_by_id(session, tenant_key, product_id, eager_load=True)
             if product is None:
@@ -268,27 +222,6 @@ class McpAdapterMixin:
         websocket_manager: Any | None = None,
         force: bool = False,
     ) -> dict[str, Any]:
-        """Update project metadata via MCP tool (validation + tenant-scoped resolution).
-
-        Pushed down from ToolAccessor.update_project_metadata (sprint 002f).
-
-        BE-9435: the project is resolved by id within the caller's tenant, and the
-        active product plays no part -- it need not match the project's owning
-        product, and no product need be active at all. Flipping (or deselecting) the
-        active product is ordinary use, so gating an edit on it refused normal work.
-
-        BE-9499b: ``successor_project_id`` carries the supersede pointer.
-        ``status='superseded'`` with no successor (or an ineligible one) is
-        refused as a structured Tier-2 rejection, not raised -- see the
-        ``SUPERSEDE_REQUIRES_SUCCESSOR`` catch below.
-
-        BE-9539: completing a solo project runs the archive lifecycle (below),
-        which defaults to REFUSING when no closeout entry exists yet
-        (``CloseoutRequiredError``, caught below and returned as the structured
-        Tier-2 ``CLOSEOUT_BLOCKED`` rejection -- this door must complete
-        ``write_project_closeout`` first). ``force=True`` opts into archiving
-        without one, mirroring ``write_project_closeout``'s own ``force`` param.
-        """
         if not project_id or not project_id.strip():
             raise ValidationError(
                 "Project ID is required and cannot be empty.",
@@ -332,16 +265,6 @@ class McpAdapterMixin:
         effective_tenant_key = tenant_key or self.tenant_manager.get_current_tenant()
         ws = websocket_manager or self._websocket_manager
 
-        # BE-9435: this tool resolves NO active product at all -- neither to require
-        # one nor to compare against it. The tenant-scoped read below is the whole
-        # boundary: another tenant's id reads as nonexistent here.
-        #
-        # Both refusals that used to stand on this spot were designed in with the
-        # tool (2026-04-13) rather than added for any incident, and neither survived
-        # the question "what breaks without it". The mismatch refusal fired on an
-        # ordinary product flip; requiring merely SOME product to be active refused
-        # an edit for a state nothing downstream reads. update_task -- same MCP
-        # surface, same write class -- has never carried either one.
         project = await self.get_project(project_id=project_id, tenant_key=effective_tenant_key)
 
         project_type = await self._validate_taxonomy_for_update(
@@ -364,18 +287,6 @@ class McpAdapterMixin:
         if successor_project_id is not None:
             updates["successor_project_id"] = successor_project_id
 
-        # BE-9384: completing a SOLO project runs the full archive lifecycle -- the
-        # same one the dashboard's Archive button runs -- instead of the bare status
-        # write. Reaching only the status write left spawned agents stranded at
-        # 'complete' and skipped deactivation, and this tool was the only completion
-        # path an agent could reach over MCP, so the unsupported path was the only
-        # reachable one. Note the lifecycle DERIVES the terminal status from
-        # early_termination, so an early-terminated project correctly lands
-        # 'terminated' here even though the caller asked for 'completed'.
-        #
-        # A chain member keeps the bare write: its run's conductor owns member
-        # lifecycle (_closeout_finalize flips the row and marks the run entry), and
-        # rerouting it would fire a second, competing terminal transition.
         runs_archive_lifecycle = status == ProjectStatus.COMPLETED and not await self._has_active_chain_run(
             project_id, effective_tenant_key
         )
@@ -387,12 +298,6 @@ class McpAdapterMixin:
             if updates:
                 updated = await self.update_project(project_id=project_id, updates=updates, websocket_manager=ws)
         except AlreadyExistsError as e:
-            # BE-9016 (Sentry GILJOAI-BACKEND-A): the "single active project per
-            # product" conflict is an EXPECTED, agent-actionable domain rejection
-            # (BE-6081 Tier-2 carve-out) -- return it as structured content instead
-            # of letting it raise to isError. The taxonomy-duplicate AlreadyExistsError
-            # (a different, pre-existing rejection) is untouched by this branch and
-            # keeps raising unchanged.
             if e.error_code == "ANOTHER_PROJECT_ACTIVE":
                 return {
                     "success": False,
@@ -402,11 +307,6 @@ class McpAdapterMixin:
                 }
             raise
         except ValidationError as e:
-            # BE-9499b: a supersede attempt with no successor_project_id, or an
-            # ineligible one, is an EXPECTED, agent-actionable domain rejection
-            # (BE-6081 Tier-2 carve-out) -- same treatment as ANOTHER_PROJECT_ACTIVE
-            # above. Every other ValidationError (bad name length, unknown
-            # project_type, ...) is a genuine client error and keeps raising.
             if e.error_code == "SUPERSEDE_REQUIRES_SUCCESSOR":
                 return {
                     "success": False,
@@ -446,11 +346,6 @@ class McpAdapterMixin:
         effective_tenant_key: str,
         project_id: str,
     ) -> str | None:
-        """Validate + resolve project_type/series_number/subseries for
-        ``update_project_metadata_for_mcp``, including the duplicate-taxonomy
-        check. Split out to keep that function under the Guardrail-7 200-line
-        cap (BE-9499b). Returns the resolved project_type_id (or None).
-        """
         if project_type is not None:
             resolved_type = await self.get_project_type_by_label(project_type, effective_tenant_key)
             if resolved_type:
@@ -476,7 +371,6 @@ class McpAdapterMixin:
                 context={"operation": "update_project_metadata"},
             )
 
-        # Duplicate taxonomy check when any taxonomy field changes
         if any(v is not None for v in (project_type, series_number, subseries)):
             check_type_id = project_type if project_type is not None else project.project_type_id
             check_series = series_number if series_number is not None else project.series_number
@@ -494,13 +388,6 @@ class McpAdapterMixin:
         return project_type
 
     async def _has_active_chain_run(self, project_id: str, tenant_key: str) -> bool:
-        """Whether this project is a member of a live chain run (BE-9384 guard).
-
-        Read-only, and the same detector ``mark_chain_member_status`` uses:
-        ``find_active_run_for_project`` returns None on the solo path, which is the
-        common case. Local import mirrors that helper -- SequenceRunService imports
-        project models, so a module-level import would cycle.
-        """
         from giljo_mcp.services.sequence_run_service import SequenceRunService
 
         svc = SequenceRunService(
@@ -514,11 +401,6 @@ class McpAdapterMixin:
 
     @staticmethod
     def _build_closeout_blocked_rejection(project_id: str, error: CloseoutRequiredError) -> dict[str, Any]:
-        """BE-9539 (BE-6081 Tier-2 carve-out): an EXPECTED, agent-actionable domain
-        rejection -- resolve the blockers or pass force=true -- mirrors
-        ``write_project_closeout``'s own CLOSEOUT_BLOCKED shape. Extracted so
-        ``update_project_metadata_for_mcp`` stays under the 200-line guardrail.
-        """
         return {
             "success": False,
             "error": "CLOSEOUT_BLOCKED",
@@ -539,11 +421,6 @@ class McpAdapterMixin:
 
     @staticmethod
     def _build_archive_message(archived: ProjectArchiveResult) -> str:
-        """Say which lifecycle steps actually fired, rather than a fixed sentence.
-
-        The agent needs to know whether its spawned agents were closed -- that is the
-        step whose silent absence made the old path look like it had worked.
-        """
         parts = [f"Project '{archived.project.name}' completed via the archive lifecycle"]
         if archived.deactivated:
             parts.append("deactivated first")

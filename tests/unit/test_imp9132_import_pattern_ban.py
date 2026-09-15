@@ -2,18 +2,6 @@
 # Licensed under the Elastic License 2.0.
 # See LICENSE in the project root for terms.
 
-"""IMP-9132 test 4 — ban module-level TENANT_SCOPED_MODELS / TENANT_SCOPED_TABLES imports.
-
-``giljo_mcp.database.TENANT_SCOPED_MODELS`` and ``TENANT_SCOPED_TABLES`` are PEP 562
-LIVE properties (``tenant_guard.py:197-204`` — a ``__getattr__`` that returns the
-current union). A MODULE-LEVEL ``from giljo_mcp.database import TENANT_SCOPED_MODELS``
-binds the value at IMPORT time, snapshotting the pre-SaaS-registration set and missing
-every later ``register_tenant_scoped_models()`` widening (the SaaS models registered at
-startup). Readers must import inside a function so they read the live value at call time.
-
-This AST-scans ``src/`` + ``api/`` and bans the import at module scope (function-local
-imports are the sanctioned live-read pattern and are allowed).
-"""
 
 from __future__ import annotations
 
@@ -34,12 +22,6 @@ def _py_files() -> list[Path]:
 
 
 def _module_scope_nodes(node: ast.AST):
-    """Yield descendants at module scope — i.e. NOT inside a function body.
-
-    Descends into module-level ``if`` / ``try`` / ``with`` / class bodies (those run at
-    import time) but never into a function/method body (a function-local import is
-    deferred to call time — the sanctioned live-read pattern).
-    """
     for child in ast.iter_child_nodes(node):
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue

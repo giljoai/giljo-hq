@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Query-count regression for ContextRepository.search_chunks (BE-6003).
-
-The prior implementation ran one FTS query, then re-SELECTed every matched row
-individually in a Python loop — 1 + N round-trips (11 DB executions for a
-10-result search). The fix hydrates all matched rows in a single IN(...) query
-while preserving FTS rank order.
-
-This test counts cursor executions issued during a single search_chunks call and
-asserts <= 2 round-trips for a 10-result search.
-"""
 
 from __future__ import annotations
 
@@ -32,7 +22,6 @@ pytestmark = pytest.mark.asyncio
 
 @pytest_asyncio.fixture
 async def seeded_product_with_chunks(db_session, test_tenant_key):
-    """Seed a product with 12 chunks whose content matches the search term."""
     product = Product(
         id=str(uuid4()),
         name=f"Ctx Product {uuid4().hex[:6]}",
@@ -58,7 +47,6 @@ async def seeded_product_with_chunks(db_session, test_tenant_key):
 
 
 async def test_search_chunks_no_n_plus_one(db_session, db_manager, test_tenant_key, seeded_product_with_chunks):
-    """search_chunks issues <= 2 cursor executions for a 10-result search."""
     repo = ContextRepository(db_manager)
 
     sync_engine = db_manager.async_engine.sync_engine
@@ -89,7 +77,6 @@ async def test_search_chunks_no_n_plus_one(db_session, db_manager, test_tenant_k
 async def test_search_chunks_preserves_fts_rank_order(
     db_session, db_manager, test_tenant_key, seeded_product_with_chunks
 ):
-    """Hydrated ORM rows come back in the FTS rank order (chunk_order ascending here)."""
     repo = ContextRepository(db_manager)
 
     results = await repo.search_chunks(

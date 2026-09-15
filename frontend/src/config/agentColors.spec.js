@@ -1,23 +1,3 @@
-/**
- * agentColors.spec.js — FE-9490
- *
- * Regression coverage for the shared badge helpers introduced to consolidate
- * six copy-pasted initials-derivation sites and three drifting colour-key
- * priorities:
- *
- * Bug 1 — initials swallowed punctuation. Every copy split a display name on
- * `/[-_\s]+/` (or an equivalent) WITHOUT stripping other punctuation first, so
- * a parenthetical suffix like "Reviewer (Phase 5)" rendered as "R(" — a
- * literal bracket leaking into the badge.
- *
- * Bug 2 — the same agent could resolve to a different colour in different
- * views, because callers picked their own key priority (`role || display_name`
- * in the Hub composer/pill, `display_name` alone in the timeline,
- * `agent_name || agent_display_name` in the project agent rows).
- *
- * getAgentInitials() and getAgentColorKey() are the single source of truth
- * both bugs now route through.
- */
 
 import { describe, it, expect } from 'vitest'
 import { getAgentColor, getAgentColorKey, getAgentInitials } from './agentColors'

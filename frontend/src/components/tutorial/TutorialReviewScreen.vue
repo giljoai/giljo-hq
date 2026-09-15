@@ -13,14 +13,6 @@
         </div>
       </div>
 
-      <!-- FE-9320: the agent-driven doors create the card with a DELIBERATELY
-           empty name — that is what lets the agent name it (update_product_context
-           only writes product_name when the existing name is blank; locked by
-           tests/test_fe9200_tutorial_prompt_contract.py). So the name cannot be
-           pre-filled at creation. But if the agent never got to it, a fresh
-           install's very first product would go live nameless. Catch it here, at
-           the moment it becomes the user's real product. Pinned OUTSIDE the
-           scroll region so it can never be scrolled out of sight. -->
       <div v-if="needsName" class="name-fix" data-testid="tutorial-name-required">
         <label class="name-label" for="tutorial-product-name">
           Your agent did not give this product a name. Name it before activating.
@@ -99,11 +91,6 @@
       </v-btn>
     </div>
 
-    <!-- FE-9569 Part 3: "Activate product" is retired as a user-facing concept
-         (products no longer need activating -- multi-product work). This
-         subtitle keeps Ruling 19's dual-door teaching (harness AND dashboard)
-         in ONE line instead of two separate hint paragraphs. The WRITE this
-         button performs is unchanged -- see activate() below. -->
     <p class="review-post-hint" data-testid="tutorial-review-post-hint">
       You can tune the product later by asking the agent to read back your fields, and modify
       them. Or do it yourself in the app under /products &rsaquo; {{ productDisplayName }}.
@@ -117,9 +104,6 @@ import { useProductActivation } from '@/composables/useProductActivation'
 import { useProductStore } from '@/stores/products'
 
 const props = defineProps({
-  /** THE tutorial-run product id, threaded via useTutorialState (gate F1) —
-   *  this screen must NEVER re-derive products[0] (ordered is_active.desc,
-   *  i.e. the user's real active product). */
   productId: {
     type: String,
     default: null,
@@ -132,21 +116,9 @@ const productStore = useProductStore()
 
 const { toggleProductActivation } = useProductActivation(() => productStore.fetchProducts())
 
-// FE-9569: the operator flagged as unknown whether this screen live-updates
-// when the agent revises the product while the user is looking at it. It did
-// not -- `product` used to be a local `ref(null)` snapshotted once in
-// onMounted, so a later agent write was invisible even though the STORE
-// already had it (systemEventRoutes' vision:analysis_complete handler
-// write-throughs every progressive-fill write into productsById, and
-// updateProduct below does the same for a name save). Deriving `product`
-// from the store's reactive getter instead of a local snapshot means any
-// write that lands in productsById -- from this screen or from the agent's
-// CLI -- shows up here live. The mount fetch stays, only to PRIME the cache
-// for a screen the store hasn't fetched yet.
 const product = computed(() => productStore.getProductById(props.productId))
 
 onMounted(async () => {
-  // No id = no product; Activate stays disabled (never guess from the store list).
   if (!props.productId) return
   try {
     await productStore.fetchProductById(props.productId)
@@ -155,22 +127,16 @@ onMounted(async () => {
   }
 })
 
-/** Full description — the user approves the whole brief, so the whole brief
- *  is on screen. The old 220-char excerpt asked them to approve text they
- *  could not read. */
 const description = computed(() => (product.value?.description || '').trim())
 
 const str = (v) => (typeof v === 'string' ? v.trim() : '')
 
-/** Comma-separated string -> chip list (same split the old chip-row used). */
 const toChips = (v) =>
   str(v)
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
 
-/** Accordion state. Tech stack opens by default (per the approved layout);
- *  the rest start collapsed behind their one-line summaries. */
 const expanded = reactive({ tech: true, architecture: false, standards: false, testing: false })
 const toggle = (key) => {
   expanded[key] = !expanded[key]
@@ -178,11 +144,6 @@ const toggle = (key) => {
 
 const joinParts = (parts) => parts.filter(Boolean).join(' · ')
 
-/** Section rows. Field names mirror the ProductResponse serialization
- *  (api/endpoints/products/crud.py): coding_conventions rides under
- *  architecture, brand_guidelines at top level, quality_standards under
- *  test_config. Empty fields render as "Not provided" — a thin proposal
- *  must LOOK thin at the approval moment, not trimmed to its good parts. */
 const sections = computed(() => {
   const p = product.value || {}
   const ts = p.tech_stack || {}
@@ -252,10 +213,8 @@ const sections = computed(() => {
 const nameDraft = ref('')
 const nameError = ref('')
 
-/** A product the agent never named must not be activated nameless. */
 const needsName = computed(() => Boolean(product.value) && !(product.value.name || '').trim())
 
-/** Name shown in the post-Done hint's "/products › {name}" pointer. */
 const productDisplayName = computed(() => (product.value?.name || '').trim() || 'your product')
 
 async function activate() {
@@ -271,20 +230,8 @@ async function activate() {
       nameError.value = 'Could not save that name. Check your connection and try again.'
       return
     }
-    // No manual reassignment needed: updateProduct() write-throughs the
-    // server's response into productsById, and `product` (above) is derived
-    // from that same store, so it already reflects the new name here.
   }
 
-  // Already shown (e.g. the user activated it from the Products page
-  // mid-flow): toggleProductActivation would HIDE it — skip straight to
-  // done instead (gate F1's deactivation hazard). FE-9529: checks is_active
-  // (shown) only. The old check also OR'd against
-  // `productStore.activeProduct?.id === product.value.id` -- the RESOLVED
-  // DEFAULT, an unrelated concept (D2: a hidden product can be the default).
-  // That meant a hidden product that happened to be the tenant's default
-  // would short-circuit here and never actually get shown -- the exact
-  // shown/default conflation this project exists to clean up.
   if (product.value.is_active) {
     emit('activated')
     return

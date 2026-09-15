@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-E2E integration tests for the vision document analysis feature.
-
-Handover 0842e: end-to-end validation from vision-doc retrieval through
-``update_product_context`` to context-manager reads.
-
-BE-5117b: the legacy parallel write path is gone. Tests covering it moved
-to test_be_5117b_single_canonical_write_path.py. The remaining cases here
-exercise the column-based path (``VisionDocument.summary_light/medium`` +
-``Product.consolidated_vision_*``) and partial-write merge semantics for
-non-summary fields.
-"""
 
 import uuid
 from unittest.mock import AsyncMock
@@ -34,14 +22,10 @@ from giljo_mcp.repositories.vision_document_repository import VisionDocumentRepo
 from giljo_mcp.tenant import TenantManager
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture(scope="function")
 async def vision_repo(db_manager) -> VisionDocumentRepository:
-    """Create VisionDocumentRepository instance for testing."""
     return VisionDocumentRepository(db_manager)
 
 
@@ -94,9 +78,6 @@ async def vision_doc(db_session: AsyncSession, tenant_key: str, product: Product
     return doc
 
 
-# ---------------------------------------------------------------------------
-# Test 1: Full Analysis Flow on the canonical column path (BE-5117/5117b)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -107,7 +88,6 @@ async def test_e2e_full_analysis_flow(
     product: Product,
     vision_doc: VisionDocument,
 ):
-    """Round-trip: get vision doc, write across 4 tables + per-doc/aggregate summaries."""
     from giljo_mcp.tools.vision_analysis import get_vision_doc as get_vision_document
     from giljo_mcp.tools.vision_analysis import update_product_fields
 
@@ -245,9 +225,6 @@ async def test_e2e_full_analysis_flow(
     assert event["data"]["product_id"] == product.id
 
 
-# ---------------------------------------------------------------------------
-# Test 2: Partial Field Write (merge-write, no overwrite)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -258,7 +235,6 @@ async def test_e2e_partial_field_write_no_overwrite(
     product: Product,
     vision_doc: VisionDocument,
 ):
-    """Partial writes only update provided fields; subsequent writes do not null earlier fields."""
     from giljo_mcp.tools.vision_analysis import update_product_fields
 
     result1 = await update_product_fields(
@@ -334,9 +310,6 @@ async def test_e2e_partial_field_write_no_overwrite(
     assert tc.test_strategy == "BDD"
 
 
-# ---------------------------------------------------------------------------
-# Test 3: Custom Instructions in Extraction Prompt
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -347,7 +320,6 @@ async def test_e2e_custom_instructions(
     product: Product,
     vision_doc: VisionDocument,
 ):
-    """Custom instructions appear in extraction prompt; clearing them removes the section."""
     from giljo_mcp.tools.vision_analysis import get_vision_doc as get_vision_document
 
     result_with = await get_vision_document(

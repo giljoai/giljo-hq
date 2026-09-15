@@ -3,31 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""RFC 7591 OAuth 2.0 Dynamic Client Registration — Community Edition (BE-6235).
-
-``POST /api/oauth/register`` — public, rate-limited.
-
-Why this exists (STEP-0, BE-6235): OAuth-capable MCP harnesses (Claude Code et al.)
-have no path to adopt a server-advertised *static* ``client_id``. When a client_id
-isn't pre-configured they either use CIMD (needs HTTPS + a hosted metadata doc — a
-non-starter for a localhost/self-hosted box) or fall back to Dynamic Client
-Registration (RFC 7591). Without a ``registration_endpoint`` a fresh CE server
-cannot complete OAuth auto-attach, even though it already ships a built-in public
-client (``giljo-mcp-default``). This endpoint closes that gap.
-
-What it does NOT do (deliberately, unlike SaaS DCR in
-``api/saas_endpoints/oauth_register.py``): it persists NOTHING and mints NO
-per-client id. CE recognizes exactly one OAuth client — the built-in public PKCE
-client — so this endpoint always returns it. That client is already resolvable by
-the CE ``ClientResolver`` and is bound to the localhost-loopback redirect allowlist
-(RFC 8252), so ``/authorize`` + ``/token`` work for the loopback case with zero new
-state, no new table, and no migration. A CE served over HTTP on a LAN cannot OAuth
-(its non-loopback ``http`` redirect is rejected) — those clients use an API key.
-
-Edition Isolation: CE file. Never imports ``saas/``. Does NOT touch the SaaS-only
-``oauth_clients`` table (Table Existence Rule). Client resolution stays GLOBAL by
-``client_id`` (OAUTH-MT) — this endpoint adds no tenant scoping.
-"""
 
 from __future__ import annotations
 
@@ -52,21 +27,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Mirrors the SaaS DCR request caps so agent input is bounded before it reaches us.
 MAX_CLIENT_NAME_LENGTH = 255
 MAX_REDIRECT_URIS = 5
 MAX_REDIRECT_URI_LENGTH = 2048
 
-# CE recognizes only ``authorization_code`` (+ ``refresh_token`` for the rotating
-# public-client flow) and the ``code`` response type — same surface the AS metadata
-# advertises (oauth.py grant_types_supported / response_types_supported).
 _ALLOWED_GRANT_TYPES = frozenset({"authorization_code", "refresh_token"})
 _ALLOWED_RESPONSE_TYPES = frozenset({"code"})
 
-# Compiled once. The built-in client validates redirect URIs against these same
-# loopback patterns at /authorize (oauth_service.ALLOWED_REDIRECT_URI_PATTERNS), so
-# rejecting non-loopback URIs here just fails fast with a clean 422 instead of a
-# later 400 at consent.
 _LOOPBACK_PATTERNS = [re.compile(pattern) for pattern in ALLOWED_REDIRECT_URI_PATTERNS]
 
 
@@ -144,9 +111,6 @@ async def register_client(request: Request, body: CeRegistrationRequest):
     rate_limiter = get_rate_limiter()
     await rate_limiter.check_rate_limit(request, limit=limit_for("oauth_register"), window=60, raise_on_limit=True)
 
-    # Filter the requested grant/response types to CE's supported subset; fall back
-    # to the defaults when the caller omitted them or requested nothing supported
-    # (RFC 7591 §3.2.1 filter-don't-reject; the response echoes what we registered).
     grant_types = [g for g in (body.grant_types or []) if g in _ALLOWED_GRANT_TYPES] or [
         "authorization_code",
         "refresh_token",

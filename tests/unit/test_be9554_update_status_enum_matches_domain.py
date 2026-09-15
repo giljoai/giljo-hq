@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9554 -- ``update_project.status`` now carries an enum; this pins it to the domain.
-
-The enum is a ``Literal`` because it must be statically analysable, which means the
-values are restated in ``_project_tools.py`` rather than derived from the domain
-frozenset. A restated list is a snapshot, and a snapshot rots. This test imports
-``VALID_UPDATE_STATUSES`` -- the writer's OWN gate -- and asserts the served schema
-matches it exactly, so adding a settable status to the domain fails the build until
-the tool surface offers it too, and removing one fails until the tool stops offering it.
-
-It defends the invariant, not today's membership list.
-"""
 
 import asyncio
 
@@ -23,7 +12,6 @@ from giljo_mcp.domain import VALID_UPDATE_STATUSES
 
 
 def _served_status_enum() -> set[str]:
-    """The enum as an MCP client actually receives it, read off the live registered schema."""
     from api.endpoints.mcp_tools import mcp
 
     async def _read() -> set[str]:
@@ -54,8 +42,6 @@ def test_served_status_enum_matches_the_domains_settable_set() -> None:
 
 
 def test_keep_current_sentinel_is_offered() -> None:
-    """Every other update_project field uses empty-string as keep-current; status must too,
-    or an agent updating only the name would be forced to restate the status."""
     assert "" in _served_status_enum(), (
         "The empty-string keep-current sentinel must remain in the enum -- update_project "
         "is a partial-update tool and status is optional."
@@ -64,8 +50,6 @@ def test_keep_current_sentinel_is_offered() -> None:
 
 @pytest.mark.parametrize("terminal_only", ["terminated", "deleted"])
 def test_derived_terminal_states_are_not_offered_as_settable(terminal_only: str) -> None:
-    """'terminated' and 'deleted' are DERIVED/soft-delete states, not things a caller sets.
-    Offering them would invite an agent to write a status the writer does not accept."""
     assert terminal_only not in _served_status_enum(), (
         f"'{terminal_only}' is not a settable status -- it must not appear in the enum."
     )

@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tests for FE-9511's server-derived approval banner state.
-
-UserApprovalService.list_pending now returns fully-built UserApprovalRead
-rows carrying ``banner_state`` (one of VALID_APPROVAL_BANNER_STATES) and
-``taxonomy_alias``, computed from the approval's own project + requesting
-execution -- approval-scoped, not a
-product-wide scan.
-"""
 
 import random
 from datetime import UTC, datetime
@@ -30,7 +22,6 @@ from giljo_mcp.tenant import TenantManager
 
 @pytest_asyncio.fixture
 async def banner_seed(db_session, test_tenant_key):
-    """Seed a product + project + orchestrator job/execution, override-able per test."""
 
     async def _seed(*, staging_status=None, implementation_launched_at=None, execution_status="working"):
         product = Product(
@@ -135,8 +126,6 @@ async def test_staging_paused_project_reports_waiting_at_staging(approval_servic
 async def test_launched_project_at_staging_complete_is_not_waiting_at_staging(
     approval_service, banner_seed, test_tenant_key
 ):
-    # implementation_launched_at set -> Implement WAS pressed, so this must not
-    # read as "waiting at staging" even though staging_status still says complete.
     seed = await banner_seed(staging_status="staging_complete", implementation_launched_at=datetime.now(UTC))
     await _create_pending(approval_service, test_tenant_key, seed)
 
@@ -150,9 +139,6 @@ async def test_blocked_execution_reports_blocked(approval_service, banner_seed, 
     seed = await banner_seed(execution_status="working")
     await _create_pending(approval_service, test_tenant_key, seed)
 
-    # create_pending parks the execution at "awaiting_user"; simulate the
-    # separate, later transition to "blocked" (e.g. a health monitor) that can
-    # happen while the approval is still pending.
     seed["execution"].status = "blocked"
     await db_session.commit()
 
@@ -175,12 +161,10 @@ async def test_banner_state_is_always_a_member_of_the_closed_set(approval_servic
 async def test_taxonomy_alias_is_carried_on_the_payload_without_a_store_lookup(
     approval_service, banner_seed, test_tenant_key
 ):
-    """FE-9508's trap: the pill must not depend on the project already being
-    loaded client-side -- the payload itself must carry taxonomy_alias."""
     seed = await banner_seed()
     await _create_pending(approval_service, test_tenant_key, seed)
 
     reads, _ = await approval_service.list_pending(tenant_key=test_tenant_key)
 
     assert reads[0].taxonomy_alias == seed["project"].taxonomy_alias
-    assert reads[0].taxonomy_alias  # non-empty
+    assert reads[0].taxonomy_alias

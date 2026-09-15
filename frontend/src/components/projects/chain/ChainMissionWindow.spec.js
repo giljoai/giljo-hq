@@ -1,13 +1,3 @@
-/**
- * ChainMissionWindow.spec.js — FE-9538 (Ask 3)
- *
- * Pins the fix for the clipped conductor placeholder: this window caps its
- * body at max-height:180px (see the component's own style block), so its
- * empty state must render EmptyState with `compact` -- otherwise EmptyState's
- * default full-page padding+icon budget (~190px) overflows the box.
- *
- * Edition scope: Both
- */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createVuetify } from 'vuetify'

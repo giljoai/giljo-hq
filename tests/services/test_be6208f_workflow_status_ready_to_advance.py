@@ -3,27 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6208f: WorkflowStatus.ready_to_advance — single authoritative advance signal.
-
-current_stage/progress_percent report "Completed"/100% while project_closeout_at
-is still null for ~2 min (agents flip complete before the closeout writes), so
-those fields are the WRONG advance trigger for the chain conductor.
-ready_to_advance is True ONLY once closeout_executed_at is set.
-
-1. test_ready_to_advance_false_at_100_percent_without_closeout (DB-touching)
-   All agents complete (100% / "Completed") but closeout not yet run →
-   ready_to_advance is False and project_closeout_at is None.
-
-2. test_ready_to_advance_true_once_closeout_set (DB-touching)
-   closeout_executed_at set → ready_to_advance is True.
-
-3. test_ready_to_advance_is_only_added_field (DB-touching)
-   The pre-BE-6208f response fields are byte-identical; ready_to_advance is the
-   sole new key.
-
-Parallel-safe: DB-touching tests use db_session (TransactionalTestContext). No
-module-level mutable state. Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -44,8 +23,6 @@ async def _seed_project(
     *,
     closeout_executed_at: datetime | None = None,
 ) -> str:
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -101,9 +78,6 @@ def _workflow_svc(session: AsyncSession) -> WorkflowStatusService:
     return WorkflowStatusService(db_manager=None, tenant_manager=TenantManager(), test_session=session)
 
 
-# ---------------------------------------------------------------------------
-# 1. 100% / "Completed" but no closeout → ready_to_advance False
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -120,9 +94,6 @@ async def test_ready_to_advance_false_at_100_percent_without_closeout(db_session
     assert result.ready_to_advance is False
 
 
-# ---------------------------------------------------------------------------
-# 2. closeout set → ready_to_advance True
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -137,9 +108,6 @@ async def test_ready_to_advance_true_once_closeout_set(db_session: AsyncSession)
     assert result.ready_to_advance is True
 
 
-# ---------------------------------------------------------------------------
-# 3. ready_to_advance is the ONLY added field (existing response unchanged)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -167,11 +135,6 @@ async def test_ready_to_advance_is_only_added_field(db_session: AsyncSession) ->
         "project_closeout_at",
         "staging_status",
     }
-    # BE-8003a added the computed next_action envelope alongside ready_to_advance.
-    # FE-9296b added checkin_cadence_minutes (the resolved account-level cadence).
-    # BE-9541 added closed_agents (a "closed" execution was never counted anywhere,
-    # so a fully-closed solo project read as 0% / Unknown -- additive, counted
-    # alongside completed_agents rather than replacing it).
     assert set(dumped) == pre_be6208f_keys | {
         "ready_to_advance",
         "next_action",

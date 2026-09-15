@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9098: SequenceRunService.mark_member_reviewed — durable chain review ack.
-
-Regression at the SERVICE layer, where the bug lived: before this write, chain
-per-member review acknowledgment existed ONLY in a client-side Pinia Map, so it
-evaporated on refresh and the Review badge returned every page load. The fix
-persists it to ``sequence_runs.reviewed_project_ids``. These tests exercise the
-owning service directly:
-
-  * the ack is readable back (persistence — the core regression);
-  * idempotent (re-marking is a no-op, no duplicates);
-  * tenant-isolated (a foreign run is a 404, not a cross-tenant write);
-  * NON-GATING (project_statuses is never touched → purge_run / advancement
-    behaviour is unchanged);
-  * membership + input guards (422, not a 500 or unbounded growth).
-
-Parallel-safe: DB-touching tests use db_session (TransactionalTestContext). No
-module-level mutable state. Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -39,8 +21,6 @@ from tests.helpers.taxonomy_seeds import next_series_number
 
 
 async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -57,8 +37,6 @@ async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
         status="active",
         tenant_key=tenant_key,
         product_id=_owning_product_project.id,
-        # BE-9429: uq_project_taxonomy_active is NULLS NOT DISTINCT, so these
-        # NULL-product/NULL-type rows collide unless the serial differs.
         series_number=next_series_number(),
         execution_mode="claude_code_cli",
         created_at=datetime.now(UTC),
@@ -89,7 +67,6 @@ async def _make_run(session: AsyncSession, tenant: str) -> tuple[SequenceRunServ
 
 @pytest.mark.asyncio
 async def test_mark_member_reviewed_persists_and_reads_back(db_session: AsyncSession) -> None:
-    """The core regression: a review ack is durably written and reads back."""
     tenant = TenantManager.generate_tenant_key()
     svc, run, p1, _p2 = await _make_run(db_session, tenant)
     assert run["reviewed_project_ids"] == []
@@ -97,14 +74,12 @@ async def test_mark_member_reviewed_persists_and_reads_back(db_session: AsyncSes
     updated = await svc.mark_member_reviewed(run_id=run["id"], project_id=p1, tenant_key=tenant)
     assert updated["reviewed_project_ids"] == [p1]
 
-    # Read back through a fresh get() — proves it survives, not just an in-memory echo.
     refetched = await svc.get(run_id=run["id"], tenant_key=tenant)
     assert refetched["reviewed_project_ids"] == [p1]
 
 
 @pytest.mark.asyncio
 async def test_mark_member_reviewed_is_idempotent(db_session: AsyncSession) -> None:
-    """Re-marking the same member is a no-op — no duplicates, no error."""
     tenant = TenantManager.generate_tenant_key()
     svc, run, p1, _p2 = await _make_run(db_session, tenant)
 
@@ -116,7 +91,6 @@ async def test_mark_member_reviewed_is_idempotent(db_session: AsyncSession) -> N
 
 @pytest.mark.asyncio
 async def test_mark_member_reviewed_appends_multiple_members(db_session: AsyncSession) -> None:
-    """Distinct members accumulate (append-only, order preserved)."""
     tenant = TenantManager.generate_tenant_key()
     svc, run, p1, p2 = await _make_run(db_session, tenant)
 
@@ -128,9 +102,6 @@ async def test_mark_member_reviewed_appends_multiple_members(db_session: AsyncSe
 
 @pytest.mark.asyncio
 async def test_mark_member_reviewed_does_not_touch_project_statuses(db_session: AsyncSession) -> None:
-    """NON-GATING invariant: review never mutates project_statuses, so chain
-    advancement / purge_run (which key on CHAIN_TERMINAL_PROJECT_STATUSES) are
-    unaffected. 'awaiting_review' must never appear."""
     tenant = TenantManager.generate_tenant_key()
     svc, run, p1, _p2 = await _make_run(db_session, tenant)
     before = run["project_statuses"]
@@ -139,13 +110,11 @@ async def test_mark_member_reviewed_does_not_touch_project_statuses(db_session: 
 
     assert updated["project_statuses"] == before
     assert "awaiting_review" not in updated["project_statuses"].values()
-    # Every member stays terminal → purge/advancement semantics unchanged.
     assert all(st in CHAIN_TERMINAL_PROJECT_STATUSES for st in updated["project_statuses"].values())
 
 
 @pytest.mark.asyncio
 async def test_mark_member_reviewed_tenant_isolated(db_session: AsyncSession) -> None:
-    """A run created under tenant A is not markable under tenant B (404, no write)."""
     tenant_a = TenantManager.generate_tenant_key()
     tenant_b = TenantManager.generate_tenant_key()
     svc, run, p1, _p2 = await _make_run(db_session, tenant_a)
@@ -153,14 +122,12 @@ async def test_mark_member_reviewed_tenant_isolated(db_session: AsyncSession) ->
     with pytest.raises(ResourceNotFoundError):
         await svc.mark_member_reviewed(run_id=run["id"], project_id=p1, tenant_key=tenant_b)
 
-    # Tenant A's run is untouched.
     refetched = await svc.get(run_id=run["id"], tenant_key=tenant_a)
     assert refetched["reviewed_project_ids"] == []
 
 
 @pytest.mark.asyncio
 async def test_mark_member_reviewed_rejects_non_member(db_session: AsyncSession) -> None:
-    """A project_id that is not a member of the run is a 422, not a silent write."""
     tenant = TenantManager.generate_tenant_key()
     svc, run, _p1, _p2 = await _make_run(db_session, tenant)
 
@@ -170,7 +137,6 @@ async def test_mark_member_reviewed_rejects_non_member(db_session: AsyncSession)
 
 @pytest.mark.asyncio
 async def test_mark_member_reviewed_rejects_empty_project_id(db_session: AsyncSession) -> None:
-    """An empty/blank project_id is a 422 input guard."""
     tenant = TenantManager.generate_tenant_key()
     svc, run, _p1, _p2 = await _make_run(db_session, tenant)
 
@@ -180,7 +146,6 @@ async def test_mark_member_reviewed_rejects_empty_project_id(db_session: AsyncSe
 
 @pytest.mark.asyncio
 async def test_mark_member_reviewed_unknown_run_is_404(db_session: AsyncSession) -> None:
-    """An unknown run id raises ResourceNotFoundError (-> 404)."""
     tenant = TenantManager.generate_tenant_key()
     svc = _run_svc(db_session)
 

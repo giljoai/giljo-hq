@@ -3,38 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9273 item 1 -- the REST self-heal complete_project flow must broadcast
-``agent:status_changed`` for any agent it force-decommissions, mirroring the
-BE-9246 fix already shipped for the owns_session=True MCP-tool closeout path.
-
-Root cause (see ``closeout_ws_broadcast.broadcast_agent_status_events``
-docstring, unchanged by this fix): ``close_project_and_update_memory`` is
-called from ``ProjectLifecycleService._complete_project_transaction`` with
-``session=session`` (that inner call's ``owns_session`` is False from ITS
-perspective, since ``_complete_project_transaction`` owns the commit), so it
-must NOT broadcast from inside itself -- a broadcast there could announce a
-status a rollback in the OUTER caller could still undo. Before this fix, the
-outer caller never picked up the slack: the force-decommission events it
-computed were simply discarded, so the REST "Complete Project" dashboard
-action force-decommissioning a straggler agent left that agent's dashboard
-tile stale until a manual refresh.
-
-Fix: ``close_project_and_update_memory`` grew an optional
-``decommission_events_out`` list the caller can pass to receive the raw
-events; ``_complete_project_transaction`` passes one, then -- ONLY after its
-own ``session.commit()`` actually lands -- broadcasts them via the SAME
-``broadcast_agent_status_events`` helper BE-9246 introduced.
-
-Failing layer: SERVICE (``ProjectLifecycleService.complete_project``), driven
-end-to-end against a real committing session (mirrors
-``test_be9256_lifecycle_success_check.py`` / test 5 of
-``test_be9246_closeout_ws_broadcast.py``) so the commit-then-broadcast
-ordering is genuinely observable -- the rollback-isolated ``db_session``
-fixture cannot demonstrate a real commit.
-
-Parallel-safe: unique tenant_key per test, real db_manager session cleaned up
-via ``purge_tenant_rows``. Edition Scope: Both (CE closeout core).
-"""
 
 from __future__ import annotations
 
@@ -103,15 +71,6 @@ async def _seed_execution(
 
 
 async def test_rest_selfheal_complete_project_broadcasts_status_changed_post_commit(db_manager) -> None:
-    """The REST dashboard "Complete Project" action force-decommissions any
-    still-active straggler agent (``close_project_and_update_memory(force=True)``).
-    Before BE-9273 that decommission landed in the DB with zero WebSocket
-    signal, so the dashboard agent tile stayed stale. This drives
-    ``ProjectLifecycleService.complete_project`` (the exact REST
-    /{project_id}/complete call shape: no db_session, so it owns and commits
-    its own transaction) and proves the broadcast fires once that commit has
-    genuinely landed.
-    """
     tenant_key = TenantManager.generate_tenant_key()
     TenantManager.set_current_tenant(tenant_key)
     try:
@@ -166,11 +125,8 @@ async def test_rest_selfheal_complete_project_broadcasts_status_changed_post_com
         assert event["job_id"] == job_id
         assert event["old_status"] == "working"
         assert event["status"] == "decommissioned"
-        # BE-9518: the force-decommission agent:status_changed must carry product_id too.
         assert event["product_id"] == product.id
 
-        # BE-9518: the project_update broadcast (status_changed -> completed) must
-        # carry product_id so a per-tab WS router can filter on it.
         mock_ws.broadcast_project_update.assert_awaited_once()
         assert mock_ws.broadcast_project_update.await_args.kwargs["project_data"]["product_id"] == product.id
     finally:
@@ -179,8 +135,6 @@ async def test_rest_selfheal_complete_project_broadcasts_status_changed_post_com
 
 
 async def test_rest_selfheal_complete_project_no_agents_emits_nothing(db_manager) -> None:
-    """No active agents to decommission -> no events, no broadcast call at all
-    (must not emit a spurious empty event)."""
     tenant_key = TenantManager.generate_tenant_key()
     TenantManager.set_current_tenant(tenant_key)
     try:

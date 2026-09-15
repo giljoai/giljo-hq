@@ -3,35 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression test for the 'products' get_context category (BE-9523a).
-
-Product identity a: agents need to resolve a product NAME to a product_id --
-today no MCP tool can enumerate products at all. A get_context CATEGORY, not
-a new MCP tool (roster-lock name-list and count stay unchanged -- see
-test_be9452_standard_profile_roster_lock.py).
-
-Exercises the fix at the fetch_context dispatch layer: categories=['products']
-routes through ProductService.list_products (SELECT-only), tenant-scoped,
-returns every product (active AND inactive) as {id, name, is_active}.
-
-Also locks in the category's whole reason for existing: it must work with NO
-product_id and NO active product set -- every freshly created product starts
-inactive (ProductService.create_product always writes is_active=False), so a
-multi-product tenant commonly has zero active products. Before this fix,
-fetch_context's mandatory product_id resolution (_resolve_active_product_id)
-would raise ValidationError before the 'products' category's own dispatch
-ever ran, defeating the category's purpose.
-
-Also locks in the BE-9523a finding: Product.name is NOT unique per tenant
-(only idx_product_name, a plain non-unique index -- unlike the partial-unique
-slug). Two products in the same tenant CAN share a name.
-
-Parallel-safety: DB-touching; function-scoped tenant-key cleanup fixture,
-mirrors test_be9352_fetch_context_threads_category.py. No module-level
-mutable state, no test ordering dependency.
-
-Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -54,7 +25,6 @@ from giljo_mcp.tools.context_tools.get_products import get_products
 
 @pytest_asyncio.fixture
 async def cleanup_tenants(db_manager):
-    """Collect tenant_keys created by a test; delete their rows at teardown."""
     tenants: list[str] = []
     yield tenants
     for tk in tenants:
@@ -72,17 +42,10 @@ async def _create_product(db_manager, tenant_key: str, name: str, *, is_active: 
 
 
 def test_products_category_is_registered() -> None:
-    """RED-first lock: before implementation 'products' was absent from
-    CATEGORY_TOOLS, so fetch_context(categories=['products']) raised
-    ValidationError('Invalid categories...'). Locks the fix in place."""
     assert "products" in CATEGORY_TOOLS
 
 
 def test_listing_profile_did_not_grow() -> None:
-    """The category exists AND the advertised 'listing' marketplace-connector
-    profile roster count/name-list is untouched -- no standalone products
-    tool was added to reach it (this project adds zero new @mcp.tool
-    functions)."""
     from api.endpoints.mcp_tools._base import _LISTING_PROFILE_TOOLS
 
     assert "list_products" not in _LISTING_PROFILE_TOOLS
@@ -91,10 +54,6 @@ def test_listing_profile_did_not_grow() -> None:
 
 @pytest.mark.asyncio
 async def test_products_category_is_tenant_scoped(db_manager, cleanup_tenants: list[str]) -> None:
-    """Seed TWO tenants -- the only setup that can catch a dropped tenant_key
-    filter. Tenant A gets 2 products (one active, one inactive); tenant B gets
-    1. fetch_context(categories=['products']) on A must return exactly A's
-    two product ids/names/is_active flags, never B's."""
     tenant_a = TenantManager.generate_tenant_key()
     tenant_b = TenantManager.generate_tenant_key()
     cleanup_tenants.append(tenant_a)
@@ -125,10 +84,6 @@ async def test_products_category_is_tenant_scoped(db_manager, cleanup_tenants: l
 
 @pytest.mark.asyncio
 async def test_products_category_zero_products_is_empty_not_an_error(db_manager, cleanup_tenants: list[str]) -> None:
-    """A tenant with zero products gets a clean empty list -- not an error --
-    so an empty category never reads as a failure. Also proves the category
-    works with NO product_id and NO active product (the category's entire
-    reason for existing): a fresh tenant with nothing yet."""
     tenant = TenantManager.generate_tenant_key()
     cleanup_tenants.append(tenant)
 
@@ -147,12 +102,6 @@ async def test_products_category_zero_products_is_empty_not_an_error(db_manager,
 
 @pytest.mark.asyncio
 async def test_products_category_works_with_no_active_product(db_manager, cleanup_tenants: list[str]) -> None:
-    """RED-first lock for the fix in fetch_context's mandatory product_id
-    resolution: a tenant with products but NONE active (the normal state --
-    ProductService.create_product always writes is_active=False) must still
-    resolve categories=['products'] without product_id. Before the fix,
-    _resolve_active_product_id raised ValidationError('No active product set')
-    before 'products' dispatch ever ran."""
     tenant = TenantManager.generate_tenant_key()
     cleanup_tenants.append(tenant)
 
@@ -174,11 +123,6 @@ async def test_products_category_works_with_no_active_product(db_manager, cleanu
 
 @pytest.mark.asyncio
 async def test_products_category_includes_inactive_products(db_manager, cleanup_tenants: list[str]) -> None:
-    """The category is a resolver over the WHOLE tenant, not just the active
-    product -- ProductService.list_products defaults to include_inactive=False,
-    so get_products must pass include_inactive=True explicitly or inactive
-    products silently vanish from the list an agent is trying to resolve
-    against."""
     tenant = TenantManager.generate_tenant_key()
     cleanup_tenants.append(tenant)
     inactive_id = await _create_product(db_manager, tenant, "Only Inactive", is_active=False)
@@ -191,15 +135,6 @@ async def test_products_category_includes_inactive_products(db_manager, cleanup_
 
 @pytest.mark.asyncio
 async def test_product_names_are_not_unique_per_tenant(db_manager, cleanup_tenants: list[str]) -> None:
-    """BE-9523a finding: Product.name carries only a plain non-unique index
-    (idx_product_name), unlike the partial-unique slug
-    (idx_product_slug_unique_per_tenant). Two products in the SAME tenant CAN
-    share a name at the model/DB layer (ProductService.create_product does
-    reject a duplicate name via its own get_by_name pre-check, but that is a
-    service-layer guard, not a DB constraint -- a direct insert, a migration
-    backfill, or a future bypass of that service method is not stopped by the
-    schema). An agent resolving a name to an id must therefore be prepared for
-    more than one match and disambiguate by id, never assume the first hit."""
     tenant = TenantManager.generate_tenant_key()
     cleanup_tenants.append(tenant)
 
@@ -213,15 +148,6 @@ async def test_product_names_are_not_unique_per_tenant(db_manager, cleanup_tenan
 
 @pytest.mark.asyncio
 async def test_product_scoped_category_still_requires_active_product(db_manager, cleanup_tenants: list[str]) -> None:
-    """Guardrail: the fix that lets 'products' skip the active-product
-    fallback must NOT widen to a product-SCOPED category. A tenant with zero
-    active products asking for 'tech_stack' (which reads product_id) must
-    still raise the SAME ValidationError('No active product set...') it
-    raised before this PR touched shared resolution -- byte-identical
-    behaviour, same code path (_resolve_active_product_id). If the skip
-    condition were even slightly too broad, this would start returning an
-    empty tech_stack instead of refusing -- which reads as "no data" rather
-    than "you did not tell me which product"."""
     tenant = TenantManager.generate_tenant_key()
     cleanup_tenants.append(tenant)
     await _create_product(db_manager, tenant, "Inactive Only", is_active=False)
@@ -239,12 +165,6 @@ async def test_product_scoped_category_still_requires_active_product(db_manager,
 async def test_mixed_products_and_product_scoped_category_still_requires_active_product(
     db_manager, cleanup_tenants: list[str]
 ) -> None:
-    """Guardrail, the mixed case: one tenant-scoped category
-    ('products') in the request must NOT excuse a product-scoped category
-    ('tech_stack') requested alongside it. Any category outside
-    _CATEGORIES_NOT_REQUIRING_PRODUCT_ID in the list forces the same
-    active-product resolution (and the same raise) as if 'products' were
-    never asked for at all."""
     tenant = TenantManager.generate_tenant_key()
     cleanup_tenants.append(tenant)
     await _create_product(db_manager, tenant, "Inactive Only", is_active=False)
@@ -258,26 +178,8 @@ async def test_mixed_products_and_product_scoped_category_still_requires_active_
         )
 
 
-# _CATEGORIES_NOT_REQUIRING_PRODUCT_ID widens the
-# skip to FIVE other pre-existing categories beyond 'products' itself --
-# 'threads', 'self_identity', 'todos', 'project', 'chain'. Before this PR,
-# calling any of these with no product_id/project_id/active product raised
-# ValidationError('No active product set...') the moment fetch_context tried
-# to resolve one, even though none of them reads product_id at all (each has
-# its own, different requirement -- agent_name, job_id, project_id, or
-# nothing). That is a real, observable behaviour change to five shipped
-# categories.
-#
-# Parametrized over the SET ITSELF (imported, not retyped) per the
-# correction: five separately-authored tests each pin today's membership, but
-# none of them defend the INVARIANT -- drop a category from the set later and
-# every test in the file still passes, because none of them ask for it. This
-# one test fails the moment the set stops matching reality: add a category
-# to it and this test demands it work with no active product; remove one and
-# the removal is visible in the parametrize diff.
 _EXTRA_KWARGS_BY_CATEGORY = {
     "self_identity": {"agent_name": "does-not-exist"},
-    # job_id is per-call (a fresh uuid), filled in by the test itself.
 }
 
 
@@ -286,19 +188,6 @@ _EXTRA_KWARGS_BY_CATEGORY = {
 async def test_category_not_requiring_product_id_succeeds_with_no_active_product(
     category: str, db_manager, cleanup_tenants: list[str]
 ) -> None:
-    """Every category in _CATEGORIES_NOT_REQUIRING_PRODUCT_ID must resolve
-    (never raise ValidationError('No active product set...')) for a tenant
-    with zero active products and no project_id. 'project'/'chain' still
-    return their own missing-project_id error *dict* (unrelated to product
-    resolution) -- the pin is specifically that it is a returned dict, not a
-    raised exception.
-
-    Some of the underlying tools (get_self_identity, get_todos, and the
-    shared depth-config loader run for every category) open their own
-    db_manager session with no tenant_key kwarg, relying on TenantManager's
-    ambient contextvar (set by request middleware in production) -- set/reset
-    it here like a real request would, harmless for the categories that
-    don't need it."""
     tenant = TenantManager.generate_tenant_key()
     cleanup_tenants.append(tenant)
 

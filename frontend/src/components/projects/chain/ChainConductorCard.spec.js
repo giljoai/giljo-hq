@@ -1,6 +1,3 @@
-/**
- * ChainConductorCard.spec.js — FE-6199 C2
- */
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ChainConductorCard from './ChainConductorCard.vue'

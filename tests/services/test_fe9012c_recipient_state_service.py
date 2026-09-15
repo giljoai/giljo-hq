@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Service-layer tests for FE-9012c (D3/D4) — per-message recipient acted-on state.
-
-``get_thread_history(include_recipient_state=True)`` surfaces MESSAGE-relative
-junction state (recipients / acked_by / completed_by / pending_for) so the Hub's
-in-thread waiting/read/sent filter has real per-recipient data — NOT the viewer's
-own cursor (the human user is not a comm_participant with junction rows).
-
-Locks the three contracts the filter rides on:
-- pending vs acted: a directed post with no ack is ``pending_for`` the recipient;
-  once acked (the D6 mark_read drain) it moves to ``acked_by`` / out of pending.
-- completion also counts as acted (``pending_for`` excludes completed recipients).
-- default read (``include_recipient_state=False``) is byte-identical — the keys are
-  absent, and the batched junction query never runs (the MCP agent poll path).
-- tenant isolation: a junction row in another tenant NEVER leaks into the state.
-
-Real DB (rollback-isolated ``db_session``), no mocks. Parallel-safe: each test owns
-its tenant + setup; no module-level mutable state.
-"""
 
 from __future__ import annotations
 
@@ -56,8 +38,6 @@ def _msg(history: dict, message_id: str) -> dict:
 
 
 async def test_recipient_state_pending_then_acked(db_manager, db_session):
-    """A directed action-required post is pending_for its recipient until that
-    recipient's mark_read drain (D6) records an ack; then it is acked, not pending."""
     tenant = _tk("pending")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -75,7 +55,6 @@ async def test_recipient_state_pending_then_acked(db_manager, db_session):
     )
     mid = posted["message_id"]
 
-    # Before any ack: beta is a recipient with no acted-on state -> pending.
     before = await svc.get_thread_history(thread_id=tid, include_recipient_state=True, tenant_key=tenant)
     m = _msg(before, mid)
     assert m["recipients"] == ["beta"]
@@ -83,7 +62,6 @@ async def test_recipient_state_pending_then_acked(db_manager, db_session):
     assert m["completed_by"] == []
     assert m["pending_for"] == ["beta"]
 
-    # beta drains (mark_read) -> D4 ack recorded.
     await svc.get_thread_history(thread_id=tid, as_participant="beta", mark_read=True, tenant_key=tenant)
 
     after = await svc.get_thread_history(thread_id=tid, include_recipient_state=True, tenant_key=tenant)
@@ -93,7 +71,6 @@ async def test_recipient_state_pending_then_acked(db_manager, db_session):
 
 
 async def test_completion_counts_as_acted(db_manager, db_session):
-    """A completion (D4) also removes the recipient from pending_for."""
     tenant = _tk("complete")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -122,7 +99,6 @@ async def test_completion_counts_as_acted(db_manager, db_session):
 
 
 async def test_default_read_omits_recipient_state(db_manager, db_session):
-    """Without include_recipient_state the message dict is byte-identical (no keys)."""
     tenant = _tk("default")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -139,7 +115,6 @@ async def test_default_read_omits_recipient_state(db_manager, db_session):
 
 
 async def test_recipient_state_tenant_scoped(db_manager, db_session):
-    """A junction row bearing another tenant's key NEVER leaks into the state."""
     tenant = _tk("iso")
     other = _tk("iso_other")
     await _seed(db_session, tenant)
@@ -153,7 +128,6 @@ async def test_recipient_state_tenant_scoped(db_manager, db_session):
     )
     mid = posted["message_id"]
 
-    # A cross-tenant recipient row on the SAME message id must be invisible here.
     with tenant_session_context(db_session, other):
         db_session.add(MessageRecipient(id=str(uuid.uuid4()), message_id=mid, agent_id="ghost", tenant_key=other))
         await db_session.flush()

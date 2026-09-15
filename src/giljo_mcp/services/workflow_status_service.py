@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-WorkflowStatusService - Project workflow status queries.
-
-Sprint 002e: Extracted from OrchestrationService to reduce god-class size.
-get_workflow_status is completely self-contained (162 lines) -- pure read query.
-"""
 
 import logging
 from typing import Any
@@ -36,10 +30,6 @@ logger = logging.getLogger(__name__)
 
 
 class WorkflowStatusService:
-    """Service for querying project workflow status.
-
-    Extracted from OrchestrationService (Sprint 002e).
-    """
 
     def __init__(
         self,
@@ -53,7 +43,6 @@ class WorkflowStatusService:
         self._logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def _get_session(self, tenant_key: str | None = None):
-        """Yield a tenant-scoped DB session, honoring an injected test session (shared helper, BE-8000d)."""
         return optional_tenant_session(
             self.db_manager, tenant_key or self.tenant_manager.get_current_tenant(), self._test_session
         )
@@ -64,25 +53,6 @@ class WorkflowStatusService:
         tenant_key: str,
         exclude_job_id: str | None = None,
     ) -> WorkflowStatus:
-        """Get workflow status for a project.
-
-        Handover 0491: Simplified status model.
-        - Counts execution statuses (waiting, working, complete, blocked, silent, decommissioned)
-        - Job status comes from AgentJob (active, completed, cancelled)
-        - Execution status from AgentExecution (execution progress)
-
-        Args:
-            project_id: Project UUID
-            tenant_key: Tenant key for isolation
-            exclude_job_id: Optional job_id to exclude from the query
-
-        Returns:
-            WorkflowStatus with agent counts, progress, and current stage
-
-        Raises:
-            ResourceNotFoundError: Project not found
-            DatabaseError: Database operation failed
-        """
         try:
             job_repo = AgentJobRepository(None)
             ops_repo = AgentOperationsRepository()
@@ -95,19 +65,11 @@ class WorkflowStatusService:
                         context={"project_id": project_id, "tenant_key": tenant_key},
                     )
 
-                # BE-6071: get_workflow_executions now returns column-projected Row objects
-                # (named attrs incl. job_type) instead of full (AgentExecution, AgentJob) ORM tuples.
                 executions = await ops_repo.get_workflow_executions(session, tenant_key, project_id, exclude_job_id)
 
                 job_type_map = {ex.job_id: ex.job_type or "" for ex in executions}
                 active_count = sum(1 for ex in executions if ex.status == "working")
                 completed_count = sum(1 for ex in executions if ex.status == "complete")
-                # BE-9541: "closed" is a terminal-done status distinct from
-                # "complete" (see TERMINAL_EXECUTION_STATUSES), but nothing
-                # counted it -- a project whose sole agent was closed reported
-                # 0 completed / 0% / "Unknown". Counted in its own bucket AND folded into the
-                # done total below so progress/stage treat it as finished
-                # work, matching the model's own terminal-status grouping.
                 closed_count = sum(1 for ex in executions if ex.status == "closed")
                 pending_count = sum(1 for ex in executions if ex.status == "waiting")
                 blocked_count = sum(1 for ex in executions if ex.status == "blocked")
@@ -141,11 +103,6 @@ class WorkflowStatusService:
                 else:
                     caller_note = "Note: You (the calling agent) are included in the active count above."
 
-                # BE-6225c: when the project looks wedged (any blocked or silent
-                # agents), point the orchestrator at the read-only self-heal
-                # diagnostic so it naturally lands on the recovery step instead of
-                # guessing. Appended only in the wedged case -- the healthy-path
-                # caller_note is unchanged.
                 if blocked_count > 0 or silent_count > 0:
                     caller_note += (
                         " This project looks wedged (blocked/silent agents present) -- call "
@@ -153,10 +110,6 @@ class WorkflowStatusService:
                         "suggested recovery step."
                     )
 
-                # BE-8003a: computed next_action, derived ONLY from the agent counts
-                # and ready_to_advance already loaded above (no new queries). None
-                # when nothing is forced -- agents are still actively working, or
-                # nothing has been spawned yet.
                 ready_to_advance = getattr(project, "closeout_executed_at", None) is not None
                 next_action: dict[str, Any] | None = None
                 if blocked_count > 0 or silent_count > 0:
@@ -179,10 +132,6 @@ class WorkflowStatusService:
                     session, tenant_key, project_id, executions, job_type_map, ops_repo
                 )
 
-                # FE-9296b: the resolved check-in cadence (project override ->
-                # tenant override -> account default) — the live value a running
-                # orchestrator's CH6 loop re-reads every cycle, so a Settings
-                # change reaches it at its next wake. Never raises (None on failure).
                 checkin_cadence_minutes = await resolve_checkin_cadence_safe(session, tenant_key, project)
 
                 return WorkflowStatus(
@@ -198,29 +147,15 @@ class WorkflowStatusService:
                     total_agents=total_count,
                     caller_note=caller_note,
                     agents=agent_details,
-                    # BE-6013: surface the live slider state from the already-loaded
-                    # project. getattr defaults keep non-multi-terminal callers
-                    # unaffected. This is the single source of truth a running
-                    # orchestrator re-reads each check-in cycle.
                     auto_checkin_enabled=bool(getattr(project, "auto_checkin_enabled", False)),
                     auto_checkin_interval=getattr(project, "auto_checkin_interval", None),
                     checkin_cadence_minutes=checkin_cadence_minutes,
-                    # BE-6188: expose the project's closeout timestamp so the chain
-                    # conductor can poll via get_workflow_status instead of raw HTTP.
                     project_closeout_at=(
                         project.closeout_executed_at.isoformat()
                         if getattr(project, "closeout_executed_at", None) is not None
                         else None
                     ),
-                    # BE-6193: expose the project's staging_status so the chain
-                    # orchestrator's drive loop detects when a sub-orch reached
-                    # "staging_complete" (the gate-crossing signal).
                     staging_status=getattr(project, "staging_status", None),
-                    # BE-6208f: ONE authoritative advance signal for the conductor.
-                    # current_stage/progress_percent hit "Completed"/100% ~2 min
-                    # before closeout writes (agents flip complete first), so they
-                    # are the WRONG trigger. closeout_executed_at is the only field
-                    # that is non-null strictly after the closeout has run.
                     ready_to_advance=ready_to_advance,
                     next_action=next_action,
                 )
@@ -243,15 +178,6 @@ class WorkflowStatusService:
         job_type_map: dict[str, str],
         ops_repo: AgentOperationsRepository,
     ) -> list[AgentWorkflowDetail]:
-        """Build the per-agent detail list for get_workflow_status (extracted,
-        BE-9242 budget: keeps get_workflow_status under the 200-line cap).
-
-        BE-6200 (Unit F): unread_messages reads the LIVE pending count
-        (BE-9012d: same query/semantics the retired bus's receive_messages
-        self-heal used) instead of the drift-prone
-        AgentExecution.messages_waiting_count denormalized column. One
-        GROUP BY across all agents (no N+1) per aggregation below.
-        """
         if not executions:
             return []
 
@@ -260,15 +186,9 @@ class WorkflowStatusService:
 
         agent_ids = [ex.agent_id for ex in executions if ex.agent_id]
         unread_map = await ops_repo.get_live_unread_counts_by_agent(session, tenant_key, project_id, agent_ids)
-        # BE-9242 deliverable #3: the actionable subset of the badge total
-        # above, sourced from the same gate-definition query the closeout
-        # gate uses (requires_action + non-auto_generated).
         action_required_map = await ops_repo.get_live_action_required_unread_counts_by_agent(
             session, tenant_key, project_id, agent_ids
         )
-        # BE-9242 deliverable #2: per-thread breakdown of the badge total.
-        # sum(per-thread) == unread_map[agent_id] by construction (identical
-        # "unread" definition, thread_id added to group-by).
         thread_breakdown_map = await ops_repo.get_live_unread_counts_by_agent_and_thread(
             session, tenant_key, project_id, agent_ids
         )

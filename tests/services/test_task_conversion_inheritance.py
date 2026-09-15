@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""IMP-6262: Task → Project conversion STRIPS the taxonomy type.
-
-``TSK`` is task-exclusive: converting a task must NOT copy its type onto the new
-project (that would mint a TSK-typed project and reopen the task/project alias
-ambiguity). The converted project is born UNTYPED (``project_type_id IS NULL``),
-keeping the task's title + serial as its identity; the user re-tags it later.
-
-The task's ``series_number`` is preserved (the task row is hard-deleted on
-conversion, freeing that product-unique number). A serial-less task still gets a
-fresh number under the (tenant, product, NULL) bucket so the project satisfies
-``uq_project_taxonomy_active`` (NULLS NOT DISTINCT).
-
-(Supersedes BE-5065, which copied ``project_type_id`` + ``series_number`` across.)
-"""
 
 from uuid import uuid4
 
@@ -92,10 +78,6 @@ class TestTaskConversionInheritance:
         test_tenant_key: str,
         be_taxonomy: TaxonomyType,
     ):
-        """IMP-6262: a typed task converts to an UNTYPED project — the type is
-        STRIPPED (not copied), the serial + title are kept. TSK is task-exclusive,
-        so no conversion ever stamps a taxonomy onto the project; the user tags it
-        later in the dashboard."""
         user = await _admin(db_session, test_tenant_key)
         product = await _active_product(db_session, test_tenant_key)
 
@@ -124,9 +106,7 @@ class TestTaskConversionInheritance:
         )
 
         project = (await db_session.execute(select(Project).where(Project.id == result.project_id))).scalar_one()
-        # Type is STRIPPED — NOT copied from the task's BE type.
         assert project.project_type_id is None
-        # Serial + title are preserved as the untyped project's identity.
         assert project.series_number == 17
         assert project.name == "BE-0017 task"
 
@@ -174,11 +154,6 @@ class TestTaskConversionInheritance:
         db_session,
         test_tenant_key: str,
     ):
-        """The ORIGINAL incident: a task converted to a project must be born with
-        NO execution mode (NULL = not yet chosen), never silently stamped
-        'multi_terminal'. The conversion path does not set execution_mode, and the
-        column now has no default, so the user must pick a mode in the dashboard
-        before staging."""
         user = await _admin(db_session, test_tenant_key)
         product = await _active_product(db_session, test_tenant_key)
 

@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SSL / HTTPS configuration endpoints (server-level, CE-only).
-
-INF-6236: bring-your-own-cert HTTPS for CE Network settings. Split out of
-``configuration.py`` (which hit the 800-line guardrail). These routes mount on the
-SAME ``/api/v1/config`` prefix — ``configuration.py`` includes this router — so the
-public surface is unchanged (``/ssl``, ``/ssl/cert/upload``, ``/ssl/cert/reference``).
-
-The server is cert-AGNOSTIC: it loads and serves any matching PEM cert+key and never
-issues or trust-validates certificates. The SSL setting is SERVER-level (config.yaml,
-the same source uvicorn reads at startup), NOT per-tenant — Teams-readiness (ADR-009).
-"""
 
 import ssl
 from pathlib import Path
@@ -44,28 +33,16 @@ class SSLStatusResponse(BaseModel):
     key_path: str | None = None
     restart_required: bool = True
     message: str
-    # Cert details (best-effort, populated by GET /ssl when a cert is present) so the
-    # UI can show "valid until … · covers …" instead of a raw file path.
     cert_not_after: str | None = None
     cert_sans: list[str] = Field(default_factory=list)
     cert_expired: bool = False
 
 
-# Server-global cert/key files (config.yaml paths) — uvicorn reads these at startup.
 _CERTS_DIR = "certs"
-_MAX_PEM_BYTES = 64 * 1024  # a PEM cert/key chain is well under 64 KB
+_MAX_PEM_BYTES = 64 * 1024
 
 
 def _validate_cert_pair(cert_path: str, key_path: str) -> None:
-    """Confirm the PEM cert+key parse and match — the cert-AGNOSTIC server check.
-
-    INF-6236: the server neither issues nor trust-validates certificates. We only
-    verify the files load into a TLS server context (exactly what uvicorn does at
-    startup), so a malformed or mismatched cert/key is rejected with a 422-class
-    error here rather than crashing the server on the next restart. Whether the
-    cert is *trusted* is a client-side concern the operator owns (real CA, internal
-    CA, or trusting the mkcert/self-signed rootCA on each client).
-    """
     if not (Path(cert_path).exists() and Path(key_path).exists()):
         raise HTTPException(
             status_code=400,
@@ -82,7 +59,6 @@ def _validate_cert_pair(cert_path: str, key_path: str) -> None:
 
 
 def _ssl_status_from_config() -> tuple[bool, str | None, str | None, bool]:
-    """Read (ssl_enabled, cert_path, key_path, has_cert) from config.yaml (server-level)."""
     from giljo_mcp._config_io import read_config
 
     config = read_config()
@@ -94,13 +70,6 @@ def _ssl_status_from_config() -> tuple[bool, str | None, str | None, bool]:
 
 
 def _read_cert_details(cert_path: str) -> tuple[str | None, list[str], bool]:
-    """Return (not_after_iso, sans, is_expired) for a PEM cert. Best-effort — never raises.
-
-    Lets the UI show the cert's expiry + the hostnames/IPs it covers (its SubjectAltNames)
-    instead of just a raw file path. The server stays cert-agnostic: this only reads the
-    cert it was given, it does not validate trust. A malformed/unreadable cert returns
-    ``(None, [], False)`` so the status endpoint degrades gracefully.
-    """
     try:
         from datetime import UTC, datetime
 
@@ -120,7 +89,6 @@ def _read_cert_details(cert_path: str) -> tuple[str | None, list[str], bool]:
 
 
 def _write_cert_paths_to_config(cert_path: str, key_path: str) -> None:
-    """Point config.yaml (server-global runtime source of truth) at a cert/key pair."""
     from giljo_mcp._config_io import read_config, write_config
 
     config = read_config()
@@ -130,7 +98,6 @@ def _write_cert_paths_to_config(cert_path: str, key_path: str) -> None:
     write_config(config)
 
 
-# SERVER-LEVEL: SSL status from config.yaml (server-global, NOT per-tenant), CE-only
 @router.get("/ssl", response_model=SSLStatusResponse)
 async def get_ssl_status(
     current_user: User = Depends(require_admin),
@@ -154,7 +121,6 @@ async def get_ssl_status(
     )
 
 
-# SERVER-LEVEL: bring-your-own-cert UPLOAD (PEM), writes config.yaml paths, CE-only
 @router.post("/ssl/cert/upload", response_model=SSLStatusResponse)
 async def upload_ssl_cert(
     cert_file: UploadFile = File(..., description="PEM certificate (or full chain)"),
@@ -180,10 +146,8 @@ async def upload_ssl_cert(
     key_dest = certs_dir / "ssl_key.pem"
     cert_dest.write_bytes(cert_bytes)
     key_dest.write_bytes(key_bytes)
-    key_dest.chmod(0o600)  # restrict private-key to owner-read/write only
+    key_dest.chmod(0o600)
 
-    # Validate AFTER writing so we test the exact on-disk files; remove on failure
-    # so a bad upload never lingers as a half-provisioned cert.
     try:
         _validate_cert_pair(str(cert_dest), str(key_dest))
     except HTTPException:
@@ -206,7 +170,6 @@ async def upload_ssl_cert(
     )
 
 
-# SERVER-LEVEL: bring-your-own-cert by file PATH on the server, CE-only
 @router.post("/ssl/cert/reference", response_model=SSLStatusResponse)
 async def reference_ssl_cert(
     request_body: SSLCertPathRequest,
@@ -234,7 +197,6 @@ async def reference_ssl_cert(
     )
 
 
-# SERVER-LEVEL: flip ssl_enabled in config.yaml (server-global), CE-only
 @router.post("/ssl", response_model=SSLStatusResponse)
 async def toggle_ssl(
     request_body: SSLToggleRequest,
@@ -263,7 +225,6 @@ async def toggle_ssl(
             ),
         )
     if request_body.enabled and has_cert:
-        # Re-validate the on-disk pair so we never flip ssl_enabled on a broken cert.
         _validate_cert_pair(cert_path, key_path)
 
     config = read_config()

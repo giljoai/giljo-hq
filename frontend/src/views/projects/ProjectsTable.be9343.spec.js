@@ -1,21 +1,3 @@
-/**
- * ProjectsTable.be9343.spec.js — BE-9343
- *
- * The COMPLETED column used to render `item.completed_at || item.updated_at`. Because
- * the backend left `completed_at` NULL for any project closed through agent tooling,
- * that fallback was the ACTIVE path for most finished projects — so the column headed
- * COMPLETED actually showed last-modified. Any later write moved it, and the
- * archive/hide toggle is usually the last thing to touch a finished project, so the
- * displayed "completion date" was routinely the moment it was archived.
- *
- * These specs pin the fallback shut. The date shown must come from `completed_at` and
- * nothing else; a terminal row without one shows the em-dash rather than borrowing
- * `updated_at`. Distinct formatter return values make the two sources
- * distinguishable — a test that mocked both to the same string could not tell which
- * field was read, and would pass with the fallback still in place.
- *
- * Edition scope: CE.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
@@ -36,10 +18,6 @@ vi.mock('@/config/colorTokens', () => ({
   DOT_WARNING: '#ffc300',
   DOT_ERROR: '#ff6b6b',
 }))
-// The two dates are formatted into DIFFERENT strings so the assertions can prove
-// WHICH field was read, not merely that something rendered. Literals are inlined in
-// the factory rather than referenced from consts below: vi.mock is hoisted above the
-// module's own declarations, so an outer reference would be in the TDZ.
 vi.mock('@/composables/useFormatDate', () => {
   const label = (d) =>
     d === '2026-07-01T10:00:00Z' ? 'COMPLETED-DATE' : d === '2026-07-20T23:59:00Z' ? 'UPDATED-DATE' : 'NO-DATE'

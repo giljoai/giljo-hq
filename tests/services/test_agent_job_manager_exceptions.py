@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Test suite for AgentJobManager exception-based error handling.
-
-This test suite verifies that AgentJobManager raises appropriate exceptions
-instead of returning error dicts (0480 migration).
-
-Tests cover:
-- spawn_execution() - Generic exceptions
-- complete_job() - ResourceNotFoundError and generic exceptions
-"""
 
 from unittest.mock import AsyncMock, MagicMock
 
@@ -27,13 +17,11 @@ from giljo_mcp.tenant import TenantManager
 
 @pytest.fixture
 def mock_db_manager():
-    """Create a mock DatabaseManager."""
     return AsyncMock(spec=DatabaseManager)
 
 
 @pytest.fixture
 def mock_tenant_manager():
-    """Create a mock TenantManager."""
     manager = AsyncMock(spec=TenantManager)
     manager.get_current_tenant.return_value = "test-tenant"
     return manager
@@ -41,29 +29,13 @@ def mock_tenant_manager():
 
 @pytest.fixture
 def agent_job_manager(mock_db_manager, mock_tenant_manager):
-    """Create an AgentJobManager instance with mocked dependencies."""
     return AgentJobManager(db_manager=mock_db_manager, tenant_manager=mock_tenant_manager)
 
 
 class TestSpawnExecutionExceptions:
-    """Test spawn_execution() exception handling.
-
-    Purpose: the service boundary must surface DB failures as a raised
-    BaseGiljoError (post-0480 "raise, don't return error dicts"), with the
-    failing operation recorded in the exception context — not swallow them or
-    return a success-shaped value.
-    """
 
     @pytest.mark.asyncio
     async def test_spawn_execution_raises_exception_on_database_error(self, agent_job_manager, mock_db_manager):
-        """A DB error inside spawn_execution is wrapped and re-raised as BaseGiljoError.
-
-        spawn_execution's first DB touch is the job-existence ``session.execute``
-        (in AgentJobRepository.add_execution_for_existing_job). Making that raise
-        a generic Exception exercises the broad service-boundary catch, which must
-        wrap it in BaseGiljoError tagged operation='spawn_execution'.
-        """
-        # Session whose first query raises — simulates a lost DB connection.
         mock_session = AsyncMock(spec=AsyncSession)
         mock_session.execute.side_effect = Exception("Database connection lost")
         mock_session.__aenter__.return_value = mock_session
@@ -71,7 +43,6 @@ class TestSpawnExecutionExceptions:
 
         mock_db_manager.get_session_async.return_value = mock_session
 
-        # Verify exception is raised (not error dict returned)
         with pytest.raises(BaseGiljoError) as exc_info:
             await agent_job_manager.spawn_execution(
                 job_id="test-job",
@@ -79,18 +50,14 @@ class TestSpawnExecutionExceptions:
                 tenant_key="test-tenant",
             )
 
-        # Verify exception details: original cause surfaced + operation tagged.
         assert "Database connection lost" in str(exc_info.value)
         assert exc_info.value.context.get("operation") == "spawn_execution"
 
 
 class TestCompleteJobExceptions:
-    """Test complete_job() exception handling."""
 
     @pytest.mark.asyncio
     async def test_complete_job_raises_not_found_error(self, agent_job_manager, mock_db_manager):
-        """Test that complete_job raises ResourceNotFoundError when job not found."""
-        # Mock session that returns no job
         mock_session = AsyncMock(spec=AsyncSession)
         mock_result = MagicMock()
         mock_result.scalar_one_or_none = MagicMock(return_value=None)
@@ -100,19 +67,15 @@ class TestCompleteJobExceptions:
 
         mock_db_manager.get_session_async.return_value = mock_session
 
-        # Verify ResourceNotFoundError is raised
         with pytest.raises(ResourceNotFoundError) as exc_info:
             await agent_job_manager.complete_job(job_id="nonexistent-job", tenant_key="test-tenant")
 
-        # Verify exception details
         assert "Job" in str(exc_info.value)
         assert "not found" in str(exc_info.value)
         assert exc_info.value.context.get("job_id") == "nonexistent-job"
 
     @pytest.mark.asyncio
     async def test_complete_job_raises_exception_on_database_error(self, agent_job_manager, mock_db_manager):
-        """Test that complete_job raises BaseGiljoError on database errors."""
-        # Mock session that raises an exception
         mock_session = AsyncMock(spec=AsyncSession)
         mock_session.execute.side_effect = Exception("Database error during job completion")
         mock_session.__aenter__.return_value = mock_session
@@ -120,10 +83,8 @@ class TestCompleteJobExceptions:
 
         mock_db_manager.get_session_async.return_value = mock_session
 
-        # Verify exception is raised
         with pytest.raises(BaseGiljoError) as exc_info:
             await agent_job_manager.complete_job(job_id="test-job", tenant_key="test-tenant")
 
-        # Verify exception details
         assert "Database error during job completion" in str(exc_info.value)
         assert exc_info.value.context.get("operation") == "complete_job"

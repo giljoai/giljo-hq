@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6068 F1 regression: sync ``bcrypt`` must run OFF the event loop.
-
-``bcrypt.checkpw``/``hashpw`` is ~250-400ms of pure CPU. Called directly inside
-``async def`` it freezes the single uvicorn worker — every concurrent request,
-MCP call and WS frame stalls for the duration. F1 wraps every remaining bcrypt
-site in ``asyncio.to_thread`` (mirroring BE-6060a's ``verify_api_key_cached``).
-Additionally, ``AuthService.authenticate_user`` was restructured so the verify
-runs AFTER the user-lookup session is released, so the CPU work no longer pins a
-pooled DB connection.
-
-These tests patch ``asyncio.to_thread`` and assert the bcrypt call is dispatched
-through it (not called inline), and that login still succeeds.
-"""
 
 from __future__ import annotations
 
@@ -34,17 +21,10 @@ pytestmark = pytest.mark.asyncio
 async def test_authenticate_user_offloads_bcrypt_after_session_close(
     monkeypatch, auth_service, auth_user_with_password
 ):
-    """Login dispatches bcrypt.checkpw via to_thread, AFTER releasing the session.
-
-    Proves both halves of the F1 fix for the login hot path: (1) the verify runs
-    off the event loop, and (2) it runs after the user-lookup ``async with
-    _get_session()`` block exits, so the bcrypt CPU no longer pins a connection.
-    """
     user, password = auth_user_with_password
 
     events: list[str] = []
 
-    # Record when the lookup session context exits (delegates to the real one).
     original_get_session = auth_service._get_session
 
     def _recording_get_session(tenant_key: str | None = None):
@@ -58,7 +38,6 @@ async def test_authenticate_user_offloads_bcrypt_after_session_close(
 
     monkeypatch.setattr(auth_service, "_get_session", _recording_get_session)
 
-    # Spy on the offload seam; record only the bcrypt dispatch.
     real_to_thread = asyncio.to_thread
 
     async def _spy(fn, *args, **kwargs):
@@ -70,20 +49,16 @@ async def test_authenticate_user_offloads_bcrypt_after_session_close(
 
     result = await auth_service.authenticate_user(user.username, password)
 
-    # Behavior preserved: a valid login still returns an AuthResult.
     assert isinstance(result, AuthResult)
     assert result.user_id == user.id
 
-    # Offload proven: bcrypt went through a worker thread, not the loop.
     assert "bcrypt_offload" in events, "bcrypt.checkpw was not offloaded via asyncio.to_thread"
-    # Restructure proven: the lookup session released before the verify ran.
     assert events.index("session_closed") < events.index("bcrypt_offload"), (
         "bcrypt verify ran while the DB session was still open"
     )
 
 
 async def test_authenticate_user_invalid_password_still_offloads(monkeypatch, auth_service, auth_user_with_password):
-    """A failed login also routes through to_thread (no inline bcrypt fast-path)."""
     from giljo_mcp.exceptions import AuthenticationError
 
     user, _ = auth_user_with_password
@@ -105,12 +80,6 @@ async def test_authenticate_user_invalid_password_still_offloads(monkeypatch, au
 
 
 async def test_oauth_client_secret_verify_offloads_bcrypt(monkeypatch):
-    """Confidential-client secret verify (/token + /refresh) offloads bcrypt.
-
-    DB-free: a stub ClientResolver returns a ResolvedClient carrying a real
-    bcrypt hash. The single wrapped site at oauth_service.py is the only bcrypt
-    on both the /token exchange and the /refresh grant paths.
-    """
     from giljo_mcp.services.oauth_service import (
         OAuthService,
         ResolvedClient,

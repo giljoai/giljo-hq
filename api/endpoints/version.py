@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Version check endpoint.
-
-Public (no auth required) -- installers and update checkers need this
-before authentication is configured.
-"""
 
 import logging
 

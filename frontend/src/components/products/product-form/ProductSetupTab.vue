@@ -3,9 +3,6 @@
     <div class="text-body-large mb-1">Product Setup</div>
     <div class="text-body-small text-warning mb-4">Always used as context source by orchestrator.</div>
 
-    <!-- FE-5073: AI context staleness banner. Edit-modal-only,
-         derived from the store (NOT props.product) so WS-driven
-         product mutations re-render the banner without remount. -->
     <v-alert
       v-if="showStalenessBanner"
       type="warning"
@@ -161,8 +158,6 @@
       </span>
     </v-alert>
 
-    <!-- Path C — explicit doc-less escape. Visually SECONDARY to the doc flow:
-         a de-emphasized text button (theme tokens only, no hardcoded hex). -->
     <div v-if="!isEdit" class="mt-1 mb-2 d-flex align-center ga-2 flex-wrap">
       <v-btn
         variant="text"
@@ -224,8 +219,6 @@
       </v-expansion-panel>
     </v-expansion-panels>
 
-    <!-- Clipboard fallback — shown when browser blocks clipboard API
-         during stageAnalysis(). Lets the user manually copy the prompt. -->
     <v-alert
       v-if="promptFallbackText"
       type="warning"
@@ -313,11 +306,8 @@ const emit = defineEmits([
 
 const { formatDate } = useFormatDate()
 
-// Local file picker state — cleared after emitting
 const localVisionFiles = ref([])
 
-// Two-way binding for the two new-product path toggles. The parent owns
-// mutual exclusivity (choosing one clears the other).
 const skipAiAnalysis = computed({
   get: () => props.skipAiAnalysis,
   set: (value) => emit('update:skipAiAnalysis', value),

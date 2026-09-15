@@ -3,32 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Migration regression for BE-9431 — ``uq_task_taxonomy_active`` gets its teeth back.
-
-Real scratch PostgreSQL DB, real alembic. ``ce_0059`` rewrote this index as
-``op.create_index(...)`` kwargs while widening its predicate and silently lost
-``NULLS NOT DISTINCT``; since ``subseries`` is NULL on ordinary rows, the index
-then rejected nothing for the common case. ``ce_0095`` restores the flag, and
-must HEAL any database already holding duplicates first — the CE installer
-reruns ``alembic upgrade`` on every boot, so a migration that merely tried to
-build the strict index would brick a self-hoster's boot with no operator around
-to clean the data up.
-
-The four things this pins:
-
-- **The defect is real, at the pre-revision.** A duplicate live typed serial
-  INSERTs successfully at ce_0094. This is the discriminating control: without
-  it, every assertion below would also pass against an index that was strict all
-  along, and the test would prove nothing.
-- **The upgrade heals rather than fails.** Two colliding rows both survive, live,
-  with DISTINCT serials taken from the shared tasks+projects watermark.
-- **The index is strict afterwards** (``indnullsnotdistinct``) and actually
-  REJECTS a fresh duplicate — the property, not just the catalog flag.
-- **Idempotent.** The boot-rerun path is a clean no-op.
-
-Mirrors tests/integration/migrations/test_ce_0067_tsk_task_exclusive.py, whose
-reassign-above-the-watermark healing ce_0095 follows.
-"""
 
 from __future__ import annotations
 
@@ -153,7 +127,6 @@ def scratch_engine():
 
 @pytest.fixture
 def scratch_at_pre(scratch_engine: sa.Engine):
-    """Fresh schema built up to ce_0094 (the pre-revision), ready for seeding."""
     _drop_all_objects(scratch_engine)
     up = _run_alembic("upgrade", _PRE)
     assert up.returncode == 0, f"upgrade to {_PRE} failed:\n{up.stdout}\n{up.stderr}"
@@ -161,16 +134,12 @@ def scratch_at_pre(scratch_engine: sa.Engine):
     _drop_all_objects(scratch_engine)
 
 
-# --------------------------------------------------------------------------- #
-# Seed helpers (raw SQL — the ORM models are not needed for a migration test)  #
-# --------------------------------------------------------------------------- #
 
 TK = "tk_be9431"
 PID = "prod_be9431"
 
 
 def _seed_base(engine: sa.Engine) -> str:
-    """Seed a product + one taxonomy type; return the type id."""
     type_id = str(uuid4())
     with engine.connect() as conn:
         conn.execute(
@@ -196,7 +165,6 @@ def _seed_task(
     *,
     trashed: bool = False,
 ) -> str:
-    """INSERT a task directly. Raises IntegrityError if an index refuses it."""
     task_id = str(uuid4())
     with engine.connect() as conn:
         conn.execute(
@@ -236,7 +204,6 @@ def _task_row(engine: sa.Engine, task_id: str) -> sa.Row:
 
 
 def _index_is_strict(engine: sa.Engine) -> bool | None:
-    """``pg_index.indnullsnotdistinct`` for the index, ``None`` if it is gone."""
     with engine.connect() as conn:
         return conn.execute(
             text(
@@ -252,14 +219,6 @@ def _index_is_strict(engine: sa.Engine) -> bool | None:
 @pytest.mark.integration
 class TestBe9431TaskIndexTeeth:
     def test_pre_revision_accepts_a_duplicate_serial(self, scratch_at_pre: sa.Engine) -> None:
-        """THE DISCRIMINATING CONTROL, and the defect itself.
-
-        At ce_0094 the index exists, is UNIQUE, and covers exactly these rows —
-        and still accepts the duplicate, because ``subseries`` is NULL and
-        Postgres' default NULLS DISTINCT makes each row unique by construction.
-        If this test ever fails, the pre-state changed and every assertion in
-        this file stops meaning anything.
-        """
         type_id = _seed_base(scratch_at_pre)
         _seed_task(scratch_at_pre, "TSK-19 first", type_id, 19)
         _seed_task(scratch_at_pre, "TSK-19 duplicate", type_id, 19)
@@ -267,12 +226,6 @@ class TestBe9431TaskIndexTeeth:
         assert _index_is_strict(scratch_at_pre) is False, "pre-revision index must be the weakened one"
 
     def test_upgrade_heals_duplicates_instead_of_failing(self, scratch_at_pre: sa.Engine) -> None:
-        """A database already holding duplicates must UPGRADE, not brick.
-
-        Both rows survive, both stay live, and the later one is reassigned above
-        the bucket's shared tasks+projects watermark — the project at serial 50
-        is what proves the watermark is the shared line and not just MAX(tasks).
-        """
         type_id = _seed_base(scratch_at_pre)
         keeper = _seed_task(scratch_at_pre, "TSK-19 first", type_id, 19)
         duplicate = _seed_task(scratch_at_pre, "TSK-19 duplicate", type_id, 19)
@@ -290,8 +243,6 @@ class TestBe9431TaskIndexTeeth:
         assert _index_is_strict(scratch_at_pre) is True, "the index must be strict after healing"
 
     def test_restored_index_rejects_a_fresh_duplicate(self, scratch_at_pre: sa.Engine) -> None:
-        """The property, not just the catalog flag — the same INSERT the
-        pre-revision accepted is now refused."""
         type_id = _seed_base(scratch_at_pre)
         _seed_task(scratch_at_pre, "TSK-19 first", type_id, 19)
 
@@ -302,8 +253,6 @@ class TestBe9431TaskIndexTeeth:
             _seed_task(scratch_at_pre, "TSK-19 duplicate", type_id, 19)
 
     def test_trashed_rows_are_out_of_scope_and_untouched(self, scratch_at_pre: sa.Engine) -> None:
-        """The predicate excludes soft-deleted rows, so a trashed task may keep a
-        serial a live task also holds — healing must not renumber it."""
         type_id = _seed_base(scratch_at_pre)
         live = _seed_task(scratch_at_pre, "TSK-19 live", type_id, 19)
         trashed = _seed_task(scratch_at_pre, "TSK-19 trashed", type_id, 19, trashed=True)
@@ -315,8 +264,6 @@ class TestBe9431TaskIndexTeeth:
         assert _task_row(scratch_at_pre, trashed).series_number == 19, "a trashed row is not a duplicate here"
 
     def test_rerun_is_idempotent(self, scratch_at_pre: sa.Engine) -> None:
-        """The CE installer's every-boot ``alembic upgrade`` re-entry: the second
-        run finds the index already strict and changes nothing."""
         type_id = _seed_base(scratch_at_pre)
         keeper = _seed_task(scratch_at_pre, "TSK-19 first", type_id, 19)
         duplicate = _seed_task(scratch_at_pre, "TSK-19 duplicate", type_id, 19)
@@ -332,8 +279,6 @@ class TestBe9431TaskIndexTeeth:
         assert _index_is_strict(scratch_at_pre) is True
 
     def test_downgrade_then_upgrade_round_trips(self, scratch_at_pre: sa.Engine) -> None:
-        """The chain stays walkable: downgrade drops the flag (schema only,
-        serials keep their healed values) and upgrade puts it back."""
         type_id = _seed_base(scratch_at_pre)
         _seed_task(scratch_at_pre, "TSK-19 first", type_id, 19)
 

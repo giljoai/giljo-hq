@@ -3,18 +3,12 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Codex CLI execution prompt builder.
-
-Extracted from ThinClientPromptGenerator (Handover 0950g).
-Refactored to inherit from ExecutionPromptBuilderBase (quality-sprint-002e).
-"""
 
 from giljo_mcp.prompts.default_agent_ladder import MISSING_AGENT_TEMPLATES_NOTICE
 from giljo_mcp.prompts.execution_prompt_base import ExecutionPromptBuilderBase
 
 
 class CodexPromptBuilder(ExecutionPromptBuilderBase):
-    """Builds Codex CLI execution prompts for the implementation phase."""
 
     @property
     def platform_name(self) -> str:
@@ -45,23 +39,22 @@ class CodexPromptBuilder(ExecutionPromptBuilderBase):
         ]
 
     def _build_spawning_section(self, agent_jobs: list) -> list[str]:
-        """Build Codex spawn_agent spawning template section."""
         lines = [
             "## How to Spawn Agents via Codex spawn_agent",
             "",
-            "### CRITICAL: Template-First Spawning",
-            "The `agent=` parameter loads an INSTALLED agent template from",
-            "`~/.codex/agents/gil-{agent_name}.toml`. This template contains the agent's",
-            "developer_instructions, model config, and sandbox settings.",
-            "The agent ALREADY KNOWS its role \u2014 you do NOT re-explain it.",
+            "### CRITICAL: the role comes from the server, not from your disk",
+            "The thin prompt below already carries a HARNESS block for this agent's harness",
+            "(its launch line, plus model and effort hints), and get_job_mission returns its",
+            "full agent_profile: role, description, instructions, behavioural rules and",
+            "success criteria. There is no agent file to install, look up, or keep in sync.",
             "",
-            "### Prefer the installed template; fall back to the default agent",
+            "### Prefer the tenant's own agent; fall back to the default agent",
             "- NEVER use agent='worker', agent='implementer', agent='tester', or any unprefixed name",
-            "  while the gil-* template exists — built-in Codex roles shadow unprefixed names",
-            "- If a gil-* template is MISSING, do NOT stop: spawn Codex's DEFAULT subagent for that",
+            "  while a gil-* agent resolves — built-in Codex roles shadow unprefixed names",
+            "- If no gil-* agent resolves, do NOT stop: spawn Codex's DEFAULT subagent for that",
             f'  job and say so once — "{MISSING_AGENT_TEMPLATES_NOTICE}"',
-            "- DO NOT re-explain the agent's role in instructions= (the template handles this)",
-            "- DO NOT override template behavior with lengthy instruction text",
+            "- DO NOT re-explain the agent's role in instructions= (the agent_profile handles this)",
+            "- DO NOT override the profile with lengthy instruction text",
             "",
             "### Always use 'gil-' prefix",
             "The server returns agent_name WITHOUT the prefix. You MUST prepend 'gil-'.",
@@ -70,7 +63,7 @@ class CodexPromptBuilder(ExecutionPromptBuilderBase):
             "### Spawning Template",
             "```",
             "spawn_agent(",
-            '    agent="gil-{agent_name}",  # loads ~/.codex/agents/gil-{agent_name}.toml',
+            '    agent="gil-{agent_name}",  # role arrives from get_job_mission, not a local file',
             '    instructions="""',
             "    You are {agent_name} (job_id: {job_id})",
             "    ",

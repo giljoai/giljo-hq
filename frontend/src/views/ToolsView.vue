@@ -1,10 +1,8 @@
 <template>
   <v-container>
-    <!-- Page Header -->
     <h1 class="text-headline-large mb-2">Tools</h1>
     <p class="text-body-large mb-4 settings-subtitle">Manage connections, tune agents, and configure context</p>
 
-    <!-- Settings Pills -->
     <div class="pill-toggle-row">
       <button
         class="pill-toggle smooth-border"
@@ -52,28 +50,13 @@
       </button>
     </div>
 
-    <!-- Tab Content -->
     <div class="pill-tabs-content">
       <v-window v-model="activeTab" :touch="false" :reverse="false" class="global-tabs-window main-window-tabs">
-      <!-- Context Settings -->
       <v-window-item value="context" eager>
         <ContextPriorityConfig :git-integration-enabled="gitEnabled" />
       </v-window-item>
 
-      <!-- Agents -->
       <v-window-item value="agents">
-        <!-- FE-9555: the ONE account default for the staging
-             execution-mode question. It belongs on THIS tab, not with the
-             notification/monitoring knobs: the headless EXECUTION_MODE_REQUIRED
-             refusal tells the user in so many words to set it under Tools ->
-             Agents, so anywhere else makes the product's own instruction wrong. -->
-        <!-- FE-9555 (operator direction 2026-09-04): the account-wide agent policy
-             controls grouped under one heading, ABOVE the template roster. The
-             execution-mode default and the two orchestration switches all answer
-             "how do agents behave", which the template roster below does not --
-             OrchestrationToggles was only ever inside TemplateManager because that
-             tab had room, as its own docstring says. Heading mirrors Agent Template
-             Manager's own title + help-tooltip pattern so the two read as peers. -->
         <div class="tab-header mb-4 d-flex align-center">
           <h2 class="text-title-large">Agent Behaviour Settings</h2>
           <v-tooltip location="bottom" max-width="360">
@@ -86,16 +69,12 @@
           </v-tooltip>
         </div>
         <ExecutionModeDefaultSelect />
-        <!-- FE-9553: relocated out of Notifications. These tune how agents
-             behave, not how notifications display, and this is the group for
-             exactly that class of control. -->
         <AgentTimingSettings class="mb-4" />
         <OrchestrationToggles class="mb-6" />
 
         <TemplateManager />
       </v-window-item>
 
-      <!-- Setup Settings -->
       <v-window-item value="startup">
         <div class="tab-header mb-4">
           <h2 class="text-title-large">Startup</h2>
@@ -139,12 +118,6 @@
         </div>
       </v-window-item>
 
-      <!-- Notification Settings — FE-9553: four cards, one per surface.
-           Each card is its own component: this file is at the 800-line
-           guardrail, and the model reads better as four named surfaces than as
-           one wall of controls. Order follows the record: the surface that asks
-           you for something first, the medium that delivers it second, feedback
-           third, the archive last. -->
       <v-window-item value="notifications">
         <div class="tab-header mb-4">
           <h2 class="text-title-large">Notifications</h2>
@@ -158,18 +131,14 @@
         <BellPreferencesCard />
       </v-window-item>
 
-      <!-- Connect (formerly Integrations + API Keys folded in as Credentials) -->
       <v-window-item value="connect">
         <div class="tab-header mb-4">
           <h2 class="text-title-large">Connect</h2>
           <p class="text-body-medium text-muted-a11y mt-1">Connect external tools and services to your GiljoAI workspace</p>
         </div>
 
-        <!-- AI-tool connect surface — C2 tool directory (FE-9204). Shared connect
-             card with the setup wizard; replaces the old MCP + generic-MCP cards. -->
         <ToolsConnectDirectory class="mb-5" />
 
-        <!-- Other integrations (non-AI-tool): export, Serena, Git. -->
         <div class="connect-grid mb-5">
           <AgentExport />
           <SerenaIntegrationCard
@@ -183,10 +152,6 @@
             @update:enabled="toggleGit"
           />
 
-          <!-- FE-9339: the symptom is "my tool cannot connect", so this is where the
-               user looks. Same modal the Startup card opens — that card stays, this is
-               a second door, not a move. CE only: a hosted tenant has no certificate
-               of its own to trust. -->
           <div
             v-if="isCe"
             class="intg-line smooth-border"
@@ -212,7 +177,7 @@
                   <div>
                     <strong>One-time setup for servers running HTTPS</strong>
                     <p class="mt-2 mb-0">
-                      Command-line AI tools built on Node (Claude Code, Codex CLI, Gemini CLI)
+                      Command-line AI tools built on Node (Claude Code, Codex CLI, OpenCode)
                       do not read your operating system&rsquo;s trust store, so they refuse a
                       private or self-signed certificate even after your browser has accepted it.
                     </p>
@@ -242,17 +207,12 @@
           </div>
         </div>
 
-        <!-- Credentials (compact section, formerly the "API Keys" peer tab) -->
         <div class="credentials-section">
           <ApiKeyManager />
         </div>
       </v-window-item>
     </v-window>
 
-    <!-- FE-9339: mounted at container level, not inside the Startup tab. VWindowItem
-         renders its slot lazily, and Connect is the default tab — a modal parked
-         inside a tab the user has never opened is simply not in the DOM, so the
-         Connect entry point would have opened nothing. One instance, both doors. -->
     <CertTrustModal
       v-model="showCertModal"
       @continue="recordCertTrustDismissal"
@@ -263,7 +223,7 @@
 </template>
 
 <script setup>
-import { ref, provide, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useWebSocketStore } from '@/stores/websocket'
 import TemplateManager from '@/components/TemplateManager.vue'
@@ -287,16 +247,12 @@ import PopoutPreferencesCard from '@/components/settings/PopoutPreferencesCard.v
 import ToastPreferencesCard from '@/components/settings/ToastPreferencesCard.vue'
 import ExecutionModeDefaultSelect from '@/components/settings/ExecutionModeDefaultSelect.vue'
 import OrchestrationToggles from '@/components/templates/OrchestrationToggles.vue'
-// Stores and Theme
 const router = useRouter()
 
-// WebSocket for real-time Git integration updates
 const { on, off } = useWebSocketStore()
 
-// State
 const activeTab = ref('connect')
 
-// Map legacy tab values to current ones (keep deep-links working after FE-0023 IA reshuffle).
 function normalizeTab(tab) {
   if (!tab) return null
   if (tab === 'general') return 'startup'
@@ -308,17 +264,10 @@ const showCertModal = ref(false)
 const serenaEnabled = ref(false)
 const toggling = ref(false)
 
-// Git Integration state (system-level like Serena)
-// This state is shared with ContextPriorityConfig via props
 const gitEnabled = ref(false)
 
-// Handover 0335: Provide template export event data to child components
-// This allows TemplateManager to receive export events even when not actively mounted
-const templateExportEvent = ref(null)
-provide('templateExportEvent', templateExportEvent)
 const togglingGit = ref(false)
 
-// Methods
 async function loadEditionMode() {
   try {
     const status = await setupService.checkEnhancedStatus()
@@ -328,7 +277,6 @@ async function loadEditionMode() {
   }
 }
 
-// Serena MCP Methods
 async function checkSerenaStatus() {
   try {
     const status = await setupService.getSerenaStatus()
@@ -346,22 +294,18 @@ async function toggleSerena(enabled) {
     if (result.success) {
       serenaEnabled.value = result.enabled
     } else {
-      // Revert on failure
       serenaEnabled.value = !enabled
       console.error('[USER SETTINGS] Failed to toggle Serena:', result.message)
     }
   } catch (error) {
     console.error('[USER SETTINGS] Error toggling Serena:', error)
-    // Revert on error
     serenaEnabled.value = !enabled
   } finally {
     toggling.value = false
   }
 }
 
-// Lifecycle
 onMounted(async () => {
-  // Check for tab parameter in query string
   const route = router.currentRoute.value
 
   if (route.query.tab) {
@@ -369,32 +313,17 @@ onMounted(async () => {
     if (normalized) activeTab.value = normalized
   }
 
-  // Check Serena MCP status
   await checkSerenaStatus()
   await loadEditionMode()
 
-  // FE-9553: the notification and agent-timing loads that used to live here
-  // moved into the cards that own those controls. They were unguarded awaits in
-  // this hook, so either one failing aborted every load after it -- including
-  // loadGitSettings below, which has nothing to do with notifications.
 
-  // Load git integration settings (system-level)
   await loadGitSettings()
 
-  // Listen for real-time Git integration changes via WebSocket
-  // This listener is at parent level to ensure it captures events even when
-  // ContextPriorityConfig tab is not actively mounted
   on('product:git:settings:changed', handleGitIntegrationUpdate)
-
-  // Handover 0335: Listen for template export events at parent level
-  // This ensures events are captured even when TemplateManager tab is not active
-  on('template:exported', handleTemplateExportEvent)
 
 })
 
 watch(activeTab, (newTab) => {
-  // Replace (don't push) so browser back button returns to the previous PAGE,
-  // not through every intermediate tab click within ToolsView.
   const currentQuery = router.currentRoute.value.query
   if (currentQuery.tab !== newTab) {
     router.replace({ query: { ...currentQuery, tab: newTab } })
@@ -411,12 +340,9 @@ watch(
 )
 
 onUnmounted(() => {
-  // Clean up WebSocket listeners to prevent memory leaks
   off('product:git:settings:changed', handleGitIntegrationUpdate)
-  off('template:exported', handleTemplateExportEvent) // Handover 0335
 })
 
-// Git Integration Functions (system-level like Serena)
 async function loadGitSettings() {
   try {
     const settings = await setupService.getGitSettings()
@@ -435,7 +361,6 @@ async function toggleGit(enabled) {
     gitEnabled.value = result.enabled
   } catch (error) {
     console.error('[USER SETTINGS] Git toggle failed:', error)
-    // Revert on error
     gitEnabled.value = !enabled
   } finally {
     togglingGit.value = false
@@ -443,15 +368,6 @@ async function toggleGit(enabled) {
 }
 
 
-/**
- * Handle real-time Git integration updates from WebSocket
- * This handler is at parent level to ensure it fires regardless of
- * which tab is currently active
- * @param {Object} data - WebSocket event data
- * @param {string} data.product_id - Product ID
- * @param {Object} data.settings - Git integration settings
- * @param {boolean} data.settings.enabled - Whether git integration is enabled
- */
 function handleGitIntegrationUpdate(data) {
   if (!data || !data.settings) {
     console.warn('[USER SETTINGS] Received invalid git integration update:', data)
@@ -460,33 +376,6 @@ function handleGitIntegrationUpdate(data) {
 
   const newState = data.settings.enabled || false
   gitEnabled.value = newState
-}
-
-
-/**
- * Handover 0335: Handle template export WebSocket events
- * This handler is at parent level to ensure it fires regardless of
- * which tab is currently active. The event data is provided to TemplateManager
- * via Vue's provide/inject system.
- *
- * @param {Object} data - WebSocket event data (already normalized by websocket store)
- * @param {string} data.tenant_key - Multi-tenant isolation key
- * @param {string[]} data.template_ids - List of exported template UUIDs
- * @param {string} data.export_type - Export type (manual_zip, personal_agents, product_agents)
- * @param {string} data.exported_at - ISO timestamp of export
- */
-function handleTemplateExportEvent(data) {
-  if (!data || !data.template_ids || !data.exported_at) {
-    console.warn('[USER SETTINGS] Invalid template export event - missing required fields:', data)
-    return
-  }
-
-  // Update the provided ref so TemplateManager can react to it
-  // Include a unique ID to ensure Vue detects the change even if same templates
-  templateExportEvent.value = {
-    ...data,
-    _eventId: Date.now(), // Force reactivity
-  }
 }
 
 </script>

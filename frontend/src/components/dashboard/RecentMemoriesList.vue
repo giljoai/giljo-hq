@@ -27,7 +27,6 @@
       </div>
     </div>
 
-    <!-- Memory Detail Dialog -->
     <v-dialog v-model="showDetail" max-width="640" scrollable>
       <v-card v-if="selectedMemory" class="smooth-border">
         <div class="dlg-header">
@@ -94,17 +93,9 @@ function openMemory(memory) {
   showDetail.value = true
 }
 
-// BE-6078: the project-finish family — three entry_types that mean the SAME
-// milestone (a project/handover closeout), split only by write path
-// (write_project_closeout vs write_memory_entry's default vs the legacy
-// handover entry). Collapse them to ONE "Completed" badge + one shared color.
-// session_handover / baseline / decision / architecture / discovery carry
-// different signal and stay distinct (handled by typeColorMap or the default).
 const FINISH_FAMILY_TYPES = new Set(['project_closeout', 'project_completion', 'handover_closeout'])
 const completedHex = getAgentColor('implementer').hex
 
-// Tinted type tag colors — mapped to agent color tokens. Distinct (non-finish)
-// types only; the finish family resolves to completedHex below.
 const typeColorMap = {
   session_handover: getAgentColor('reviewer').hex,
 }

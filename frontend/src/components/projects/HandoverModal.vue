@@ -11,7 +11,6 @@
     @keydown.esc="handleClose"
   >
     <v-card v-draggable data-testid="handover-modal-card" class="smooth-border">
-      <!-- Modal header -->
       <div id="handover-modal-title" class="dlg-header dlg-header--primary dlg-header--sticky">
         <v-icon class="dlg-icon" icon="mdi-refresh" />
         <span class="dlg-title">Session Handover</span>
@@ -36,7 +35,6 @@
       <v-divider />
 
       <v-card-text class="pa-4">
-        <!-- Checkbox gate -->
         <v-checkbox
           v-model="subagentsConfirmed"
           color="warning"
@@ -52,7 +50,6 @@
           </template>
         </v-checkbox>
 
-        <!-- Step 1: Retire -->
         <div class="step-row mb-3" data-testid="step-1">
           <v-avatar :color="step1Done ? 'success' : 'grey-darken-1'" size="26" class="mr-3 flex-shrink-0">
             <span class="text-body-small font-weight-bold" style="color: white">1</span>
@@ -73,7 +70,6 @@
           </v-btn>
         </div>
 
-        <!-- Step 2: Continue -->
         <div class="step-row" data-testid="step-2">
           <v-avatar :color="step2Done ? 'success' : 'grey-darken-1'" size="26" class="mr-3 flex-shrink-0">
             <span class="text-body-small font-weight-bold" style="color: white">2</span>
@@ -131,7 +127,6 @@ const subagentsConfirmed = ref(false)
 const step1Done = ref(false)
 const step2Done = ref(false)
 
-// Reset state when modal opens/closes
 watch(() => props.show, (val) => {
   if (!val) {
     subagentsConfirmed.value = false

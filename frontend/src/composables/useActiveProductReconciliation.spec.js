@@ -1,28 +1,3 @@
-/**
- * useActiveProductReconciliation.spec.js — FE-9412, demoted by FE-9502c
- *
- * The staleness backstop for a DEAD socket, scoped to the DISPLAYED
- * server-active product only.
- *
- * The live `product:status:changed` event only helps a session whose socket is
- * alive. The session in the original FE-9412 incident sat stale for over an
- * hour because its socket never delivered the event and nothing on the client
- * ever re-asked. These specs pin the reconciliation half: on tab focus /
- * visibilitychange — and on a WS reconnect — the session re-reads the active
- * product against persisted server state with one lightweight GET, and
- * corrects `activeProduct` if it was stale.
- *
- * FE-9502c: this no longer re-scopes `currentProductId` (the viewed tab).
- * Under the tabbed shell that would be silent auto-navigation off a
- * background event — a session with two tabs open must not have
- * its viewed tab reassigned just because some OTHER session activated a
- * different product on the server. The specs below assert the NEGATIVE
- * explicitly: currentProductId never moves, no matter what activeProduct does.
- *
- * Mirrors the FE-9407/FE-9166 rule: never trust the live event alone.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { effectScope } from 'vue'
@@ -64,7 +39,6 @@ function setVisibility(state) {
   })
 }
 
-/** A session VIEWING product A's tab while the server's active product is stale/unknown to it. */
 function createStaleSession() {
   const projectStore = useProjectStore()
   projectStore.fetchProjects = vi.fn(() => Promise.resolve())
@@ -90,7 +64,6 @@ describe('FE-9412/FE-9502c — activeProduct heals on focus, the viewed tab neve
     localStorage.clear()
     setVisibility('visible')
 
-    // Server truth: B is active. The session below still displays A.
     mockGetDefault.mockResolvedValue({
       data: { has_active_product: true, product: PRODUCT_B },
     })
@@ -124,8 +97,6 @@ describe('FE-9412/FE-9502c — activeProduct heals on focus, the viewed tab neve
     document.dispatchEvent(new Event('visibilitychange'))
     await vi.waitFor(() => expect(session.products.activeProduct).toMatchObject({ id: PRODUCT_B.id }))
 
-    // The user is still looking at A's tab -- a background reconciliation
-    // must never silently switch what's on screen.
     expect(session.products.currentProductId).toBe(PRODUCT_A.id)
     expect(session.projectStore.fetchProjects).not.toHaveBeenCalled()
   })
@@ -166,24 +137,14 @@ describe('FE-9412/FE-9502c — activeProduct heals on focus, the viewed tab neve
   })
 
   it('a FAILED re-validation leaves the displayed activeProduct exactly as it was', async () => {
-    // This fires on every tab focus, so a laptop waking before its network
-    // does must not blank the header.
     mockGetDefault.mockRejectedValue(new Error('network down'))
     const session = createStaleSession()
     scope.run(() => useActiveProductReconciliation())
 
     document.dispatchEvent(new Event('visibilitychange'))
-    // The start and end states are deliberately identical here (nothing must
-    // change), so neither "the GET was called" nor a waitFor on the end state
-    // can tell settled from mid-flight — the first samples before the restore,
-    // the second passes on its first poll before anything has happened. Drain
-    // to a macrotask instead: every pending microtask in the reconcile chain
-    // has run by then.
     await vi.waitFor(() => expect(mockGetDefault).toHaveBeenCalled())
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    // The header is the assertion that matters: fetchActiveProduct nulls it in
-    // its catch, so without the restore this reads "No active product".
     expect(session.products.activeProduct).toMatchObject({ id: PRODUCT_A.id })
     expect(session.products.currentProductId).toBe(PRODUCT_A.id)
     expect(session.projectStore.fetchProjects).not.toHaveBeenCalled()

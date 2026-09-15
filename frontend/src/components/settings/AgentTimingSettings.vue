@@ -1,27 +1,3 @@
-<!--
-  AgentTimingSettings.vue — FE-9553
-
-  The agent silence threshold and check-in cadence, RELOCATED out of the
-  Notifications tab.
-
-  They were never notification settings. They tune how agents behave — when one
-  counts as silent, how often a waiting one looks for work — and they sat under
-  Notifications only because that is where the first one happened to be added.
-  The record's instruction is that each tab should mean one thing, so they move
-  to Tools -> Agents, into the Agent Behaviour Settings group FE-9555 created
-  for exactly this class of control ("settings that modify how agents operate").
-
-  Extracted as a component rather than moved as markup for two reasons: it
-  removes ~40 lines from ToolsView.vue, which sits at the 800-line guardrail
-  with no headroom, and the Agents tab is not eager-rendered, so owning its own
-  load keeps the values correct whether or not that tab has ever been opened.
-
-  SAVE-ON-CHANGE, unlike the Notifications tab's batched Save button. Every peer
-  in the Agent Behaviour group (the execution-mode default, both orchestration
-  toggles) commits on change, and leaving these two behind a Save button that
-  lives on a different tab is how the relocation would have produced two
-  controls with no way to commit them.
--->
 <template>
   <div data-test="agent-timing-settings">
     <div class="ats-row">
@@ -42,8 +18,6 @@
       />
     </div>
 
-    <!-- FE-9296b: the account-level check-in cadence that replaced the
-         per-project auto check-in slider. -->
     <div class="ats-row">
       <v-text-field
         v-model.number="cadenceMinutes"
@@ -86,9 +60,6 @@ const saving = ref(false)
 const error = ref(false)
 
 onMounted(async () => {
-  // Guarded individually: an unguarded await here used to abort the rest of
-  // ToolsView's onMounted when either read failed, taking unrelated loads down
-  // with it. Owning the load locally is what lets each one fail alone.
   try {
     silenceMinutes.value = await settings.loadAgentSilenceThreshold()
   } catch {
@@ -101,7 +72,6 @@ onMounted(async () => {
   }
 })
 
-/** Only commit a value the rules accept — a rejected keystroke is not a save. */
 function isValid(value) {
   return Number.isInteger(value) && value >= 1 && value <= 1440
 }

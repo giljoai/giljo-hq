@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Unit tests for ToolAccessor.create_project() — product resolution and return value.
-
-Test Coverage:
-- Active product resolution when product_id not provided
-- Raises ValidationError when no active product exists
-- Uses tenant_manager fallback when tenant_key not provided
-- Returns serializable dict (not ORM object)
-
-BE-9411: product resolution moved behind ``ProductService.resolve_binding_product``,
-which validates an explicitly supplied product_id against the tenant instead of
-trusting it. The default (omitted) path is unchanged and these tests now exercise
-the REAL resolver over a stubbed ``get_default_product``. Explicit-id tests stub the
-resolver itself -- their subject is mission/status/return-dict forwarding, and the
-validation behavior they used to (wrongly) pin is covered for real against a live DB
-in ``tests/integration/test_be9411_explicit_product_id_on_creates.py``.
-"""
 
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -32,7 +15,6 @@ from giljo_mcp.tools.tool_accessor import ToolAccessor
 
 
 def _stub_product(product_id: str, name: str) -> Mock:
-    """A resolved product stand-in (BE-9411): only id + name are read."""
     product = Mock()
     product.id = product_id
     product.name = name
@@ -41,12 +23,6 @@ def _stub_product(product_id: str, name: str) -> Mock:
 
 @pytest.fixture(autouse=True)
 def _autopatch_valid_project_types():
-    """create_project_for_mcp now reads valid_types as a hint when project_type is omitted.
-
-    These tests don't set up a real DB; stub the helper so the omitted-type path
-    doesn't try to open an async session. Tests that exercise the unknown-type
-    rejection path explicitly mock this with a populated list.
-    """
     with patch.object(
         ProjectService,
         "_get_valid_project_types",
@@ -57,11 +33,9 @@ def _autopatch_valid_project_types():
 
 
 class TestCreateProjectActiveProductResolution:
-    """Test suite for active product resolution logic."""
 
     @pytest.mark.asyncio
     async def test_resolves_active_product_when_product_id_not_provided(self):
-        """Test that active product is fetched when product_id is None."""
         db_manager = Mock()
         tenant_manager = Mock()
         tenant_manager.get_current_tenant = Mock(return_value="tenant-abc")
@@ -73,13 +47,6 @@ class TestCreateProjectActiveProductResolution:
             test_session=None,
         )
 
-        # BE-9411: stub only the active-product lookup and let the REAL
-        # resolve_binding_product run, so the default path is genuinely covered
-        # rather than mocked away.
-        # BE-9523b: resolve_binding_product(write=True) now counts the tenant's
-        # products before falling back to active; stub list_products with a
-        # single-product tenant so that count check is a real no-op (byte-identical
-        # single-product behaviour is the point being tested here).
         with (
             patch.object(
                 ProductService,
@@ -120,27 +87,16 @@ class TestCreateProjectActiveProductResolution:
                 tenant_key="tenant-abc",
             )
 
-            # The active product was consulted (omitted product_id -> ambient).
             mock_get_active.assert_awaited_once()
 
-            # Verify create_project was called with resolved product_id
             mock_create.assert_awaited_once()
             call_kwargs = mock_create.call_args[1]
             assert call_kwargs["product_id"] == "prod-123"
 
-            # BE-9411: the response names the landing on the default path too.
             assert result["product_name"] == "Product 123"
 
     @pytest.mark.asyncio
     async def test_explicit_product_id_is_validated_not_trusted(self):
-        """BE-9411: an explicit product_id goes THROUGH resolution, not around it.
-
-        This test used to assert the opposite -- that supplying product_id skipped
-        the ProductService entirely (``assert_not_called``). That skip was the
-        vulnerability: the id came from an agent and reached the write with no
-        tenant-membership check at all. The parameter is now resolved and validated
-        like any other untrusted input, so the assertion is inverted deliberately.
-        """
         db_manager = Mock()
         tenant_manager = Mock()
         tenant_manager.get_current_tenant = Mock(return_value="tenant-abc")
@@ -186,17 +142,14 @@ class TestCreateProjectActiveProductResolution:
                 tenant_key="tenant-abc",
             )
 
-            # The supplied id is handed to the validator, not straight to the write.
             mock_resolve.assert_awaited_once()
             assert mock_resolve.await_args[0][0] == "explicit-prod-id"
 
-            # Verify create_project used the validated product_id
             call_kwargs = mock_create.call_args[1]
             assert call_kwargs["product_id"] == "explicit-prod-id"
 
     @pytest.mark.asyncio
     async def test_raises_validation_error_when_no_active_product(self):
-        """Test that ValidationError is raised when no active product exists."""
         db_manager = Mock()
         tenant_manager = Mock()
         tenant_manager.get_current_tenant = Mock(return_value="tenant-abc")
@@ -208,9 +161,6 @@ class TestCreateProjectActiveProductResolution:
             test_session=None,
         )
 
-        # Real resolver, no active product to find -> the real 422 it raises.
-        # BE-9523b: write=True counts products first; zero products is the same
-        # "nothing to be ambiguous between" case as one, so it falls through.
         with (
             patch.object(
                 ProductService,
@@ -236,7 +186,6 @@ class TestCreateProjectActiveProductResolution:
 
     @pytest.mark.asyncio
     async def test_uses_tenant_manager_when_tenant_key_not_provided(self):
-        """Test that tenant_manager is used when tenant_key is None."""
         db_manager = Mock()
         tenant_manager = Mock()
         tenant_manager.get_current_tenant = Mock(return_value="tenant-from-manager")
@@ -280,20 +229,16 @@ class TestCreateProjectActiveProductResolution:
                 tenant_key=None,
             )
 
-            # Verify tenant_manager was called
             tenant_manager.get_current_tenant.assert_called_once()
 
-            # Verify ProductService was instantiated with manager's tenant_key
             call_kwargs = mock_product_service_cls.call_args[1]
             assert call_kwargs["tenant_key"] == "tenant-from-manager"
 
 
 class TestCreateProjectReturnValue:
-    """Test suite for return value serialization."""
 
     @pytest.mark.asyncio
     async def test_returns_serializable_dict(self):
-        """Test that create_project returns a plain dict, not an ORM object."""
         db_manager = Mock()
         tenant_manager = Mock()
         tenant_manager.get_current_tenant = Mock(return_value="tenant-abc")
@@ -347,7 +292,6 @@ class TestCreateProjectReturnValue:
 
     @pytest.mark.asyncio
     async def test_return_dict_contains_all_expected_keys(self):
-        """Test that the returned dict has exactly the expected keys."""
         db_manager = Mock()
         tenant_manager = Mock()
         tenant_manager.get_current_tenant = Mock(return_value="tenant-abc")
@@ -399,15 +343,12 @@ class TestCreateProjectReturnValue:
                 "mission",
                 "status",
                 "product_id",
-                # BE-9411: the create response names its landing, not just its id.
                 "product_name",
                 "created_at",
                 "message",
                 "project_type",
                 "series_number",
                 "valid_types",
-                # BE-6049d: create-success advertises auto-numbering so agents
-                # stop supplying series_number.
                 "numbering",
             }
             assert set(result.keys()) == expected_keys, f"Expected keys {expected_keys}, got {set(result.keys())}"

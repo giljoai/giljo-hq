@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""User-facing notification endpoints (DB-backed notification bell, IMP-5037a).
-
-This router is auth-gated.
-
-BE-9143: the registered-but-dead ``GET /api/notifications/check-skills-version``
-drift-check route was retired (no remaining caller — SystemStatusBanner.vue
-dropped that polling post-IMP-5024).
-"""
 
 import logging
 

@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression tests for BE-5117b: single canonical vision-summary write path.
-
-BE-5117 introduced the column-based write path:
-- ``VisionDocument.summary_light`` / ``summary_medium`` (per-doc)
-- ``Product.consolidated_vision_light`` / ``consolidated_vision_medium`` (aggregate)
-- ``Product.vision_analysis_complete`` gates frontend staging unlock.
-
-BE-5117b removes the LEGACY parallel write path:
-- ``summary_33`` / ``summary_66`` parameters on ``update_product_fields``
-- ``vision_document_summaries`` table + ``VisionDocumentSummary`` model
-- ``VisionDocumentRepository.create_summary`` / ``get_summaries`` / ``get_best_summary``
-
-After this project:
-- The AI extraction prompt teaches ONLY ``vision_summaries[]`` + ``consolidated_vision{}``.
-- Passing ``summary_33`` / ``summary_66`` produces a clean ``ValidationError`` (no silent no-op).
-- The happy path through ``vision_summaries`` + ``consolidated_vision`` populates the
-  per-doc columns AND flips ``vision_analysis_complete`` to True.
-- The ``vision_document_summaries`` table is gone after migration ce_0035.
-"""
 
 import uuid
 
@@ -78,7 +59,6 @@ async def vision_doc(db_session: AsyncSession, tenant_key: str, product: Product
 
 
 def test_prompt_single_path() -> None:
-    """VISION_EXTRACTION_PROMPT teaches ONLY the column-write path."""
     from giljo_mcp.tools.vision_analysis import VISION_EXTRACTION_PROMPT
 
     assert "summary_33" not in VISION_EXTRACTION_PROMPT
@@ -95,12 +75,6 @@ async def test_tool_rejects_legacy_fields(
     product: Product,
     vision_doc: VisionDocument,
 ) -> None:
-    """Passing summary_33/summary_66 raises ValidationError (no silent no-op).
-
-    Silent no-op would mask agent bugs: the agent thinks it wrote summaries
-    but the staging gate never opens. A loud 422-style error surfaces the
-    out-of-date prompt immediately.
-    """
     from giljo_mcp.tools.vision_analysis import update_product_fields
 
     with pytest.raises(ValidationError):
@@ -121,7 +95,6 @@ async def test_happy_path_column_write(
     product: Product,
     vision_doc: VisionDocument,
 ) -> None:
-    """vision_summaries + consolidated_vision populate columns and flip the gate."""
     from giljo_mcp.tools.vision_analysis import update_product_fields
 
     result = await update_product_fields(
@@ -158,7 +131,6 @@ async def test_happy_path_column_write(
 
 @pytest.mark.asyncio
 async def test_table_is_gone(db_session: AsyncSession) -> None:
-    """vision_document_summaries table is dropped after migration ce_0035."""
 
     def _names(sync_conn) -> list[str]:
         return inspect(sync_conn).get_table_names()

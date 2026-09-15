@@ -1,20 +1,3 @@
-/**
- * commHubStore.fe9586.spec.js — FE-9586
- *
- * Opening a thread must tell the SERVER it was read.
- *
- * The defect: markThreadRead() zeroed an in-memory counter and persisted nothing,
- * and the REST history read passes no mark_read, so comm_participants.last_read_at
- * — the cursor the card's `unread` flag keys on — was advanced only by agents over
- * MCP. The operator had no watermark and every card read unread forever.
- *
- * The rules pinned here are the decided conditions on write-on-open, and each is a
- * test rather than a comment because each is a way to get this subtly wrong:
- *  - it fires on a genuine open;
- *  - it is fire-and-forget — a rejected write must not throw out of selectThread,
- *    because a failed watermark must never break the thread view;
- *  - closing the pane (id null) writes nothing, so "no thread" is not a thread.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useCommHubStore } from '@/stores/commHubStore'
@@ -54,7 +37,6 @@ describe('commHubStore write-on-open watermark (FE-9586)', () => {
     markReadMock.mockImplementation(() => Promise.reject(new Error('offline')))
 
     expect(() => useCommHubStore().selectThread('thr-1')).not.toThrow()
-    // and the selection still happened — the view must not depend on the write
     expect(useCommHubStore().selectedThreadId).toBe('thr-1')
   })
 

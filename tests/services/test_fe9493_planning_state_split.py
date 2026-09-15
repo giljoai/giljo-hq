@@ -3,35 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-9493 — split "implementing" into "planning" + "implementing".
-
-The chain tab strip could not distinguish "this member's sub-orchestrator has
-started working the project" from "the first worker it spawned has started" --
-both wrote the SAME ``project_statuses`` value ("implementing"), and the FE bug
-(a WAITING member flipping to PLANNING just from being clicked/visited) was a
-separate client-side artifact fixed on the frontend side (useChainContext.spec.js).
-This backend half makes the PLANNING state real:
-
-1. ``VALID_PROJECT_STATUSES`` gains "planning"; ``CHAIN_TERMINAL_PROJECT_STATUSES``
-   does NOT (it is not a terminal state).
-2. ``advance_chain_member_to_implementing`` (the sub-orch entering the project, at
-   launch or at staging-end) now writes "planning" instead of "implementing".
-3. ``mission_service.get_agent_mission``'s atomic waiting->working start, when the
-   job belongs to a non-orchestrator (a spawned worker) on a chain-member project,
-   promotes that member's status to "implementing" -- the FIRST-WORKER-STARTED
-   signal -- via a NEW forward-only guard on ``mark_chain_member_status`` (its
-   ``not_from`` param) so a late/racing worker registration can never demote a
-   member that already reached awaiting_review/completed/failed/stalled/terminated.
-4. ``job_completion_staging._RUN_IMPL_STARTED_STATUSES`` (used by
-   ``is_conductor_staging_end`` to decide whether a chain has left the staging
-   phase) gains "planning" -- the same real-world event this set always meant to
-   catch, just renamed.
-
-Each numbered item is pinned by its own test group below, driven at the service
-layer (the layer the split touches) with real DB writes through db_session
-(TransactionalTestContext). No module-level mutable state. No ordering
-dependencies. Parallel-safe. Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -57,16 +28,9 @@ from giljo_mcp.tenant import TenantManager
 pytestmark = pytest.mark.asyncio
 
 
-# ---------------------------------------------------------------------------
-# Seeding helpers (mirrors tests/services/test_be6206_chain_gateless_release.py)
-# ---------------------------------------------------------------------------
 
 
 async def _seed_project(session: AsyncSession, tenant_key: str, *, implementation_launched: bool = False) -> str:
-    """``implementation_launched=True`` stamps ``implementation_launched_at`` so a
-    WORKER (non-orchestrator) job on this project clears the mission_implementation_gate
-    human/chain-staging gate -- required for any test that drives a real worker
-    get_agent_mission call past that gate to reach the atomic-start block."""
     product = Product(
         id=str(uuid.uuid4()),
         name=f"FE-9493 Product {uuid.uuid4().hex[:6]}",
@@ -105,8 +69,6 @@ async def _seed_job(
     job_type: str,
     status: str = "waiting",
 ) -> AgentJob:
-    """Hand-mint a job + execution at the given status (default "waiting" — the
-    pre-first-mission-fetch state the atomic-start block keys on)."""
     job_id = str(uuid.uuid4())
     job = AgentJob(
         job_id=job_id,
@@ -152,9 +114,6 @@ async def _reload_execution(session: AsyncSession, job_id: str, tenant_key: str)
     ).scalar_one()
 
 
-# ===========================================================================
-# 1. VALID_PROJECT_STATUSES / CHAIN_TERMINAL_PROJECT_STATUSES membership
-# ===========================================================================
 
 
 async def test_planning_is_a_valid_project_status() -> None:
@@ -162,20 +121,14 @@ async def test_planning_is_a_valid_project_status() -> None:
 
 
 async def test_planning_is_not_terminal() -> None:
-    """PLANNING must never release the C1 conductor-chain-incomplete guard --
-    only a genuinely finished member does."""
     assert "planning" not in CHAIN_TERMINAL_PROJECT_STATUSES
 
 
-# ===========================================================================
-# 2. advance_chain_member_to_implementing writes "planning", not "implementing"
-# ===========================================================================
 
 
 async def test_advance_writes_planning_not_implementing(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
     p1 = await _seed_project(db_session, tenant)
-    # advance_chain_member_to_implementing is a no-op without an active run.
     await _run_svc(db_session).create(
         project_ids=[p1], resolved_order=[p1], execution_mode="claude_code_cli", tenant_key=tenant
     )
@@ -196,14 +149,9 @@ async def test_advance_writes_planning_not_implementing(db_session: AsyncSession
     )
 
 
-# ===========================================================================
-# 3a. mark_chain_member_status forward-only guard (not_from)
-# ===========================================================================
 
 
 async def test_not_from_none_preserves_existing_callers_byte_identical(db_session: AsyncSession) -> None:
-    """Every EXISTING caller passes status="completed" with no not_from -- default
-    None must change nothing for them (regression guard on the 4 existing call sites)."""
     tenant = TenantManager.generate_tenant_key()
     p1 = await _seed_project(db_session, tenant)
     await _run_svc(db_session).create(
@@ -225,8 +173,6 @@ async def test_not_from_none_preserves_existing_callers_byte_identical(db_sessio
 
 @pytest.mark.parametrize("current_status", ["pending", "staged", "planning"])
 async def test_not_from_permits_forward_transitions(db_session: AsyncSession, current_status: str) -> None:
-    """planning (and any earlier state) -> implementing is a legitimate forward
-    move and must NOT be blocked by the guard."""
     tenant = TenantManager.generate_tenant_key()
     p1 = await _seed_project(db_session, tenant)
     run = await _run_svc(db_session).create(
@@ -252,8 +198,6 @@ async def test_not_from_permits_forward_transitions(db_session: AsyncSession, cu
 
 @pytest.mark.parametrize("settled_status", ["awaiting_review", "completed", "failed", "stalled", "terminated"])
 async def test_not_from_blocks_demotion_from_settled_states(db_session: AsyncSession, settled_status: str) -> None:
-    """The load-bearing guard: a member already past 'implementing' must NEVER
-    be written back to 'implementing' by a late/racing worker registration."""
     tenant = TenantManager.generate_tenant_key()
     p1 = await _seed_project(db_session, tenant)
     run = await _run_svc(db_session).create(
@@ -276,11 +220,6 @@ async def test_not_from_blocks_demotion_from_settled_states(db_session: AsyncSes
     assert refreshed["project_statuses"][p1] == settled_status, "the settled status must be left untouched"
 
 
-# ===========================================================================
-# 3b. mission_service.get_agent_mission — the real integration: first worker
-#     mission fetch promotes planning -> implementing; the orchestrator's own
-#     first fetch does NOT; a settled member is never demoted.
-# ===========================================================================
 
 
 async def test_first_worker_mission_fetch_promotes_planning_to_implementing(
@@ -303,10 +242,6 @@ async def test_first_worker_mission_fetch_promotes_planning_to_implementing(
 
 
 async def test_orchestrators_own_first_mission_fetch_does_not_promote(db_session: AsyncSession, db_manager) -> None:
-    """job.job_type == "orchestrator" must be excluded -- the sub-orch's OWN
-    first mission fetch already wrote 'planning' via the staging-end/launch
-    path; this call must not re-promote to 'implementing' before any worker
-    has actually started."""
     tenant = TenantManager.generate_tenant_key()
     p1 = await _seed_project(db_session, tenant)
     run = await _run_svc(db_session).create(
@@ -327,8 +262,6 @@ async def test_orchestrators_own_first_mission_fetch_does_not_promote(db_session
 async def test_late_worker_mission_fetch_does_not_demote_a_completed_member(
     db_session: AsyncSession, db_manager
 ) -> None:
-    """Race guard: a worker's first-ever mission fetch lands AFTER its project
-    already closed out (completed). Must not demote back to 'implementing'."""
     tenant = TenantManager.generate_tenant_key()
     p1 = await _seed_project(db_session, tenant, implementation_launched=True)
     run = await _run_svc(db_session).create(
@@ -346,10 +279,8 @@ async def test_late_worker_mission_fetch_does_not_demote_a_completed_member(
 
 
 async def test_solo_worker_mission_fetch_is_a_clean_noop(db_session: AsyncSession, db_manager) -> None:
-    """Solo (no active run) project: the new promotion call must be a byte-
-    identical no-op -- get_agent_mission still succeeds normally."""
     tenant = TenantManager.generate_tenant_key()
-    p1 = await _seed_project(db_session, tenant, implementation_launched=True)  # no sequence run created
+    p1 = await _seed_project(db_session, tenant, implementation_launched=True)
     worker_job = await _seed_job(db_session, tenant, p1, job_type="implementer", status="waiting")
 
     response = await _mission_svc(db_session, db_manager).get_agent_mission(worker_job.job_id, tenant)
@@ -359,9 +290,6 @@ async def test_solo_worker_mission_fetch_is_a_clean_noop(db_session: AsyncSessio
     assert refreshed.status == "working"
 
 
-# ===========================================================================
-# 4. is_conductor_staging_end — "planning" must count as "implementation begun"
-# ===========================================================================
 
 
 async def test_planning_member_means_conductor_call_is_not_staging_end(db_session: AsyncSession) -> None:
@@ -386,8 +314,6 @@ async def test_planning_member_means_conductor_call_is_not_staging_end(db_sessio
 
 
 async def test_no_member_started_still_reads_as_conductor_staging_end(db_session: AsyncSession) -> None:
-    """Control: byte-identical for the case this fix does not touch -- nothing
-    has started yet, so the conductor's call is still a genuine staging-end."""
     tenant = TenantManager.generate_tenant_key()
     p1 = await _seed_project(db_session, tenant)
     run = await _run_svc(db_session).create(

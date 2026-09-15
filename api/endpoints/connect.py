@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Connect surface -- read-only credential-status endpoint (FE-9274).
-
-Backs the "Configured" state on the Connect surface so it survives a page
-reload instead of resetting to session-only local state. Computed on the fly
-from EXISTING api_keys / oauth_refresh_tokens rows -- no new table.
-
-BE-9591: this module gained ONE write -- removing a tool's stored connection.
-The read above was always the whole surface, and "Remove tool" used to touch
-nothing durable, so a removed tool went green again from history the moment it
-was re-added.
-"""
 
 import logging
 

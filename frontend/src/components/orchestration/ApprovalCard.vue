@@ -58,16 +58,6 @@ import { useToast } from '@/composables/useToast'
 import { getAgentColor } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
 
-/**
- * ApprovalCard — renders a single user_approval row.
- *
- * Edition Scope: CE.
- *
- * The decide flow is owned by useApprovalsStore (which hits api.approvals.decide
- * via the shared axios singleton, ADR-001 compliant). This component is a
- * dumb-ish presenter: it formats `reason`, `context`, and `options` and emits
- * `decided` on success so the parent can react (e.g., close a modal).
- */
 const props = defineProps({
   approval: {
     type: Object,
@@ -87,7 +77,6 @@ const error = ref(null)
 const submitting = computed(() => pendingOptionId.value !== null)
 
 const options = computed(() => {
-  // Each option: { id: string, label: string }
   return Array.isArray(props.approval?.options) ? props.approval.options : []
 })
 
@@ -128,9 +117,6 @@ const agentBadgeStyle = computed(() => ({
 }))
 
 const cardStyle = computed(() => ({
-  // Use the agent-tinted color for the smooth-border ring and a faint
-  // tonal background. No CSS `border` — smooth-border class supplies the
-  // box-shadow inset ring (design system rule).
   '--smooth-border-color': hexToRgba(agentColor.value, 0.55),
   '--card-accent': hexToRgba(agentColor.value, 0.06),
   background: 'var(--card-accent)',

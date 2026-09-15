@@ -1,13 +1,3 @@
-/**
- * SupersedeProjectModal.spec.js — BE-9157
- *
- * Regression coverage for the "Mark Superseded" successor-picker modal:
- * the successor v-select must populate from candidate projects, the confirm
- * button must stay disabled until a successor is chosen, and confirming must
- * call the store's supersedeProject action with the right payload.
- *
- * Edition scope: Both
- */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -56,11 +46,6 @@ describe('SupersedeProjectModal.vue', () => {
     })
   })
 
-  // FE-9485: GET /api/v1/projects/ 422s if `limit` exceeds the REST bound
-  // (le=200, BE-6076's deliberate page-size cap). The mocked api.projects.list
-  // above accepts any params, so this asserts the store's OUTGOING request
-  // actually respects the real endpoint's bound rather than just proving the
-  // mock is permissive.
   it('requests successor candidates within the projects endpoint limit bound', async () => {
     await mountModal()
 
@@ -77,11 +62,6 @@ describe('SupersedeProjectModal.vue', () => {
     expect(wrapper.vm.successorOptions[0].value).toBe(OTHER_PROJECT.id)
   })
 
-  // FE-9508 defect 2: options rendered only `p.name`, so the operator could not
-  // tell candidates apart (four options, none identifiable by serial). This
-  // assertion checks the alias is IN the title, not just that a title exists —
-  // a missing `taxonomy_alias` field renders as an empty string rather than
-  // throwing, which is exactly the false-green risk called out in the DoD.
   it('renders the taxonomy alias alongside the name for each successor option', async () => {
     const { wrapper } = await mountModal()
 
@@ -89,8 +69,6 @@ describe('SupersedeProjectModal.vue', () => {
     expect(wrapper.vm.successorOptions[0].title).toContain(OTHER_PROJECT.name)
   })
 
-  // FE-9508 defect 2 fallback: a candidate with no alias yet must still render
-  // (bare name), not blow up or produce a blank option.
   it('falls back to the bare name when a candidate has no taxonomy alias', async () => {
     api.projects.list = vi.fn().mockResolvedValue({
       data: [{ id: 'proj-no-alias', name: 'Unaliased Project' }, { id: PROJECT_ID, name: 'Old Project' }],
@@ -100,10 +78,6 @@ describe('SupersedeProjectModal.vue', () => {
     expect(wrapper.vm.successorOptions).toEqual([{ title: 'Unaliased Project', value: 'proj-no-alias' }])
   })
 
-  // FE-9508 defect 3: `inactive` candidates were swept up with the terminal
-  // statuses this dialog meant to exclude. The store now requests `inactive`
-  // too — assert the modal surfaces one when the store returns it (does not
-  // filter it back out client-side).
   it('surfaces an inactive candidate as a selectable successor', async () => {
     const INACTIVE_PROJECT = { id: 'proj-inactive', name: 'Inactive Candidate', status: 'inactive', taxonomy_alias: 'BE-9499c' }
     api.projects.list = vi.fn().mockResolvedValue({

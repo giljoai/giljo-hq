@@ -1,22 +1,3 @@
-/**
- * products.fe9529.spec.js — FE-9529
- *
- * The Default-product write path: setDefaultProduct() and the
- * delete-clears-default follow-up read.
- *
- * - setDefaultProduct calls the ONE server write (POST /set-default, already
- *   atomic server-side: ProductLifecycleService.set_default_product clears
- *   any previous default in the SAME call) then mirrors that single-default
- *   guarantee into the local list immediately, and refreshes the RESOLVED
- *   default (activeProduct) rather than assuming the write response IS the
- *   resolution.
- * - deleteProduct: a deleted product's is_default is cleared server-side
- *   (FE-9524's product_lifecycle_service.py); if the deleted row WAS the
- *   resolved default, the store must re-read rather than keep pointing
- *   activeProduct at a soft-deleted row.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 

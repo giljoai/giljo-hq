@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""MCP-transport boundary test: a filtered ``mark_read`` drain reports over the wire
-what it actually changed, and the COMPLETION_BLOCKED guidance names a call that works.
-
-The bug was only ever visible to an agent holding the tool result. It called
-``get_thread_history(mark_read=true, action_required_only=true)``, read
-``marked_read: 2``, called it again, read ``marked_read: 2`` again, and concluded the
-server was discarding its acknowledgements. The count was the thing lying — the acks
-were real — and the count is shaped at this boundary, so the regression belongs here
-as well as at the service layer (CLAUDE.md / BE-5042).
-
-Over the wire:
-- a repeated filtered drain reports ``marked_read: 0`` and ``cursor_advanced: false``,
-  with a note naming the unfiltered call that advances the cursor;
-- the filtered drain nevertheless clears the completion gate, so ``complete_job``
-  succeeds;
-- the COMPLETION_BLOCKED rejection names the THREAD the blocking posts are on (the
-  gate is project-scoped while the drain is thread-scoped, so "that job's coordination
-  thread" was not enough to act on) and tells the caller to read it unfiltered.
-"""
 
 from __future__ import annotations
 
@@ -47,7 +28,7 @@ from tests.helpers.mcp_session_fixture import create_connected_server_and_client
 
 pytestmark = pytest.mark.asyncio
 
-SENDER = "sender-orch"  # distinct author so the post never self-excludes the recipient
+SENDER = "sender-orch"
 
 
 def _payload(res) -> dict:
@@ -66,12 +47,6 @@ def _error_text(res) -> str:
 
 @pytest_asyncio.fixture
 async def markread_mcp_client(db_manager, db_session, monkeypatch):
-    """Yield ``(new_client, tenant_key, job_id, agent_id, project_id)``.
-
-    Mirrors the BE-9108 gate fixture: tenant scaffolding plus product -> project ->
-    orchestrator AgentJob + working AgentExecution, with the ToolAccessor threaded onto
-    the rolled-back test session so every tool write stays inside the transaction.
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -169,7 +144,6 @@ async def _call(new_client, tool, args):
 
 
 async def _seed_thread(new_client, project_id: str, agent_id: str) -> tuple[str, list[str]]:
-    """Project thread with interleaved informational + action-required posts."""
     thread = _payload(
         await _call(new_client, "create_thread", {"subject": "coord", "project_id": project_id, "creator_id": SENDER})
     )
@@ -217,8 +191,6 @@ async def test_repeated_filtered_drain_reports_no_new_acks_over_the_wire(markrea
     assert first["cursor_advanced"] is False
     assert "unread_only" in first["mark_read_note"]
 
-    # Same posts come back (the cursor is deliberately unmoved) — but nothing new was
-    # acknowledged, so the count the agent reads must be 0, not a repeated 2.
     second = _payload(await _call(new_client, "get_thread_history", args))
     assert second["count"] == len(action_required)
     assert second["marked_read"] == 0
@@ -250,9 +222,5 @@ async def test_completion_blocked_guidance_names_the_thread_and_the_unfiltered_r
     assert blocked.is_error is True
     text = _error_text(blocked)
 
-    # The gate is project-scoped, the drain is thread-scoped: without the thread id the
-    # agent has message ids it cannot act on, and may drain a thread they are not on.
     assert tid in text, "COMPLETION_BLOCKED must name the thread carrying the blocking posts"
-    # And it must not send the caller back to a narrowed read, which acks what it
-    # returns but leaves unread_only re-serving the same posts forever.
     assert "action_required_only" in text

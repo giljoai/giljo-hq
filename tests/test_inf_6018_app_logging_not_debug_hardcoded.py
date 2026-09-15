@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""INF-6018 regression: api/app.py must not hardcode DEBUG logging.
-
-api/app.py configures logging at module import time (before .env loads), so a
-hardcoded ``level=logging.DEBUG`` forces the ENTIRE app to DEBUG on every
-deploy -- overriding the uvicorn ``--log-level info`` start command and the
-canonical LOG_LEVEL-aware setup in ``giljo_mcp.logging``. On prod this floods
-logs (~500 lines/sec) and adds per-request I/O overhead.
-
-The failing layer is the module-level logging config, so the guard asserts on
-the source of api/app.py directly: the level must be derived from the
-LOG_LEVEL env var, never pinned to DEBUG.
-"""
 
 from __future__ import annotations
 
@@ -29,7 +17,6 @@ def _source() -> str:
 
 
 def test_app_does_not_hardcode_debug_level() -> None:
-    """The early basicConfig must not pin the root logger to DEBUG."""
     src = _source()
     assert "level=logging.DEBUG" not in src, (
         "api/app.py hardcodes logging.DEBUG at import time. This overrides "
@@ -39,7 +26,6 @@ def test_app_does_not_hardcode_debug_level() -> None:
 
 
 def test_app_logging_honors_log_level_env() -> None:
-    """The logging level must be derived from the LOG_LEVEL env var."""
     src = _source()
     assert 'os.getenv("LOG_LEVEL"' in src or "os.getenv('LOG_LEVEL'" in src, (
         "api/app.py must resolve its log level from the LOG_LEVEL env var "

@@ -1,14 +1,3 @@
-/**
- * threadDisplayName.spec.js — FE-9436
- *
- * The operator's names-never-UUIDs rule, pinned at its single implementation.
- *
- * The test that carries the weight is the last one: an id must never come out, from any
- * field, at any position. Every surface that names a thread reached for one when it ran
- * out of better options, so "never" is the property to assert rather than "prefers".
- *
- * Edition scope: Both
- */
 import { describe, it, expect } from 'vitest'
 import { threadDisplayName } from './threadDisplayName'
 
@@ -23,8 +12,6 @@ describe('threadDisplayName (FE-9436)', () => {
   })
 
   it('falls back to the live event when the store has not hydrated the thread', () => {
-    // The cold-page case: the browser notification fires for a thread this session has
-    // never loaded, which is precisely when the old fallbacks printed an id.
     expect(threadDisplayName(undefined, { subject: 'Renamed thread' })).toBe('Renamed thread')
     expect(threadDisplayName(null, { chat_id: 'CHT-0493' })).toBe('CHT-0493')
   })
@@ -41,9 +28,6 @@ describe('threadDisplayName (FE-9436)', () => {
   })
 
   it('NEVER returns an id, from any field or any position', () => {
-    // Each case gives the function an id and nothing else it prefers. A future edit that
-    // adds `thread_id` to the fallback chain — the shape all three surfaces had — fails
-    // here rather than in front of an operator.
     const cases = [
       { thread_id: UUID },
       { thread_id: UUID, subject: '', title: '', chat_id: '' },

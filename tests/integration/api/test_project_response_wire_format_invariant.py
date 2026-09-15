@@ -3,29 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""CE-0038 — Wire-format invariant for Project response shapes.
-
-These tests capture the JSON shape of REST ``GET /api/v1/projects/{id}`` and
-the MCP ``ProjectDetail`` / ``ProjectData`` ``model_dump(mode='json')`` output.
-They run BEFORE the CE-0038 schema consolidation and assert byte-identical
-output AFTER, guaranteeing the consolidation is purely structural — no
-consumer-visible change.
-
-Why this matters: the frontend hard-codes specific JSON field presence and
-type semantics (e.g. ``implementation_launched_at`` must always appear, even
-as ``null``, because the closeout guard checks property presence not
-truthiness — CE-0036). MCP agents have prompt-template expectations that
-also depend on field order/presence. Any drift cascades into bugs in
-code paths not directly touched by this refactor.
-
-Coverage:
-- REST ``GET /api/v1/projects/{id}`` — three scenarios (all fields,
-  optional fields null, mixed taxonomy state)
-- MCP ``ProjectDetail.model_dump(mode='json')`` — what tools return when
-  surfacing full project detail
-- MCP ``ProjectData.model_dump(mode='json')`` — what ``cancel_staging`` /
-  ``update_project`` MCP tools return
-"""
 
 from __future__ import annotations
 
@@ -73,14 +50,9 @@ def _build_app(stub_service: _StubProjectService) -> FastAPI:
     return app
 
 
-# ---------------------------------------------------------------------------
-# REST wire format
-# ---------------------------------------------------------------------------
 
 
 def _full_detail() -> ProjectDetail:
-    """ProjectDetail with every optional field populated. Exercises the
-    'happy-path' wire shape the frontend renders against."""
     return ProjectDetail(
         id="proj-wire-full",
         alias="WF",
@@ -113,8 +85,6 @@ def _full_detail() -> ProjectDetail:
 
 
 def _nulled_detail() -> ProjectDetail:
-    """ProjectDetail with optional fields = None. Exercises the wire shape
-    for newly-created or staging projects where most fields are unset."""
     return ProjectDetail(
         id="proj-wire-nulled",
         alias="WN",
@@ -146,10 +116,6 @@ def _nulled_detail() -> ProjectDetail:
     )
 
 
-# Expected REST JSON shape for _full_detail() projected through ProjectResponse.
-# Captured pre-refactor via Pydantic v2 serialization. Field ordering follows
-# the Pydantic field declaration order in ProjectResponse; if the consolidation
-# changes ordering, an explicit decision is required.
 EXPECTED_REST_FULL: dict = {
     "id": "proj-wire-full",
     "alias": "WF",
@@ -194,10 +160,6 @@ EXPECTED_REST_NULLED: dict = {
     "agent_count": 0,
     "message_count": 0,
     "agents": [],
-    # NULL-state redesign: a project whose execution_mode is unset (None) now
-    # serializes as null on the wire — the API no longer fabricates
-    # 'multi_terminal'. The detail stub at _nulled_detail() passes
-    # execution_mode=None, so the honest wire value is null.
     "execution_mode": None,
     "auto_checkin_enabled": False,
     "auto_checkin_interval": 10,
@@ -213,8 +175,6 @@ EXPECTED_REST_NULLED: dict = {
 
 @pytest.mark.asyncio
 async def test_rest_get_project_wire_format_full() -> None:
-    """REST GET /api/v1/projects/{id} JSON body for a fully-populated detail
-    must match the captured shape byte-for-byte."""
     app = _build_app(_StubProjectService(_full_detail()))
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/api/v1/projects/proj-wire-full")
@@ -227,8 +187,6 @@ async def test_rest_get_project_wire_format_full() -> None:
 
 @pytest.mark.asyncio
 async def test_rest_get_project_wire_format_nulled() -> None:
-    """REST GET /api/v1/projects/{id} JSON body for a detail with most
-    fields null must match the captured shape byte-for-byte."""
     app = _build_app(_StubProjectService(_nulled_detail()))
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/api/v1/projects/proj-wire-nulled")
@@ -240,9 +198,6 @@ async def test_rest_get_project_wire_format_nulled() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# MCP ProjectDetail wire format
-# ---------------------------------------------------------------------------
 
 
 EXPECTED_MCP_DETAIL_FULL: dict = {
@@ -278,8 +233,6 @@ EXPECTED_MCP_DETAIL_FULL: dict = {
 
 
 def test_mcp_project_detail_wire_format_full() -> None:
-    """MCP tools surfacing ProjectDetail produce this exact JSON shape.
-    Order matches Pydantic field declaration in ProjectDetail."""
     detail = _full_detail()
     assert detail.model_dump(mode="json") == EXPECTED_MCP_DETAIL_FULL, (
         "MCP ProjectDetail wire format drift detected. Orchestrator and "
@@ -288,9 +241,6 @@ def test_mcp_project_detail_wire_format_full() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# MCP ProjectData wire format
-# ---------------------------------------------------------------------------
 
 
 def _full_data() -> ProjectData:
@@ -344,9 +294,6 @@ EXPECTED_MCP_DATA_FULL: dict = {
 
 
 def test_mcp_project_data_wire_format_full() -> None:
-    """MCP tools returning ProjectData produce this exact JSON shape.
-    The compact shape intentionally omits ``staging_status`` and
-    ``implementation_launched_at`` — callers read those via ProjectDetail."""
     data = _full_data()
     assert data.model_dump(mode="json") == EXPECTED_MCP_DATA_FULL, (
         "MCP ProjectData wire format drift detected. cancel_staging and "

@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""REST contract for the operator's attention read (FE-9586).
-
-``GET /api/v1/threads/attention`` is the ONE read behind the thread-post banner
-family. tests/services/test_fe9586_operator_attention.py pins the semantics; this
-pins the SHIM: the route is not shadowed by ``GET /{thread_id}``, the reader is
-the session, tenant isolation holds even between two operators who share a
-display name, and an unauthenticated caller is refused rather than told it is all
-caught up.
-
-Note on the fixtures: a mention must be authored by SOMEBODY ELSE, because your
-own post naming you is not being named. The REST post endpoint stamps the
-authenticated user as the author, so these tests seed a second user in the same
-tenant and post as them -- an operator posting their own name would be silently
-excluded and the test would pass for the wrong reason.
-
-Parallel-safe: api_client fixture, fresh tenant per test, no ordering deps.
-"""
 
 from __future__ import annotations
 
@@ -42,14 +25,6 @@ _TEST_CSRF_TOKEN = secrets.token_urlsafe(32)
 
 
 async def _seed_tenant(db_manager, *, display_first: str = "Test", display_last: str | None = None) -> dict:
-    """Org + user in a fresh isolated tenant.
-
-    Deliberately the SAME construction as tests/api/test_comm_threads_endpoints.py
-    rather than a fresh one: ``User.display_name`` is a derived property with no
-    setter, so a hand-rolled seed passing it fails at ORM construction. Copying the
-    working seed is how this file stays a test of the endpoint instead of a test of
-    my own fixture.
-    """
     async with db_manager.get_session_async() as session:
         suffix = uuid.uuid4().hex[:8]
         tenant_key = TenantManager.generate_tenant_key()
@@ -99,7 +74,6 @@ async def _seed_tenant(db_manager, *, display_first: str = "Test", display_last:
 
 
 async def _second_user(db_manager, tenant_key: str, org_id: str | None = None) -> dict:
-    """Another user inside an EXISTING tenant, so one can name the other."""
     async with db_manager.get_session_async() as session:
         suffix = uuid.uuid4().hex[:8]
         if org_id is None:
@@ -142,13 +116,6 @@ async def _thread(api_client: AsyncClient, headers: dict) -> str:
 
 @pytest.mark.asyncio
 async def test_attention_is_declared_above_the_thread_id_route(api_client: AsyncClient, db_manager) -> None:
-    """The shadowing trap, pinned as behaviour rather than trusted to file order.
-
-    A literal path registered AFTER ``GET /{thread_id}`` is swallowed by it, and this
-    call would be served as a thread whose id is the word "attention" -- a 404 that
-    looks like a missing thread rather than a misregistered route. Asserting the
-    payload SHAPE is what distinguishes the two.
-    """
     seed = await _seed_tenant(db_manager)
 
     resp = await api_client.get("/api/v1/threads/attention", headers=seed["headers"])
@@ -159,8 +126,6 @@ async def test_attention_is_declared_above_the_thread_id_route(api_client: Async
 
 @pytest.mark.asyncio
 async def test_attention_reports_a_post_naming_the_operator(api_client: AsyncClient, db_manager) -> None:
-    """End to end through the shim, with the name resolved server-side from the
-    session -- the client sends nothing but its cookie."""
     seed = await _seed_tenant(db_manager)
     other = await _second_user(db_manager, seed["tenant_key"])
     thread_id = await _thread(api_client, seed["headers"])
@@ -179,8 +144,6 @@ async def test_attention_reports_a_post_naming_the_operator(api_client: AsyncCli
 
 @pytest.mark.asyncio
 async def test_attention_is_empty_for_a_quiet_tenant(api_client: AsyncClient, db_manager) -> None:
-    """Negative control: a thread that names nobody reports nothing. Without this a
-    read that returned every thread would pass the test above."""
     seed = await _seed_tenant(db_manager)
     thread_id = await _thread(api_client, seed["headers"])
     await api_client.post(
@@ -196,8 +159,6 @@ async def test_attention_is_empty_for_a_quiet_tenant(api_client: AsyncClient, db
 
 @pytest.mark.asyncio
 async def test_attention_does_not_reach_another_tenants_threads(api_client: AsyncClient, db_manager) -> None:
-    """Two operators who happen to share a display name must not see each other's
-    mentions. The seed gives both the same name deliberately."""
     a = await _seed_tenant(db_manager)
     b = await _seed_tenant(db_manager, display_first=a["display_name"].split()[0], display_last="")
     other = await _second_user(db_manager, a["tenant_key"])
@@ -215,8 +176,6 @@ async def test_attention_does_not_reach_another_tenants_threads(api_client: Asyn
 
 @pytest.mark.asyncio
 async def test_attention_requires_authentication(api_client: AsyncClient, db_manager) -> None:
-    """It reports one person's obligations, so an unauthenticated caller gets nothing
-    -- not an empty list, which would read as "you are all caught up"."""
     resp = await api_client.get("/api/v1/threads/attention")
 
     assert resp.status_code in (401, 403), resp.text

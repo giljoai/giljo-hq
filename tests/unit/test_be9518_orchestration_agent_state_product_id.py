@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9518 — product_id on OrchestrationAgentStateService's agent:status_changed emitters.
-
-A WS-payload audit named exactly two ``agent:status_changed`` sources
-(``api/websocket.py``'s ``broadcast_job_status_update`` and
-``closeout_ws_broadcast.py``). This service independently emits the SAME
-event_type via FIVE more direct ``broadcast_to_tenant`` call sites --
-``_broadcast_completion``, ``reactivate_job``, ``dismiss_reactivation``,
-``finalize_job``, ``set_agent_status`` -- a third source the audit missed
-(Decided: fold in rather than ship a router that can filter only some
-``agent:status_changed`` events).
-
-Each test mocks ``state_service._job_repo`` directly (the repo methods, not
-raw ``session.execute``) -- the same style already used for this service in
-``test_0435b_closed_agent_status.py`` -- so these stay robust to the method
-bodies' internal query ORDERING, unlike a raw-session-mock approach.
-
-Pure in-memory (mocked repo + session), no DB. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 

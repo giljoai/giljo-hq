@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-TODO Append & Duration Display Tests - Handover 0827d
-
-Tests that OrchestrationService correctly:
-1. report_progress(todo_append=[...]) preserves existing completed items
-2. report_progress(todo_append=[...]) assigns correct sequence numbers
-3. report_progress(todo_append=[...]) updates JSONB summary counts
-4. report_progress(todo_items=[...]) still does full replace (no regression)
-5. report_progress with both todo_items and todo_append raises ValidationError
-6. JobResponse includes accumulated_duration_seconds and reactivation_count
-7. list_jobs returns accumulated_duration_seconds and reactivation_count
-"""
 
 import random
 from datetime import UTC, datetime, timedelta
@@ -34,9 +22,6 @@ from giljo_mcp.services.orchestration_service import OrchestrationService
 from giljo_mcp.tenant import TenantManager
 
 
-# ============================================================================
-# Fixtures
-# ============================================================================
 
 
 @pytest.fixture
@@ -97,7 +82,6 @@ def _create_agent_with_todos(
     status: str = "working",
     todo_items: list[dict] | None = None,
 ) -> tuple[AgentJob, AgentExecution]:
-    """Helper to create a job + execution + optional todo items."""
     job_id = str(uuid4())
     job = AgentJob(
         job_id=job_id,
@@ -145,7 +129,6 @@ async def working_agent_with_todos(
     test_tenant_key: str,
     active_project: Project,
 ) -> tuple[AgentJob, AgentExecution]:
-    """Create a working agent with 5 completed todo items."""
     todo_items = [
         {"content": "Step 1: Setup", "status": "completed"},
         {"content": "Step 2: Implement", "status": "completed"},
@@ -194,9 +177,6 @@ async def orchestration_service(
     )
 
 
-# ============================================================================
-# Tests: todo_append preserves existing items
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -206,10 +186,8 @@ async def test_todo_append_preserves_existing_items(
     working_agent_with_todos: tuple[AgentJob, AgentExecution],
     test_tenant_key: str,
 ):
-    """todo_append should NOT delete existing completed items."""
     job, _agent = working_agent_with_todos
 
-    # Append 2 new steps
     result = await orchestration_service.report_progress(
         job_id=job.job_id,
         tenant_key=test_tenant_key,
@@ -221,7 +199,6 @@ async def test_todo_append_preserves_existing_items(
 
     assert result.status == "success"
 
-    # Verify all 7 items exist
     items_result = await db_session.execute(
         select(AgentTodoItem)
         .where(AgentTodoItem.job_id == job.job_id)
@@ -232,12 +209,10 @@ async def test_todo_append_preserves_existing_items(
 
     assert len(items) == 7
 
-    # Verify original 5 are intact
     for i in range(5):
         assert items[i].status == "completed"
         assert items[i].sequence == i
 
-    # Verify new items appended correctly
     assert items[5].content == "Step 6: Fix subfolder"
     assert items[5].status == "pending"
     assert items[5].sequence == 5
@@ -254,17 +229,14 @@ async def test_todo_append_correct_sequence_after_gap(
     working_agent_with_todos: tuple[AgentJob, AgentExecution],
     test_tenant_key: str,
 ):
-    """Sequence numbers should continue from max existing sequence."""
     job, _agent = working_agent_with_todos
 
-    # Append once
     await orchestration_service.report_progress(
         job_id=job.job_id,
         tenant_key=test_tenant_key,
         todo_append=[{"content": "Step 6", "status": "pending"}],
     )
 
-    # Append again
     await orchestration_service.report_progress(
         job_id=job.job_id,
         tenant_key=test_tenant_key,
@@ -280,7 +252,6 @@ async def test_todo_append_correct_sequence_after_gap(
     items = items_result.scalars().all()
 
     assert len(items) == 7
-    # Sequences should be 0,1,2,3,4,5,6
     assert [item.sequence for item in items] == [0, 1, 2, 3, 4, 5, 6]
 
 
@@ -291,7 +262,6 @@ async def test_todo_append_updates_jsonb_summary(
     working_agent_with_todos: tuple[AgentJob, AgentExecution],
     test_tenant_key: str,
 ):
-    """JSONB todo_steps metadata should reflect appended items."""
     job, _agent = working_agent_with_todos
 
     await orchestration_service.report_progress(
@@ -303,7 +273,6 @@ async def test_todo_append_updates_jsonb_summary(
         ],
     )
 
-    # Refresh job to get updated metadata
     await db_session.refresh(job)
     metadata = job.job_metadata or {}
     todo_steps = metadata.get("todo_steps", {})
@@ -313,9 +282,6 @@ async def test_todo_append_updates_jsonb_summary(
     assert todo_steps["skipped_steps"] == 0
 
 
-# ============================================================================
-# Tests: todo_items still does full replace (no regression)
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -325,10 +291,8 @@ async def test_todo_items_full_replace_still_works(
     working_agent_with_todos: tuple[AgentJob, AgentExecution],
     test_tenant_key: str,
 ):
-    """todo_items full replace works when completed count is maintained."""
     job, _agent = working_agent_with_todos
 
-    # Replace with new items — must keep at least 5 completed (matching DB state)
     result = await orchestration_service.report_progress(
         job_id=job.job_id,
         tenant_key=test_tenant_key,
@@ -353,7 +317,6 @@ async def test_todo_items_full_replace_still_works(
     )
     items = items_result.scalars().all()
 
-    # All 5 originals replaced by 7 new ones (5 completed + 2 new)
     assert len(items) == 7
     assert items[5].content == "New A"
     assert items[6].content == "New B"
@@ -365,7 +328,6 @@ async def test_todo_items_regression_guard_rejects_lossy_replace(
     working_agent_with_todos: tuple[AgentJob, AgentExecution],
     test_tenant_key: str,
 ):
-    """Regression guard rejects todo_items that would lose completed work."""
     job, _agent = working_agent_with_todos
 
     with pytest.raises(ValidationError, match="regression rejected"):
@@ -379,9 +341,6 @@ async def test_todo_items_regression_guard_rejects_lossy_replace(
         )
 
 
-# ============================================================================
-# Tests: Mutual exclusion of todo_items and todo_append
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -390,7 +349,6 @@ async def test_todo_items_and_todo_append_mutually_exclusive(
     working_agent_with_todos: tuple[AgentJob, AgentExecution],
     test_tenant_key: str,
 ):
-    """Cannot use both todo_items and todo_append in the same call."""
     job, _agent = working_agent_with_todos
 
     with pytest.raises(ValidationError, match="Cannot use both"):
@@ -402,9 +360,6 @@ async def test_todo_items_and_todo_append_mutually_exclusive(
         )
 
 
-# ============================================================================
-# Tests: todo_append on empty list
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -414,8 +369,6 @@ async def test_todo_append_on_empty_list(
     active_project: Project,
     test_tenant_key: str,
 ):
-    """todo_append on a job with no existing items should work fine."""
-    # Create agent with no todos
     job, agent = _create_agent_with_todos(
         db_session,
         active_project.id,
@@ -452,13 +405,9 @@ async def test_todo_append_on_empty_list(
     assert items[1].sequence == 1
 
 
-# ============================================================================
-# Tests: JobResponse model fields
-# ============================================================================
 
 
 def test_job_response_includes_reactivation_fields():
-    """JobResponse should include accumulated_duration_seconds and reactivation_count."""
     from api.endpoints.agent_jobs.models import JobResponse
 
     response = JobResponse(
@@ -478,7 +427,6 @@ def test_job_response_includes_reactivation_fields():
 
 
 def test_job_response_defaults_reactivation_fields():
-    """JobResponse reactivation fields should default to zero."""
     from api.endpoints.agent_jobs.models import JobResponse
 
     response = JobResponse(
@@ -495,9 +443,6 @@ def test_job_response_defaults_reactivation_fields():
     assert response.reactivation_count == 0
 
 
-# ============================================================================
-# Tests: list_jobs returns reactivation fields
-# ============================================================================
 
 
 @pytest.mark.asyncio
@@ -507,7 +452,6 @@ async def test_list_jobs_includes_reactivation_fields(
     active_project: Project,
     test_tenant_key: str,
 ):
-    """list_jobs should include accumulated_duration_seconds and reactivation_count."""
     job, agent = _create_agent_with_todos(
         db_session,
         active_project.id,
@@ -530,13 +474,9 @@ async def test_list_jobs_includes_reactivation_fields(
     assert agent_job["reactivation_count"] == 1
 
 
-# ============================================================================
-# Tests: job_to_response passes reactivation fields
-# ============================================================================
 
 
 def test_job_to_response_passes_reactivation_fields():
-    """job_to_response should map accumulated_duration_seconds and reactivation_count."""
     from api.endpoints.agent_jobs.status import job_to_response
 
     job_dict = {

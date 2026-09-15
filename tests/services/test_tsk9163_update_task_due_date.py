@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""TSK-9163 regression: update_task 500 on a due_date write via the MCP surface.
-
-Edition Scope: Both.
-
-The @mcp.tool update_task wrapper delivers ``due_date`` as an ISO 8601 STRING
-(the MCP param is typed str). ``update_task_for_mcp`` passed it through
-unparsed, ``_update_task_impl`` setattr'd the raw string onto the
-``DateTime(timezone=True)`` column, and asyncpg rejected the str at commit —
-wrapped by the service boundary into the generic internal-error envelope.
-The REST PATCH path never hit this because Pydantic's ``TaskUpdate.due_date:
-datetime | None`` parses the string before the service sees it.
-
-Field-level, not row-specific: the original report blamed a legacy-shaped row
-(TSK-6010, created 2026-05-29) because that was the only row a due_date write
-was ever tried on via MCP. Both a faithful legacy-shaped row AND a fresh row
-are pinned here.
-"""
 
 from __future__ import annotations
 
@@ -39,9 +22,6 @@ pytestmark = pytest.mark.asyncio
 
 
 async def _insert_legacy_shaped_task(db_session, tenant_key: str, product_id: str) -> str:
-    """Insert a task row shaped like the 2026-05 era (TSK-6010): direct ORM
-    insert with an old created_at, a series number, no project, no creator,
-    and no due_date."""
     task_id = str(uuid4())
     db_session.add(
         Task(
@@ -69,8 +49,6 @@ async def _get_due_date(db_session, tenant_key: str, task_id: str):
 
 
 async def test_update_task_due_date_string_on_legacy_shaped_row(db_session, two_tenant_service_setup):
-    """The TSK-9163 repro: an ISO date STRING due_date on a legacy-shaped row
-    must be written, not die in the generic internal-error envelope."""
     tenant_a = two_tenant_service_setup["tenant_a"]
     product_a = two_tenant_service_setup["product_a"]
     task_service = two_tenant_service_setup["task_service_a"]
@@ -90,13 +68,10 @@ async def test_update_task_due_date_string_on_legacy_shaped_row(db_session, two_
 
 
 async def test_update_task_due_date_string_on_fresh_row(db_session, two_tenant_service_setup):
-    """Field-level pin: the same string due_date write succeeds on a fresh row
-    created through the normal MCP create path."""
     tenant_a = two_tenant_service_setup["tenant_a"]
     db_manager = two_tenant_service_setup["db_manager"]
     task_service = two_tenant_service_setup["task_service_a"]
 
-    # create_task_for_mcp resolves TSK lazily; ensure the reserved tag exists.
     taxonomy = TaxonomyService(db_manager=db_manager, session=db_session)
     await taxonomy.ensure_reserved_task_type(tenant_a)
 
@@ -121,8 +96,6 @@ async def test_update_task_due_date_string_on_fresh_row(db_session, two_tenant_s
 
 
 async def test_update_task_due_date_garbage_string_is_agent_actionable(db_session, two_tenant_service_setup):
-    """An unparseable due_date must raise ValidationError (agent-actionable),
-    never the wrapped internal-error envelope."""
     tenant_a = two_tenant_service_setup["tenant_a"]
     product_a = two_tenant_service_setup["product_a"]
     task_service = two_tenant_service_setup["task_service_a"]
@@ -140,8 +113,6 @@ async def test_update_task_due_date_garbage_string_is_agent_actionable(db_sessio
 
 
 async def test_update_task_due_date_datetime_object_still_works(db_session, two_tenant_service_setup):
-    """Regression guard: a real datetime due_date (REST path parity) keeps
-    working unchanged."""
     tenant_a = two_tenant_service_setup["tenant_a"]
     product_a = two_tenant_service_setup["product_a"]
     task_service = two_tenant_service_setup["task_service_a"]

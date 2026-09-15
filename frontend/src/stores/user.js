@@ -1,21 +1,10 @@
-/**
- * User Store - Authentication and Role Management
- * Manages user authentication state and role-based access control
- * Includes organization context (Handover 0424h)
- */
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import api, { setTenantKey } from '@/services/api'
 import { setSentryTenantKey } from '@/sentry'
-import { useTaskStore } from '@/stores/tasks'  // FE-9151: static (was a dynamic import); usage stays function-level
+import { useTaskStore } from '@/stores/tasks'
 
-// FE-9583: a refresh that returns no authoritative verdict is treated as
-// inconclusive rather than as a logout, so a transient failure cannot discard
-// a session the router guard has already verified. Authorization itself
-// remains server-side; this only governs how the client interprets an
-// inconclusive refresh. The router guard's own check is not covered by this
-// tolerance and keeps failing closed.
 function isIndeterminateAuthError(error) {
   const status = error?.response?.status
   if (status === undefined || status === null) return true
@@ -23,24 +12,14 @@ function isIndeterminateAuthError(error) {
 }
 
 export const useUserStore = defineStore('user', () => {
-  // State
   const currentUser = ref(null)
 
-  // FE-9546 fold-in: the HTTP status of the most recent FAILED login attempt.
-  // login() below has always swallowed the axios error and returned a bare
-  // boolean, so a caller could never tell "bad password" from "rate-limited"
-  // apart -- both rendered the same "check your credentials" copy, which
-  // misled a throttled user into thinking their password was wrong. Reset to
-  // null at the start of every attempt so a stale status never survives past
-  // the next login.
   const lastLoginErrorStatus = ref(null)
 
-  // Org state (Handover 0424h)
   const orgId = ref(null)
   const orgName = ref(null)
   const orgRole = ref(null)
 
-  // Getters
   const isAuthenticated = computed(() => currentUser.value !== null)
 
   const isAdmin = computed(() => {
@@ -50,7 +29,6 @@ export const useUserStore = defineStore('user', () => {
     return currentUser.value.role.toLowerCase() === 'admin'
   })
 
-  // Organization computed properties (Handover 0424h)
   const currentOrg = computed(() => {
     if (!orgId.value) return null
     return {
@@ -60,10 +38,8 @@ export const useUserStore = defineStore('user', () => {
     }
   })
 
-  // Deduplicates concurrent fetchCurrentUser() calls (single in-flight request)
   let _fetchPending = null
 
-  // Actions
   async function fetchCurrentUser() {
     if (_fetchPending) return _fetchPending
     _fetchPending = _doFetchCurrentUser()
@@ -79,37 +55,22 @@ export const useUserStore = defineStore('user', () => {
       const response = await api.auth.me()
       currentUser.value = response.data
 
-      // Store org fields from API response (Handover 0424h)
       orgId.value = response.data?.org_id || null
       orgName.value = response.data?.org_name || null
       orgRole.value = response.data?.org_role || null
 
-      // Update API client tenant key after successful auth
       if (currentUser.value?.tenant_key) {
         setTenantKey(currentUser.value.tenant_key)
-        // INF-5063: refresh Sentry tenant_key tag (no-op when Sentry inactive).
         setSentryTenantKey(currentUser.value.tenant_key)
       }
 
       return true
     } catch (error) {
-      // FE-9583: fetchCurrentUser() is a refresh, not the gate. It runs after
-      // the router guard has already verified the session, and treating an
-      // inconclusive answer here as a proven logout could discard a session
-      // the guard had just verified.
-      //
-      // The tolerance is conditional on there being a verified session to
-      // preserve, which is what keeps this from being a relaxation: with
-      // currentUser null nothing has been verified, so the original hard-fail
-      // path below runs unchanged and protected content is still denied. We
-      // preserve a success that actually happened; we never fabricate one.
       if (currentUser.value && isIndeterminateAuthError(error)) {
         console.warn(
           '[UserStore] Current-user refresh indeterminate, keeping the verified session:',
           error?.response?.status ?? error?.code ?? error?.message,
         )
-        // Drop the checkAuth TTL so the next navigation re-verifies over the
-        // network rather than being answered from a cached pass.
         _checkAuthAt = 0
         return true
       }
@@ -125,7 +86,6 @@ export const useUserStore = defineStore('user', () => {
     lastLoginErrorStatus.value = null
     try {
       await api.auth.login(username, password)
-      // After successful login, fetch the user data
       await fetchCurrentUser()
       return true
     } catch (error) {
@@ -133,58 +93,33 @@ export const useUserStore = defineStore('user', () => {
       currentUser.value = null
       clearOrgFields()
       lastLoginErrorStatus.value = error?.response?.status ?? null
-      // FE-9556: rethrow instead of returning false. Swallowing the error made
-      // every caller's status-branched catch block (401 detail branching, 403,
-      // 429, network) dead code, so all failures rendered one generic message.
-      // Local state is already cleared and lastLoginErrorStatus (PR #1002)
-      // recorded above; callers own the user-facing copy in their catch.
       throw error
     }
   }
 
   async function logout() {
-    // FE-9241: capture the outgoing user's id before it's nulled below —
-    // notificationStore.clearAll() needs it to clear that user's localStorage-
-    // persisted `_local` notification rows (silent-agent bell notifications
-    // that never reach the DB), so a different account on the same browser
-    // can't rehydrate the previous user's notifications.
     const outgoingUserId = currentUser.value?.id ?? null
     try {
       await api.auth.logout()
     } catch (error) {
       console.error('[UserStore] Logout endpoint failed:', error)
-      // Continue with local cleanup even if API call fails
     } finally {
-      // Always clear local auth state -- every field the router guard or any
-      // view could read must be reset so a post-logout navigation cannot
-      // render a protected view from stale Pinia state (regression: demo
-      // server 2026-04-24, route-guard-bypass leak).
       currentUser.value = null
       clearOrgFields()
 
-      // Cancel any in-flight fetchCurrentUser() dedupe token so the next
-      // navigation fires a fresh /api/auth/me against the now-invalid cookie.
       _fetchPending = null
 
-      // Invalidate the checkAuth() TTL + in-flight token so the next router
-      // guard does a fresh check against the now-invalid cookie (no stale pass).
       _checkAuthAt = 0
       _checkAuthPending = null
 
-      // Clear tenant key from API client so subsequent pre-auth requests
-      // (e.g. /api/setup/status) don't reuse the logged-out user's header.
       setTenantKey(null)
 
-      // Clear remember me data
       try {
         localStorage.removeItem('remembered_username')
       } catch {
         // localStorage may be unavailable in restricted environments
       }
 
-      // Clear dependent stores on logout (tenant isolation defense-in-depth).
-      // Wrap dynamic imports in try/catch so a bundler or test-env failure
-      // here can never prevent the auth state above from being cleared.
       try {
         const { useWebSocketStore } = await import('@/stores/websocket')
         useWebSocketStore().disconnect()
@@ -198,9 +133,6 @@ export const useUserStore = defineStore('user', () => {
         console.warn('[UserStore] Notification store cleanup skipped:', e)
       }
       try {
-        // FE-9589: banner dismissals are per-user localStorage; drop the
-        // outgoing user's so a second account on this browser is announced
-        // everything it has not itself seen.
         const { useBannerDismissStore } = await import('@/stores/bannerDismissStore')
         useBannerDismissStore().clear(outgoingUserId)
       } catch (e) {
@@ -220,22 +152,14 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
-  // checkAuth() is called by the router guard on EVERY navigation. Without
-  // throttling, rapid clicks fire one /api/auth/me per navigation, piling onto
-  // rate-limit bucket pressure (perf-findings 2026-06-11). A short TTL collapses
-  // bursts and an in-flight dedup collapses concurrent callers. This only
-  // affects the client-side route gate — the backend still enforces auth on
-  // every API call, so a few seconds of staleness is never a security boundary.
   const CHECK_AUTH_TTL_MS = 5000
   let _checkAuthAt = 0
   let _checkAuthPending = null
 
   async function checkAuth() {
-    // Serve a very recent successful result without re-hitting the network.
     if (currentUser.value && Date.now() - _checkAuthAt < CHECK_AUTH_TTL_MS) {
       return true
     }
-    // Collapse concurrent callers onto a single in-flight request.
     if (_checkAuthPending) return _checkAuthPending
     _checkAuthPending = _doCheckAuth()
     try {
@@ -250,31 +174,18 @@ export const useUserStore = defineStore('user', () => {
       const response = await api.auth.me()
       currentUser.value = response.data
 
-      // Store org fields from API response (Handover 0424h)
       orgId.value = response.data?.org_id || null
       orgName.value = response.data?.org_name || null
       orgRole.value = response.data?.org_role || null
 
-      // Update API client tenant key after successful auth
       if (currentUser.value?.tenant_key) {
         setTenantKey(currentUser.value.tenant_key)
-        // INF-5063: refresh Sentry tenant_key tag (no-op when Sentry inactive).
         setSentryTenantKey(currentUser.value.tenant_key)
       }
 
       _checkAuthAt = Date.now()
       return true
     } catch (error) {
-      // FE-9233: a 429 (rate limited) or 5xx is the server saying "not now",
-      // NOT "you are logged out". Clearing the session on those threw a
-      // throttled user out to /login mid-session. Keep the last-known auth
-      // state and let the next navigation re-verify -- _checkAuthAt is left
-      // at 0 so nothing is served stale from the TTL.
-      //
-      // Not an auth relaxation: we only preserve an already-successful
-      // check, never fabricate one, and the backend still enforces auth on
-      // every API call (see the CHECK_AUTH_TTL_MS note above) -- this client
-      // gate has never been the security boundary.
       const status = error?.response?.status
       if (status === 429 || status >= 500) {
         console.warn('[UserStore] Auth check transient failure:', status)
@@ -287,20 +198,16 @@ export const useUserStore = defineStore('user', () => {
       clearOrgFields()
       _checkAuthAt = 0
 
-      // v3.0 Unified: Always require valid authentication
-      // No localhost bypass - unified authentication for ALL IPs
       return false
     }
   }
 
-  // Helper method to clear org fields (Handover 0424h)
   function clearOrgFields() {
     orgId.value = null
     orgName.value = null
     orgRole.value = null
   }
 
-  // Update setup wizard state (Handover 0855c)
   async function updateSetupState(payload) {
     const response = await api.auth.updateSetupState(payload)
     const data = response.data
@@ -309,34 +216,26 @@ export const useUserStore = defineStore('user', () => {
       if (data.setup_selected_tools !== undefined) currentUser.value.setup_selected_tools = data.setup_selected_tools
       if (data.setup_step_completed !== undefined) currentUser.value.setup_step_completed = data.setup_step_completed
       if (data.learning_complete !== undefined) currentUser.value.learning_complete = data.learning_complete
-      // FE-9200 seam: tutorial resume fields (BE-9201 schema, in flight).
-      // Absent from the response until the backend ships them — tolerated.
       if (data.learning_beat !== undefined) currentUser.value.learning_beat = data.learning_beat
       if (data.router_choice !== undefined) currentUser.value.router_choice = data.router_choice
     }
     return data
   }
 
-  // Clear all user and org state (Handover 0424h)
   function clearUser() {
     currentUser.value = null
     clearOrgFields()
   }
 
   return {
-    // State
     currentUser,
     lastLoginErrorStatus,
-    // Org state (Handover 0424h)
     orgId,
     orgName,
     orgRole,
-    // Getters
     isAuthenticated,
     isAdmin,
-    // Org computed properties (Handover 0424h)
     currentOrg,
-    // Actions
     fetchCurrentUser,
     login,
     logout,

@@ -3,27 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9085b -- durable ``ever_launched_at`` signal on ProjectStagingService.
-
-Regression at the FAILING layer (ProjectStagingService): the shipped BE-9085
-closeout detector accepted a known false-positive because ``restage`` clears
-``implementation_launched_at`` back to NULL, making a launched-then-restaged
-project indistinguishable from a never-launched one at closeout time. This
-adds ``ever_launched_at``: stamped once at launch (never overwritten by a
-re-launch), left untouched by ``restage``, and cleared only by
-``reset_to_prestage`` (the discard-everything rewind).
-
-Covers:
-1. launch_implementation stamps ever_launched_at once.
-2. A second launch call (already_launched path) does not overwrite it.
-3. restage leaves ever_launched_at untouched (the false-positive fix).
-4. reset_to_prestage clears ever_launched_at (genuine rewind to birth).
-
-DB-touching: uses the db_session fixture (TransactionalTestContext, rollback
-at teardown). No module-level mutable state. No ordering dependencies.
-
-Edition Scope: Both. projects/staging are CE-general; no saas/ import.
-"""
 
 from __future__ import annotations
 
@@ -52,8 +31,6 @@ async def _seed_project(
     launched: bool = False,
     ever_launched: bool = False,
 ) -> str:
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -110,9 +87,6 @@ async def _seed_orchestrator(session: AsyncSession, tenant_key: str, project_id:
 def _staging_svc(session: AsyncSession, tenant_key: str | None = None) -> ProjectStagingService:
     tenant_manager = TenantManager()
     if tenant_key is not None:
-        # restage()/reset_to_prestage() resolve the tenant via
-        # tenant_manager.get_current_tenant() (contextvar), unlike
-        # launch_implementation() which accepts an explicit tenant_key kwarg.
         tenant_manager.set_current_tenant(tenant_key)
     return ProjectStagingService(
         db_manager=None,  # type: ignore[arg-type]
@@ -122,9 +96,6 @@ def _staging_svc(session: AsyncSession, tenant_key: str | None = None) -> Projec
 
 
 def _lifecycle_svc(session: AsyncSession, tenant_key: str) -> ProjectLifecycleService:
-    """restage() needs ProjectLifecycleService's OrchestratorFixtureMixin
-    (_ensure_orchestrator_fixture) -- ProjectStagingService alone only has it
-    if handed a lifecycle_service, which is exactly what the facade wires up."""
     tenant_manager = TenantManager()
     tenant_manager.set_current_tenant(tenant_key)
     return ProjectLifecycleService(
@@ -135,7 +106,6 @@ def _lifecycle_svc(session: AsyncSession, tenant_key: str) -> ProjectLifecycleSe
 
 
 async def test_launch_stamps_ever_launched_at_once(db_session: AsyncSession) -> None:
-    """A first launch stamps both implementation_launched_at and ever_launched_at."""
     tenant = TenantManager.generate_tenant_key()
     pid = await _seed_project(db_session, tenant, staging_status="staging_complete")
 
@@ -148,8 +118,6 @@ async def test_launch_stamps_ever_launched_at_once(db_session: AsyncSession) -> 
 
 
 async def test_relaunch_does_not_overwrite_ever_launched_at(db_session: AsyncSession) -> None:
-    """A subsequent launch call must never overwrite the original ever_launched_at
-    stamp -- it's a set-once, first-crossing signal."""
     tenant = TenantManager.generate_tenant_key()
     pid = await _seed_project(db_session, tenant, staging_status="staging_complete")
 
@@ -157,7 +125,6 @@ async def test_relaunch_does_not_overwrite_ever_launched_at(db_session: AsyncSes
     await svc.launch_implementation(project_id=pid, tenant_key=tenant)
     first = (await db_session.get(Project, pid)).ever_launched_at
 
-    # Re-entrant call on an already-launched project (already_launched path).
     result = await svc.launch_implementation(project_id=pid, tenant_key=tenant)
     assert result["already_launched"] is True
 
@@ -166,8 +133,6 @@ async def test_relaunch_does_not_overwrite_ever_launched_at(db_session: AsyncSes
 
 
 async def test_restage_preserves_ever_launched_at(db_session: AsyncSession) -> None:
-    """THE BE-9085 false-positive fix: restage clears implementation_launched_at
-    but must leave ever_launched_at untouched."""
     tenant = TenantManager.generate_tenant_key()
     pid = await _seed_project(
         db_session,
@@ -190,8 +155,6 @@ async def test_restage_preserves_ever_launched_at(db_session: AsyncSession) -> N
 
 
 async def test_reset_to_prestage_clears_ever_launched_at(db_session: AsyncSession) -> None:
-    """reset_to_prestage is a genuine rewind to birth -- unlike restage, it DOES
-    clear ever_launched_at."""
     tenant = TenantManager.generate_tenant_key()
     pid = await _seed_project(
         db_session,

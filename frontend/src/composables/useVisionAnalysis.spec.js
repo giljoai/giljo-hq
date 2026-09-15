@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useVisionAnalysis } from './useVisionAnalysis'
 
-// Spy-able clipboard mock — replaces useClipboard for the entire spec file.
 const copyMock = vi.fn(() => Promise.resolve(true))
 vi.mock('@/composables/useClipboard', () => ({
   useClipboard: () => ({
@@ -132,14 +131,6 @@ describe('useVisionAnalysis', () => {
     const PRODUCT_ID = 'prod-123'
 
     function expectsBasePrompt(prompt) {
-      // BE-9164: the expanded two-role prompt template (BE-5118) now lives
-      // server-side in VISION_EXTRACTION_PROMPT (get_vision_document's
-      // extraction_instructions) as the single source of truth. This wizard
-      // prompt only needs to point the agent at that flow.
-      // FE-9320: it used to also require a single atomic update_product_context
-      // call. That mandate WAS the defect — a real run died at 62,420 bytes
-      // obeying it — so the prompt now teaches STAGED writes finished with
-      // emit_completion=true.
       expect(prompt).toContain('Analyze the vision documents for product "My Product"')
       expect(prompt).toContain(`get_vision_document(product_id="${PRODUCT_ID}")`)
       expect(prompt).toMatch(/extraction_instructions/)
@@ -247,7 +238,6 @@ describe('useVisionAnalysis', () => {
     })
   })
 
-  // FE-9166: recovery paths for a lost 'vision-analysis-complete' event.
   describe('FE-9166 recovery', () => {
     const PRODUCT_ID = 'prod-123'
 
@@ -272,7 +262,6 @@ describe('useVisionAnalysis', () => {
       analysisAgentConnected.value = true
       expect(analysisInProgress.value).toBe(true)
 
-      // No 'vision-analysis-complete' window event is ever dispatched here.
       await vi.advanceTimersByTimeAsync(10_000)
 
       expect(productStore.fetchProductById).toHaveBeenCalledWith(PRODUCT_ID)
@@ -303,10 +292,10 @@ describe('useVisionAnalysis', () => {
       await stageAnalysis({ name: 'My Product', extractionCustomInstructions: '' }, PRODUCT_ID)
 
       await vi.advanceTimersByTimeAsync(10_000)
-      expect(analysisInProgress.value).toBe(true) // first tick: not complete yet
+      expect(analysisInProgress.value).toBe(true)
 
       await vi.advanceTimersByTimeAsync(10_000)
-      expect(analysisInProgress.value).toBe(false) // second tick: complete
+      expect(analysisInProgress.value).toBe(false)
       expect(productStore.fetchProductById).toHaveBeenCalledTimes(2)
     })
 
@@ -322,8 +311,6 @@ describe('useVisionAnalysis', () => {
       const event = new CustomEvent('vision-analysis-complete', {
         detail: { product_id: PRODUCT_ID },
       })
-      // The event handler re-throws the rejection after the finally; a real
-      // window listener ignores it. The flags must be cleared regardless.
       await onVisionAnalysisComplete(event, PRODUCT_ID).catch(() => {})
 
       expect(analysisInProgress.value).toBe(false)

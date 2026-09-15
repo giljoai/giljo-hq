@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-BE-9385d: the orchestrator prompt resolution ladder.
-
-**Edition Scope:** Both.
-
-Resolution order is **product override -> tenant override -> seeded default**. The
-per-product rung is additional rows in the SAME ``configurations`` store under a
-product-namespaced key (``system.orchestrator_prompt:{product_id}``); the existing
-``uq_config_tenant_key`` unique constraint already accommodates it, so there is no
-schema migration and no data rewrite.
-
-The load-bearing property under test is the FALLBACK: a tenant that has customized
-its orchestrator and has no per-product override must keep getting **byte-identical**
-content. That is asserted by string equality against the value the tenant saved, not
-by eyeballing the code path -- an existing customization silently changing shape is
-the only way this feature can hurt someone who never asked for it.
-"""
 
 from __future__ import annotations
 
@@ -42,7 +25,6 @@ PRODUCT_TEXT = "PRODUCT-SCOPED orchestrator seed. This product only."
 
 @pytest.mark.asyncio
 class TestResolutionLadder:
-    """product override -> tenant override -> seeded default."""
 
     async def test_product_override_wins_over_tenant_override(self, db_manager, db_session, test_tenant_key):
         service = SystemPromptService(db_manager=db_manager)
@@ -70,11 +52,6 @@ class TestResolutionLadder:
     async def test_tenant_override_is_byte_identical_when_no_product_override(
         self, db_manager, db_session, test_tenant_key
     ):
-        """The whole-feature safety property: an existing customization is untouched.
-
-        A tenant with a tenant-wide override and NO override for the product being
-        asked about must receive exactly the bytes it saved.
-        """
         service = SystemPromptService(db_manager=db_manager)
         await service.update_orchestrator_prompt(
             tenant_key=test_tenant_key, content=TENANT_TEXT, updated_by="admin", session=db_session
@@ -87,7 +64,7 @@ class TestResolutionLadder:
         )
 
         assert with_product.content == TENANT_TEXT
-        assert with_product.content == without_product.content  # byte-identical
+        assert with_product.content == without_product.content
         assert with_product.is_override is True
         assert with_product.scope == "tenant"
 
@@ -99,10 +76,10 @@ class TestResolutionLadder:
             tenant_key=test_tenant_key, product_id=str(uuid.uuid4()), session=db_session
         )
 
-        assert with_product.content == without_product.content  # byte-identical
+        assert with_product.content == without_product.content
         assert with_product.is_override is False
         assert with_product.scope == "default"
-        assert with_product.content  # non-empty seed
+        assert with_product.content
 
     async def test_product_override_does_not_leak_to_another_product(self, db_manager, db_session, test_tenant_key):
         service = SystemPromptService(db_manager=db_manager)
@@ -127,12 +104,11 @@ class TestResolutionLadder:
             tenant_key=test_tenant_key, product_id=product_b, session=db_session
         )
         assert a_result.content == PRODUCT_TEXT
-        assert b_result.content == TENANT_TEXT  # B falls through to the tenant rung
+        assert b_result.content == TENANT_TEXT
 
 
 @pytest.mark.asyncio
 class TestProductRowStorage:
-    """The product rung is rows in the SAME store -- no migration, no new table."""
 
     async def test_product_row_uses_namespaced_key_and_leaves_tenant_row_alone(
         self, db_manager, db_session, test_tenant_key
@@ -165,7 +141,6 @@ class TestProductRowStorage:
         assert by_key[expected_key].value["content"] == PRODUCT_TEXT
 
     async def test_product_override_is_tenant_scoped(self, db_manager, db_session):
-        """Same product id, two tenants: neither sees the other's override."""
         service = SystemPromptService(db_manager=db_manager)
         product_id = str(uuid.uuid4())
         tenant_a, tenant_b = "tk_be9385d_a", "tk_be9385d_b"
@@ -188,7 +163,6 @@ class TestProductRowStorage:
     async def test_reset_at_product_scope_falls_back_to_tenant_and_keeps_tenant_row(
         self, db_manager, db_session, test_tenant_key
     ):
-        """Resetting a product override means 'this product goes back to inheriting'."""
         service = SystemPromptService(db_manager=db_manager)
         product_id = str(uuid.uuid4())
 
@@ -212,7 +186,6 @@ class TestProductRowStorage:
         assert after_reset.content == TENANT_TEXT
         assert after_reset.scope == "tenant"
 
-        # The tenant-wide row survives untouched.
         tenant_row = (
             await db_session.execute(
                 select(Configuration).where(
@@ -223,7 +196,6 @@ class TestProductRowStorage:
         ).scalar_one()
         assert tenant_row.value["content"] == TENANT_TEXT
 
-        # ...and the product row is gone.
         product_row = (
             await db_session.execute(
                 select(Configuration).where(
@@ -235,7 +207,6 @@ class TestProductRowStorage:
         assert product_row is None
 
     async def test_tenant_reset_does_not_delete_product_overrides(self, db_manager, db_session, test_tenant_key):
-        """Resetting the tenant rung is scoped to the tenant row only."""
         service = SystemPromptService(db_manager=db_manager)
         product_id = str(uuid.uuid4())
 
@@ -263,13 +234,12 @@ class TestProductRowStorage:
 
 @pytest.mark.asyncio
 class TestProductIdValidation:
-    """``product_id`` reaches a DB key, so it is validated at the boundary."""
 
     @pytest.mark.parametrize(
         "bad_product_id",
         [
             "not-a-uuid",
-            "x" * 40,  # longer than the String(36) id column
+            "x" * 40,
             "../../etc/passwd",
             "abc def",
         ],
@@ -282,7 +252,6 @@ class TestProductIdValidation:
             )
 
     async def test_blank_product_id_is_treated_as_no_product(self, db_manager, db_session, test_tenant_key):
-        """A falsy product_id means 'no product context' -- the tenant rung, not an error."""
         service = SystemPromptService(db_manager=db_manager)
         await service.update_orchestrator_prompt(
             tenant_key=test_tenant_key, content=TENANT_TEXT, updated_by="admin", session=db_session

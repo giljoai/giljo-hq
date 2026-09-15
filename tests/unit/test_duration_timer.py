@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-5107 regression: minimal duration timer on AgentExecution.
-
-Product rule:
-- Duration starts the first time status flips to 'working'
-- Duration freezes once status reaches 'complete' or 'closed'
-- Nothing else stops or pauses it (not blocked, idle, sleeping, awaiting_user,
-  silent, or reactivation)
-
-These tests exercise the failing layer (model attribute event + property)
-because that is the chokepoint we own. All five status-flip call sites
-funnel into the same SQLAlchemy `set` event listener.
-"""
 
 from datetime import UTC, datetime, timedelta
 
@@ -24,7 +12,6 @@ from giljo_mcp.models.agent_identity import AgentExecution
 
 
 def _make_execution(status: str = "waiting") -> AgentExecution:
-    """Build an in-memory AgentExecution without touching the DB."""
     return AgentExecution(
         agent_id="00000000-0000-0000-0000-000000000001",
         job_id="00000000-0000-0000-0000-00000000000a",
@@ -52,7 +39,6 @@ def test_transition_to_working_anchors_once_and_ticks():
     assert first_reading is not None
     assert first_reading >= 0.0
 
-    # Re-setting status to 'working' must NOT re-anchor (idempotent).
     execution.status = "working"
     assert execution.working_started_at == first_anchor
 
@@ -63,12 +49,10 @@ def test_reactivation_complete_to_working_does_not_reset_anchor():
     original_anchor = execution.working_started_at
     assert original_anchor is not None
 
-    # Run through complete -> working again (reactivation).
     execution.status = "complete"
     execution.completed_at = datetime.now(UTC)
     execution.status = "working"
 
-    # Anchor stays at the original transition; reactivation does not reset it.
     assert execution.working_started_at == original_anchor
 
 

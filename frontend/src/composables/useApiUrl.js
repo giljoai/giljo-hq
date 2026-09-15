@@ -1,34 +1,5 @@
-// See docs/adr/ADR-001-frontend-url-resolution.md
-// This file IS the canonical resolver. All API/WS URL composition must use
-// getApiBaseUrl() / getWsBaseUrl() exported below — never ${host}:${port}.
 
-/**
- * API URL resolver
- *
- * Single source of truth for building REST and WebSocket base URLs in the
- * frontend. Replaces scattered `${hostname}:${port}` composition that broke
- * deployments behind Cloudflare Tunnel (mcp.example.com).
- *
- * Resolution order (API base):
- *   1. VITE_API_URL (absolute http(s) URL) — used verbatim, no port appended.
- *      Used by the demo (VITE_API_URL=https://mcp.example.com).
- *   2. window.API_BASE_URL — server-injected runtime override.
- *   3. import.meta.env.DEV — empty string so Vite proxy handles /api and /ws.
- *   4. window.location.origin — same-origin fallback (CE prod, SaaS subdomain
- *      tenants). FastAPI serves dist/ and the API from the same origin.
- *
- * VITE_API_PORT is intentionally NOT considered here. It must never be
- * concatenated with an absolute URL (that was the demo bug). If a deployment
- * needs a non-standard port, set VITE_API_URL=http://host:port explicitly.
- *
- * WebSocket base is always derived from the API base: http->ws, https->wss.
- */
 
-/**
- * Get the REST API base URL for the current deployment.
- * Returns empty string in dev so callers use Vite's proxy via relative URLs.
- * @returns {string}
- */
 export function getApiBaseUrl() {
   const envUrl = import.meta.env.VITE_API_URL
   if (envUrl && (envUrl.startsWith('http://') || envUrl.startsWith('https://'))) {
@@ -46,12 +17,6 @@ export function getApiBaseUrl() {
   return ''
 }
 
-/**
- * Get the WebSocket base URL for the current deployment.
- * Derived from the API base so scheme and host always agree.
- * Returns empty string in dev so callers build relative `/ws/...` URLs.
- * @returns {string}
- */
 export function getWsBaseUrl() {
   const base = getApiBaseUrl()
   if (!base) return ''

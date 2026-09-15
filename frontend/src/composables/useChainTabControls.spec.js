@@ -1,12 +1,3 @@
-/**
- * useChainTabControls.spec.js — BE-6177
- *
- * Regression coverage for the chain Implement wiring:
- *  - Bug 1: handleChainImplement passes the head project id (resolved_order[0],
- *    with project_ids / first-tab fallbacks) so the head launch gate is crossed.
- *  - Bug 2: a successful Implement flips the host activeTab ref to 'jobs' (solo-parity
- *    tab jump); a failed Implement leaves it on 'launch'.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ref } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
@@ -34,16 +25,12 @@ const makeChainCtx = (overrides = {}) => ({
   ...overrides,
 })
 
-// Full run for chainImplementReady gate tests (FE-6199 C1)
 const makeReadyCtx = (runOverrides = {}, ctxOverrides = {}) => ({
   run: {
     id: 'run-1',
     status: 'pending',
     resolved_order: ['p1', 'p2'],
     project_ids: ['p1', 'p2'],
-    // Deliberately NOT staging_complete: the chain Implement button must arm at
-    // STAGING time (locked + mission), before any member reaches staging_complete
-    // (that only happens during drive, after Implement). FE-6199 regression.
     project_statuses: { p1: 'pending', p2: 'pending' },
     chain_mission: 'Deliver the feature',
     ...runOverrides,
@@ -147,8 +134,6 @@ describe('useChainTabControls — chainImplementReady gate (FE-6199 C1)', () => 
   })
 
   it('true when pending + locked + mission (members NOT yet staging_complete)', () => {
-    // The crux of the FE-6199 fix: arms at staging time. makeReadyCtx has
-    // project_statuses pending, proving it does NOT wait on staging_complete.
     const { chainImplementReady } = build(makeReadyCtx())
     expect(chainImplementReady.value).toBe(true)
   })
@@ -204,10 +189,6 @@ describe('useChainTabControls — chainImplementReady gate (FE-6199 C1)', () => 
   })
 })
 
-// UI-2 / BE-6177: handleChainReviewComplete must NOT patch project_statuses.
-// The archive endpoint's close_completed_agents_with_commit already called
-// mark_chain_member_status atomically; a redundant FE PATCH with a stale spread
-// was the secondary cause of the chain eject bug.
 describe('useChainTabControls — handleChainReviewComplete (UI-2)', () => {
   let mockPatchRun
 
@@ -218,7 +199,6 @@ describe('useChainTabControls — handleChainReviewComplete (UI-2)', () => {
   })
 
   it('hides the modal and does NOT call patchRun', async () => {
-    // Spy on sequenceRunStore.patchRun after the store is created.
     const { useSequenceRunStore } = await import('@/stores/sequenceRunStore')
     const sequenceRunStore = useSequenceRunStore()
     mockPatchRun = vi.spyOn(sequenceRunStore, 'patchRun')
@@ -240,7 +220,6 @@ describe('useChainTabControls — handleChainReviewComplete (UI-2)', () => {
       route: { query: {} },
     })
 
-    // Open the review for p1.
     chainReviewTab.value = { projectId: 'p1', name: 'Project 1', isCompleted: false }
     showChainReview.value = true
 
@@ -281,8 +260,6 @@ describe('useChainTabControls — handleChainReviewComplete (UI-2)', () => {
   })
 })
 
-// BE-9098: handleChainReviewComplete must PERSIST the review (markReviewedRemote)
-// so the badge survives refresh; a failed persist surfaces a toast (non-gating).
 describe('useChainTabControls — handleChainReviewComplete persistence (BE-9098)', () => {
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -342,7 +319,6 @@ describe('useChainTabControls — handleChainReviewComplete persistence (BE-9098
     await flush()
 
     expect(mockShowToast).toHaveBeenCalledTimes(1)
-    // The optimistic local mark is NOT rolled back (review is non-gating).
     expect(sequenceRunStore.isReviewed('run-1', 'p1')).toBe(true)
   })
 })
@@ -376,7 +352,6 @@ describe('useChainTabControls — handleChainReviewComplete advance/return', () 
 
     await handleChainReviewComplete()
 
-    // p2 is still working — allDone=false, no nextUnreviewed completed tab → NO navigation
     expect(router.push).not.toHaveBeenCalled()
     expect(router.push).not.toHaveBeenCalledWith('/projects')
   })
@@ -394,7 +369,7 @@ describe('useChainTabControls — handleChainReviewComplete advance/return', () 
     })
     const { useSequenceRunStore } = await import('@/stores/sequenceRunStore')
     const seqStore = useSequenceRunStore()
-    seqStore.markReviewed('run-1', 'p1') // pre-review p1
+    seqStore.markReviewed('run-1', 'p1')
 
     const { showChainReview, chainReviewTab, handleChainReviewComplete } = useChainTabControls({
       chainCtx,
@@ -407,7 +382,6 @@ describe('useChainTabControls — handleChainReviewComplete advance/return', () 
 
     await handleChainReviewComplete()
 
-    // p1 pre-reviewed + p2 just reviewed → every member completed & reviewed → /projects
     expect(router.push).toHaveBeenCalledWith('/projects')
   })
 
@@ -431,7 +405,6 @@ describe('useChainTabControls — handleChainReviewComplete advance/return', () 
       route: { query: { run: 'run-1' } },
     })
 
-    // Step 1: review p1 → should advance to p2 (next completed unreviewed)
     chainReviewTab.value = { projectId: 'p1', name: 'P1', isCompleted: true }
     showChainReview.value = true
     await handleChainReviewComplete()
@@ -443,7 +416,6 @@ describe('useChainTabControls — handleChainReviewComplete advance/return', () 
 
     router.push.mockClear()
 
-    // Step 2: review p2 → allDone=false (p3 not completed), no nextUnreviewed completed → NO push
     chainReviewTab.value = { projectId: 'p2', name: 'P2', isCompleted: true }
     showChainReview.value = true
     await handleChainReviewComplete()
@@ -451,7 +423,6 @@ describe('useChainTabControls — handleChainReviewComplete advance/return', () 
   })
 
   it('advances to the next UNREVIEWED completed tab when one remains', async () => {
-    // Both p1 and p2 are completed. Reviewing p1 → advance to p2.
     const router = stubRouter()
     const chainCtx = ref({
       run: { id: 'run-1', project_statuses: {}, resolved_order: ['p1', 'p2'] },
@@ -494,7 +465,6 @@ describe('useChainTabControls — handleChainReviewComplete advance/return', () 
     })
     const { useSequenceRunStore } = await import('@/stores/sequenceRunStore')
     const seqStore = useSequenceRunStore()
-    // p1 was already reviewed in a prior step
     seqStore.markReviewed('run-1', 'p1')
 
     const { showChainReview, chainReviewTab, handleChainReviewComplete } = useChainTabControls({
@@ -508,14 +478,11 @@ describe('useChainTabControls — handleChainReviewComplete advance/return', () 
 
     await handleChainReviewComplete()
 
-    // p2 just reviewed, p1 already reviewed → no unreviewed completed tabs left
     expect(showChainReview.value).toBe(false)
     expect(router.push).toHaveBeenCalledWith('/projects')
   })
 
   it('skips already-reviewed tabs and jumps to the first genuinely unreviewed', async () => {
-    // 3 completed tabs: p2 was pre-reviewed.
-    // Reviewing p1 → p2 skipped (already reviewed) → advance to p3.
     const router = stubRouter()
     const chainCtx = ref({
       run: { id: 'run-1', project_statuses: {}, resolved_order: ['p1', 'p2', 'p3'] },
@@ -529,7 +496,7 @@ describe('useChainTabControls — handleChainReviewComplete advance/return', () 
     })
     const { useSequenceRunStore } = await import('@/stores/sequenceRunStore')
     const seqStore = useSequenceRunStore()
-    seqStore.markReviewed('run-1', 'p2') // pre-reviewed
+    seqStore.markReviewed('run-1', 'p2')
 
     const { showChainReview, chainReviewTab, handleChainReviewComplete } = useChainTabControls({
       chainCtx,

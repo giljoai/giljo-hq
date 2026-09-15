@@ -3,11 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Integration tests for ``POST /api/approvals/{id}/decide`` (BE-5059 Phase B).
-
-Full HTTP round-trip: pending -> decided + agent auto-resume verifiable in DB.
-Auth required. Cross-tenant attempts return 404 (no existence leak).
-"""
 
 from __future__ import annotations
 
@@ -48,11 +43,6 @@ def _build_app(
     db_session: AsyncSession,
     user: User | None,
 ) -> FastAPI:
-    """Mount the approvals router with auth + service overrides.
-
-    ``user=None`` keeps the real auth dependency in place to assert 401 on
-    unauthenticated calls.
-    """
     app = FastAPI()
     app.include_router(approvals_router, prefix="/api/approvals")
 
@@ -112,8 +102,6 @@ async def _seed_full(db_session: AsyncSession, tenant_key: str) -> dict:
     db_session.add(project)
     await db_session.flush()
 
-    # BE-9054 (a): request_approval is orchestrator-only, so create_pending seeds
-    # must use an orchestrator job.
     job = AgentJob(
         job_id=str(uuid4()),
         tenant_key=tenant_key,
@@ -143,7 +131,6 @@ async def _seed_full(db_session: AsyncSession, tenant_key: str) -> dict:
 
 @pytest_asyncio.fixture
 async def pending_approval(db_manager, db_session, test_user):
-    """Create a pending approval for ``test_user``'s tenant via the service."""
     seed = await _seed_full(db_session, test_user.tenant_key)
     ws = MagicMock()
     ws.broadcast_to_tenant = AsyncMock()
@@ -168,14 +155,6 @@ async def pending_approval(db_manager, db_session, test_user):
 
 
 async def test_decide_requires_auth_dependency(db_manager, db_session, pending_approval):
-    """Endpoint MUST inject ``Depends(get_current_active_user)``.
-
-    Static-shape regression: scan the registered route's dependant tree for the
-    auth dependency. Catches accidental drops of the auth gate during refactor
-    (the failing-layer surface for the auth requirement is route registration,
-    not a 401 round-trip -- which depends on full app_state wiring beyond this
-    test's scope).
-    """
     app = _build_app(db_manager, db_session, user=None)
     decide_route = next(
         (route for route in iter_effective_routes(app.routes) if route.path == "/api/approvals/{approval_id}/decide"),
@@ -194,7 +173,6 @@ async def test_decide_requires_auth_dependency(db_manager, db_session, pending_a
 
 
 async def test_decide_round_trip_flips_status_and_resumes_agent(db_manager, db_session, test_user, pending_approval):
-    """Pending -> decided + agent awaiting_user -> working in one HTTP call."""
     app = _build_app(db_manager, db_session, user=test_user)
     approval_id = pending_approval["approval"].id
 
@@ -258,11 +236,6 @@ async def test_decide_already_decided_returns_409(db_manager, db_session, test_u
 
 
 async def test_decide_cross_tenant_returns_404(db_manager, db_session, test_user, pending_approval):
-    """Tenant B authenticated user trying to decide tenant A's approval gets 404.
-
-    Critical: the response body must NOT confirm or deny existence -- the same
-    404 is returned for "no such approval" and "exists but wrong tenant".
-    """
     other_tenant_key = TenantManager.generate_tenant_key()
     org_b = Organization(
         name=f"Other Org {uuid4().hex[:6]}",
@@ -295,20 +268,15 @@ async def test_decide_cross_tenant_returns_404(db_manager, db_session, test_user
 
     assert resp.status_code == 404, f"expected 404, got {resp.status_code}: {resp.text}"
 
-    # The endpoint ran as tenant B, leaving tenant-B flush context on the shared
-    # db_session; scope the verification read to the approval's owning tenant
-    # (test_user / tenant A) so the guard authorizes it (Slice-6 test-side).
     with tenant_session_context(db_session, test_user.tenant_key):
         row = (await db_session.execute(select(UserApproval).where(UserApproval.id == approval_id))).scalar_one()
     assert row.status == "pending", "cross-tenant attempt must not mutate"
     assert row.decided_option_id is None
 
 
-# ---- GET /api/approvals?status=pending (FE-5017 Phase C) ----
 
 
 async def test_list_pending_returns_tenant_rows(db_manager, db_session, test_user, pending_approval):
-    """Authenticated user sees their tenant's pending approvals."""
     app = _build_app(db_manager, db_session, user=test_user)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -328,7 +296,6 @@ async def test_list_pending_returns_tenant_rows(db_manager, db_session, test_use
 
 
 async def test_list_pending_excludes_other_tenants(db_manager, db_session, test_user, pending_approval):
-    """Tenant isolation: tenant B sees zero rows from tenant A's pending list."""
     other_tenant_key = TenantManager.generate_tenant_key()
     org_b = Organization(
         name=f"Other Org {uuid4().hex[:6]}",
@@ -363,13 +330,6 @@ async def test_list_pending_excludes_other_tenants(db_manager, db_session, test_
 
 
 async def test_list_rejects_unsupported_status(db_manager, db_session, test_user, pending_approval):
-    """A status outside VALID_USER_APPROVAL_STATUSES returns 422.
-
-    BE-9514 widened this endpoint from a ``status='pending'``-only 422 to any
-    valid status (``pending`` | ``decided`` | ``expired`` | ``cancelled``) --
-    see test_list_decided_status_returns_decided_rows_with_channel below for
-    the newly-supported ``decided`` case.
-    """
     app = _build_app(db_manager, db_session, user=test_user)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -381,9 +341,6 @@ async def test_list_rejects_unsupported_status(db_manager, db_session, test_user
 async def test_list_decided_status_returns_decided_rows_with_channel(
     db_manager, db_session, test_user, pending_approval
 ):
-    """BE-9514: ``status=decided`` is the read surface for verifying
-    ``decided_via`` end to end -- decided approvals previously had no read
-    surface at all (this endpoint 422'd on anything but 'pending')."""
     app = _build_app(db_manager, db_session, user=test_user)
     approval_id = pending_approval["approval"].id
 
@@ -406,7 +363,6 @@ async def test_list_decided_status_returns_decided_rows_with_channel(
 
 
 async def test_list_excludes_decided_rows(db_manager, db_session, test_user, pending_approval):
-    """Decided approvals must not appear in the pending list."""
     app = _build_app(db_manager, db_session, user=test_user)
     approval_id = pending_approval["approval"].id
 
@@ -425,7 +381,6 @@ async def test_list_excludes_decided_rows(db_manager, db_session, test_user, pen
 
 
 async def test_list_requires_auth_dependency(db_manager, db_session, pending_approval):
-    """Static-shape regression: GET /api/approvals/ MUST inject get_current_active_user."""
     app = _build_app(db_manager, db_session, user=None)
     list_route = next(
         (route for route in iter_effective_routes(app.routes) if route.path == "/api/approvals/"),
@@ -443,18 +398,9 @@ async def test_list_requires_auth_dependency(db_manager, db_session, pending_app
     )
 
 
-# ---- BE-5061: real 401 round-trip with structured envelope ----
 
 
 async def test_decide_unauthenticated_returns_401_canonical_envelope(db_manager, db_session):
-    """POST /api/approvals/{id}/decide with NO auth returns 401 + canonical envelope.
-
-    This is the failing-layer regression for BE-5061: the prior cleanup of
-    ``detail=str(exc)`` could regress the wire shape of approval error responses.
-    This test mounts a fresh app WITHOUT overriding ``get_current_active_user``
-    so the real auth dependency runs end-to-end and emits the canonical envelope
-    via ``api.exception_handlers``.
-    """
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(approvals_router, prefix="/api/approvals")
@@ -484,14 +430,6 @@ async def test_decide_unauthenticated_returns_401_canonical_envelope(db_manager,
 async def test_decide_already_decided_returns_structured_error_envelope(
     db_manager, db_session, test_user, pending_approval
 ):
-    """409 already-decided response carries the structured error envelope.
-
-    Regression for BE-5061: prior code emitted ``detail=str(exc)`` which the
-    legacy ``StarletteHTTPException`` handler wraps as
-    ``{error_code: HTTP_ERROR, message: <str>}`` -- losing the specific code.
-    The cleanup must produce ``APPROVAL_ALREADY_DECIDED`` at the response top
-    level so the frontend's ``parseErrorResponse`` can branch on it.
-    """
     app = _build_app(db_manager, db_session, user=test_user)
     register_exception_handlers(app)
     approval_id = pending_approval["approval"].id

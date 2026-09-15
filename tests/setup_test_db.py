@@ -3,30 +3,21 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Script to set up the PostgreSQL test database.
-
-Run this before executing tests for the first time.
-"""
 
 import asyncio
 import sys
 from pathlib import Path
 
 
-# Add src to path
-# TODO: Remove after editable install confirmed on all platforms
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tests.helpers.test_db_helper import PostgreSQLTestHelper, wait_for_database_ready
 
 
 async def main():
-    """Main entry point."""
     print("Setting up PostgreSQL test database...")
     print("=" * 80)
 
-    # Check if PostgreSQL is ready
     print("\n1. Checking PostgreSQL availability...")
     is_ready = await wait_for_database_ready(max_attempts=5, delay=0.5)
 
@@ -38,7 +29,6 @@ async def main():
 
     print("   PostgreSQL is available!")
 
-    # Create test database
     print("\n2. Creating test database (giljo_mcp_test)...")
     try:
         await PostgreSQLTestHelper.ensure_test_database_exists()
@@ -47,7 +37,6 @@ async def main():
         print(f"\n ERROR: Failed to create test database: {e}")
         sys.exit(1)
 
-    # Create test database manager and tables
     print("\n3. Creating database tables...")
     try:
         from giljo_mcp.database import DatabaseManager

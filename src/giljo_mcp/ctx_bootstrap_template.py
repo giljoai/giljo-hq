@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""CTX project bootstrap template (BE-5122).
-
-The Context Update Feature (CTX project_type) creates a project whose mission
-is a fully-rendered prompt -- no LLM templating in the orchestrator phase. We
-keep the template in code rather than wired through jinja2 so it survives
-edition stripping (CE installs without the SaaS Ops Panel still need this)
-and because the substitution surface is tiny: a few product fields plus an
-optional ``new_documents`` list.
-
-Render with :func:`render_ctx_bootstrap`. The function is pure -- no I/O, no
-database access. Inputs are validated by the calling MCP tool layer before
-they arrive here; this module trusts its contract.
-"""
 
 from __future__ import annotations
 
@@ -76,12 +63,6 @@ def render_ctx_bootstrap(
     vision_inputs_hash: str,
     new_documents: Iterable[dict[str, Any]] | None = None,
 ) -> str:
-    """Return the CTX project mission with all placeholders substituted.
-
-    No partial substitutions: every ``{{var}}`` in the canonical template is
-    replaced. Missing/None hashes render as ``"(unset)"`` so the resulting
-    text never contains a literal ``None``.
-    """
     substitutions = {
         "{{product_id}}": str(product_id),
         "{{product_name}}": product_name,

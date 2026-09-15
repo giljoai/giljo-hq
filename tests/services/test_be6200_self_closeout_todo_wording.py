@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6200 (#5): a differently-worded self-referential closeout TODO must auto-clear.
-
-A naive orchestrator may word its OWN closeout TODO without the exact CLOSEOUT_TODO_PATTERN
-keywords (e.g. "Wrap up and finalize the project"). The act of closing out IS what that TODO
-asks for, so it must not block this job's own closeout. A genuine non-closeout TODO
-(e.g. "Fix the failing test") must STILL block with COMPLETION_BLOCKED.
-"""
 
 from __future__ import annotations
 
@@ -133,8 +126,6 @@ async def test_differently_worded_self_closeout_todo_auto_clears(
     test_tenant_key: str,
     active_project: Project,
 ):
-    """An orchestrator whose ONLY incomplete TODO is a differently-worded
-    self-referential closeout TODO can close out (auto-cleared)."""
     job = await _seed_orchestrator_with_todos(
         db_session,
         test_tenant_key,
@@ -175,8 +166,6 @@ async def test_genuine_non_closeout_todo_still_blocks(
     test_tenant_key: str,
     active_project: Project,
 ):
-    """A genuine non-closeout incomplete TODO STILL blocks with COMPLETION_BLOCKED,
-    even on the closeout-phase path."""
     job = await _seed_orchestrator_with_todos(
         db_session,
         test_tenant_key,

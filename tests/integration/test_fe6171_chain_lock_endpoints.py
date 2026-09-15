@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-6171 BE foundation — REST integration tests for the chain lock endpoints.
-
-Covers the API surface end-to-end (auth + tenant scope + service):
-  PATCH  /api/v1/sequence-runs/{run_id}            — locked Stage/Unstage
-  DELETE /api/v1/sequence-runs/{run_id}/members/{project_id}  — granular removal
-
-Fixture pattern mirrors tests/integration/test_be6165e_lifecycle_endpoints.py
-(api_client + JWT cookie auth + db_manager seeding). Parallel-safe: each test
-seeds its own tenants with unique keys, so per-worker DBs never collide.
-"""
 
 from __future__ import annotations
 
@@ -175,9 +165,6 @@ async def _create_run(api_client, headers, pids: list[str], extra: dict | None =
     return resp.json()
 
 
-# ---------------------------------------------------------------------------
-# PATCH locked — Stage / Unstage
-# ---------------------------------------------------------------------------
 
 
 async def test_patch_locked_stage_then_unstage(api_client, db_manager):
@@ -199,9 +186,6 @@ async def test_patch_locked_stage_then_unstage(api_client, db_manager):
     assert unstaged.json()["locked"] is False
 
 
-# ---------------------------------------------------------------------------
-# DELETE member — granular removal + reduce-to-one dissolve + ultralock 422
-# ---------------------------------------------------------------------------
 
 
 async def test_delete_member_removes_one(api_client, db_manager):
@@ -217,9 +201,6 @@ async def test_delete_member_removes_one(api_client, db_manager):
 
 
 async def test_delete_member_reduce_to_one_dissolves_no_activate(api_client, db_manager):
-    """FE-6174b: reducing a run to one member dissolves it (status=cancelled) but
-    must NOT auto-activate the lone project (collapse-to-solo was removed; the new
-    rule is reduce-to-1 = warning only, never an auto-flip to active)."""
     tenant = await _seed_user(db_manager)
     lone = await _seed_project(db_manager, tenant["tenant_key"])
     other = str(uuid.uuid4())
@@ -229,8 +210,6 @@ async def test_delete_member_reduce_to_one_dissolves_no_activate(api_client, db_
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "cancelled", "removal leaving 1 dissolves the run"
 
-    # Lone project status is UNCHANGED — it stays INACTIVE (seed status), never
-    # flipped to ACTIVE. Tenant-scope the read so the guard does not filter it out.
     async with db_manager.get_session_async(tenant_key=tenant["tenant_key"]) as session:
         row = await session.execute(
             select(Project).where(Project.id == lone, Project.tenant_key == tenant["tenant_key"])
@@ -274,6 +253,5 @@ async def test_delete_member_tenant_isolation(api_client, db_manager):
     p1, p2, p3 = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
     run_a = await _create_run(api_client, tenant_a["headers"], [p1, p2, p3])
 
-    # Tenant B cannot touch tenant A's run.
     resp = await api_client.delete(f"/api/v1/sequence-runs/{run_a['id']}/members/{p2}", headers=tenant_b["headers"])
     assert resp.status_code == 404, "TENANT LEAK: B reached A's run"

@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""INF-3009a — explicit env-driven DB pool config; kill the psutil RAM heuristic.
-
-Regression tests at the failing layer:
-- DatabaseManager pool sizing (the layer the psutil heuristic lived in).
-- ConfigManager env knob (the layer the phantom pg_pool_size lived in).
-- check_connection_budget startup sanity check (the boot-assembly layer).
-
-These tests touch NO database — SQLAlchemy engines are lazy (no connection until
-first checkout), so constructing a DatabaseManager with a fake URL is safe and
-parallel-safe. Env state is isolated via monkeypatch.setenv only (no module-level
-mutable state, no ordering deps).
-"""
 
 from pathlib import Path
 
@@ -27,26 +15,21 @@ FAKE_URL = "postgresql://u:p@localhost:5432/giljo_inf3009a_fake"
 
 
 def _pool(manager: DatabaseManager):
-    """Return the live QueuePool from a manager's async engine (engine-side proof)."""
     return manager.async_engine.sync_engine.pool
 
 
 class TestPsutilGoneFromPoolPath:
-    """DoD: psutil heuristic deleted from the pool path entirely."""
 
     def test_auto_pool_size_method_removed(self):
         assert not hasattr(DatabaseManager, "_auto_pool_size"), "_auto_pool_size must be deleted"
 
     def test_database_module_does_not_import_psutil(self):
         source = Path(db_module.__file__).read_text(encoding="utf-8")
-        # The DoD is about the import: no host-RAM probe in the pool path. A historical
-        # mention in a comment is fine; an `import psutil` (top-level or inline) is not.
         assert "import psutil" not in source, "database.py pool path must not import psutil"
         assert "psutil." not in source, "database.py must not call into psutil"
 
 
 class TestFixedPoolDefaultsNotRamDerived:
-    """DoD: a fake large-RAM host yields the fixed configured pool, NOT ~150/RAM-derived."""
 
     def test_default_pool_is_fixed_constant(self):
         mgr = DatabaseManager(FAKE_URL, is_async=True)
@@ -54,10 +37,6 @@ class TestFixedPoolDefaultsNotRamDerived:
         assert mgr.max_overflow == DEFAULT_MAX_OVERFLOW == 5
 
     def test_huge_fake_ram_has_no_effect_on_pool(self, monkeypatch):
-        """Even with a host reporting 256 GB RAM, the pool stays the fixed default.
-
-        (Pre-INF-3009a this would have bucketed up to 50/worker; the heuristic is gone.)
-        """
         import psutil
 
         class _FakeVM:
@@ -74,17 +53,14 @@ class TestFixedPoolDefaultsNotRamDerived:
 
 
 class TestExplicitConfigHonored:
-    """DoD (fix works): explicit pool config reaches the engine."""
 
     def test_explicit_values_stored_and_on_engine(self):
         mgr = DatabaseManager(FAKE_URL, is_async=True, pool_size=7, max_overflow=3)
         assert mgr.pool_size == 7
         assert mgr.max_overflow == 3
-        # Engine-side proof: the configured pool_size reached the live QueuePool.
         assert _pool(mgr).size() == 7
 
     def test_happy_path_default_boot_builds_working_engine(self):
-        """DoD (two-sided): a normal boot with defaults still yields a usable async engine."""
         mgr = DatabaseManager(FAKE_URL, is_async=True)
         assert mgr.async_engine is not None
         assert mgr.AsyncSessionLocal is not None
@@ -92,18 +68,15 @@ class TestExplicitConfigHonored:
 
 
 class TestConfigKnobIsAuthoritative:
-    """DoD: pg_pool_size/pg_max_overflow are one env-driven knob wired to DatabaseManager."""
 
     def test_new_config_fields_exist_with_defaults(self):
         cfg = DatabaseConfig()
-        # INF-9577 lowered these from 10/10; the deployment arithmetic that forced it
-        # is pinned in tests/unit/test_inf9577_connection_budget_defaults.py.
         assert cfg.pg_pool_size == 5
         assert cfg.pg_max_overflow == 5
         assert cfg.pg_slot_budget == 90
 
     def test_env_overrides_pool_knobs(self, monkeypatch):
-        monkeypatch.setenv("DB_PASSWORD", "x")  # satisfy validate()
+        monkeypatch.setenv("DB_PASSWORD", "x")
         monkeypatch.setenv("GILJO_PG_POOL_SIZE", "15")
         monkeypatch.setenv("GILJO_PG_MAX_OVERFLOW", "5")
         monkeypatch.setenv("GILJO_DB_SLOT_BUDGET", "120")
@@ -117,12 +90,8 @@ class TestConfigKnobIsAuthoritative:
         monkeypatch.setenv("DB_PASSWORD", "x")
         monkeypatch.setenv("GILJO_PG_POOL_SIZE", "not-an-int")
 
-        # Isolate from any ambient ./config.yaml: a dev workstation may have one
-        # whose pool_size differs from the dataclass default, which would mask the
-        # fallback. Point at a nonexistent path so the bad env value falls back to
-        # the dataclass default (10), deterministically on every machine + CI.
         cfg = ConfigManager(config_path=tmp_path / "nonexistent.yaml", auto_reload=False)
-        assert cfg.database.pg_pool_size == 5  # unchanged, no crash
+        assert cfg.database.pg_pool_size == 5
 
     def test_create_database_manager_passes_config_pool(self, monkeypatch):
         monkeypatch.setenv("DB_PASSWORD", "x")
@@ -138,13 +107,11 @@ class TestConfigKnobIsAuthoritative:
 
 
 class TestConnectionBudgetCheck:
-    """DoD: pool-math sanity check LOGS when over budget but NEVER raises."""
 
     def test_over_budget_warns_and_does_not_raise(self, caplog):
         from api.startup.database import check_connection_budget
 
         with caplog.at_level("WARNING"):
-            # 2 workers x (50 + 50) = 200 > 90 budget
             check_connection_budget(pool_size=50, max_overflow=50, workers=2, slot_budget=90)
 
         assert any("budget EXCEEDED" in r.message for r in caplog.records)
@@ -153,7 +120,6 @@ class TestConnectionBudgetCheck:
         from api.startup.database import check_connection_budget
 
         with caplog.at_level("WARNING"):
-            # 1 worker x (10 + 10) = 20 <= 90 budget
             check_connection_budget(pool_size=10, max_overflow=10, workers=1, slot_budget=90)
 
         assert not any("budget EXCEEDED" in r.message for r in caplog.records)
@@ -161,7 +127,6 @@ class TestConnectionBudgetCheck:
     def test_non_numeric_inputs_do_not_crash(self):
         from api.startup.database import check_connection_budget
 
-        # A mocked db_manager would pass MagicMock attrs here — must be skipped, not raised.
         check_connection_budget(pool_size=object(), max_overflow=10, workers=1, slot_budget=90)
 
     def test_worker_count_reads_web_concurrency(self, monkeypatch):

@@ -1,15 +1,10 @@
 <template>
   <v-container>
-    <!-- Page Header -->
     <h1 class="text-headline-large mb-2">Admin Settings</h1>
     <p class="text-body-large mb-4 settings-subtitle">
       Configure server and system-wide settings (Admin only)
     </p>
 
-    <!-- Settings Pills -->
-    <!-- Order: Identity, then server-plumbing tabs (CE only). The orchestrator
-         prompt moved to Account -> Danger Zone (IMP-5042) -- it is tenant-scoped
-         self-management, not server admin. -->
     <div class="pill-toggle-row">
       <button
         class="pill-toggle smooth-border"
@@ -42,15 +37,12 @@
       </button>
     </div>
 
-    <!-- Tab Content -->
     <div class="pill-tabs-content">
       <v-window v-model="activeTab" class="global-tabs-window main-window-tabs">
-        <!-- Identity (Workspace + Members) - Handover 0434 -->
         <v-window-item value="identity">
           <IdentityTab />
         </v-window-item>
 
-        <!-- Network Settings -->
         <v-window-item v-if="isCeMode" value="network">
           <NetworkSettingsTab
             :server-host-display="serverHostDisplay"
@@ -68,7 +60,6 @@
           />
         </v-window-item>
 
-        <!-- Database Settings -->
         <v-window-item v-if="isCeMode" value="database">
           <DatabaseConnection
             :readonly="true"
@@ -103,7 +94,6 @@ import { useToast } from '@/composables/useToast'
 import configService from '@/services/configService'
 import { isCeModeValue } from '@/composables/useGiljoMode'
 
-// Components
 import DatabaseConnection from '@/components/DatabaseConnection.vue'
 import IdentityTab from '@/components/settings/tabs/IdentityTab.vue'
 import NetworkSettingsTab from '@/components/settings/tabs/NetworkSettingsTab.vue'
@@ -112,35 +102,25 @@ const { showToast } = useToast()
 const giljoMode = ref('ce')
 const isCeMode = computed(() => isCeModeValue(giljoMode.value))
 
-// State
 const activeTab = ref('identity')
 
-// Valid tab values when the user is restricted to product-admin tabs.
-// The orchestrator prompt moved to Account -> Danger Zone (IMP-5042), so
-// Identity is the only product-admin tab; the rest are CE-only server config.
 const PRODUCT_ADMIN_TABS = ['identity']
 
-// Loading states
 const loading = ref({
   network: false,
   security: false,
 })
 
-// Network settings state — read-only, derived from what the server actually
-// responds on (FE-6239: real interface IP(s), not the config external_host).
 const serverHostDisplay = ref('localhost')
 const serverPort = ref(parseInt(window.location.port) || 7272)
 const sslEnabled = ref(false)
 
-// Cookie Domain Whitelist state
 const cookieDomains = ref([])
 const securityFeedback = ref(null)
 
-// Network Settings Methods
 async function loadNetworkSettings() {
   loading.value.network = true
   try {
-    // The host IP(s) + port the server actually responds on (FE-6239).
     const response = await fetch(`${getApiBaseURL()}/api/v1/config/network-info`, {
       credentials: 'include',
     })
@@ -151,7 +131,6 @@ async function loadNetworkSettings() {
     serverHostDisplay.value = info.host_display || 'localhost'
     serverPort.value = info.port || parseInt(window.location.port) || 7272
 
-    // SSL/HTTPS status (prop fallback; the tab also fetches /config/ssl itself).
     const cfgResp = await fetch(`${getApiBaseURL()}/api/v1/config`, {
       credentials: 'include',
     })
@@ -161,7 +140,6 @@ async function loadNetworkSettings() {
     }
   } catch (error) {
     console.error('[SYSTEM SETTINGS] Failed to load network settings:', error)
-    // Fall back to the address this client reached the server on.
     serverHostDisplay.value = window.location.hostname || 'localhost'
     serverPort.value = parseInt(window.location.port) || 7272
     sslEnabled.value = false
@@ -170,22 +148,8 @@ async function loadNetworkSettings() {
   }
 }
 
-// Database Methods
-/**
- * FE-9553: `notify` defaults to FALSE, and the default is the point.
- *
- * This function is reachable from a click (the retry button) AND from
- * onMounted, and a toast is only honest in the first case -- on a page load
- * nobody asked for this, so an error toast reads as though the operator caused
- * it. Following HubView's loadDeletedThreads({ notify = false }) precedent
- * rather than inventing a second convention.
- *
- * Silent by default so a new call site cannot add a spurious toast by
- * forgetting; a caller that genuinely IS a click opts in.
- */
 async function loadDatabaseSettings({ notify = false } = {}) {
   try {
-    // Fetch database config from API
     const response = await fetch(`${getApiBaseURL()}/api/v1/config/database`, {
       credentials: 'include',
     })
@@ -209,7 +173,6 @@ function handleDatabaseError(error) {
   console.error('Database connection failed:', error)
 }
 
-// Cookie Domain Whitelist Methods
 async function loadCookieDomains() {
   loading.value.security = true
   try {
@@ -227,7 +190,6 @@ async function loadCookieDomains() {
 }
 
 async function addCookieDomain(domain) {
-  // Check for duplicates
   if (cookieDomains.value.includes(domain)) {
     securityFeedback.value = {
       type: 'warning',
@@ -273,19 +235,14 @@ function clearSecurityFeedback() {
   securityFeedback.value = null
 }
 
-// Lifecycle
 onMounted(async () => {
-  // Resolve mode from config service so isCeMode is accurate before gating tabs
   await configService.fetchConfig()
   giljoMode.value = configService.getGiljoMode()
 
-  // If the active tab is server-admin-only but we're not in CE mode,
-  // fall back to the default product-admin tab
   if (!isCeMode.value && !PRODUCT_ADMIN_TABS.includes(activeTab.value)) {
     activeTab.value = 'identity'
   }
 
-  // Only load server-admin config in CE mode -- other modes have no server tabs
   if (isCeMode.value) {
     await loadDatabaseSettings()
     await loadNetworkSettings()

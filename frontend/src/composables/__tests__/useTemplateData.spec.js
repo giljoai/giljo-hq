@@ -1,18 +1,3 @@
-/**
- * useTemplateData.spec.js — FE-9203
- *
- * Regression lock for the agent-template filter predicates. The original bug:
- * the status filter matched `t.status` — a field that does NOT exist on the
- * AgentTemplate model or the API payload — so every status option (including
- * "Active") filtered the table to an empty list. The category filter matched
- * `t.category`, which the save path always writes as 'role', making it useless
- * as a grouping axis.
- *
- * These tests bind the predicates to the model's REAL fields (is_active, role)
- * so phantom filter axes cannot return.
- *
- * Edition scope: CE
- */
 
 import { describe, it, expect, vi } from 'vitest'
 import { ref } from 'vue'
@@ -42,25 +27,25 @@ function setup(rows) {
   const search = ref('')
   const filterRole = ref(null)
   const filterStatus = ref(null)
-  const data = useTemplateData(search, filterRole, filterStatus)
+  const data = useTemplateData(search, filterRole, filterStatus, ref('prod-1'), ref(false))
   data.templates.value = rows
   return { filterRole, filterStatus, ...data }
 }
 
 describe('useTemplateData — status filter (FE-9203 regression)', () => {
   const rows = [
-    makeTemplate({ id: 'a', name: 'analyzer', role: 'analyzer', is_active: true }),
-    makeTemplate({ id: 'b', name: 'reviewer', role: 'reviewer', is_active: false }),
-    makeTemplate({ id: 'c', name: 'tester', role: 'tester', is_active: true }),
+    makeTemplate({ id: 'a', name: 'analyzer', role: 'analyzer', product_active: true }),
+    makeTemplate({ id: 'b', name: 'reviewer', role: 'reviewer', product_active: false }),
+    makeTemplate({ id: 'c', name: 'tester', role: 'tester', product_active: true }),
   ]
 
-  it('filters on the real is_active boolean — "active" returns only active templates', () => {
+  it('filters on the per-product switch — "active" returns only the enabled agents', () => {
     const { filterStatus, filteredTemplates } = setup(rows)
     filterStatus.value = 'active'
     expect(filteredTemplates.value.map((t) => t.id)).toEqual(['a', 'c'])
   })
 
-  it('"inactive" returns only inactive templates', () => {
+  it('"inactive" returns only the switched-off agents', () => {
     const { filterStatus, filteredTemplates } = setup(rows)
     filterStatus.value = 'inactive'
     expect(filteredTemplates.value.map((t) => t.id)).toEqual(['b'])
@@ -70,6 +55,36 @@ describe('useTemplateData — status filter (FE-9203 regression)', () => {
     const { filterStatus, filteredTemplates } = setup(rows)
     filterStatus.value = 'active'
     expect(filteredTemplates.value.length).toBeGreaterThan(0)
+  })
+})
+
+describe('useTemplateData — the status filter follows the per-product switch', () => {
+  it('"active" keeps an agent with an active assignment', () => {
+    const rows = [makeTemplate({ id: 'a', is_active: false, product_active: true })]
+    const { filterStatus, filteredTemplates } = setup(rows)
+    filterStatus.value = 'active'
+    expect(filteredTemplates.value.map((t) => t.id)).toEqual(['a'])
+  })
+
+  it('"inactive" keeps an agent with no assignment at all', () => {
+    const rows = [makeTemplate({ id: 'a', is_active: true })]
+    const { filterStatus, filteredTemplates } = setup(rows)
+    filterStatus.value = 'inactive'
+    expect(filteredTemplates.value.map((t) => t.id)).toEqual(['a'])
+  })
+
+  it('"active" keeps an agent the viewed product has an explicit ON row for', () => {
+    const rows = [makeTemplate({ id: 'a', product_active: true })]
+    const { filterStatus, filteredTemplates } = setup(rows)
+    filterStatus.value = 'active'
+    expect(filteredTemplates.value.map((t) => t.id)).toEqual(['a'])
+  })
+
+  it('"inactive" keeps an agent that is OFF for the viewed product', () => {
+    const rows = [makeTemplate({ id: 'b', is_active: true, product_active: false })]
+    const { filterStatus, filteredTemplates } = setup(rows)
+    filterStatus.value = 'inactive'
+    expect(filteredTemplates.value.map((t) => t.id)).toEqual(['b'])
   })
 })
 

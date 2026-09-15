@@ -1,30 +1,3 @@
-/**
- * TutorialPromptScreen.adopt-gate-f1.spec.js — FE-9566 / FE-9579
- *
- * Door D adopts a leftover tour draft rather than creating a second one. Gate
- * F1 is the rule deciding what may be adopted, and it exists to stop the tour
- * grabbing the user's REAL product and presenting it as "proposed", where
- * Activate could then deactivate it.
- *
- * The gate was written as "not shown AND unnamed", back when is_active meant
- * "THE active product". FE-9524/D1 redefined is_active as "shown as a tab" and
- * create_product sets it True for every product, a nameless draft included, so
- * the gate could no longer match the drafts it was written to adopt — the door
- * always tried to CREATE, and collided with its own leftover on the second
- * visit (tests/integration/test_fe9566_door_d_draft_create_contract.py).
- *
- * The NAME is what actually carries the protection, and gate F1's own comment
- * says so: user-created products always carry a name. The tests below split
- * into two kinds on purpose:
- *
- *   - "adopts ..." — RED before the fix, green after.
- *   - "never adopts ..." — GREEN BEFORE AND AFTER. These are the guard that
- *     the fix does not reintroduce what gate F1 exists to prevent. If one of
- *     them were red BEFORE the change, gate F1 was already broken, which would
- *     be a worse finding than the one being fixed.
- *
- * Edition scope: Both (shared frontend/src).
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
@@ -97,7 +70,6 @@ describe('TutorialPromptScreen — gate F1: what door D may adopt (FE-9566)', ()
     expect(wrapper.emitted('product-created')[0]).toEqual(['draft-ws'])
   })
 
-  // ── GATE F1 PROTECTION. Green before AND after the fix. ──────────────────
 
   it('never adopts the user\'s real SHOWN product', async () => {
     h.products = [{ id: 'real-shown', is_active: true, name: 'My Real Product' }]
@@ -118,8 +90,6 @@ describe('TutorialPromptScreen — gate F1: what door D may adopt (FE-9566)', ()
   })
 
   it('never adopts products[0] just because it is first — it picks the nameless one', async () => {
-    // The list is ordered is_active.desc, so [0] is a real product whenever one
-    // exists. This is the exact failure gate F1 was written to prevent.
     h.products = [
       { id: 'real-first', is_active: true, name: 'The Users Product' },
       { id: 'draft-second', is_active: true, name: '' },

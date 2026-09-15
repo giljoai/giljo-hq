@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tests for product-service Pydantic response models.
-
-Split from test_service_responses.py — covers ProductStatistics, CascadeImpact,
-VisionUploadResult, PurgeResult, PathValidationResult, GitIntegrationSettings.
-
-Created: Handover 0731
-"""
 
 import pytest
 from pydantic import ValidationError
@@ -25,16 +17,11 @@ from giljo_mcp.schemas.service_responses import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Product Service Models
-# ---------------------------------------------------------------------------
 
 
 class TestProductStatistics:
-    """Tests for ProductStatistics model (Handover 0731c: updated with product metadata fields)."""
 
     def test_creation_with_required_fields(self):
-        """Required fields: product_id, name, is_active."""
         stats = ProductStatistics(product_id="p1", name="Test Product", is_active=True)
         assert stats.product_id == "p1"
         assert stats.name == "Test Product"
@@ -78,10 +65,8 @@ class TestProductStatistics:
 
 
 class TestCascadeImpact:
-    """Tests for CascadeImpact model (Handover 0731c: updated field names)."""
 
     def test_creation_with_required_fields(self):
-        """product_id and product_name are required."""
         impact = CascadeImpact(product_id="prod-123", product_name="Test Product")
         assert impact.product_id == "prod-123"
         assert impact.product_name == "Test Product"
@@ -123,7 +108,6 @@ class TestCascadeImpact:
 
 
 class TestVisionUploadResult:
-    """Tests for VisionUploadResult model (Handover 0731c: filename renamed to document_name)."""
 
     def test_creation_with_required_fields(self):
         result = VisionUploadResult(document_id="doc-1", document_name="design.pdf")
@@ -162,7 +146,6 @@ class TestVisionUploadResult:
 
 
 class TestPurgeResult:
-    """Tests for PurgeResult model."""
 
     def test_creation_defaults(self):
         result = PurgeResult()
@@ -176,7 +159,6 @@ class TestPurgeResult:
         assert "p2" in result.purged_ids
 
     def test_purged_ids_default_factory_isolation(self):
-        """Each instance should get its own list (no shared mutable default)."""
         r1 = PurgeResult()
         r2 = PurgeResult()
         r1.purged_ids.append("x")
@@ -193,7 +175,6 @@ class TestPurgeResult:
 
 
 class TestPathValidationResult:
-    """Tests for PathValidationResult model."""
 
     def test_creation_with_required_fields(self):
         result = PathValidationResult(valid=True, path="/home/user/project")
@@ -228,7 +209,6 @@ class TestPathValidationResult:
 
 
 class TestGitIntegrationSettings:
-    """Tests for GitIntegrationSettings model."""
 
     def test_creation_defaults(self):
         settings = GitIntegrationSettings()

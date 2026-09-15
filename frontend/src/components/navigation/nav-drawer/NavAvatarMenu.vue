@@ -10,13 +10,11 @@
       >
         <span v-if="currentUser" class="nav-orb-initials">{{ userInitials }}</span>
         <v-icon v-else size="18">mdi-account</v-icon>
-        <!-- account-state badge anchored to avatar (SaaS only). -->
         <component :is="accountStatusBadgeComponent" v-if="accountStatusBadgeComponent" />
       </div>
     </template>
 
     <v-list density="compact" min-width="220">
-      <!-- account status section (deletion / trial). -->
       <template v-if="accountBadgeState && accountBadgeState !== 'none'">
         <v-list-item
           data-test="account-status-section"
@@ -70,9 +68,6 @@
         <v-list-item-subtitle v-if="orgName" class="text-body-small mt-1">
           {{ orgName }}
         </v-list-item-subtitle>
-        <!-- Role/Owner badges: CE-only display (FE-9172). Hosted SaaS is
-             single-user/account-owner — no admin chrome. role="admin" logic
-             (isAdmin, guards) is unchanged; only the chips hide. -->
         <v-list-item-subtitle
           v-if="currentUser.role && isCeEdition"
           class="d-flex align-center mt-2 gap-2"
@@ -92,7 +87,6 @@
 
       <v-divider v-if="currentUser" />
 
-      <!-- Account / Profile -->
       <v-list-item :to="{ path: '/account/profile' }">
         <template #prepend>
           <v-icon>mdi-account</v-icon>
@@ -100,7 +94,6 @@
         <v-list-item-title>Account / Profile</v-list-item-title>
       </v-list-item>
 
-      <!-- Admin Settings shortcut. Admin-only AND CE-only. -->
       <v-list-item
         v-if="isAdmin && isCeEdition"
         :to="{ name: 'SystemSettings' }"
@@ -120,7 +113,6 @@
         <v-list-item-title>User Guide</v-list-item-title>
       </v-list-item>
 
-      <!-- Reset Password (SaaS only) -->
       <v-list-item v-if="isNonCeEdition" @click="showResetPasswordConfirm = true">
         <template #prepend>
           <v-icon>mdi-lock-reset</v-icon>
@@ -145,7 +137,6 @@
     </v-list>
   </v-menu>
 
-  <!-- About Dialog -->
   <v-dialog v-model="aboutDialog" max-width="380">
     <v-card class="smooth-border">
       <v-btn
@@ -179,7 +170,6 @@
     </v-card>
   </v-dialog>
 
-  <!-- Reset Password Confirmation -->
   <BaseDialog
     v-model="showResetPasswordConfirm"
     type="warning"
@@ -236,12 +226,6 @@ const props = defineProps({
     type: String,
     default: null,
   },
-  // Account state props (from useNavDrawerAccount).
-  // camelCase is load-bearing, not style: the parent binds this as the
-  // kebab-case attribute `:account-status-badge-component`, and Vue camelizes
-  // that to `accountStatusBadgeComponent`. A leading capital can never be
-  // produced by that camelization, so a PascalCase name here is unreachable
-  // from any template and the badge silently never renders (FE-9419).
   accountStatusBadgeComponent: {
     type: Object,
     default: null,
@@ -270,7 +254,6 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  // About dialog data
   versionLabel: {
     type: String,
     default: '',
@@ -296,16 +279,13 @@ defineEmits([
   'confirm-reset-password',
 ])
 
-// Local dialog state
 const aboutDialog = ref(false)
 const productName = PRODUCT_NAME
 const showResetPasswordConfirm = ref(false)
 
-// Edition predicates (delegated to the centralized accessor — FE-9147)
 const isCeEdition = computed(() => isCeModeValue(props.giljoMode))
 const isNonCeEdition = computed(() => isNonCeModeValue(props.giljoMode))
 
-// About dialog computed labels sourced from edition licensing
 const aboutEditionLabel = computed(() => getLicenseCopy(props.giljoMode).editionLabel)
 const aboutLongDescription = computed(() => getLicenseCopy(props.giljoMode).longDescription)
 const aboutLicenseLabel = computed(() => {

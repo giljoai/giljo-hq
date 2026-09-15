@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SaaS enforcement-wiring boot gate — Phases 8.6 / 8.7 (SEC-9131, fail-loud).
-
-Extracted from ``api/app.py``'s lifespan so the fail-loud policy is unit-testable
-(mirrors INF-3009c's extraction of Phase 8.5 into ``cache_backends_gate.py``).
-
-Policy: in SaaS mode a failure to register the tenant-scope widening (Phase 8.6)
-or the /mcp subscription gate (Phase 8.7) ABORTS boot — the exception propagates
-out of ``lifespan()`` and stops uvicorn, exactly like the Phase 0 license check
-and Phase 8.5 Redis gate. Silently degrading would ship prod with enforcement
-absent while looking healthy (BE-6069 incident class).
-
-Both functions are pure no-ops for CE (``giljo_mode != "saas"``) and reach the
-``saas/`` tree only through ``importlib`` — no static SaaS import crosses the
-boundary, so the Deletion Test holds.
-"""
 
 from __future__ import annotations
 
@@ -31,7 +16,6 @@ logger = logging.getLogger("api.app")
 
 
 def register_saas_tenant_scoped_models(*, giljo_mode: str) -> None:
-    """Phase 8.6 — register SaaS-only tenant-scoped models (BE-6037). Fail-loud."""
     if giljo_mode != "saas":
         return
     try:
@@ -46,18 +30,6 @@ def register_saas_tenant_scoped_models(*, giljo_mode: str) -> None:
 
 
 def require_public_base_url(*, giljo_mode: str) -> None:
-    """Phase 8.58 — SaaS origin-pin presence gate (SEC-9227h / M7). Fail-loud.
-
-    The SaaS origin pin (SEC-9171 #30) only activates when BOTH
-    ``GILJO_MODE=saas`` AND ``GILJO_PUBLIC_BASE_URL`` are set. Without this
-    gate a SaaS boot with the var unset succeeds silently and the OAuth
-    issuer, every advertised endpoint URL, the JWT ``aud`` claim, and emailed
-    lifecycle links all derive from the attacker-influenceable Host /
-    X-Forwarded-Host header (uvicorn ``proxy_headers=True``) — cache-poisonable
-    behind CDNs. A malformed pin is as bad as a missing one, so the value is
-    validated too. CE/LAN request-derived resolution is deliberate and this
-    gate never runs there.
-    """
     if giljo_mode != "saas":
         return
     pinned = os.environ.get("GILJO_PUBLIC_BASE_URL", "").strip()
@@ -81,15 +53,9 @@ def require_public_base_url(*, giljo_mode: str) -> None:
 
 
 def _public_base_url_problem(pinned: str) -> str | None:
-    """Return a human-readable defect in the pin value, or None if valid.
-
-    Valid: an https:// origin with a hostname, no credentials, and no
-    path/query/fragment beyond an optional trailing slash. http:// is allowed
-    ONLY for localhost — local SaaS-mode dev runs without TLS.
-    """
     try:
         parts = urlsplit(pinned)
-        hostname = parts.hostname  # lazy property — can raise on malformed netloc
+        hostname = parts.hostname
         has_credentials = bool(parts.username or parts.password)
     except ValueError:
         return "not a parseable URL"
@@ -109,7 +75,6 @@ def _public_base_url_problem(pinned: str) -> str | None:
 
 
 def register_mcp_subscription_gate(*, giljo_mode: str) -> None:
-    """Phase 8.7 — register the /mcp subscription gate (BE-6060d). Fail-loud."""
     if giljo_mode != "saas":
         return
     try:

@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-8003b — batch validation + actionable error messages, MCP-boundary layer.
-
-Delta-1 finding (see WO-8003b): the SERVICE layer (memory_entry_write_validator.py,
-BE-6208a) already batches every offending field into
-``MemoryEntryWriteValidationError.all_failures`` and already attaches the full
-controlled-vocabulary list on the FIRST tag-vocab failure via ``.allowed`` --
-``tests/unit/test_memory_entry_write_validator.py::test_batch_reports_all_failing_caps_together``
-proves this at the unit layer. The bug this project fixes is that NONE of that
-structured data reaches the agent: ``MemoryEntryWriteValidationError.__str__``
-only renders the PRIMARY field/size/guidance line, and the FastMCP ``@mcp.tool``
-wrapper (``_base.py::_call_tool``) surfaces raised ``_CLEAN_VALIDATION_ERRORS``
-via a bare ``raise`` -> the SDK's ``ToolError(f"...: {e}")`` calls ``str(e)`` and
-drops ``all_failures``/``allowed``/``invalid_tag`` on the floor. Exactly the
-BE-5042 class of bug: correct unit coverage, broken MCP-boundary wrapper.
-
-Drives the REAL transport (``create_connected_server_and_client_session``),
-per CLAUDE.md's failing-layer regression-test mandate.
-"""
 
 from __future__ import annotations
 
@@ -50,9 +32,6 @@ def _error_text(result) -> str:
 
 @pytest_asyncio.fixture
 async def autospec_mcp(monkeypatch):
-    """Mirrors test_be3006d_mcp_boundary_validation.autospec_mcp: an autospec
-    ToolAccessor on the in-memory transport so a test can plant a real
-    MemoryEntryWriteValidationError as a specific accessor method's side_effect."""
     from unittest.mock import create_autospec
 
     from api import app_state
@@ -91,23 +70,20 @@ async def autospec_mcp(monkeypatch):
 
 
 def _real_combined_violation_error():
-    """Build the REAL MemoryEntryWriteValidationError a simultaneous cap-violation
-    + bad-tag payload produces, using production code (not a hand-rolled stub)."""
     with pytest.raises(Exception) as exc_info:  # noqa: PT011 - want the real validator exception
         validate_memory_entry_write(
             {
                 "summary": "ok",
                 "key_outcomes": [],
-                "decisions_made": ["x"] * 6,  # > 5 items: cap violation
+                "decisions_made": ["x"] * 6,
                 "deliverables": [],
-                "tags": ["not-a-real-tag"],  # simultaneous vocab violation
+                "tags": ["not-a-real-tag"],
             }
         )
     return exc_info.value
 
 
 class TestServiceLayerAlreadyBatches:
-    """Confirms delta-1: the SERVICE layer already batches (this must PASS)."""
 
     def test_combined_violation_batches_both_fields(self):
         err = _real_combined_violation_error()
@@ -124,10 +100,6 @@ class TestServiceLayerAlreadyBatches:
 
 @pytest.mark.asyncio
 async def test_mcp_boundary_surfaces_all_failures_for_combined_violation(autospec_mcp):
-    """The MCP-BOUNDARY layer must surface every simultaneous violation, not just
-    the primary one. Reproduces the field report's N-resend dance: a caller that
-    submits a decisions_made cap overflow AND a bad tag together must learn about
-    BOTH from a single response, not just the first (`decisions_made`)."""
     client, accessor = autospec_mcp
     accessor.write_project_closeout.side_effect = _real_combined_violation_error()
 
@@ -145,16 +117,12 @@ async def test_mcp_boundary_surfaces_all_failures_for_combined_violation(autospe
 
     assert result.is_error is True
     text = _error_text(result)
-    # The primary (first) violation is expected to surface.
     assert "decisions_made" in text
-    # DoD #1: the SECOND simultaneous violation must ALSO surface in one round-trip.
     assert "tags" in text, f"batched second violation missing from MCP-boundary error text: {text!r}"
 
 
 @pytest.mark.asyncio
 async def test_mcp_boundary_surfaces_full_vocab_on_first_tag_failure(autospec_mcp):
-    """DoD #2: an invalid-tag rejection must carry the full allowed vocabulary
-    the FIRST time, not only after a second failed attempt (field report)."""
     client, accessor = autospec_mcp
     with pytest.raises(Exception) as exc_info:  # noqa: PT011
         validate_memory_entry_write(
@@ -182,18 +150,10 @@ async def test_mcp_boundary_surfaces_full_vocab_on_first_tag_failure(autospec_mc
 
     assert result.is_error is True
     text = _error_text(result)
-    # The full controlled vocabulary must be inline on THIS (first) failure.
     missing = [tag for tag in CONTROLLED_TAG_VOCABULARY if tag not in text]
     assert not missing, f"allowed vocabulary missing from first-failure MCP-boundary text: {missing}"
 
 
-# ---------------------------------------------------------------------------
-# DoD #3/#5 -- "not found" family disambiguation (unknown-ID vs exists-but-
-# wrong-state), driven through finalize_job. finalize_job is a TOOL_DISPATCH PURE
-# tool (dispatches straight to OrchestrationAgentStateService.finalize_job,
-# bypassing the ToolAccessor adapter), so it needs a real DB-backed session
-# rather than an autospec accessor.
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
@@ -231,8 +191,6 @@ async def db_backed_client(db_manager, db_session, monkeypatch):
 
 
 async def _seed_working_job(db_session, tenant_key: str):
-    """A job whose only execution is 'working' (not 'complete') -- the
-    exists-but-wrong-state half of the disambiguation."""
     import random
     from datetime import UTC, datetime
 
@@ -293,8 +251,6 @@ async def _seed_working_job(db_session, tenant_key: str):
 
 @pytest.mark.asyncio
 async def test_close_job_mcp_boundary_disambiguates_wrong_state(db_backed_client):
-    """finalize_job on a job that EXISTS but is not 'complete' must say so distinctly
-    from an unknown job_id -- naming the actual status and diagnose_project_state."""
     client, tenant_key, session = db_backed_client
     job = await _seed_working_job(session, tenant_key)
 
@@ -310,8 +266,6 @@ async def test_close_job_mcp_boundary_disambiguates_wrong_state(db_backed_client
 
 @pytest.mark.asyncio
 async def test_close_job_mcp_boundary_disambiguates_unknown_job_id(db_backed_client):
-    """finalize_job on a job_id that does not exist AT ALL must say so distinctly
-    from an exists-but-wrong-state job, not the old ambiguous shared message."""
     client, _tenant_key, _session = db_backed_client
     ghost_job_id = str(uuid4())
 
@@ -322,5 +276,4 @@ async def test_close_job_mcp_boundary_disambiguates_unknown_job_id(db_backed_cli
     text = _error_text(result)
     assert "No job found with ID" in text
     assert "diagnose_project_state" in text
-    # Must NOT claim a status the job never had (that's the wrong-state message).
     assert "not 'complete'" not in text

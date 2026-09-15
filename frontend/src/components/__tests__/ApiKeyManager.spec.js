@@ -1,18 +1,6 @@
-/**
- * ApiKeyManager.spec.js — FE-9225
- *
- * The API Keys card is view-and-revoke ONLY. FE-6242's "Configurator" pill and the
- * AiToolConfigWizard it mounted were retired here: the FE-9204 connect directory
- * above this card owns tool connection, and the operator verified both the OAuth and
- * the API-key path end-to-end through that new flow before deletion.
- *
- * These assertions are the inverse pin of the ones they replace — they fail if the
- * legacy configurator path is reintroduced into this card. Edition scope: Both.
- */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
-// BaseDialog is used for the revoke confirmation — stub it.
 vi.mock('@/components/common/BaseDialog.vue', () => ({
   default: { name: 'BaseDialog', template: '<div class="base-dialog-stub"><slot /></div>' },
 }))
@@ -25,7 +13,6 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ showToast: vi.fn() }),
 }))
 
-// api mock (global setup already provides this, but ensure apiKeys is present)
 vi.mock('@/services/api', () => ({
   default: {
     apiKeys: {
@@ -62,7 +49,6 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-// -----------------------------------------------------------------------
 
 describe('ApiKeyManager — view/revoke only (FE-9225 retirement of the configurator)', () => {
   it('does NOT render the legacy Configurator pill', async () => {

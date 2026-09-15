@@ -3,9 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Giljo HQ - Multi-Agent Coding Orchestrator
-"""
 
 try:
     from importlib.metadata import PackageNotFoundError
@@ -13,4 +10,4 @@ try:
 
     __version__ = _get_version("giljo-mcp")
 except (PackageNotFoundError, ImportError):
-    __version__ = "2.1.0"
+    __version__ = "2.2.0"

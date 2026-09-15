@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9289b — operator edit of a thread: rename and settable status.
-
-Two capabilities the operator did not have. A thread could only be named at CREATE
-time, which is the top complaint about the Hub; and ``status`` moved only as a side
-effect of an agent posting, which is why the operator's list is a wall of stale "Open".
-
-A rename is REFUSED on a project-bound thread: that thread is named after its project
-and is kept with the project's 360 memory, so a divergent chat title would misrepresent
-the archive. Status carries no such restriction — resolving or closing a project thread
-is a normal operator action and says nothing about the project's identity.
-
-Parallel-safe: real DB via the rollback-isolated ``db_session`` fixture, no module-level
-mutable state, each test owns its setup, every query is tenant-scoped.
-"""
 
 from __future__ import annotations
 
@@ -51,8 +37,6 @@ async def _seed(db_session, tenant: str) -> None:
 
 async def _seed_project(db_session, tenant: str) -> str:
     with tenant_session_context(db_session, tenant):
-        # BE-9437: a project belongs to a product. Its own, so an active
-        # seed cannot collide under idx_project_single_active_per_product.
         _owning_product_project = Product(
             id=str(uuid.uuid4()),
             tenant_key=tenant,
@@ -89,9 +73,6 @@ async def _project_bound(svc, tenant: str, project_id: str) -> str:
     return thread["thread_id"]
 
 
-# ---------------------------------------------------------------------------
-# Item 1 + 4 — rename, and operator-settable status.
-# ---------------------------------------------------------------------------
 
 
 async def test_rename_a_standalone_thread(db_manager, db_session):
@@ -102,11 +83,10 @@ async def test_rename_a_standalone_thread(db_manager, db_session):
 
     result = await svc.update_thread(thread_id=tid, subject="  Deploy coordination  ", tenant_key=tenant)
 
-    assert result["subject"] == "Deploy coordination"  # trimmed
+    assert result["subject"] == "Deploy coordination"
 
 
 async def test_rename_refused_on_a_project_thread(db_manager, db_session):
-    """Same rule as delete, same voice — a clean validation error, never a 500."""
     tenant = _tk("renameguard")
     await _seed(db_session, tenant)
     project_id = await _seed_project(db_session, tenant)
@@ -120,7 +100,6 @@ async def test_rename_refused_on_a_project_thread(db_manager, db_session):
 
 
 async def test_operator_can_set_status_without_an_agent(db_manager, db_session):
-    """Item 4: the reason the operator's list is a wall of stale 'Open'."""
     tenant = _tk("status")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -143,7 +122,6 @@ async def test_rename_and_status_in_one_call(db_manager, db_session):
 
 
 async def test_blank_subject_is_refused(db_manager, db_session):
-    """A nameless thread is what this feature exists to fix — do not allow one back in."""
     tenant = _tk("blank")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -154,7 +132,6 @@ async def test_blank_subject_is_refused(db_manager, db_session):
 
 
 async def test_empty_update_is_refused(db_manager, db_session):
-    """Neither field supplied is a caller mistake, not a silent no-op."""
     tenant = _tk("noop")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -174,11 +151,6 @@ async def test_unknown_status_is_refused(db_manager, db_session):
         await svc.update_thread(thread_id=tid, status="banana", tenant_key=tenant)
 
 
-# ---------------------------------------------------------------------------
-# FE-9530 — retagging: product_id/clear_product + project_ids (ruling 2's fix
-# for pre-existing untagged threads, since "no migration" leaves them with no
-# other way to ever get a product).
-# ---------------------------------------------------------------------------
 
 
 async def _seed_product(db_session, tenant: str, *, is_active: bool = True) -> str:
@@ -196,18 +168,16 @@ async def _seed_product(db_session, tenant: str, *, is_active: bool = True) -> s
 
 
 async def test_retag_a_pre_existing_untagged_thread_with_a_product(db_manager, db_session):
-    """The whole point of Finding 1's fix: an old thread that predates mandatory
-    tagging must be retaggable on touch, since ruling 2 forbids a bulk migration."""
     tenant = _tk("retag")
     await _seed(db_session, tenant)
     product_id = await _seed_product(db_session, tenant)
     svc = _service(db_manager, db_session)
-    tid = await _standalone(svc, tenant)  # created with NO product (tenant had none yet)
+    tid = await _standalone(svc, tenant)
 
     result = await svc.update_thread(thread_id=tid, product_id=product_id, tenant_key=tenant)
 
     assert result["product_id"] == product_id
-    assert result["project_ids"] == []  # retagging the product never touches project tags
+    assert result["project_ids"] == []
 
 
 async def test_retag_refuses_a_product_from_another_tenant(db_manager, db_session):
@@ -247,14 +217,6 @@ async def test_product_id_and_clear_product_together_is_refused(db_manager, db_s
 
 
 async def test_project_ids_is_plural_and_full_replace(db_manager, db_session):
-    """Ruling 3: a thread may tag one, several, or none. Full-replace semantics --
-    a second call with a different set REPLACES, it does not accumulate.
-
-    The thread is created FIRST, on a zero-product tenant, so create_thread's own
-    mandatory-resolution logic (FE-9530 ruling 1) has nothing to resolve and the
-    thread starts genuinely untagged -- ``_seed_project`` (called after) seeds its
-    OWN owning product, which must not retroactively affect a thread already made.
-    """
     tenant = _tk("plural")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -264,7 +226,6 @@ async def test_project_ids_is_plural_and_full_replace(db_manager, db_session):
     result = await svc.update_thread(thread_id=tid, project_ids=[project_a], tenant_key=tenant)
     assert result["project_ids"] == [project_a]
 
-    # Full replace with an empty list clears every tag.
     result = await svc.update_thread(thread_id=tid, project_ids=[], tenant_key=tenant)
     assert result["project_ids"] == []
 
@@ -283,7 +244,6 @@ async def test_project_ids_refuses_a_project_from_another_tenant(db_manager, db_
 
 
 async def test_omitted_project_ids_leaves_existing_tags_untouched(db_manager, db_session):
-    """None (omitted) must NOT be read as 'clear the tags' -- that is what [] is for."""
     tenant = _tk("plural_untouched")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)

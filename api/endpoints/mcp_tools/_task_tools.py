@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Task Management Tools -- @mcp.tool wrappers (BE-6042d split of mcp_sdk_server.py).
-
-Mechanically extracted verbatim from the pre-split ``mcp_sdk_server.py``. Each
-wrapper registers against the shared ``mcp`` instance from ``_base`` as a decorator
-side effect at import time. Behavior, signatures, names, and descriptions unchanged.
-"""
 
 from typing import Annotated, Any, Literal
 
@@ -25,6 +18,7 @@ from api.endpoints.mcp_tools._base import (
     MCP_SHORT_TEXT_MAX,
     READ_PRODUCT_ID_DESC,
     _call_tool,
+    blank_text_rejection,
     mcp,
 )
 from api.endpoints.mcp_tools._tool_annotations import _tool_hints
@@ -90,6 +84,8 @@ async def create_task(
     ] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
+    if not title.strip():
+        return blank_text_rejection("title", entity="Task")
     kwargs: dict[str, Any] = {"title": title, "description": description, "priority": priority}
     if task_type:
         kwargs["task_type"] = task_type
@@ -109,7 +105,6 @@ async def create_task(
         "Pass convert_to_project=true to PROMOTE the task to a project instead of editing it -- "
         "same conversion the dashboard wizard runs, and it DELETES the task row. Tenant-scoped."
     ),
-    # BE-9251: status accepts terminal values (completed/cancelled) -- see _tool_hints docstring.
     annotations=_tool_hints("update_task", destructive=True),
 )
 async def update_task(
@@ -172,6 +167,8 @@ async def update_task(
 ) -> dict[str, Any]:
     params: dict[str, Any] = {"task_id": task_id}
     if title:
+        if not title.strip():
+            return blank_text_rejection("title", entity="Task")
         params["title"] = title
     if description:
         params["description"] = description
@@ -192,10 +189,6 @@ async def update_task(
     if completion_notes:
         params["completion_notes"] = completion_notes
     if convert_to_project:
-        # BE-9382: the conversion runs as the authenticated user (only the task's
-        # creator or an admin may convert), so hand the adapter the identity from
-        # the request scope. Resolved through the _base MODULE so the in-memory
-        # transport's monkeypatch reaches it (same reason as _setup_tools).
         params["convert_to_project"] = True
         params["user_id"] = _base._resolve_user_id(ctx)
     return await _call_tool(ctx, "update_task", params)
@@ -295,10 +288,6 @@ async def list_tasks(
     ] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
-    # BE-9470: forward None, not the wire sentinel "", when mode was left at its
-    # default -- an explicit mode must be distinguishable from "not passed" so the
-    # service layer can let mode win over summary_only only when the caller actually
-    # set it (mirrors list_projects's "mode": mode or None).
     kwargs: dict[str, Any] = {"mode": mode or None, "limit": limit}
     if status:
         kwargs["status"] = status
@@ -315,10 +304,6 @@ async def list_tasks(
         elif h in ("false", "0", "no"):
             kwargs["hidden"] = False
         else:
-            # BE-9469 (U62-F2): garbage used to fall through to "no filter" here --
-            # silently answering the WHOLE board instead of the caller's intended
-            # subset. Refuse instead of guessing; the real true/false coercions
-            # above are unchanged.
             raise ValidationError(
                 message=(
                     f"Unknown value {hidden!r} for hidden. Accepted: 'true'/'1'/'yes', "

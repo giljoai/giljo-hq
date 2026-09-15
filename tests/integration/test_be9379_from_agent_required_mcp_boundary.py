@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""MCP-transport boundary tests for BE-9379 — post_to_thread attribution fail-closed.
-
-Incident (2026-08-08, CHT-0483): an agent omitted the optional ``from_agent`` on
-``post_to_thread`` and the post rendered as the human operator (from_kind="user") —
-one forgotten field and an agent impersonated the operator in the durable thread
-record, with baton auto-pass and directed-action semantics treating it as a real
-operator turn. The docstring sentence guarding that surface was prose; this is the
-mechanism replacing it.
-
-The contract under test, at the layer the bug lived (the @mcp.tool wrapper —
-BE-5042 precedent, exercised over the ACTUAL transport):
-
-- omitting ``from_agent`` (without ``as_user``) returns the structured BE-6081
-  domain rejection ``FROM_AGENT_REQUIRED`` (NOT isError) and writes NO message row;
-- ``as_user=true`` deliberately attributes the post to the authenticated principal;
-- ``from_agent=X`` attributes to agent X, exactly as before;
-- passing BOTH is refused (``FROM_AGENT_AS_USER_EXCLUSIVE``) and writes nothing.
-"""
 
 from __future__ import annotations
 
@@ -60,8 +42,6 @@ def _error_text(res) -> str:
 
 @pytest_asyncio.fixture
 async def mcp_env(db_manager, db_session, monkeypatch):
-    """Yield ``(new_client, tenant_key, user_id, _base, monkeypatch)`` — the same
-    FastMCP in-memory transport harness the sibling boundary files use."""
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -122,26 +102,21 @@ async def _message_count(db_session, thread_id: str) -> int:
 
 
 async def test_omitted_from_agent_is_refused_and_writes_nothing(mcp_env, db_session):
-    """THE incident regression: omission is a structured domain rejection (a declined
-    request the agent can self-correct, NOT isError) and persists no message row —
-    it must never again fall back to the authenticated principal."""
     new_client, _tk, _user_id, _base, _mp = mcp_env
     thread = await _create_thread(new_client, subject="fail closed", creator_id="agent-alpha")
     tid = thread["thread_id"]
 
     async with new_client() as s:
         res = await s.call_tool("post_to_thread", {"thread_id": tid, "content": "who am I?"})
-    assert res.is_error is False, _error_text(res)  # BE-6081 Tier 2: a response, not an error
+    assert res.is_error is False, _error_text(res)
     payload = _payload(res)
     assert payload["success"] is False
     assert payload["error"] == "FROM_AGENT_REQUIRED"
-    assert "as_user" in payload["message"]  # tells the caller exactly how to self-correct
+    assert "as_user" in payload["message"]
     assert await _message_count(db_session, tid) == 0
 
 
 async def test_as_user_attributes_to_the_authenticated_principal(mcp_env, db_session):
-    """Posting in the human's voice is now an explicit act: as_user=true attributes
-    to the authenticated principal, with no advisory warning (it is deliberate)."""
     new_client, _tk, user_id, _base, _mp = mcp_env
     thread = await _create_thread(new_client, subject="operator voice", creator_id="agent-alpha")
     tid = thread["thread_id"]
@@ -160,8 +135,6 @@ async def test_as_user_attributes_to_the_authenticated_principal(mcp_env, db_ses
 
 
 async def test_from_agent_attributes_to_that_agent(mcp_env):
-    """The unchanged happy path: a declared from_agent is the author, kind 'agent',
-    even though the wrapper still injects the authenticated principal's user_id."""
     new_client, _tk, user_id, _base, _mp = mcp_env
     thread = await _create_thread(new_client, subject="agent voice", creator_id="agent-alpha")
     tid = thread["thread_id"]
@@ -179,8 +152,6 @@ async def test_from_agent_attributes_to_that_agent(mcp_env):
 
 
 async def test_from_agent_and_as_user_together_are_refused(mcp_env, db_session):
-    """The two authorship claims are mutually exclusive; claiming both is refused
-    before any write."""
     new_client, _tk, _uid, _base, _mp = mcp_env
     thread = await _create_thread(new_client, subject="both claims", creator_id="agent-alpha")
     tid = thread["thread_id"]

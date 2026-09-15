@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9083a — unit tests for the protocol_survival helpers.
-
-The (phase x role) checklist is an authoritative steering wheel: a wrong cell is
-worse than none (CE-0026 precedent), so every cell is pinned on its distinctive
-tool calls and the unresolvable cells are pinned to None. The MCP-transport half
-(the BE-5042 failing-layer proof for all six cells) lives in
-tests/integration/test_be9083a_next_required_actions_mcp_boundary.py.
-
-Pure functions — no DB, no module-level mutable state. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -43,8 +33,6 @@ def _all_cells() -> dict[str, list[str]]:
 
 
 def test_every_cell_is_numbered_and_within_budget() -> None:
-    """Every cell renders a numbered checklist of <= 15 entries (the measured
-    cross-harness safe budget is ~200 lines total; the checklist must stay tiny)."""
     for name, checklist in _all_cells().items():
         assert 1 <= len(checklist) <= 15, f"{name}: {len(checklist)} entries"
         for i, item in enumerate(checklist, start=1):
@@ -86,17 +74,13 @@ def test_cells_are_distinct_and_carry_their_signature_steps() -> None:
     assert "write_project_closeout" in solo_impl
     assert "Hub" not in solo_impl, "solo has no chain Hub thread protocol"
 
-    # No two cells may render identically (a duplicate means a lost distinction).
     rendered = ["\n".join(c) for c in cells.values()]
     assert len(set(rendered)) == len(rendered)
 
 
 def test_unresolvable_orchestrator_cells_return_none() -> None:
-    """No checklist beats a wrong checklist: an orchestrator with no live phase
-    signal (and not a conductor) gets None, which the serializer strips."""
     assert compute_next_required_actions(job_type="orchestrator", phase=None) is None
     assert compute_next_required_actions(job_type="orchestrator", phase=None, is_chain_member=True) is None
-    # An unknown phase token is equally unresolvable — never guess a cell.
     assert compute_next_required_actions(job_type="orchestrator", phase="weird") is None
 
 
@@ -106,8 +90,6 @@ def test_every_non_orchestrator_job_type_gets_the_worker_cell(job_type) -> None:
 
 
 def test_conductor_wins_over_chain_member_flag() -> None:
-    """The project-less conductor can never be a project-bound member; if both flags
-    ever arrive True, the conductor cell (the more specific role) must win."""
     both = compute_next_required_actions(
         job_type="orchestrator", phase="implementation", is_chain_member=True, is_chain_conductor=True
     )
@@ -115,10 +97,6 @@ def test_conductor_wins_over_chain_member_flag() -> None:
 
 
 def test_truncation_check_names_marker_size_and_real_recovery() -> None:
-    """The head sentinel states the size, the tail marker, and the recovery ladder:
-    protocol_etag refetch first, then the BE-9083d per-section refetch (section=<name>
-    from protocol_toc). 9083a shipped this sentinel with 'section fetch ships later';
-    9083d deliberately closed that dangling reference — it must never come back."""
     text = build_truncation_check(41_234)
     assert "~41234 chars" in text
     assert PROTOCOL_END_MARKER in text

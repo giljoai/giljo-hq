@@ -3,35 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9264 -- rendered-output neutrality E2E proof (chain closer).
-
-tests/unit/test_neutrality_guard.py scans SOURCE FILES for dogfooding
-contamination (GiljoAI naming itself as the target product, this repo's
-CE/SaaS rules asserted as customer rules, a hardcoded Python/pytest
-toolchain, GitHub/Gitea host references, ...). That is necessary but not
-sufficient: some contamination only appears once a template is actually
-RENDERED for a specific product/harness combination (an ``if tool ==
-"claude-code":`` gated block, a per-language example that only shows up
-when tech_stack.programming_languages is filled in, ...). This suite closes
-that gap by creating a synthetic FOREIGN-STACK product -- Go backend, no
-frontend framework, GitLab-hosted repo on branch ``main``, macOS target,
-single-tenant, empty test config -- through the REAL service layer
-(ProductService, never raw ORM writes), then rendering the customer-reaching
-prompt/template surfaces through their REAL code paths (no parallel
-renderer) and asserting neutrality on the actual rendered strings.
-
-Neutrality is asserted by IMPORTING the guard's own pattern engine
-(``match_prose_line`` from test_neutrality_guard.py) rather than forking a
-second copy of the pattern list -- a rendered string is treated as one big
-multi-line "string constant" the same way the guard's AST scanner treats a
-source literal, so the exact same keep-regexes/nearby-window logic applies.
-
-Edition Scope: Both (test-only; no production behavior change).
-
-Parallel-safe: DB-backed fixtures use the rolled-back ``db_session``
-(TransactionalTestContext, via tests/conftest.py); fresh tenant_key per
-test; no module-level mutable state.
-"""
 
 from __future__ import annotations
 
@@ -61,16 +32,8 @@ from tests.unit.test_neutrality_guard import _NEARBY_WINDOW, match_prose_line
 pytestmark = pytest.mark.asyncio
 
 
-# ---------------------------------------------------------------------------
-# Neutrality assertion helper -- IMPORTS the guard's pattern engine, does not
-# fork it (BE-9264 mandate).
 
 
-# Pre-existing, DOCUMENTED baseline offenders (tests/unit/neutrality_guard_baseline.py)
-# are audited-but-not-yet-fixed static contamination -- this suite proves there is no
-# NEW dynamic-rendering-only contamination, it does not re-litigate those. Reusing the
-# baseline's own excerpts (rather than hardcoding a second copy) keeps the two scans
-# in lockstep: shrink the baseline and this tolerance automatically tightens too.
 _BASELINE_EXCERPTS = tuple(note.split(" :: ", 2)[-1] for _, note in BASELINE)
 
 
@@ -79,20 +42,6 @@ def _is_known_documented_offender(line_text: str) -> bool:
 
 
 def _neutral_hits(text: str, *, allow: frozenset[str] = frozenset()) -> list[tuple[int, str, str]]:
-    """Run the guard's pattern engine over a RENDERED runtime string.
-
-    Mirrors ``test_neutrality_guard.scan_file``'s per-string-constant
-    windowing (a nearby-window keep-regex sees +/-3 lines within the SAME
-    string), but for a string produced by calling a real render function at
-    test time, not an AST literal pulled from a source file.
-
-    ``allow``: pattern_ids to skip entirely for THIS render -- used only when
-    the render was deliberately requested FOR a harness that legitimately
-    carries that pattern's vocabulary (e.g. calling a builder with
-    ``tool="claude-code"`` legitimately renders "TodoWrite"/"ToolSearch";
-    the corresponding non-claude render, checked separately with no
-    allowance, is what actually proves the gating).
-    """
     lines = text.split("\n")
     total_len = sum(len(ln) for ln in lines)
     hits: list[tuple[int, str, str]] = []
@@ -114,14 +63,10 @@ def _assert_neutral(text: str, label: str, *, allow: frozenset[str] = frozenset(
     assert not hits, f"{label}: dogfooding contamination found in rendered output: {hits}"
 
 
-# ---------------------------------------------------------------------------
-# Fixtures -- synthetic FOREIGN-STACK product, created via the real service
-# layer (never raw ORM writes).
 
 
 @pytest_asyncio.fixture
 async def foreign_stack_product(db_manager, db_session) -> tuple[Product, str]:
-    """A Go/GitLab/macOS product, deliberately nothing like this repo's own stack."""
     tenant_key = TenantManager.generate_tenant_key()
     service = ProductService(db_manager, tenant_key, test_session=db_session)
     product = await service.create_product(
@@ -148,7 +93,6 @@ async def foreign_stack_product(db_manager, db_session) -> tuple[Product, str]:
 
 @pytest_asyncio.fixture
 async def foreign_stack_project(db_manager, db_session, foreign_stack_product):
-    """A project bound to the foreign-stack product, for the staging/thin-prompt renders."""
     product, tenant_key = foreign_stack_product
     manager = TenantManager()
     manager.set_current_tenant(tenant_key)
@@ -167,8 +111,6 @@ async def foreign_stack_project(db_manager, db_session, foreign_stack_product):
         current_tenant.reset(token)
 
 
-# ---------------------------------------------------------------------------
-# 1. The synthetic product itself, created through the REAL service layer.
 
 
 async def test_product_created_via_real_service_layer(foreign_stack_product):
@@ -178,8 +120,6 @@ async def test_product_created_via_real_service_layer(foreign_stack_product):
     assert product.target_platforms == ["macos"]
 
 
-# ---------------------------------------------------------------------------
-# 2. template_seeder personas (all 6) -- seeded verbatim to every new tenant.
 
 
 async def test_template_seeder_personas_neutral_and_role1_present():
@@ -192,8 +132,6 @@ async def test_template_seeder_personas_neutral_and_role1_present():
         _assert_neutral(text, f"template_seeder persona '{template['name']}'")
 
     orchestrator_text = next(t["user_instructions"] for t in templates if t["name"] == "orchestrator")
-    # Role-1 presence (over-correction check): the platform still brands
-    # itself and still names its own tools/skills.
     assert "Giljo HQ" in orchestrator_text
     assert "get_staging_instructions" in orchestrator_text
     assert "get_job_mission" in orchestrator_text
@@ -203,25 +141,15 @@ async def test_check_in_protocol_todowrite_gated_by_harness():
     claude_render = _get_check_in_protocol_section(tool="claude-code")
     codex_render = _get_check_in_protocol_section(tool="codex")
 
-    # harness_tool_names allowed ONLY on the claude-code variant -- it was
-    # deliberately requested for that harness, so TodoWrite/ToolSearch text is
-    # Role-1 EXPECTED there; the codex variant below is checked with no
-    # allowance, which is what actually proves the gating.
     _assert_neutral(claude_render, "check-in protocol section (claude-code)", allow=frozenset({"harness_tool_names"}))
     _assert_neutral(codex_render, "check-in protocol section (codex)")
 
-    # Role-1 presence: the claude-code render still carries its harness-specific
-    # TaskCreate-override + ToolSearch bootstrap guidance (over-correction check).
     assert "TaskCreate" in claude_render
     assert "ToolSearch" in claude_render
-    # The NON-claude render must carry neither.
     assert "TaskCreate" not in codex_render
     assert "ToolSearch" not in codex_render
 
 
-# ---------------------------------------------------------------------------
-# 3. Protocol sections via protocol_builder -- worker + orchestrator, for
-#    claude-code AND a non-claude harness (codex).
 
 
 async def test_worker_protocol_neutral_git_block_host_blind_and_todowrite_gated():
@@ -240,13 +168,11 @@ async def test_worker_protocol_neutral_git_block_host_blind_and_todowrite_gated(
     _assert_neutral(codex_render, "worker protocol (codex)")
 
     for label, render in (("claude-code", claude_render), ("codex", codex_render)):
-        # P4: worker_body git block -- host-agnostic framing (BE-9256).
         assert "Git Commit (REQUIRED - Git Integration Enabled)" in render, label
         assert "git add" in render, label
         assert "github" not in render.lower(), label
         assert "gitea" not in render.lower(), label
 
-    # Role-1 presence vs. non-claude gating (BE-9260's task_list_phrase()):
     assert "TodoWrite" in claude_render
     assert "TodoWrite" not in codex_render
 
@@ -258,7 +184,7 @@ async def test_orchestrator_protocol_neutral_and_role1_present():
         "orchestrator_id": str(uuid4()),
         "tenant_key": str(uuid4()),
         "git_integration_enabled": True,
-        "include_implementation_reference": True,  # CH5 -- chapters_reference completion step
+        "include_implementation_reference": True,
     }
     claude_chapters = _build_orchestrator_protocol(tool="claude-code", **common)
     codex_chapters = _build_orchestrator_protocol(tool="codex", **common)
@@ -270,30 +196,22 @@ async def test_orchestrator_protocol_neutral_and_role1_present():
     _assert_neutral(codex_render, "orchestrator protocol chapters (codex)")
 
     for render in (claude_render, codex_render):
-        # Role-1 presence: Giljo HQ as the orchestration SYSTEM, tool
-        # names and /giljo identifiers still present where expected.
         assert "spawn_job" in render
         assert "get_context" in render
-        # CH5 (chapters_reference) completion step is included.
         assert "ch5_reference" in claude_chapters
         assert claude_chapters["ch5_reference"]
 
 
-# ---------------------------------------------------------------------------
-# 4. serena_instructions block -- conditional wording, no hardcoded language.
 
 
 async def test_serena_instructions_neutral_and_conditional():
     for role in ("orchestrator", "implementer", "tester", "analyzer", "reviewer", "documenter"):
         text = for_role(role)
         _assert_neutral(text, f"serena_instructions for_role('{role}')")
-        # BE-9260: conditional wording, never an unconditional "Python-only" claim.
         assert "if it is not registered" in text.lower() or "prefer them" in text.lower()
         assert "python-only in this" not in text.lower()
 
 
-# ---------------------------------------------------------------------------
-# 5. TUNING_PROMPT_TEMPLATE render -- for the REAL Go/GitLab/macOS product.
 
 
 async def test_tuning_prompt_renders_neutral_for_foreign_stack_product(db_manager, db_session, foreign_stack_product):
@@ -303,7 +221,7 @@ async def test_tuning_prompt_renders_neutral_for_foreign_stack_product(db_manage
     async def _fake_user_configs(_session, _user_id):
         return DEFAULT_FIELD_PRIORITY, {}
 
-    service._get_user_configs = _fake_user_configs  # boundary mock: user/toggle lookup is not under test here
+    service._get_user_configs = _fake_user_configs
 
     result = await service.assemble_tuning_prompt(
         product_id=str(product.id),
@@ -313,18 +231,13 @@ async def test_tuning_prompt_renders_neutral_for_foreign_stack_product(db_manage
     prompt = result["prompt"]
     _assert_neutral(prompt, "TUNING_PROMPT_TEMPLATE render (foreign-stack product)")
 
-    # The product's own (Go) data is reflected, not this repo's (Python) stack.
     assert "Go" in prompt
     assert "pytest" not in prompt.lower()
 
-    # Multi-ecosystem test-discovery step (P3) renders correctly and stays
-    # stack-neutral even for a non-Python product.
     assert "go test -list ." in prompt
     assert "collect-only" in prompt
 
 
-# ---------------------------------------------------------------------------
-# 6. Staging/thin prompts -- claude-code AND a non-claude harness (codex).
 
 
 async def test_thin_prompt_neutral_and_todowrite_toolsearch_gated(foreign_stack_project):
@@ -354,8 +267,6 @@ async def test_thin_prompt_neutral_and_todowrite_toolsearch_gated(foreign_stack_
     assert "ToolSearch" not in codex_render
 
 
-# ---------------------------------------------------------------------------
-# 7. giljo_guide text.
 
 
 async def test_giljo_guide_neutral():
@@ -363,8 +274,6 @@ async def test_giljo_guide_neutral():
     _assert_neutral(guide_text, "giljo_guide text")
 
 
-# ---------------------------------------------------------------------------
-# 8. ai_tools Terminal labels -- neutral, no Windows-only shell assumed.
 
 
 async def test_ai_tools_terminal_labels_neutral():
@@ -376,8 +285,6 @@ async def test_ai_tools_terminal_labels_neutral():
         assert "powershell" not in label.lower(), tool_id
 
 
-# ---------------------------------------------------------------------------
-# 9. GIT_COMMIT_TITLE_REQUIRED rejection hint -- neutral, actionable, host-blind.
 
 
 async def test_git_commit_title_required_hint_neutral_and_actionable():

@@ -3,34 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-9227f (M2a) — no readable token material in the idempotency cache backends.
-
-Defect: both idempotency serialize helpers (``_serialize`` in
-``oauth_token_idempotency``, ``_serialize_refresh_entry`` in
-``oauth_refresh_service``) json.dumps the FULL /token//refresh response body —
-including the raw access-token JWT and the raw refresh token — into the cache
-backend. CE stores that in its own process dict (low risk); SaaS ships it to
-Redis for the idempotency window, where persistence (RDB/AOF), MONITOR access,
-or a Redis compromise exposes live token pairs. That contradicts the module's
-own contract ("the raw value is returned to the client ONCE in the response
-and never persisted", oauth_refresh_service.hash_refresh_token).
-
-Fix shape under test: the four serialize/deserialize choke-point helpers wrap
-AES-256-GCM (key HKDF-derived from the existing JWT secret, fresh random nonce
-per entry, "v1:"+base64 format) around the JSON. Any decrypt failure is a
-cache MISS with a warning — never an exception — so a broken cache entry can
-never break a sign-in.
-
-The two ``*_raw_backend_value_*`` tests are the reproduce-first probes: pre-fix
-they FAIL (raw stored value contains the live token values and plaintext JSON
-structure); post-fix they pass while the round-trip still returns the original
-entry intact.
-
-Parallel-safe: unique tenant/user/client per test, per-test cache-backend
-registry reset (precedent: ``tests/services/test_oauth_token_idempotency.py``),
-no module-level mutable state. Assertions compare booleans so no token
-material is ever printed in a failure message.
-"""
 
 from __future__ import annotations
 
@@ -61,8 +33,6 @@ from giljo_mcp.services.oauth_service import BUILTIN_CLIENT_ID, OAuthService
 
 @pytest.fixture(autouse=True)
 def _isolated_cache_registry():
-    """Fresh cache-backend registry + derived-key cache per test so neither an
-    entry nor a key derived under another test's JWT secret leaks across."""
     cache_backends.reset_registry_for_tests()
     _idem_crypto.reset_key_cache_for_tests()
     yield
@@ -71,11 +41,6 @@ def _isolated_cache_registry():
 
 
 def _assert_no_readable_token_material(raw: str, response_body: dict) -> None:
-    """The stored value must contain neither live token values nor the
-    plaintext JSON structure of the cached response.
-
-    Booleans only — a failure message must never echo token material.
-    """
     access_leaked = response_body["access_token"] in raw
     refresh_leaked = response_body.get("refresh_token", "") and response_body["refresh_token"] in raw
     assert not access_leaked, "raw cache value contains the live access_token"
@@ -86,7 +51,6 @@ def _assert_no_readable_token_material(raw: str, response_body: dict) -> None:
 
 
 async def _seed_user(db_manager) -> tuple[str, str]:
-    """Create org+user, committed; return (user_id, tenant_key)."""
     from giljo_mcp.models.auth import User
     from giljo_mcp.models.organizations import Organization
     from giljo_mcp.tenant import TenantManager
@@ -130,13 +94,6 @@ def _generate_pkce_pair() -> tuple[str, str]:
 
 
 def _install_builtin_resolver():
-    """Pin the CE built-in resolver for the /token probe.
-
-    In the SaaS test lane a prior test can leave the DB-backed SaaS resolver
-    installed process-wide; that resolver looks BUILTIN_CLIENT_ID up in a
-    UUID-typed column and errors before the grant runs. The probe is about the
-    cache payload, not resolver wiring — pin the builtin and restore after.
-    """
     from giljo_mcp.services import oauth_service as svc
 
     prior = svc.get_client_resolver()
@@ -145,7 +102,6 @@ def _install_builtin_resolver():
 
 
 def _install_confidential_resolver(client_id: str, secret_hash: str):
-    """Stub resolver recognizing one confidential client (test_sec9217b pattern)."""
     from giljo_mcp.services import oauth_service as svc
 
     prior = svc.get_client_resolver()
@@ -167,8 +123,6 @@ def _install_confidential_resolver(client_id: str, secret_hash: str):
 
 @pytest.mark.asyncio
 async def test_token_grant_raw_backend_value_holds_no_readable_token_material(db_manager, monkeypatch):
-    """/token grant path: the raw stored cache value must be opaque, and the
-    round-trip through cache_get must still return the identical entry."""
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     monkeypatch.setattr(_idem, "OAUTH_TOKEN_IDEMPOTENCY_WINDOW_SECONDS", 30)
 
@@ -210,12 +164,10 @@ async def test_token_grant_raw_backend_value_holds_no_readable_token_material(db
 
         assert "access_token" in response and "refresh_token" in response
 
-        # PROBE: inspect the raw stored value exactly as the backend holds it.
         raw = await get_cache_backend(OAUTH_IDEMPOTENCY_BACKEND_NAME).get(tk, code_value)
         assert raw is not None, "the grant must have cached an idempotency entry"
         _assert_no_readable_token_material(raw, response)
 
-        # Round-trip: the opaque entry still deserializes to the identical response.
         cached = await _idem.cache_get(tk, code_value)
         assert cached is not None
         assert cached.response_body == response
@@ -225,7 +177,6 @@ async def test_token_grant_raw_backend_value_holds_no_readable_token_material(db
 
 @pytest.mark.asyncio
 async def test_refresh_grant_raw_backend_value_holds_no_readable_token_material(db_manager, monkeypatch):
-    """/refresh grant path: same probe as the /token twin."""
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     monkeypatch.setattr(_refresh_svc, "OAUTH_REFRESH_IDEMPOTENCY_WINDOW_SECONDS", 30)
 
@@ -260,12 +211,10 @@ async def test_refresh_grant_raw_backend_value_holds_no_readable_token_material(
         assert "access_token" in response and "refresh_token" in response
         token_hash = hash_refresh_token(raw_presented)
 
-        # PROBE: raw stored value as the backend holds it.
         raw = await get_cache_backend(OAUTH_REFRESH_BACKEND_NAME).get(tk, token_hash)
         assert raw is not None, "the grant must have cached an idempotency entry"
         _assert_no_readable_token_material(raw, response)
 
-        # Round-trip: the opaque entry still deserializes to the identical response.
         cached = await _refresh_svc._refresh_idempotency_cache_get(tk, token_hash)
         assert cached is not None
         assert cached.response_body == response
@@ -282,11 +231,6 @@ def _sample_entries() -> tuple[_idem.IdempotencyEntry, _refresh_svc._RefreshIdem
 
 
 class TestFailSecureDegradation:
-    """Every decrypt failure is a MISS + one warning — never an exception.
-
-    Exercised at the cache_get seam (the real read path) on BOTH the /token
-    and /refresh sides, against a raw backend value corrupted in place.
-    """
 
     @pytest.mark.asyncio
     async def test_tampered_entry_is_a_miss_on_both_paths(self, monkeypatch, caplog):
@@ -300,7 +244,6 @@ class TestFailSecureDegradation:
             backend = get_cache_backend(name)
             raw = await backend.get("tk_t", key)
             assert raw is not None and raw.startswith("v1:")
-            # Flip one ciphertext byte inside the base64 body (keep the prefix).
             body = bytearray(base64.b64decode(raw[3:]))
             body[-1] ^= 0x01
             tampered = "v1:" + base64.b64encode(bytes(body)).decode("ascii")
@@ -320,7 +263,6 @@ class TestFailSecureDegradation:
         await _idem.cache_put("tk_w", "code-1", token_entry)
         await _refresh_svc._refresh_idempotency_cache_put("tk_w", "hash-1", refresh_entry)
 
-        # Simulate a mid-window secret rotation: re-derive under a new secret.
         _idem_crypto.reset_key_cache_for_tests()
         monkeypatch.setenv("JWT_SECRET", "secret-key-B")
 
@@ -347,20 +289,15 @@ class TestCryptoFormat:
         one = _idem_crypto.encrypt_payload("same plaintext")
         two = _idem_crypto.encrypt_payload("same plaintext")
         assert one.startswith("v1:") and two.startswith("v1:")
-        # Fresh random nonce per entry: identical plaintexts encrypt differently.
         assert one != two
         assert _idem_crypto.decrypt_payload(one) == "same plaintext"
         assert _idem_crypto.decrypt_payload(two) == "same plaintext"
 
     def test_key_is_not_derived_at_import_time(self, monkeypatch):
-        """Importing the module (already imported here) must not have required a
-        JWT secret; only encrypt/decrypt use derives it. With no secret set,
-        encryption raises the same RuntimeError token-signing would."""
         monkeypatch.delenv("JWT_SECRET", raising=False)
         monkeypatch.delenv("GILJO_MCP_SECRET_KEY", raising=False)
         monkeypatch.delenv("SECRET_KEY", raising=False)
         _idem_crypto.reset_key_cache_for_tests()
         with pytest.raises(RuntimeError):
             _idem_crypto.encrypt_payload("x")
-        # The read path must degrade to a miss even without a secret.
         assert _idem_crypto.decrypt_payload("v1:QUJD") is None

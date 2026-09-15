@@ -3,29 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-6199 — chain staging live-fill: sequence:updated broadcast on writes that
-arm the chain Implement button.
-
-The chain cockpit's Implement button arms when the run is locked (Stage Chain
-pressed) AND chain_mission is written by the conductor. Both writes go through
-SequenceRunService.update(), which broadcasts sequence:updated. This file
-confirms both broadcasts fire so the FE can live-fill the chain-mission window
-and arm the Implement button without a manual page refresh.
-
-1. test_stage_chain_lock_broadcasts_sequence_updated
-   PATCH /api/v1/sequence-runs/<id> with locked=True (the Stage Chain FE action)
-   routes through SequenceRunService.update() and fires sequence:updated.
-
-2. test_chain_mission_write_broadcasts_sequence_updated
-   conductor update_job_mission -> mirror_chain_mission_for_conductor ->
-   SequenceRunService.update(chain_mission=...) fires sequence:updated.
-   (Companion to test_conductor_mission_write_broadcasts_sequence_updated in
-   test_be6186_conductor_mission_mirror.py -- this copy is a focused regression
-   pinned to the FE-6199 live-fill fix; that file tests the mirror mechanics.)
-
-Both tests mock WebSocketManager and assert broadcast_event_to_tenant is called
-with the correct sequence:updated event. Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -53,7 +30,6 @@ pytestmark = pytest.mark.asyncio
 
 
 def _ensure_api_stub() -> None:
-    """Ensure 'api' package is importable (not present in all test workers)."""
     if "api" not in sys.modules:
         stub = types.ModuleType("api")
         stub.__path__ = ["api"]
@@ -82,8 +58,6 @@ def _run_svc(session: AsyncSession, ws=None) -> SequenceRunService:
 
 
 async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -100,8 +74,6 @@ async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
         status="active",
         tenant_key=tenant_key,
         product_id=_owning_product_project.id,
-        # BE-9429: uq_project_taxonomy_active is NULLS NOT DISTINCT, so these
-        # NULL-product/NULL-type rows collide unless the serial differs.
         series_number=next_series_number(),
         execution_mode="claude_code_cli",
         created_at=datetime.now(UTC),
@@ -122,18 +94,9 @@ async def _conductor_job_id(session: AsyncSession, tenant_key: str, conductor_ag
     return str(row.scalar_one())
 
 
-# ---------------------------------------------------------------------------
-# 1. Stage Chain lock -> sequence:updated
-# ---------------------------------------------------------------------------
 
 
 async def test_stage_chain_lock_broadcasts_sequence_updated(db_session: AsyncSession) -> None:
-    """PATCH locked=True (Stage Chain) must broadcast sequence:updated (FE-6199).
-
-    The FE patchRun(runId, {locked: true}) call hits SequenceRunService.update()
-    which fires _broadcast_sequence_updated. This test confirms the broadcast so
-    the cockpit's chainCtx.locked -> chainImplementReady gate can react live.
-    """
     _ensure_api_stub()
     from api.websocket import WebSocketManager
 
@@ -156,20 +119,9 @@ async def test_stage_chain_lock_broadcasts_sequence_updated(db_session: AsyncSes
     ws.broadcast_event_to_tenant.assert_any_await(tenant, {"type": "sequence:updated", "data": {"run_id": run_id}})
 
 
-# ---------------------------------------------------------------------------
-# 2. chain_mission write -> sequence:updated (via conductor update_job_mission)
-# ---------------------------------------------------------------------------
 
 
 async def test_chain_mission_write_broadcasts_sequence_updated(db_session: AsyncSession) -> None:
-    """conductor update_job_mission -> mirror -> SequenceRunService.update(chain_mission=)
-    must broadcast sequence:updated so the cockpit chain-mission window live-fills.
-
-    Regression for the FE-6199 live-fill gap: without the websocket_manager threaded
-    through mirror_chain_mission_for_conductor, the SequenceRunService.update() inside
-    the mirror had no ws manager -> broadcast was a no-op -> chain-mission window stayed
-    blank until a manual refresh.
-    """
     _ensure_api_stub()
     from api.websocket import WebSocketManager
     from giljo_mcp.services.mission_service import MissionService

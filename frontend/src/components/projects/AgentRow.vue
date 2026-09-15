@@ -4,7 +4,6 @@
     :data-agent-display-name="agent.agent_display_name"
     :data-agent-status="agent.status"
   >
-    <!-- Phase Badge (Handover 0829, 0875: "All" for subagent modes) -->
     <td class="phase-cell" data-testid="phase-badge">
       <span v-if="isSubagentMode" class="phase-badge">All</span>
       <span v-else-if="isOrchestratorAgent" class="phase-badge">Start</span>
@@ -12,7 +11,6 @@
       <span v-else class="phase-badge">P{{ agent.phase }}</span>
     </td>
 
-    <!-- Play button: own column, no header -->
     <td class="play-cell">
       <div class="play-btn-slot">
         <template v-if="shouldShowCopy">
@@ -35,7 +33,6 @@
       </div>
     </td>
 
-    <!-- Agent card: tinted badge + name (0870j) -->
     <td class="agent-display-name-cell">
       <div class="agent-card-row">
         <button
@@ -79,8 +76,6 @@
       </div>
     </td>
 
-    <!-- Agent Status: Dynamic binding from agent.status -->
-    <!-- HITL Closeout: Pass block_reason for closeout-specific display -->
     <td
       class="status-cell"
       data-testid="status-chip"
@@ -92,12 +87,10 @@
       {{ getStatusLabel(agent.status, agent.block_reason) }}<span v-if="agent.status === 'working'" class="working-dots"><span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></span>
     </td>
 
-    <!-- Duration -->
     <td class="duration-cell hide-mobile" data-testid="duration">
       {{ formatDuration(agent) }}
     </td>
 
-    <!-- Steps (numeric TODO progress) -->
     <td class="steps-cell text-center hide-mobile">
       <button
         v-if="agent.steps && typeof agent.steps.completed === 'number' && typeof agent.steps.total === 'number'"
@@ -112,7 +105,6 @@
       <span v-else>—</span>
     </td>
 
-    <!-- Messages (waiting count) — tinted badge (0870j); BE-9273: needs-action tint distinguishes "waiting on user" -->
     <td class="messages-waiting-cell text-center hide-mobile">
       <button
         type="button"
@@ -129,11 +121,8 @@
       </button>
     </td>
 
-    <!-- Actions: inline icons on wide screens, three-dot menu on narrow -->
     <td class="actions-cell">
-      <!-- Inline icons (hidden on narrow/portrait screens) -->
       <div class="actions-inline">
-        <!-- BE-8003j: isolated-PR chain hand-off — open the delivered PR when present -->
         <v-tooltip v-if="prUrl" text="Open pull request">
           <template #activator="{ props: tooltipProps }">
             <a
@@ -255,7 +244,6 @@
         </v-tooltip>
       </div>
 
-      <!-- Three-dot menu (shown only on narrow/portrait screens) -->
       <div class="actions-menu">
         <v-menu>
           <template #activator="{ props: menuProps }">
@@ -312,48 +300,24 @@ import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 import { isOrchestrator, getPrimaryAgentLabel } from '@/utils/agentDisplay'
 import { formatAgentDuration } from '@/utils/durationFormat'
 
-/**
- * AgentRow — FE-6042a presentational child of JobsTab.
- *
- * Renders a single <tr> for an agent. No API calls. No timers.
- * All stateful logic lives in the container (JobsTab.vue).
- */
 
 const props = defineProps({
-  /** The agent job object from phaseSortedAgents. */
   agent: {
     type: Object,
     required: true,
   },
-  /**
-   * Current timestamp in ms — ticking ref from JobsTab container.
-   * AgentRow has NO timer; it receives now as a prop so duration
-   * stays O(1) interval for the entire table.
-   */
   now: {
     type: Number,
     required: true,
   },
-  /**
-   * True when execution_mode is subagent-style (BE-9035c: 'subagent' plus any
-   * tolerated legacy per-CLI token). Computed store-first in container.
-   */
   isSubagentMode: {
     type: Boolean,
     default: false,
   },
-  /**
-   * = shouldShowCopyButton(agent) computed in container.
-   * Controls play-button column visibility.
-   */
   shouldShowCopy: {
     type: Boolean,
     default: false,
   },
-  /**
-   * = isPlayButtonFaded(agent) computed in container.
-   * Dims the play button when the agent is not in a copyable state.
-   */
   playFaded: {
     type: Boolean,
     default: false,
@@ -371,15 +335,9 @@ const emit = defineEmits([
   'stop-project',
 ])
 
-// ---------------------------------------------------------------------------
-// Internal helpers (row-only, not exported)
-// ---------------------------------------------------------------------------
 
 const isOrchestratorAgent = computed(() => isOrchestrator(props.agent))
 
-// BE-8003j: the isolated-PR chain hand-off surfaces the delivered PR link from the
-// agent's completion result (complete_job.result.pr_url). Present only for
-// web-coding (isolated_pr) jobs that recorded a PR; null otherwise (no button).
 const prUrl = computed(() => {
   const url = props.agent?.result?.pr_url
   return typeof url === 'string' && url.trim() ? url.trim() : null
@@ -396,38 +354,15 @@ function getMessagesWaiting(agent) {
   return agent?.messages_waiting_count ?? 0
 }
 
-/**
- * BE-9273: the subset of messages_waiting_count that is genuinely
- * requires_action + non-auto_generated (the same definition the closeout
- * gate blocks complete_job on) — i.e. work actually waiting on the USER,
- * not just unread mail the agent hasn't drained yet.
- */
 function getActionRequiredUnread(agent) {
   return agent?.action_required_unread ?? 0
 }
 
-/**
- * Three-state badge tint: needs-action (action_required_unread > 0, the
- * strictest/strongest signal) takes priority over has-msgs (plain unread >
- * 0) takes priority over zero.
- */
 function getMessageBadgeClass(agent) {
   if (getActionRequiredUnread(agent) > 0) return 'needs-action'
   return getMessagesWaiting(agent) > 0 ? 'has-msgs' : 'zero'
 }
 
-/**
- * formatDuration — pure function that takes the agent and a nowMs timestamp.
- * No closure over refs; receives `now` via the prop so AgentRow has no timer.
- *
- * BE-5107: backend computes duration_seconds; FE ticks locally between WS
- * events using working_started_at as the anchor so the cell doesn't freeze.
- * Terminal statuses trust the backend's frozen duration_seconds.
- *
- * FE-9548: the anchor/format logic itself now lives in durationFormat.js so
- * the Jobs board's compact agent rows render an identical string — this stays
- * a thin wrapper over the shared helper rather than a second implementation.
- */
 function formatDuration(agent) {
   return formatAgentDuration(agent, props.now)
 }

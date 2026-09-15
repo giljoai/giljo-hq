@@ -3,42 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9475 — a headless agent has no way to report what it is doing.
-
-Verified against a live CE database (2026-08-19): a participant's Hub status dot reads
-``agent_executions`` through ``latest_execution_status()``, correlated on
-``agent_id == participant_id``. A headless/external agent — an operator-driven TUI lane —
-joins a thread with ``join_thread`` and never registers an execution row, so that
-subquery serves NULL forever. ``useAgentStatusDot.displayStatus`` reads NULL-status-with-
-a-``last_seen_at`` as ``idle``, which the dashboard labels "Monitoring". The lane shows
-"Monitoring" the entire time it is pinning a CPU core, and nothing it can do changes that.
-
-This is a MECHANISM gap, not a discipline gap: a careful agent can do everything right
-and still never show "Working". So the fix is a validated parameter plus a column, and
-this file is the gate on it — at the layer the defect lives (the ``@mcp.tool`` wrapper,
-exercised over the ACTUAL FastMCP transport, per the BE-5042 precedent), writing through
-``post_to_thread`` and reading back through ``get_participant_liveness``.
-
-The contract under test:
-
-- ``post_to_thread(my_status=...)`` moves the served status for an execution-less
-  participant (the reproduction);
-- an execution row still WINS when both exist — self-reported is a fallback, never an
-  override, so the dot cannot disagree with the Jobs board;
-- an invalid ``my_status`` is a structured BE-6081 domain rejection naming the valid set,
-  never a 500 from a DB constraint, and it persists nothing;
-- both no-status cases stay byte-identical to today: never checked in => NULL status AND
-  NULL ``last_seen_at`` (the hollow ring), posted-without-a-status => NULL status with a
-  ``last_seen_at`` (idle / "Monitoring").
-
-CONTROLS. Three tests here must pass on BOTH sides of the change
-(``test_control_...``, ``test_execution_status_wins_...``, ``test_control_no_status_...``).
-They exist so a RED run proves the ASSERTION failed and not the harness: if the controls
-go red too, the instrument is broken and the reproduction proves nothing.
-
-Parallel-safe: rollback-isolated ``db_session``, no module-level mutable state, each test
-owns its setup, every query tenant-scoped.
-"""
 
 from __future__ import annotations
 
@@ -80,12 +44,6 @@ def _error_text(res) -> str:
 
 
 def _outcome(res) -> str:
-    """A one-line description of what a tool call actually did.
-
-    Carried into the reproduction's assertion message so a RED run says WHY the status
-    did not move (parameter refused at the surface / rejected / accepted-but-ignored)
-    instead of only that it did not.
-    """
     if res.is_error:
         return f"isError: {_error_text(res)[:400]}"
     return f"ok: {json.dumps(_payload(res))[:400]}"
@@ -93,8 +51,6 @@ def _outcome(res) -> str:
 
 @pytest_asyncio.fixture
 async def mcp_env(db_manager, db_session, monkeypatch):
-    """Yield ``(new_client, tenant_key, user_id)`` — the FastMCP in-memory transport
-    harness the sibling ``*_mcp_boundary`` files use."""
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -142,8 +98,6 @@ async def mcp_env(db_manager, db_session, monkeypatch):
 
 
 async def _thread_with_headless_agent(new_client, agent_id: str) -> str:
-    """A thread whose only agent participant joined via ``join_thread`` and has NO
-    ``agent_executions`` row — exactly how an operator-driven lane arrives."""
     async with new_client() as s:
         res = await s.call_tool("create_thread", {"subject": "BE-9475", "creator_id": "user-operator"})
         assert res.is_error is False, _error_text(res)
@@ -154,11 +108,6 @@ async def _thread_with_headless_agent(new_client, agent_id: str) -> str:
 
 
 async def _served_participant(new_client, thread_id: str, agent_id: str) -> dict:
-    """The participant row as the Hub's read path serves it, over the transport.
-
-    ``get_participant_liveness`` returns ``list_participants`` rows verbatim, so this is
-    the same ``status`` the opened-thread directory and the thread-card list render.
-    """
     async with new_client() as s:
         res = await s.call_tool("get_participant_liveness", {"thread_id": thread_id})
     assert res.is_error is False, _error_text(res)
@@ -166,8 +115,6 @@ async def _served_participant(new_client, thread_id: str, agent_id: str) -> dict
 
 
 async def _seed_execution(db_session, tenant_key: str, agent_id: str, status: str) -> None:
-    """One ``agent_executions`` row for ``agent_id`` — what a Giljo-spawned agent has
-    and a headless lane does not."""
     with tenant_session_context(db_session, tenant_key):
         job = AgentJob(job_id=str(uuid.uuid4()), tenant_key=tenant_key, job_type="implementer")
         db_session.add(job)
@@ -188,15 +135,6 @@ async def _seed_execution(db_session, tenant_key: str, agent_id: str, status: st
 
 
 async def _enroll_without_activity(db_session, tenant_key: str, thread_id: str, agent_id: str) -> None:
-    """Enrol a participant the way a PLACEHOLDER writer does — no activity stamp.
-
-    This is the only producer of the hollow ring, and it is NOT ``join_thread``:
-    ``CommThreadService.join_thread`` passes ``touch_last_seen=True`` ("joining is
-    activity"), so a joined agent always has a ``last_seen_at``. The never-checked-in row
-    comes from ``_auto_enroll_project_roster``, which calls ``add_participant`` with both
-    ``touch_last_seen`` and ``authoritative`` defaulted off. Mirrored here exactly, so the
-    control describes a state the product can actually reach.
-    """
     from giljo_mcp.repositories.comm_thread_repository import CommThreadRepository
 
     with tenant_session_context(db_session, tenant_key):
@@ -218,18 +156,9 @@ async def _message_count(db_session, thread_id: str) -> int:
     ).scalar_one()
 
 
-# ---------------------------------------------------------------------------
-# CONTROL — must pass on BOTH sides of the change.
-# ---------------------------------------------------------------------------
 
 
 async def test_control_execution_status_is_served_through_the_transport(mcp_env, db_session):
-    """The instrument works: when an execution row DOES exist, its status reaches the
-    transport read.
-
-    This is the both-sides guard. If it goes red, the reproduction below proves nothing
-    about the defect — it proves the harness is broken.
-    """
     new_client, tenant_key, _user_id = mcp_env
     agent_id = "agent-with-execution"
     tid = await _thread_with_headless_agent(new_client, agent_id)
@@ -239,18 +168,9 @@ async def test_control_execution_status_is_served_through_the_transport(mcp_env,
     assert served["status"] == "working"
 
 
-# ---------------------------------------------------------------------------
-# THE REPRODUCTION — RED before the fix.
-# ---------------------------------------------------------------------------
 
 
 async def test_headless_agent_can_report_working_via_post_to_thread(mcp_env, db_session):
-    """FAIL-FIRST — the operator-visible defect.
-
-    A headless lane joins, posts, and declares it is WORKING. Before the fix the served
-    status is NULL, which the client renders as idle / "Monitoring" — the lane looks
-    like it is watching a screen while it is saturating a core.
-    """
     new_client, _tenant_key, _user_id = mcp_env
     agent_id = "E97-headless-lane"
     tid = await _thread_with_headless_agent(new_client, agent_id)
@@ -271,12 +191,6 @@ async def test_headless_agent_can_report_working_via_post_to_thread(mcp_env, db_
 
 
 async def test_self_reported_status_is_refused_when_not_in_the_locked_vocabulary(mcp_env, db_session):
-    """An invalid status is a structured domain rejection that NAMES the valid set, so
-    the agent can self-correct — not a 500 from a DB constraint, and not a silent write.
-
-    The vocabulary is locked to the dot's existing colours; a status the dashboard has no
-    colour for would render "Unknown" grey, which is worse than no report at all.
-    """
     new_client, _tenant_key, _user_id = mcp_env
     agent_id = "E97-bad-status"
     tid = await _thread_with_headless_agent(new_client, agent_id)
@@ -293,8 +207,6 @@ async def test_self_reported_status_is_refused_when_not_in_the_locked_vocabulary
     assert payload["error"] == "INVALID_MY_STATUS"
     for valid in ("working", "waiting", "blocked", "idle", "sleeping", "complete"):
         assert valid in payload["message"], f"the rejection must name {valid!r} so the caller can self-correct"
-    # Echoing the rejected value back is deliberate: the caller is an agent, and
-    # "got 'grinding'" is what turns the refusal into something it can act on.
     assert "grinding" in payload["message"]
     assert await _message_count(db_session, tid) == 0, "a refused status must not persist the post"
 
@@ -302,18 +214,9 @@ async def test_self_reported_status_is_refused_when_not_in_the_locked_vocabulary
     assert served["status"] is None, "a refused status must never reach the participant row"
 
 
-# ---------------------------------------------------------------------------
-# PRECEDENCE + the unchanged cases — must pass on BOTH sides of the change.
-# ---------------------------------------------------------------------------
 
 
 async def test_execution_status_wins_over_self_reported_status(mcp_env, db_session):
-    """Self-reported is a FALLBACK, never an override.
-
-    A Giljo-spawned agent has an execution row that the platform maintains; letting a
-    self-declaration beat it would let the Hub dot disagree with the Jobs board for the
-    same agent, which is the two-vocabularies defect TSK-9457 closed.
-    """
     new_client, tenant_key, _user_id = mcp_env
     agent_id = "agent-both-sources"
     tid = await _thread_with_headless_agent(new_client, agent_id)
@@ -330,22 +233,6 @@ async def test_execution_status_wins_over_self_reported_status(mcp_env, db_sessi
 
 
 async def test_execution_status_outside_the_locked_six_still_serves_untouched(mcp_env, db_session):
-    """The write allowlist governs ``my_status`` ONLY — it must never narrow what the
-    execution side may serve.
-
-    ``agent_executions.status`` carries a WIDER vocabulary than the six an agent may
-    declare: its own column comment lists ``closed``, and the platform also sets
-    ``silent``, ``decommissioned``, ``awaiting_user`` and ``staged``. Those are lifecycle
-    facts the platform establishes, and they have reached the Hub dot since long before
-    this project existed.
-
-    Pinned because the two sets sitting side by side invite exactly one wrong tidy-up:
-    making them agree. Narrowing the read to the write allowlist would blank the dot for
-    every agent in a terminal state; widening the write allowlist would let an agent award
-    itself ``awaiting_user``, which drives the gold approval card. They are different
-    jobs — an input contract and a display passthrough — and this test fails if anyone
-    collapses them.
-    """
     new_client, tenant_key, _user_id = mcp_env
     agent_id = "agent-closed-execution"
     tid = await _thread_with_headless_agent(new_client, agent_id)
@@ -358,17 +245,6 @@ async def test_execution_status_outside_the_locked_six_still_serves_untouched(mc
 
 
 async def test_control_no_status_cases_are_unchanged(mcp_env, db_session):
-    """The two NULL cases stay byte-identical to today, and they stay DISTINGUISHABLE.
-
-    - never checked in  -> status NULL and last_seen_at NULL  => hollow ring
-    - posted, no status -> status NULL, last_seen_at present  => idle / "Monitoring"
-
-    Collapsing these would either claim we heard from an agent we never heard from, or
-    lose the fact that we did. Both-sides guard.
-
-    The never-checked-in row is enrolled by a placeholder writer, NOT by ``join_thread``
-    — see ``_enroll_without_activity`` for why that distinction is load-bearing.
-    """
     new_client, tenant_key, _user_id = mcp_env
     silent_id = "agent-never-checked-in"
     poster_id = "agent-posts-no-status"

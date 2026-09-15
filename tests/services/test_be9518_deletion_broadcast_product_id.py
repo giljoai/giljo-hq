@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9518 — ProjectDeletionService's project_update broadcasts must carry product_id.
-
-Both deletion paths build their own inline ``project_data`` dict (they don't route
-through ``project_helpers._build_ws_project_data``), so each needed its own one-line
-fix and its own regression test:
-
-- ``delete_project`` (soft delete): the project row is still attached post-commit,
-  so ``project.product_id`` is read directly at the broadcast call site.
-- ``nuclear_delete_project`` (hard delete): the row is gone from the DB by the time
-  the broadcast fires, so ``product_id`` MUST be captured into a local BEFORE the
-  delete + commit (mirrors the existing ``project_name`` capture) -- reading
-  ``project.product_id`` after commit on a deleted row is exactly the kind of bug
-  this test exists to catch.
-
-DB-touching: ``db_session`` (TransactionalTestContext, rolled back). No module-level
-mutable state, no ordering dependencies. Parallel-safe (pytest-xdist -n auto).
-Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -57,7 +39,6 @@ def _deletion_svc(session: AsyncSession, tenant_key: str, websocket_manager=None
 
 
 async def _seed_project(session: AsyncSession, tenant_key: str, *, status: str = "inactive") -> tuple[str, str]:
-    """Seed a project under its own product. Returns (project_id, product_id)."""
     product = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -84,7 +65,6 @@ async def _seed_project(session: AsyncSession, tenant_key: str, *, status: str =
 
 
 async def test_delete_project_broadcasts_product_id(db_session: AsyncSession) -> None:
-    """Soft delete: project row is still attached, product_id read directly."""
     from giljo_mcp.tenant import TenantManager
 
     tenant_key = TenantManager.generate_tenant_key()
@@ -101,9 +81,6 @@ async def test_delete_project_broadcasts_product_id(db_session: AsyncSession) ->
 
 
 async def test_nuclear_delete_project_broadcasts_product_id(db_session: AsyncSession) -> None:
-    """Hard delete: the project row is GONE by broadcast time -- product_id must
-    have been captured into a local before the delete, not read off the row after.
-    """
     from giljo_mcp.tenant import TenantManager
 
     tenant_key = TenantManager.generate_tenant_key()

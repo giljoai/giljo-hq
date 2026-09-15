@@ -1,19 +1,3 @@
-/**
- * TutorialUploadScreen.copy-control.spec.js — FE-9320
- *
- * Operator's rule: a prompt reaches the clipboard ONLY via a distinct button or
- * the copy icon beside the text. NEVER as a side effect of another action.
- *
- * The regression: dropping a vision document called stageAnalysis, which wrote
- * the discovery prompt straight to the clipboard. The user never asked for it,
- * and when the write failed the wizard showed an unexplained fallback panel.
- *
- * These tests run the REAL useVisionAnalysis composable — stubbing it would make
- * the central claim ("attaching a file does not copy") a statement about the
- * mock rather than about the screen.
- *
- * Edition scope: Both (shared frontend/src).
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
@@ -76,10 +60,6 @@ async function dropFile(wrapper) {
 }
 
 describe('TutorialUploadScreen — copying is the user\'s action, never a side effect (FE-9320)', () => {
-  // stageAnalysis starts a real 10s poll interval and a real 60s hint timeout.
-  // Without fake timers those outlive the file and race vitest worker teardown
-  // under xdist — the flake class tests/setup.js already documents. The sibling
-  // FE-9320 specs fake their timers for the same reason.
   beforeEach(() => {
     vi.useFakeTimers()
     h.copy = vi.fn(async () => true)
@@ -107,7 +87,6 @@ describe('TutorialUploadScreen — copying is the user\'s action, never a side e
 
     const box = wrapper.find('[data-testid="tutorial-analysis-prompt"]')
     expect(box.exists()).toBe(true)
-    // The real prompt the agent needs — not a "clipboard blocked" fallback.
     expect(box.text()).toContain('get_vision_document(product_id="prod-1")')
     expect(wrapper.text()).not.toContain('Clipboard blocked')
   })

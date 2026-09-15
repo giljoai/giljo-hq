@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Worker 5-phase lifecycle protocol body.
-
-BE-6211f: verbatim split from ``agent_protocol.py`` — the render is byte-identical;
-only the module location changed. ``agent_protocol`` keeps the thin
-``_generate_agent_protocol`` role-router and re-imports these two builders.
-"""
 
 from __future__ import annotations
 
@@ -16,11 +10,6 @@ from giljo_mcp.platform_registry import Platform, giljo_invocation, task_list_ph
 from giljo_mcp.services.protocol_sections.orchestrator_body import render_capability_ladder
 
 
-# BE-8003f (D3-S4): the Phase-1 shell env-detection + per-shell sleep block, extracted
-# verbatim from the body f-string so it can be GATED. It renders unchanged on the None/CLI
-# path and for any preset that HAS a shell (web_sandbox / desktop_app); only a pure chat
-# preset (has_shell=False) swaps it for the no-shell ladder. Raw string so the literal
-# backslashes in the PowerShell/cmd path hints stay byte-identical to the pre-extraction body.
 _PHASE1_STEP0_SHELL = r"""0. **ENVIRONMENT DETECTION**:
    Detect your shell environment before executing tasks:
    Call: `python -c "import os; print(os.environ.get('SHELL', os.environ.get('COMSPEC', 'unknown')))"`
@@ -41,13 +30,6 @@ _PHASE1_STEP0_SHELL = r"""0. **ENVIRONMENT DETECTION**:
 
 
 def _phase1_step0(preset: Platform | None) -> str:
-    """Phase-1 step 0 for a worker (BE-8003f, D3-S4).
-
-    ``preset is None or preset.has_shell`` -> today's exact shell env-detection block. A
-    pure chat preset (``has_shell`` False) has no shell, so the shell probe/sleep asides
-    are nonsensical there — swap them for a PREFERRED/FALLBACK/FLOOR ladder that keeps
-    planning/PM work flowing while routing code-execution to a session with an environment.
-    """
     if preset is None or preset.has_shell:
         return _PHASE1_STEP0_SHELL
     return render_capability_ladder(
@@ -76,13 +58,6 @@ def _build_conditional_blocks(
     execution_mode: str,
     tool: str,
 ) -> tuple[str, str]:
-    """
-    Build optional Phase 4 blocks that depend on runtime configuration.
-
-    Returns:
-        (git_commit_block, giljo_block) — either string may be empty.
-    """
-    # 0497d: Conditional Phase 4 blocks
     git_commit_block = ""
     if git_integration_enabled:
         git_commit_block = """
@@ -98,11 +73,6 @@ Before calling `complete_job()`, commit your work:
 
     giljo_block = ""
     if execution_mode == "multi_terminal":
-        # Handover 0841: platform-aware command syntax in closeout signoff.
-        # INF-6049a: the gil_add/gil_get fleet collapsed to one /giljo command
-        # (it routes both create and read). BE-6207: derive the token from the
-        # registry (giljo_invocation) — a hardcoded ``tool == "codex"`` check dropped
-        # Antigravity, which also installs ``$giljo``.
         giljo_cmd = giljo_invocation(tool)
         giljo_block = f"""
 ### User Guidance (Multi-Terminal)
@@ -127,33 +97,6 @@ def _build_worker_protocol_body(
     comm_thread_id: str | None = None,
     tool: str = "multi_terminal",
 ) -> str:
-    """
-    Render the complete 5-phase worker protocol string. All parameters are injected via f-string; no side effects.
-
-    BE-8003f (D3-S4): ``preset`` gates the Phase-1 shell env-detection block. Default
-    None -> today's exact bytes (D1); a chat preset (no shell) swaps step 0 for the
-    no-shell ladder. web_sandbox / desktop_app (has_shell) keep the shell block.
-
-    BE-9012d: ``comm_thread_id`` is the project's bound Hub thread (resolved by
-    ``MissionService.get_agent_mission`` via ``CommThreadService``). A worker always
-    has a resolved thread; ``None`` only reaches here for a caller that renders
-    without one (a direct/test render, or a hypothetical project-less job) — the
-    prose then degrades to a banner telling the agent to skip the Hub calls below
-    rather than embedding a bogus thread id into a tool example.
-    BE-9260: ``tool`` drives the harness-neutral ``task_list_phrase`` wording (was hardcoded "TodoWrite").
-
-    BE-9543: this renderer is only reached for non-orchestrator ``job_type``s
-    (``_generate_agent_protocol`` in ``agent_protocol.py`` branches orchestrator jobs to
-    ``_generate_orchestrator_protocol`` / ``orchestrator_body.py`` before this function is
-    ever called). A "Phase 4 — ORCHESTRATOR ADDENDUM" section describing the closeout
-    call sequence used to render here anyway -- dead prose no real orchestrator ever saw,
-    shown instead to every worker, and wrong on top of that (it told the reader to call
-    ``write_memory_entry`` between ``complete_job`` and ``write_project_closeout``, which
-    double-writes the 360: ``write_project_closeout`` persists its own ``project_closeout``
-    entry via ``_build_and_persist_memory_entry`` in ``tools/project_closeout.py``). The
-    one correct, orchestrator-facing statement of that sequence lives in
-    ``orchestrator_body.py``'s Phase 3 closeout steps -- do not re-add a copy here.
-    """
     phase1_step0 = _phase1_step0(preset)
     todo_phrase = task_list_phrase(tool)
     thread_ref = f'"{comm_thread_id}"' if comm_thread_id else '"<none>"'
@@ -168,8 +111,6 @@ def _build_worker_protocol_body(
         )
     )
 
-    # ruff's S608 detector matches the `from_agent=` token in example post_to_thread calls
-    # within the f-string body. Suppressed at function level rather than per-line.
     body = rf"""## Agent Lifecycle Protocol (5 Phases)
 
 *Tool names below are bare; your MCP client may expose them under a prefix (e.g.

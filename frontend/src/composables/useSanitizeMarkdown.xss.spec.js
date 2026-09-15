@@ -1,36 +1,14 @@
-/**
- * SEC-0003 Phase 2 — XSS payload coverage for the sanctioned sanitizer.
- *
- * Complements useSanitizeMarkdown.spec.js (API surface) by asserting the
- * HARDENED_CONFIG actually neutralises the classic OWASP XSS vectors when
- * fed through both entry points:
- *   - sanitizeHtml()              (raw HTML path -- DatabaseConnection, UserGuideView)
- *   - useSanitizeMarkdown()       (markdown path -- MessageItem, BroadcastPanel)
- *
- * If any payload below smuggles an executable fragment past the pipeline,
- * this suite must go RED. It is the regression moat for SEC-0003.
- */
 
 import { describe, it, expect } from 'vitest'
 import { useSanitizeMarkdown, sanitizeHtml } from './useSanitizeMarkdown'
 
 const { sanitizeMarkdown } = useSanitizeMarkdown()
 
-/**
- * Parse HTML string into a DOM for structural inspection. String-matching
- * alone is brittle ("alert" can legitimately appear as text); element queries
- * are the authoritative check for "did a script/iframe/form actually land?"
- */
 function parseFragment(html) {
   const doc = new DOMParser().parseFromString(`<!doctype html><body>${html}`, 'text/html')
   return doc.body
 }
 
-/**
- * Assert output contains no elements that would execute code or exfiltrate.
- * Shared across every payload — catches the universal "did anything dangerous
- * survive?" question.
- */
 function assertNoExecutableNodes(html) {
   const body = parseFragment(html)
   expect(body.querySelectorAll('script').length, 'script elements').toBe(0)
@@ -41,7 +19,6 @@ function assertNoExecutableNodes(html) {
   expect(body.querySelectorAll('form').length, 'form elements').toBe(0)
   expect(body.querySelectorAll('svg').length, 'svg elements').toBe(0)
 
-  // No element may carry an inline event handler attribute.
   const all = body.querySelectorAll('*')
   for (const el of all) {
     for (const attr of el.attributes) {
@@ -52,8 +29,6 @@ function assertNoExecutableNodes(html) {
     }
   }
 
-  // No attribute value may start with javascript: or data: (except data-uri on
-  // images we already block via scheme allow-list — belt-and-suspenders here).
   for (const el of all) {
     for (const attr of el.attributes) {
       const v = (attr.value || '').trim().toLowerCase()
@@ -117,7 +92,6 @@ describe('sanitizeHtml — raw HTML XSS payloads', () => {
     const out = sanitizeHtml('<input type="image" src=x onerror="alert(1)">')
     expect(out).not.toMatch(/\son\w+=/i)
     expect(out).not.toContain('alert(1)')
-    // <input> is not in ALLOWED_TAGS, so it should be stripped entirely too.
     assertNoExecutableNodes(out)
     expect(parseFragment(out).querySelectorAll('input').length).toBe(0)
   })
@@ -138,9 +112,6 @@ describe('sanitizeHtml — raw HTML XSS payloads', () => {
   })
 
   it('neutralises attribute-break payload "><script>alert(1)</script>', () => {
-    // Raw fragment fed into sanitizer — the `"><script>` injection technique
-    // relies on escaping out of an attribute context; our sanitizer receives
-    // a parsed tree, so the <script> must not survive.
     const out = sanitizeHtml('"><script>alert(1)</script>')
     expect(out).not.toMatch(/<script\b/i)
     expect(out).not.toContain('alert(1)')
@@ -183,7 +154,6 @@ describe('useSanitizeMarkdown — markdown-layer XSS payloads', () => {
   })
 
   it('neutralises combined script + markdown-link javascript: payload', () => {
-    // The BroadcastPanel live-preview sees this kind of pasted blob.
     const out = sanitizeMarkdown('<script>alert(1)</script>\n\n[xss](javascript:alert(1))')
     expect(out).not.toMatch(/<script\b/i)
     expect(out).not.toMatch(/href\s*=\s*["']?javascript:/i)

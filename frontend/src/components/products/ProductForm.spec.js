@@ -3,8 +3,6 @@ import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { nextTick, ref } from 'vue'
 
-// FE-5073: shared mocks for router, toast, and api. Hoisted so all describe
-// blocks share them; individual specs reset .mock state in their beforeEach.
 const { pushMock, showToastMock, apiMock } = vi.hoisted(() => {
   return {
     pushMock: vi.fn(),
@@ -37,9 +35,6 @@ vi.mock('@/services/api', () => ({
   apiClient: {},
 }))
 
-// useVisionAnalysis is stubbed because the modal-level tests focus on the
-// flattened Setup tab + single-CTA matrix; the composable's own behavior is
-// covered by useVisionAnalysis.spec.js.
 vi.mock('@/composables/useVisionAnalysis', () => ({
   useVisionAnalysis: () => ({
     analysisPromptCopied: ref(false),
@@ -57,9 +52,6 @@ vi.mock('@/composables/useVisionAnalysis', () => ({
 import ProductForm from '@/components/products/ProductForm.vue'
 import { useProductStore } from '@/stores/products'
 
-// Footer primary button locator — text rotates Save/Create/Next/Stage
-// analysis/Analyzing, so identify the primary button structurally as the
-// last <button> with one of the known label tokens inside .dlg-footer.
 function findFooterPrimaryBtn(wrapper) {
   const footer = wrapper.find('.dlg-footer')
   if (!footer.exists()) return undefined
@@ -183,8 +175,6 @@ describe('ProductForm.vue — flattened Setup tab', () => {
     expect(wrapper.html()).not.toContain('document still uploads and is chunked')
     wrapper.vm.skipAiAnalysis = true
     await nextTick()
-    // Skip AI Analysis keeps the document — it must NOT warn about a NULL
-    // description (that is the Create-blank path's concern).
     expect(wrapper.html()).toContain('document still uploads and is chunked')
     expect(wrapper.html()).not.toContain('the product description and AI context start empty')
     wrapper.unmount()
@@ -217,18 +207,15 @@ describe('ProductForm.vue — flattened Setup tab', () => {
     })
     wrapper.vm.productForm.name = 'SkipTest'
     await nextTick()
-    // File picker enabled when name present and no path chosen.
     let fileInput = wrapper.find('input[type="file"]')
     expect(fileInput.exists()).toBe(true)
     expect(fileInput.attributes('disabled')).toBeUndefined()
 
-    // Skip AI Analysis REQUIRES a doc, so the picker stays enabled.
     wrapper.vm.skipAiAnalysis = true
     await nextTick()
     fileInput = wrapper.find('input[type="file"]')
     expect(fileInput.attributes('disabled')).toBeUndefined()
 
-    // Create blank is the doc-less path — the picker is disabled.
     wrapper.vm.skipAiAnalysis = false
     wrapper.vm.createBlank = true
     await nextTick()
@@ -238,9 +225,6 @@ describe('ProductForm.vue — flattened Setup tab', () => {
   })
 })
 
-// Single-CTA matrix: 4 states drive label + disabled-ness in the footer.
-// This is the regression test at the failing layer — would have caught the
-// original "Stage analysis hidden behind v-if" bug.
 describe('ProductForm.vue — footer single-CTA state matrix', () => {
   let productStore
   let pinia
@@ -315,7 +299,6 @@ describe('ProductForm.vue — footer single-CTA state matrix', () => {
       name: 'My Product',
       skipVision: false,
     })
-    // Reach into the stubbed composable refs via the component instance.
     wrapper.vm.analysisInProgress = true
     await nextTick()
     const btn = findFooterPrimaryBtn(wrapper)
@@ -385,7 +368,6 @@ describe('ProductForm.vue — footer single-CTA state matrix', () => {
   })
 })
 
-// BE-5118 gate behavior — confirms tab-lock logic survives the flatten.
 describe('ProductForm.vue — BE-5118 vision analysis gate (post-flatten)', () => {
   let productStore
   let pinia
@@ -462,13 +444,8 @@ describe('ProductForm.vue — BE-5118 vision analysis gate (post-flatten)', () =
     const wrapper = mountWithFlag({ visionAnalysisComplete: false, docs })
     await nextTick()
     let nextBtn = findFooterPrimaryBtn(wrapper)
-    // While gate is closed and docs are present, the label is "Stage analysis"
-    // (not "Next"). The button is enabled because the user must be able to
-    // click it to trigger staging.
     expect(nextBtn.html()).toContain('Stage analysis')
 
-    // Mirrors the vision:analysis_complete WS route's write-through into
-    // productsById (FE-9121) — NOT a direct currentProduct mutation.
     productStore.$patch({
       productsById: {
         ...productStore.productsById,
@@ -498,7 +475,6 @@ describe('ProductForm.vue — BE-5118 vision analysis gate (post-flatten)', () =
     wrapper.unmount()
   })
 
-  // FE-6007 regression cases — edit-mode gate release
   it('FE-6007: edit mode unlocks tabs even when docs present and analysis incomplete', async () => {
     const wrapper = mountWithFlag({
       visionAnalysisComplete: false,
@@ -506,12 +482,10 @@ describe('ProductForm.vue — BE-5118 vision analysis gate (post-flatten)', () =
       isEdit: true,
     })
     await nextTick()
-    // isTabLocked must return false for all lockable tabs in edit mode
     expect(wrapper.vm.isTabLocked('tech')).toBe(false)
     expect(wrapper.vm.isTabLocked('features')).toBe(false)
     expect(wrapper.vm.isTabLocked('info')).toBe(false)
     expect(wrapper.vm.isTabLocked('arch')).toBe(false)
-    // Tab buttons rendered and not disabled
     const allBtns = wrapper.findAll('button')
     const lockableLabels = ['Product Info', 'Tech Stack', 'Architecture', 'Testing']
     for (const label of lockableLabels) {
@@ -541,10 +515,8 @@ describe('ProductForm.vue — BE-5118 vision analysis gate (post-flatten)', () =
       isEdit: false,
     })
     await nextTick()
-    // Gate must be active in create mode
     expect(wrapper.vm.isTabLocked('tech')).toBe(true)
     expect(wrapper.vm.isTabLocked('features')).toBe(true)
-    // Tab buttons should be disabled
     const allBtns = wrapper.findAll('button')
     const lockableLabels = ['Product Info', 'Tech Stack', 'Architecture', 'Testing']
     for (const label of lockableLabels) {
@@ -552,18 +524,11 @@ describe('ProductForm.vue — BE-5118 vision analysis gate (post-flatten)', () =
       expect(btn, `tab "${label}" should render`).toBeDefined()
       expect(btn.attributes('disabled'), `tab "${label}" must still be disabled in create mode`).toBeDefined()
     }
-    // Skip AI Analysis checkbox must still render in create mode
     expect(wrapper.html()).toContain('Skip AI Analysis')
     wrapper.unmount()
   })
 })
 
-// ============================================================================
-// FE-9121 — productsById write-through replaces the localAnalysisJustCompleted
-// mirror. LOAD-BEARING REGRESSION: the create-wizard auto-creates a product
-// that is almost never the globally selected one (currentProductId), so the
-// gate must key off the store's per-id cache — not a currentProductId match.
-// ============================================================================
 describe('ProductForm.vue — FE-9121 store-first gate (not selection-first)', () => {
   let productStore
   let pinia
@@ -576,9 +541,6 @@ describe('ProductForm.vue — FE-9121 store-first gate (not selection-first)', (
 
   it('CTA advances via productsById write-through even when the edited product is NOT the selected product', async () => {
     const product = { id: 'p-new', name: 'Wizard Product', vision_analysis_complete: false }
-    // The create wizard auto-created 'p-new', but a DIFFERENT product is
-    // (and stays) globally selected — the old mirror's replacement must not
-    // require them to match.
     productStore.$patch({ currentProductId: 'p-other-selected', currentProduct: { id: 'p-other-selected' } })
 
     const wrapper = mount(ProductForm, {
@@ -594,8 +556,6 @@ describe('ProductForm.vue — FE-9121 store-first gate (not selection-first)', (
     let btn = findFooterPrimaryBtn(wrapper)
     expect(btn.html()).toContain('Stage analysis')
 
-    // Simulate the vision:analysis_complete WS route's write-through
-    // (systemEventRoutes.js -> productStore.fetchProductById -> productsById).
     productStore.$patch({
       productsById: { ...productStore.productsById, 'p-new': { ...product, vision_analysis_complete: true } },
     })
@@ -609,11 +569,6 @@ describe('ProductForm.vue — FE-9121 store-first gate (not selection-first)', (
   })
 })
 
-// ============================================================================
-// FE-6088 — three-path onboarding gate (regression at the failing layer).
-// New product is LOCKED BY DEFAULT; unlocks only via Path A (analysis complete),
-// Path B (Skip AI Analysis + a document), or Path C (Create blank, no document).
-// ============================================================================
 describe('ProductForm.vue — FE-6088 three-path onboarding gate', () => {
   let productStore
   let pinia
@@ -662,13 +617,11 @@ describe('ProductForm.vue — FE-6088 three-path onboarding gate', () => {
 
   it('Gate state 2 — Skip AI Analysis requires a doc, then unlocks', async () => {
     const wrapper = mountGate({ docs: [] })
-    // Skip AI Analysis with NO doc must NOT unlock.
     wrapper.vm.skipAiAnalysis = true
     await nextTick()
     for (const t of LOCKABLE) {
       expect(wrapper.vm.isTabLocked(t), `tab "${t}" must stay locked: skip on, no doc`).toBe(true)
     }
-    // Attach a doc → Path B opens the gate.
     await wrapper.setProps({ existingVisionDocuments: [{ id: 'd1', filename: 'a.md' }] })
     await nextTick()
     for (const t of LOCKABLE) {
@@ -690,10 +643,7 @@ describe('ProductForm.vue — FE-6088 three-path onboarding gate', () => {
   it('Gate state 4 — Path A: optimistic unlock on analysis completion', async () => {
     const wrapper = mountGate({ docs: [{ id: 'd1', filename: 'a.md' }], visionAnalysisComplete: false })
     await nextTick()
-    // Closed while analysis pending.
     expect(wrapper.vm.isTabLocked('tech')).toBe(true)
-    // Store flips complete (mirrors the vision:analysis_complete WS write-through
-    // into productsById, FE-9121) → unlock.
     productStore.$patch({
       productsById: {
         ...productStore.productsById,
@@ -721,12 +671,6 @@ describe('ProductForm.vue — FE-6088 three-path onboarding gate', () => {
   })
 })
 
-// BE-9164 superseded the BE-5118 expanded prompt template: the detailed
-// two-role extraction brief now lives server-side in VISION_EXTRACTION_PROMPT
-// (returned by get_vision_document as extraction_instructions) so it can't drift
-// out of sync with the update_product_context schema. This wizard prompt is
-// now a slim pointer at that single source of truth. The single-call
-// instruction MUST survive the modal refactor.
 describe('useVisionAnalysis — BE-9164 slim single-source prompt', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -749,9 +693,6 @@ describe('useVisionAnalysis — BE-9164 slim single-source prompt', () => {
     expect(prompt).toContain('get_vision_document(product_id="prod-xyz")')
     expect(prompt).toMatch(/extraction_instructions/)
     expect(prompt).toContain('update_product_context')
-    // FE-9320: this asserted "ONE single call". That mandate is the defect — a real
-    // run died at 62,420 bytes obeying it — so the prompt now teaches STAGED writes
-    // with emit_completion on the last call.
     expect(prompt).toMatch(/stages|staged/i)
     expect(prompt).toMatch(/emit_completion/)
     expect(prompt).toMatch(/vision_analysis_complete/)
@@ -759,22 +700,6 @@ describe('useVisionAnalysis — BE-9164 slim single-source prompt', () => {
   })
 })
 
-// ============================================================================
-// FE-5073 — Edit-modal staleness banner + CTX bootstrap CTA
-// ============================================================================
-//
-// 10-case regression matrix:
-//   1.  Banner hidden in create mode (isEdit=false).
-//   2.  Banner hidden in edit when hashes match (sha256: prefix stripped).
-//   3.  Banner visible in edit when persisted hash is null but inputs hash is non-empty.
-//   4.  Banner visible in edit when hashes differ.
-//   5.  Banner hidden when vision_inputs_hash == sentinel "sha256:empty".
-//   6.  Banner derives from store mutation (NOT props.product) — store flips → banner clears.
-//   7.  Counter wording uses doc count when consolidated_at present (singular vs plural).
-//   8.  Counter wording falls back to generic copy when count is 0.
-//   9.  Clicking the CTA opens the confirmation dialog with verbatim copy.
-//  10.  Confirm → success path POSTs CTX with bootstrap_template_vars in {document_name, document_type} shape.
-//       Also asserts the idempotency probe ran first and the file-attach handler does NOT call create.
 
 describe('ProductForm.vue — FE-5073 staleness banner + CTX bootstrap CTA', () => {
   let productStore
@@ -876,9 +801,6 @@ describe('ProductForm.vue — FE-5073 staleness banner + CTX bootstrap CTA', () 
     })
     await nextTick()
     expect(wrapper.find('[data-test="ctx-staleness-banner"]').exists()).toBe(true)
-    // Mutate ONLY the store's productsById cache (props remain stale on
-    // purpose). Banner must clear because derivation reads from
-    // productStore.getProductById (FE-9121), mirroring the WS write-through.
     productStore.$patch({
       productsById: {
         ...productStore.productsById,
@@ -940,9 +862,6 @@ describe('ProductForm.vue — FE-5073 staleness banner + CTX bootstrap CTA', () 
     await wrapper.find('[data-test="ctx-update-cta"]').trigger('click')
     await nextTick()
     expect(wrapper.vm.ctxConfirmOpen).toBe(true)
-    // Verbatim copy lives in the template — confirm it is exactly the mission
-    // string. Template HTML is collapsed-whitespace; assert against the raw
-    // component HTML rather than the teleported portal.
     expect(wrapper.html()).toContain('Spawning project CTX-#### — run this next to refresh')
     expect(wrapper.html()).toContain('appear in your projects list')
     wrapper.unmount()
@@ -971,10 +890,6 @@ describe('ProductForm.vue — FE-5073 staleness banner + CTX bootstrap CTA', () 
     await nextTick()
     await wrapper.find('[data-test="ctx-update-cta"]').trigger('click')
     await nextTick()
-    // The confirm dialog uses a Vuetify teleport; rather than depend on jsdom
-    // portal rendering, call the bound handler directly. This exercises the
-    // full confirmCtxLaunch path — idempotency probe, taxonomy lookup,
-    // create POST, toast emission — without coupling to teleport mechanics.
     await wrapper.vm.confirmCtxLaunch()
     await new Promise((r) => setTimeout(r, 0))
     await nextTick()
@@ -997,8 +912,6 @@ describe('ProductForm.vue — FE-5073 staleness banner + CTX bootstrap CTA', () 
       expect.objectContaining({ message: expect.stringContaining('CTX-0001') }),
     )
 
-    // Sanity guard: attaching a file in the existing picker must NOT trigger
-    // any of the CTX-create API calls. Only an emitted upload event is fired.
     apiMock.products.getContextUpdateProject.mockClear()
     apiMock.taxonomyTypes.list.mockClear()
     apiMock.projects.create.mockClear()

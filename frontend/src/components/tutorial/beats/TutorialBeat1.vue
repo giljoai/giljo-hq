@@ -33,7 +33,7 @@
     </div>
 
     <div class="beat-footnote">
-      Integrated with <span class="footnote-strong">Claude · ChatGPT/Codex · Gemini · Antigravity · OpenCode</span> — and any open MCP client.
+      Integrated with <span class="footnote-strong">Claude · ChatGPT/Codex · OpenCode</span> — and any open MCP client.
       <template v-if="connectedToolNames">
         <br />you connected: {{ connectedToolNames }}
       </template>
@@ -45,16 +45,15 @@
 import { computed } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { PRODUCT_NAME } from '@/branding'
+import { retiredHarnessLabel } from '@/config/retiredHarness'
 
 const productName = PRODUCT_NAME.toUpperCase()
 
-// Live-state enhancement (approved): personalize from setup_selected_tools
-// when available — appended under the interface cards, never replacing them.
 const TOOL_NAMES = {
   claude_code: 'Claude Code CLI',
   codex_cli: 'Codex CLI',
-  gemini_cli: 'Gemini CLI',
-  antigravity_cli: 'Antigravity CLI',
+  opencode: 'OpenCode',
+  generic: 'Generic MCP client',
 }
 
 const userStore = useUserStore()
@@ -62,7 +61,7 @@ const userStore = useUserStore()
 const connectedToolNames = computed(() => {
   const ids = userStore.currentUser?.setup_selected_tools
   if (!Array.isArray(ids) || ids.length === 0) return ''
-  return ids.map((id) => TOOL_NAMES[id] || id).join(', ')
+  return ids.map((id) => TOOL_NAMES[id] || retiredHarnessLabel(id) || id).join(', ')
 })
 </script>
 

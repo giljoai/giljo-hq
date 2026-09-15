@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Request models for the user endpoints.
-
-Companion to ``auth_models.py``, and it exists for the same two reasons: the
-endpoint module is on the repo's shrink-only size budget, and a request shape
-is a contract worth reading on its own rather than buried between handlers.
-
-**Edition Scope:** Both
-"""
 
 from __future__ import annotations
 
@@ -52,19 +44,6 @@ class NotificationPreferencesUpdate(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _refuse_explicit_nulls(cls, data: Any) -> Any:
-        """An explicitly sent ``null`` is a client error, not "leave it alone".
-
-        The ``| None`` on every field expresses OPTIONALITY, and
-        ``exclude_unset`` is what distinguishes absent from set. But that leaves
-        an explicit ``{"popout_scope": null}`` as a set-to-None, which sails
-        through the field types and fails deeper down in the JSONB validator --
-        as a 500, which is exactly what declaring this model was meant to
-        prevent. A test caught that before it shipped; this is the fix.
-
-        Refusing rather than ignoring, on purpose: silently dropping a null
-        would answer 200 to a request that changed nothing, which reads as
-        success and is the kind of quiet near-miss that is worse than an error.
-        """
         if isinstance(data, dict):
             nulls = sorted(key for key, value in data.items() if value is None)
             if nulls:

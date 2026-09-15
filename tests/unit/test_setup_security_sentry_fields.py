@@ -1,18 +1,7 @@
 # Copyright (c) 2024-2026 GiljoAI LLC. All rights reserved.
 # Licensed under the Elastic License 2.0.
 # See LICENSE in the project root for terms.
-# [CE+SaaS] Endpoint lives in CE; sentryDsn is non-null only in saas/demo.
 
-"""Unit tests for the setup-status endpoint Sentry fields.
-
-The frontend (commit 495433193) reads ``sentryDsn`` and ``environment`` from the
-``/api/setup/status`` response in camelCase. These tests pin the response shape
-so a future refactor can't silently drop or rename those keys.
-
-Strategy: import the endpoint module, monkeypatch ``GILJO_MODE`` and the env vars,
-and call the FastAPI handler with a stub async session that returns zero users.
-No DB, no HTTP client.
-"""
 
 from __future__ import annotations
 

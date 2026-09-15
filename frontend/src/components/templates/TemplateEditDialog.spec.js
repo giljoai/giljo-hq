@@ -1,44 +1,21 @@
-/**
- * TemplateEditDialog.spec.js — FE-6042b
- *
- * Co-located child spec for TemplateEditDialog.vue.
- * Covers render variants and EVERY emit.
- *
- * Strategy: custom stubs that can emit Vue-level events so the component's
- * @update:model-value listeners actually fire — matching the approach used
- * in TemplateManager.spec.js and TemplatesTable.spec.js.
- *
- * Edition scope: CE
- */
 
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import TemplateEditDialog from './TemplateEditDialog.vue'
 
-// ---------------------------------------------------------------------------
-// Stubs
-// ---------------------------------------------------------------------------
 
 const tooltipStub = {
   props: ['text', 'location'],
   template: `<div class="v-tooltip"><slot name="activator" :props="{}" /><slot /></div>`,
 }
 
-/**
- * v-dialog stub: renders slot contents so child elements are accessible.
- * Exposes an update:model-value emitter so the component's binding fires.
- */
 const dialogStub = {
   props: ['modelValue'],
   emits: ['update:modelValue'],
   template: `<div class="v-dialog"><slot /><button class="dialog-backdrop-close" @click="$emit('update:modelValue', false)" /></div>`,
 }
 
-/**
- * v-select stub for role: clicking triggers update:modelValue with a new value.
- * Emits Vue-level event so the component's @update:model-value="$emit('role-change', $event)" fires.
- */
 const selectStub = {
   props: ['modelValue', 'items', 'label'],
   emits: ['update:modelValue'],
@@ -53,9 +30,6 @@ const selectStub = {
   </div>`,
 }
 
-/**
- * v-text-field stub: input event triggers update:modelValue.
- */
 const textFieldStub = {
   props: ['modelValue', 'label'],
   emits: ['update:modelValue'],
@@ -68,9 +42,6 @@ const textFieldStub = {
   />`,
 }
 
-/**
- * v-textarea stub: input event triggers update:modelValue.
- */
 const textareaStub = {
   props: ['modelValue', 'label'],
   emits: ['update:modelValue'],
@@ -82,9 +53,6 @@ const textareaStub = {
   ></textarea>`,
 }
 
-// ---------------------------------------------------------------------------
-// Default props
-// ---------------------------------------------------------------------------
 
 function makeTemplate(overrides = {}) {
   return {
@@ -128,9 +96,6 @@ function mountDialog(propsData = {}) {
   })
 }
 
-// ---------------------------------------------------------------------------
-// Render variants
-// ---------------------------------------------------------------------------
 
 describe('TemplateEditDialog — render', () => {
   it('shows "Create Template" title when template.id is null', () => {
@@ -184,9 +149,6 @@ describe('TemplateEditDialog — render', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// Emits — every declared emit
-// ---------------------------------------------------------------------------
 
 describe('TemplateEditDialog — emit: save', () => {
   it('emits save when Save button is clicked', async () => {
@@ -215,7 +177,6 @@ describe('TemplateEditDialog — emit: close', () => {
 describe('TemplateEditDialog — emit: role-change', () => {
   it('emits role-change with the selected role when the role select changes', async () => {
     const wrapper = mountDialog()
-    // selectStub renders one button per role option; click "backend"
     const backendOption = wrapper.find('.role-option-backend')
     expect(backendOption.exists()).toBe(true)
     await backendOption.trigger('click')
@@ -230,7 +191,6 @@ describe('TemplateEditDialog — emit: update:template', () => {
     const tpl = makeTemplate({ role: 'analyzer', custom_suffix: '', description: 'original' })
     const wrapper = mountDialog({ template: tpl })
 
-    // Find custom_suffix field by data-label (textFieldStub sets data-label from :label prop)
     const suffixInput = wrapper.find('[data-label="Custom Suffix (optional)"]')
     expect(suffixInput.exists()).toBe(true)
 
@@ -238,7 +198,6 @@ describe('TemplateEditDialog — emit: update:template', () => {
 
     const emitted = wrapper.emitted('update:template')
     expect(emitted).toHaveLength(1)
-    // custom_suffix updated, sibling fields preserved (proves update() spreads correctly)
     expect(emitted[0][0]).toMatchObject({ custom_suffix: 'fast', description: 'original', role: 'analyzer' })
   })
 
@@ -272,7 +231,6 @@ describe('TemplateEditDialog — emit: update:template', () => {
 describe('TemplateEditDialog — emit: update:modelValue', () => {
   it('emits update:modelValue=false when the dialog stub fires update:modelValue', async () => {
     const wrapper = mountDialog()
-    // dialogStub has a .dialog-backdrop-close button that emits update:modelValue=false
     const backdropClose = wrapper.find('.dialog-backdrop-close')
     expect(backdropClose.exists()).toBe(true)
     await backdropClose.trigger('click')
@@ -282,56 +240,60 @@ describe('TemplateEditDialog — emit: update:modelValue', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// FE-9385c — the availability control is one line, and its label holds still
-// ---------------------------------------------------------------------------
-// This control had NO coverage before: the heading could be removed and the
-// label rewritten and the whole suite stayed green. That gap is why these exist.
 
-describe('TemplateEditDialog — FE-9385c availability control', () => {
-  // tests/setup.js stubs v-switch as a bare checkbox, so the label arrives as an
-  // attribute rather than as rendered text here. Asserting the attribute is what
-  // is actually observable in this harness; asserting wrapper.text() would pass
-  // or fail for reasons that have nothing to do with the label.
-  const retireSwitch = (wrapper) => wrapper.find('[data-testid="retire-switch"]')
+describe('TemplateEditDialog — FE-9610c: no cross-product affordance', () => {
+  it('offers neither bulk action', () => {
+    const wrapper = mountDialog({ template: makeTemplate({ id: 'tpl-1', role: 'analyzer' }) })
 
-  it('reads "Available in all products" when the agent IS available', () => {
-    const wrapper = mountDialog({ template: makeTemplate({ id: 7, is_active: true }) })
-
-    expect(retireSwitch(wrapper).attributes('label')).toBe('Available in all products')
+    expect(wrapper.find('[data-testid="enable-all-products"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="disable-all-products"]').exists()).toBe(false)
   })
 
-  it('reads the SAME label when the agent is NOT available', () => {
-    // The behaviour change: the label used to flip to "Retired everywhere". A
-    // caption that rewrites itself as you toggle is harder to read at a glance,
-    // and the switch position already carries the state.
-    const wrapper = mountDialog({ template: makeTemplate({ id: 7, is_active: false }) })
+  it('says nothing about other products, or about moving an agent between them', () => {
+    const wrapper = mountDialog({ template: makeTemplate({ id: 'tpl-1', role: 'analyzer' }) })
+    const text = wrapper.text()
 
-    expect(retireSwitch(wrapper).attributes('label')).toBe('Available in all products')
-    expect(wrapper.html()).not.toContain('Retired everywhere')
+    expect(text).not.toMatch(/all products/i)
+    expect(text).not.toMatch(/move|reassign|transfer/i)
   })
 
-  it('no longer renders the redundant "Availability" heading', () => {
-    const wrapper = mountDialog({ template: makeTemplate({ id: 7, is_active: true }) })
+  it('exposes no account-wide enable control', () => {
+    const wrapper = mountDialog({ template: makeTemplate({ id: 'tpl-1', role: 'analyzer' }) })
 
-    // The switch and its own label said everything the heading said.
-    expect(wrapper.text()).not.toMatch(/\bAvailability\b/)
+    expect(wrapper.find('[data-testid="template-retire-switch"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toMatch(/retire|available in all/i)
+  })
+})
+describe('TemplateEditDialog — model and effort hints (BE-9605b)', () => {
+  it('renders two plain text inputs defaulting to inherit', () => {
+    const wrapper = mountDialog({ template: makeTemplate({ model: undefined, effort: undefined }) })
+    const model = wrapper.find('[data-testid="model-input"]')
+    const effort = wrapper.find('[data-testid="effort-input"]')
+    expect(model.exists()).toBe(true)
+    expect(effort.exists()).toBe(true)
+    expect(model.element.value).toBe('inherit')
+    expect(effort.element.value).toBe('inherit')
   })
 
-  it('carries an aria-label matching the visible label', () => {
-    // The string most likely to be missed when visible text changes.
-    const wrapper = mountDialog({ template: makeTemplate({ id: 7, is_active: true }) })
-
-    expect(wrapper.html()).toContain('aria-label="Available in all products"')
-    expect(wrapper.html()).not.toMatch(/aria-label="Availability/)
+  it('reflects stored free text verbatim', () => {
+    const wrapper = mountDialog({ template: makeTemplate({ model: 'whatever is newest', effort: 'think hard' }) })
+    expect(wrapper.find('[data-testid="model-input"]').element.value).toBe('whatever is newest')
+    expect(wrapper.find('[data-testid="effort-input"]').element.value).toBe('think hard')
   })
 
-  it('still hides the control on CREATE, where the choice would mean nothing', () => {
-    // Unchanged behaviour, pinned because the markup around it moved: a new
-    // agent is born available, so offering the toggle would imply a decision
-    // nothing acts on.
-    const wrapper = mountDialog({ template: makeTemplate({ id: null }) })
+  it('emits update:template with the typed model and effort', async () => {
+    const wrapper = mountDialog()
+    await wrapper.find('[data-testid="model-input"]').setValue('claude-opus-5 or newer')
+    await wrapper.find('[data-testid="effort-input"]').setValue('max')
+    const emitted = wrapper.emitted('update:template')
+    expect(emitted[0][0].model).toBe('claude-opus-5 or newer')
+    expect(emitted[1][0].effort).toBe('max')
+  })
 
-    expect(wrapper.text()).not.toContain('Available in all products')
+  it('shows the inherit help text on both fields', () => {
+    const wrapper = mountDialog()
+    const hint = "Prose instruction for the harness; 'inherit' = same as the orchestrator"
+    expect(wrapper.find('[data-testid="model-input"]').attributes('hint')).toBe(hint)
+    expect(wrapper.find('[data-testid="effort-input"]').attributes('hint')).toBe(hint)
   })
 })

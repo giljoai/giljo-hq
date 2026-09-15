@@ -1,8 +1,3 @@
-/**
- * ProjectTabStrip.spec.js — FE-9239
- * Badge-state derivation (review > completed > working > planning > waiting) and
- * pulse behavior for the chain tab strip. Presentational — no store mocks needed.
- */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ProjectTabStrip from './ProjectTabStrip.vue'

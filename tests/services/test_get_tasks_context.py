@@ -3,11 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Phase E test: fetch_context(categories=['tasks']) and get_tasks() helper.
-
-Verifies the new ``tasks`` category returns a tenant-scoped open-task summary
-with the expected response shape.
-"""
 
 from __future__ import annotations
 
@@ -27,7 +22,6 @@ async def test_get_tasks_returns_open_tasks_only(db_session, db_manager, two_ten
     tenant_a = two_tenant_service_setup["tenant_a"]
     product_a = two_tenant_service_setup["product_a"]
 
-    # Seed a taxonomy + two tasks (one open, one completed).
     tax = TaxonomyService(db_manager=db_manager, session=db_session)
     await tax.create_type(tenant_key=tenant_a, abbreviation="BE", label="Backend")
     await db_session.commit()

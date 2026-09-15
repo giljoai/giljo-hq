@@ -1,23 +1,10 @@
-/**
- * useWelcomeGreeting.js — FE-6006 unit 3a
- *
- * Extracted from WelcomeView.vue: time-of-day personalised greeting generator.
- * Pure computed — no side-effects, no API calls.
- * Edition scope: CE
- */
 import { computed } from 'vue'
 
-/**
- * @param {Object} options
- * @param {import('vue').Ref<string>} options.firstName - reactive first name of current user
- * @returns {{ fullGreeting: import('vue').ComputedRef<string> }}
- */
 export function useWelcomeGreeting({ firstName }) {
   const fullGreeting = computed(() => {
     const name = firstName.value
     const hour = new Date().getHours()
 
-    // WITH COMMA - Direct address greetings (vocative case)
     const withComma = {
       morning: [
         'Good morning, {name}!',
@@ -49,7 +36,6 @@ export function useWelcomeGreeting({ firstName }) {
       ],
     }
 
-    // WITHOUT COMMA - Name flows naturally into phrase
     const withoutComma = {
       morning: [
         'Ready to conquer the day {name}?',
@@ -74,7 +60,6 @@ export function useWelcomeGreeting({ firstName }) {
       ],
     }
 
-    // FUN CASUAL - Energetic oddball greetings
     const funCasual = [
       "Let's get crackalackin' {name}!",
       "Let's do this {name}!",
@@ -97,13 +82,11 @@ export function useWelcomeGreeting({ firstName }) {
       return arr[Math.floor(Math.random() * arr.length)]
     }
 
-    // Determine time-based category
     const timeKey = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : hour < 22 ? 'evening' : 'general'
 
-    // Build pool: 40% with comma, 30% without comma, 30% fun casual
     const pool = [
       ...withComma[timeKey],
-      ...withComma[timeKey], // Double weight for time-appropriate
+      ...withComma[timeKey],
       ...withoutComma[timeKey],
       ...funCasual,
     ]

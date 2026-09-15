@@ -1,21 +1,3 @@
-/**
- * SystemStatusBanner.baton.fe9410.spec.js — FE-9410
- *
- * Entry point 1 of 2 for the baton notification: the app-wide banner row.
- *
- * FE-9368 already pinned that this row names the right thread and pushes /hub with its
- * id. What it never pinned is the half the operator actually feels: the click has to
- * arrive carrying WHICH MESSAGE raised it, not just which thread. Landing on the Hub
- * with the thread merely fetched is what produced the original report ("it takes me to
- * the Hub, not to the message") — see HubView.baton.fe9410.spec.js for the other half
- * of that same defect.
- *
- * The route shape is asserted as a literal here on purpose: hubThreadRoute.spec.js
- * proves the shared helper produces exactly this object, so the two entry points are
- * held to one contract without either spec having to trust the other.
- *
- * Edition scope: Both
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -119,8 +101,6 @@ describe('SystemStatusBanner baton navigation (FE-9410)', () => {
   })
 
   it('carries the same context when the whole row is clicked, not only the CTA', async () => {
-    // The row and its button are two ways to answer one notification; an operator who
-    // hits the strip rather than the word "Open" must not get a lesser landing.
     const wrapper = await mountBanner({ threads: [thread()] })
     await wrapper.find('[data-testid="your-turn-banner"]').trigger('click')
     expect(h.push).toHaveBeenCalledWith({
@@ -130,8 +110,6 @@ describe('SystemStatusBanner baton navigation (FE-9410)', () => {
   })
 
   it('still opens the plain Hub list when several threads are pending', async () => {
-    // FE-9368 semantics, deliberately unchanged: with more than one baton we cannot
-    // pick for the operator, so there is no message to focus and none is claimed.
     const wrapper = await mountBanner({
       threads: [thread(), thread({ thread_id: 'thr-43', subject: 'Second' })],
     })

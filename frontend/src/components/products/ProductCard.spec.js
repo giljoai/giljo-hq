@@ -1,9 +1,3 @@
-/**
- * ProductCard.spec.js — FE-6006 unit 3b
- *
- * Tests the pure-presentational product card component.
- * Edition scope: CE
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
@@ -28,8 +22,6 @@ const baseProduct = {
   task_count: 3,
   project_count: 5,
   unfinished_projects: 2,
-  // BE-6066 P4: the lean list ships pre-aggregated vision_summary, not the
-  // full vision_documents array.
   vision_summary: { doc_count: 0, chunked_count: 0, chunk_total: 0, embedded_count: 0 },
   vision_analysis_complete: false,
 }
@@ -55,10 +47,6 @@ function mountCard(props = {}) {
         'v-tooltip': {
           template: '<div class="v-tooltip"><slot name="default" /><slot name="activator" :props="{}" /></div>',
         },
-        // The global setup.js stub is an inert `<input v-bind="$attrs">` --
-        // model-value/update:model-value never round-trip through it, so a
-        // local stub that actually implements v-model semantics is needed to
-        // test the Default checkbox's toggle behavior.
         'v-checkbox': {
           props: ['modelValue'],
           emits: ['update:modelValue'],
@@ -92,19 +80,18 @@ describe('ProductCard', () => {
 
   it('displays task_count and project_count', () => {
     const wrapper = mountCard()
-    expect(wrapper.text()).toContain('3') // task_count
-    expect(wrapper.text()).toContain('5') // project_count
+    expect(wrapper.text()).toContain('3')
+    expect(wrapper.text()).toContain('5')
   })
 
   it('computes completed count as project_count - unfinished_projects', () => {
     const wrapper = mountCard()
-    expect(wrapper.text()).toContain('3') // 5 - 2 = 3 completed
+    expect(wrapper.text()).toContain('3')
   })
 
   it('emits info event when info button clicked', async () => {
     const wrapper = mountCard()
     const btns = wrapper.findAll('.v-btn')
-    // Find the info button by aria-label
     const infoBtn = btns.find(b => b.attributes('aria-label') === 'View product details')
     expect(infoBtn).toBeDefined()
     await infoBtn.trigger('click')
@@ -173,7 +160,6 @@ describe('ProductCard', () => {
     expect(wrapper.text()).toContain('Pending analysis — 1 of 3 docs analyzed')
   })
 
-  // FE-9529: the Default control.
   describe('Default control', () => {
     it('is unchecked when isDefault is false', () => {
       const wrapper = mountCard({ isDefault: false })
@@ -216,18 +202,8 @@ describe('ProductCard', () => {
     })
   })
 
-  // FE-9571: card layout system -- regression guards for the structural fix.
-  // These assert the presence of the specific classes the fix's scoped SCSS
-  // targets, so reverting the template markup (even if the SCSS block is left
-  // in place) makes these fail. Pixel-level verification (no mid-word breaks,
-  // no clipped controls, footers aligned) was done against a live build --
-  // jsdom does not run a real layout/CSS engine, so it cannot assert wrapped
-  // line counts or clipping directly; see the PR screenshot for that evidence.
   describe('layout system (FE-9571)', () => {
     it('top-aligns the title/chip row instead of vertically centering it', () => {
-      // A vertically-centered row put the "Shown" chip mid-title for a name
-      // that wraps to multiple lines. Top-aligning keeps the chip level with
-      // the title's first line regardless of how many lines the title takes.
       const wrapper = mountCard({ isActive: true })
       const row = wrapper.find('.product-title-row')
       expect(row.exists()).toBe(true)
@@ -241,19 +217,11 @@ describe('ProductCard', () => {
       const wrapper = mountCard({ product, isActive: true })
       const title = wrapper.find('.product-title-clamp')
       expect(title.exists()).toBe(true)
-      // Full name stays available (a11y / hover tooltip) even though the
-      // visual line-clamp CSS truncates what's shown.
       expect(title.attributes('title')).toBe(longName)
       expect(title.text()).toBe(longName)
     })
 
     it('marks every stat column label to resist Vuetify\'s inherited mid-word break-word', () => {
-      // Vuetify's base .v-card rule sets overflow-wrap: break-word, which let
-      // "Completed" split into "Complet"/"ed" inside its narrow 1-of-3 column.
-      // The fix scopes overflow-wrap: normal / word-break: keep-all to these
-      // labels specifically -- guard that the marker class survives on all
-      // three (Tasks / Projects / Completed), not just the one that visibly
-      // broke in the reported screenshot.
       const wrapper = mountCard()
       const labels = wrapper.findAll('.product-stat-label')
       expect(labels).toHaveLength(3)
@@ -261,12 +229,6 @@ describe('ProductCard', () => {
     })
 
     it('marks the actions row as the pinned footer', () => {
-      // The scoped SCSS pins this element to the card's bottom edge via
-      // `margin-top: auto` inside the card's flex-column, regardless of how
-      // little content (no vision chips, no updated_at) sits above it in
-      // v-card-text -- keeping footers aligned across cards of different
-      // content volumes (confirmed live: 0px gap below the actions row on
-      // 4 test cards with different content, vs. up to 76px before the fix).
       const minimalProduct = { ...baseProduct, updated_at: null, vision_summary: { doc_count: 0 } }
       const wrapper = mountCard({ product: minimalProduct })
       const actions = wrapper.find('.v-card-actions')

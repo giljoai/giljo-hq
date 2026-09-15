@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""API regression: the project PATCH route maps ProjectStateError -> 409.
-
-The execution_mode lock (and every other project state conflict) raises
-ProjectStateError. The crud.py PATCH endpoint has no local exception mapping and
-relies on the global handler; ProjectStateError now carries default_status_code
-409 (a state conflict is a CLIENT error, not a 500). This exercises the REAL
-route + global handler over HTTP and asserts both the status and the FE-visible
-message — the bug was originally observed at this PATCH boundary, where the lock
-surfaced as a 500 the frontend silently swallowed (BE-5042 failing-layer
-discipline: test at the layer the user actually hit).
-"""
 
 from __future__ import annotations
 
@@ -43,7 +32,6 @@ class _FakeUser:
 
 
 class _RaisingProjectService:
-    """Stub whose update_project raises the post-launch execution_mode lock."""
 
     async def update_project(self, project_id: str, updates: dict):
         raise ProjectStateError(
@@ -57,7 +45,7 @@ class _RaisingProjectService:
 def _build_app() -> FastAPI:
     app = FastAPI()
     app.include_router(projects_router)
-    register_exception_handlers(app)  # ProjectStateError -> 409 via the global handler
+    register_exception_handlers(app)
 
     async def _override_user() -> _FakeUser:
         return _FakeUser()
@@ -71,8 +59,6 @@ def _build_app() -> FastAPI:
 
 
 async def test_patch_execution_mode_state_conflict_maps_to_409_not_500():
-    """A state-conflict on the PATCH route surfaces as 409 (client error), not a
-    500, with the message preserved so the frontend can display it."""
     app = _build_app()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.patch(

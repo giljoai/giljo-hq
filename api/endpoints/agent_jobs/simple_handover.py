@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Simple Handover Endpoint - Handover 0461c (Updated: Two-Stage Retirement Flow)
-
-Two-stage orchestrator session refresh:
-1. Returns retirement_prompt (old orchestrator writes 360 Memory with rich context)
-2. Returns continuation_prompt (new terminal picks up where old left off)
-
-The OLD orchestrator writes 360 Memory via MCP tools (not this endpoint),
-because only the orchestrator has the actual session context (decisions, progress, blockers).
-
-No more Agent ID Swap. No new AgentExecution rows. Same UUID, same card.
-"""
 
 import logging
 from datetime import UTC, datetime
@@ -83,7 +71,6 @@ async def simple_handover(
             "context_reset": True
         }
     """
-    # Find execution (job_id could be agent_id)
     stmt = (
         select(AgentExecution)
         .where(
@@ -96,7 +83,6 @@ async def simple_handover(
     result = await db.execute(stmt)
     execution = result.scalars().first()
 
-    # Fallback to job_id
     if not execution:
         stmt = (
             select(AgentExecution)
@@ -116,7 +102,6 @@ async def simple_handover(
     if execution.agent_display_name != "orchestrator":
         raise HTTPException(status_code=400, detail="Only orchestrators can use handover")
 
-    # Get job for project_id (tenant-scoped for defense-in-depth)
     stmt = select(AgentJob).where(
         AgentJob.job_id == execution.job_id,
         AgentJob.tenant_key == current_user.tenant_key,
@@ -127,9 +112,6 @@ async def simple_handover(
     if not job:
         raise HTTPException(status_code=500, detail="Job not found")
 
-    # Load project + product for git closeout commit gating.
-    # BE-5058: ``project_type`` no longer needs eager loading -- ``taxonomy_alias``
-    # is a SELECT-time column_property.
     project_stmt = (
         select(Project)
         .options(joinedload(Project.product))
@@ -138,15 +120,11 @@ async def simple_handover(
     project_result = await db.execute(project_stmt)
     project = project_result.scalar_one_or_none()
 
-    # BE-9103: the retiring orchestrator's git closeout-commit gate reads the canonical
-    # master toggle ALONE (settings integrations.git_integration.enabled), decoupled from
-    # the git_history CONTEXT depth toggle — reading history != writing commits.
     git_enabled = await SettingsService(db, current_user.tenant_key).git_integration_enabled()
     project_taxonomy = project.taxonomy_alias if project else ""
 
     await db.commit()
 
-    # Generate retirement prompt (old orchestrator writes 360 Memory)
     retirement_prompt = build_retirement_prompt(
         project_id=str(job.project_id),
         agent_id=execution.agent_id,
@@ -156,7 +134,6 @@ async def simple_handover(
         project_taxonomy=project_taxonomy,
     )
 
-    # Generate continuation prompt (new terminal reads 360 Memory)
     continuation_prompt = build_continuation_prompt(
         project_id=str(job.project_id),
         agent_id=execution.agent_id,
@@ -165,7 +142,6 @@ async def simple_handover(
         product_id=str(project.product_id) if project and project.product_id else None,
     )
 
-    # Emit WebSocket event
     try:
         from api.app import app
 

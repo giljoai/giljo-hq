@@ -3,11 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-9296b: the account-level agent check-in cadence endpoint.
-
-Mirrors the agent-silence-threshold suite — the cadence is hosted by the exact
-same pattern (CE: system_settings; SaaS: per-tenant `configurations` override).
-"""
 
 from __future__ import annotations
 
@@ -95,8 +90,6 @@ async def _admin_headers_and_tenant(db_manager) -> tuple[dict[str, str], str]:
 
 @pytest.mark.asyncio
 async def test_get_agent_checkin_cadence_defaults_to_ten(api_client, auth_headers, db_manager):
-    """Unset everywhere -> the retired slider's default (10), so a deployment
-    that never touches the setting keeps the cadence it always had."""
     await _cleanup_cadence(db_manager)
 
     response = await api_client.get(ENDPOINT, headers=auth_headers)
@@ -139,8 +132,6 @@ async def test_put_agent_checkin_cadence_writes_system_setting(api_client, db_ma
 
 @pytest.mark.asyncio
 async def test_saas_put_then_get_persists_tenant_override(api_client, db_manager):
-    """SaaS PUT writes a per-tenant override in `configurations` (not system_settings);
-    a subsequent GET for the SAME tenant returns that override, not the deployment default."""
     await _cleanup_cadence(db_manager)
     await _set_cadence(db_manager, "23")
     headers, tenant_key = await _admin_headers_and_tenant(db_manager)
@@ -158,7 +149,6 @@ async def test_saas_put_then_get_persists_tenant_override(api_client, db_manager
     assert get_response.status_code == 200
     assert get_response.json() == {"agent_checkin_cadence_minutes": 60}
 
-    # The deployment-wide system_settings row must be untouched by the SaaS write.
     async with db_manager.get_session_async() as session:
         result = await session.execute(select(SystemSetting.value).where(SystemSetting.key == CADENCE_KEY))
         assert result.scalar_one() == "23"
@@ -169,7 +159,6 @@ async def test_saas_put_then_get_persists_tenant_override(api_client, db_manager
 
 @pytest.mark.asyncio
 async def test_saas_agent_checkin_cadence_is_tenant_isolated(api_client, db_manager):
-    """ADR-009: tenant A's override is invisible to and unaffected by tenant B."""
     await _cleanup_cadence(db_manager)
     await _set_cadence(db_manager, "23")
     headers_a, tenant_a = await _admin_headers_and_tenant(db_manager)
@@ -190,7 +179,6 @@ async def test_saas_agent_checkin_cadence_is_tenant_isolated(api_client, db_mana
 
 @pytest.mark.asyncio
 async def test_saas_put_agent_checkin_cadence_rejects_out_of_range(api_client, db_manager):
-    """Boundary validation (1-1440): out-of-range is a clean 4xx, never a DB 500."""
     headers, tenant_key = await _admin_headers_and_tenant(db_manager)
 
     with patch("api.app_state.GILJO_MODE", "saas"):

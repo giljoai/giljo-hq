@@ -1,22 +1,9 @@
-/**
- * useHubPresence.js — FE-6054f
- *
- * Reactive `isHubPresent` = the Hub pane is the user's active focus.
- * True when ALL of:
- *   - document.visibilityState === 'visible'
- *   - document.hasFocus()
- *   - active route is /hub
- *
- * Listens to visibilitychange, window focus/blur, and watches the active route.
- * Cleans up on scope dispose.
- */
 import { ref, computed, onScopeDispose, getCurrentScope } from 'vue'
 import { useRoute } from 'vue-router'
 
 export function useHubPresence() {
   const route = useRoute()
 
-  // Track document visibility and focus as reactive refs so computed can depend on them
   const isVisible = ref(
     typeof document !== 'undefined' ? document.visibilityState === 'visible' : false,
   )
@@ -48,8 +35,6 @@ export function useHubPresence() {
     }
   }
 
-  // route.path is reactive via Vue Router's reactive route object;
-  // computed picks it up automatically when the route object is a reactive proxy.
   const isHubPresent = computed(
     () => isVisible.value && isFocused.value && route.path === '/hub',
   )

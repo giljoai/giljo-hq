@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Product CRUD Endpoints - Handover 0127b
-
-Handles product CRUD operations using ProductService.
-
-All database access now goes through ProductService following the
-established service layer pattern (similar to ProjectService, TemplateService).
-
-Exception handling: Domain exceptions (ResourceNotFoundError, ValidationError,
-AuthorizationError) propagate to the global exception handler in
-api/exception_handlers.py which maps them to appropriate HTTP status codes.
-
-Handover 0731d: Updated for typed ProductService returns (Product ORM models,
-DeleteResult, ProductStatistics instead of dicts).
-"""
 
 import logging
 from datetime import UTC, datetime, timedelta
@@ -26,7 +11,6 @@ from fastapi import APIRouter, Depends, Query
 
 from giljo_mcp.auth.dependencies import get_current_active_user
 
-# Model imports: Use modular pattern (Post-0128a refactoring)
 from giljo_mcp.models.auth import User
 from giljo_mcp.schemas.service_responses import ProductStatistics
 from giljo_mcp.services import ProductService
@@ -46,25 +30,10 @@ from .models import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Purge retention period for deleted products (days)
 _PURGE_RETENTION_DAYS = 10
 
 
 def _build_product_response(product, stats=None, override_active=None) -> ProductResponse:
-    """
-    Build a ProductResponse from a Product ORM model and optional ProductStatistics.
-
-    Centralizes the ORM-to-response mapping so every endpoint uses the same logic.
-    Handover 0840i: Exposes normalized fields directly (no config_data reconstruction).
-
-    Args:
-        product: Product ORM model
-        stats: Optional ProductStatistics for metrics fields
-        override_active: Optional bool to override product.is_active in response
-
-    Returns:
-        ProductResponse Pydantic model
-    """
     from giljo_mcp.services.vision_hash import compute_vision_inputs_hash
 
     from .models import ArchitectureSchema, TechStackSchema, TestConfigSchema
@@ -108,8 +77,6 @@ def _build_product_response(product, stats=None, override_active=None) -> Produc
         else None
     )
 
-    # Handover 0412: Ensure product_memory is never None
-    # BE-9261: seed key renamed github -> git_integration
     pm = product.product_memory
     if pm is None:
         pm = {"git_integration": {}, "sequential_history": [], "context": {}}
@@ -141,7 +108,6 @@ def _build_product_response(product, stats=None, override_active=None) -> Produc
         is_default=product.is_default,
         product_memory=pm,
         target_platforms=product.target_platforms or ["all"],
-        # BE-5117/BE-5118: surface AI-owned vision-analysis state to the frontend.
         vision_analysis_complete=bool(product.vision_analysis_complete),
         consolidated_vision_light=product.consolidated_vision_light,
         consolidated_vision_medium=product.consolidated_vision_medium,
@@ -149,34 +115,11 @@ def _build_product_response(product, stats=None, override_active=None) -> Produc
         consolidated_vision_medium_tokens=product.consolidated_vision_medium_tokens,
         consolidated_vision_hash=product.consolidated_vision_hash,
         consolidated_at=product.consolidated_at,
-        # BE-5122: derived from currently-loaded vision_documents (eager-loaded
-        # in ProductRepository.get_by_id(eager_load=True)). Frontend compares
-        # this against consolidated_vision_hash to decide whether a CTX project
-        # would self-close on launch.
         vision_inputs_hash=compute_vision_inputs_hash(product.vision_documents),
     )
 
 
 def _build_product_list_response(product, metrics: dict | None, vision: dict | None) -> ProductListResponse:
-    """
-    BE-6066 P4: build the LEAN list response — columns + P1 counts + vision
-    aggregates ONLY.
-
-    CRITICAL (footgun 1): this builder must NEVER read product.tech_stack /
-    architecture / test_config / vision_documents. In the lean list path those
-    relations are deliberately NOT eager-loaded, so the Product is detached from
-    its session by the time we serialize it; touching a relation would raise.
-    Only plain columns (loaded with the row) and the pre-aggregated dicts below
-    are read here.
-
-    Args:
-        product: Product ORM model (columns loaded; relations NOT loaded)
-        metrics: Per-product metrics dict from get_product_statistics_bulk, or None
-        vision: Per-product vision aggregates from get_vision_summary_bulk, or None
-
-    Returns:
-        ProductListResponse Pydantic model
-    """
     vision = vision or {}
     return ProductListResponse(
         id=str(product.id),
@@ -205,22 +148,6 @@ def _build_product_list_response(product, metrics: dict | None, vision: dict | N
 
 
 def _stats_from_metrics(product, metrics: dict) -> ProductStatistics:
-    """
-    Build a ProductStatistics from a Product ORM model and a metrics dict.
-
-    BE-6066 P1: the batched stats path (``get_product_statistics_bulk``) returns
-    raw metric dicts and deliberately does NOT re-SELECT products, so the product
-    metadata (name/is_active/timestamps) comes from the Product the caller already
-    holds. Produces the identical ProductStatistics the per-product
-    ``get_product_statistics`` returned.
-
-    Args:
-        product: Product ORM model
-        metrics: Metrics dict from ProductMemoryService.get_product_statistics_bulk
-
-    Returns:
-        ProductStatistics Pydantic model
-    """
     return ProductStatistics(
         product_id=str(product.id),
         name=product.name,
@@ -256,10 +183,9 @@ async def create_product(
         test_config=request.test_config.model_dump() if request.test_config else None,
         core_features=request.core_features,
         brand_guidelines=request.brand_guidelines,
-        target_platforms=request.target_platforms,  # Handover 0425 Phase 2
+        target_platforms=request.target_platforms,
     )
 
-    # Get statistics for the newly created product
     stats = await service.memory.get_product_statistics(str(product.id))
 
     return _build_product_response(product, stats)
@@ -287,9 +213,7 @@ async def list_products(
     logger.debug("Found %d products", len(products))
 
     product_ids = [str(p.id) for p in products]
-    # BE-6066 P1: batched per-product statistics (fixed query count, no O(N) loop).
     stats_map = await service.memory.get_product_statistics_bulk(product_ids)
-    # BE-6066 P4: ONE grouped query for the card's vision aggregates.
     vision_map = await service.memory.get_vision_summary_bulk(product_ids)
 
     responses = []
@@ -313,22 +237,12 @@ async def list_deleted_products(
     """
     products = await service.lifecycle.list_deleted_products()
 
-    # BE-6073 (m13): batched stats in a fixed query count, mirroring the active
-    # list_products bulk path that BE-6066 introduced — not a per-product loop.
-    # The bulk path returns an entry for every supplied id, so every deleted
-    # product is present here.
-    # BE-9356: these counts are NOT zeros. delete_product cascades nothing — it
-    # writes deleted_at/is_active/updated_at on the product row alone — so the
-    # children are still live, and the counts below are the product's real child
-    # counts. They reach zero only once purge_product hard-deletes the product and
-    # the FK cascade fires.
     product_ids = [str(p.id) for p in products]
     stats_map = await service.memory.get_product_statistics_bulk(product_ids)
 
     now = datetime.now(UTC)
     result = []
     for p in products:
-        # Compute purge date: deleted_at + retention period
         purge_date = p.deleted_at + timedelta(days=_PURGE_RETENTION_DAYS)
         days_until_purge = max(0, (purge_date - now).days)
         stats = stats_map.get(str(p.id)) or {}
@@ -363,7 +277,6 @@ async def get_product(
     product = await service.get_product(product_id=product_id)
     stats = await service.memory.get_product_statistics(str(product.id))
 
-    # Handover 0412: Ensure product_memory is passed through correctly
     pm = product.product_memory
     if pm is None:
         logger.warning("Product %s: product_memory is None, using default", sanitize(product_id))
@@ -384,15 +297,10 @@ async def update_product(
 
     Uses ProductService.update_product() for database operations.
     """
-    # Convert Pydantic model to dict, excluding unset fields
-    # model_dump already converts nested Pydantic models to dicts
     update_data = updates.model_dump(exclude_unset=True)
 
-    # force=True: user is intentionally saving from the UI — always allow overwrites.
-    # The overwrite guard (WI-2) is for MCP tool agents, not dashboard users.
     product = await service.update_product(product_id, force=True, **update_data)
 
-    # Get statistics for the updated product
     stats = await service.memory.get_product_statistics(str(product.id))
 
     logger.info("Updated product %s", sanitize(product_id))

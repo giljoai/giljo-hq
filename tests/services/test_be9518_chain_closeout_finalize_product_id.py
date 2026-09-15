@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9518 — the MCP chain-member closeout project_update broadcast must carry
-product_id.
-
-``_finalize_chain_member_closeout`` (``src/giljo_mcp/tools/_closeout_finalize.py``)
-builds its own inline ``project_data`` dict for a chain member's row-flip
-broadcast, independent of ``project_helpers._build_ws_project_data``, so it needed
-its own one-line fix and its own regression test.
-
-DB-touching: ``db_session`` (TransactionalTestContext, rolled back). No
-module-level mutable state, no ordering dependencies. Parallel-safe
-(pytest-xdist -n auto). Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -45,7 +33,6 @@ def _mock_ws() -> MagicMock:
 
 
 async def _seed_chain_member(session: AsyncSession, tenant_key: str) -> tuple[Project, str]:
-    """Seed a project that IS a member of an active sequence_run. Returns (project, product_id)."""
     product = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,

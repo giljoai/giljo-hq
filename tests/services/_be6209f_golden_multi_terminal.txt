@@ -144,7 +144,7 @@ Each session is one job order. The user (or you, on behalf of the user) opens
 a session, the operator pastes the thin prompt for that job_id, and the agent
 in that session calls get_job_mission() to load its work. One job per
 session — different sessions can run different CLI tools (Claude, Codex,
-Gemini) and still coordinate, because coordination is MCP-only.
+opencode) and still coordinate, because coordination is MCP-only.
 
 CROSS-AGENT COORDINATION (MCP-ONLY):
   - spawn_job(...)          — request a NEW job order (a new terminal/agent)
@@ -174,7 +174,7 @@ PARAMETER REQUIREMENTS:
 Use an agent_name EXACTLY as it appears in the agent_templates list in this
 response — copy the agent_name field verbatim. It often equals the display_name
 (e.g. 'implementer'); some templates differ. NEVER invent a name that is not in
-the list. File mapping: agent_name → fetched from MCP server via get_staging_instructions().
+the list. Role source: agent_name → the agent_profile in that job's get_job_mission response.
 
 ── agent_display_name ──────────────────────────────────────────────────────
 UI label only — implementer | tester | analyzer | documenter | reviewer.
@@ -188,7 +188,7 @@ phases. Pair with predecessor_job_id when a successor needs prior output
 (server renders the preamble in multi_terminal mode; subagent modes splice
 inline).
 
-⚠ SUBAGENT-MODE NOTE: In Claude Code / Codex / Gemini subagent execution
+⚠ SUBAGENT-MODE NOTE: In Claude Code / Codex subagent execution
 modes the server does NOT block higher-phase jobs from starting before
 lower-phase jobs finish. The `phase` value is informational ordering
 metadata — the orchestrator is responsible for spawning agents in phase
@@ -201,9 +201,9 @@ a prior agent's output. Empty string is rejected (ValidationError). Pass
 the predecessor's job_id, not its agent_id.
 
 Generic MCP Note:
-  - Agent templates are served by the MCP server, not local files
-  - Any MCP-connected coding tool can consume these templates
-  - agent_name is the key used across DB records and template lookups
+  - Agent profiles are served by the MCP server, never installed as local files
+  - Any MCP-connected coding tool can consume them — no per-tool export exists
+  - agent_name is the key used across DB records and job orders
 
 VERIFICATION AGENT DEFERRAL: tester/reviewer are NOT spawned in staging. In implementation,
 after deliverable agents complete: call get_agent_result(job_id) for each, build the
@@ -261,8 +261,9 @@ Mission >10K tokens → condense, reference vision docs instead of embedding.
 Target <5K.
 
 ── Agent Templates Empty ──────────────────────────────────────────────────
-agent_templates list empty → tell the user to activate templates in
-My Settings → Agent Templates.
+agent_templates list empty → this product has no agents assigned. Work with
+your harness default; do not block. Tell the user they can assign agents to
+this product on the Agents screen.
 
 ── STATUS TRANSITIONS ──────────────────────────────────────────────────────
 
@@ -636,7 +637,6 @@ your specialists yourself.
 FORBIDDEN in this mode (zero exceptions):
   ✗ Task(subagent_type="...")  ← Claude Code
   ✗ spawn_agent(name="...")    ← Codex
-  ✗ @agent-name ...            ← Gemini
   ✗ Any in-process subagent spawn — user opens each agent's new session.
 
 CORRECT:
@@ -1010,7 +1010,7 @@ Each session is one job order. The user (or you, on behalf of the user) opens
 a session, the operator pastes the thin prompt for that job_id, and the agent
 in that session calls get_job_mission() to load its work. One job per
 session — different sessions can run different CLI tools (Claude, Codex,
-Gemini) and still coordinate, because coordination is MCP-only.
+opencode) and still coordinate, because coordination is MCP-only.
 
 CROSS-AGENT COORDINATION (MCP-ONLY):
   - spawn_job(...)          — request a NEW job order (a new terminal/agent)
@@ -1040,7 +1040,7 @@ PARAMETER REQUIREMENTS:
 Use an agent_name EXACTLY as it appears in the agent_templates list in this
 response — copy the agent_name field verbatim. It often equals the display_name
 (e.g. 'implementer'); some templates differ. NEVER invent a name that is not in
-the list. File mapping: agent_name → fetched from MCP server via get_staging_instructions().
+the list. Role source: agent_name → the agent_profile in that job's get_job_mission response.
 
 ── agent_display_name ──────────────────────────────────────────────────────
 UI label only — implementer | tester | analyzer | documenter | reviewer.
@@ -1054,7 +1054,7 @@ phases. Pair with predecessor_job_id when a successor needs prior output
 (server renders the preamble in multi_terminal mode; subagent modes splice
 inline).
 
-⚠ SUBAGENT-MODE NOTE: In Claude Code / Codex / Gemini subagent execution
+⚠ SUBAGENT-MODE NOTE: In Claude Code / Codex subagent execution
 modes the server does NOT block higher-phase jobs from starting before
 lower-phase jobs finish. The `phase` value is informational ordering
 metadata — the orchestrator is responsible for spawning agents in phase
@@ -1067,9 +1067,9 @@ a prior agent's output. Empty string is rejected (ValidationError). Pass
 the predecessor's job_id, not its agent_id.
 
 Generic MCP Note:
-  - Agent templates are served by the MCP server, not local files
-  - Any MCP-connected coding tool can consume these templates
-  - agent_name is the key used across DB records and template lookups
+  - Agent profiles are served by the MCP server, never installed as local files
+  - Any MCP-connected coding tool can consume them — no per-tool export exists
+  - agent_name is the key used across DB records and job orders
 
 VERIFICATION AGENT DEFERRAL: tester/reviewer are NOT spawned in staging. In implementation,
 after deliverable agents complete: call get_agent_result(job_id) for each, build the
@@ -1127,8 +1127,9 @@ Mission >10K tokens → condense, reference vision docs instead of embedding.
 Target <5K.
 
 ── Agent Templates Empty ──────────────────────────────────────────────────
-agent_templates list empty → tell the user to activate templates in
-My Settings → Agent Templates.
+agent_templates list empty → this product has no agents assigned. Work with
+your harness default; do not block. Tell the user they can assign agents to
+this product on the Agents screen.
 
 ── STATUS TRANSITIONS ──────────────────────────────────────────────────────
 
@@ -1175,7 +1176,6 @@ your specialists yourself.
 FORBIDDEN in this mode (zero exceptions):
   ✗ Task(subagent_type="...")  ← Claude Code
   ✗ spawn_agent(name="...")    ← Codex
-  ✗ @agent-name ...            ← Gemini
   ✗ Any in-process subagent spawn — user opens each agent's new session.
 
 CORRECT:

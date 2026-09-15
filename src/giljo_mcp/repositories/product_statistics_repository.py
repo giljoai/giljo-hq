@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Product and project statistics repository — projects, messages, tasks, dashboard analytics."""
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,55 +16,6 @@ from giljo_mcp.platform_registry import normalize_execution_mode
 from giljo_mcp.utils.taxonomy_alias import format_taxonomy_alias
 
 
-# What makes a 360 memory entry eligible for the dashboard. Two independent
-# liveness facts, both of which these readers used to ignore:
-#
-# 1. Soft-deleting a PRODUCT does not cascade -- ``delete_product`` stamps
-#    ``deleted_at`` on the product row alone -- so a reader has to revalidate the
-#    product each entry points at, or a trashed product keeps feeding the
-#    dashboard for the whole recovery window.
-# 2. Purging a PROJECT does reach these rows: ``mark_entries_deleted``
-#    (product_memory_repository) flags its entries ``deleted_by_user`` and keeps
-#    them for history. Reached from the project purge endpoint AND from the
-#    background expiry sweep -- a live path, not scaffolding.
-#
-# One definition, two call sites on purpose: the 360 Memories panel and the
-# Commits tile are derived from the same rows (DashboardView builds its commit
-# preview out of ``recent_memories``), so a predicate applied to only one of them
-# would leave the panel and the counter disagreeing -- the same defect, moved.
-# Both joins carry the same ON clause for the same reason.
-#
-# ``deleted_at`` and NOT ``is_active``: deactivating a product is not trashing it
-# (``deactivate_product`` clears ``is_active`` and leaves ``deleted_at`` NULL),
-# and a dormant product's history still belongs on the dashboard. This matches
-# every sibling reader (product_repository, task_repository,
-# vision_document_repository, product_memory_repository).
-#
-# ``is_not(True)`` rather than the sibling ``== False`` spelling because the
-# column is NULLABLE in the shipped schema and the 0390a backfill wrote
-# ``COALESCE(..., false)`` -- a NULL means "not deleted", and must not silently
-# drop a live entry off the dashboard.
-#
-# Deliberately NOT extended to the projects a trashed product owns:
-# ``project_repository`` holds no reference to ``Product`` and never filters on
-# product liveness, so those projects stay visible everywhere else in the app --
-# hiding them here alone would manufacture a disagreement rather than remove one.
-# Do not reach for FK nullability to justify that line: ``projects.product_id``
-# and ``product_memory_entries.product_id`` are BOTH ``ondelete="CASCADE"``, so
-# nullability says nothing about ownership. The reason is the reader survey above.
-#
-# BE-9354 closed the remaining dashboard half WITHOUT reopening that decision.
-# ``get_recent_projects`` still SELECTed ``Product.name``, so a trashed product's
-# name kept rendering beside its completed projects (RecentProjectsList.vue:18).
-# The fix neutralises the NAME -- the same liveness predicate, moved into that
-# method's ``Product`` outerjoin ON clause, so a trashed parent yields a NULL
-# ``product_name`` -- and leaves project visibility exactly as it was. Hiding the
-# projects instead would have relocated the disagreement rather than removed it:
-# their tasks, chain runs (``sequence_run_live_filter`` reads ``Project``
-# directly, bypassing the repository), roadmap items and jobs would all have
-# stayed visible.
-#
-# Callers must have joined :class:`Product`.
 _LIVE_MEMORY_ENTRY_CRITERIA = (
     Product.deleted_at.is_(None),
     ProductMemoryEntry.deleted_by_user.is_not(True),
@@ -73,42 +23,16 @@ _LIVE_MEMORY_ENTRY_CRITERIA = (
 
 
 class ProductStatisticsRepository:
-    """
-    Repository for product-level statistics queries.
-
-    Covers project counts and pagination, tenant-wide message stats,
-    task counts, and dashboard distribution analytics. All methods
-    enforce tenant isolation via tenant_key.
-    """
 
     def __init__(self, db_manager):
-        """
-        Initialize product statistics repository.
-
-        Args:
-            db_manager: Database manager instance
-        """
         self.db = db_manager
 
-    # ============================================================================
-    # PROJECT STATISTICS DOMAIN
-    # ============================================================================
 
     async def count_total_projects(
         self,
         session: AsyncSession,
         tenant_key: str,
     ) -> int:
-        """
-        Count total projects for tenant.
-
-        Args:
-            session: Async database session
-            tenant_key: Tenant key for isolation
-
-        Returns:
-            Total project count (soft-deleted projects excluded — BE-9355)
-        """
         result = await session.scalar(
             select(func.count(Project.id)).where(Project.tenant_key == tenant_key, Project.deleted_at.is_(None))
         )
@@ -120,24 +44,6 @@ class ProductStatisticsRepository:
         tenant_key: str,
         status: str,
     ) -> int:
-        """
-        Count projects with specific status for tenant.
-
-        Args:
-            session: Async database session
-            tenant_key: Tenant key for isolation
-            status: Project status to filter by
-
-        Returns:
-            Project count for status
-
-        BE-9355 (hygiene, not a defect fix): the soft-delete writer stamps
-        ``status='deleted'`` and ``deleted_at`` together
-        (``project_deletion_service.py:99-100``) and ``restore_project`` clears
-        both, so a trashed row already sits in a bucket no caller asks for. The
-        predicate makes the two liveness facts stop depending on each other, and
-        matches every sibling in this file.
-        """
         result = await session.scalar(
             select(func.count(Project.id)).where(
                 Project.tenant_key == tenant_key,
@@ -152,11 +58,6 @@ class ProductStatisticsRepository:
         session: AsyncSession,
         tenant_key: str,
     ) -> int:
-        """Count LIVE projects with staging_status in ('staged', 'staging_complete').
-
-        BE-9355: ``staging_status`` is untouched by soft-delete, so a trashed
-        project kept its staged marking and inflated this tile.
-        """
         result = await session.scalar(
             select(func.count(Project.id)).where(
                 Project.tenant_key == tenant_key,
@@ -174,19 +75,6 @@ class ProductStatisticsRepository:
         limit: int = 100,
         offset: int = 0,
     ) -> list[tuple]:
-        """Get paginated projects with per-project aggregate counts in ONE round-trip.
-
-        Collapses the BE-6063b N+1 (the endpoint previously fired 5 separate
-        ``get_session_async`` round-trips per project). Correlated scalar
-        subqueries keep each project to exactly one row (no join fan-out). Returns
-        rows of (Project, agent_count, message_count, task_count,
-        completed_task_count, last_activity); counts are non-NULL ints.
-
-        BE-9355 (hygiene): no PRODUCTION caller reaches this method today — the
-        only callers are tests. The liveness predicate is applied anyway so that
-        whichever paginated project surface adopts it later does not inherit the
-        defect its siblings in this file had.
-        """
         agent_count = (
             select(func.count(AgentExecution.agent_id))
             .select_from(AgentExecution)
@@ -245,25 +133,12 @@ class ProductStatisticsRepository:
         result = await session.execute(query)
         return list(result.all())
 
-    # ============================================================================
-    # MESSAGE STATISTICS DOMAIN
-    # ============================================================================
 
     async def count_total_messages(
         self,
         session: AsyncSession,
         tenant_key: str,
     ) -> int:
-        """
-        Count total messages for tenant.
-
-        Args:
-            session: Async database session
-            tenant_key: Tenant key for isolation
-
-        Returns:
-            Total message count
-        """
         result = await session.scalar(select(func.count(Message.id)).where(Message.tenant_key == tenant_key))
         return result or 0
 
@@ -273,31 +148,17 @@ class ProductStatisticsRepository:
         tenant_key: str,
         status: str,
     ) -> int:
-        """Count messages with a specific status for the tenant."""
         result = await session.scalar(
             select(func.count(Message.id)).where(Message.tenant_key == tenant_key, Message.status == status)
         )
         return result or 0
 
-    # ============================================================================
-    # TASK STATISTICS DOMAIN
-    # ============================================================================
 
     async def count_total_tasks(
         self,
         session: AsyncSession,
         tenant_key: str,
     ) -> int:
-        """
-        Count total tasks for tenant.
-
-        Args:
-            session: Async database session
-            tenant_key: Tenant key for isolation
-
-        Returns:
-            Total task count
-        """
         result = await session.scalar(
             select(func.count(Task.id)).where(Task.tenant_key == tenant_key, Task.deleted_at.is_(None))
         )
@@ -308,16 +169,6 @@ class ProductStatisticsRepository:
         session: AsyncSession,
         tenant_key: str,
     ) -> int:
-        """
-        Count completed tasks for tenant.
-
-        Args:
-            session: Async database session
-            tenant_key: Tenant key for isolation
-
-        Returns:
-            Completed task count
-        """
         result = await session.scalar(
             select(func.count(Task.id)).where(
                 Task.tenant_key == tenant_key, Task.status == "completed", Task.deleted_at.is_(None)
@@ -325,9 +176,6 @@ class ProductStatisticsRepository:
         )
         return result or 0
 
-    # ============================================================================
-    # DASHBOARD ANALYTICS DOMAIN (Handover 0839)
-    # ============================================================================
 
     async def get_project_status_distribution(
         self,
@@ -335,17 +183,6 @@ class ProductStatisticsRepository:
         tenant_key: str,
         product_id: str | None = None,
     ) -> dict[str, int]:
-        """
-        Get project count grouped by status.
-
-        Args:
-            session: Async database session
-            tenant_key: Tenant key for isolation
-            product_id: Optional product filter
-
-        Returns:
-            Dict mapping status to count, e.g. {"active": 5, "completed": 12}
-        """
         stmt = (
             select(Project.status, func.count(Project.id))
             .where(Project.tenant_key == tenant_key, Project.deleted_at.is_(None))
@@ -362,20 +199,6 @@ class ProductStatisticsRepository:
         tenant_key: str,
         product_id: str | None = None,
     ) -> list[dict]:
-        """
-        Get project count grouped by project type (taxonomy).
-
-        Includes an "Untyped" entry for projects with no project_type_id.
-
-        Args:
-            session: Async database session
-            tenant_key: Tenant key for isolation
-            product_id: Optional product filter
-
-        Returns:
-            List of dicts with keys: label, color, count
-        """
-        # Typed projects: join TaxonomyType, group by label + color
         typed_stmt = (
             select(
                 TaxonomyType.label,
@@ -401,7 +224,6 @@ class ProductStatisticsRepository:
         typed_result = await session.execute(typed_stmt)
         rows = [{"label": row.label, "color": row.color, "count": row.count} for row in typed_result.all()]
 
-        # Untyped projects count
         untyped_stmt = select(func.count(Project.id)).where(
             Project.tenant_key == tenant_key,
             Project.project_type_id.is_(None),
@@ -423,19 +245,6 @@ class ProductStatisticsRepository:
         product_id: str | None = None,
         limit: int = 10,
     ) -> list[dict]:
-        """
-        Get the most recently completed projects.
-
-        Args:
-            session: Async database session
-            tenant_key: Tenant key for isolation
-            product_id: Optional product filter
-            limit: Maximum number of results
-
-        Returns:
-            List of dicts with keys: id, name, status, created_at, completed_at,
-            taxonomy_alias, project_type_color
-        """
         stmt = (
             select(
                 Project.id,
@@ -464,12 +273,6 @@ class ProductStatisticsRepository:
                 and_(
                     Project.product_id == Product.id,
                     Product.tenant_key == tenant_key,
-                    # BE-9354: in the ON clause, not the WHERE. A trashed parent
-                    # must fail the join so ``product_name`` comes back NULL and
-                    # the dashboard stops naming it -- while the project itself
-                    # stays listed. In the WHERE this predicate would instead
-                    # DROP the project, which is the visibility change this fix
-                    # deliberately does not make.
                     Product.deleted_at.is_(None),
                 ),
             )
@@ -490,9 +293,6 @@ class ProductStatisticsRepository:
 
         projects = []
         for row in rows:
-            # BE-6049a: single-sourced via format_taxonomy_alias so this path
-            # cannot drift from the SQL column_property (and pads min-4 without
-            # truncating 5-6 digit grandfathered serials).
             abbr = row.type_abbreviation if (row.project_type_id and row.type_abbreviation) else None
             taxonomy_alias = format_taxonomy_alias(abbr, row.series_number, row.subseries, fallback=row.alias)
 
@@ -519,18 +319,6 @@ class ProductStatisticsRepository:
         product_id: str | None = None,
         limit: int = 10,
     ) -> list[dict]:
-        """
-        Get the most recent 360 memory entries.
-
-        Args:
-            session: Async database session
-            tenant_key: Tenant key for isolation
-            product_id: Optional product filter
-            limit: Maximum number of results
-
-        Returns:
-            List of dicts with keys: project_name, summary, timestamp, entry_type
-        """
         stmt = (
             select(
                 ProductMemoryEntry.product_id,
@@ -577,22 +365,6 @@ class ProductStatisticsRepository:
         tenant_key: str,
         product_id: str | None = None,
     ) -> int:
-        """Count the git commits recorded across live 360 memory entries (BE-6078).
-
-        Sums ``jsonb_array_length(git_commits)`` over every LIVE
-        ``product_memory_entries`` row for the tenant (and product, when the
-        per-product dashboard filter is active). This is the true cumulative
-        commit count — the dashboard previously showed only the capped 10-item
-        preview length (DashboardView.vue), which never exceeded 10.
-
-        Liveness is :data:`_LIVE_MEMORY_ENTRY_CRITERIA`, the same set the 360
-        Memories panel applies, so the Commits tile and the commit preview built
-        from that panel cannot disagree about which entries exist.
-
-        Tenant-scoped and product-filter-aware. The ``jsonb_typeof = 'array'``
-        guard skips rows whose ``git_commits`` is NULL or a non-array shape so a
-        malformed legacy value can't raise instead of counting as zero.
-        """
         stmt = (
             select(func.coalesce(func.sum(func.jsonb_array_length(ProductMemoryEntry.git_commits)), 0))
             .select_from(ProductMemoryEntry)
@@ -617,17 +389,6 @@ class ProductStatisticsRepository:
         tenant_key: str,
         product_id: str | None = None,
     ) -> dict[str, int]:
-        """
-        Get task count grouped by status.
-
-        Args:
-            session: Async database session
-            tenant_key: Tenant key for isolation
-            product_id: Optional product filter
-
-        Returns:
-            Dict mapping status to count, e.g. {"pending": 3, "completed": 10}
-        """
         stmt = (
             select(Task.status, func.count(Task.id))
             .where(Task.tenant_key == tenant_key, Task.deleted_at.is_(None))
@@ -644,30 +405,6 @@ class ProductStatisticsRepository:
         tenant_key: str,
         product_id: str | None = None,
     ) -> dict[str, int]:
-        """
-        Get project count grouped by execution_mode.
-
-        Args:
-            session: Async database session
-            tenant_key: Tenant key for isolation
-            product_id: Optional product filter
-
-        Returns:
-            Dict mapping the CANONICAL execution_mode to count, e.g.
-            {"multi_terminal": 5, "subagent": 3, "unset": 1}.
-
-        BE-9035c: the SQL GROUP BY buckets by the RAW stored value, so legacy
-        ``*_cli`` / ``generic_mcp`` rows would otherwise show as separate buckets. We
-        fold each stored value through :func:`normalize_execution_mode` and SUM the
-        counts, so a legacy CLI row collapses into ``subagent`` (stored values are
-        never rewritten — the fold is display-only). NULL stays ``unset``.
-
-        BE-9355: soft-deleted projects are excluded. ``execution_mode`` survives a
-        soft delete untouched, so a trashed project kept its bucket here while
-        :meth:`get_project_status_distribution` — served in the SAME dashboard
-        payload — already excluded it. One response described two different
-        project totals at once.
-        """
         stmt = (
             select(Project.execution_mode, func.count(Project.id))
             .where(Project.tenant_key == tenant_key, Project.deleted_at.is_(None))
@@ -678,9 +415,6 @@ class ProductStatisticsRepository:
         result = await session.execute(stmt)
         distribution: dict[str, int] = {}
         for mode, count in result.all():
-            # NULL-state: a project with no chosen execution mode groups under "unset"
-            # (a None object key is not JSON-serializable). A concrete value folds to
-            # its canonical mode so legacy tokens sum into the subagent bucket.
             key = "unset" if mode is None else (normalize_execution_mode(mode) or "unset")
             distribution[key] = distribution.get(key, 0) + count
         return distribution
@@ -690,21 +424,6 @@ class ProductStatisticsRepository:
         session: AsyncSession,
         tenant_key: str,
     ) -> list[dict]:
-        """
-        Get project count per product (for product selector badges).
-
-        Args:
-            session: Async database session
-            tenant_key: Tenant key for isolation
-
-        Returns:
-            List of dicts with keys: product_id, product_name, project_count
-
-        Trashed products are omitted and their soft-deleted projects are not
-        counted, so this rollup agrees with
-        :meth:`get_project_status_distribution` and with the product list the
-        rest of the app serves.
-        """
         stmt = (
             select(
                 Product.id.label("product_id"),
@@ -716,8 +435,6 @@ class ProductStatisticsRepository:
                 and_(
                     Product.id == Project.product_id,
                     Project.tenant_key == tenant_key,
-                    # In the ON clause, not the WHERE: a product whose only
-                    # projects are trashed must still be listed, with a count of 0.
                     Project.deleted_at.is_(None),
                 ),
             )

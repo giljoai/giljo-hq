@@ -3,41 +3,11 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-3006d — MCP-boundary validation + sanitizing error catch-all (two-sided).
-
-CLAUDE.md mandates a regression test at the failing layer. The bugs this project
-fixes live in the FastMCP @mcp.tool wrapper layer + the single ``_call_tool``
-dispatch chokepoint, so every test here drives the REAL transport
-(``create_connected_server_and_client_session``) — the wrapper arg-validation,
-the ``_call_tool`` catch-all, and the service-layer JSONB validator are all
-exercised, not mocked around.
-
-Two-sided coverage (DoD):
-
-* NEGATIVE — invalid input must surface as a clean 422-style ToolError, never a
-  500/stack trace:
-    - invalid enum (message_type / task status) -> rejected at FastMCP arg
-      validation, no SQL/traceback in the wire error.
-    - over-length param (content / title) -> same.
-    - a PLANTED unexpected DB error inside the accessor -> the catch-all
-      SANITIZES it: the agent-facing text carries NO SQL, NO bind parameters,
-      and NO "Traceback".
-    - a curated client error (our ValidationError, 4xx) -> surfaces VERBATIM
-      (the catch-all must not swallow actionable agent-facing errors).
-
-* POSITIVE (load-bearing) — every legitimate call still dispatches cleanly after
-  the Literals/caps were added, and complete_job's new AgentExecutionResult
-  validator accepts a valid result.
-
-Parallel-safe: the autospec section needs no DB; the complete_job section uses
-the rolled-back ``db_session`` (TransactionalTestContext-equivalent via the
-shared-session service rebind). No module-level mutable state; tenant keys are
-freshly generated per test.
-"""
 
 from __future__ import annotations
 
 import inspect
+import json
 import random
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -65,7 +35,6 @@ from tests.helpers.mcp_dispatch import attach_registry_service_autospecs
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
-# Substrings that would prove a raw DB/driver leak reached the agent.
 _LEAK_MARKERS = ("[SQL:", "[parameters:", "Traceback", "INSERT INTO", "psycopg", "secret-bind-value")
 
 
@@ -78,19 +47,21 @@ def _error_text(result) -> str:
     return "\n".join(parts)
 
 
+def _assert_structured_validation_rejection(result) -> None:
+    assert result.is_error is False, _error_text(result)
+    payload = json.loads(result.content[0].text)
+    assert payload.get("success") is False, payload
+    assert payload.get("error") == "VALIDATION_ERROR", payload
+    assert payload.get("field"), payload
+
+
 def _assert_no_leak(text: str) -> None:
     for marker in _LEAK_MARKERS:
         assert marker not in text, f"agent-facing error leaked {marker!r}: {text!r}"
 
 
-# ---------------------------------------------------------------------------
-# Section 1 — autospec transport (no DB): caps, enums, sanitization.
-# ---------------------------------------------------------------------------
 @pytest_asyncio.fixture
 async def autospec_mcp(monkeypatch):
-    """Install an autospec ToolAccessor + tenant resolution on the in-memory
-    transport (mirrors the INF-3000b smoke harness). Yields a client factory and
-    the accessor so a test can force a specific method to raise."""
     from api import app_state
     from api.endpoints.mcp_tools import _base
     from giljo_mcp.tools.tool_accessor import ToolAccessor
@@ -107,9 +78,6 @@ async def autospec_mcp(monkeypatch):
         if inspect.iscoroutinefunction(getattr(ToolAccessor, attr_name, None)):
             getattr(accessor, attr_name).return_value = {"ok": True}
 
-    # BE-3010b: PURE tools dispatch straight to the terminal service method via
-    # TOOL_DISPATCH; wire autospec'd service sub-objects so they resolve (and a
-    # test can plant a side_effect on the real terminal method).
     attach_registry_service_autospecs(accessor, {"ok": True})
 
     state.tool_accessor = accessor
@@ -131,13 +99,10 @@ async def autospec_mcp(monkeypatch):
         state.db_manager = prior_db_manager
 
 
-# --- NEGATIVE: invalid enum / over-length -> clean 422, no leak --------------
 
 
 @pytest.mark.asyncio
 async def test_invalid_thread_status_enum_is_clean_422(autospec_mcp):
-    """BE-9012d: retargeted from the retired send_message's message_type Literal
-    onto post_to_thread's set_status Literal (the Hub tool that replaced it)."""
     client, _accessor = autospec_mcp
     async with client() as session:
         result = await session.call_tool(
@@ -145,10 +110,10 @@ async def test_invalid_thread_status_enum_is_clean_422(autospec_mcp):
             {
                 "thread_id": str(uuid4()),
                 "content": "hi",
-                "set_status": "not-a-real-status",  # not in the Literal
+                "set_status": "not-a-real-status",
             },
         )
-    assert result.is_error is True
+    _assert_structured_validation_rejection(result)
     _assert_no_leak(_error_text(result))
 
 
@@ -158,26 +123,24 @@ async def test_invalid_task_status_enum_is_clean_422(autospec_mcp):
     async with client() as session:
         result = await session.call_tool(
             "update_task",
-            {"task_id": str(uuid4()), "status": "doing-stuff"},  # not in the Literal
+            {"task_id": str(uuid4()), "status": "doing-stuff"},
         )
-    assert result.is_error is True
+    _assert_structured_validation_rejection(result)
     _assert_no_leak(_error_text(result))
 
 
 @pytest.mark.asyncio
 async def test_over_length_message_content_is_clean_422(autospec_mcp):
-    """BE-9012d: retargeted from the retired send_message onto post_to_thread (the
-    Hub tool that replaced it) — both cap content at MCP_MESSAGE_MAX."""
     client, _accessor = autospec_mcp
     async with client() as session:
         result = await session.call_tool(
             "post_to_thread",
             {
                 "thread_id": str(uuid4()),
-                "content": "x" * (MCP_MESSAGE_MAX + 1),  # over the cap
+                "content": "x" * (MCP_MESSAGE_MAX + 1),
             },
         )
-    assert result.is_error is True
+    _assert_structured_validation_rejection(result)
     _assert_no_leak(_error_text(result))
 
 
@@ -189,25 +152,20 @@ async def test_over_length_task_title_is_clean_422(autospec_mcp):
             "create_task",
             {"title": "t" * (MCP_NAME_MAX + 1), "description": "d"},
         )
-    assert result.is_error is True
+    _assert_structured_validation_rejection(result)
     _assert_no_leak(_error_text(result))
 
 
-# --- NEGATIVE: planted unexpected DB error -> sanitized ----------------------
 
 
 @pytest.mark.asyncio
 async def test_planted_db_error_is_sanitized(autospec_mcp):
-    """An unexpected SQLAlchemy error (carrying SQL + bind params in its str())
-    must be sanitized by the _call_tool catch-all before it reaches the agent."""
     client, accessor = autospec_mcp
     leaky = ProgrammingError(
         statement="INSERT INTO tasks (id, title) VALUES (%(id)s, %(title)s)",
         params={"id": "uuid", "title": "secret-bind-value"},
         orig=Exception("relation does not exist"),
     )
-    # BE-3010b: create_task dispatches to the terminal service method, so plant
-    # the leaky error there (not on the bypassed accessor mixin method).
     accessor._task_service.create_task_for_mcp.side_effect = leaky
 
     async with client() as session:
@@ -216,16 +174,12 @@ async def test_planted_db_error_is_sanitized(autospec_mcp):
     assert result.is_error is True
     text = _error_text(result)
     _assert_no_leak(text)
-    # The agent gets the generic sanitized guidance, not the driver detail.
     assert "internal error" in text.lower() or _SANITIZED_TOOL_ERROR[:40] in text
 
 
 @pytest.mark.asyncio
 async def test_curated_client_error_surfaces_verbatim(autospec_mcp):
-    """A curated 4xx BaseGiljoError must surface VERBATIM (not sanitized) so the
-    agent keeps its actionable message."""
     client, accessor = autospec_mcp
-    # BE-3010b: create_task dispatches to the terminal service method.
     accessor._task_service.create_task_for_mcp.side_effect = GiljoValidationError(
         "title must be a short actionable phrase",
         context={"field": "title"},
@@ -240,7 +194,6 @@ async def test_curated_client_error_surfaces_verbatim(autospec_mcp):
     assert _SANITIZED_TOOL_ERROR[:40] not in text
 
 
-# --- POSITIVE: valid calls still dispatch after the caps/Literals were added --
 
 _VALID_CALLS: dict[str, dict[str, Any]] = {
     "post_to_thread": {
@@ -276,31 +229,18 @@ _VALID_CALLS: dict[str, dict[str, Any]] = {
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool_name", sorted(_VALID_CALLS))
 async def test_valid_hardened_calls_still_dispatch(tool_name, autospec_mcp):
-    """The happy path is the half that matters most: a legitimate call for every
-    hardened tool must still pass arg validation and dispatch (isError False)."""
     client, _accessor = autospec_mcp
     async with client() as session:
         result = await session.call_tool(tool_name, _VALID_CALLS[tool_name])
     assert result.is_error is False, f"{tool_name} valid call failed: {_error_text(result)}"
 
 
-# --- BE-6209e (BE-9118 regroup): api_style / architecture_pattern are PROSE(20k).
-# These write to unbounded Postgres ``Text`` columns (products.api_style,
-# product_architectures.primary_pattern); the MCP-boundary cap is the only limit.
-# BE-9118 (Option B) moved both fields INSIDE the ``architecture`` grouped dict —
-# the per-field cap now lives on the nested Pydantic model, so the same cap must
-# still bite through the transport. Drive the REAL transport (the failing layer is
-# the @mcp.tool arg-validation wrapper, per CLAUDE.md): a value over the OLD 200
-# label cap must dispatch (prose-sized), a legacy short value must dispatch, and
-# the prose cap must still reject at the boundary — all now under architecture={}.
 
 
 @pytest.mark.asyncio
 async def test_update_product_context_long_api_arch_now_dispatches(autospec_mcp):
-    """A prose-sized api_style / architecture_pattern (over the old 200 label cap)
-    passes arg validation inside the BE-9118 architecture group."""
     client, _accessor = autospec_mcp
-    long_value = "REST + gRPC; " * 100  # ~1300 chars: over 200, well under 20_000
+    long_value = "REST + gRPC; " * 100
     assert MCP_NAME_MAX < len(long_value) < MCP_DESCRIPTION_MAX
     async with client() as session:
         result = await session.call_tool(
@@ -315,8 +255,6 @@ async def test_update_product_context_long_api_arch_now_dispatches(autospec_mcp)
 
 @pytest.mark.asyncio
 async def test_update_product_context_legacy_short_values_still_dispatch(autospec_mcp):
-    """Backward-compat: short api_style / architecture_pattern values are still
-    accepted inside the BE-9118 architecture group (no min-length regression)."""
     client, _accessor = autospec_mcp
     async with client() as session:
         result = await session.call_tool(
@@ -331,25 +269,18 @@ async def test_update_product_context_legacy_short_values_still_dispatch(autospe
 
 @pytest.mark.asyncio
 async def test_update_product_context_over_prose_cap_still_rejected(autospec_mcp):
-    """The BE-9118 regroup preserved the cap: a value over MCP_DESCRIPTION_MAX
-    inside the architecture group is still a clean 422 at the boundary, no leak."""
     client, _accessor = autospec_mcp
     async with client() as session:
         result = await session.call_tool(
             "update_product_context",
             {"product_id": str(uuid4()), "architecture": {"api_style": "x" * (MCP_DESCRIPTION_MAX + 1)}},
         )
-    assert result.is_error is True
+    _assert_structured_validation_rejection(result)
     _assert_no_leak(_error_text(result))
 
 
-# ---------------------------------------------------------------------------
-# Section 2 — DB-backed complete_job: AgentExecutionResult validator two-sided.
-# ---------------------------------------------------------------------------
 @pytest_asyncio.fixture
 async def complete_job_client(db_manager, db_session, monkeypatch):
-    """Rebind JobCompletionService to the rolled-back test session (same pattern
-    as test_complete_job_mcp_boundary.phase_mcp_client)."""
     from api import app_state
     from api.endpoints.mcp_tools import _base
     from giljo_mcp.services.job_completion_service import JobCompletionService
@@ -446,8 +377,6 @@ async def _seed_impl_orchestrator(db_session, tenant_key: str) -> AgentJob:
 
 @pytest.mark.asyncio
 async def test_complete_job_valid_result_succeeds(complete_job_client):
-    """POSITIVE: a well-formed result (known fields + extensible extras) passes
-    the AgentExecutionResult validator and completes."""
     new_client, tenant_key, session = complete_job_client
     job = await _seed_impl_orchestrator(session, tenant_key)
 
@@ -459,7 +388,7 @@ async def test_complete_job_valid_result_succeeds(complete_job_client):
                 "result": {
                     "summary": "Did the work",
                     "artifacts": ["a.py", "b.py"],
-                    "files_changed": ["a.py"],  # extra="allow" extra key rides along
+                    "files_changed": ["a.py"],
                 },
             },
         )
@@ -468,32 +397,25 @@ async def test_complete_job_valid_result_succeeds(complete_job_client):
 
 @pytest.mark.asyncio
 async def test_complete_job_wrong_typed_result_is_clean_422(complete_job_client):
-    """NEGATIVE: a wrong-typed known field (summary as int) is rejected as a clean
-    422-style error, NOT a sanitized 500 and NOT a raw DB/JSONB leak."""
     new_client, tenant_key, session = complete_job_client
     job = await _seed_impl_orchestrator(session, tenant_key)
 
     async with new_client() as mcp_session:
         result = await mcp_session.call_tool(
             "complete_job",
-            {"job_id": job.job_id, "result": {"summary": 12345}},  # summary must be str
+            {"job_id": job.job_id, "result": {"summary": 12345}},
         )
     assert result.is_error is True
     text = _error_text(result)
     _assert_no_leak(text)
-    # Actionable, not the generic sanitized message.
     assert _SANITIZED_TOOL_ERROR[:40] not in text
 
 
-# ---------------------------------------------------------------------------
-# Section 3 — unit: the AgentExecutionResult convenience validator.
-# ---------------------------------------------------------------------------
 def test_validate_agent_execution_result_accepts_and_preserves_extras():
     from giljo_mcp.schemas.jsonb_validators import validate_agent_execution_result
 
     payload = {"summary": "ok", "commits": ["abc"], "files_changed": ["a.py"]}
     out = validate_agent_execution_result(payload)
-    # Shape preserved exactly (no reshaping, no dropped extras).
     assert out == payload
 
 

@@ -3,10 +3,4 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Cross-layer contract tests.
-
-Tests in this directory assert that two or more independently-maintained
-layers (e.g. backend Python and frontend Vue) agree on a shared contract.
-A failure here means a code change drifted one side without updating the
-other -- the message will name which side has extras and how to sync them.
-"""
+pass

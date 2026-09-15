@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Template Preview & Diff Endpoints - Handover 0126
-
-Handles template preview and diff operations.
-
-NOTE: This module contains operations not yet in TemplateService.
-Future work: Extract preview/diff logic to TemplateService methods.
-"""
 
 import logging
 import re
@@ -44,7 +36,7 @@ async def preview_template(
     Preview template with variable substitutions.
 
     For Claude (cli_tool='claude'): returns YAML-style preview with frontmatter.
-    For Codex/Gemini: returns plaintext/markdown preview.
+    For Codex/generic: returns plaintext/markdown preview.
 
     Migrated to TemplateService - Handover 1011 Phase 2.
     """
@@ -62,7 +54,6 @@ async def preview_template(
     system_text = template.system_instructions or ""
     user_text = template.user_instructions or ""
 
-    # Apply variable substitutions for preview
     variables = request.variables or {}
 
     def apply_vars(text: str) -> str:
@@ -78,14 +69,12 @@ async def preview_template(
     variables_used = re.findall(r"\{(\w+)\}", system_text + user_text)
 
     if cli_tool == "claude":
-        # YAML frontmatter + markdown sections
         lines = [
             "---",
             f"name: {name}",
             f"description: {description}",
             f"model: {model}",
         ]
-        # Include color when template has background_color mapped to Claude Code
         claude_color = hex_to_claude_color(getattr(template, "background_color", None))
         if claude_color:
             lines.append(f"color: {claude_color}")
@@ -111,7 +100,6 @@ async def preview_template(
             lines.extend(["", "## Success Criteria", *template.success_criteria])
         preview_text = "\n".join(lines)
     else:
-        # Plaintext / markdown preview for non-Claude tools
         header = f"# {name}"
         body_lines = [header, "", system_rendered]
         if user_rendered:

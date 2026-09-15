@@ -1,23 +1,11 @@
-/**
- * TutorialUploadScreen.spec.js — TSK-9206
- *
- * Regression: if the tutorial's run-owned draft product is deleted externally
- * mid-flow, the upload screen used to keep the id-only stub ({id, name:''}) and a
- * later upload targeted the dead product id (500 server-side). fetchProductById
- * swallows the 404 and returns null, so the fix treats a null lookup as "the
- * draft is gone": it drops the stub and emits `product-invalidated` (the overlay
- * clears s.productId), so the next upload takes the fresh-create branch.
- *
- * Edition scope: CE frontend (shared frontend/src; both editions render it).
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
 
 const h = vi.hoisted(() => ({
-  fetchResult: null, // what productStore.fetchProductById resolves to
-  editingRef: null, // the editingProduct ref the component hands the upload composable
-  uploadImpl: null, // side effect of uploadVisionFilesOnAttach (simulates create/edit)
+  fetchResult: null,
+  editingRef: null,
+  uploadImpl: null,
   stageAnalysis: vi.fn(),
 }))
 
@@ -73,7 +61,7 @@ describe('TutorialUploadScreen — stale run-owned draft (TSK-9206)', () => {
   })
 
   it('drops the stale stub and invalidates the run product when the draft is gone', async () => {
-    h.fetchResult = null // deleted externally -> fetchProductById swallows the 404 -> null
+    h.fetchResult = null
     const wrapper = mountScreen('dead-id')
     await flushPromises()
 
@@ -82,7 +70,6 @@ describe('TutorialUploadScreen — stale run-owned draft (TSK-9206)', () => {
 
   it('after invalidation, the next upload creates a FRESH product (never targets the dead id)', async () => {
     h.fetchResult = null
-    // Simulate the create branch: the upload composable mints a brand-new product.
     h.uploadImpl = () => {
       h.editingRef.value = { id: 'fresh-id', name: 'vision' }
     }
@@ -91,7 +78,6 @@ describe('TutorialUploadScreen — stale run-owned draft (TSK-9206)', () => {
 
     await dropFile(wrapper)
 
-    // The upload registered the FRESH product, not the deleted stub id.
     const created = wrapper.emitted('product-created')
     expect(created).toBeTruthy()
     expect(created.at(-1)).toEqual(['fresh-id'])
@@ -101,7 +87,6 @@ describe('TutorialUploadScreen — stale run-owned draft (TSK-9206)', () => {
 
   it('happy path: an existing run-owned product is adopted and reused (no invalidation, edit branch)', async () => {
     h.fetchResult = { id: 'live-id', name: 'Live Product' }
-    // Edit branch: uploading against an existing product does not mint a new one.
     h.uploadImpl = () => {}
     const wrapper = mountScreen('live-id')
     await flushPromises()
@@ -110,7 +95,6 @@ describe('TutorialUploadScreen — stale run-owned draft (TSK-9206)', () => {
 
     await dropFile(wrapper)
 
-    // Re-used the adopted product: no new product-created, staged against live-id.
     expect(wrapper.emitted('product-created')).toBeFalsy()
     expect(h.stageAnalysis).toHaveBeenCalledWith(expect.anything(), 'live-id')
   })

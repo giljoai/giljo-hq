@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-ProjectLaunchService - Project launch orchestration
-
-Handover 0950i: Extracted from ProjectService to reduce god-class size.
-Original launch_project was 219 lines — decomposed into named sub-methods.
-
-Responsibilities:
-- Launch orchestration (creating orchestrator agent job)
-- Pre-launch validation and existing orchestrator detection
-- User field priority and depth config resolution
-- Thin-client prompt generation
-
-Design Principles:
-- Single Responsibility: Only launch orchestration
-- ProjectLaunchService may call ProjectService for activation
-- ProjectService must NOT import from this module
-- All agent lifecycle operations go through AgentJob/AgentExecution models
-- All DB queries filter by tenant_key
-"""
 
 import logging
 from datetime import UTC, datetime
@@ -49,18 +30,6 @@ logger = logging.getLogger(__name__)
 
 
 class ProjectLaunchService:
-    """
-    Service for launching project orchestrators.
-
-    Handles the complete launch lifecycle:
-    1. Validate project exists and is launchable
-    2. Resolve user configuration (field priorities, depth)
-    3. Check for existing orchestrators (reuse if found)
-    4. Create new orchestrator job + execution
-    5. Generate thin-client launch prompt
-
-    Thread Safety: Each instance is session-scoped. Do not share across requests.
-    """
 
     def __init__(
         self,
@@ -69,15 +38,6 @@ class ProjectLaunchService:
         test_session: AsyncSession | None = None,
         websocket_manager: Any | None = None,
     ):
-        """
-        Initialize ProjectLaunchService.
-
-        Args:
-            db_manager: Database manager for async database operations
-            tenant_manager: Tenant manager for multi-tenancy support
-            test_session: Optional AsyncSession for tests
-            websocket_manager: Optional WebSocket manager for real-time updates
-        """
         self.db_manager = db_manager
         self.tenant_manager = tenant_manager
         self._test_session = test_session
@@ -87,7 +47,6 @@ class ProjectLaunchService:
         self._lifecycle_repo = ProjectLifecycleRepository()
 
     def _get_session(self, tenant_key: str | None = None):
-        """Yield a tenant-scoped DB session, honoring an injected test session (shared helper, BE-8000d)."""
         return optional_tenant_session(self.db_manager, tenant_key, self._test_session)
 
     async def launch_project(
@@ -98,26 +57,6 @@ class ProjectLaunchService:
         websocket_manager: Any | None = None,
         project_service: Any | None = None,
     ) -> ProjectLaunchResult:
-        """
-        Launch project orchestrator.
-
-        Creates orchestrator agent job and generates thin-client launch prompt.
-        Activates the project if not already active.
-
-        Args:
-            project_id: Project UUID
-            user_id: Optional user ID for fetching field priorities and depth config
-            launch_config: Optional launch configuration
-            websocket_manager: Optional WebSocket manager for real-time updates
-            project_service: ProjectService instance for activation (injected to avoid circular import)
-
-        Returns:
-            ProjectLaunchResult with orchestrator job ID and launch prompt
-
-        Raises:
-            ResourceNotFoundError: Project not found
-            ProjectStateError: Cannot activate project
-        """
         tenant_key = self.tenant_manager.get_current_tenant()
 
         async with self._get_session(tenant_key) as session:
@@ -129,15 +68,6 @@ class ProjectLaunchService:
 
             existing = await self._find_existing_orchestrator(session, project_id, tenant_key)
             if existing:
-                # CE-0032: single orchestrator entity. No second exec is ever
-                # spawned. The same row persists across the project lifetime —
-                # staging-end leaves it at status='waiting' (see
-                # job_completion_service._apply_completion_status), and the
-                # impl session's first get_job_mission flips it back to
-                # 'working' (mission_service.py:174). _build_reuse_result
-                # handles every reachable case: staging-in-flight (working),
-                # post-staging (waiting), impl-in-flight (working), and the
-                # legacy pre-CE-0032 'complete' state on already-shipped data.
                 return self._build_reuse_result(project, existing)
 
             return await self._spawn_orchestrator(
@@ -159,21 +89,6 @@ class ProjectLaunchService:
         websocket_manager: Any | None,
         project_service: Any | None,
     ) -> Project:
-        """Fetch project and activate if needed.
-
-        Args:
-            session: Database session
-            project_id: Project UUID
-            tenant_key: Tenant key for isolation
-            websocket_manager: Optional WS manager for activation broadcast
-            project_service: ProjectService for activation
-
-        Returns:
-            Project model instance
-
-        Raises:
-            ResourceNotFoundError: Project not found
-        """
         project = await self._project_repo.get_by_id(session, tenant_key, project_id)
 
         if not project:
@@ -193,18 +108,6 @@ class ProjectLaunchService:
         user_id: str | None,
         tenant_key: str,
     ) -> tuple[dict, dict]:
-        """Resolve user field toggles and depth configuration.
-
-        Handover 0840d: Fetch from normalized tables/columns.
-
-        Args:
-            session: Database session
-            user_id: Optional user ID
-            tenant_key: Tenant key for isolation
-
-        Returns:
-            Tuple of (field_toggles dict, depth_config dict)
-        """
         field_toggles: dict = {}
         depth_config: dict | None = None
 
@@ -249,31 +152,9 @@ class ProjectLaunchService:
         project_id: str,
         tenant_key: str,
     ) -> AgentExecution | None:
-        """Check for existing orchestrator to reuse.
-
-        Handover 0485: Prevents duplicate orchestrators when launch_project()
-        is called multiple times.
-
-        Args:
-            session: Database session
-            project_id: Project UUID
-            tenant_key: Tenant key for isolation
-
-        Returns:
-            Existing AgentExecution if found, None otherwise
-        """
         return await self._lifecycle_repo.find_non_decommissioned_orchestrator(session, tenant_key, project_id)
 
     def _build_reuse_result(self, project: Project, existing: AgentExecution) -> ProjectLaunchResult:
-        """Build launch result for reusing an existing orchestrator.
-
-        Args:
-            project: Project model instance
-            existing: Existing orchestrator AgentExecution
-
-        Returns:
-            ProjectLaunchResult with existing orchestrator info
-        """
         self._logger.info(
             f"[LAUNCH] Reusing existing orchestrator {existing.job_id} "
             f"for project {project.id} (status={existing.status})"
@@ -298,24 +179,8 @@ class ProjectLaunchService:
         user_id: str | None,
         websocket_manager: Any | None,
     ) -> ProjectLaunchResult:
-        """Create new orchestrator job and execution records.
-
-        Args:
-            session: Database session
-            project: Project model instance
-            project_id: Project UUID
-            tenant_key: Tenant key for isolation
-            field_toggles: User field priority toggles
-            depth_config: User depth configuration
-            user_id: Optional user ID
-            websocket_manager: Optional WS manager for broadcast
-
-        Returns:
-            ProjectLaunchResult with new orchestrator info
-        """
         orchestrator_job_id = str(uuid4())
 
-        # Create AgentJob (work order) - stores mission ONCE (Handover 0358a)
         agent_job = AgentJob(
             job_id=orchestrator_job_id,
             tenant_key=tenant_key,
@@ -334,8 +199,6 @@ class ProjectLaunchService:
         )
         await self._lifecycle_repo.add_entity(session, agent_job)
 
-        # Create AgentExecution (executor) - first instance (Handover 0358a)
-        # CE-0026: spawn at launch is the staging session — phase='staging'.
         agent_execution = AgentExecution(
             agent_id=str(uuid4()),
             job_id=orchestrator_job_id,
@@ -349,7 +212,6 @@ class ProjectLaunchService:
         )
         await self._lifecycle_repo.add_entity(session, agent_execution)
 
-        # Set staging_status to 'staging' when orchestrator is launched
         project.staging_status = "staging"
         project.updated_at = datetime.now(UTC)
 
@@ -363,7 +225,6 @@ class ProjectLaunchService:
             f"Launched project {sanitize(project_id)} with orchestrator job {sanitize(orchestrator_job_id)}"
         )
 
-        # Broadcast WebSocket event
         if websocket_manager:
             try:
                 project_data = _build_ws_project_data(project)
@@ -388,17 +249,6 @@ class ProjectLaunchService:
 
     @staticmethod
     def _generate_launch_prompt(project_name: str, project_id: str, mission: str | None, job_id: str) -> str:
-        """Generate thin-client launch prompt for orchestrator.
-
-        Args:
-            project_name: Human-readable project name
-            project_id: Project UUID
-            mission: Project mission statement
-            job_id: Orchestrator job UUID
-
-        Returns:
-            Launch prompt string
-        """
         return f"""Launch orchestrator for project: {project_name}
 
 Project ID: {project_id}

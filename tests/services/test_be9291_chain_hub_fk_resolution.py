@@ -3,28 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Chain-hub discovery resolves on a real FK, not a subject substring (BE-9291).
-
-A chain hub used to be found by substring-searching its own SUBJECT for the run_id
-(``list_threads(query="{run_id}")``), which made a free-text display field
-load-bearing lookup machinery. When that broke, NOTHING errored: a sub-orchestrator
-simply never found its hub and went quiet.
-
-``comm_threads.sequence_run_id`` is that link made structural. Resolution follows the
-``resolve_or_create_bound_thread`` precedence idiom:
-
-  1. FK match on ``sequence_run_id``  -> that thread (subject irrelevant);
-  2. otherwise the legacy subject substring, so a hub the backfill could not reach
-     (or one a conductor created without stamping) still resolves instead of going
-     silent again;
-  3. nothing matches -> ``None``, an explicit absence the caller can act on.
-
-THE test in this file is ``test_hub_resolves_by_fk_when_subject_omits_the_run_id``:
-a hub whose subject contains no run_id at all. That is what proves discovery genuinely
-moved off the string rather than merely gaining a second path to it.
-
-Real DB (rollback-isolated ``db_session``), tenant-scoped (ADR-009).
-"""
 
 from __future__ import annotations
 
@@ -51,8 +29,6 @@ pytestmark = pytest.mark.asyncio
 _JAN = datetime(2026, 1, 1, tzinfo=UTC)
 _FEB = datetime(2026, 2, 1, tzinfo=UTC)
 
-# A realistic run id. The point of every subject below is whether this string
-# appears in it — so it is spelled out once and never interpolated by accident.
 _RUN = "0f7c1d2e-9a41-4b8e-8c33-5a6b7c8d9e01"
 _OTHER_RUN = "1a2b3c4d-5e6f-4071-8899-aabbccddeeff"
 
@@ -62,7 +38,6 @@ def _svc(db_manager, db_session) -> CommThreadService:
 
 
 async def _seed_run(db_session, tenant: str, run_id: str) -> None:
-    """Insert a minimal sequence_runs row — the FK target."""
     with tenant_session_context(db_session, tenant):
         await ensure_default_types_seeded(db_session, tenant)
         await db_session.execute(
@@ -90,17 +65,9 @@ async def _seed_thread(db_session, tenant, tid, serial, subject, created, run_id
         await db_session.flush()
 
 
-# ---------------------------------------------------------------------------
-# The regression test that matters
-# ---------------------------------------------------------------------------
 
 
 async def test_hub_resolves_by_fk_when_subject_omits_the_run_id(db_manager, db_session):
-    """A subject with NO run_id in it anywhere still resolves. This is the whole project.
-
-    Before the FK existed this could not be done at all: the only handle on the hub was
-    the substring, so a subject like this one was undiscoverable — silently.
-    """
     tenant = "tk_be9291_fk_only"
     await _seed_run(db_session, tenant, _RUN)
     subject = "Chain: ship the widget"
@@ -115,12 +82,6 @@ async def test_hub_resolves_by_fk_when_subject_omits_the_run_id(db_manager, db_s
 
 
 async def test_legacy_subject_search_finds_nothing_and_raises_nothing(db_manager, db_session):
-    """The silent failure, reproduced: the OLD mechanism returns an empty list, not an error.
-
-    This is why the defect was invisible. Kept as a test because "it fails quietly" is the
-    load-bearing fact about the mechanism being replaced — if this ever starts raising, the
-    urgency of the FK path changes and someone should know.
-    """
     tenant = "tk_be9291_silent"
     await _seed_run(db_session, tenant, _RUN)
     await _seed_thread(db_session, tenant, "t_hub", 901, "Chain: ship the widget", _JAN, run_id=_RUN)
@@ -130,17 +91,9 @@ async def test_legacy_subject_search_finds_nothing_and_raises_nothing(db_manager
     assert legacy["threads"] == [], "substring discovery finds nothing here — and says so by staying quiet"
 
 
-# ---------------------------------------------------------------------------
-# Precedence + isolation
-# ---------------------------------------------------------------------------
 
 
 async def test_legacy_subject_hub_still_resolves_without_the_fk(db_manager, db_session):
-    """A pre-migration hub the backfill could not reach must not become undiscoverable.
-
-    Removing the substring dependency must not remove the substring TOLERANCE — that is
-    the (a)-shaped answer to "what happens to rows already in the old shape".
-    """
     tenant = "tk_be9291_legacy"
     await _seed_run(db_session, tenant, _RUN)
     await _seed_thread(db_session, tenant, "t_legacy", 902, f"Chain: old thing - run {_RUN}", _JAN, run_id=None)
@@ -151,10 +104,8 @@ async def test_legacy_subject_hub_still_resolves_without_the_fk(db_manager, db_s
 
 
 async def test_fk_wins_over_a_subject_match(db_manager, db_session):
-    """Both present -> the FK decides. The structural link outranks the string, always."""
     tenant = "tk_be9291_precedence"
     await _seed_run(db_session, tenant, _RUN)
-    # The decoy is OLDER, so "oldest wins" alone would pick it. Only FK precedence does not.
     await _seed_thread(db_session, tenant, "t_decoy", 903, f"chatter about run {_RUN}", _JAN, run_id=None)
     await _seed_thread(db_session, tenant, "t_hub", 904, "Chain: ship the widget", _FEB, run_id=_RUN)
 
@@ -164,7 +115,6 @@ async def test_fk_wins_over_a_subject_match(db_manager, db_session):
 
 
 async def test_no_hub_returns_none_rather_than_a_wrong_thread(db_manager, db_session):
-    """No hub for this run -> None. Never another run's hub."""
     tenant = "tk_be9291_absent"
     await _seed_run(db_session, tenant, _RUN)
     await _seed_run(db_session, tenant, _OTHER_RUN)
@@ -176,7 +126,6 @@ async def test_no_hub_returns_none_rather_than_a_wrong_thread(db_manager, db_ses
 
 
 async def test_a_soft_deleted_hub_is_not_resolved(db_manager, db_session):
-    """Soft-deleted threads are invisible to every other read here; discovery is no exception."""
     tenant = "tk_be9291_deleted"
     await _seed_run(db_session, tenant, _RUN)
     await _seed_thread(db_session, tenant, "t_gone", 906, "Chain: ship the widget", _JAN, run_id=_RUN)
@@ -193,7 +142,6 @@ async def test_a_soft_deleted_hub_is_not_resolved(db_manager, db_session):
 
 
 async def test_another_tenants_hub_is_never_resolved(db_manager, db_session):
-    """Tenant isolation on the discovery path (ADR-009). A run id is not a capability."""
     mine, theirs = "tk_be9291_mine", "tk_be9291_theirs"
     await _seed_run(db_session, theirs, _RUN)
     await _seed_thread(db_session, theirs, "t_theirs", 907, "Chain: not yours", _JAN, run_id=_RUN)
@@ -204,17 +152,9 @@ async def test_another_tenants_hub_is_never_resolved(db_manager, db_session):
     assert out is None, "a hub in another tenant must not resolve, FK match or not"
 
 
-# ---------------------------------------------------------------------------
-# Creation: the conductor stamps the link, and a bad id never reaches the FK
-# ---------------------------------------------------------------------------
 
 
 async def test_create_thread_stamps_the_run_and_the_hub_is_then_discoverable(db_manager, db_session):
-    """The other half of the loop: what the conductor writes is what discovery reads.
-
-    Deliberately created with a subject carrying NO run_id — a hub born the way step 5
-    of this project lets conductors write them.
-    """
     tenant = "tk_be9291_create"
     await _seed_run(db_session, tenant, _RUN)
     svc = _svc(db_manager, db_session)
@@ -227,7 +167,6 @@ async def test_create_thread_stamps_the_run_and_the_hub_is_then_discoverable(db_
 
 
 async def test_create_thread_rejects_a_run_id_that_is_not_a_run_here(db_manager, db_session):
-    """An unknown run id is a 422 from the service, never a 500 from the constraint."""
     tenant = "tk_be9291_badrun"
     await _seed_run(db_session, tenant, _RUN)
     svc = _svc(db_manager, db_session)
@@ -237,11 +176,6 @@ async def test_create_thread_rejects_a_run_id_that_is_not_a_run_here(db_manager,
 
 
 async def test_create_thread_rejects_another_tenants_run_id(db_manager, db_session):
-    """``sequence_runs.id`` is globally unique, so the FK alone would ACCEPT this.
-
-    Only the tenant-scoped check refuses it. Without this, a run id learned from
-    anywhere would let a caller link a thread across the isolation boundary (ADR-009).
-    """
     mine, theirs = "tk_be9291_cmine", "tk_be9291_ctheirs"
     await _seed_run(db_session, theirs, _RUN)
     await _seed_run(db_session, mine, _OTHER_RUN)
@@ -252,20 +186,6 @@ async def test_create_thread_rejects_another_tenants_run_id(db_manager, db_sessi
 
 
 async def test_create_thread_refuses_a_second_hub_and_names_the_first(db_manager, db_session):
-    """A restaged conductor must not be able to give a run a second hub.
-
-    THE forward half of the double-link defect. The backfill guard closes the
-    historical path; this closes the one a live conductor actually walks — step 0
-    succeeds, the conductor dies before recording the thread id, it restages and runs
-    step 0 again. Both hubs would carry the link, both would land in the FK branch of
-    the resolver's CASE, and ``created_at`` ascending would answer every
-    sub-orchestrator with the first, abandoned thread while the conductor polled the
-    second. Nothing raises; the chain just goes quiet.
-
-    The refusal NAMES the existing hub, because a restaged conductor's correct move is
-    to adopt it. An error that only said "no" would strand the caller and move the
-    failure rather than remove it.
-    """
     tenant = "tk_be9291_second_hub"
     await _seed_run(db_session, tenant, _RUN)
     svc = _svc(db_manager, db_session)
@@ -283,12 +203,6 @@ async def test_create_thread_refuses_a_second_hub_and_names_the_first(db_manager
 
 
 async def test_a_second_hub_is_allowed_once_the_first_is_soft_deleted(db_manager, db_session):
-    """The other side of the guard: it refuses a collision, not a replacement.
-
-    A soft-deleted hub is already invisible to resolution, so a conductor recreating
-    one is doing the right thing. A guard that refused this would make a deleted
-    thread permanently poison its own run.
-    """
     tenant = "tk_be9291_replace_hub"
     await _seed_run(db_session, tenant, _RUN)
     svc = _svc(db_manager, db_session)
@@ -308,11 +222,6 @@ async def test_a_second_hub_is_allowed_once_the_first_is_soft_deleted(db_manager
 
 
 async def test_another_tenants_hub_does_not_block_creation(db_manager, db_session):
-    """The new guard is tenant-scoped, so it can neither leak nor refuse across tenants.
-
-    A cross-tenant run id is refused by the EXISTING check, and this pins that the new
-    one adds no second, wider reason to say no.
-    """
     mine, theirs = "tk_be9291_hmine", "tk_be9291_htheirs"
     await _seed_run(db_session, mine, _RUN)
     await _seed_run(db_session, theirs, _OTHER_RUN)
@@ -325,7 +234,6 @@ async def test_another_tenants_hub_does_not_block_creation(db_manager, db_sessio
 
 
 async def test_a_plain_thread_is_unaffected(db_manager, db_session):
-    """Nearly every thread is not a hub. Creating one without a run stays exactly as it was."""
     tenant = "tk_be9291_plain"
     with tenant_session_context(db_session, tenant):
         await ensure_default_types_seeded(db_session, tenant)
@@ -336,13 +244,6 @@ async def test_a_plain_thread_is_unaffected(db_manager, db_session):
 
 
 async def test_purging_the_run_unlinks_the_hub_instead_of_deleting_it(db_manager, db_session):
-    """``ON DELETE SET NULL`` is load-bearing, so it gets a test rather than a comment.
-
-    A finished chain run is PURGED (SequenceRunService.purge_run) — that is the happy
-    path, not an edge case. Under CASCADE this delete would take the hub thread and its
-    entire coordination history with it every time a chain completed; under RESTRICT it
-    would raise and break chain completion outright. The thread must survive, unlinked.
-    """
     tenant = "tk_be9291_purge"
     await _seed_run(db_session, tenant, _RUN)
     await _seed_thread(db_session, tenant, "t_hub", 908, "Chain: ship the widget", _JAN, run_id=_RUN)
@@ -363,18 +264,9 @@ async def test_purging_the_run_unlinks_the_hub_instead_of_deleting_it(db_manager
     assert row[0] is None, "the link is cleared, not cascaded"
 
 
-# ---------------------------------------------------------------------------
-# Composition pinned BY IDENTITY
-# ---------------------------------------------------------------------------
 
 
 def test_the_repository_serves_hub_resolution_by_identity():
-    """Served BY the mixin, never shadowed on the repository — one source of truth.
-
-    A redefinition on the concrete class would leave the mixin copy dead while still
-    looking authoritative, which is the exact failure the five extractions before this
-    one were pinned against.
-    """
     assert CommThreadRepository.resolve_chain_hub_thread is RepoChainHubMixin.resolve_chain_hub_thread
     assert CommThreadRepository._require_sequence_run is RepoChainHubMixin._require_sequence_run
 
@@ -384,33 +276,15 @@ def test_the_service_serves_hub_resolution_by_identity():
 
 
 def test_the_service_serves_the_conductor_resolver_by_identity():
-    """The service serves the BUILDER MODULE's resolver — never a local shadow.
-
-    Same one-source-of-truth property the two assertions above pin for the hub mixins.
-    """
     assert mission_orchestration_service.resolve_conductor_early_return is resolve_conductor_early_return
 
 
 async def test_the_conductor_branch_is_served_by_the_extracted_resolver(monkeypatch):
-    """The project-less conductor branch is SERVED BY ``resolve_conductor_early_return``.
-
-    BE-9291-F1 lifted that branch out of ``_build_orchestrator_context`` (296 lines
-    against a 295 shrink-only budget — the guardrail-7 breach that reddened CI) and out
-    of the module entirely, which sat at exactly its 835-line file budget. The hazard of
-    any extraction is that someone later re-inlines the logic and leaves the extracted
-    function dead while it still looks authoritative.
-
-    Containment cannot catch that: a re-inlined duplicate contains the same code. Only
-    SUBSTITUTION can. Swapping the resolver for a sentinel must change what the caller
-    returns — so if the branch is ever inlined again, the sentinel is never consulted
-    and this test goes red. Verified to bite: re-inlining the branch turns THIS test red
-    while every conductor suite stays green.
-    """
     svc = MissionOrchestrationService(db_manager=None, tenant_manager=TenantManager())  # type: ignore[arg-type]
 
     class _Job:
         job_type = "orchestrator"
-        project_id = None  # the project-less conductor — this is the branch under test
+        project_id = None
 
     class _Execution:
         agent_id = "be9291-conductor-agent"

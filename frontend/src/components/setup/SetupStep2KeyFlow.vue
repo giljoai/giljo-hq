@@ -1,31 +1,24 @@
 <template>
-  <!-- API key flow — Card 1 (Generate) + Card 2 (Command). Shown for key + manual
-       methods, or when a sign-in tool's fallback is toggled on. -->
   <div class="key-flow" data-testid="key-flow-section">
-    <!-- Card 1 — Generate key -->
     <div class="numbered-card">
       <span class="numbered-card-step">1.</span>
       <div class="numbered-card-body">
-        <!-- Checking for existing key -->
         <div v-if="checkingKey" class="api-key-status" data-testid="key-status-checking">
           <v-progress-circular size="16" width="2" indeterminate :color="colorMuted" />
           <span class="status-text">Checking for existing key...</span>
         </div>
 
-        <!-- Generating key -->
         <div v-else-if="generatingKey" class="api-key-status" data-testid="key-status-generating">
           <v-progress-circular size="16" width="2" indeterminate :color="colorMuted" />
           <span class="status-text">Generating API key...</span>
         </div>
 
-        <!-- Fresh key generated (embedded in the command below — never shown raw) -->
         <div v-else-if="generatedKey" class="api-key-status" data-testid="key-status-generated">
           <v-icon size="16" :color="colorSuccess">mdi-check-circle</v-icon>
           <span class="status-text status-text--key">Key generated</span>
           <span class="key-inline-note">already inside the command below</span>
         </div>
 
-        <!-- Existing key found (prefix only, no plaintext) -->
         <div v-else-if="existingKeyPrefix" class="api-key-existing" data-testid="key-status-existing">
           <div class="api-key-status">
             <v-icon size="16" :color="colorSuccess">mdi-check-circle</v-icon>
@@ -44,7 +37,6 @@
           </v-btn>
         </div>
 
-        <!-- No key at all -->
         <div v-else class="api-key-status api-key-status--empty" data-testid="key-status-empty">
           <span class="status-text">Create the API key this tool will use</span>
           <v-btn
@@ -66,10 +58,8 @@
       </div>
     </div>
 
-    <!-- Card 2 — Configuration command (only when key is available) -->
     <div v-if="hasKey" class="key-flow-config">
 
-      <!-- HTTPS cert trust (Node.js tools) -->
       <template v-if="needsCertTrust">
         <div class="platform-pill-row">
           <button :class="['platform-pill', 'smooth-border', { 'platform-pill--active': platform === 'windows' }]" data-testid="platform-windows-btn" @click="$emit('set-platform', 'windows')">PowerShell</button>
@@ -99,13 +89,11 @@
         </div>
       </template>
 
-      <!-- Platform toggle for Codex env var (if not already shown for HTTPS) -->
       <div v-if="!needsCertTrust && activeNormalizedId === 'codex'" class="platform-pill-row">
         <button :class="['platform-pill', 'smooth-border', { 'platform-pill--active': platform === 'windows' }]" @click="$emit('set-platform', 'windows')">PowerShell</button>
         <button :class="['platform-pill', 'smooth-border', { 'platform-pill--active': platform === 'unix' }]" @click="$emit('set-platform', 'unix')">Linux / macOS</button>
       </div>
 
-      <!-- Codex: Environment Variable -->
       <div v-if="activeNormalizedId === 'codex'" class="config-block smooth-border" data-testid="codex-env-block">
         <div class="config-block-header">
           <span class="config-block-label">Environment Variable</span>
@@ -120,11 +108,8 @@
         <pre class="config-code">{{ envVarText }}</pre>
       </div>
 
-      <!-- Main config command (bearer for CLI tools, JSON server config for generic) -->
       <div class="config-block smooth-border" data-testid="config-command-block">
         <div class="config-block-header">
-          <!-- FE-9383: name the client on the snippet itself — each CLI has its own
-               flag syntax, so an unlabeled command invites pasting it into the wrong tool. -->
           <span class="config-block-label" data-testid="config-block-label">{{ isGeneric ? `${toolLabel} server config (key included)` : `Paste in your ${toolLabel} terminal (key included)` }}</span>
           <v-btn
             icon="mdi-content-copy"
@@ -151,9 +136,6 @@ defineProps({
   hasKey:            { type: Boolean, required: true },
   needsCertTrust:    { type: Boolean, required: true },
   activeNormalizedId: { type: String, required: true },
-  // Display name of the client this snippet targets (FE-9383). Defaulted so an
-  // existing mount that has not been updated degrades to the previous wording
-  // rather than rendering "undefined".
   toolLabel:         { type: String,  default: 'your tool' },
   platform:          { type: String,  required: true },
   certCommand:       { type: String,  default: '' },

@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 
-// SetupWizardOverlay pulls in the three step components; shallow-stub them and
-// Vuetify so we test only the wizard chrome (Gradient Rail redesign, FE-6259b).
 async function mountOverlay(props = {}) {
   const SetupWizardOverlay = (await import('@/components/setup/SetupWizardOverlay.vue')).default
   return mount(SetupWizardOverlay, {
@@ -137,18 +135,18 @@ describe('SetupWizardOverlay — Next button gating (canProceed)', () => {
   })
 })
 
-describe('SetupWizardOverlay — Choose-tools grid (FE-9204: six tools)', () => {
-  it('renders all six tool cards, including OpenCode and the generic client', async () => {
+describe('SetupWizardOverlay — Choose-tools grid (FE-9204 / INF-9605a: four tools)', () => {
+  it('renders all four tool cards, including OpenCode and the generic client', async () => {
     const wrapper = await mountOverlay({ currentStep: 0, selectedTools: [] })
-    for (const id of ['claude_code', 'codex_cli', 'gemini_cli', 'antigravity_cli', 'opencode', 'generic']) {
+    for (const id of ['claude_code', 'codex_cli', 'opencode', 'generic']) {
       expect(wrapper.find(`[data-testid="tool-select-${id}"]`).exists()).toBe(true)
     }
   })
 
-  it('shows a method tag per card (SaaS default: sign-in tools + key-only + manual)', async () => {
+  it('shows a method tag per card (SaaS default: sign-in tools + manual)', async () => {
     const wrapper = await mountOverlay({ currentStep: 0, selectedTools: [] })
     expect(wrapper.find('[data-testid="tool-method-claude_code"]').text()).toBe('SIGN-IN OR KEY')
-    expect(wrapper.find('[data-testid="tool-method-antigravity_cli"]').text()).toBe('API KEY ONLY')
+    expect(wrapper.find('[data-testid="tool-method-codex_cli"]').text()).toBe('SIGN-IN OR KEY')
     expect(wrapper.find('[data-testid="tool-method-generic"]').text()).toBe('MANUAL CONFIG')
   })
 
@@ -192,8 +190,6 @@ describe('SetupWizardOverlay — Launch step (step 3) footer + rerun', () => {
 
 describe('SetupWizardOverlay — learning mode removed (FE-9200)', () => {
   it('renders the Gradient Rail regardless of the legacy mode prop', async () => {
-    // The learning module moved to components/tutorial/TutorialOverlay.vue;
-    // the wizard now owns setup mode only.
     const wrapper = await mountOverlay({ mode: 'learning', currentStep: 0 })
     expect(wrapper.text()).not.toContain('How to Use GiljoAI MCP')
     expect(wrapper.find('[aria-label="Setup Giljo HQ"]').exists()).toBe(true)

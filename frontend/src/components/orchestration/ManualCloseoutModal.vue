@@ -11,7 +11,6 @@
     @keydown.esc="handleClose"
   >
     <v-card v-draggable class="smooth-border">
-      <!-- Modal header -->
       <div id="manual-closeout-title" class="dlg-header dlg-header--primary dlg-header--sticky">
         <v-icon class="dlg-icon" icon="mdi-check-circle-outline" />
         <span class="dlg-title">Complete Project: {{ projectName }}</span>
@@ -23,7 +22,6 @@
       <v-divider />
 
       <v-card-text class="pa-4">
-        <!-- 360 Memory Info Banner -->
         <v-alert
           type="info"
           variant="tonal"
@@ -41,12 +39,10 @@
           </span>
         </v-alert>
 
-        <!-- Error state -->
         <v-alert v-if="error" type="error" variant="tonal" density="compact" class="mb-4" closable @click:close="error = null">
           {{ error }}
         </v-alert>
 
-        <!-- 360 Memory Summary Field -->
         <div class="mb-4">
           <v-textarea
             v-model="summary"
@@ -63,7 +59,6 @@
           />
         </div>
 
-        <!-- Git Commits Section -->
         <div class="commit-section mb-4">
           <div class="commit-section__header mb-2">
             <span class="text-body-medium font-weight-medium" style="color: var(--text-secondary)">
@@ -74,7 +69,6 @@
             </span>
           </div>
 
-          <!-- Commit rows -->
           <div
             v-for="(row, idx) in commitRows"
             :key="row.id"
@@ -82,7 +76,6 @@
             :data-testid="`commit-row-${idx}`"
           >
             <div class="commit-row__required d-flex gap-2 mb-2">
-              <!-- SHA (required) -->
               <v-text-field
                 v-model="row.sha"
                 :data-testid="`commit-sha-${idx}`"
@@ -94,7 +87,6 @@
                 aria-label="Commit SHA"
                 hide-details
               />
-              <!-- Message (required) -->
               <v-text-field
                 v-model="row.message"
                 :data-testid="`commit-msg-${idx}`"
@@ -106,7 +98,6 @@
                 aria-label="Commit message"
                 hide-details
               />
-              <!-- Remove button -->
               <v-btn
                 icon
                 variant="text"
@@ -119,7 +110,6 @@
               </v-btn>
             </div>
 
-            <!-- Optional fields: author + date -->
             <div class="commit-row__optional d-flex gap-2">
               <v-text-field
                 v-model="row.author"
@@ -146,7 +136,6 @@
             </div>
           </div>
 
-          <!-- Add commit button -->
           <v-btn
             variant="text"
             size="small"
@@ -160,7 +149,6 @@
           </v-btn>
         </div>
 
-        <!-- Manual confirmation checkbox -->
         <div class="mt-4">
           <v-checkbox
             v-model="confirmed"
@@ -177,7 +165,6 @@
 
       <v-divider />
 
-      <!-- Modal actions -->
       <div class="dlg-footer">
         <v-btn variant="text" @click="handleClose">
           Cancel
@@ -221,26 +208,21 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'completed'])
 
-// Vuetify display breakpoints
 const { mobile } = useDisplay()
 const isMobile = computed(() => mobile.value)
 
-// Reactive state
 const summary = ref('')
 const confirmed = ref(false)
 const completing = ref(false)
 const error = ref(null)
 
-// Commit rows — each row has a unique id for keying, plus the four payload fields
 let _rowCounter = 0
 const commitRows = ref([])
 
-// Computed
 const canSubmit = computed(() => {
   return confirmed.value && summary.value.length >= 50
 })
 
-// Methods
 const addCommitRow = () => {
   commitRows.value.push({
     id: ++_rowCounter,
@@ -255,11 +237,6 @@ const removeCommitRow = (idx) => {
   commitRows.value.splice(idx, 1)
 }
 
-/**
- * Build the git_commits payload array from non-empty rows.
- * A row is only included when BOTH sha and message are non-empty.
- * Optional fields (author, date) are only included when filled.
- */
 const buildGitCommits = () => {
   const commits = []
   for (const row of commitRows.value) {

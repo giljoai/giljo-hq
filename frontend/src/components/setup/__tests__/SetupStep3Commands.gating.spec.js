@@ -1,15 +1,6 @@
-/**
- * FE-9497 regression: the wizard's install step must not let a user past Next
- * until BOTH skills and agents actually install in THIS run.
- *
- * These mount the REAL SetupStep3Commands inside the real wizard. The older
- * SetupWizardOverlay.spec.js stubs that child, which is exactly why the three
- * defects below shipped without a failing test.
- */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
-// Minimal WebSocket store: capture handlers so a test can fire install events.
 const handlers = {}
 vi.mock('@/stores/websocket', () => ({
   useWebSocketStore: () => ({
@@ -27,7 +18,6 @@ async function mountOverlay(props = {}) {
     global: {
       stubs: {
         teleport: true,
-        // Step 2 stub reports one connected tool, matching the real hand-off.
         SetupStep2Connect: {
           emits: ['can-proceed', 'step-data'],
           template: '<div />',
@@ -48,7 +38,6 @@ async function mountOverlay(props = {}) {
   })
 }
 
-/** Walk Connect -> Install so step 3 receives a real connectedTools list. */
 async function mountOnInstallStep(props = {}) {
   const wrapper = await mountOverlay({ currentStep: 1, ...props })
   await wrapper.vm.$nextTick()
@@ -71,19 +60,16 @@ describe('FE-9497 — install step gates Next on real installs', () => {
     expect(nextBtn(wrapper).attributes('disabled')).not.toBeUndefined()
   })
 
-  it('skills only: Next stays disabled (agents are required too)', async () => {
+  it('skills installed: Next becomes enabled (BE-9605c: no agents step)', async () => {
     const wrapper = await mountOnInstallStep()
     handlers['setup:commands_installed']({ tool_name: 'claude_code' })
-    await wrapper.vm.$nextTick()
-    expect(nextBtn(wrapper).attributes('disabled')).not.toBeUndefined()
-  })
-
-  it('skills + agents: Next becomes enabled', async () => {
-    const wrapper = await mountOnInstallStep()
-    handlers['setup:commands_installed']({ tool_name: 'claude_code' })
-    handlers['setup:agents_downloaded']({})
     await wrapper.vm.$nextTick()
     expect(nextBtn(wrapper).attributes('disabled')).toBeUndefined()
+  })
+
+  it('the retired agents_downloaded event is not subscribed', async () => {
+    await mountOnInstallStep()
+    expect(handlers['setup:agents_downloaded']).toBeUndefined()
   })
 
   it('giljo_setup bootstrap event alone enables Next', async () => {
@@ -94,11 +80,6 @@ describe('FE-9497 — install step gates Next on real installs', () => {
   })
 
   it('the checklist starts unticked even for a user who finished setup before', async () => {
-    // The pre-fix code took a setupStepCompleted prop and pre-ticked BOTH boxes
-    // when it was >= 3, handing every repeat user an enabled Next without
-    // installing anything. The prop is gone, so passing it here is inert on the
-    // fixed component and is deliberately kept as the fail-first guard: reinstate
-    // the pre-tick path and this test goes red again.
     const wrapper = await mountOnInstallStep({ isRerun: true, setupStepCompleted: 4 })
     expect(wrapper.findAll('.checklist-text--done')).toHaveLength(0)
     expect(nextBtn(wrapper).attributes('disabled')).not.toBeUndefined()

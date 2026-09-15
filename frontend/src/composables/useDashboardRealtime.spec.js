@@ -1,13 +1,3 @@
-/**
- * useDashboardRealtime.spec.js — FE-9501c (D7)
- *
- * DashboardView had ZERO WebSocket wiring before this. Proves the composable
- * actually subscribes to the three lifecycle events, debounces a burst into
- * ONE refetch, and unsubscribes on unmount -- mirrors useTemplateRealtime's
- * "prove the wiring is live, not just present" spec shape.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { mount } from '@vue/test-utils'

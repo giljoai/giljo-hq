@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6209b: get_agent_mission surfaces the LIVE project phase, not a stale snapshot.
-
-Field report friction #2: during the implementation phase the ``project_phase``
-field on the mission payload still read ``"staging"``. Cause: every orchestrator
-AgentExecution is minted with ``project_phase="staging"`` (the column is frozen at
-creation), and the mission payload read that frozen column directly — so once
-implementation launched, the value never updated.
-
-The fix derives ``project_phase`` at read time from the authoritative implementation
-gate (``project.implementation_launched_at`` — the same signal the staging→
-implementation branch and assert_implementation_ready use) instead of the frozen
-column.
-
-These tests pin the behaviour at the service layer (MissionService.get_agent_mission,
-via the OrchestrationService facade), using fully-mocked DB sessions (matching the
-existing get_agent_mission unit tests). Parallel-safe: no DB, no module-level
-mutable state, no ordering deps. CE / tenant-scoped.
-"""
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -46,7 +28,7 @@ def mock_db_manager():
     session.commit = AsyncMock()
     session.refresh = AsyncMock()
     session.add = MagicMock()
-    session.info = {}  # tenant_session_context save/restore target
+    session.info = {}
     db_manager.get_session_async = MagicMock(return_value=session)
     return db_manager, session
 
@@ -58,8 +40,6 @@ def orchestration_service(mock_db_manager):
 
 
 def _orchestrator_job_execution(frozen_phase: str = "staging"):
-    """Orchestrator job + execution whose project_phase column is frozen at staging
-    (the realistic state — every orchestrator execution is minted 'staging')."""
     job_id = str(uuid4())
     job = AgentJob(
         job_id=job_id,
@@ -83,8 +63,6 @@ def _orchestrator_job_execution(frozen_phase: str = "staging"):
 
 
 def _wire_session(session, job, execution, *, implementation_launched_at):
-    """Wire the mocked session to answer get_agent_mission's queries, with a project
-    whose implementation_launched_at the caller controls (the gate signal)."""
     project = SimpleNamespace(
         id=job.project_id,
         tenant_key=job.tenant_key,
@@ -124,9 +102,6 @@ def _wire_session(session, job, execution, *, implementation_launched_at):
 
 @pytest.mark.asyncio
 async def test_project_phase_reads_implementation_once_launched(orchestration_service, mock_db_manager):
-    """Core regression: with the execution frozen at project_phase='staging', once
-    implementation has launched the payload must report 'implementation' (the live
-    value), not the stale frozen column."""
     _db, session = mock_db_manager
     job, execution = _orchestrator_job_execution(frozen_phase="staging")
     _wire_session(session, job, execution, implementation_launched_at=datetime.now(UTC))
@@ -138,12 +113,6 @@ async def test_project_phase_reads_implementation_once_launched(orchestration_se
 
 @pytest.mark.asyncio
 async def test_project_phase_reads_staging_before_launch(orchestration_service, mock_db_manager):
-    """Before implementation launches the payload reports 'staging'.
-
-    Pre-launch the solo gate would BLOCK an orchestrator, so this mirrors the only
-    pre-launch path that surfaces a mission (a chain member) by stubbing the
-    chain-member check — isolating the phase derivation under test.
-    """
     _db, session = mock_db_manager
     job, execution = _orchestrator_job_execution(frozen_phase="staging")
     _wire_session(session, job, execution, implementation_launched_at=None)
@@ -156,8 +125,6 @@ async def test_project_phase_reads_staging_before_launch(orchestration_service, 
 
 @pytest.mark.asyncio
 async def test_non_orchestrator_phase_is_none(orchestration_service, mock_db_manager):
-    """Worker agents have no phase semantics — project_phase stays None even though
-    the execution carries a frozen column value."""
     _db, session = mock_db_manager
     job, execution = _orchestrator_job_execution(frozen_phase="staging")
     job.job_type = "agent"

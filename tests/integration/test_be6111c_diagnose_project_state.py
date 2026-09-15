@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6111c — transport regression for the net-new diagnose_project_state tool.
-
-BE-5042 discipline: a tool can pass every service-layer test yet fail to register
-on the FastMCP ``mcp`` instance — so this exercises diagnose_project_state THROUGH
-the in-memory MCP transport (registration + wrapper dispatch + real service read +
-wire serialization), not just the service. Seeds a project with no agents and
-asserts the lifecycle diagnostic (gates + counts + readiness + stuck conditions)
-comes back over the wire.
-
-Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -36,9 +25,6 @@ pytestmark = pytest.mark.asyncio
 
 @pytest_asyncio.fixture
 async def diagnose_client(db_manager, db_session, monkeypatch):
-    """Yield ``(new_client, project_id)`` for the FastMCP transport: a real
-    ToolAccessor over the rolled-back test session + a synthetic tenant + a seeded
-    no-agents project."""
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -100,8 +86,6 @@ def _payload(result):
 
 
 async def test_diagnose_project_state_dispatches_through_transport(diagnose_client):
-    """A no-agents ACTIVE project diagnoses over the wire: gates + zero counts +
-    can_close False + the no_agents_spawned stuck condition."""
     new_client, project_id, product_id = diagnose_client
 
     async with new_client() as session:
@@ -110,9 +94,6 @@ async def test_diagnose_project_state_dispatches_through_transport(diagnose_clie
     assert result.is_error is False, f"diagnose_project_state failed at transport: {result}"
     payload = _payload(result)
     assert payload["project_id"] == project_id
-    # BE-9525a: diagnose_project_state's return omitted product_id — an orchestrator
-    # juggling projects across products had no way to tell which product a diagnosed
-    # project belongs to without a second lookup.
     assert payload["product_id"] == product_id
     assert payload["status"] == "active"
     assert payload["execution_mode"] == "claude_code_cli"
@@ -120,15 +101,12 @@ async def test_diagnose_project_state_dispatches_through_transport(diagnose_clie
     assert payload["readiness"]["can_close"] is False
     assert payload["readiness"]["blockers"] == []
     assert "no_agents_spawned" in payload["stuck_conditions"]
-    # execution_mode IS set, so that is NOT flagged.
     assert "execution_mode_not_selected" not in payload["stuck_conditions"]
 
 
 async def test_diagnose_flags_missing_execution_mode(diagnose_client, db_session):
-    """A project with NULL execution_mode is flagged execution_mode_not_selected."""
     new_client, project_id, _product_id = diagnose_client
 
-    # Null out execution_mode on the seeded project (same rolled-back txn).
     project = await db_session.get(Project, project_id)
     project.execution_mode = None
     await db_session.commit()

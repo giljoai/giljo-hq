@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Database setup endpoints for setup wizard.
-
-Handles:
-- PostgreSQL connection testing
-- Database creation and schema migration
-- Database verification (reads from .env)
-- Config file updates with validated credentials
-"""
 
 import logging
 import os
@@ -31,11 +22,6 @@ logger = logging.getLogger(__name__)
 
 
 def require_setup_incomplete() -> None:
-    """Dependency that blocks setup endpoints after initial setup is complete.
-
-    Checks if the database has users (first admin created). If so, setup
-    is already done and these endpoints should be locked down.
-    """
     try:
         import psycopg2
 
@@ -46,7 +32,7 @@ def require_setup_incomplete() -> None:
         db_password = os.getenv("POSTGRES_PASSWORD") or os.getenv("DB_PASSWORD")
 
         if not all([db_host, db_port, db_name, db_user, db_password]):
-            return  # No credentials yet -- setup not complete
+            return
 
         with (
             psycopg2.connect(
@@ -100,7 +86,6 @@ async def test_database_connection(request: DatabaseSetupRequest) -> dict:
     try:
         import psycopg2
 
-        # Attempt connection to postgres database (always exists)
         conn = psycopg2.connect(
             host=request.host,
             port=request.port,
@@ -110,7 +95,6 @@ async def test_database_connection(request: DatabaseSetupRequest) -> dict:
             connect_timeout=5,
         )
 
-        # Get PostgreSQL version
         with conn.cursor() as cur:
             cur.execute("SELECT version();")
             version_string = cur.fetchone()[0]
@@ -121,7 +105,6 @@ async def test_database_connection(request: DatabaseSetupRequest) -> dict:
 
         conn.close()
 
-        # Check if target database exists
         conn = psycopg2.connect(
             host=request.host,
             port=request.port,
@@ -189,7 +172,6 @@ async def setup_database(request: DatabaseSetupRequest) -> dict:
     from installer.core.database import DatabaseInstaller
 
     try:
-        # Prepare settings for DatabaseInstaller
         settings = {
             "pg_host": request.host,
             "pg_port": request.port,
@@ -197,10 +179,8 @@ async def setup_database(request: DatabaseSetupRequest) -> dict:
             "pg_password": request.admin_password,
         }
 
-        # Initialize database installer
         db_installer = DatabaseInstaller(settings)
 
-        # Run database setup
         logger.info(f"Setting up database {sanitize(request.database_name)}...")
         setup_result = db_installer.setup()
 
@@ -212,16 +192,13 @@ async def setup_database(request: DatabaseSetupRequest) -> dict:
                 detail="Database setup failed. Check server logs for details.",
             )
 
-        # Setup succeeded - run migrations
         logger.info("Running Alembic migrations...")
         alembic_ini = Path.cwd() / "alembic.ini"
         migration_result = db_installer.run_migrations(alembic_ini)
 
         if not migration_result.get("success"):
             logger.warning(f"Migrations failed: {migration_result.get('errors')}")
-            # Continue anyway - database is created, migrations can be retried
 
-        # Update config.yaml with validated credentials
         logger.info("Updating config.yaml with database credentials...")
         config_path = get_config_path()
 
@@ -231,10 +208,8 @@ async def setup_database(request: DatabaseSetupRequest) -> dict:
                 detail="config.yaml not found - cannot update credentials",
             )
 
-        # Read current config
         config_data = read_config(config_path)
 
-        # Update database section with application user credentials
         if "database" not in config_data:
             config_data["database"] = {}
 
@@ -249,11 +224,9 @@ async def setup_database(request: DatabaseSetupRequest) -> dict:
             }
         )
 
-        # Remove setup_mode flag if present (allows backend to start normally)
         if "setup_mode" in config_data:
             del config_data["setup_mode"]
 
-        # Write updated config
         backup_path = config_path.with_suffix(f".yaml.backup_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}")
         shutil.copy(config_path, backup_path)
 
@@ -275,8 +248,6 @@ async def setup_database(request: DatabaseSetupRequest) -> dict:
         }
 
     except (ImportError, OSError, ValueError) as e:
-        # Log full detail server-side; return a generic message to avoid leaking
-        # internal exception text or paths to the caller (CodeQL: py/stack-trace-exposure)
         logger.error("Database setup failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Database setup failed. Check server logs for details.") from e
 
@@ -303,14 +274,12 @@ async def verify_database_setup() -> dict:
     try:
         import psycopg2
 
-        # Read credentials from environment (loaded from .env at startup)
         db_host = os.getenv("POSTGRES_HOST") or os.getenv("DB_HOST")
         db_port = os.getenv("POSTGRES_PORT") or os.getenv("DB_PORT")
         db_name = os.getenv("POSTGRES_DB") or os.getenv("DB_NAME")
         db_user = os.getenv("POSTGRES_USER") or os.getenv("DB_USER")
         db_password = os.getenv("POSTGRES_PASSWORD") or os.getenv("DB_PASSWORD")
 
-        # Validate credentials exist
         if not all([db_host, db_port, db_name, db_user, db_password]):
             missing_vars = []
             if not db_host:
@@ -329,7 +298,6 @@ async def verify_database_setup() -> dict:
                 detail=f"Database credentials not found in .env file. Missing: {', '.join(missing_vars)}",
             )
 
-        # Test connection using psycopg2 (raw connection test)
         try:
             conn = psycopg2.connect(
                 host=db_host,
@@ -340,7 +308,6 @@ async def verify_database_setup() -> dict:
                 connect_timeout=5,
             )
 
-            # Get PostgreSQL version
             with conn.cursor() as cur:
                 cur.execute("SELECT version();")
                 version_string = cur.fetchone()[0]
@@ -349,7 +316,6 @@ async def verify_database_setup() -> dict:
                 version_num = int(cur.fetchone()[0])
                 major_version = version_num // 10000
 
-                # Count tables to verify schema migration
                 cur.execute("""
                     SELECT COUNT(*)
                     FROM information_schema.tables
@@ -359,7 +325,6 @@ async def verify_database_setup() -> dict:
 
             conn.close()
 
-            # Verify schema is migrated (expect at least 10 tables from models.py)
             schema_migrated = tables_count >= 10
 
             logger.info(f"Database verification successful: {db_name}@{db_host}:{db_port}, {tables_count} tables")

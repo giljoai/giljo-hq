@@ -1,9 +1,3 @@
-/**
- * useProjectStaging.spec.js — FE-6006 unit 3a
- *
- * Tests for the extracted project staging composable from ProjectTabs.vue.
- * Edition scope: CE
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ref } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
@@ -58,8 +52,6 @@ describe('useProjectStaging', () => {
   async function makeComposable(overrides = {}) {
     const { useProjectStaging } = await import('./useProjectStaging')
     const projectId = ref(overrides.projectId ?? 'proj-1')
-    // Honor an explicit null (NULL-state: mode not yet chosen); default to
-    // 'multi_terminal' only when the override is absent entirely.
     const executionMode = ref('executionMode' in overrides ? overrides.executionMode : 'multi_terminal')
     const isProjectStaged = ref(overrides.isProjectStaged ?? false)
     const readyToLaunch = ref(overrides.readyToLaunch ?? true)
@@ -96,8 +88,6 @@ describe('useProjectStaging', () => {
     stagingMock.mockResolvedValueOnce({ data: { prompt: 'p' } })
     const { handleStageProject } = await makeComposable({ executionMode: null })
     await handleStageProject()
-    // Sends a tool (claude-code fallback) but NO real mode — axios omits a null
-    // param so the backend gate can fire instead of defaulting to multi_terminal.
     expect(stagingMock).toHaveBeenCalledWith('proj-1', {
       tool: 'claude-code',
       execution_mode: null,
@@ -125,7 +115,7 @@ describe('useProjectStaging', () => {
   it('handleLaunchJobs calls api.orchestrator.launchProject', async () => {
     launchMock.mockResolvedValueOnce({})
     const { handleLaunchJobs, onLaunchSuccess } = await makeComposable({ readyToLaunch: true })
-    onLaunchSuccess(() => {}) // register callback
+    onLaunchSuccess(() => {})
     await handleLaunchJobs()
     expect(launchMock).toHaveBeenCalledWith({ project_id: 'proj-1' })
   })
@@ -142,7 +132,6 @@ describe('useProjectStaging', () => {
     expect(loadingStageProject.value).toBe(false)
   })
 
-  // BE-6047: recovery flow tests
   it('handleRestageProject calls restageProject store action', async () => {
     restageProjectMock.mockResolvedValueOnce()
     const { handleRestageProject } = await makeComposable({ canRestage: true })
@@ -172,7 +161,6 @@ describe('useProjectStaging', () => {
 
   it('handleStageOrRestage calls restageProject when canRestage is true', async () => {
     restageProjectMock.mockResolvedValueOnce()
-    // isProjectStaged=false, canRestage=true → should call restage not stage
     const { handleStageOrRestage } = await makeComposable({ isProjectStaged: false, canRestage: true })
     await handleStageOrRestage()
     expect(restageProjectMock).toHaveBeenCalledWith('proj-1')

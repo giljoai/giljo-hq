@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Service-layer Pydantic response models for Giljo HQ.
-
-Re-exports all domain-specific response models so that existing imports
-(``from giljo_mcp.schemas.service_responses import X``) continue to work
-unchanged. New code may import directly from domain sub-modules.
-
-Split from monolithic service_responses.py in Sprint 002e.
-"""
 
 from giljo_mcp.schemas.responses.auth import (
     ApiKeyCreateResult,
@@ -100,13 +91,11 @@ from giljo_mcp.schemas.responses.template import (
 
 __all__ = [
     "ActiveProjectDetail",
-    # Orchestration
     "AgentStatusChangeEvent",
     "AgentTodoCounts",
     "AgentWorkflowDetail",
     "ApiKeyCreateResult",
     "ApiKeyInfo",
-    # Auth
     "AuthResult",
     "CanCloseResult",
     "CascadeImpact",
@@ -116,7 +105,6 @@ __all__ = [
     "ConsolidationResult",
     "ConversionResult",
     "CredentialStatusResult",
-    # Shared
     "DeleteResult",
     "DismissResult",
     "ErrorReportResult",
@@ -131,7 +119,6 @@ __all__ = [
     "PaginatedResult",
     "PathValidationResult",
     "PendingJobsResult",
-    # Product
     "ProductStatistics",
     "ProgressResult",
     "ProjectArchiveResult",
@@ -146,7 +133,6 @@ __all__ = [
     "ProjectResumeResult",
     "ProjectSummaryResult",
     "ProjectSwitchResult",
-    # Project
     "ProjectTypeInfo",
     "PurgeResult",
     "ReactivationResult",
@@ -160,19 +146,15 @@ __all__ = [
     "SuccessionStatus",
     "SummarizeMultiLevelResult",
     "SummarizeSingleResult",
-    # Consolidation
     "SummaryLevel",
-    # Task
     "TaskListResponse",
     "TaskSummary",
     "TaskUpdateResult",
-    # Template
     "TemplateDetail",
     "TemplateGetResult",
     "ThreadUnreadDetail",
     "UserInfo",
     "VisionUploadResult",
     "WorkflowStatus",
-    # BE-8003a next_action envelope
     "build_next_action",
 ]

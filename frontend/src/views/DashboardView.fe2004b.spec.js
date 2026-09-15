@@ -1,18 +1,3 @@
-/**
- * DashboardView.fe2004b.spec.js — FE-2004 sibling (Dashboard status chart).
- *
- * Same defect class as FE-2004: the project-status distribution chart mapped
- * `active` to COLOR_SURFACE (#ffffff, white) in `statusColors`. Every other app
- * surface renders active = implementer blue (#6db3e4), so the "Active" segment
- * (and its legend dot) rendered white — unreadable on the white stat-pill card.
- *
- * This test drives the real view with a status distribution of only `active`
- * and asserts the rendered segment color is the implementer blue, not white.
- * RED on master (white segment), GREEN after sourcing the color from
- * getAgentColor('implementer'), same source the agent-role chart already uses.
- *
- * Edition Scope: CE.
- */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -51,7 +36,7 @@ import DashboardView from '@/views/DashboardView.vue'
 
 function dashboardPayload(overrides = {}) {
   return {
-    project_status_dist: { active: 2 }, // only Active → one chart segment
+    project_status_dist: { active: 2 },
     taxonomy_dist: [],
     agent_role_dist: [],
     recent_projects: [],
@@ -94,13 +79,11 @@ describe('DashboardView.vue — Active status segment color (FE-2004 sibling)', 
     expect(seg.exists()).toBe(true)
 
     const style = (seg.attributes('style') || '').toLowerCase().replace(/\s+/g, '')
-    const blueHex = getAgentColor('implementer').hex.toLowerCase() // #6db3e4
+    const blueHex = getAgentColor('implementer').hex.toLowerCase()
     const blueRgb = 'rgb(109,179,228)'
 
-    // RED on master: the segment background was white.
     expect(style).not.toContain('#ffffff')
     expect(style).not.toContain('rgb(255,255,255)')
-    // GREEN after fix: segment shares the app-wide active/implementer color.
     expect(style.includes(blueHex) || style.includes(blueRgb)).toBe(true)
   })
 })

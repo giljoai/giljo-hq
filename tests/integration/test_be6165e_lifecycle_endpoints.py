@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6165e — REST integration tests for the chain lifecycle endpoints.
-
-Covers the two new routes end-to-end (auth + tenant scope + service):
-  GET  /api/v1/sequence-runs?status=...        — durable-election read-back
-  POST /api/v1/sequence-runs/{run_id}/release  — graceful | cancel
-
-Fixture pattern mirrors tests/integration/test_be6131a_sequence_run_rest.py
-(api_client + JWT cookie auth + db_manager seeding). Parallel-safe:
-TransactionalTestContext is not used here (the API commits); each test seeds its
-own tenants with unique keys, so per-worker DBs never collide.
-"""
 
 from __future__ import annotations
 
@@ -95,12 +84,6 @@ async def api_client(db_manager):
         async with db_manager.get_session_async() as session:
             yield session
 
-    # Save process-global state so this fixture leaves no leak. Overwriting
-    # state.config with a MagicMock and not restoring it poisons a later
-    # create_app() build: its SPA static mount probes
-    # state.config.get_nested("paths.static"), which on a mock resolves to a
-    # nonexistent path, silently dropping the ("", frozenset()) route and
-    # flaking tests/unit/test_be6042b_app_surface.py.
     _saved_state = {
         "db_manager": state.db_manager,
         "tenant_manager": state.tenant_manager,
@@ -139,8 +122,6 @@ async def api_client(db_manager):
     app.dependency_overrides.clear()
     if hasattr(app.state, "auth"):
         del app.state.auth
-    # Restore process-global state so a later create_app()/global-app test sees
-    # the real config (and the SPA static mount) instead of this fixture's mock.
     state.db_manager = _saved_state["db_manager"]
     state.tenant_manager = _saved_state["tenant_manager"]
     state.tool_accessor = _saved_state["tool_accessor"]
@@ -164,15 +145,9 @@ def _payload(extra: dict | None = None) -> dict:
 
 
 async def _seed_live_members(db_manager, tenant_key: str, run: dict) -> None:
-    """Insert live (non-terminal) project rows for the run's members so the
-    BE-6200 live-member filter in list_active keeps the run. A real chain always
-    has real member projects; default INACTIVE status is non-terminal -> 'live'."""
     member_ids = list(dict.fromkeys((run.get("resolved_order") or []) + (run.get("project_ids") or [])))
     async with db_manager.get_session_async() as session:
         for pid in member_ids:
-            # BE-9437: product_id is NOT NULL. One product per member -- these are
-            # INACTIVE so idx_project_single_active_per_product does not bite, but
-            # a product each keeps the members independent.
             product_id = str(uuid.uuid4())
             session.add(
                 Product(
@@ -191,8 +166,6 @@ async def _seed_live_members(db_manager, tenant_key: str, run: dict) -> None:
                     name=f"chain-member-{pid[:8]}",
                     description="live chain member",
                     mission="member mission",
-                    # BE-9429: uq_project_taxonomy_active is NULLS NOT DISTINCT,
-                    # so these all-NULL taxonomy rows collide without a serial.
                     series_number=next_series_number(),
                 )
             )
@@ -208,9 +181,6 @@ async def _create_run(api_client, tenant: dict, extra: dict | None = None, *, db
     return run
 
 
-# ---------------------------------------------------------------------------
-# GET list — durable-election read-back
-# ---------------------------------------------------------------------------
 
 
 async def test_list_active_tenant_isolation(api_client, db_manager):
@@ -249,9 +219,6 @@ async def test_list_rejects_invalid_status(api_client, db_manager):
     assert resp.status_code == 422, resp.text
 
 
-# ---------------------------------------------------------------------------
-# POST release — cancel (forced) + graceful (terminated, with precondition)
-# ---------------------------------------------------------------------------
 
 
 async def test_release_cancel_ends_run_no_project_mutation(api_client, db_manager):
@@ -265,17 +232,14 @@ async def test_release_cancel_ends_run_no_project_mutation(api_client, db_manage
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["status"] == "cancelled"
-    # No ProjectStatus mutation: project_statuses map unchanged.
     assert body["project_statuses"] == before_statuses
 
-    # Freed membership: the run drops out of the active list.
     active = await api_client.get("/api/v1/sequence-runs", headers=tenant["headers"])
     assert run["id"] not in {r["id"] for r in active.json()}
 
 
 async def test_release_graceful_requires_inflight_closed(api_client, db_manager):
     tenant = await _seed_user(db_manager)
-    # in-flight project (index 0) is "implementing" — not closed out.
     run = await _create_run(api_client, tenant)
 
     rejected = await api_client.post(
@@ -283,7 +247,6 @@ async def test_release_graceful_requires_inflight_closed(api_client, db_manager)
     )
     assert rejected.status_code == 422, "graceful must reject while the in-flight project is still running"
 
-    # Close out the in-flight project, then graceful succeeds -> terminated.
     head_pid = run["resolved_order"][0]
     await api_client.patch(
         f"/api/v1/sequence-runs/{run['id']}",

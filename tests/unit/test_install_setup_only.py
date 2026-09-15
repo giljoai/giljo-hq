@@ -2,22 +2,6 @@
 # Licensed under the Elastic License 2.0.
 # [CE] Community Edition.
 
-"""
-Tests for --setup-only flag in install.py.
-
-Verifies that when setup_only=True:
-- Prereq checks (Python, PostgreSQL, Node.js) are skipped
-- Dependency installation steps are skipped
-- Frontend dependency installation is skipped
-- Frontend mode prompt is skipped
-- Shortcut creation is skipped
-- Config generation and database setup still run
-- Full flow still works when setup_only is False (regression)
-
-Note (INF-6241): setup_https() has been removed from install.py; the installer
-always configures plain HTTP. HTTPS is an opt-in bring-your-own-cert feature in
-Settings -> Network. Tests referencing setup_https are removed.
-"""
 
 import sys
 from pathlib import Path
@@ -26,8 +10,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-# install.py lives at repo root -- add to sys.path before importing
-# TODO: Remove after editable install confirmed on all platforms
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -36,16 +18,12 @@ from install import UnifiedInstaller, main  # noqa: E402
 
 
 class TestSetupOnlyFlag:
-    """Verify --setup-only click option is wired correctly."""
 
     def test_main_accepts_setup_only_flag(self):
-        """The main() click command should accept --setup-only."""
-        # click stores params on the command object
         param_names = [p.name for p in main.params]
         assert "setup_only" in param_names
 
     def test_setup_only_is_a_flag(self):
-        """--setup-only should be a boolean flag, not a value option."""
         for p in main.params:
             if p.name == "setup_only":
                 assert p.is_flag is True
@@ -55,11 +33,9 @@ class TestSetupOnlyFlag:
 
 
 class TestRunWithSetupOnly:
-    """Verify run() skips the correct steps when setup_only=True."""
 
     @pytest.fixture
     def installer(self, tmp_path):
-        """Create an installer with setup_only=True and all methods mocked."""
         settings = {
             "install_dir": str(tmp_path),
             "headless": True,
@@ -69,7 +45,6 @@ class TestRunWithSetupOnly:
         with patch("install.get_platform_handler", return_value=MagicMock()):
             inst = UnifiedInstaller(settings=settings)
 
-        # Mock every step method so nothing actually runs
         inst.welcome_screen = MagicMock()
         inst.ask_installation_questions = MagicMock()
         inst.check_python_version = MagicMock(return_value=True)
@@ -112,7 +87,6 @@ class TestRunWithSetupOnly:
         installer._prompt_frontend_mode.assert_not_called()
 
     def test_skips_shortcuts(self, installer):
-        # Even with create_shortcuts=True, setup_only should skip
         installer.settings["create_shortcuts"] = True
         installer.run()
         installer.create_desktop_shortcuts.assert_not_called()
@@ -159,11 +133,9 @@ class TestRunWithSetupOnly:
 
 
 class TestRunWithoutSetupOnly:
-    """Regression: verify full flow still works when setup_only is False."""
 
     @pytest.fixture
     def installer(self, tmp_path):
-        """Create an installer with setup_only=False (default) and all methods mocked."""
         settings = {
             "install_dir": str(tmp_path),
             "headless": True,

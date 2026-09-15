@@ -1,26 +1,8 @@
-/**
- * useDeferredHomeData (FE-6059) — defer Home/Welcome's Tools-domain reads off the
- * cold first paint.
- *
- * The agent-templates list ("Your Team" section) and git/serena integration
- * status (onboarding-reminder copy) are only needed once their section actually
- * renders. This composable fetches each lazily the first time its gate turns
- * true, instead of firing /api/v1/templates/, templates/stats/active-count,
- * /api/git/settings and /api/serena/status unconditionally on mount. Extracted
- * from WelcomeView so the orchestration lives in one cohesive place.
- *
- * @param {Object} deps
- * @param {import('vue').Ref<boolean>} deps.onboardingComplete - gates the team-templates load.
- * @param {import('vue').Ref<boolean>} deps.showIntegReminder - gates the integration-status load.
- * @param {import('vue').Ref<Array>} deps.templates - destination ref for the templates list.
- * @param {import('vue').Ref<number>} deps.totalSlots - destination ref for the active-count max_slots.
- * @returns {{ gitEnabled: import('vue').Ref<boolean>, serenaEnabled: import('vue').Ref<boolean> }}
- */
 import { watch } from 'vue'
 import api from '@/services/api'
 import { useIntegrationStatus } from '@/composables/useIntegrationStatus'
 
-export function useDeferredHomeData({ onboardingComplete, showIntegReminder, templates, totalSlots }) {
+export function useDeferredHomeData({ onboardingComplete, showIntegReminder, templates, totalSlots, productId }) {
   const { gitEnabled, serenaEnabled, refresh: refreshIntegrationStatus } = useIntegrationStatus({
     immediate: false,
   })
@@ -28,23 +10,33 @@ export function useDeferredHomeData({ onboardingComplete, showIntegReminder, tem
   let teamTemplatesLoaded = false
   async function loadTeamTemplates() {
     if (teamTemplatesLoaded) return
+    const scope = productId?.value || null
+    if (!scope) {
+      templates.value = []
+      return
+    }
     teamTemplatesLoaded = true
-    await Promise.allSettled([
-      api.templates
-        .list()
-        .then((response) => {
-          templates.value = response.data || []
-        })
-        .catch(() => {}),
-      api.templates
-        .activeCount()
-        .then((response) => {
-          if (response.data?.max_slots) {
-            totalSlots.value = response.data.max_slots
-          }
-        })
-        .catch(() => {}),
+    const [listed, counted, assigned] = await Promise.allSettled([
+      Promise.resolve().then(() => api.templates.list(scope)),
+      Promise.resolve().then(() => api.templates.activeCount(scope)),
+      Promise.resolve().then(() => api.assignments.list(scope)),
     ])
+
+    if (counted.status === 'fulfilled' && counted.value?.data?.max_slots) {
+      totalSlots.value = counted.value.data.max_slots
+    }
+    if (listed.status !== 'fulfilled') return
+
+    const enabled = new Map(
+      (assigned.status === 'fulfilled' ? assigned.value?.data?.assignments || [] : []).map((a) => [
+        a.template_id,
+        a.is_active,
+      ]),
+    )
+    templates.value = (listed.value?.data || []).map((t) => ({
+      ...t,
+      product_active: enabled.get(t.id) ?? false,
+    }))
   }
 
   let integrationStatusLoaded = false
@@ -55,6 +47,7 @@ export function useDeferredHomeData({ onboardingComplete, showIntegReminder, tem
   }
 
   watch(onboardingComplete, (ready) => { if (ready) loadTeamTemplates() }, { immediate: true })
+  watch(() => productId?.value, (id) => { if (id && onboardingComplete.value) loadTeamTemplates() })
   watch(showIntegReminder, (show) => { if (show) loadIntegrationStatusOnce() }, { immediate: true })
 
   return { gitEnabled, serenaEnabled }

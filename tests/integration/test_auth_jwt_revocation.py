@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-6001 — dashboard JWT revocation enforced at get_current_user.
-
-Before SEC-6001, ``logout`` only cleared the cookie: a copied access token kept
-authenticating until expiry, and a password change did not invalidate the
-session that performed it. jti-revocation existed only at the ``/mcp`` Bearer
-boundary, not for dashboard cookie/Bearer auth.
-
-These tests exercise the fix at the failing layer —
-``giljo_mcp.auth.dependencies.get_current_user`` — using a real seeded user and
-a real signed JWT. ``get_current_user_optional`` delegates to
-``get_current_user`` (swallowing the 401), so covering the raising variant
-covers both.
-
-Parallel-safe: each test seeds a unique tenant/user, clears the revocation TTL
-cache around the revoke step, and writes through the same revocation service the
-production logout path uses. No module-level mutable state, no ordering deps.
-"""
 
 from __future__ import annotations
 
@@ -112,7 +95,7 @@ async def test_revoked_cookie_token_is_rejected(db_manager):
     clear_revocation_cache()
 
     async with db_manager.get_session_async() as db:
-        with pytest.raises(Exception) as exc:  # HTTPException 401
+        with pytest.raises(Exception) as exc:
             await get_current_user(
                 request=_cookie_request(),
                 access_token=token,
@@ -151,7 +134,6 @@ async def test_revoked_bearer_token_is_rejected(db_manager):
 
 @pytest.mark.asyncio
 async def test_optional_variant_returns_none_for_revoked_token(db_manager):
-    """get_current_user_optional swallows the 401 and returns None."""
     clear_revocation_cache()
     tenant_key, user_id = await _seed_user(db_manager)
     token = _mint(tenant_key, user_id)
@@ -176,7 +158,6 @@ async def test_optional_variant_returns_none_for_revoked_token(db_manager):
 
 @pytest.mark.asyncio
 async def test_tenant_isolation_revocation_does_not_cross_tenants(db_manager):
-    """A revoked jti in tenant A must not reject tenant B's distinct token."""
     clear_revocation_cache()
     tenant_a, user_a = await _seed_user(db_manager)
     tenant_b, user_b = await _seed_user(db_manager)

@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9289b — the Hub list's card facts, assembled in one round trip.
-
-The Quiet Cards list shows three things per card: the thread's name, who registered on
-it, and the last thing said — plus whether there is anything new. None of that was
-fetchable from the thread list, so the UI issued a follow-up call per thread. This
-replaces that N+1 with a single query over the page it already has.
-
-Two properties are load-bearing and are pinned here rather than left to review:
-
-- ``unread`` is a BOOLEAN produced by an ``EXISTS``, never a count that gets cast. The
-  card's design bar is no numbers except relative times, and a count on the payload is
-  an invitation to render one.
-- The enrichment is ONE round trip. If it ever regresses into per-thread queries the
-  N+1 is back and the whole point is lost.
-
-Parallel-safe: real DB via the rollback-isolated ``db_session`` fixture, no module-level
-mutable state, each test owns its setup, every query is tenant-scoped.
-"""
 
 from __future__ import annotations
 
@@ -66,8 +48,6 @@ async def _seed_execution(
     started_at: datetime | None,
     display_name: str = "Seeded Agent",
 ) -> None:
-    """One ``agent_executions`` row for ``agent_id``. Several rows per agent is the
-    normal case — succession reuses the agent_id — so these tests seed more than one."""
     with tenant_session_context(db_session, tenant):
         job = AgentJob(
             job_id=str(uuid.uuid4()),
@@ -91,12 +71,6 @@ async def _seed_execution(
 
 
 async def _age_message(db_session, tenant: str, message_id: str, *, seconds: int = 60) -> None:
-    """Push one post backwards in time so a "newest post" read has a real winner.
-
-    Posts made inside one transaction share a ``created_at`` (``server_default=func.now()``
-    and Postgres ``now()`` is the transaction timestamp), which production does not do —
-    there each post commits on its own. Without this the ordering is a tie.
-    """
     with tenant_session_context(db_session, tenant):
         await db_session.execute(
             update(Message)
@@ -108,8 +82,6 @@ async def _age_message(db_session, tenant: str, message_id: str, *, seconds: int
 
 async def _seed_project(db_session, tenant: str, name: str) -> str:
     with tenant_session_context(db_session, tenant):
-        # BE-9437: a project belongs to a product. Its own, so an active
-        # seed cannot collide under idx_project_single_active_per_product.
         _owning_product_project = Product(
             id=str(uuid.uuid4()),
             tenant_key=tenant,
@@ -136,22 +108,13 @@ async def _seed_project(db_session, tenant: str, name: str) -> str:
     return project.id
 
 
-# ---------------------------------------------------------------------------
-# Composition — the house pattern for these extractions (three uses makes it canon).
-# ---------------------------------------------------------------------------
 
 
 def test_the_repository_serves_the_enrichment_by_identity():
-    """Served BY the mixin, never shadowed on the repository — one source of truth. A
-    redefinition would leave the mixin copy dead while still looking authoritative, and
-    behavioural tests would keep passing right up until the two copies diverged."""
     assert issubclass(CommThreadRepository, CommThreadListEnrichmentMixin)
     assert CommThreadRepository.list_threads_enriched is CommThreadListEnrichmentMixin.list_threads_enriched
 
 
-# ---------------------------------------------------------------------------
-# The card facts.
-# ---------------------------------------------------------------------------
 
 
 async def test_card_facts_for_a_project_thread(db_manager, db_session):
@@ -198,7 +161,6 @@ async def test_a_standalone_thread_has_no_project_name(db_manager, db_session):
 
 
 async def test_a_silent_thread_has_no_last_message(db_manager, db_session):
-    """A thread nobody has spoken in must not fabricate an excerpt."""
     tenant = _tk("silent")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -208,17 +170,12 @@ async def test_a_silent_thread_has_no_last_message(db_manager, db_session):
     card = next(t for t in listed["threads"] if t["thread_id"] == thread["thread_id"])
 
     assert card["last_message"] is None
-    assert card["unread"] is False  # nothing said means nothing to read
+    assert card["unread"] is False
 
 
-# ---------------------------------------------------------------------------
-# unread — a boolean, per viewer, keyed on the stored read cursor.
-# ---------------------------------------------------------------------------
 
 
 async def test_unread_is_true_when_never_read(db_manager, db_session):
-    """No participant row, or a NULL cursor, means nothing has been read — so any
-    message at all counts. Honest "never read" semantics."""
     tenant = _tk("unread")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -232,8 +189,6 @@ async def test_unread_is_true_when_never_read(db_manager, db_session):
 
 
 async def test_unread_is_a_boolean_not_a_count(db_manager, db_session):
-    """Load-bearing: three unread messages must still read as True, not 3. A count on
-    the payload is an invitation to render a number, and the card shows none."""
     tenant = _tk("bool")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -249,8 +204,6 @@ async def test_unread_is_a_boolean_not_a_count(db_manager, db_session):
 
 
 async def test_unread_is_false_once_the_reader_has_drained_the_thread(db_manager, db_session):
-    """Keys on comm_participants.last_read_at — the BE-9012a cursor, which the list
-    never used before this."""
     tenant = _tk("read")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -266,7 +219,6 @@ async def test_unread_is_false_once_the_reader_has_drained_the_thread(db_manager
 
 
 async def test_unread_is_per_viewer(db_manager, db_session):
-    """Two people looking at the same list see different unread flags."""
     tenant = _tk("perviewer")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -286,36 +238,9 @@ async def test_unread_is_per_viewer(db_manager, db_session):
     assert fresh["unread"] is True
 
 
-# ---------------------------------------------------------------------------
-# FE-9418 — the message ANCHOR. Without an id the client can only guess the post.
-# ---------------------------------------------------------------------------
 
 
 async def test_last_message_names_the_post_it_describes(db_manager, db_session):
-    """The card's last_message carries the id of the post it summarises.
-
-    FE-9410 landed baton notifications inside the thread but could not point at the
-    POST, because this payload named no message: the Hub had to approximate the target
-    as "newest post at the moment you arrive", which is a different row from "the post
-    that handed you the baton" as soon as anything else lands in between. This id is the
-    anchor that removes the guess, and it is the only reachable source of one — the
-    baton's own WS event (``broadcast_thread_update``) and its durable bell row
-    (``HubBatonHandoverPayload``) both carry a thread id and no message id.
-
-    Two posts are seeded deliberately: with one, an implementation that returned the
-    OLDEST row, or any row, would still pass.
-
-    The older post is explicitly aged, and that is required rather than tidy.
-    ``Message.created_at`` is ``server_default=func.now()``, and Postgres ``now()`` is
-    the TRANSACTION timestamp — so two posts made inside this suite's single
-    rollback-bound transaction carry an IDENTICAL ``created_at`` and the LATERAL's
-    ``ORDER BY created_at DESC LIMIT 1`` is a tie broken arbitrarily. Production does
-    not have that tie (each post commits in its own transaction), so aging the row is
-    what makes this test model production instead of the harness. There is no monotonic
-    key on ``messages`` to tiebreak with, and the tie is harmless where it happens: one
-    LATERAL row supplies the excerpt AND the anchor together, so the operator always
-    lands on exactly the post the card described.
-    """
     tenant = _tk("anchor")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -334,15 +259,6 @@ async def test_last_message_names_the_post_it_describes(db_manager, db_session):
 
 
 async def test_the_message_anchor_is_the_message_id_not_the_thread_id(db_manager, db_session):
-    """The anchor must be Message.id, and this is the assertion that proves it.
-
-    The outer select already carries ``CommThread.id``. Projecting the LATERAL's id
-    WITHOUT a label puts two ``id`` columns in one row tuple, and attribute access
-    resolves to the first — so the THREAD id would be served as the message anchor. The
-    client would then deep-link to a message that does not exist, and every weaker
-    assertion ("an id is present", "it is a string") would stay green. Only comparing it
-    against the thread id catches that.
-    """
     tenant = _tk("anchorlabel")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -356,14 +272,9 @@ async def test_the_message_anchor_is_the_message_id_not_the_thread_id(db_manager
     assert card["last_message"]["id"] != card["thread_id"]
 
 
-# ---------------------------------------------------------------------------
-# Opt-in, and tenant isolation.
-# ---------------------------------------------------------------------------
 
 
 async def test_the_agent_path_stays_unenriched(db_manager, db_session):
-    """No viewer means no card facts — the MCP list payload is unchanged, and unread is
-    per-viewer so it cannot be answered without knowing who is asking."""
     tenant = _tk("optin")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -377,7 +288,6 @@ async def test_the_agent_path_stays_unenriched(db_manager, db_session):
 
 
 async def test_enrichment_is_tenant_scoped(db_manager, db_session):
-    """Another tenant's participants and messages never bleed into these facts."""
     mine, theirs = _tk("mine"), _tk("theirs")
     await _seed(db_session, mine)
     await _seed(db_session, theirs)
@@ -390,14 +300,9 @@ async def test_enrichment_is_tenant_scoped(db_manager, db_session):
     assert all(t["thread_id"] != tid for t in listed["threads"])
 
 
-# ---------------------------------------------------------------------------
-# Item 3 — honest titles, structurally and only structurally.
-# ---------------------------------------------------------------------------
 
 
 async def test_a_bound_thread_is_titled_from_its_project(db_manager, db_session):
-    """A card must never read "(project comms)" — the machine-minted marker a
-    system-created bound thread carries."""
     tenant = _tk("title")
     await _seed(db_session, tenant)
     project_id = await _seed_project(db_session, tenant, "Message Hub redesign")
@@ -410,21 +315,10 @@ async def test_a_bound_thread_is_titled_from_its_project(db_manager, db_session)
     card = next(t for t in listed["threads"] if t["thread_id"] == thread["thread_id"])
 
     assert card["title"] == "Message Hub redesign"
-    # The STORED subject is untouched — it is load-bearing resolution machinery.
     assert card["subject"] == "(project comms)"
 
 
 async def test_a_chain_hub_keeps_its_stored_subject_run_id_and_all(db_manager, db_session):
-    """A chain hub's stored subject is handed back verbatim — titling must never parse,
-    shorten or rewrite it.
-
-    BE-9291 CORRECTED THIS DOCSTRING, not the assertions. It used to say the run_id in the
-    subject "is the DISCOVERY KEY ... and there is no FK to fall back on". There is one now
-    (``comm_threads.sequence_run_id``), so that reasoning is retired and a reader acting on
-    it would be misled. The behaviour under test is unchanged and still correct: enrichment
-    reports the stored subject as-is, whatever it happens to contain. Legacy hubs created
-    before the FK still carry a run_id here and still resolve down the subject fallback, so
-    rewriting the stored subject would still break them."""
     tenant = _tk("chainhub")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -440,8 +334,6 @@ async def test_a_chain_hub_keeps_its_stored_subject_run_id_and_all(db_manager, d
 
 
 async def test_a_bound_threads_organic_subject_still_yields_the_project_title(db_manager, db_session):
-    """Structural means structural: bound threads take the project's name whatever
-    their subject says, so the card and the 360 archive agree on what this is."""
     tenant = _tk("organic")
     await _seed(db_session, tenant)
     project_id = await _seed_project(db_session, tenant, "Canonical Project Name")
@@ -456,27 +348,9 @@ async def test_a_bound_threads_organic_subject_still_yields_the_project_title(db
     assert card["title"] == "Canonical Project Name"
 
 
-# ---------------------------------------------------------------------------
-# BE-9363 — the viewer's read cursor must correlate to the CURRENT thread.
-# ---------------------------------------------------------------------------
 
 
 async def test_thread_list_survives_a_viewer_who_belongs_to_several_threads(db_manager, db_session):
-    """FAIL-FIRST: the whole list 500s once the viewer is a participant in more than
-    one thread.
-
-    ``last_read`` is consumed inside the ``unread`` EXISTS, whose own FROM is
-    ``messages``. Without an explicit ``correlate(CommThread)`` SQLAlchemy cannot reach
-    the outer ``comm_threads`` from that depth, so it adds one to the subquery's FROM
-    and the correlation silently becomes a self-join across every thread. Postgres then
-    raises CardinalityViolationError -- "more than one row returned by a subquery used
-    as an expression" -- and GET /api/v1/threads returns 500 for that viewer.
-
-    ``uq_comm_participant`` allows at most one participant row per (thread,
-    participant), so more than one row can ONLY mean the correlation was lost.
-
-    One thread is not enough to catch this: the bug needs the viewer joined to two.
-    """
     tenant = _tk("multi")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -495,17 +369,11 @@ async def test_thread_list_survives_a_viewer_who_belongs_to_several_threads(db_m
     ids = {t["thread_id"] for t in listed["threads"]}
     assert {first["thread_id"], second["thread_id"]} <= ids
 
-    # And the cursor still answers PER THREAD, not globally: only the thread that was
-    # posted to is unread. A correlation that resolved against the wrong thread would
-    # mark both, so this is what proves the fix rather than merely surviving the query.
     by_id = {t["thread_id"]: t for t in listed["threads"]}
     assert by_id[first["thread_id"]]["unread"] is True
     assert by_id[second["thread_id"]]["unread"] is False
 
 
-# ---------------------------------------------------------------------------
-# participants[].status — what drives the card's status dot (BE-9365b).
-# ---------------------------------------------------------------------------
 
 
 async def _card_with(svc, tenant: str, tid: str, viewer: str = "operator-1") -> dict:
@@ -522,13 +390,6 @@ async def _join_and_card(svc, tenant: str, agent_id: str) -> dict:
 
 
 async def test_participant_status_comes_from_the_latest_execution(db_manager, db_session):
-    """The dot must show what the agent is doing NOW, not what it once did.
-
-    Succession reuses one agent_id across several executions, so an agent that finished a
-    job and was respawned has both a `complete` row and a `working` row. Reading the
-    wrong one paints a live agent green-and-done, which is the exact class of lie the
-    Quiet Cards honesty rule exists to prevent.
-    """
     tenant = _tk("status_latest")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -540,13 +401,6 @@ async def test_participant_status_comes_from_the_latest_execution(db_manager, db
 
 
 async def test_a_staged_successor_outranks_the_execution_it_replaced(db_manager, db_session):
-    """A successor that has been staged but has not started yet has a NULL started_at.
-
-    Postgres orders NULLs FIRST on DESC, so it wins — which is what we want: the agent's
-    current state is "staged", not the predecessor's "complete". If this ever flips to
-    NULLS LAST the card would show a finished agent for a thread that just got a fresh
-    one, so the ordering is asserted rather than assumed.
-    """
     tenant = _tk("status_staged")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -558,13 +412,6 @@ async def test_a_staged_successor_outranks_the_execution_it_replaced(db_manager,
 
 
 async def test_status_is_null_when_the_agent_never_registered_an_execution(db_manager, db_session):
-    """No execution row => NULL, deliberately NOT coalesced to a default.
-
-    The client renders NULL as a hollow ring ("never checked in") and a missing status as
-    slate. Defaulting here — to `idle`, or worse to anything green — would make an agent
-    that never arrived indistinguishable from one that is healthy and watching. Absent
-    data must not read as healthy.
-    """
     tenant = _tk("status_absent")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -575,18 +422,12 @@ async def test_status_is_null_when_the_agent_never_registered_an_execution(db_ma
 
 
 async def test_participant_status_is_tenant_scoped(db_manager, db_session):
-    """An agent_id is only unique within a tenant, so the join MUST carry tenant_key.
-
-    Without it another tenant's execution for a same-named agent would supply the status
-    — a cross-tenant read on the isolation boundary, not merely a wrong colour.
-    """
     mine = _tk("status_mine")
     theirs = _tk("status_theirs")
     await _seed(db_session, mine)
     await _seed(db_session, theirs)
     svc = _service(db_manager, db_session)
 
-    # Same agent_id, different tenant, and the only execution row in existence.
     await _seed_execution(db_session, theirs, "agent-shared", "working", started_at=datetime(2026, 6, 1, tzinfo=UTC))
 
     assert (await _join_and_card(svc, mine, "agent-shared"))["status"] is None

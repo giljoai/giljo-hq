@@ -3,6 +3,4 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-API endpoint routers
-"""
+pass

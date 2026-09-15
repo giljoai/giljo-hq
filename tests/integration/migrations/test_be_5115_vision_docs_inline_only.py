@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-5115 migration regression test: vision_documents storage_type collapsed to inline.
-
-Verifies ce_0032_vision_docs_inline_only against a real scratch PostgreSQL DB:
-
-1. Pre: insert a hybrid row with vision_path AND vision_document populated.
-   Upgrade to head -> row is rewritten to storage_type='inline',
-   vision_path=NULL, vision_document preserved.
-
-2. Edge: a 'file' row with NULL vision_document is rewritten to storage_type='inline',
-   vision_document='' (defensive backfill -- repo:107 means this should match zero
-   rows in real installs, but the migration must not reject them).
-
-3. Downgrade is best-effort schema only: the constraints flip back to the legacy
-   shape and the call must not raise. Existing rows stay inline because the disk
-   files are gone. Re-upgrade after downgrade must still succeed (idempotency).
-
-Uses the same scratch-DB helpers as test_saas_migration_bootstrap.py so the
-suite stays consistent.
-"""
 
 from __future__ import annotations
 
@@ -40,9 +21,6 @@ from tests.helpers.test_db_helper import bootstrap_db_base, worker_suffix
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 ALEMBIC_INI = PROJECT_ROOT / "alembic.ini"
 
-# Per-worker scratch DB (BE-6014): each migration test runs DROP SCHEMA public
-# CASCADE, so under pytest-xdist the workers must not share one bootstrap DB or
-# they wipe each other's schema mid-run. worker_suffix() is "" outside xdist.
 SCRATCH_DB = f"{bootstrap_db_base()}{worker_suffix()}"
 ADMIN_USER = os.environ.get("POSTGRES_OWNER_USER", "giljo_owner")
 ADMIN_PASSWORD = os.environ.get("POSTGRES_OWNER_PASSWORD", "")
@@ -116,7 +94,6 @@ def _run_alembic(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _ensure_scratch_database_exists() -> None:
-    """Create the scratch DB if missing -- mirrors the bootstrap-test helper."""
     scratch = _scratch_db_url()
     prefix, _, _ = scratch.rpartition("/")
     owner_admin_url = f"{prefix}/postgres"
@@ -152,7 +129,6 @@ def empty_scratch_db(scratch_engine: sa.Engine):
 
 
 def _upgrade_to_pre_be5115(scratch_engine: sa.Engine) -> None:
-    """Bring schema up to ce_0031 (the revision immediately before ce_0032)."""
     result = _run_alembic("upgrade", "ce_0031_user_split_name")
     assert result.returncode == 0, (
         f"alembic upgrade ce_0031_user_split_name failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
@@ -181,14 +157,6 @@ def _insert_vision_doc_skipping_constraint(
     vision_path: str | None,
     vision_document: str | None,
 ) -> None:
-    """Insert a row with the pre-BE-5115 legacy constraint dropped temporarily.
-
-    The legacy ck_vision_doc_storage_consistency CHECK rejects rows that don't
-    match the file/inline/hybrid shape. To insert an edge-case 'file' + NULL
-    document row we temporarily drop the consistency CHECK, insert, then add
-    a NOT-VALID copy back so existing data is left as-is. The migration under
-    test will normalize everything afterwards.
-    """
     with engine.connect() as conn:
         conn.execute(text("ALTER TABLE vision_documents DROP CONSTRAINT IF EXISTS ck_vision_doc_storage_consistency"))
         product_id = conn.execute(
@@ -220,7 +188,6 @@ def _insert_vision_doc_skipping_constraint(
 @pytest.mark.integration
 class TestBe5115Migration:
     def test_hybrid_row_collapses_to_inline_with_content_preserved(self, empty_scratch_db: sa.Engine) -> None:
-        """A pre-existing hybrid row migrates to inline; vision_document survives."""
         _upgrade_to_pre_be5115(empty_scratch_db)
 
         _insert_vision_doc_skipping_constraint(
@@ -243,7 +210,6 @@ class TestBe5115Migration:
         assert row["vision_document"] == "preserved hybrid content"
 
     def test_file_row_with_null_document_is_backfilled_to_empty_string(self, empty_scratch_db: sa.Engine) -> None:
-        """Edge case: legacy 'file' + NULL document survives, vision_document='' afterwards."""
         _upgrade_to_pre_be5115(empty_scratch_db)
 
         _insert_vision_doc_skipping_constraint(
@@ -265,7 +231,6 @@ class TestBe5115Migration:
         assert row["vision_document"] == ""
 
     def test_downgrade_does_not_raise_and_upgrade_is_idempotent(self, empty_scratch_db: sa.Engine) -> None:
-        """Schema-only downgrade succeeds; re-upgrade is a no-op on already-inline rows."""
         _upgrade_to_pre_be5115(empty_scratch_db)
         _insert_vision_doc_skipping_constraint(
             empty_scratch_db,
@@ -285,9 +250,6 @@ class TestBe5115Migration:
             f"alembic downgrade ce_0031 failed:\nSTDOUT:\n{downgrade.stdout}\nSTDERR:\n{downgrade.stderr}"
         )
 
-        # Row remains inline -- the disk file is gone, so downgrade cannot
-        # repopulate vision_path. The contract is that the downgrade does not
-        # raise, not that it round-trips data.
         row = _vision_documents_row(empty_scratch_db, "be5115-inline-roundtrip")
         assert row["storage_type"] == "inline"
 

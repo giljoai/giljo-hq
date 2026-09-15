@@ -1,33 +1,7 @@
-/**
- * useProjectFilters.be9455.spec.js — BE-9455: the per-page "All" control.
- *
- * Edition Scope: Both.
- *
- * THE DEFECT, at the layer it lives in. Vuetify's `v-data-table-server` footer
- * ships a default per-page option list ending in `{ value: -1, title: 'All' }`
- * (vuetify 4.1.5, VDataTableFooter.js). `ProjectsTable.vue` renders that default,
- * so selecting "All" sets `itemsPerPage` to the sentinel `-1`, which
- * `buildServerParams()` forwards verbatim as `limit: -1`.
- *
- * `GET /api/v1/projects/` declares `limit: int | None = Query(ge=1, le=200)`
- * (api/endpoints/projects/crud.py). A `-1` is therefore rejected with HTTP 422
- * before the query runs, `projectStore.fetchProjects` swallows it into
- * `error.value`, and the table never changes — the operator's report that "All
- * does not expand the list".
- *
- * These tests assert the CONTRACT rather than the widget: whatever the per-page
- * control is set to, the emitted `limit`/`offset` must be values the API will
- * accept. That keeps the assertion true no matter how the option list is later
- * re-specified, which is the point — a control must not promise what the wire
- * cannot carry.
- */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ref } from 'vue'
 import { useProjectFilters } from './useProjectFilters'
 
-// The bounds declared by `limit` on GET /api/v1/projects/ (crud.py). Mirrored
-// here deliberately: if the endpoint's bounds move, this spec must be updated
-// alongside, and the matching backend test pins the same pair from the API side.
 const API_LIMIT_MIN = 1
 const API_LIMIT_MAX = 200
 
@@ -66,7 +40,6 @@ describe('BE-9455 — the per-page control must emit a limit the API accepts', (
 
   it('does not emit the Vuetify "All" sentinel (-1) as the server limit', () => {
     const f = make()
-    // What v-data-table-server reports upward when the user picks "All".
     f.itemsPerPage.value = -1
 
     const params = f.buildServerParams()
@@ -80,8 +53,6 @@ describe('BE-9455 — the per-page control must emit a limit the API accepts', (
     f.itemsPerPage.value = -1
     f.currentPage.value = 2
 
-    // offset = (page - 1) * itemsPerPage — with the sentinel that is negative,
-    // and `offset` is declared ge=0 on the endpoint, so it 422s on its own.
     expect(f.buildServerParams().offset).toBeGreaterThanOrEqual(0)
   })
 
@@ -103,10 +74,6 @@ describe('BE-9455 — the per-page control must emit a limit the API accepts', (
     expect(params.offset).toBe(200)
   })
 
-  // The fix clamps rather than special-casing the single `-1` sentinel, so the
-  // whole CLASS of out-of-contract page sizes dies here — not just the one value
-  // Vuetify happens to use today. A future option-list edit, a copied composable,
-  // or a Vuetify default change cannot reintroduce a request the API will reject.
   it.each([
     ['the Vuetify "All" sentinel', -1],
     ['zero', 0],
@@ -128,8 +95,6 @@ describe('BE-9455 — the per-page control must emit a limit the API accepts', (
 
   it('derives offset from the CLAMPED size, so paging stays consistent with it', () => {
     const f = make()
-    // An over-cap request collapses to the cap; page 3 must then start at 2*cap,
-    // not at 2*the-requested-size, or the pages would overlap or skip rows.
     f.itemsPerPage.value = 500
     f.currentPage.value = 3
 

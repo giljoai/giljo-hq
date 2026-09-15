@@ -1,9 +1,7 @@
 <template>
   <v-container>
-    <!-- Page Header -->
     <h1 class="text-headline-large mb-6">User Management</h1>
 
-    <!-- User Manager Component -->
     <UserManager />
   </v-container>
 </template>

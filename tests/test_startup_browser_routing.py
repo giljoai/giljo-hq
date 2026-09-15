@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression tests for IMP-0011 Phase 2: mode-aware browser auto-open URL.
-
-The launcher (startup.py) must branch the auto-open URL on `deployment_context`
-(read from config.yaml).
-
-Branch order (load-bearing):
-1. deployment_context == "saas-production" -> suppress auto-open (returns None)
-2. is_first_run (CE first-run)             -> /welcome
-3. otherwise                               -> dashboard root (no path)
-
-`saas-production` additionally triggers `suppress_browser=True` upstream, so in
-that mode `open_browser` must not be called at all.
-
-These tests pin the branch by calling the pure helper
-`_choose_browser_target(deployment_context, is_first_run)` which returns:
-- a route string (e.g. "/welcome", or "" for dashboard root)
-- `None` when browser auto-open should be suppressed entirely
-"""
 
 from __future__ import annotations
 
@@ -34,11 +16,8 @@ from startup_support import services
 
 
 class TestChooseBrowserTarget:
-    """Pure-helper branch coverage for _choose_browser_target()."""
 
     def test_saas_production_returns_none_for_suppression(self) -> None:
-        # Defence in depth: even though suppress_browser short-circuits upstream,
-        # the helper itself must signal "do not open" for saas-production.
         assert startup._choose_browser_target("saas-production", is_first_run=True) is None
         assert startup._choose_browser_target("saas-production", is_first_run=False) is None
 
@@ -46,11 +25,9 @@ class TestChooseBrowserTarget:
         assert startup._choose_browser_target("localhost", is_first_run=True) == "/welcome"
 
     def test_localhost_not_first_run_opens_dashboard_root(self) -> None:
-        # Dashboard root is represented by empty path string ("" -> URL ends in :port).
         assert startup._choose_browser_target("localhost", is_first_run=False) == ""
 
     def test_lan_first_run_opens_welcome(self) -> None:
-        # lan is a non-saas CE context; it should follow the first-run/dashboard branch.
         assert startup._choose_browser_target("lan", is_first_run=True) == "/welcome"
 
     def test_lan_not_first_run_opens_dashboard_root(self) -> None:
@@ -58,7 +35,6 @@ class TestChooseBrowserTarget:
 
 
 class TestBrowserRoutingIntegration:
-    """End-to-end URL assembly via the helper, matching how main() composes URLs."""
 
     @pytest.mark.parametrize(
         ("deployment_context", "is_first_run", "expected_suffix"),
@@ -87,20 +63,13 @@ class TestBrowserRoutingIntegration:
         target_route = startup._choose_browser_target("localhost", is_first_run=False)
         assert target_route == ""
         dashboard_url = f"{http_proto}://{server_host}:{browser_port}{target_route}"
-        # Must end at the port, not at any path segment.
         assert dashboard_url == f"http://127.0.0.1:{browser_port}"
         assert not dashboard_url.endswith("/welcome")
 
     def test_saas_production_short_circuits_no_open(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """If the helper returns None, the caller must not invoke open_browser.
-
-        This simulates the upstream `suppress_browser` guard: in saas-production
-        mode, open_browser MUST NOT be called.
-        """
         calls: list[str] = []
 
         def fake_open_browser(url: str, delay: int = 3) -> None:
-            # `delay` is part of open_browser's signature; we don't sleep in tests.
             _ = delay
             calls.append(url)
 
@@ -114,7 +83,6 @@ class TestBrowserRoutingIntegration:
 
 
 class TestWslDetection:
-    """TSK-9114: `_is_wsl()` must key off WSL_DISTRO_NAME or the kernel string."""
 
     def test_wsl_distro_name_env_var_detected(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
@@ -149,7 +117,6 @@ class TestWslDetection:
 
 
 class TestOpenBrowserWsl:
-    """TSK-9114: opener fallback order wslview -> explorer.exe -> powershell.exe."""
 
     def test_prefers_wslview_when_available(self, monkeypatch: pytest.MonkeyPatch) -> None:
         calls: list[list[str]] = []
@@ -223,7 +190,6 @@ class TestOpenBrowserWsl:
 
 
 class TestOpenBrowserHonestStatus:
-    """TSK-9114: no false "[OK] Browser opened" when the opener actually failed."""
 
     def test_success_prints_ok(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(services, "_is_wsl", lambda: False)

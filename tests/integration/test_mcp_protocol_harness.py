@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-FastMCP HTTP/SSE integration harness (closes ACTION_REQUIRED_AUDIT seq 120).
-
-Exercises the MCP-tool registration boundary end-to-end via the SDK's in-process
-transport: real FastMCP server instance, real tool registry, real JSON-RPC over
-in-memory streams. Auth middleware is bypassed because the harness connects
-directly to the FastMCP server (the same fixture pattern the official MCP
-Python SDK uses for its own protocol tests).
-
-The mcp_client fixture yields an async context manager (not a session directly)
-so the SDK's anyio task-group setup and teardown stay inside one coroutine
-task. Yielding the live ClientSession across pytest-asyncio's fixture
-finalization boundary triggers anyio's "exit cancel scope in a different task"
-guard.
-"""
 
 import json
 
@@ -30,7 +15,6 @@ pytestmark = pytest.mark.asyncio
 
 
 async def test_tools_list_includes_health_check(mcp_client):
-    """list_tools() must expose health_check with a well-formed input schema."""
     async with mcp_client as session:
         result = await session.list_tools()
 
@@ -48,7 +32,6 @@ async def test_tools_list_includes_health_check(mcp_client):
 
 
 async def test_health_check_round_trip(mcp_client):
-    """call_tool('health_check', {}) must round-trip a non-error result with status=healthy."""
     async with mcp_client as session:
         result = await session.call_tool("health_check", {})
 
@@ -61,7 +44,6 @@ async def test_health_check_round_trip(mcp_client):
 
 
 def _extract_payload(call_tool_result) -> dict:
-    """Decode the first text content block from a CallToolResult into a dict."""
     if getattr(call_tool_result, "structuredContent", None):
         return call_tool_result.structured_content
 

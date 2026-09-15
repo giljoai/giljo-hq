@@ -3,41 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9275b: heal the "GiljoAI MCP" -> "Giljo HQ" bootstrap rebrand for existing tenants.
-
-Revision ID: ce_0085_heal_giljo_hq_bootstrap_rebrand
-Revises: ce_0084_heal_neutralized_seed_personas
-Create Date: 2026-07-24
-
-BE-9275b flipped the MCP tool prefix in agent-facing prose from `mcp__giljo_mcp__`
-to `mcp__giljo_hq__` (derived from ``branding.MCP_ALIAS``) and reworded the shared
-MCP bootstrap section (``template_seeder._get_mcp_bootstrap_section()``) from
-"GiljoAI MCP" to "Giljo HQ" (derived from ``branding.PRODUCT_NAME``). That bootstrap
-is stored verbatim in every non-orchestrator role's ``agent_templates.system_instructions``
-column at seed time.
-
-``refresh_tenant_template_instructions`` is operator-triggered only and does NOT
-run on startup (same gap ``ce_0049`` and ``ce_0084`` healed for their own bootstrap
-edits) -- this migration does its own raw-SQL heal so existing tenants actually
-receive the reworded bootstrap via the path that runs on every boot.
-
-Scope: ``system_instructions`` only, for rows whose column still byte-matches the
-EXACT pre-BE-9275b bootstrap string produced by ``_get_mcp_bootstrap_section()``.
-The orchestrator role is in ``SYSTEM_MANAGED_ROLES`` (``template_seeder.py``) and
-never gets its own ``agent_templates`` row seeded -- callers read its identity
-prompt straight from code, so there is nothing in the DB to heal for it. The
-in-repo template_renderer.py tolerates BOTH the old and new bootstrap shapes
-(marker/heading dual-check) regardless of whether this migration has run yet, so
-a CE self-hoster who never re-runs migrations still renders correctly -- this
-migration is a data cleanliness pass, not a correctness dependency.
-
-Idempotent: the UPDATE's WHERE clause requires the column to still hold the OLD
-text, so a second run (the CE installer reruns `alembic upgrade head` on every
-boot) matches zero rows and is a clean no-op.
-
-Edition Scope: CE -- ``agent_templates`` is a CE table (``migrations/versions/``).
-SaaS inherits this migration unchanged via its next ``preDeploy`` alembic run.
-"""
 
 import sqlalchemy as sa
 from alembic import op

@@ -1,17 +1,3 @@
-/**
- * useDashboardRealtime.js — FE-9501c (D7)
- *
- * DashboardView had ZERO WebSocket wiring -- only a 60s call-count poll. This
- * subscribes to the lifecycle events that already drive Roadmap/Projects
- * (project_update, agent:created, task:updated) and debounces them into one
- * refetch, since a chain run or an agent-activity burst emits a lot of these
- * in a row. Subscribe on mount, unsubscribe on unmount -- the caller wires
- * nothing beyond passing the refetch function.
- *
- * @param {Function} refetch - called (debounced) on any of the wired events
- *
- * Edition scope: Both
- */
 import { onMounted, onUnmounted } from 'vue'
 import debounce from 'lodash-es/debounce'
 import { useWebSocketStore } from '@/stores/websocket'

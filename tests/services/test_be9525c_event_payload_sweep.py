@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9525c: finish the event-payload sweep BE-9518 left behind.
-
-BE-9518 put ``product_id`` on six event types; its own comment in the FE
-router named the ones it deliberately left out: ``agent:created``,
-``agent:removed``, ``job:progress_update``. This closes that set, adds the
-inverse gap on ``agent:auto_failed`` (had product_id, not project_id), adds
-``product_id`` to the approval read model, and normalizes the
-``notification:new`` envelope to carry top-level ids (fixing a real
-``clearForProject`` shape-mismatch bug on the frontend side).
-
-Each test below exercises the REAL service method (not the broadcast helper
-in isolation) with a mocked websocket manager, mirroring
-test_be3006b_transaction_ownership.py's proven pattern.
-
-Parallel-safe: DB-touching tests use the shared transactional db_session /
-project fixtures from tests/services/conftest.py. No module-level mutable
-state. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -47,9 +29,6 @@ from giljo_mcp.tenant import TenantManager
 pytestmark = pytest.mark.asyncio
 
 
-# ---------------------------------------------------------------------------
-# 1. agent:created (JobLifecycleService.spawn_job) gains product_id
-# ---------------------------------------------------------------------------
 
 
 async def test_spawn_job_agent_created_carries_product_id(db_session, db_manager, tenant_key, project):
@@ -76,9 +55,6 @@ async def test_spawn_job_agent_created_carries_product_id(db_session, db_manager
     assert call.kwargs["data"]["product_id"] == project.product_id
 
 
-# ---------------------------------------------------------------------------
-# 2. project:staging_complete (mark_staging_complete) gains product_id
-# ---------------------------------------------------------------------------
 
 
 async def test_mark_staging_complete_carries_product_id(db_session, tenant_key, project):
@@ -94,10 +70,6 @@ async def test_mark_staging_complete_carries_product_id(db_session, tenant_key, 
     assert call.kwargs["data"]["product_id"] == project.product_id
 
 
-# ---------------------------------------------------------------------------
-# 3. project:implementation_launched (ProjectStagingService.launch_implementation)
-#    gains product_id
-# ---------------------------------------------------------------------------
 
 
 async def test_launch_implementation_carries_product_id(db_session, db_manager, tenant_key, project):
@@ -121,9 +93,6 @@ async def test_launch_implementation_carries_product_id(db_session, db_manager, 
     assert call.kwargs["data"]["product_id"] == project.product_id
 
 
-# ---------------------------------------------------------------------------
-# 4. job:progress_update (ProgressService.report_progress) gains product_id
-# ---------------------------------------------------------------------------
 
 
 async def test_report_progress_carries_product_id(db_session, db_manager, tenant_key, project):
@@ -164,9 +133,6 @@ async def test_report_progress_carries_product_id(db_session, db_manager, tenant
     assert progress_calls[0].kwargs["data"]["product_id"] == project.product_id
 
 
-# ---------------------------------------------------------------------------
-# 5. agent:auto_failed gains project_id (the inverse gap)
-# ---------------------------------------------------------------------------
 
 
 async def test_agent_auto_failed_carries_project_id():
@@ -190,7 +156,6 @@ async def test_agent_auto_failed_carries_project_id():
 
 
 async def test_agent_auto_failed_omits_project_id_when_not_given():
-    """Additive, not invented: no project_id param -> no key in the payload."""
     mock_ws = MagicMock()
     mock_ws.broadcast_event_to_tenant = AsyncMock()
 
@@ -206,9 +171,6 @@ async def test_agent_auto_failed_omits_project_id_when_not_given():
     assert "project_id" not in event["data"]
 
 
-# ---------------------------------------------------------------------------
-# 6. UserApprovalRead gains product_id
-# ---------------------------------------------------------------------------
 
 
 async def test_approval_read_carries_product_id(db_session, db_manager, tenant_key):
@@ -277,15 +239,9 @@ async def test_approval_read_carries_product_id(db_session, db_manager, tenant_k
     assert reads[0].product_id == product.id
 
 
-# ---------------------------------------------------------------------------
-# 7. agent:removed (deactivate's never-run-orchestrator cleanup) gains product_id
-# ---------------------------------------------------------------------------
 
 
 async def test_deactivate_never_run_orchestrator_agent_removed_carries_product_id(db_session, db_manager, tenant_key):
-    """BE-6123's never-run-orchestrator cleanup path: activate (creates the
-    fixture) -> deactivate (deletes it, since it never ran) -> agent:removed.
-    """
     product = Product(
         id=str(uuid4()),
         name=f"BE-9525c removed-product {uuid4().hex[:6]}",
@@ -325,17 +281,9 @@ async def test_deactivate_never_run_orchestrator_agent_removed_carries_product_i
     assert removed_calls[0].kwargs["data"]["product_id"] == product.id
 
 
-# ---------------------------------------------------------------------------
-# 8. notification:new envelope gains top-level project_id/product_id
-# ---------------------------------------------------------------------------
 
 
 async def test_notification_new_envelope_carries_top_level_ids(db_session, db_manager, tenant_key):
-    """The normalization: readers should be able to trust n.project_id /
-    n.product_id without reaching into payload -- derived here from whatever
-    the row's own payload already carries (project.pre_launch_workproduct
-    carries project_id; nothing is invented for a type that carries none).
-    """
     mock_ws = MagicMock()
     mock_ws.broadcast_to_tenant = AsyncMock()
     service = NotificationService(db_manager=db_manager, websocket_manager=mock_ws, session=db_session)

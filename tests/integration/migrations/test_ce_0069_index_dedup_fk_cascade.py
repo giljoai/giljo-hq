@@ -3,28 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Migration regression for ce_0069_dedup_indexes_drift_reconcile (BE-8000c).
-
-The failing layer for the load-bearing fix is the SCHEMA/migration layer: an
-existing install built via ce_0020 has NO foreign key on
-``oauth_refresh_tokens.user_id`` at all, so deleting a user silently orphaned
-that user's refresh tokens (a real data-integrity gap). ce_0069 adds the
-``ON DELETE CASCADE`` FK. Unit tests pass against the ORM model (which already
-declares the CASCADE FK), so the regression MUST run at the migrated-DB layer.
-
-Covered here against a real scratch PostgreSQL DB:
-
-1. Fresh chain head has the ``oauth_refresh_tokens.user_id -> users.id`` FK with
-   ON DELETE CASCADE, and deleting a user cascade-deletes its refresh tokens.
-2. The legacy-heal path: on a DB that reached ce_0068 and then LOST the FK (the
-   real shape of an install created via the old ce_0020, which never made one),
-   ce_0069's upgrade ADDS the CASCADE FK — proving the guard adds, not just
-   no-ops a fresh chain.
-3. The dedup half: a representative exact-duplicate index is dropped while its
-   surviving UNIQUE twin stays, and a kept ce_0051 perf composite is present.
-
-Mirrors tests/integration/migrations/test_ce_0043_execution_mode_nullable.py.
-"""
 
 from __future__ import annotations
 
@@ -155,7 +133,6 @@ def empty_scratch_db(scratch_engine: sa.Engine):
 
 
 def _fk_delete_action(engine: sa.Engine) -> str | None:
-    """confdeltype for the oauth_refresh_tokens.user_id FK ('c'=CASCADE), or None."""
     with engine.connect() as conn:
         return conn.execute(
             text(
@@ -178,7 +155,6 @@ def _index_exists(engine: sa.Engine, name: str) -> bool:
 
 
 def _seed_user_and_token(engine: sa.Engine, *, uid: str) -> None:
-    """Insert a minimal valid user and one refresh token owned by that user."""
     with engine.connect() as conn:
         conn.execute(
             text(
@@ -218,7 +194,6 @@ def _delete_user(engine: sa.Engine, uid: str) -> None:
 @pytest.mark.integration
 class TestCe0069IndexDedupFkCascade:
     def test_fresh_chain_has_cascade_fk_and_cascades(self, empty_scratch_db: sa.Engine) -> None:
-        """Head has the CASCADE FK; deleting a user removes its refresh tokens."""
         up = _run_alembic("upgrade", _TARGET)
         assert up.returncode == 0, f"upgrade {_TARGET} failed:\n{up.stdout}\n{up.stderr}"
 
@@ -234,12 +209,8 @@ class TestCe0069IndexDedupFkCascade:
         )
 
     def test_legacy_missing_fk_is_healed_by_upgrade(self, empty_scratch_db: sa.Engine) -> None:
-        """The genuine ADD path: a ce_0068 DB that lacks the FK (old ce_0020 shape)
-        gains the CASCADE FK when ce_0069 runs — the guard adds, not just no-ops."""
         assert _run_alembic("upgrade", _PRE).returncode == 0
 
-        # Simulate the legacy install: strip the FK baseline created, leaving the
-        # bare column the old ce_0020 produced.
         with empty_scratch_db.connect() as conn:
             conn.execute(text(f"ALTER TABLE oauth_refresh_tokens DROP CONSTRAINT IF EXISTS {_FK_NAME}"))
             conn.commit()
@@ -256,14 +227,9 @@ class TestCe0069IndexDedupFkCascade:
         assert _token_count(empty_scratch_db, "u_legacy") == 0
 
     def test_duplicate_index_dropped_unique_twin_and_perf_composite_kept(self, empty_scratch_db: sa.Engine) -> None:
-        """Dedup half: an exact-dup plain index is gone, its UNIQUE twin stays,
-        and a kept ce_0051 perf composite survives."""
         assert _run_alembic("upgrade", _TARGET).returncode == 0
 
-        # api_keys.key_hash: the redundant plain idx_apikey_hash is dropped; the
-        # UNIQUE ix_api_keys_key_hash (the uniqueness guarantee) is kept.
         assert not _index_exists(empty_scratch_db, "idx_apikey_hash")
         assert _index_exists(empty_scratch_db, "ix_api_keys_key_hash")
-        # A dropped prefix-redundant narrow index and the composite that covers it.
         assert not _index_exists(empty_scratch_db, "idx_agent_executions_tenant")
         assert _index_exists(empty_scratch_db, "idx_agent_executions_tenant_job_started")

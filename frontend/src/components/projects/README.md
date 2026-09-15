@@ -240,7 +240,7 @@ Message badges only appear when `mode === 'jobs'` and messages exist.
 When `isOrchestrator={true}`:
 
 1. **Launch Prompt Icons**: Displays `LaunchPromptIcons` component with Claude
-   Code, Codex, Gemini CLI icons
+   Code, Codex icons
 2. **Closeout Button**: Shows green "Closeout Project" button when
    `showCloseoutButton={true}` (typically when all agents are complete)
 
@@ -466,7 +466,6 @@ AI coding tool icons with copy-to-clipboard functionality.
 
 - Claude Code (orange)
 - Codex CLI (purple)
-- Gemini CLI (blue)
 - Click to copy MCP integration command
 - Toast notification on successful copy
 

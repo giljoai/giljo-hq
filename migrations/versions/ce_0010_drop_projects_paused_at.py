@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Drop orphan projects.paused_at column.
-
-Revision ID: ce_0010_drop_projects_paused_at
-Revises: ce_0009_drop_per_user_skills_tracking_add_system_announce
-Create Date: 2026-05-05
-
-Pause-as-a-distinct-state was never wired end-to-end. The deactivate flow
-(which is the actually-used codepath) never wrote paused_at. Drop the orphan
-column so the model and schema match. Reference:
-internal design notes, sec 3, P1 finding 2.
-
-Idempotent: re-applying is a no-op.
-"""
 
 import sqlalchemy as sa
 from alembic import op

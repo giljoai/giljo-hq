@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Add oauth_revoked_tokens table (API-0022 RFC 7009 revocation).
-
-Revision ID: ce_0022_oauth_revoked_tokens
-Revises: ce_0021_oauth_codes_scope_default
-Create Date: 2026-05-12
-
-API-0022 introduces RFC 7009 OAuth Token Revocation. The /oauth/revoke
-endpoint persists a row here keyed by JWT ``jti`` (added to all access
-tokens by API-0022). The /mcp Bearer middleware looks up the presented
-token's jti against this table on every request (with a short-lived
-in-process TTL cache in front) and rejects revoked tokens with 401.
-
-Edition Scope: CE -- the OAuth surface lives in CE (api/endpoints/oauth.py);
-per CLAUDE.md migration-chain rule the table must go in the CE chain so
-``startup.py``'s ``alembic upgrade head`` creates it on every install.
-
-Idempotent: create_table + index guarded by information_schema lookup.
-"""
 
 import sqlalchemy as sa
 from alembic import op

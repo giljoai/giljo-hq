@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-5046: ce_0024 tasks.hidden migration idempotency tests.
-
-Mirrors the pattern in test_migration_ce_0018_user_approvals -- exercises
-upgrade() / downgrade() against a fake bind so the information_schema guards
-and op.add_column / op.drop_column behavior can be verified without booting
-Alembic against a real database.
-"""
 
 from unittest.mock import MagicMock, patch
 
@@ -50,7 +43,6 @@ def test_upgrade_adds_hidden_column_when_missing():
     column = args[1]
     assert column.name == "hidden"
     assert column.nullable is False
-    # server_default text must encode 'false' so existing rows backfill cleanly
     assert "false" in str(column.server_default.arg).lower()
 
 

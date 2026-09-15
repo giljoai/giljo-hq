@@ -1,30 +1,3 @@
-/**
- * HubView.pinning.fe9418.spec.js — FE-9418
- *
- * The landing half of exact baton-message pinning.
- *
- * FE-9410 got the operator INTO the thread but could only approximate the post, because
- * nothing on the notification path named one: the baton's WS event
- * (`broadcast_thread_update`) and its durable bell row (`HubBatonHandoverPayload`) both
- * carry a thread id and no message id. So the Hub resolved the target as "the newest
- * post at the moment you arrive" — which is a DIFFERENT row from "the post that handed
- * you the baton" as soon as anything else lands in between, and under a sprint's worth
- * of agent traffic that is the ordinary case rather than the unlucky one.
- *
- * FE-9418 adds `Message.id` to the thread-list `last_message`, so the route can carry
- * the anchor. These pin the three things that must all hold at once:
- *
- *   1. a named anchor WINS over the tail — otherwise the change bought nothing;
- *   2. no anchor falls back to the tail UNCHANGED — three real callers cannot supply
- *      one (a bare thread id, a thread nobody has posted in, an older payload);
- *   3. an anchor naming a post that is not loaded ALSO falls back — an id nothing
- *      matches would mark nothing and scroll nowhere, which is worse than the tail.
- *
- * FE-9410's own guarantees are re-asserted here rather than assumed, because this lane
- * rewrites the computed that carries them.
- *
- * Edition scope: Both
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { reactive, nextTick } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -82,12 +55,6 @@ function batonThread(overrides = {}) {
   }
 }
 
-/**
- * The thread's history, oldest first. The baton post is deliberately NOT last: a post
- * landing between the notification and the click is the whole reason this project
- * exists, and a fixture whose anchor is already the tail cannot tell the two rules
- * apart — every assertion below would pass on unmodified FE-9410 code.
- */
 function seedHistory(thread) {
   api.threads.history.mockResolvedValue({
     data: {
@@ -130,14 +97,10 @@ describe('HubView exact-message pinning (FE-9418)', () => {
       seed: batonThread(),
     })
     expect(focusOf(wrapper)).toBe(BATON_MESSAGE)
-    // Stated as its own assertion because it is the entire point of the project: the
-    // tail is a real, different, plausible answer here and it is the wrong one.
     expect(focusOf(wrapper)).not.toBe(NEWER_MESSAGE)
   })
 
   it('falls back to the thread tail when the arrival names no message', async () => {
-    // The bell rows hold only a thread id, and a thread nobody has posted in has no
-    // anchor to give. FE-9410's behaviour must survive both untouched.
     const { wrapper } = await mountHub({
       query: { thread: THREAD_ID, focus: 'baton' },
       seed: batonThread(),
@@ -146,9 +109,6 @@ describe('HubView exact-message pinning (FE-9418)', () => {
   })
 
   it('falls back to the tail when the named message is not in the loaded timeline', async () => {
-    // An anchor nothing matches is functionally absent: it would mark no post and
-    // scroll nowhere, leaving the operator worse off than the approximation. A stale
-    // bookmark, a bounded history window, or a deleted post all reach this.
     const { wrapper } = await mountHub({
       query: { thread: THREAD_ID, focus: 'baton', message: 'msg-not-here' },
       seed: batonThread(),
@@ -157,9 +117,6 @@ describe('HubView exact-message pinning (FE-9418)', () => {
   })
 
   it('marks nothing on an ordinary arrival even when a message is named', async () => {
-    // A plain ?thread= deep link (the /jobs message icon, FE-9012c) is not a hand-off.
-    // The anchor names a post but no baton was passed, so nothing may say "Waiting on
-    // you" — the flag is the authority on WHETHER to mark, the anchor only on WHICH.
     const { wrapper } = await mountHub({
       query: { thread: THREAD_ID, message: BATON_MESSAGE },
       seed: batonThread(),
@@ -169,9 +126,6 @@ describe('HubView exact-message pinning (FE-9418)', () => {
   })
 
   it('still stops marking once the operator moves on to another thread', async () => {
-    // FE-9410's 441dec7b0 guard, re-asserted rather than assumed: this lane rewrites the
-    // computed that carries it, and a pinned anchor outliving its thread would put
-    // "Waiting on you" on a post nobody handed over — the same defect through a new door.
     const { wrapper, store } = await mountHub({
       query: { thread: THREAD_ID, focus: 'baton', message: BATON_MESSAGE },
       seed: batonThread(),
@@ -194,8 +148,6 @@ describe('HubView exact-message pinning (FE-9418)', () => {
   })
 
   it('sends the attention-strip click with the anchor the thread carries', async () => {
-    // The strip holds the enriched thread object, so it is the one entry point that CAN
-    // name the post. It must actually do so, through the shared helper.
     const { wrapper } = await mountHub({ query: { tab: 'town' }, seed: batonThread() })
     await wrapper.find('[data-testid="hub-attention-strip"]').trigger('click')
     expect(h.push).toHaveBeenCalledWith({
@@ -206,24 +158,8 @@ describe('HubView exact-message pinning (FE-9418)', () => {
 })
 
 describe('HubView -> ThreadTimeline, end to end (FE-9418)', () => {
-  /**
-   * The DoD asks that clicking a baton notification HIGHLIGHTS the exact message. Every
-   * test above stubs the timeline, so together with FE-9410's ThreadTimeline spec they
-   * prove it by composition: the right id is resolved here, and the timeline marks
-   * whatever id it is handed. Composition is not the same as connection.
-   *
-   * FE-9419 is the reason that distinction earns its own test. It shipped a prop that
-   * never bound — invisible to the child's unit spec, because VTU maps prop OBJECTS
-   * straight through and so never exercises the template binding where the defect lived.
-   * A stub declaring `focusMessageId` has exactly that blind spot: it would accept the
-   * prop under any name the parent used.
-   *
-   * So this one mounts the REAL timeline and asserts the flag lands on the exact post.
-   */
   beforeEach(() => {
     h.push.mockClear()
-    // jsdom has no scrollIntoView; install it rather than spy, or the timeline's scroll
-    // would throw and read as "it chose not to scroll".
     Element.prototype.scrollIntoView = vi.fn()
   })
 
@@ -239,7 +175,6 @@ describe('HubView -> ThreadTimeline, end to end (FE-9418)', () => {
     const wrapper = mount(HubView, {
       global: {
         plugins: [pinia, createVuetify()],
-        // Every child stubbed EXCEPT ThreadTimeline — the binding under test.
         stubs: { ...childStubs, ThreadTimeline: false },
       },
     })
@@ -253,8 +188,6 @@ describe('HubView -> ThreadTimeline, end to end (FE-9418)', () => {
 
     expect(named.find('[data-testid="hub-focus-baton"]').exists()).toBe(true)
     expect(named.classes()).toContain('timeline-msg--focus')
-    // The assertion that makes this test worth mounting the real component for: the tail
-    // is present, plausible, and must NOT be the one marked.
     expect(newest.find('[data-testid="hub-focus-baton"]').exists()).toBe(false)
     expect(newest.classes()).not.toContain('timeline-msg--focus')
   })

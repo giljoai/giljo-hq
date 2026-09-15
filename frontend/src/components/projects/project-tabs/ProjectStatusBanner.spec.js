@@ -1,9 +1,3 @@
-/**
- * ProjectStatusBanner.spec.js — FE-6006 unit 3a
- *
- * Tests banner state visibility: one state shown at a time.
- * Edition scope: CE
- */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'

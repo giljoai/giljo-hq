@@ -166,8 +166,7 @@ them by path on the server (for IT-managed/rotated certificates). Then flip the 
 toggle and restart.
 
 Changing the protocol (HTTP↔HTTPS) changes the server URL, so you must re-attach and
-re-authenticate your AI coding tools afterwards. Node.js-based tools (Codex CLI,
-Gemini CLI) also need the certificate trusted in the system CA store; the Network
+re-authenticate your AI coding tools afterwards. Node.js-based tools (Codex CLI) also need the certificate trusted in the system CA store; the Network
 settings page shows the exact commands.
 
 ### 14. Open the dashboard
@@ -186,7 +185,7 @@ wizard.
 ### Step 1: Choose Tools
 
 Select the AI coding tools you plan to connect. Options: Claude Code, Codex CLI,
-Gemini CLI. You can select multiple tools and connect them in the same session.
+OpenCode, or a generic MCP client. You can select multiple tools and connect them in the same session.
 
 ### Step 2: Connect
 
@@ -221,14 +220,9 @@ Then register the server:
 codex mcp add giljo_hq --url <server-url>/mcp --bearer-token-env-var GILJO_API_KEY
 ```
 
-**Gemini CLI:**
-```bash
-gemini mcp add -t http -H "Authorization: Bearer <api-key>" giljo_hq <server-url>/mcp
-```
-
 **If you enabled HTTPS: trust the certificate (one-time, Node.js tools only)**
 
-If your server uses HTTPS, Codex CLI and Gemini CLI need to trust the system CA store.
+If your server uses HTTPS, Codex CLI needs to trust the system CA store.
 Run this before starting the tool:
 
 ```bash
@@ -252,11 +246,14 @@ Ask your connected AI coding tool to run:
 giljo_setup
 ```
 
-This MCP tool downloads slash commands and agent templates and installs them in your
-tool's configuration directory. The wizard shows two checkmarks as downloads complete:
-"Skills downloaded" and "Agents downloaded".
+This MCP tool downloads the slash commands and installs them in your tool's
+configuration directory, and writes the Giljo HQ marker block into your project's
+`CLAUDE.md` / `AGENTS.md`. The wizard shows a "Skills downloaded" checkmark when it
+completes.
 
-To refresh agent templates later, run the `giljo_setup` tool and choose "Agents only".
+It does not install agents. Every agent your orchestrator starts is handed its own
+profile by the server when it begins work, so there is nothing to install or refresh.
+Run `giljo_setup` again whenever your skills are outdated.
 
 For manual setup, go to Tools > Connect in the dashboard.
 
@@ -277,8 +274,8 @@ go to the dashboard home page.
 ## giljo_setup Tool
 
 `giljo_setup` is the recommended first command to run after connecting an AI coding
-tool. It downloads slash commands and agent templates as a ZIP and installs them in
-the correct location for your CLI tool.
+tool. It downloads the slash commands as a ZIP, installs them in the correct location
+for your CLI tool, and writes the Giljo HQ marker block into your project file.
 
 The tool auto-detects the platform from the MCP client name. You can also pass a
 platform explicitly:
@@ -286,7 +283,6 @@ platform explicitly:
 ```
 giljo_setup(platform="claude_code")
 giljo_setup(platform="codex_cli")
-giljo_setup(platform="gemini_cli")
 ```
 
 When setup completes, the dashboard emits a `setup:bootstrap_complete` WebSocket
@@ -339,7 +335,7 @@ process occupies these ports:
 
 ### HTTPS certificate not trusted (HTTPS mode)
 
-If you enabled HTTPS in Settings → Network: Node.js-based tools (Codex CLI, Gemini CLI)
+If you enabled HTTPS in Settings → Network: Node.js-based tools (Codex CLI)
 reject self-signed or private certificates unless the system CA store is trusted.
 Set `NODE_OPTIONS="--use-system-ca"` in your shell environment before starting the
 tool. The setup wizard shows the exact command for your platform.

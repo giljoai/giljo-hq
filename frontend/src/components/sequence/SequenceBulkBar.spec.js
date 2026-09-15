@@ -1,11 +1,3 @@
-/**
- * SequenceBulkBar.spec.js — FE-6131e
- *
- * Covers the cap=5 enforcement on the "Run sequential (N/5)" bulk-action bar
- * (DoD: cap=5 enforcement) plus the run/clear intents.
- *
- * Edition scope: CE.
- */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import SequenceBulkBar from '@/components/sequence/SequenceBulkBar.vue'
@@ -25,7 +17,6 @@ describe('SequenceBulkBar', () => {
     expect(wrapper.find('[data-testid="seq-bulk-bar"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="seq-bulk-count"]').text()).toContain('3 selected')
     expect(wrapper.find('[data-testid="seq-run-btn"]').text()).toContain('3/5')
-    // no over-cap warning, run enabled
     expect(wrapper.find('[data-testid="seq-bulk-warn"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="seq-run-btn"]').attributes('disabled')).toBeUndefined()
   })

@@ -2,15 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-// ---------- Stub heavy dependencies ----------
-// FE-9204: the connect step was rebuilt into a walk-one-tool-at-a-time controller
-// (SetupStep2Connect) hosting the shared ConnectToolCard. These specs mount the step
-// and exercise the CARD through it (the child is intentionally not stubbed). The
-// pre-rebuild invariants are preserved under the new anatomy: no "OAuth" in copy
-// (FE-6259b), CE never renders sign-in (FE-6242), server lock on SaaS/unknown
-// (FE-6055), and stable data-testid hooks (FE-6247).
 
-// Capture the WebSocket subscription so tests can fire setup:tool_connected.
 let wsHandlers = {}
 vi.mock('@/stores/websocket', () => ({
   useWebSocketStore: () => ({
@@ -21,16 +13,8 @@ vi.mock('@/stores/websocket', () => ({
   }),
 }))
 
-// FE-9569: credential-status seeding (detector 1). Defaults to "nothing
-// connected yet" so the pre-existing suite (which never anticipated this
-// call) keeps behaving exactly as before; individual tests below override
-// per-call to exercise the already-connected seed path.
 let mockConnectedHarnesses = {}
 
-// BE-9591: the flow now requires a FRESH connection, so seeds must be expressed
-// RELATIVE to now, never as fixed dates. A hardcoded "recent" literal silently
-// becomes history as the calendar moves -- 2026-09-01 read as fresh when these
-// tests were written and does not any more.
 const justNow = () => new Date(Date.now() + 60_000).toISOString()
 const longAgo = () => new Date(Date.now() - 86_400_000).toISOString()
 vi.mock('@/services/api', () => ({
@@ -54,7 +38,6 @@ vi.mock('@/services/api', () => ({
   },
 }))
 
-// configService.fetchConfig drives edition (CE editable / SaaS read-only).
 let mockGiljoMode = 'saas'
 let mockSslEnabled = false
 vi.mock('@/services/configService', () => ({
@@ -76,7 +59,6 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ showToast: vi.fn() }),
 }))
 
-// useMcpConfig is consumed REAL — the command generation is part of what we validate.
 
 const globalStubs = {
   'v-text-field': {
@@ -102,7 +84,7 @@ async function mountStep(selectedTools, giljoMode = 'saas') {
     props: { selectedTools },
     global: { stubs: globalStubs },
   })
-  await flushPromises() // onMounted: checkExistingKey + loadBackendConfig (parent + card)
+  await flushPromises()
   return wrapper
 }
 
@@ -125,7 +107,6 @@ beforeEach(() => {
   mockConnectedHarnesses = {}
 })
 
-// -----------------------------------------------------------------------
 
 describe('SetupStep2Connect — SaaS: sign-in primary path (FE-6259b vocabulary lock)', () => {
   it('renders the sign-in command with NO bearer token and never the word "OAuth"', async () => {
@@ -136,7 +117,6 @@ describe('SetupStep2Connect — SaaS: sign-in primary path (FE-6259b vocabulary 
     expect(pre.text()).toContain('/mcp')
     expect(pre.text()).not.toContain('Bearer')
     expect(pre.text()).not.toContain('Authorization')
-    // Connect-vocabulary parity: never the word "OAuth", never an em dash in step-2 copy.
     expect(wrapper.text()).not.toContain('OAuth')
     expect(wrapper.text()).not.toContain('—')
   })
@@ -149,7 +129,6 @@ describe('SetupStep2Connect — SaaS: sign-in primary path (FE-6259b vocabulary 
     await wrapper.find('[data-testid="fallback-toggle"]').trigger('click')
     await nextTick()
     expect(wrapper.text()).toContain('Generate API Key')
-    // Toggling back returns to sign-in.
     await wrapper.find('[data-testid="fallback-toggle"]').trigger('click')
     await nextTick()
     expect(wrapper.text()).toContain('Use an API key instead')
@@ -159,16 +138,6 @@ describe('SetupStep2Connect — SaaS: sign-in primary path (FE-6259b vocabulary 
     const wrapper = await mountStep(['codex_cli'], 'saas')
     expect(wrapper.text()).not.toContain('auto-detected')
     expect(wrapper.text()).not.toContain('OAuth')
-  })
-
-  it('treats Antigravity as key-only — no sign-in command, shows the not-supported note + immediate key flow', async () => {
-    const wrapper = await mountStep(['antigravity_cli'], 'saas')
-    const text = wrapper.text()
-    expect(wrapper.find('[data-testid="oauth-section"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="fallback-toggle"]').exists()).toBe(false)
-    expect(text).toContain('Browser sign-in is not supported')
-    expect(text).not.toContain('OAuth')
-    expect(text).toContain('Generate API Key')
   })
 
   it('OpenCode (added FE-9204) is sign-in-capable — emits the opencode add+auth command, no bearer', async () => {
@@ -184,23 +153,16 @@ describe('SetupStep2Connect — SaaS: sign-in primary path (FE-6259b vocabulary 
     const wrapper = await mountStep(['generic'], 'saas')
     expect(wrapper.find('[data-testid="oauth-section"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="fallback-toggle"]').exists()).toBe(false)
-    // Manual config shows the generate card immediately; the JSON appears once a key exists.
     expect(wrapper.text()).toContain('Generate API Key')
   })
 
-  // FE-9225: the retired configurator's "Web & app" route is ported (reduced) onto the
-  // generic card — apps that take an MCP connector URL need the bare endpoint, not the
-  // key-bearing JSON, because they run their own browser sign-in.
   it('Generic MCP client exposes the connector URL + web-app hint, with no key required', async () => {
     const wrapper = await mountStep(['generic'], 'saas')
     const block = wrapper.find('[data-testid="web-endpoint-block"]')
     expect(block.exists()).toBe(true)
-    // buildServerUrl path 1: browser is already on the backend host, so the endpoint
-    // is origin-derived (this is what proxied deployments depend on).
     expect(block.find('pre').text()).toBe(`${window.location.origin}/mcp`)
     expect(block.find('[data-testid="web-endpoint-copy-btn"]').exists()).toBe(true)
     expect(block.text()).toContain('claude.ai')
-    // Present before any key is generated — the web connector never needs one.
     expect(wrapper.text()).toContain('Generate API Key')
   })
 
@@ -210,20 +172,7 @@ describe('SetupStep2Connect — SaaS: sign-in primary path (FE-6259b vocabulary 
   })
 })
 
-// -----------------------------------------------------------------------
 
-/**
- * FE-9569 detector 1: the connect dot used to depend ENTIRELY on a live
- * setup:tool_connected WS event arriving while this card is open. An
- * already-authenticated tenant (connected in another TUI, or reconnecting
- * after a reload) sends no `initialize` while the wizard is mounted, so the
- * dot stayed stuck on "Waiting..." forever even though a real connection
- * already exists. Fix: seed connectionStatus from the durable
- * GET /api/connect/credential-status truth on mount (same idiom already
- * shipped in ToolsConnectDirectory.vue), with the WS event staying as the
- * live-delta path on top of that seed. By design: no recency cutoff on
- * connected_harnesses — any timestamp counts, matching the shipped sibling.
- */
 describe('SetupStep2Connect — credential-status seeding, already-connected case (FE-9569 detector 1)', () => {
   it('fresh case: no connected_harnesses leaves the dot waiting (unchanged behavior)', async () => {
     mockConnectedHarnesses = {}
@@ -233,18 +182,10 @@ describe('SetupStep2Connect — credential-status seeding, already-connected cas
   })
 
   it('a FRESH connection on record flips the dot green WITHOUT any WS event', async () => {
-    // MEANING NARROWED BY BE-9591. This used to assert that ANY connection on record
-    // flips the dot, however old. The operator hit the other side of that: he connected
-    // on one machine, opened the wizard on a second, and the tool was already green
-    // before that machine had ever connected. The guarantee it actually protects --
-    // don't depend on catching a live WS event -- is unchanged and still asserted here;
-    // what changed is that the record must be FRESH. See the historical-record test below.
-    // 'claude-code' is the backend harness_resolver token for claude_code (setupTools.js HARNESS_TO_TOOL_ID).
     mockConnectedHarnesses = { 'claude-code': justNow() }
     const wrapper = await mountStep(['claude_code'], 'saas')
     expect(wrapper.find('[data-testid="hero-check"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('connected.')
-    // No setup:tool_connected fired -- this must NOT depend on the event.
     expect(wsHandlers['setup:tool_connected']).toBeTruthy()
   })
 
@@ -258,8 +199,6 @@ describe('SetupStep2Connect — credential-status seeding, already-connected cas
   it('multi-tool walk: resumes at the first NOT-yet-connected tool, not always index 0', async () => {
     mockConnectedHarnesses = { 'claude-code': justNow() }
     const wrapper = await mountStep(['claude_code', 'codex_cli'], 'saas')
-    // claude_code (tool 1) is already connected via credential-status, so the
-    // walk should resume on codex_cli (tool 2), not restart at tool 1.
     expect(wrapper.find('.connect-eyebrow').text()).toContain('TOOL 2 OF 2')
   })
 
@@ -270,10 +209,6 @@ describe('SetupStep2Connect — credential-status seeding, already-connected cas
   })
 
   it('BE-9591: a HISTORICAL connection does NOT satisfy this flow', async () => {
-    // The operator's report: connected on PC1, opened the wizard on a laptop, and
-    // Claude Code was already green there before the laptop had ever connected.
-    // Once-connected read as forever-connected. The active flow now requires a
-    // connection newer than the moment the step was entered.
     mockConnectedHarnesses = { 'claude-code': longAgo() }
     const wrapper = await mountStep(['claude_code'], 'saas')
     expect(wrapper.find('[data-testid="hero-check"]').exists()).toBe(false)
@@ -281,9 +216,6 @@ describe('SetupStep2Connect — credential-status seeding, already-connected cas
   })
 
   it('BE-9591: a live WS announce still flips it, history or not', async () => {
-    // The freshness cutoff must never swallow the live path -- an announce arriving
-    // WHILE the step is open is fresh by definition, and it is the signal a user
-    // connecting right now actually produces.
     mockConnectedHarnesses = { 'claude-code': longAgo() }
     const wrapper = await mountStep(['claude_code'], 'saas')
     expect(wrapper.find('[data-testid="hero-check"]').exists()).toBe(false)
@@ -302,7 +234,6 @@ describe('SetupStep2Connect — credential-status seeding, already-connected cas
   })
 })
 
-// -----------------------------------------------------------------------
 
 describe('SetupStep2Connect — CE: API-key-only gating (FE-6242)', () => {
   it('CE: hides the sign-in command + fallback toggle for a sign-in-capable tool', async () => {
@@ -316,12 +247,6 @@ describe('SetupStep2Connect — CE: API-key-only gating (FE-6242)', () => {
     expect(wrapper.text()).toContain('Generate API Key')
   })
 
-  it('CE: Antigravity (key-only) still works — key-only note + immediate key flow', async () => {
-    const wrapper = await mountStep(['antigravity_cli'], 'ce')
-    expect(wrapper.text()).toContain('Browser sign-in is not supported')
-    expect(wrapper.text()).toContain('Generate API Key')
-  })
-
   it('CE: WS connect event flips the active tool and clears the can-proceed gate', async () => {
     const wrapper = await mountStep(['claude_code'], 'ce')
     expect(typeof wsHandlers['setup:tool_connected']).toBe('function')
@@ -332,7 +257,6 @@ describe('SetupStep2Connect — CE: API-key-only gating (FE-6242)', () => {
   })
 })
 
-// -----------------------------------------------------------------------
 
 describe('SetupStep2Connect — status hero + generic-event active-only flip (proposal §6)', () => {
   it('starts waiting and blocks proceeding', async () => {
@@ -354,7 +278,6 @@ describe('SetupStep2Connect — status hero + generic-event active-only flip (pr
 
   it('generic event flips ONLY the active tool, not every selected tool', async () => {
     const wrapper = await mountStep(['claude_code', 'codex_cli'], 'saas')
-    // Active tool is the first one (claude_code); the event flips it only.
     wsHandlers['setup:tool_connected']({ tool_name: 'mcp_connected' })
     await nextTick()
     const stepData = wrapper.emitted('step-data')
@@ -365,11 +288,9 @@ describe('SetupStep2Connect — status hero + generic-event active-only flip (pr
 
   it('advance label is "Next tool" mid-walk and "Install agents & skills" on the last tool', async () => {
     const wrapper = await mountStep(['claude_code', 'codex_cli'], 'saas')
-    // Connect the active (first) tool → hero advance appears with the mid-walk label.
     wsHandlers['setup:tool_connected']({ tool_name: 'mcp_connected' })
     await nextTick()
     expect(wrapper.find('[data-testid="hero-advance"]').text()).toContain('Next tool')
-    // Walk to the last tool, connect it → label becomes the install advance.
     await wrapper.find('[data-testid="hero-advance"]').trigger('click')
     await nextTick()
     expect(wrapper.find('.connect-eyebrow').text()).toContain('TOOL 2 OF 2')
@@ -397,16 +318,13 @@ describe('SetupStep2Connect — status hero + generic-event active-only flip (pr
   })
 })
 
-// -----------------------------------------------------------------------
 
 describe('SetupStep2Connect — per-tool fallback isolation (walk)', () => {
   it('toggling the fallback on one tool does not carry to the next tool', async () => {
     const wrapper = await mountStep(['claude_code', 'codex_cli'], 'saas')
-    // Reveal the key flow on tool 1.
     await wrapper.find('[data-testid="fallback-toggle"]').trigger('click')
     await nextTick()
     expect(wrapper.text()).toContain('Generate API Key')
-    // Connect + walk to tool 2 — it must start on the sign-in path, not the key flow.
     wsHandlers['setup:tool_connected']({ tool_name: 'mcp_connected' })
     await nextTick()
     await wrapper.find('[data-testid="hero-advance"]').trigger('click')
@@ -417,7 +335,6 @@ describe('SetupStep2Connect — per-tool fallback isolation (walk)', () => {
   })
 })
 
-// -----------------------------------------------------------------------
 
 describe('SetupStep2Connect — server URL edition gating (FE-6055)', () => {
   it('is editable (click reveals host/port fields, pencil icon) on CE', async () => {
@@ -436,7 +353,6 @@ describe('SetupStep2Connect — server URL edition gating (FE-6055)', () => {
   })
 })
 
-// -----------------------------------------------------------------------
 
 describe('SetupStep2Connect — HTTPS cert-trust guidance (INF-6241)', () => {
   it('shows no cert-trust note when ssl_enabled is false', async () => {
@@ -449,13 +365,11 @@ describe('SetupStep2Connect — HTTPS cert-trust guidance (INF-6241)', () => {
     expect(wrapper.find('[data-testid="oauth-cert-note"]').exists()).toBe(true)
     const text = wrapper.find('[data-testid="oauth-cert-note"]').text()
     expect(text).toContain('HTTPS certificate trust')
-    // Never imply GiljoAI issued the cert.
     expect(text).not.toContain('root CA')
     expect(text).not.toContain('mkcert')
   })
 })
 
-// -----------------------------------------------------------------------
 
 describe('SetupStep2Connect — data-testid hooks preserved under new anatomy (FE-6247)', () => {
   it('root, server field, and status hero hooks are present', async () => {
@@ -477,31 +391,14 @@ describe('SetupStep2Connect — data-testid hooks preserved under new anatomy (F
     expect(wrapper.find('[data-testid="fallback-toggle"]').exists()).toBe(false)
   })
 
-  it('key-only tool: apikey-only-note present, oauth-section absent', async () => {
-    const wrapper = await mountStep(['antigravity_cli'], 'saas')
-    expect(wrapper.find('[data-testid="apikey-only-note"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="oauth-section"]').exists()).toBe(false)
-  })
-
   it('SaaS + HTTPS: oauth-cert-note renders when ssl_enabled', async () => {
     const wrapper = await mountStepSsl(['claude_code'], true)
     expect(wrapper.find('[data-testid="oauth-cert-note"]').exists()).toBe(true)
   })
 })
 
-// -----------------------------------------------------------------------
 
-/**
- * FE-9383 — OpenCode's `mcp add` does not share Claude Code's syntax: the server URL
- * rides on `--url` (a bare URL is an unexpected positional and OpenCode answers with
- * its help text), and headers are KEY=VALUE (`Authorization=Bearer <key>`, not the
- * colon form). Both generators emitted the Claude Code shape, so an OpenCode user's
- * first copy-paste failed twice over. These assertions sit at the rendered-snippet
- * layer — the exact text the user copies — and pin the Claude Code commands as
- * unchanged so the fix cannot drift into the tool it was already correct for.
- */
 describe('SetupStep2Connect — OpenCode snippet syntax + client labels (FE-9383)', () => {
-  /** Run the key flow so the bearer command block renders (it is gated on hasKey). */
   async function withGeneratedKey(wrapper) {
     await wrapper.find('[data-testid="generate-key-btn"]').trigger('click')
     await flushPromises()

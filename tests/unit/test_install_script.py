@@ -2,13 +2,6 @@
 # Licensed under the Elastic License 2.0.
 # [CE] Community Edition.
 
-"""
-Python-based validation tests for install.ps1.
-
-These tests verify structural properties of the PowerShell installer
-without requiring Pester or PowerShell execution. They run as part of
-the standard pytest suite.
-"""
 
 import subprocess
 import sys
@@ -23,7 +16,6 @@ START_BAT = REPO_ROOT / "scripts" / "start-giljoai.bat"
 
 
 class TestInstallPs1Exists:
-    """Verify the installer script file exists and is non-empty."""
 
     def test_script_file_exists(self):
         assert INSTALL_PS1.exists(), f"Expected {INSTALL_PS1} to exist"
@@ -34,7 +26,6 @@ class TestInstallPs1Exists:
 
 
 class TestInstallPs1Structure:
-    """Verify the script contains required structural elements."""
 
     @pytest.fixture(autouse=True)
     def _load_content(self):
@@ -106,10 +97,8 @@ class TestInstallPs1Structure:
 
 @pytest.mark.skipif(sys.platform != "win32", reason="PowerShell syntax check only runs on Windows")
 class TestInstallPs1Syntax:
-    """Validate PowerShell syntax if PowerShell is available."""
 
     def test_powershell_parses_without_errors(self):
-        """Use PowerShell's parser to check for syntax errors."""
         ps_check = (
             f"$errors = $null; "
             f"[System.Management.Automation.Language.Parser]::ParseFile("
@@ -129,16 +118,6 @@ class TestInstallPs1Syntax:
 
 
 class TestStartBat:
-    """Verify the start-giljoai.bat launcher script (INF-9321 contract).
-
-    The pre-INF-9321 version of this class pinned the DRIFTED launcher:
-    it asserted `activate.bat` and `api.run_api` were present -- the exact
-    pattern check_installer_integrity.py forbids in install.ps1's heredoc --
-    and its `api.run_api` assertion kept passing against the fixed bat by
-    matching a COMMENT. These tests now pin the corrected contract, and the
-    behavioural asserts look only at CODE lines (comments stripped) so prose
-    can never satisfy or violate them again.
-    """
 
     @staticmethod
     def _code_lines() -> list[str]:
@@ -153,19 +132,14 @@ class TestStartBat:
         assert "@echo off" in content
 
     def test_bat_launches_startup_py_with_the_venv_python(self):
-        """The launcher must run venv\\Scripts\\python.exe startup.py -- never a
-        bare `python` (the Store alias trap) and never api.run_api (skips
-        migrations, frontend build, and the browser open)."""
         code = self._code_lines()
         assert any("venv\\Scripts\\python.exe" in line and "startup.py" in line for line in code), code
 
     def test_bat_never_invokes_run_api_or_activate_in_code(self):
-        """The drifted launcher used `call activate.bat` + `python -m api.run_api`."""
         code = self._code_lines()
         assert not any("api.run_api" in line for line in code), code
         assert not any("activate.bat" in line for line in code), code
 
     def test_bat_cds_to_the_install_root(self):
-        """The bat ships inside scripts/ but venv + startup.py live one level up."""
         code = self._code_lines()
         assert any('cd /d "%~dp0..' in line for line in code), code

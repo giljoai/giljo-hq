@@ -3,11 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Unit tests for ProjectService.get_closeout_data (Handover 0249a).
-Updated 0730d: Exception-based error handling patterns (no success wrappers).
-Updated 0731c: Typed returns - get_closeout_data returns CloseoutData model.
-"""
 
 import random
 import uuid
@@ -27,12 +22,9 @@ from giljo_mcp.tenant import TenantManager
 async def test_get_closeout_data_all_agents_complete(
     db_manager, db_session: AsyncSession, tenant_manager: TenantManager
 ):
-    """Closeout data reflects all agents completed successfully."""
     tenant_key = TenantManager.generate_tenant_key()
     tenant_manager.set_current_tenant(tenant_key)
 
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -74,7 +66,6 @@ async def test_get_closeout_data_all_agents_complete(
     await db_session.commit()
 
     service = ProjectService(db_manager, tenant_manager)
-    # 0731c: get_closeout_data returns CloseoutData typed model
     data = await service.closeout.get_closeout_data(project.id, db_session=db_session)
 
     assert isinstance(data, CloseoutData)
@@ -91,12 +82,9 @@ async def test_get_closeout_data_all_agents_complete(
 async def test_get_closeout_data_with_blocked_agents(
     db_manager, db_session: AsyncSession, tenant_manager: TenantManager
 ):
-    """Closeout data reports blocked agents and incomplete status."""
     tenant_key = TenantManager.generate_tenant_key()
     tenant_manager.set_current_tenant(tenant_key)
 
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -171,7 +159,6 @@ async def test_get_closeout_data_with_blocked_agents(
     await db_session.commit()
 
     service = ProjectService(db_manager, tenant_manager)
-    # 0731c: get_closeout_data returns CloseoutData typed model
     data = await service.closeout.get_closeout_data(project.id, db_session=db_session)
 
     assert isinstance(data, CloseoutData)
@@ -188,7 +175,6 @@ async def test_get_closeout_data_with_blocked_agents(
 async def test_get_closeout_data_with_git_integration(
     db_manager, db_session: AsyncSession, tenant_manager: TenantManager
 ):
-    """Closeout data reflects Git integration when enabled on the product."""
     tenant_key = TenantManager.generate_tenant_key()
     tenant_manager.set_current_tenant(tenant_key)
 
@@ -234,7 +220,6 @@ async def test_get_closeout_data_with_git_integration(
     await db_session.commit()
 
     service = ProjectService(db_manager, tenant_manager)
-    # 0731c: get_closeout_data returns CloseoutData typed model
     data = await service.closeout.get_closeout_data(project.id, db_session=db_session)
 
     assert isinstance(data, CloseoutData)
@@ -249,12 +234,9 @@ async def test_get_closeout_data_with_git_integration(
 
 @pytest.mark.asyncio
 async def test_get_closeout_data_tenant_isolation(db_manager, db_session: AsyncSession, tenant_manager: TenantManager):
-    """Closeout data cannot be fetched across tenants."""
     tenant_one = TenantManager.generate_tenant_key()
     tenant_two = TenantManager.generate_tenant_key()
 
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_one,
@@ -278,7 +260,6 @@ async def test_get_closeout_data_tenant_isolation(db_manager, db_session: AsyncS
     tenant_manager.set_current_tenant(tenant_two)
     service = ProjectService(db_manager, tenant_manager)
 
-    # 0731c: Exception-based error handling - raises ResourceNotFoundError
     with pytest.raises(ResourceNotFoundError) as exc_info:
         await service.closeout.get_closeout_data(project.id)
 

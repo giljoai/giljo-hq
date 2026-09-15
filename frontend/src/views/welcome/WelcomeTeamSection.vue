@@ -3,22 +3,24 @@
     <div class="team-header">
       <div class="section-label mb-0">Your Team</div>
       <div class="d-flex align-center ga-2">
-        <v-tooltip v-if="hasStaleAgents" location="bottom" max-width="300">
-          <template #activator="{ props }">
-            <span v-bind="props" class="stale-agents-warning">
-              <v-icon size="14">mdi-alert</v-icon> Re-export agents
-            </span>
-          </template>
-          <span>Agent templates have changed since your last export. Run the <code>giljo_setup</code> tool (choose "Agents only") to update your local agent files.</span>
-        </v-tooltip>
-        <span class="team-slots smooth-border">{{ activeTemplates.length + 1 }} / {{ totalSlots }} slots</span>
+        <span v-if="hasProduct" class="team-slots smooth-border"
+          >{{ activeTemplates.length + 1 }} / {{ totalSlots }} slots</span
+        >
         <router-link to="/settings?tab=agents" class="team-manage">
           <v-icon size="14">mdi-cog</v-icon> Manage
         </router-link>
       </div>
     </div>
-    <div class="team-grid">
-      <!-- Orchestrator: system agent, always present -->
+    <div v-if="!hasProduct" class="team-empty smooth-border" data-testid="team-no-product">
+      <v-icon size="20" class="team-empty-icon">mdi-package-variant-closed</v-icon>
+      <div class="team-empty-title">Create a product to get your agent crew</div>
+      <div class="team-empty-desc">
+        Every product arrives with its own crew of agents, ready to work. You can rename them,
+        tune them, and switch them on per product.
+      </div>
+    </div>
+
+    <div v-else class="team-grid">
       <div class="team-card smooth-border">
         <div class="team-avatar-wrap">
           <div
@@ -86,9 +88,9 @@ defineProps({
     type: Number,
     default: 8,
   },
-  hasStaleAgents: {
+  hasProduct: {
     type: Boolean,
-    default: false,
+    default: true,
   },
 })
 
@@ -239,5 +241,30 @@ function tintedBg(hex) {
   .team-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+.team-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 28px 20px;
+  border-radius: $border-radius-default;
+  gap: 6px;
+}
+.team-empty-icon {
+  color: $color-text-muted;
+  opacity: 0.7;
+}
+.team-empty-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: $color-text-secondary;
+}
+.team-empty-desc {
+  font-size: 0.8rem;
+  color: $color-text-muted;
+  max-width: 420px;
 }
 </style>

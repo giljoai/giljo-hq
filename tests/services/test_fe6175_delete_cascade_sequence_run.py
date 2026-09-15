@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-6175 (RC2) — project-delete cascade to active sequence_runs.
-
-Regression at the FAILING LAYER (the service): deleting a project that is a
-member of an active ``sequence_run`` must drop it from that run, so the chain
-views never storm 404s fetching dead members. Reuses the existing
-SequenceRunService writers (remove_member / release) — no new method.
-
-Covered:
-  - delete a member of a 2-member PENDING run -> run dissolves (cancelled),
-    list_active no longer returns it.
-  - delete a member of a RUNNING (ultralocked) run -> release(cancel) ends the
-    whole run; list_active no longer returns it.
-  - delete a project that is NOT in any run -> no-op; an unrelated active run is
-    left byte-identical (the deletion test for the solo path).
-
-Parallel-safety: DB-touching; uses the db_session fixture (TransactionalTestContext,
-rolled back at teardown). No module-level mutable state; each test owns its setup.
-"""
 
 from __future__ import annotations
 
@@ -49,8 +31,6 @@ _MODE = "claude_code_cli"
 
 @pytest_asyncio.fixture(autouse=True)
 async def _wipe_sequence_runs(db_manager):
-    """SequenceRunService COMMITs through the injected session (RoadmapService
-    pattern); wipe sequence_runs after each test (per-worker DB, serial tests)."""
     yield
     async with db_manager.get_session_async() as session:
         with tenant_isolation_bypass(
@@ -75,8 +55,6 @@ def _deletion_svc(session: AsyncSession, tenant_key: str) -> ProjectDeletionServ
 
 
 async def _create_project(session: AsyncSession, tenant_key: str, project_id: str, *, status: str = "inactive") -> None:
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -114,14 +92,12 @@ async def _create_run(
 
 
 async def test_delete_member_of_pending_run_dissolves_it(db_session: AsyncSession) -> None:
-    """Deleting a member of a 2-member pending run cancels the run (reduce-to-one)."""
     tenant = TenantManager.generate_tenant_key()
     member_id = str(uuid.uuid4())
     other_id = str(uuid.uuid4())
     await _create_project(db_session, tenant, member_id)
     run = await _create_run(db_session, tenant, [member_id, other_id], status="pending")
 
-    # Sanity: the run is active before the delete.
     before = await _seq_svc(db_session).list_active(tenant_key=tenant)
     assert run["id"] in {r["id"] for r in before}
 
@@ -132,7 +108,6 @@ async def test_delete_member_of_pending_run_dissolves_it(db_session: AsyncSessio
 
 
 async def test_delete_member_of_running_run_cancels_it(db_session: AsyncSession) -> None:
-    """A running (ultralocked) run is ended via release(cancel) when a member is deleted."""
     tenant = TenantManager.generate_tenant_key()
     member_id = str(uuid.uuid4())
     p2 = str(uuid.uuid4())
@@ -146,22 +121,14 @@ async def test_delete_member_of_running_run_cancels_it(db_session: AsyncSession)
 
     active = await _seq_svc(db_session).list_active(tenant_key=tenant)
     assert run["id"] not in {r["id"] for r in active}
-    # Confirm it is specifically cancelled (terminal), not silently dropped.
-    # BE-6200: read the row directly via get() — list_active now filters out runs
-    # by live-member terminality regardless of status filter, so it can no longer
-    # be used as a status inspector.
     row = await _seq_svc(db_session).get(run_id=run["id"], tenant_key=tenant)
     assert row["status"] == "cancelled"
 
 
 async def test_delete_non_member_leaves_runs_untouched(db_session: AsyncSession) -> None:
-    """Deletion test: deleting a project in NO run leaves an unrelated run intact."""
     tenant = TenantManager.generate_tenant_key()
     lone_id = str(uuid.uuid4())
     await _create_project(db_session, tenant, lone_id)
-    # An unrelated active run for two OTHER projects. BE-6200: list_active now
-    # keys on live Project rows, so these members must be real, non-terminal rows
-    # (a real run always references real projects).
     other_a = str(uuid.uuid4())
     other_b = str(uuid.uuid4())
     await _create_project(db_session, tenant, other_a, status="active")

@@ -3,11 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-ProductMemoryEntry Repository (Handover 0390a)
-
-CRUD operations for 360 memory entries with tenant isolation.
-"""
 
 import logging
 from datetime import UTC, datetime
@@ -27,15 +22,6 @@ from giljo_mcp.services.dto import MemoryEntryCreateParams
 logger = logging.getLogger(__name__)
 
 
-# BE-6082 + BE-9469: tsvector document expression. MUST stay byte-identical to
-# ``_FTS_DOCUMENT`` in ``migrations/versions/ce_0096_pme_fts_git_commits_be9469.py``
-# (the CURRENT index-defining migration, not ce_0052's superseded original) so
-# this matches the ``idx_pme_fts`` GIN index and the planner uses it -- enforced
-# by ``test_be9469_pme_fts_git_commits_parity.py``, not just this comment.
-# Fields mirror the client-side ``_matchesSearch`` haystack in memoryStore.js.
-# JSONB columns (key_outcomes/decisions_made/tags/git_commits) are cast with
-# ``::text`` (jsonb_out is IMMUTABLE), not array_to_string. git_commits entries
-# are ``{"sha", "message", ...}`` dicts, so the cast reaches each commit message.
 _FTS_DOCUMENT_SQL = (
     "to_tsvector('english', "
     "coalesce(summary, '') || ' ' || "
@@ -48,17 +34,11 @@ _FTS_DOCUMENT_SQL = (
 
 
 def _escape_like(value: str) -> str:
-    """Escape LIKE/ILIKE wildcards so the ILIKE fallback does literal substring
-    matching (parity with the client-side ``.includes()`` haystack)."""
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 class ProductMemoryRepository:
-    """Repository for ProductMemoryEntry CRUD operations."""
 
-    # BE-6071: recent-entries window for get_git_history. Bounds the all-entries scan
-    # that flattened JSONB git_commits across every entry. Far larger than the typical
-    # commit `limit` (50) so the most recent commits are virtually always covered.
     _GIT_HISTORY_ENTRY_WINDOW = 200
 
     async def create_entry(
@@ -66,20 +46,6 @@ class ProductMemoryRepository:
         session: AsyncSession,
         params: MemoryEntryCreateParams,
     ) -> ProductMemoryEntry:
-        """
-        Create a new 360 memory entry.
-
-        Args:
-            session: Database session
-            params: DTO containing all entry fields (tenant_key, product_id, sequence, etc.)
-
-        Returns:
-            Created ProductMemoryEntry instance
-
-        Raises:
-            IntegrityError: If sequence is duplicate for product
-        """
-        # Validate JSONB list columns at the write boundary
         from giljo_mcp.schemas.jsonb_validators import (
             validate_git_commits,
             validate_string_list,
@@ -93,7 +59,7 @@ class ProductMemoryRepository:
 
         entry = ProductMemoryEntry(
             tenant_key=params.tenant_key,
-            product_id=str(params.product_id),  # Convert UUID to string (column is String(36))
+            product_id=str(params.product_id),
             project_id=str(params.project_id) if params.project_id else None,
             sequence=params.sequence,
             entry_type=params.entry_type,
@@ -133,20 +99,6 @@ class ProductMemoryRepository:
         offset: int = 0,
         include_deleted: bool = False,
     ) -> list[ProductMemoryEntry]:
-        """
-        Get 360 memory entries for a product with pagination.
-
-        Args:
-            session: Database session
-            product_id: Product ID to query
-            tenant_key: Tenant isolation key
-            limit: Maximum entries to return (None = all)
-            offset: Number of entries to skip
-            include_deleted: Include soft-deleted entries
-
-        Returns:
-            List of ProductMemoryEntry in descending sequence order
-        """
         stmt = (
             select(ProductMemoryEntry)
             .where(
@@ -176,25 +128,6 @@ class ProductMemoryRepository:
         offset: int = 0,
         include_deleted: bool = False,
     ) -> tuple[list[ProductMemoryEntry], int]:
-        """
-        Get 360 memory entries for the last N distinct projects.
-
-        Unlike get_entries_by_product which limits by entry count, this limits
-        by distinct project_id count. A project with 3 entries returns all 3
-        within a single project slot.
-
-        Args:
-            session: Database session
-            product_id: Product ID to query
-            tenant_key: Tenant isolation key
-            last_n_projects: Number of distinct projects to include
-            offset: Number of distinct projects to skip
-            include_deleted: Include soft-deleted entries
-
-        Returns:
-            Tuple of (entries list in descending sequence order, total distinct project count)
-        """
-        # Base filter shared by both queries
         base_filter = [
             ProductMemoryEntry.product_id == str(product_id),
             ProductMemoryEntry.tenant_key == tenant_key,
@@ -203,13 +136,11 @@ class ProductMemoryRepository:
         if not include_deleted:
             base_filter.append(ProductMemoryEntry.deleted_by_user == False)  # noqa: E712
 
-        # Count total distinct projects
         count_stmt = select(func.count(func.distinct(ProductMemoryEntry.project_id))).where(*base_filter)
         with tenant_session_context(session, tenant_key):
             count_result = await session.execute(count_stmt)
         total_distinct_projects = count_result.scalar() or 0
 
-        # Get the N most recent distinct project_ids (by max sequence)
         project_ids_stmt = (
             select(ProductMemoryEntry.project_id)
             .where(*base_filter)
@@ -225,7 +156,6 @@ class ProductMemoryRepository:
         if not project_ids:
             return [], total_distinct_projects
 
-        # Fetch all entries for those projects
         entries_stmt = (
             select(ProductMemoryEntry)
             .where(
@@ -250,19 +180,6 @@ class ProductMemoryRepository:
         product_id: UUID,
         tenant_key: str,
     ) -> int:
-        """
-        Get the next available sequence number for a product.
-
-        Uses SELECT MAX(sequence) + 1, returns 1 if no entries exist.
-
-        Args:
-            session: Database session
-            product_id: Product ID
-            tenant_key: Tenant isolation key (required, no default)
-
-        Returns:
-            Next sequence number (1-based)
-        """
         filters = [
             ProductMemoryEntry.product_id == str(product_id),
             ProductMemoryEntry.tenant_key == tenant_key,
@@ -279,20 +196,6 @@ class ProductMemoryRepository:
         project_id: UUID,
         tenant_key: str,
     ) -> int:
-        """
-        Soft-delete all entries associated with a project.
-
-        Called when a project is deleted - marks entries as deleted
-        but preserves them for historical reference.
-
-        Args:
-            session: Database session
-            project_id: Project ID to mark entries for
-            tenant_key: Tenant isolation key
-
-        Returns:
-            Number of entries marked as deleted
-        """
         stmt = (
             update(ProductMemoryEntry)
             .where(
@@ -324,20 +227,6 @@ class ProductMemoryRepository:
         tenant_key: str,
         limit: int = 5,
     ) -> list[dict[str, Any]]:
-        """
-        Get entries formatted for context (mission planning).
-
-        Returns lightweight dicts suitable for agent context injection.
-
-        Args:
-            session: Database session
-            product_id: Product ID
-            tenant_key: Tenant isolation key
-            limit: Max entries to return
-
-        Returns:
-            List of entry dicts
-        """
         entries = await self.get_entries_by_product(
             session=session,
             product_id=product_id,
@@ -354,24 +243,6 @@ class ProductMemoryRepository:
         tenant_key: str,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        """
-        Get aggregated git commits from all entries.
-
-        Args:
-            session: Database session
-            product_id: Product ID
-            tenant_key: Tenant isolation key
-            limit: Max commits to return
-
-        Returns:
-            List of git commit dicts
-        """
-        # BE-6071: bound the entries window instead of loading EVERY entry then Python-sorting.
-        # git_commits is a JSONB array per entry, so commits cannot be SQL-LIMITed directly.
-        # get_entries_by_product orders by sequence desc, so the most recent _ENTRY_WINDOW
-        # entries carry the most recent commits; flatten+sort+slice on that bounded window.
-        # _ENTRY_WINDOW (200) >> the typical `limit` (50) so the top commits are virtually
-        # always covered even when entries hold several commits each.
         entries = await self.get_entries_by_product(
             session=session,
             product_id=product_id,
@@ -385,18 +256,10 @@ class ProductMemoryRepository:
             if entry.git_commits:
                 all_commits.extend(entry.git_commits)
 
-        # Sort by date descending, limit
-        # ``or ""`` and str(): a commit dict can carry date=None (the key exists,
-        # so a .get default never applies) or a non-string, and one such row
-        # breaks the whole sort (Sentry GILJOAI-BACKEND-N: None < None raised).
         all_commits.sort(key=lambda c: str(c.get("date") or ""), reverse=True)
         return all_commits[:limit]
 
-    # get_entries_by_tag_prefix and resolve_action_tags removed in INF-5025b
 
-    # ========================================================================
-    # Product lookups (BE-5022d: moved from product_memory_service.py)
-    # ========================================================================
 
     async def get_product_by_id(
         self,
@@ -404,17 +267,6 @@ class ProductMemoryRepository:
         product_id: str,
         tenant_key: str,
     ) -> Product | None:
-        """
-        Get a product by ID with tenant isolation (non-deleted only).
-
-        Args:
-            session: Active database session
-            product_id: Product UUID
-            tenant_key: Tenant key for isolation
-
-        Returns:
-            Product ORM instance or None
-        """
         stmt = select(Product).where(
             and_(
                 Product.id == product_id,
@@ -426,9 +278,6 @@ class ProductMemoryRepository:
             result = await session.execute(stmt)
         return result.scalar_one_or_none()
 
-    # ========================================================================
-    # Cascade impact counts (BE-5022d: moved from product_memory_service.py)
-    # ========================================================================
 
     async def count_projects(
         self,
@@ -436,17 +285,6 @@ class ProductMemoryRepository:
         product_id: str,
         tenant_key: str,
     ) -> int:
-        """
-        Count non-deleted projects for a product.
-
-        Args:
-            session: Active database session
-            product_id: Product UUID
-            tenant_key: Tenant key for isolation
-
-        Returns:
-            Count of non-deleted projects
-        """
         stmt = select(func.count(Project.id)).where(
             and_(
                 Project.product_id == product_id,
@@ -464,17 +302,6 @@ class ProductMemoryRepository:
         product_id: str,
         tenant_key: str,
     ) -> int:
-        """
-        Count tasks for a product.
-
-        Args:
-            session: Active database session
-            product_id: Product UUID
-            tenant_key: Tenant key for isolation
-
-        Returns:
-            Count of tasks
-        """
         stmt = select(func.count(Task.id)).where(
             and_(Task.product_id == product_id, Task.tenant_key == tenant_key, Task.deleted_at.is_(None))
         )
@@ -488,22 +315,11 @@ class ProductMemoryRepository:
         product_id: str,
         tenant_key: str,
     ) -> int:
-        """
-        Count vision documents for a product.
-
-        Args:
-            session: Active database session
-            product_id: Product UUID
-            tenant_key: Tenant key for isolation
-
-        Returns:
-            Count of vision documents
-        """
         stmt = select(func.count(VisionDocument.id)).where(
             and_(
                 VisionDocument.product_id == product_id,
                 VisionDocument.tenant_key == tenant_key,
-                VisionDocument.deleted_at.is_(None),  # BE-6130b: exclude trashed docs
+                VisionDocument.deleted_at.is_(None),
             )
         )
         with tenant_session_context(session, tenant_key):
@@ -516,17 +332,6 @@ class ProductMemoryRepository:
         product_id: str,
         tenant_key: str,
     ) -> int:
-        """
-        Count active or inactive projects for a product.
-
-        Args:
-            session: Active database session
-            product_id: Product UUID
-            tenant_key: Tenant key for isolation
-
-        Returns:
-            Count of unfinished projects
-        """
         stmt = select(func.count(Project.id)).where(
             and_(
                 Project.product_id == product_id,
@@ -544,17 +349,6 @@ class ProductMemoryRepository:
         product_id: str,
         tenant_key: str,
     ) -> int:
-        """
-        Count pending or in-progress tasks for a product.
-
-        Args:
-            session: Active database session
-            product_id: Product UUID
-            tenant_key: Tenant key for isolation
-
-        Returns:
-            Count of unresolved tasks
-        """
         stmt = select(func.count(Task.id)).where(
             and_(
                 Task.product_id == product_id,
@@ -567,15 +361,6 @@ class ProductMemoryRepository:
             result = await session.execute(stmt)
         return result.scalar() or 0
 
-    # ========================================================================
-    # BE-6066 P1: batched (GROUP BY) variants of the per-product count_* methods.
-    # Each returns ``{product_id: count}`` for the supplied product_ids in a
-    # SINGLE grouped query — a fixed query count regardless of how many products
-    # are passed (O(1) in N, not O(N)). Filters mirror the singular ``count_*``
-    # methods EXACTLY so the status / soft-delete semantics are byte-identical.
-    # Products with zero matching rows are simply absent from the dict; callers
-    # default missing keys to 0.
-    # ========================================================================
 
     async def count_projects_bulk(
         self,
@@ -583,12 +368,6 @@ class ProductMemoryRepository:
         product_ids: list[str],
         tenant_key: str,
     ) -> dict[str, int]:
-        """
-        Batched non-deleted project counts keyed by product_id.
-
-        Mirrors :meth:`count_projects` (status != DELETED OR status IS NULL),
-        grouped by product FK across all ``product_ids``.
-        """
         if not product_ids:
             return {}
         stmt = (
@@ -612,11 +391,6 @@ class ProductMemoryRepository:
         product_ids: list[str],
         tenant_key: str,
     ) -> dict[str, int]:
-        """
-        Batched active/inactive project counts keyed by product_id.
-
-        Mirrors :meth:`count_unfinished_projects` (status IN active, inactive).
-        """
         if not product_ids:
             return {}
         stmt = (
@@ -640,11 +414,6 @@ class ProductMemoryRepository:
         product_ids: list[str],
         tenant_key: str,
     ) -> dict[str, int]:
-        """
-        Batched task counts keyed by product_id.
-
-        Mirrors :meth:`count_tasks` (all tasks for the product + tenant_key).
-        """
         if not product_ids:
             return {}
         stmt = (
@@ -662,11 +431,6 @@ class ProductMemoryRepository:
         product_ids: list[str],
         tenant_key: str,
     ) -> dict[str, int]:
-        """
-        Batched pending/in_progress task counts keyed by product_id.
-
-        Mirrors :meth:`count_unresolved_tasks` (status IN pending, in_progress).
-        """
         if not product_ids:
             return {}
         stmt = (
@@ -691,12 +455,6 @@ class ProductMemoryRepository:
         product_ids: list[str],
         tenant_key: str,
     ) -> dict[str, int]:
-        """
-        Batched vision-document counts keyed by product_id.
-
-        Mirrors :meth:`count_vision_documents` (all vision docs for the product
-        + tenant_key).
-        """
         if not product_ids:
             return {}
         stmt = (
@@ -705,7 +463,7 @@ class ProductMemoryRepository:
                 and_(
                     VisionDocument.product_id.in_(product_ids),
                     VisionDocument.tenant_key == tenant_key,
-                    VisionDocument.deleted_at.is_(None),  # BE-6130b: exclude trashed docs
+                    VisionDocument.deleted_at.is_(None),
                 )
             )
             .group_by(VisionDocument.product_id)
@@ -720,17 +478,8 @@ class ProductMemoryRepository:
         product_ids: list[str],
         tenant_key: str,
     ) -> dict[str, dict[str, int]]:
-        """BE-6066 P4: batched vision aggregates per product_id in ONE grouped query.
-
-        The four values ``ProductCard.vue`` derived from ``vision_documents``:
-        ``doc_count`` (== :meth:`count_vision_documents_bulk`), ``chunked_count``,
-        ``chunk_total`` (sum ``chunk_count``), ``embedded_count`` (both summaries
-        non-empty — the card's truthy ``getAnalyzedDocCount``). Products with no
-        rows are absent (callers zero-fill).
-        """
         if not product_ids:
             return {}
-        # Mirror the card's truthy `summary_light && summary_medium` (excl. empty).
         analyzed = and_(
             func.coalesce(VisionDocument.summary_light, "") != "",
             func.coalesce(VisionDocument.summary_medium, "") != "",
@@ -747,7 +496,7 @@ class ProductMemoryRepository:
                 and_(
                     VisionDocument.product_id.in_(product_ids),
                     VisionDocument.tenant_key == tenant_key,
-                    VisionDocument.deleted_at.is_(None),  # BE-6130b: exclude trashed docs
+                    VisionDocument.deleted_at.is_(None),
                 )
             )
             .group_by(VisionDocument.product_id)
@@ -767,30 +516,6 @@ class ProductMemoryRepository:
         search_query: str | None = None,
         tag: str | None = None,
     ) -> tuple[list[ProductMemoryEntry], int]:
-        """
-        Get memory entries with total count for a product.
-
-        Args:
-            session: Active database session
-            product_id: Product UUID
-            tenant_key: Tenant key for isolation
-            project_id: Optional project filter
-            limit: Maximum entries to return
-            search_query: Optional full-text search term (BE-6082). When present,
-                entries are filtered + relevance-ranked via tsquery over summary,
-                project_name, key_outcomes, decisions_made, tags, and git_commits
-                (BE-9469 -- commit messages are searchable). Falls back to an
-                ILIKE substring scan over those same fields when the tsquery
-                matches nothing usable (partial-word/stop-word terms).
-            tag: Optional exact-tag filter (BE-6225b). When present, restricts the
-                result set to entries whose JSONB ``tags`` array contains this tag
-                (``tags @> '[tag]'``). ANDs with ``search_query`` when both are set.
-
-        Returns:
-            Tuple of (entries list, total count). ``total_count`` is the
-            product's overall entry count (unchanged by search/filter) so the
-            response shape is stable across search and browse.
-        """
         base_filters = [
             ProductMemoryEntry.product_id == product_id,
             ProductMemoryEntry.tenant_key == tenant_key,
@@ -799,13 +524,10 @@ class ProductMemoryRepository:
         if project_id:
             base_filters.append(ProductMemoryEntry.project_id == project_id)
         if tag:
-            # JSONB containment: ``tags @> '["<tag>"]'`` — uses the GIN-eligible
-            # containment operator, ANDs cleanly with the FTS/ILIKE search below.
             base_filters.append(ProductMemoryEntry.tags.contains([tag]))
 
         entries = await self._fetch_memory_page(session, tenant_key, base_filters, limit, search_query)
 
-        # Total count: overall entries for product+tenant (search-independent).
         total_count_stmt = select(func.count(ProductMemoryEntry.id)).where(
             ProductMemoryEntry.product_id == product_id,
             ProductMemoryEntry.tenant_key == tenant_key,
@@ -822,14 +544,6 @@ class ProductMemoryRepository:
         project_ids: list[str],
         tenant_key: str,
     ) -> dict[str, str]:
-        """BE-6225b: batched ``{project_id: taxonomy_alias}`` for memory headlines.
-
-        ONE tenant-scoped query resolves the human-facing alias (e.g. ``BE-6225b``)
-        for each source project of a set of memory entries, so search_memory can
-        return ``project_alias`` without an N+1 per-entry lookup. Projects with no
-        alias (or since-deleted) are simply absent from the dict; callers fall back
-        to the entry's stored ``project_name``.
-        """
         ids = [pid for pid in project_ids if pid]
         if not ids:
             return {}
@@ -849,9 +563,6 @@ class ProductMemoryRepository:
         limit: int,
         search_query: str | None,
     ) -> list[ProductMemoryEntry]:
-        """Fetch one page of entries: relevance-ranked FTS when searching (with
-        an ILIKE substring fallback if the tsquery matches nothing), else the
-        existing newest-sequence-first ordering."""
         if not search_query:
             stmt = (
                 select(ProductMemoryEntry)
@@ -868,9 +579,6 @@ class ProductMemoryRepository:
 
     @staticmethod
     def _fts_stmt(base_filters: list, limit: int, search_query: str):
-        """tsquery SELECT over the ``idx_pme_fts`` document expression, ordered
-        by relevance (ts_rank) then sequence. The document literal is byte-
-        identical to the migration's index expression so the planner uses it."""
         fts_doc = literal_column(_FTS_DOCUMENT_SQL)
         tsquery = func.plainto_tsquery(literal_column("'english'"), search_query)
         return (
@@ -882,8 +590,6 @@ class ProductMemoryRepository:
 
     @staticmethod
     def _ilike_stmt(base_filters: list, limit: int, search_query: str):
-        """ILIKE substring fallback over the same fields as the FTS document
-        (JSONB columns cast to text), preserving the sequence ordering."""
         pattern = f"%{_escape_like(search_query)}%"
         match = or_(
             ProductMemoryEntry.summary.ilike(pattern, escape="\\"),
@@ -902,7 +608,6 @@ class ProductMemoryRepository:
 
     @staticmethod
     async def _scalars(session: AsyncSession, tenant_key: str, stmt) -> list[ProductMemoryEntry]:
-        """Execute a SELECT inside the tenant session context and return scalars."""
         with tenant_session_context(session, tenant_key):
             result = await session.execute(stmt)
         return list(result.scalars().all())
@@ -912,13 +617,6 @@ class ProductMemoryRepository:
         session: AsyncSession,
         product: Product,
     ) -> None:
-        """
-        Refresh a product with its relationships after commit.
-
-        Args:
-            session: Active database session
-            product: Product ORM instance
-        """
         await session.refresh(
             product,
             attribute_names=["tech_stack", "architecture", "test_config", "vision_documents"],

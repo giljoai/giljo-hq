@@ -3,17 +3,6 @@
   Licensed under the Elastic License 2.0.
   See LICENSE in the project root for terms.
   [CE] Community Edition.
-
-  LifecycleBannerRow.vue — FE-9538
-
-  One row per project lifecycle moment (staged / activated / implementation
-  launched), fed by lifecycleBannerStore -- see that store's doc comment for
-  why this is its own ephemeral-row family rather than a Notification row.
-  Presentational only, mirroring ApprovalBannerRow.vue's split:
-  the parent (SystemStatusBanner) owns the store and passes `rows` down, and
-  this component never navigates on its own -- it emits `open`
-  with the row, and the parent's click handler carries the project id into
-  the actual router.push.
 -->
 <template>
   <div
@@ -71,11 +60,6 @@ defineEmits(['open', 'dismiss'])
 
 const lifecycleBannerStore = useLifecycleBannerStore()
 
-/**
- * "{taxonomy and title} project {has started/is ready to launch/...}" -- the
- * operator's own requested wording. A cache-miss project (never opened this
- * session) degrades to "A project" rather than dropping the row.
- */
 function messageFor(row) {
   const name = row.title || 'A project'
   return `${name} ${lifecycleBannerStore.momentLabel(row.moment)}`

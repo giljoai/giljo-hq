@@ -3,49 +3,11 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Coordination protocol chapter builders (CH_TEAM, CH_MESSAGING, CH_AUTHORITY).
-
-BE-6008 introduced three runtime-rendered coordination chapters that govern how
-agents on a multi_terminal project see each other and who is allowed to author
-work. They were originally added to chapters_reference.py, which pushed that file
-to 799/800 lines and forced the docstrings to be condensed to fit under the CI
-line ceiling (scripts/ci_guardrails.sh). They live here in their own topic-named
-module so both files have headroom and the full WHY can be documented.
-
-These chapters are the coordination contract between agents:
-  * CH_TEAM (specialist) — the live peer roster, rendered fresh each
-    get_job_mission call rather than baked in at spawn time.
-  * CH_MESSAGING (specialist) — the authority rule from the worker's side:
-    peers exchange INFO, only the orchestrator authors WORK.
-  * CH_AUTHORITY (orchestrator) — the same authority rule from the
-    orchestrator's side, plus the mode-specific staging mechanics.
-
-BE-6215: CH_CONDUCTOR (the conductor addressability + directive-relay protocol,
-BE-6131c) was FOLDED into CH_CHAIN_DRIVE (chapters_chain.py) — both chapters only
-ever co-rendered in the drive phase, so the separate chapter was pure overhead. Its
-``_build_ch_conductor_sequencing`` builder is removed; the relay protocol now renders
-inline in CH_CHAIN_DRIVE from the conductor_agent_id + job_id it already receives.
-"""
 
 from __future__ import annotations
 
 
 def _build_ch_team(team_state: list[dict] | None) -> str:
-    """Build CH_TEAM: a LIVE roster chapter for a multi_terminal specialist.
-
-    BE-6008: this chapter is rendered at READ time from the live execution rows
-    on the project, not from the static "YOUR TEAM" header that was frozen into
-    the mission body at spawn time. That distinction is the whole point — a
-    specialist that re-calls get_job_mission sees its peers' CURRENT status
-    (working / blocked / complete) instead of the snapshot from when it was
-    first staged. Peers join, finish, and block over the life of a project; the
-    spawn-time table goes stale immediately, this view does not.
-
-    ``team_state`` is current_team_state with the calling agent excluded, so a
-    specialist never sees itself in its own roster. An empty/None team_state
-    renders a friendly placeholder rather than an empty table, which happens
-    when a specialist is the first (or only) agent staged on the project.
-    """
     if not team_state:
         rows = "_(no peer agents on this project yet)_"
     else:
@@ -81,23 +43,6 @@ genuine broadcast to every thread participant.
 
 
 def _build_ch_messaging() -> str:
-    """Build CH_MESSAGING: the inter-agent authority rule for a multi_terminal specialist.
-
-    BE-6008: this is the specialist-facing half of the authority contract. A
-    specialist exchanges INFO with its peers but never authors WORK for them and
-    never accepts WORK from them — only the orchestrator authors WORK. The rule
-    exists because peer-to-peer work hand-offs silently fork the plan: two agents
-    start redirecting each other, the orchestrator's view of who-is-doing-what
-    drifts, and scope changes happen with no single owner.
-
-    The chapter draws the line concretely (status / findings / artifact paths =
-    INFO; new tasks / scope changes / re-assignments = WORK) and gives the
-    escalation path: a discovery that would change ANOTHER agent's scope goes UP
-    to the orchestrator with requires_action=true, never sideways to the peer.
-    The orchestrator decides and re-tasks. The closing heuristic — "if acting on
-    it would change what another agent is supposed to build, it is WORK" — is the
-    tie-breaker for the ambiguous middle.
-    """
     return """════════════════════════════════════════════════════════════════════════════
           CH_MESSAGING: WHO AUTHORS WORK (multi-terminal)
 ════════════════════════════════════════════════════════════════════════════
@@ -134,7 +79,8 @@ orchestrator.
 
 MESSAGE BOARD (threads) — when you are on a comm thread (a CHT-#### chat):
 - Posts are APPEND-ONLY. post_to_thread adds to the timeline; never rewrite history.
-- IDENTIFY YOURSELF: pass from_agent = your role from your activated agent template
+- IDENTIFY YOURSELF: pass from_agent = your role from the agent_profile in your get_job_mission
+  response (workers receive their profile from get_job_mission; do not look for installed agent files)
   (implementer, tester, reviewer, analyzer, documenter, orchestrator, or your specific
   agent_id) on every post_to_thread. The Hub renders your color badge from it, matching
   the Home screen. from_agent is REQUIRED — a post without it is refused
@@ -154,17 +100,6 @@ MESSAGE BOARD (threads) — when you are on a comm thread (a CHT-#### chat):
 
 
 def _build_thread_loop_directive() -> str:
-    """Build the thread-scoped loop/sleep directive (BE-6054c).
-
-    Injected into an addressed agent's mission ONLY when the user has armed a loop
-    on a comm thread the agent participates in (a ``loop_directive`` message on a
-    NON-terminal thread). Generalizes the orchestrator auto-checkin loop: instead
-    of looping until "TODO cleared", the agent loops until the THREAD is
-    resolved/closed. The interval rides the existing ``set_agent_status(sleeping,
-    wake_in_minutes=N)`` pipeline — no new mechanism. The loop provably terminates
-    because the directive stops being injected once the thread reaches a terminal
-    status (the server no longer sees a live loop_directive for the agent).
-    """
     return """════════════════════════════════════════════════════════════════════════════
           LOOP / SLEEP DIRECTIVE (user-requested, thread-scoped)
 ════════════════════════════════════════════════════════════════════════════
@@ -201,37 +136,6 @@ armed thread is closed.)
 
 
 def _build_ch_orchestrator_authority(cli_mode: bool) -> str:
-    """Build CH_AUTHORITY: orchestrator-side staging + messaging authority rule.
-
-    BE-6008: this is the orchestrator-facing half of the authority contract that
-    CH_MESSAGING describes for specialists. The orchestrator is the ONLY agent
-    that authors WORK; specialists exchange INFO and surface scope-changes UP for
-    the orchestrator to decide and re-task. Stating the rule on both sides keeps
-    a single, unambiguous owner of the plan.
-
-    Beyond the shared authority rule, the chapter carries the mode-specific
-    staging mechanics, because HOW peers become messageable differs by execution
-    mode:
-
-      * multi_terminal — two-phase staging. Create ALL agents first (spawn them
-        mission-less; each becomes a 'staged', messageable agent with an
-        agent_id but a locked Play button), THEN go back and write each job's
-        mission. Creating every agent up front means peer agent_ids exist before
-        any mission is authored, so the orchestrator can wire peers into each
-        other's missions and agents can message each other immediately.
-
-      * CLI subagent modes — there is no live dashboard roster and verification
-        agents (tester/reviewer) are deferred to implementation. So the
-        orchestrator drains its inbox at mission-WRITE time and splices the
-        relevant peer findings + predecessor artifacts directly into each
-        downstream mission as it authors it — what gets written into the mission
-        is all the subagent will ever see; there is no live roster to re-read
-        after it starts.
-
-    Args:
-        cli_mode: True for any subagent execution mode (canonical ``subagent``
-            or a stored legacy per-CLI alias), False for multi_terminal.
-    """
     if cli_mode:
         mode_rule = """── CLI SUBAGENT MODE: DRAIN INBOX AT WRITE TIME ───────────────────────────
 There is no live dashboard roster and verification agents are deferred to

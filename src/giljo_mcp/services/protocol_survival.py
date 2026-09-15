@@ -3,30 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Protocol truncation survival helpers (BE-9083a).
-
-A live incident (2026-07-07 chain run) proved harness-side output truncation eats
-the TAIL of large ``get_job_mission`` payloads (35-46KB against a ~8KB/200-line
-cross-harness safe budget), silently deleting the staging steps an agent needed.
-This module owns the two survival primitives that ride EARLY in the response:
-
-* ``compute_next_required_actions`` — a numbered, phase-and-role-computed checklist
-  (<= 15 lines) stating exactly the next protocol steps, so a truncated agent still
-  holds an authoritative step list. CRITICAL: callers MUST derive ``phase`` from
-  LIVE state (``project.implementation_launched_at`` — the CE-0026 rule), never
-  from the frozen ``execution.project_phase`` snapshot: a wrong checklist is an
-  authoritative wrong steering wheel that weak models obey over prose.
-* ``PROTOCOL_END_MARKER`` / ``build_truncation_check`` — the tail sentinel line and
-  the head sentinel prose that tells the agent how to VERIFY it received the whole
-  payload and how to recover (protocol_etag refetch; BE-9083d per-section refetch
-  via ``get_job_mission(job_id, section=<name>)``).
-* ``split_protocol_sections`` / ``build_protocol_toc`` — the BE-9083d section-fetch
-  recovery: the FINAL full_protocol is split ONCE into named contiguous slices
-  (byte-identical, ``join == full``), each under the ~8KB/200-line harness floor.
-
-Pure functions, no I/O — reused by BE-9083b (lifecycle breadcrumb footers).
-Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -34,26 +10,13 @@ import re
 from typing import Any
 
 
-# Tail sentinel: appended by mission_service as the LAST line of full_protocol so a
-# receiving agent (and the head sentinel below) can verify the payload arrived whole.
 PROTOCOL_END_MARKER = "END-OF-PROTOCOL"
 
-# BE-9083d: per-section budget for the section-fetch recovery. The cross-harness
-# floor from the harness-limits research is Codex CLI's ~10KiB / 256-line silent
-# cut — every section must INDIVIDUALLY fit under it so a per-section refetch can
-# never itself be truncated.
 SECTION_MAX_CHARS = 8_000
 SECTION_MAX_LINES = 200
 
 
 def build_truncation_check(total_chars: int) -> str:
-    """Head sentinel prose for MissionResponse.truncation_check.
-
-    Emitted EARLY in the serialized payload (before the multi-KB blocks) so it
-    survives tail truncation. BE-9083d: names the section-fetch parameter as the
-    deep recovery (each section fits under every known harness limit), closing the
-    dangling reference BE-9083a deliberately left.
-    """
     return (
         f"This response is ~{total_chars} chars. The full_protocol field ends with the "
         f"marker line '{PROTOCOL_END_MARKER}'. If you cannot see that marker at the very "
@@ -69,18 +32,6 @@ def build_truncation_check(total_chars: int) -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# BE-9083d — section-fetch recovery (single-render-then-slice).
-#
-# The FINAL full_protocol (after every injector, the loop directive, and the tail
-# marker) is split into named CONTIGUOUS slices: ``"".join(sections) == full_protocol``
-# byte-for-byte, zero separator residue. Sections are never re-rendered per request
-# (drift risk) — a section fetch slices the same render the full response would carry.
-# Boundaries are the protocol's own visual structure: ``## ``/``### `` markdown
-# headers and the ═-boxed chapter banners. Any slice exceeding the per-section budget
-# is greedily line-packed into ``<name>.N`` parts, so EVERY section fits the budget by
-# construction.
-# ---------------------------------------------------------------------------
 
 _BOX_LINE = re.compile(r"^═{10,}\s*$")
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")
@@ -92,7 +43,6 @@ def _slug(text: str) -> str:
 
 
 def _boundary_name(lines: list[str], i: int) -> str | None:
-    """Return the section name if line ``i`` starts a new section, else None."""
     line = lines[i].rstrip("\r\n")
     if line.startswith(("## ", "### ")):
         return _slug(line.lstrip("#").strip())
@@ -104,11 +54,6 @@ def _boundary_name(lines: list[str], i: int) -> str | None:
 
 
 def _pack_within_budget(name: str, content: str) -> list[tuple[str, str]]:
-    """Split one oversized section into budget-fitting ``<name>.N`` parts.
-
-    Greedy line-packing keeps parts contiguous (byte-identity by construction); a
-    single pathological line longer than the char budget is hard-sliced.
-    """
     if len(content) <= SECTION_MAX_CHARS and len(content.splitlines()) <= SECTION_MAX_LINES:
         return [(name, content)]
     chunks: list[str] = []
@@ -128,16 +73,10 @@ def _pack_within_budget(name: str, content: str) -> list[tuple[str, str]]:
 
 
 def split_protocol_sections(full_protocol: str) -> list[tuple[str, str]]:
-    """Split the FINAL full_protocol into named contiguous slices (BE-9083d).
-
-    Returns an ordered ``[(name, content), ...]`` with unique names where
-    ``"".join(contents) == full_protocol`` exactly. Prose before the first
-    structural header lands in a ``preamble`` section.
-    """
     if not full_protocol:
         return []
     lines = full_protocol.splitlines(keepends=True)
-    boundaries: list[tuple[int, str]] = []  # (char offset, raw name)
+    boundaries: list[tuple[int, str]] = []
     offset = 0
     for i, line in enumerate(lines):
         name = _boundary_name(lines, i)
@@ -160,37 +99,12 @@ def split_protocol_sections(full_protocol: str) -> list[tuple[str, str]]:
 
 
 def build_protocol_toc(sections: list[tuple[str, str]]) -> list[dict[str, Any]]:
-    """The TOC advertised on the default response: section names + sizes, in slice
-    order (so offsets are reconstructable), with the same inline size annotations
-    idiom get_context uses for token costs."""
     return [{"section": name, "chars": len(content), "lines": len(content.splitlines())} for name, content in sections]
 
 
 def finalize_mission_wire_fields(mission_response: Any, caller_etag: str | None, section: str = "") -> None:
-    """Apply the wire finalizers to a fully-assembled MissionResponse, in order.
-
-    Owns the marker → hash → section-fetch → match-strip → sentinel+TOC sequence for
-    get_agent_mission:
-
-    1. Tail marker: appended as the LAST line of the FINAL full_protocol (after all
-       injectors) BEFORE the etag hash, so the sentinel is part of the cached static
-       block and server/cache can never disagree on the bytes.
-    2. Etag (BE-6208g / BE-6211c S-4a): ALWAYS emitted — emission is decoupled from
-       consumption so a first (no-etag) call still learns the etag. The hash covers
-       the FINAL static block (agent_identity + full_protocol), exactly what the
-       caller would cache. Static-block OMISSION + protocol_unchanged stay gated on
-       a confirmed match only.
-    3. Section fetch (BE-9083d, recovery-only — never the default): when ``section``
-       is set, ship ONLY that named slice of the just-finalized full_protocol (plus
-       the TOC), byte-identical to the full render, and strip the multi-KB blocks.
-       A section request WINS over an etag match — the caller explicitly asked for
-       content, so the match-strip must not starve it.
-    4. Head sentinel + TOC (BE-9083a/d): emitted only when the static block ships —
-       an etag-match response is small by construction and drops both with the
-       block they describe.
-    """
-    from giljo_mcp.exceptions import ValidationError  # local: keep the pure-helper import surface minimal
-    from giljo_mcp.services.mission_assembly import compute_protocol_etag  # local: avoid import cycle
+    from giljo_mcp.exceptions import ValidationError
+    from giljo_mcp.services.mission_assembly import compute_protocol_etag
 
     if mission_response.full_protocol is not None:
         mission_response.full_protocol += f"\n\n{PROTOCOL_END_MARKER}"
@@ -207,29 +121,12 @@ def finalize_mission_wire_fields(mission_response: Any, caller_etag: str | None,
         mission_response.protocol_toc = build_protocol_toc(sections)
         mission_response.protocol_section = section
         mission_response.protocol_section_content = content
-        # Recovery read: ship only the slice — the multi-KB blocks are what truncated.
         mission_response.mission = None
         mission_response.agent_identity = None
         mission_response.full_protocol = None
         mission_response.current_team_state = None
         return
     if caller_etag is not None and caller_etag == computed_etag:
-        # BE-9083c (mission-outside-etag DECISION — measured, decided, ACCEPT): the etag
-        # covers ONLY the STATIC block (agent_identity + full_protocol), which is what the
-        # caller caches. ``mission`` (the orchestrator's execution plan / worker mission, up
-        # to MCP_MISSION_MAX=100K) is DELIBERATELY re-sent even on a match and is NOT put
-        # behind a second etag, because:
-        #   1. It is genuinely DYNAMIC — the orchestrator edits its plan mid-flight
-        #      (update_job_mission), the conductor mirrors chain_mission into it, a sub-orch
-        #      authors its project mission — so a mission-etag would MISS precisely when the
-        #      mission matters, buying little.
-        #   2. A second cache token is a NEW CONCEPT the agent must track and echo — exactly
-        #      the protocol-surface complexity a weak model mishandles (the failure mode this
-        #      whole truncation-survival chain fights), and against the solo-maintainable
-        #      complexity budget for a re-send that is usually small anyway.
-        #   3. Stripping the large static block here already shrinks the match response
-        #      several-fold; the remaining mission is the small dynamic part that must ride
-        #      every fetch regardless. Net: accept the re-send; do not add a mission etag.
         mission_response.agent_identity = None
         mission_response.full_protocol = None
         mission_response.protocol_unchanged = True
@@ -240,19 +137,10 @@ def finalize_mission_wire_fields(mission_response: Any, caller_etag: str | None,
             + len(mission_response.full_protocol)
         )
         mission_response.truncation_check = build_truncation_check(total_chars)
-        # BE-9083d: advertise the section TOC whenever the full protocol ships, so a
-        # truncated receiver knows the section names (they ride EARLY on the wire).
         mission_response.protocol_toc = build_protocol_toc(split_protocol_sections(mission_response.full_protocol))
 
 
 def staging_orchestrator_actions(project: Any, chain_ctx: Any) -> list[str] | None:
-    """Live-state checklist for the staging-instructions assembler (BE-9083a).
-
-    Phase derives from ``project.implementation_launched_at`` (CE-0026), never the
-    frozen execution snapshot. The project-less conductor never reaches that
-    assembler (early-return via conductor_staging_builder), so the chain role there
-    is only ever sub_orchestrator or solo.
-    """
     return compute_next_required_actions(
         job_type="orchestrator",
         phase="implementation" if getattr(project, "implementation_launched_at", None) is not None else "staging",
@@ -268,23 +156,6 @@ def compute_next_required_actions(
     is_chain_member: bool = False,
     is_chain_conductor: bool = False,
 ) -> list[str] | None:
-    """Compute the numbered next-steps checklist for one (phase x role) cell.
-
-    Args:
-        job_type: ``AgentJob.job_type`` ("orchestrator" or a worker role).
-        phase: LIVE lifecycle phase — "staging" | "implementation" | None. Callers
-            MUST derive it from ``project.implementation_launched_at`` (CE-0026),
-            never from the frozen ``execution.project_phase`` snapshot.
-        is_chain_member: True for a project-BOUND orchestrator of an active chain
-            run (a sub-orchestrator).
-        is_chain_conductor: True for the project-LESS dedicated conductor of an
-            active chain run.
-
-    Returns:
-        A numbered checklist (<= 15 entries), or None when the cell cannot be
-        determined (an orchestrator with no live phase signal) — no checklist is
-        safer than a wrong one.
-    """
     if job_type != "orchestrator":
         return _worker()
     if is_chain_conductor:
@@ -371,30 +242,9 @@ def _solo_orchestrator_implementation() -> list[str]:
     ]
 
 
-# ---------------------------------------------------------------------------
-# BE-9083b — lifecycle breadcrumb footers
-#
-# Companion to the next_required_actions checklist above. That checklist rides on
-# the mission/staging READ tools; these footers ride on the lifecycle ACTION
-# tools (spawn_job, complete_job, update_project_mission). Each footer is a short
-# (<= 10 line) plain-prose breadcrumb that tells the agent, the instant its call
-# lands, WHAT the user's dashboard now shows (the WebSocket event) and WHAT to do
-# next. The UI claims are authored from
-# ``internal design notes`` — never invent event names
-# here; that map's pinning test guards the emitter strings.
-#
-# Deliberately NOT emitted on report_progress / set_agent_status: those are
-# high-frequency, chatty tools, so a per-call footer is pure token bloat. Footers
-# land only on the low-frequency, phase-transition tools.
-# ---------------------------------------------------------------------------
 
 
 def build_spawn_footer(*, phase: str | None) -> str:
-    """Breadcrumb footer for spawn_job (fires agent:created → a JobsTab row).
-
-    ``phase`` is the LIVE lifecycle phase ("staging" | "implementation"),
-    derived by the caller from ``project.implementation_launched_at`` (CE-0026).
-    """
     if phase == "implementation":
         return (
             "Done: a new agent row now appears in the dashboard JobsTab / team roster "
@@ -411,7 +261,6 @@ def build_spawn_footer(*, phase: str | None) -> str:
 
 
 def build_mission_update_footer(*, phase: str | None) -> str:
-    """Breadcrumb footer for update_project_mission (fires project:mission_updated)."""
     if phase == "implementation":
         return (
             "Done: the dashboard's project mission panel refreshes live "
@@ -431,14 +280,6 @@ def build_complete_job_footer(
     is_conductor: bool = False,
     is_chain_member_suborch: bool = False,
 ) -> str:
-    """Breadcrumb footer for complete_job, one prose line per hidden phase.
-
-    ``phase`` is the server-detected complete_job phase already computed by
-    ``JobCompletionService._phase_response``: "staging_end" | "closeout" |
-    "deliverable". The two chain flags disambiguate the staging_end / closeout
-    cells exactly as ``_phase_response`` does, so the footer, message, and
-    next_action all agree. UI claims trace to TOOL_UI_EVENT_MAP.md.
-    """
     if phase == "staging_end":
         if is_conductor:
             return (

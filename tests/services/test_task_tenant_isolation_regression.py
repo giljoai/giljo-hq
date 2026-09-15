@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tenant isolation regression tests for TaskService (Security Fix).
-
-Verifies that cross-tenant data leaks are prevented for:
-- _update_task_impl() UPDATE query (CRITICAL: reads tenant from TenantManager)
-- get_task() (CRITICAL: filters by tenant_key)
-
-Test Strategy:
-- Create entities in two tenants (A and B)
-- Set TenantManager.set_current_tenant() to tenant A
-- Attempt cross-tenant operations from tenant A against tenant B's tasks
-- Verify all cross-tenant attempts are blocked
-
-Follows patterns from: test_project_tenant_isolation_regression.py
-"""
 
 import uuid
 
@@ -33,16 +18,9 @@ from giljo_mcp.tenant import TenantManager
 
 @pytest_asyncio.fixture(scope="function")
 async def two_tenant_tasks(db_session, db_manager):
-    """
-    Create tasks in two separate tenants for isolation testing.
-
-    Tenant A: product_a, task_a (status="pending")
-    Tenant B: product_b, task_b (status="pending")
-    """
     tenant_a = TenantManager.generate_tenant_key()
     tenant_b = TenantManager.generate_tenant_key()
 
-    # Create products (required FK for tasks)
     product_a = Product(
         id=str(uuid.uuid4()),
         name="Tenant A Product",
@@ -61,7 +39,6 @@ async def two_tenant_tasks(db_session, db_manager):
     db_session.add(product_b)
     await db_session.commit()
 
-    # Create tasks
     task_a = Task(
         id=str(uuid.uuid4()),
         title="Tenant A Task",
@@ -85,7 +62,6 @@ async def two_tenant_tasks(db_session, db_manager):
     for obj in [task_a, task_b]:
         await db_session.refresh(obj)
 
-    # Create TaskService using test session
     tenant_manager = TenantManager()
     service = TaskService(
         db_manager=db_manager,
@@ -105,28 +81,17 @@ async def two_tenant_tasks(db_session, db_manager):
     }
 
 
-# ============================================================================
-# _update_task_impl() --- Cross-Tenant Modification Test
-# ============================================================================
 
 
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_update_task_blocks_cross_tenant(db_session, two_tenant_tasks):
-    """
-    REGRESSION: _update_task_impl() must filter by tenant_key from TenantManager.
-
-    Bug: _update_task_impl() previously did not enforce tenant isolation,
-    allowing any tenant to update any other tenant's task if they knew the task_id.
-    """
     tenant_a = two_tenant_tasks["tenant_a"]
     task_b = two_tenant_tasks["task_b"]
     service = two_tenant_tasks["service"]
 
-    # Set current tenant to A
     TenantManager.set_current_tenant(tenant_a)
 
-    # Tenant A tries to update tenant B's task
     with pytest.raises(ResourceNotFoundError) as exc_info:
         await service.update_task(
             task_id=task_b.id,
@@ -135,7 +100,6 @@ async def test_update_task_blocks_cross_tenant(db_session, two_tenant_tasks):
 
     assert "not found" in exc_info.value.message.lower() or "access denied" in exc_info.value.message.lower()
 
-    # Verify the task was NOT modified (status unchanged)
     await db_session.refresh(task_b)
     assert task_b.status == "pending", "Cross-tenant update modified another tenant's task!"
 
@@ -143,17 +107,12 @@ async def test_update_task_blocks_cross_tenant(db_session, two_tenant_tasks):
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_update_task_same_tenant_succeeds(db_session, two_tenant_tasks):
-    """
-    Verify that same-tenant task update still works correctly.
-    """
     tenant_a = two_tenant_tasks["tenant_a"]
     task_a = two_tenant_tasks["task_a"]
     service = two_tenant_tasks["service"]
 
-    # Set current tenant to A
     TenantManager.set_current_tenant(tenant_a)
 
-    # Tenant A updates their own task
     result = await service.update_task(
         task_id=task_a.id,
         status="in_progress",
@@ -162,7 +121,6 @@ async def test_update_task_same_tenant_succeeds(db_session, two_tenant_tasks):
     assert task_a.id == result.task_id
     assert "status" in result.updated_fields
 
-    # Verify task was actually updated
     await db_session.refresh(task_a)
     assert task_a.status == "in_progress"
 
@@ -170,14 +128,9 @@ async def test_update_task_same_tenant_succeeds(db_session, two_tenant_tasks):
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_update_task_no_tenant_context_raises_validation_error(db_session, two_tenant_tasks):
-    """
-    update_task() with no tenant context must raise ValidationError,
-    not silently proceed without filtering.
-    """
     task_b = two_tenant_tasks["task_b"]
     service = two_tenant_tasks["service"]
 
-    # Clear tenant context
     TenantManager.clear_current_tenant()
 
     with pytest.raises(ValidationError):
@@ -187,28 +140,17 @@ async def test_update_task_no_tenant_context_raises_validation_error(db_session,
         )
 
 
-# ============================================================================
-# assign_task() --- Inherits Tenant Protection from update_task()
-# ============================================================================
 
 
-# ============================================================================
-# get_task() --- Cross-Tenant Read Test
-# ============================================================================
 
 
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_get_task_blocks_cross_tenant(db_session, two_tenant_tasks):
-    """
-    get_task() must filter by tenant_key from TenantManager.
-    Tenant A must not be able to read tenant B's task.
-    """
     tenant_a = two_tenant_tasks["tenant_a"]
     task_b = two_tenant_tasks["task_b"]
     service = two_tenant_tasks["service"]
 
-    # Set current tenant to A
     TenantManager.set_current_tenant(tenant_a)
 
     with pytest.raises(ResourceNotFoundError):
@@ -218,14 +160,10 @@ async def test_get_task_blocks_cross_tenant(db_session, two_tenant_tasks):
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_get_task_same_tenant_succeeds(db_session, two_tenant_tasks):
-    """
-    Verify that same-tenant get_task still works correctly.
-    """
     tenant_a = two_tenant_tasks["tenant_a"]
     task_a = two_tenant_tasks["task_a"]
     service = two_tenant_tasks["service"]
 
-    # Set current tenant to A
     TenantManager.set_current_tenant(tenant_a)
 
     task = await service.get_task(task_id=task_a.id)
@@ -238,7 +176,6 @@ async def test_get_task_same_tenant_succeeds(db_session, two_tenant_tasks):
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_delete_task_treats_foreign_tenant_admin_as_not_found(db_session, two_tenant_tasks):
-    """delete_task permission lookup must not load a foreign-tenant admin user."""
     tenant_a = two_tenant_tasks["tenant_a"]
     task_a = two_tenant_tasks["task_a"]
     service = two_tenant_tasks["service"]
@@ -264,7 +201,6 @@ async def test_delete_task_treats_foreign_tenant_admin_as_not_found(db_session, 
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_delete_task_same_tenant_admin_succeeds(db_session, two_tenant_tasks):
-    """Same-tenant admin users can still delete tasks."""
     tenant_a = two_tenant_tasks["tenant_a"]
     task_a = two_tenant_tasks["task_a"]
     service = two_tenant_tasks["service"]
@@ -283,8 +219,6 @@ async def test_delete_task_same_tenant_admin_succeeds(db_session, two_tenant_tas
 
     await service.delete_task(task_id=task_a.id, user_id=admin.id)
 
-    # BE-6130b: soft delete — the row persists with deleted_at stamped, but it
-    # drops out of every live read (get_task filters deleted_at IS NULL).
     soft_deleted = await db_session.get(Task, task_a.id)
     assert soft_deleted is not None
     assert soft_deleted.deleted_at is not None
@@ -295,7 +229,6 @@ async def test_delete_task_same_tenant_admin_succeeds(db_session, two_tenant_tas
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_convert_task_treats_foreign_tenant_admin_as_not_found(db_session, two_tenant_tasks):
-    """Task conversion must not authorize a foreign-tenant admin user."""
     tenant_a = two_tenant_tasks["tenant_a"]
     task_a = two_tenant_tasks["task_a"]
     service = two_tenant_tasks["service"]
@@ -327,7 +260,6 @@ async def test_convert_task_treats_foreign_tenant_admin_as_not_found(db_session,
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_convert_task_same_tenant_admin_succeeds(db_session, two_tenant_tasks):
-    """Same-tenant admin users can still convert tasks to projects."""
     tenant_a = two_tenant_tasks["tenant_a"]
     task_a = two_tenant_tasks["task_a"]
     service = two_tenant_tasks["service"]
@@ -356,35 +288,25 @@ async def test_convert_task_same_tenant_admin_succeeds(db_session, two_tenant_ta
     assert await db_session.get(Task, task_a.id) is None
 
 
-# ============================================================================
-# Combined --- Full Cross-Tenant Audit
-# ============================================================================
 
 
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_task_service_cross_tenant_audit(db_session, two_tenant_tasks):
-    """
-    Integration test: Attempt every cross-tenant task operation from tenant A
-    against tenant B's data. All must be blocked.
-    """
     tenant_a = two_tenant_tasks["tenant_a"]
     task_b = two_tenant_tasks["task_b"]
     service = two_tenant_tasks["service"]
 
     violations = []
 
-    # Set current tenant to A for all operations
     TenantManager.set_current_tenant(tenant_a)
 
-    # 1. Update cross-tenant -- should raise
     try:
         await service.update_task(task_id=task_b.id, status="in_progress")
         violations.append("update_task() allowed cross-tenant update")
     except (ResourceNotFoundError, ValidationError):
         pass
 
-    # 2. Get cross-tenant -- should raise
     try:
         await service.get_task(task_id=task_b.id)
         violations.append("get_task() allowed cross-tenant read")
@@ -395,6 +317,5 @@ async def test_task_service_cross_tenant_audit(db_session, two_tenant_tasks):
         f"- {v}" for v in violations
     )
 
-    # Verify task B was never modified by any operation
     await db_session.refresh(task_b)
     assert task_b.status == "pending", "CRITICAL: Task B status was modified by cross-tenant operations!"

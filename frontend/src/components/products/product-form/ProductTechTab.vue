@@ -86,7 +86,6 @@
       </template>
     </v-textarea>
 
-    <!-- Target Platform(s) - Handover 0425 Phase 2 -->
     <div class="mb-4">
       <label class="text-title-small mb-2 d-block">Target Platform(s)</label>
       <div class="text-body-small text-muted-a11y mb-3">

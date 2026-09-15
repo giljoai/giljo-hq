@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Service-layer tests for CommThreadService (BE-6054b).
-
-Complements the MCP-boundary test (test_be6054b_comm_thread_mcp_boundary.py) by
-exercising the service directly — in particular the LOAD-BEARING carve-out:
-``post_to_thread`` is SIDE-EFFECT-FREE. It persists Message + message_recipients
-ONLY; it must NOT acknowledge, bump counters, or auto-block completed agents the
-way orchestration ``send_message`` does, and it must accept a NULL project_id.
-
-Real DB (rollback-isolated ``db_session``), no mocks. Tenant context is
-established with ``tenant_session_context`` as the MCP boundary would.
-"""
 
 from __future__ import annotations
 
@@ -57,16 +46,12 @@ async def test_create_thread_registers_creator_and_baton(db_manager, db_session)
     thread = await svc.create_thread(subject="kickoff", creator_id="agent-alpha", tenant_key=tenant)
 
     assert thread["chat_id"].startswith("CHT-")
-    assert thread["next_action_owner"] == "agent-alpha"  # creator holds the baton
-    # Creator is registered as a participant.
+    assert thread["next_action_owner"] == "agent-alpha"
     history = await svc.get_thread_history(thread_id=thread["thread_id"], tenant_key=tenant)
     assert history["thread"]["chat_id"] == thread["chat_id"]
 
 
 async def test_post_to_thread_is_side_effect_free(db_manager, db_session):
-    """The carve-out: a thread post persists Message + recipients only — it does
-    NOT acknowledge (status stays 'pending', no MessageAcknowledgment rows) and
-    works on a STANDALONE thread (NULL project_id)."""
     tenant = _tk("sef")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -77,15 +62,13 @@ async def test_post_to_thread_is_side_effect_free(db_manager, db_session):
 
     result = await svc.post_to_thread(thread_id=tid, content="ping", from_agent="agent-alpha", tenant_key=tenant)
     assert "agent-beta" in result["recipients"]
-    assert "agent-alpha" not in result["recipients"]  # sender excluded from broadcast
+    assert "agent-alpha" not in result["recipients"]
 
     with tenant_session_context(db_session, tenant):
         msg = (await db_session.execute(select(Message).where(Message.id == result["message_id"]))).scalar_one()
-        # Standalone: NULL project_id, thread anchored, NOT auto-acknowledged.
         assert msg.project_id is None
         assert msg.thread_id == tid
         assert msg.status == "pending"
-        # SIDE-EFFECT-FREE: no acknowledgment rows were created.
         ack_count = (
             await db_session.execute(
                 select(func.count(MessageAcknowledgment.id)).where(
@@ -106,7 +89,6 @@ async def test_username_injection_on_user_post(db_manager, db_session):
 
     thread = await svc.create_thread(subject="ops", creator_id="agent-alpha", tenant_key=tenant)
     await svc.join_thread(thread_id=thread["thread_id"], participant_id="agent-alpha", tenant_key=tenant)
-    # BE-9379: the human's voice is claimed explicitly (as_user), never implied by user_id.
     result = await svc.post_to_thread(
         thread_id=thread["thread_id"], content="operator here", user_id=user.id, as_user=True, tenant_key=tenant
     )
@@ -114,10 +96,6 @@ async def test_username_injection_on_user_post(db_manager, db_session):
 
 
 async def test_from_agent_wins_over_user_id(db_manager, db_session):
-    """FE-6122 precedence flip: when BOTH user_id (always injected by the MCP
-    wrapper) AND from_agent are present, the AGENT identity wins — the post is
-    NOT collapsed to the human principal. The user-only path (no from_agent)
-    still attributes to the user (test_username_injection_on_user_post)."""
     tenant = _tk("precedence")
     await _seed(db_session, tenant)
     user = User(tenant_key=tenant, username="operator_jane")
@@ -130,7 +108,7 @@ async def test_from_agent_wins_over_user_id(db_manager, db_session):
         thread_id=thread["thread_id"],
         content="implementer reporting",
         from_agent="implementer",
-        user_id=user.id,  # injected exactly as the real MCP path does
+        user_id=user.id,
         tenant_key=tenant,
     )
     assert result["from_agent_id"] == "implementer"
@@ -139,8 +117,6 @@ async def test_from_agent_wins_over_user_id(db_manager, db_session):
 
 
 async def test_from_agent_length_cap_raises_validation(db_manager, db_session):
-    """from_agent is agent-supplied input — the owning service length-caps it
-    before the DB (defense in depth for non-MCP callers), not just the boundary."""
     tenant = _tk("cap")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -150,10 +126,6 @@ async def test_from_agent_length_cap_raises_validation(db_manager, db_session):
 
 
 async def test_from_agent_resolves_display_name_from_participant(db_manager, db_session):
-    """Bug fix: post_to_thread must resolve ``from_display_name`` from the
-    poster's OWN comm_participants row (set at join_thread), not echo the raw
-    ``from_agent`` UUID verbatim. Ground truth: a test-install test-mirror thread showed
-    every agent message stamped with the raw UUID instead of its friendly role."""
     tenant = _tk("resolve")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -165,9 +137,8 @@ async def test_from_agent_resolves_display_name_from_participant(db_manager, db_
 
     result = await svc.post_to_thread(thread_id=tid, content="status update", from_agent=agent_uuid, tenant_key=tenant)
 
-    # Stored value is the FRIENDLY name, not the raw UUID.
     assert result["from_display_name"] == "orchestrator"
-    assert result["from_agent_id"] == agent_uuid  # addressing identity unchanged
+    assert result["from_agent_id"] == agent_uuid
 
     with tenant_session_context(db_session, tenant):
         msg = (await db_session.execute(select(Message).where(Message.id == result["message_id"]))).scalar_one()
@@ -176,9 +147,6 @@ async def test_from_agent_resolves_display_name_from_participant(db_manager, db_
 
 
 async def test_from_agent_falls_back_when_not_a_participant(db_manager, db_session):
-    """Fallback: a poster with no comm_participants row (or one with no recorded
-    display_name) never crashes and never renders worse than the pre-fix behavior
-    — it falls back to the raw from_agent value."""
     tenant = _tk("fallback")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -197,8 +165,6 @@ async def test_get_my_turn_and_pass_baton(db_manager, db_session):
     svc = _service(db_manager, db_session)
     thread = await svc.create_thread(subject="t", creator_id="agent-alpha", tenant_key=tenant)
     tid = thread["thread_id"]
-    # BE-9292a: the baton target must be reachable, so beta joins before receiving it.
-    # What this test guards is unchanged — the baton moves and get_my_turn follows it.
     await svc.join_thread(thread_id=tid, participant_id="agent-beta", tenant_key=tenant)
 
     mine = await svc.get_my_turn(agent_id="agent-alpha", tenant_key=tenant)
@@ -231,7 +197,6 @@ async def test_search_threads_by_subject_and_serial(db_manager, db_session):
     by_subject = await svc.search_threads(query="playbook", tenant_key=tenant)
     assert thread["thread_id"] in {t["thread_id"] for t in by_subject["threads"]}
 
-    # CHT serial digits also resolve.
     serial_digits = thread["chat_id"].split("-")[1]
     by_serial = await svc.search_threads(query=serial_digits, tenant_key=tenant)
     assert thread["thread_id"] in {t["thread_id"] for t in by_serial["threads"]}
@@ -261,18 +226,9 @@ async def test_is_terminal_status_helper():
     assert CommThreadService.is_terminal_status(None) is False
 
 
-# ── BE-9037 — harden from_agent at the write boundary ────────────────────────
-#
-# from_agent feeds the FUNCTIONAL identity field (from_agent_id: recipient
-# self-exclusion, baton/get_my_turn matching). The hardening: sanitize (strip
-# control/zero-width chars) + reject a supplied value that sanitizes to empty +
-# surface (never silently stamp) an omitted from_agent — WITHOUT rewriting the
-# slug to a UUID or hard-rejecting unknown slugs (ad-hoc lane ids are legitimate).
 
 
 async def test_be9037_from_agent_control_chars_are_stripped(db_manager, db_session):
-    """A from_agent carrying trailing control/zero-width chars is sanitized before
-    the DB — the stored addressing key is the clean slug, no crash, no garbage."""
     tenant = _tk("be9037_strip")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -280,12 +236,10 @@ async def test_be9037_from_agent_control_chars_are_stripped(db_manager, db_sessi
     result = await svc.post_to_thread(
         thread_id=thread["thread_id"], content="hi", from_agent="BE-9037\u200b\x00\ufeff", tenant_key=tenant
     )
-    assert result["from_agent_id"] == "BE-9037"  # control/zero-width stripped, slug preserved
+    assert result["from_agent_id"] == "BE-9037"
 
 
 async def test_be9037_all_garbage_from_agent_is_rejected(db_manager, db_session):
-    """A from_agent that is ONLY control/zero-width chars sanitizes to empty and is
-    rejected with a clean ValidationError (422) — never a blank identity written."""
     tenant = _tk("be9037_garbage")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -297,12 +251,6 @@ async def test_be9037_all_garbage_from_agent_is_rejected(db_manager, db_session)
 
 
 async def test_be9379_user_attribution_is_explicit_never_the_omission_default(db_manager, db_session):
-    """BE-9379 fail-closed attribution at the service layer: a bare user_id with no
-    from_agent NO LONGER attributes to the principal (that implicit fallback let a
-    forgetful agent impersonate the operator) — it lands on the neutral
-    'orchestrator' identity with an advisory. The human's voice is an explicit
-    as_user=True, which attributes to the principal with no advisory; a declared
-    from_agent still wins and carries none; claiming both is refused."""
     tenant = _tk("be9379_explicit")
     await _seed(db_session, tenant)
     user = User(tenant_key=tenant, username="operator_kim")
@@ -313,7 +261,7 @@ async def test_be9379_user_attribution_is_explicit_never_the_omission_default(db
 
     omitted = await svc.post_to_thread(thread_id=thread["thread_id"], content="hi", user_id=user.id, tenant_key=tenant)
     assert omitted["attribution_warning"] is not None
-    assert omitted["from_agent_id"] == "orchestrator"  # never the human by default
+    assert omitted["from_agent_id"] == "orchestrator"
     assert omitted["from_kind"] == "agent"
 
     as_user = await svc.post_to_thread(
@@ -341,10 +289,6 @@ async def test_be9379_user_attribution_is_explicit_never_the_omission_default(db
 
 
 async def test_be9037_ad_hoc_lane_id_posts_and_batons(db_manager, db_session):
-    """The tonight-critical guarantee: an ad-hoc lane id that is NOT a registered
-    template (e.g. BE-9037) still posts, is stored verbatim as the addressing key,
-    self-excludes from its own broadcast, and drives get_my_turn / set_next_actor —
-    sanitize-and-accept, never reject, never a UUID rewrite."""
     tenant = _tk("be9037_lane")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -355,7 +299,7 @@ async def test_be9037_ad_hoc_lane_id_posts_and_batons(db_manager, db_session):
     result = await svc.post_to_thread(thread_id=tid, content="status", from_agent="BE-9037", tenant_key=tenant)
     assert result["from_agent_id"] == "BE-9037"
     assert "SEC-3001b" in result["recipients"]
-    assert "BE-9037" not in result["recipients"]  # slug self-exclusion intact
+    assert "BE-9037" not in result["recipients"]
 
     mine = await svc.get_my_turn(agent_id="BE-9037", tenant_key=tenant)
     assert tid in {t["thread_id"] for t in mine["threads"]}
@@ -363,12 +307,6 @@ async def test_be9037_ad_hoc_lane_id_posts_and_batons(db_manager, db_session):
     assert handoff["next_action_owner"] == "SEC-3001b"
 
 
-# ---------------------------------------------------------------------------
-# FE-9530 — an omitted product_id is now RESOLVED, not left NULL.
-# Three carve-outs: sequence_run_id (chain conductor), zero-product tenant
-# (genuinely nothing to resolve to), and project_id (derives from the
-# project's OWN product rather than the tenant's shown/default one).
-# ---------------------------------------------------------------------------
 
 
 async def _seed_product(db_session, tenant: str, *, is_active: bool = True, is_default: bool = False) -> str:
@@ -399,7 +337,6 @@ async def _seed_sequence_run(db_session, tenant: str) -> str:
 
 
 async def test_create_thread_on_a_zero_product_tenant_stays_product_less(db_manager, db_session):
-    """Ruling 1's stated exception: 'unless application has no product.'"""
     tenant = _tk("fe9530_noproduct")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -410,7 +347,6 @@ async def test_create_thread_on_a_zero_product_tenant_stays_product_less(db_mana
 
 
 async def test_create_thread_with_a_single_product_resolves_silently(db_manager, db_session):
-    """One product, none named -> resolves to it. Same ergonomics as create_task."""
     tenant = _tk("fe9530_oneproduct")
     await _seed(db_session, tenant)
     product_id = await _seed_product(db_session, tenant, is_active=True)
@@ -422,8 +358,6 @@ async def test_create_thread_with_a_single_product_resolves_silently(db_manager,
 
 
 async def test_create_thread_with_multiple_products_and_none_named_is_ambiguous(db_manager, db_session):
-    """Mandatory tagging enforced: several products, none named -> PRODUCT_AMBIGUOUS,
-    not a silently product-less thread."""
     tenant = _tk("fe9530_ambiguous")
     await _seed(db_session, tenant)
     await _seed_product(db_session, tenant, is_active=True)
@@ -435,10 +369,6 @@ async def test_create_thread_with_multiple_products_and_none_named_is_ambiguous(
 
 
 async def test_chain_conductor_create_is_exempt_from_mandatory_resolution(db_manager, db_session):
-    """Finding 2: the conductor's Step-0 create_thread carries sequence_run_id and
-    deliberately no project_id -- forcing resolution there would 422 the one call
-    every chain depends on. This must stay product-less even with several products
-    in play, exactly the case that would otherwise raise ProductAmbiguousError."""
     tenant = _tk("fe9530_conductor")
     await _seed(db_session, tenant)
     await _seed_product(db_session, tenant, is_active=True)
@@ -466,10 +396,6 @@ async def test_create_thread_with_explicit_product_id_is_never_overridden(db_man
 
 
 async def test_create_thread_with_project_id_derives_product_from_the_project(db_manager, db_session):
-    """A thread anchored to project P belongs to P's product regardless of which
-    tab is currently shown/default -- verified by seeding a SECOND, shown/default
-    product for the tenant and confirming the thread binds to the project's
-    product, not that other one."""
     tenant = _tk("fe9530_derive")
     await _seed(db_session, tenant)
     project_product = await _seed_product(db_session, tenant, is_active=False)
@@ -496,11 +422,6 @@ async def test_create_thread_with_project_id_derives_product_from_the_project(db
     assert thread["product_id"] != decoy_product
 
 
-# ---------------------------------------------------------------------------
-# BE-9537 -- a chain-conductor create composed the way a headless conductor
-# actually does (sequence_run_id only, no project_id) now DERIVES the product
-# from the run's head project instead of staying permanently untagged.
-# ---------------------------------------------------------------------------
 
 
 async def _seed_sequence_run_with_head_project(db_session, tenant: str, head_project_id: str) -> str:
@@ -517,11 +438,6 @@ async def _seed_sequence_run_with_head_project(db_session, tenant: str, head_pro
 
 
 async def test_chain_conductor_create_derives_product_from_the_runs_head_project(db_manager, db_session):
-    """The headless-conductor path: create_thread is composed with ONLY
-    sequence_run_id (no project_id, no product_id) -- exactly how a conductor
-    that builds its own call, rather than copying FE-9530's seed text, produces
-    it. The run's resolved_order[0] names a real project with a real product,
-    so the thread must come back tagged with THAT product, not left null."""
     tenant = _tk("be9537_head_project")
     await _seed(db_session, tenant)
     head_product = await _seed_product(db_session, tenant, is_active=True)
@@ -551,10 +467,6 @@ async def test_chain_conductor_create_derives_product_from_the_runs_head_project
 
 
 async def test_chain_conductor_create_stays_untagged_when_head_project_is_unresolvable(db_manager, db_session):
-    """Decided case: resolved_order names a project id that no longer resolves
-    (purged/renamed away). Derivation must not raise or 422 the conductor's
-    Step-0 create -- it stays untagged, with FE-9530's seed-text interpolation
-    remaining the fallback for a conductor that copies it faithfully."""
     tenant = _tk("be9537_purged_head")
     await _seed(db_session, tenant)
     await _seed_product(db_session, tenant, is_active=True)

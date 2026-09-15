@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6033: Task → Project conversion must not deactivate the active project.
-
-Regression: ``TaskConversionService`` previously deactivated the product's
-currently-active project before creating the new (inactive) project, leaving the
-product with ZERO active projects after a promotion. The new project is created
-INACTIVE, so there is nothing to make room for regardless of how many other
-projects in the product are active (BE-9525b dropped the one-active-per-product
-limit; this was never index-enforced from conversion's side even before that —
-only the user activates/deactivates a project, conversion never does).
-"""
 
 from uuid import uuid4
 
@@ -68,11 +58,9 @@ async def test_conversion_leaves_existing_active_project_active(
     db_session,
     test_tenant_key: str,
 ):
-    """Promoting a task must NOT touch the product's currently-active project."""
     user = await _admin(db_session, test_tenant_key)
     product = await _active_product(db_session, test_tenant_key)
 
-    # An existing ACTIVE project the user is working in.
     active_project = Project(
         id=str(uuid4()),
         tenant_key=test_tenant_key,
@@ -108,17 +96,14 @@ async def test_conversion_leaves_existing_active_project_active(
         user_id=user.id,
     )
 
-    # The pre-existing active project is untouched.
     await db_session.refresh(active_project)
     assert active_project.status == "active", (
         f"Promoting a task must not deactivate the currently-active project; got status '{active_project.status}'"
     )
 
-    # The new project is born inactive (user activates when ready).
     new_project = (await db_session.execute(select(Project).where(Project.id == result.project_id))).scalar_one()
     assert new_project.status == "inactive"
 
-    # Product still has exactly one active project — the original.
     active_rows = (
         (
             await db_session.execute(

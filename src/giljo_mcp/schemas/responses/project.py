@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Project service response models.
-
-CE-0038 — schema consolidation: ``ProjectBase`` is the single source of truth
-for fields shared across every Project response shape. REST
-``ProjectResponse`` (api/endpoints/projects/models.py) and the MCP schemas
-``ProjectDetail`` / ``ProjectData`` below all inherit from it.
-
-Subclasses MAY override the type of an inherited field where the wire format
-requires it — for example, REST normalizes timestamps via ``datetime`` to
-produce Z-suffixed ISO output, while MCP keeps pre-formatted ``str`` to match
-the existing tool wire shape. Adding a new ``Project`` model column that
-should be exposed in every response shape goes in ``ProjectBase``; columns
-that belong only on a specific shape live on the subclass. Parity tests in
-``tests/schemas/test_response_parity_all_models.py`` catch silent drops.
-
-The CE-0036 bug class (silent drift between REST and MCP schemas that
-represent the same DB entity) is structurally prevented for fields declared
-in ``ProjectBase``: a single change ripples to every consumer.
-"""
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -50,39 +31,30 @@ class ProjectBase(BaseModel):
     timestamps while MCP keeps pre-formatted ISO strings.
     """
 
-    # Identity
     id: str
     name: str
     status: str
 
-    # Core content
     description: str | None = None
     mission: str | None = None
 
-    # Product association
     product_id: str | None = None
 
-    # Execution config
     execution_mode: str | None = None
     auto_checkin_enabled: bool = False
     auto_checkin_interval: int = 10
 
-    # Timestamps — declared as pre-formatted ISO strings (MCP wire). REST
-    # subclass overrides each to ``datetime | None`` for Z-normalized output.
     created_at: str | None = None
     updated_at: str | None = None
     completed_at: str | None = None
 
-    # Taxonomy (Handover 0440a/0440c)
     project_type_id: str | None = None
     series_number: int | None = None
     subseries: str | None = None
     taxonomy_alias: str | None = None
 
-    # UI visibility flag (CE-OPT-4)
     hidden: bool = False
 
-    # BE-9157: successor pointer (set when the project is marked ``superseded``).
     successor_project_id: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -100,26 +72,16 @@ class ProjectDetail(ProjectBase):
     alias: str | None = None
     tenant_key: str
 
-    # Staging / lifecycle (not on compact ProjectData)
     staging_status: str | None = None
-    # CE-0028b: exposed so the frontend can distinguish the staging→implementation
-    # handoff window (staging_status='staging_complete' AND no impl timestamp)
-    # from the actual project-complete state. Without this the closeout flow
-    # fires at staging-end and the Implement button is hidden.
     implementation_launched_at: str | None = None
 
-    # Lifecycle reasons (also on ProjectData; not currently in REST ProjectResponse —
-    # kept off REST to preserve the wire-format invariant, allowlisted in
-    # tests/schemas/test_response_parity_all_models.py)
     cancellation_reason: str | None = None
     early_termination: bool = False
 
-    # Counts + agents
     agents: list[dict] = Field(default_factory=list)
     agent_count: int = 0
     message_count: int = 0
 
-    # Nested taxonomy info
     project_type: ProjectTypeInfo | None = None
 
 
@@ -146,9 +108,6 @@ class ProjectListItem(BaseModel):
     status: str
     staging_status: str | None = None
     implementation_launched_at: str | None = None
-    # NULL-state: real execution_mode (None until the user picks). The REST list
-    # endpoints serialize this directly (crud.py); without it those endpoints
-    # AttributeError. See 9e4ce19a7 (dropped the hardcoded 'multi_terminal' lie).
     execution_mode: str | None = None
     tenant_key: str
     product_id: str | None = None
@@ -178,11 +137,6 @@ class ActiveProjectDetail(ProjectBase):
     alias: str = ""
     mission: str = ""
 
-    # CE-0036 parity: GET /api/v1/projects/active maps this into ProjectResponse
-    # (crud.py::get_active_project). Without it here the endpoint AttributeErrors
-    # -> 500 (regression from the execution_mode-lock-on-launch change). Stored as
-    # a pre-formatted ISO string like the other timestamps; ProjectResponse coerces
-    # it to datetime.
     implementation_launched_at: str | None = None
 
     deleted_at: str | None = None
@@ -196,9 +150,6 @@ class ProjectMissionUpdateResult(BaseModel):
 
     message: str
     project_id: str
-    # BE-9083b: lifecycle breadcrumb footer — plain prose stating what the
-    # dashboard now shows (project:mission_updated) and the next step, computed
-    # from live phase (protocol_survival.build_mission_update_footer). Additive.
     lifecycle_footer: str | None = Field(
         default=None,
         description=(

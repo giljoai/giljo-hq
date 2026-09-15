@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9289b — the project-bound delete guard that was specified but never implemented.
-
-``ThreadList.vue`` carries a comment asserting a project-bound thread is "non-deletable
-while the project lives (§2.5 guard)" and simply hides the delete button. Nothing in the
-service, the repository or the REST route ever enforced it. A hidden button is not a
-guard: any other client, or a stale tab, could delete a project's chat log. Left
-unrestored, the 30-day reaper (``purge_expired_deleted_threads``) then hard-deletes the
-row and the whole message subtree goes with it via ``ON DELETE CASCADE`` — so the loss
-is delayed and silent rather than immediate.
-
-The guard is enforced at the SERVICE so every caller inherits it, which is the point:
-the entire failure mode was enforcement living in one client. Status is deliberately NOT
-restricted, and restore is deliberately unguarded.
-
-Parallel-safe: real DB via the rollback-isolated ``db_session`` fixture, no module-level
-mutable state, each test owns its setup, every query is tenant-scoped.
-"""
 
 from __future__ import annotations
 
@@ -54,8 +37,6 @@ async def _seed(db_session, tenant: str) -> None:
 
 async def _seed_project(db_session, tenant: str) -> str:
     with tenant_session_context(db_session, tenant):
-        # BE-9437: a project belongs to a product. Its own, so an active
-        # seed cannot collide under idx_project_single_active_per_product.
         _owning_product_project = Product(
             id=str(uuid.uuid4()),
             tenant_key=tenant,
@@ -92,17 +73,9 @@ async def _project_bound(svc, tenant: str, project_id: str) -> str:
     return thread["thread_id"]
 
 
-# ---------------------------------------------------------------------------
-# The unimplemented §2.5 guard — delete refused on a project-bound thread.
-# ---------------------------------------------------------------------------
 
 
 async def test_project_bound_thread_cannot_be_deleted(db_manager, db_session):
-    """FAIL-FIRST: today a project thread deletes like any other.
-
-    The UI hides the button and a comment claims the invariant, but nothing enforces
-    it. This is the enforcement, at the service so every caller inherits it.
-    """
     tenant = _tk("delguard")
     await _seed(db_session, tenant)
     project_id = await _seed_project(db_session, tenant)
@@ -112,12 +85,10 @@ async def test_project_bound_thread_cannot_be_deleted(db_manager, db_session):
     with pytest.raises(ValidationError) as exc:
         await svc.delete_thread(thread_id=tid, tenant_key=tenant)
 
-    # Readable, and it says WHY — never a bare 500 or a silent no-op.
     assert "360 memory" in str(exc.value)
 
 
 async def test_standalone_thread_still_deletes(db_manager, db_session):
-    """The guard must be narrow: an ordinary thread is still deletable."""
     tenant = _tk("delok")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -129,8 +100,6 @@ async def test_standalone_thread_still_deletes(db_manager, db_session):
 
 
 async def test_project_thread_can_still_be_closed(db_manager, db_session):
-    """Condition 5: the guard must NOT leak into status. Resolving or closing a
-    project thread is a normal operator action and says nothing about identity."""
     tenant = _tk("closeok")
     await _seed(db_session, tenant)
     project_id = await _seed_project(db_session, tenant)
@@ -143,8 +112,6 @@ async def test_project_thread_can_still_be_closed(db_manager, db_session):
 
 
 async def test_restore_is_not_guarded(db_manager, db_session):
-    """Condition 6: restoring is always safe, including for a thread trashed before
-    the guard existed — that is the recovery path for legacy rows."""
     tenant = _tk("restore")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)

@@ -3,32 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9035d -- persisted harness drives the render when the live clientInfo is dropped.
-
-FINDING #4 (found LIVE on test.giljo.ai by a real Claude Code CLI): runtime harness
-detection did NOT resolve on the ``get_staging_instructions`` render path. The server is
-``FastMCP(stateless_http=True)``, which drops the ``initialize`` clientInfo on every
-non-``initialize`` tools/call, so ``_detected_harness`` read empty ``client_params`` ->
-``generic`` -> a claude-code CLI got the ``<your-harness>`` generic_mcp ladder instead of
-the Claude-native ``Task(subagent_type=...)`` spawn prose.
-
-This drives the REAL FastMCP transport (``create_connected_server_and_client_session``)
-and EXPLICITLY reproduces the stateless drop: the live clientInfo is ABSENT on the call
-(``client_info=None`` on the handshake), so ``_detected_harness``'s live axis resolves to
-generic exactly as it does in prod. The harness the middleware would have stamped onto
-scope state at initialize time is simulated by monkeypatching ``_persisted_harness`` (the
-in-memory transport carries no HTTP request/scope; the fixture already monkeypatches
-``_resolve_tenant`` for the same reason). The FULL end-to-end capture+stamp path is proven
-separately at the ASGI middleware in ``tests/api/test_be9035d_harness_capture_and_stamp``.
-
-The existing BE-9035b boundary test is green because the in-memory transport KEEPS
-``client_params`` populated -- it never reproduces the stateless drop. That green-unit /
-dead-seam gap is exactly the BE-5042 class, so per CLAUDE.md's failing-layer mandate this
-regression pins the render at the transport with the live axis forced empty.
-
-Parallel-safe: DB-touching tests use the db_session fixture (TransactionalTestContext,
-rollback at teardown). No module-level mutable state. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -52,8 +26,6 @@ from tests.helpers.mcp_session_fixture import create_connected_server_and_client
 pytestmark = pytest.mark.asyncio
 
 
-# Render markers (lock-step with chapters_reference: the CLAUDE block header + the
-# Claude-native spawn syntax vs the generic_mcp ladder header + its <your-harness> token).
 _CLAUDE_BLOCK = "YOUR PLATFORM: CLAUDE CODE CLI"
 _CLAUDE_SPAWN = "Task(subagent_type="
 _GENERIC_MCP_BLOCK = "ANY MCP-CONNECTED AGENT (generic_mcp)"
@@ -125,8 +97,6 @@ async def _seed_org_product(db_session, tenant_key: str) -> str:
 
 
 async def _seed_orchestrator(db_session, tenant_key: str, product_id: str, execution_mode: str) -> str:
-    """An orchestrator job in staging for a project of ``execution_mode``, so
-    get_staging_instructions renders the orchestrator protocol (incl. CH3)."""
     now = datetime.now(UTC)
     project = Project(
         id=str(uuid.uuid4()),
@@ -179,26 +149,17 @@ async def _ch3_for(client, client_info, job_id) -> str:
 
 
 def _force_persisted(monkeypatch, harness: str) -> None:
-    """Simulate the middleware having stamped ``resolved_harness`` onto scope state.
-
-    ``_detected_harness`` reads the persisted value via ``_persisted_harness`` (both live
-    in ``_harness``); the in-memory transport carries no HTTP scope, so we substitute the
-    read (mirrors the fixture's ``_resolve_tenant`` monkeypatch)."""
     from api.endpoints.mcp_tools import _harness
 
     monkeypatch.setattr(_harness, "_persisted_harness", lambda ctx: harness)
 
 
 async def test_persisted_harness_drives_claude_render_when_live_dropped(mcp_client):
-    """The stateless drop (no live clientInfo) + a persisted claude-code token ->
-    CH3 renders the Claude Code CLI block with Task(subagent_type=...), NOT the
-    generic_mcp <your-harness> ladder. This is FINDING #4's exact failing path."""
     client, tenant_key, db_session, monkeypatch = mcp_client
     product_id = await _seed_org_product(db_session, tenant_key)
     job_id = await _seed_orchestrator(db_session, tenant_key, product_id, "generic_mcp")
 
     _force_persisted(monkeypatch, "claude-code")
-    # client_info=None -> the live clientInfo axis resolves to generic (the stateless drop).
     ch3 = await _ch3_for(client, None, job_id)
 
     assert _CLAUDE_BLOCK in ch3, "persisted claude-code must render the Claude Code CLI spawn block"
@@ -208,13 +169,11 @@ async def test_persisted_harness_drives_claude_render_when_live_dropped(mcp_clie
 
 
 async def test_no_persisted_harness_is_generic_floor(mcp_client):
-    """Live dropped AND nothing persisted -> the generic_mcp ladder renders (the fallback
-    fabricates nothing; the byte-identity floor holds)."""
     client, tenant_key, db_session, monkeypatch = mcp_client
     product_id = await _seed_org_product(db_session, tenant_key)
     job_id = await _seed_orchestrator(db_session, tenant_key, product_id, "generic_mcp")
 
-    _force_persisted(monkeypatch, "generic")  # stamp skips generic in prod; simulate "nothing recovered"
+    _force_persisted(monkeypatch, "generic")
     ch3 = await _ch3_for(client, None, job_id)
 
     assert _GENERIC_MCP_BLOCK in ch3, "no recovered harness -> the generic_mcp ladder must render"
@@ -222,13 +181,10 @@ async def test_no_persisted_harness_is_generic_floor(mcp_client):
 
 
 async def test_live_client_info_wins_over_persisted(mcp_client):
-    """A concrete LIVE clientInfo (initialize path, where client_params survives) wins
-    outright -- the persisted value is never consulted. Proves live stays primary."""
     client, tenant_key, db_session, monkeypatch = mcp_client
     product_id = await _seed_org_product(db_session, tenant_key)
     job_id = await _seed_orchestrator(db_session, tenant_key, product_id, "generic_mcp")
 
-    # Persisted says codex, but the live handshake declares claude-code -> live wins.
     _force_persisted(monkeypatch, "codex")
     ch3 = await _ch3_for(client, _CLAUDE_CODE_INFO, job_id)
 

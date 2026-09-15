@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""INF-9422: the SDK session helper is reached through one seam, not 77 imports.
-
-``mcp.shared.memory.create_connected_server_and_client_session`` is removed in
-MCP SDK 2.0. The suite reaches it through ``tests/helpers/mcp_session_fixture.py``
-so that removal costs one file instead of seventy-seven.
-
-Nothing enforces that but this test. A new boundary suite is almost always
-written by copying an existing one, and the copies predate the seam -- so the
-direct import comes back by hand, silently, and the seam stops being a seam
-exactly when the migration needs it.
-
-Edition Scope: Both (test-only guard).
-"""
 
 from pathlib import Path
 
@@ -23,9 +10,6 @@ from pathlib import Path
 _TESTS_ROOT = Path(__file__).resolve().parent.parent
 _SEAM = _TESTS_ROOT / "helpers" / "mcp_session_fixture.py"
 
-# The seam re-exports the helper, and this guard has to name the module it bans;
-# neither may flag itself. Nothing else is ever exempt -- a second exemption
-# makes the guard advisory, and re-pointing the import is always the cheaper fix.
 _ALLOWED = {_SEAM, Path(__file__).resolve()}
 
 _SDK_MODULE = "mcp.shared.memory"

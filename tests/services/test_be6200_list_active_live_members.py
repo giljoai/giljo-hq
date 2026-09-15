@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6200 (Unit E) — list_active excludes runs whose member rows are all terminal.
-
-Regression at the FAILING LAYER (SequenceRunService.list_active). A wedged run
-(status stuck at 'pending' — there is no reaper for sequence_runs) whose member
-PROJECT ROWS were all closed must NOT surface as active, so it can't hijack the
-project-less Jobs nav. Keyed on the real Project rows, NOT the drift-prone
-run.project_statuses JSON.
-
-Covered:
-  - all-terminal members + run.status='pending' + stale/empty project_statuses
-    -> EXCLUDED from list_active.
-  - >=1 non-terminal member -> still returned.
-  - soft-deleted (deleted_at) member counts as terminal.
-  - missing member rows count as terminal (gone == terminal).
-
-Parallel-safe: db_session (TransactionalTestContext, rolled back at teardown);
-sequence_runs wiped after each test (the service COMMITs through the session).
-No module-level mutable state; each test owns its setup.
-"""
 
 from __future__ import annotations
 
@@ -70,8 +51,6 @@ async def _create_project(
     status: str = "active",
     deleted_at: datetime | None = None,
 ) -> None:
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -122,7 +101,6 @@ async def test_all_terminal_members_excluded_even_when_status_pending_and_status
     p2 = str(uuid.uuid4())
     await _create_project(db_session, tenant, p1, status="completed")
     await _create_project(db_session, tenant, p2, status="terminated")
-    # Stale/empty project_statuses on purpose — the filter must NOT trust it.
     run = await _create_run(db_session, tenant, [p1, p2], status="pending", project_statuses={})
 
     active = await _seq_svc(db_session).list_active(tenant_key=tenant)
@@ -145,7 +123,6 @@ async def test_soft_deleted_member_counts_as_terminal(db_session: AsyncSession) 
     tenant = TenantManager.generate_tenant_key()
     p1 = str(uuid.uuid4())
     p2 = str(uuid.uuid4())
-    # status is non-terminal but deleted_at is set -> still terminal.
     await _create_project(db_session, tenant, p1, status="active", deleted_at=datetime.now(UTC))
     await _create_project(db_session, tenant, p2, status="cancelled")
     run = await _create_run(db_session, tenant, [p1, p2], status="pending")
@@ -156,7 +133,6 @@ async def test_soft_deleted_member_counts_as_terminal(db_session: AsyncSession) 
 
 async def test_missing_member_rows_count_as_terminal(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
-    # No Project rows created at all -> gone == terminal.
     run = await _create_run(db_session, tenant, [str(uuid.uuid4()), str(uuid.uuid4())], status="pending")
 
     active = await _seq_svc(db_session).list_active(tenant_key=tenant)

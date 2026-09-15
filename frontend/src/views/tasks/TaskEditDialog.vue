@@ -10,10 +10,6 @@
   >
     <template #default>
       <v-form ref="taskFormRef">
-        <!-- FE-6049e: Type → Serial → Title field order. Tasks are auto-TSK
-               (BE-6049c) — the type is fixed (not a picker) and the serial is
-               auto-assigned from the global counter (BE-6049b). Both are
-               READ-ONLY here. -->
         <v-row>
           <v-col cols="6">
             <v-text-field
@@ -25,8 +21,6 @@
             />
           </v-col>
           <v-col cols="6">
-            <!-- Read-only in BOTH modes: edit shows the assigned serial;
-                   create shows "auto" (backend mints it on save). -->
             <v-text-field
               :model-value="
                 editingTask
@@ -139,6 +133,5 @@ function updateField(field, value) {
   emit('update:currentTask', { ...props.currentTask, [field]: value })
 }
 
-// Expose form ref for parent to access (save validation)
 defineExpose({ taskFormRef })
 </script>

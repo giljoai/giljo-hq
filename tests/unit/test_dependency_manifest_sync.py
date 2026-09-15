@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""CI drift guard: pyproject.toml [project.dependencies] must match requirements.txt.
-
-**Edition Scope:** Both — CE installs from requirements.txt (install.py) and the
-SaaS Docker image installs from it too; requirements.txt is the single source of
-truth (INF-8000f) and pyproject.toml [project.dependencies] mirrors it. If the
-two manifests drift, neither alone produces a working install (a latent Railway
-build trap). This test asserts the two runtime dependency sets are identical
-(normalized name + extras + version specifiers) so any drift REDs CI in the
-existing blocking `test` job.
-
-Parallel-safe: pure file parsing, no DB, no network, no module-level mutable
-state. Scope is RUNTIME deps only — dev/optional extras are intentionally not
-compared (see WO INF-3013).
-"""
 
 import tomllib
 from pathlib import Path
@@ -31,12 +17,6 @@ REQUIREMENTS = REPO_ROOT / "requirements.txt"
 
 
 def _normalize(dep_str: str) -> tuple:
-    """Reduce a requirement string to a comparable, order-stable key.
-
-    (canonical name, sorted extras, sorted specifier clauses) — so e.g.
-    ``sentry-sdk[fastapi]>=2.60.0`` and ``mcp>=1.27.1,<1.28`` compare by their
-    semantic content, not by surface formatting or specifier ordering.
-    """
     req = Requirement(dep_str)
     name = canonicalize_name(req.name)
     extras = tuple(sorted(canonicalize_name(e) for e in req.extras))
@@ -53,11 +33,9 @@ def _pyproject_runtime_deps() -> set:
 def _requirements_runtime_deps() -> set:
     deps = set()
     for raw in REQUIREMENTS.read_text(encoding="utf-8").splitlines():
-        # Strip inline comments and surrounding whitespace.
         line = raw.split("#", 1)[0].strip()
         if not line:
             continue
-        # Skip pip directives (-r other.txt, -e ., -c constraints.txt, etc.).
         if line.startswith("-"):
             continue
         deps.add(_normalize(line))
@@ -65,7 +43,6 @@ def _requirements_runtime_deps() -> set:
 
 
 def test_manifests_are_in_sync():
-    """pyproject [project.dependencies] and requirements.txt list the same runtime deps."""
     pyproject = _pyproject_runtime_deps()
     requirements = _requirements_runtime_deps()
 

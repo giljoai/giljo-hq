@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-AUTH-EMAIL Phase 4 -- Dual-lookup for PIN recovery + first-login endpoints.
-
-Tests that verify-pin, verify-pin-and-reset-password, and check-first-login
-accept either username OR email as the identifier (wire field still named
-`username`), mirroring the Phase 1 dual-lookup pattern shipped in
-AuthService.authenticate_user (commit 42842d18, handover af53e62b).
-
-Also exercises the new AuthRepository helper
-`get_user_by_username_or_email` that encapsulates the pattern.
-"""
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -24,11 +13,6 @@ import pytest
 import pytest_asyncio
 from fastapi import HTTPException
 
-# IMP-5036 task 6c4c893b: DATABASE_URL snapshot/restore dance removed.
-# Audit seq 97 (api/__init__.py import-time DATABASE_URL mutation) was
-# closed by BE-5040 (commit dc378c07a): load_dotenv() moved out of module
-# scope into the FastAPI lifespan, so importing api.endpoints.* no longer
-# mutates os.environ. Standard imports are sufficient.
 from api.endpoints.auth_models import (
     CheckFirstLoginRequest,
     PinPasswordResetRequest,
@@ -43,18 +27,10 @@ from giljo_mcp.models.auth import User
 from giljo_mcp.repositories.auth_repository import AuthRepository
 
 
-# ----------------------------------------------------------------------------
-# Fixtures
-# ----------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
 async def pin_user(db_session, auth_test_org):
-    """
-    User with recovery PIN set and known credentials.
-
-    Returns (user, password, pin).
-    """
     suffix = uuid4().hex[:6]
     password = "Pin1234!A"
     pin = "4242"
@@ -80,7 +56,6 @@ async def pin_user(db_session, auth_test_org):
 
 
 def _fake_request():
-    """Minimal Request-like object that bypasses rate limiting (base_url http://test)."""
     return SimpleNamespace(
         base_url="http://test/",
         url=SimpleNamespace(path="/api/auth/verify-pin-and-reset-password"),
@@ -89,13 +64,9 @@ def _fake_request():
     )
 
 
-# ----------------------------------------------------------------------------
-# Repository helper: get_user_by_username_or_email
-# ----------------------------------------------------------------------------
 
 
 class TestRepoDualLookupHelper:
-    """New helper on AuthRepository encapsulating the dual-lookup pattern."""
 
     @pytest.mark.asyncio
     async def test_resolves_by_username(self, db_session, pin_user):
@@ -137,11 +108,10 @@ class TestRepoDualLookupHelper:
 
     @pytest.mark.asyncio
     async def test_username_match_wins_over_email_match(self, db_session, auth_test_org):
-        """Username lookup runs first -- deterministic tie-breaker."""
         shared = f"collide_{uuid4().hex[:8]}"
         u1 = User(
             id=str(uuid4()),
-            username=shared,  # identifier matches this row by username
+            username=shared,
             email=f"{shared}_u1@ex.com",
             password_hash="x",
             role="developer",
@@ -153,7 +123,7 @@ class TestRepoDualLookupHelper:
         u2 = User(
             id=str(uuid4()),
             username=f"other_{uuid4().hex[:6]}",
-            email=shared,  # identifier also matches this row by email
+            email=shared,
             password_hash="x",
             role="developer",
             tenant_key=auth_test_org.tenant_key,
@@ -171,9 +141,6 @@ class TestRepoDualLookupHelper:
         assert found.id == u1.id
 
 
-# ----------------------------------------------------------------------------
-# verify-pin endpoint
-# ----------------------------------------------------------------------------
 
 
 class TestVerifyPinDualLookup:
@@ -202,13 +169,9 @@ class TestVerifyPinDualLookup:
         resp = await verify_pin(request_data=req, db=db_session)
 
         assert resp.valid is False
-        # Wire-text no-enumeration pattern
         assert "Invalid username or PIN" in resp.message
 
 
-# ----------------------------------------------------------------------------
-# verify-pin-and-reset-password endpoint
-# ----------------------------------------------------------------------------
 
 
 class TestVerifyPinAndResetDualLookup:
@@ -226,7 +189,6 @@ class TestVerifyPinAndResetDualLookup:
         resp = await verify_pin_and_reset_password(http_request=_fake_request(), request_data=req, db=db_session)
 
         assert "successful" in resp.message.lower()
-        # Password actually changed
         await db_session.refresh(user)
         assert bcrypt.checkpw(new_password.encode("utf-8"), user.password_hash.encode("utf-8"))
 
@@ -235,7 +197,7 @@ class TestVerifyPinAndResetDualLookup:
         user, _, pin = pin_user
         new_password = "NewPwd456!Y"
         req = PinPasswordResetRequest(
-            username=user.email,  # wire field named username, accepts email
+            username=user.email,
             recovery_pin=pin,
             new_password=new_password,
             confirm_password=new_password,
@@ -260,13 +222,9 @@ class TestVerifyPinAndResetDualLookup:
             await verify_pin_and_reset_password(http_request=_fake_request(), request_data=req, db=db_session)
 
         assert exc.value.status_code == 400
-        # Wire-text: security no-enumeration pattern -- preserve literal
         assert "Invalid username or PIN" in exc.value.detail
 
 
-# ----------------------------------------------------------------------------
-# check-first-login endpoint
-# ----------------------------------------------------------------------------
 
 
 class TestCheckFirstLoginDualLookup:
@@ -277,7 +235,6 @@ class TestCheckFirstLoginDualLookup:
 
         resp = await check_first_login(request_data=req, db=db_session)
 
-        # Fixture sets must_change_password=True
         assert resp.must_change_password is True
         assert resp.must_set_pin is False
 
@@ -297,6 +254,5 @@ class TestCheckFirstLoginDualLookup:
 
         resp = await check_first_login(request_data=req, db=db_session)
 
-        # Safe defaults prevent enumeration
         assert resp.must_change_password is False
         assert resp.must_set_pin is False

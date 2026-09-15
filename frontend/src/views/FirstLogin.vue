@@ -3,7 +3,6 @@
     <v-row class="align-center justify-center">
       <v-col cols="12" sm="10" md="8" lg="6">
         <v-card elevation="8" class="first-login-card smooth-border">
-          <!-- Header -->
           <v-card-title class="text-center pa-6">
             <div class="d-flex flex-column align-center w-100">
               <v-img
@@ -24,7 +23,6 @@
           <v-divider />
 
           <v-card-text class="pa-6">
-            <!-- Alert for errors -->
             <AppAlert
               v-if="error"
               type="error"
@@ -36,7 +34,6 @@
               {{ error }}
             </AppAlert>
 
-            <!-- Info Alert -->
             <AppAlert type="info" variant="tonal" class="mb-4">
               <template v-if="isCeEdition">
                 <strong>Security Setup Required:</strong> Please create a new password and 4-digit
@@ -48,9 +45,7 @@
               </template>
             </AppAlert>
 
-            <!-- Form -->
             <v-form ref="firstLoginForm" @submit.prevent="handleSubmit">
-              <!-- Current Password -->
               <v-text-field
                 v-model="currentPassword"
                 label="Current Password"
@@ -77,7 +72,6 @@
                 </template>
               </v-text-field>
 
-              <!-- New Password -->
               <v-text-field
                 v-model="newPassword"
                 label="New Password"
@@ -102,7 +96,6 @@
                 </template>
               </v-text-field>
 
-              <!-- Confirm Password -->
               <v-text-field
                 v-model="confirmPassword"
                 label="Confirm New Password"
@@ -127,7 +120,6 @@
                 </template>
               </v-text-field>
 
-              <!-- Password Strength Indicator -->
               <v-progress-linear
                 :model-value="passwordStrength"
                 :color="passwordStrengthColor"
@@ -140,7 +132,6 @@
                 Password Strength: {{ passwordStrengthText }}
               </p>
 
-              <!-- Requirements List -->
               <v-list density="compact" class="requirement-list mb-4">
                 <v-list-item v-for="req in passwordRequirements" :key="req.text" class="px-0 py-1">
                   <template #prepend>
@@ -159,7 +150,6 @@
               <template v-if="isCeEdition">
               <v-divider class="my-4" />
 
-              <!-- Recovery PIN Section -->
               <h3 class="text-body-large font-weight-bold mb-2">
                 <v-icon class="mr-2">mdi-shield-key</v-icon>
                 Recovery PIN Setup
@@ -169,7 +159,6 @@
                 password.
               </p>
 
-              <!-- Recovery PIN -->
               <v-text-field
                 v-model="recoveryPin"
                 label="Recovery PIN (4 digits)"
@@ -189,7 +178,6 @@
                 @keypress="onlyNumbers"
               />
 
-              <!-- Confirm PIN -->
               <v-text-field
                 v-model="confirmPin"
                 label="Confirm Recovery PIN"
@@ -207,14 +195,12 @@
                 @keypress="onlyNumbers"
               />
 
-              <!-- Security Warning -->
               <AppAlert type="warning" variant="tonal" density="compact" class="mb-4">
                 <strong>Important:</strong> Keep your recovery PIN secure. Do not use obvious PINs
                 like 0000 or 1234.
               </AppAlert>
               </template>
 
-              <!-- Submit Button -->
               <v-btn
                 type="submit"
                 color="primary"
@@ -247,10 +233,8 @@ import { PRODUCT_NAME } from '@/branding'
 
 const productName = PRODUCT_NAME
 
-// Composables
 const router = useRouter()
 
-// Edition detection — PIN recovery is CE-only. SaaS/demo use email-based reset.
 const isCeEdition = computed(() => configService.getGiljoMode() === 'ce')
 
 async function fetchEditionOrgSetupStatus() {
@@ -262,7 +246,6 @@ async function fetchEditionOrgSetupStatus() {
   return mod.fetchOrgSetupStatus(apiClient)
 }
 
-// State
 const currentPassword = ref('')
 const {
   newPassword,
@@ -280,7 +263,6 @@ const loading = ref(false)
 const error = ref('')
 const firstLoginForm = ref(null)
 
-// Validation rules
 const confirmPinRules = [
   (v) => !!v || 'PIN confirmation is required',
   (v) => /^\d{4}$/.test(v) || 'PIN must be exactly 4 digits',
@@ -326,9 +308,7 @@ const isFormValid = computed(() => {
   )
 })
 
-// Methods
 async function handleSubmit() {
-  // Validate form
   const { valid } = await firstLoginForm.value.validate()
   if (!valid) {
     return
@@ -349,8 +329,6 @@ async function handleSubmit() {
     }
     await api.auth.completeFirstLogin(payload)
 
-    // Private editions can inject an org setup status check. The service is
-    // CE-export safe because the optional module is loaded through a glob.
     if (!isCeEdition.value) {
       try {
         const orgStatus = await fetchEditionOrgSetupStatus()
@@ -363,7 +341,6 @@ async function handleSubmit() {
       }
     }
 
-    // Redirect to dashboard
     router.push('/')
   } catch (err) {
     console.error('[FirstLogin] Failed to complete setup:', err)

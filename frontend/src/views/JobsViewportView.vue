@@ -5,7 +5,6 @@
     </div>
 
     <template v-else>
-      <!-- Header (harmonized with ProjectsView / RoadmapView) -->
       <v-row class="align-center mb-4">
         <v-col>
           <h1 class="text-headline-large">Jobs</h1>
@@ -62,10 +61,6 @@
         />
       </div>
 
-      <!-- FE-9555: the board-level launch gesture. Appears only once something is
-           selected, so an untouched board stays a status board. Deliberately NOT
-           gated on the Headless toggle: this is ergonomics, and the
-           real gate is server-side. -->
       <div v-if="selectedProjects.length" class="jb-launch-bar" data-testid="jobs-launch-bar">
         <span class="jb-launch-count">
           {{ selectedProjects.length }} staged project{{ selectedProjects.length === 1 ? '' : 's' }} selected
@@ -97,45 +92,6 @@
 </template>
 
 <script setup>
-/**
- * JobsViewportView.vue — FE-9548
- *
- * The plural Jobs board: one card per in-flight project of the viewed
- * product, rebuilt strictly to design mock jobs-board-proposal-v4.html
- * (operator: "be strict with the design I sent you") after the FE-9525d
- * version shipped with none of the house design-system treatments applied
- * (v-card variant="outlined", v-card-title, plain-grey text, no agent
- * badges) despite its own DoD naming design-system-sample-v2.html.
- *
- * Layout/arithmetic is delegated to reusable pieces so this view stays a
- * thin composition root:
- *   - JobsBoardCard.vue -- one project card (tokens, taxonomy pill, gate
- *     note, stat strip, agent rows, footer buttons)
- *   - JobsBoardAgentRow.vue -- the compact per-agent row AgentRow.vue's
- *     display logic feeds (badge/status/duration/messages, no name text)
- *   - JobsBoardDetailModal.vue -- ONE shared "Jobs detail" diagnostics modal
- *     instance, its project/agents swapped in via openDetail() rather than
- *     mounting one modal per card
- *   - utils/jobsSectionLabel.js, jobsBoardLifecycle.js, jobsBoardCardStats.js,
- *     durationFormat.js -- pure helpers, independently unit tested
- *
- * Filter segmented control (All/Needs input/Implementing/Staged/Review) is
- * local UI state -- the underlying project list is unchanged, this view just
- * narrows what's rendered. Reviewed projects leave the board "for free": once
- * a project is actually closed out, its status flips off 'active' and
- * activeProjectsMeta (BE-9525a/b) stops returning it -- no extra removal
- * logic needed here.
- *
- * Live updates: activeProjectsMeta is the SAME reactive field the store's WS
- * status_changed handler already keeps current (mirrors FE-9525d). The
- * per-project agent list is fetched once per project on mount, mirroring
- * JobsTab's own useAgentJobs.loadJobs -- live agent-level updates within an
- * open project are JobsTab's job, not duplicated here. A 1s ticker (mirroring
- * JobsTab's own durationTickerId) drives every card's live "elapsed"/duration
- * text without a WS round-trip.
- *
- * Edition scope: Both.
- */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useProjectStore } from '@/stores/projects'
 import { useProductStore } from '@/stores/products'
@@ -149,18 +105,10 @@ import LaunchStagedDialog from '@/components/projects/LaunchStagedDialog.vue'
 
 const projectStore = useProjectStore()
 const productStore = useProductStore()
-// FE-9548: reuse the EXISTING project-bound-Hub-thread resolver (JobsTab's
-// own 💬/messages action) for the board card's 💬 button, rather than a new
-// nav path. getJob is unused here (no agent-detail modal on this view).
 const { handleMessages } = useJobActions(() => null)
 const loading = ref(true)
-// project_id -> agent execution list (one fetch per card; not a store, this
-// view owns it, same shape/technique as the pre-FE-9548 version).
 const agentsByProject = ref({})
 
-// FE-9549: the tenant's real headless-self-advance setting, so the Staged card's
-// gate note states a fact instead of inferring one from the card's own state.
-// Stays null until the read resolves; the note renders only on an explicit false.
 const headlessAllowed = ref(null)
 
 async function loadHeadlessSetting() {
@@ -168,7 +116,6 @@ async function loadHeadlessSetting() {
     const res = await api.settings.getHeadlessLaunch()
     headlessAllowed.value = !!res.data?.allow_headless_launch
   } catch {
-    // Unknown on failure -- suppress the note rather than assert either way.
     headlessAllowed.value = null
   }
 }
@@ -178,9 +125,6 @@ const productName = computed(
   () => productStore.currentProduct?.name || productStore.activeProduct?.name || '',
 )
 
-// FE-9548: one ticker drives every card's live duration text (mirrors
-// JobsTab's own durationTickerId pattern) rather than each card/row owning
-// a timer.
 const now = ref(Date.now())
 let tickerId = null
 onMounted(() => {
@@ -199,12 +143,6 @@ function sectionLabelOf(project) {
   return jobsSectionLabelFor(project, agentsByProject.value[project.id] || [])
 }
 
-// FE-9551: the filter must cover every state a card can actually display.
-// `get_active_projects` (backend) filters on Project.status == ACTIVE only --
-// it does NOT filter on staging_status -- so a project mid-staging
-// (staging_status 'staging', Planning) can legitimately sit on this board
-// alongside a never-staged one (Activated). A state that can render a badge
-// but can't be filtered is a hole.
 const filter = ref('all')
 const filterOptions = computed(() => {
   const counts = {
@@ -251,16 +189,6 @@ const filteredProjects = computed(() => {
   return projects.value.filter((project) => sectionLabelOf(project) === wanted)
 })
 
-// FE-9555: board-level selection for the "Launch staged..." gesture.
-//
-// Only a STAGED card is eligible: staging finished and implementation has not
-// launched, which is the one state where handing someone a conductor seed is the
-// right next step. Offering it on an Implementing card would mint a prompt to
-// start work that is already running.
-//
-// An ARRAY, not a Set, because the order the user ticked things in IS the run
-// order the master prompt is built from -- a Set would silently reorder a
-// decision the user made deliberately.
 const selectedIds = ref([])
 const launchDialogOpen = ref(false)
 
@@ -278,11 +206,6 @@ function clearSelection() {
   selectedIds.value = []
 }
 
-// Resolved against the LIVE board rows, and in selection order. Resolving rather
-// than storing the row keeps a renamed or re-labelled project current, and the
-// filter drops anything that has left the board -- a project launched elsewhere
-// stops being staged and its card goes, and a stale id left selected would be
-// counted in the bar and built into the prompt for a card the user cannot see.
 const selectedProjects = computed(() =>
   selectedIds.value
     .map((id) => projects.value.find((project) => project.id === id))
@@ -298,31 +221,21 @@ function openDetail(project) {
 }
 
 function openHub(project) {
-  // handleMessages(agent, projectIdOverride) resolves the project-bound
-  // thread by projectIdOverride when it's passed, so a stub agent object is
-  // fine -- no agent-level fields it needs are read on that path.
   handleMessages({}, project.id)
 }
 
 async function loadAgentsFor(project) {
   try {
     const response = await api.agentJobs.list(project.id)
-    // FE-9545: /api/agent-jobs/ answers with a PAGINATED ENVELOPE
-    // ({jobs, total, limit, offset}), not a bare array. Reuse the one reader
-    // that already tolerates array | {jobs} | {rows} rather than guessing here.
     agentsByProject.value = {
       ...agentsByProject.value,
       [project.id]: extractJobsFromResponse(response?.data),
     }
   } catch {
-    // Non-fatal: the card still renders with the lifecycle-only label.
     agentsByProject.value = { ...agentsByProject.value, [project.id]: [] }
   }
 }
 
-// FE-9555: named so a refresh has ONE home. Selection is pruned by the
-// selectedProjects computed rather than here, so a board refresh cannot leave a
-// vanished project counted in the launch bar.
 async function fetchBoard() {
   await projectStore.fetchActiveProject()
   await Promise.all(projects.value.map(loadAgentsFor))
@@ -330,8 +243,6 @@ async function fetchBoard() {
 
 onMounted(async () => {
   try {
-    // FE-9549: the headless read is independent of the project fetch and must not
-    // block the board, so it runs alongside rather than gating the render.
     loadHeadlessSetting()
     await fetchBoard()
   } finally {
@@ -339,7 +250,6 @@ onMounted(async () => {
   }
 })
 
-// Exposed for unit tests (selection state + the one refresh entry point).
 defineExpose({ selectedIds, selectedProjects, launchDialogOpen, fetchBoard })
 </script>
 

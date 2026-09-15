@@ -1,23 +1,3 @@
-/**
- * DeletedCountButton.spec.js — FE-9368 (B)
- *
- * The trash icon button shared by the Message Hub and Projects. The count moved out of
- * the tooltip and onto the icon as an alert dot, so the count IS the visible state and
- * needs pinning:
- *
- *  - the number renders on the badge when there is something to recover;
- *  - the badge is hidden at zero (a dot reading "0" is noise, and the button is
- *    disabled there anyway);
- *  - the count is still readable in words on hover and by a screen reader, because a
- *    coloured dot is not an accessible count on its own.
- *
- * Mounted with the REAL VBadge (withRealVuetify): tests/setup.js stubs v-badge as a
- * bare `<span><slot /></span>`, and the badge's content is a PROP, not a slot — under
- * the flat stub the dot this whole item is about renders as nothing at all, and every
- * assertion below would pass against an empty span.
- *
- * Edition scope: Both
- */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { mount } from '@vue/test-utils'
 

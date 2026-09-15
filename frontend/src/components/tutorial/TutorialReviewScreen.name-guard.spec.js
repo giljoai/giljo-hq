@@ -1,17 +1,3 @@
-/**
- * TutorialReviewScreen.name-guard.spec.js — FE-9320
- *
- * The agent-driven doors create the product card with a DELIBERATELY empty name:
- * update_product_context only writes product_name when the existing name is
- * blank (locked by tests/test_fe9200_tutorial_prompt_contract.py), so any
- * placeholder would permanently stop the agent naming it. The name therefore
- * cannot be defended at creation.
- *
- * It has to be defended here, at the moment the draft becomes the user's real
- * product — otherwise a fresh install's very first product goes live nameless.
- *
- * Edition scope: Both (shared frontend/src).
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
@@ -22,8 +8,6 @@ const h = vi.hoisted(() => ({
   toggleProductActivation: vi.fn(async () => {}),
 }))
 
-// FE-9569: a REAL Vue ref so the component's reactive getter-based `product`
-// computed tracks it the same way it tracks the genuine store.
 const cache = ref({})
 
 vi.mock('@/stores/products', () => ({
@@ -71,8 +55,6 @@ const NAMELESS = { id: 'prod-1', name: '', tech_stack: {}, is_active: false }
 describe('TutorialReviewScreen — a nameless product cannot be activated (FE-9320)', () => {
   beforeEach(() => {
     h.row = NAMED
-    // Mirrors the real store's updateProduct(): write-throughs into the same
-    // reactive cache the component's `product` computed reads.
     h.updateProduct = vi.fn(async (id, updates) => {
       cache.value = { ...cache.value, [id]: { ...(cache.value[id] || {}), ...updates } }
       return cache.value[id]
@@ -101,7 +83,6 @@ describe('TutorialReviewScreen — a nameless product cannot be activated (FE-93
     expect(wrapper.find('[data-testid="tutorial-name-required"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="tutorial-activate"]').attributes('disabled')).toBeDefined()
 
-    // Whitespace is not a name.
     await wrapper.find('[data-testid="tutorial-product-name-input"]').setValue('   ')
     expect(wrapper.find('[data-testid="tutorial-activate"]').attributes('disabled')).toBeDefined()
 

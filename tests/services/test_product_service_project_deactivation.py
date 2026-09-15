@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Unit tests for ProductService activation and the ABSENCE of project cascade.
-
-FE-9524/D1 retires the "one active product -> one active project" rule this
-file used to pin (the 2026-08-28 multi-product design decision).
-``is_active`` is reused as "shown as a tab in the strip"; several products may
-be shown at once, and showing one never pauses another product's projects or
-jobs, nor emits the old ``projects:bulk:deactivated`` bulk event -- there is
-nothing left to deactivate in bulk. This file is the red-then-green rewrite of
-that retirement: every test below FAILED against the pre-FE-9524 code (which
-deactivated siblings and cascaded to their projects/jobs) and is green against
-the current code.
-"""
 
 import random
 import uuid
@@ -31,12 +18,6 @@ from tests.fixtures.base_fixtures import TestData
 
 @pytest.mark.asyncio
 async def test_activate_product_does_not_deactivate_projects_in_other_products(db_session, db_manager):
-    """
-    Showing Product B leaves Product A's active project untouched.
-
-    Pre-FE-9524 this asserted the opposite (Project X went 'inactive'); D1
-    explicitly retires that rule -- several tabs open is the point.
-    """
     tenant_key = TestData.generate_tenant_key()
 
     product_a = Product(
@@ -87,7 +68,6 @@ async def test_activate_product_does_not_deactivate_projects_in_other_products(d
     await db_session.refresh(product_b)
     await db_session.refresh(project_x)
 
-    # Both shown; A is untouched.
     assert product_a.is_active is True
     assert project_x.status == "active", (
         f"Showing Product B must not touch Product A's project, but status is '{project_x.status}'"
@@ -96,10 +76,6 @@ async def test_activate_product_does_not_deactivate_projects_in_other_products(d
 
 @pytest.mark.asyncio
 async def test_activate_product_emits_no_bulk_deactivation_event(db_session, db_manager):
-    """
-    Showing a product emits no ``projects:bulk:deactivated`` websocket event --
-    there are no sibling deactivations left to report.
-    """
     tenant_key = TestData.generate_tenant_key()
 
     product_a = Product(
@@ -158,12 +134,6 @@ async def test_activate_product_emits_no_bulk_deactivation_event(db_session, db_
 
 @pytest.mark.asyncio
 async def test_product_switch_multi_tenant_isolation(db_session, db_manager):
-    """
-    Activation stays tenant-scoped: showing a product in tenant A never reads
-    or writes anything belonging to tenant B (trivially true now that showing
-    a product touches only that one row, but pinned so a future reintroduction
-    of cross-product effects is still caught cross-tenant too).
-    """
     tenant_a = TestData.generate_tenant_key()
     tenant_b = TestData.generate_tenant_key()
 
@@ -235,6 +205,5 @@ async def test_product_switch_multi_tenant_isolation(db_session, db_manager):
     await db_session.refresh(project_x_tenant_a)
     await db_session.refresh(project_y_tenant_b)
 
-    # Neither tenant's project is touched -- there is no cascade left to leak.
     assert project_x_tenant_a.status == "active"
     assert project_y_tenant_b.status == "active"

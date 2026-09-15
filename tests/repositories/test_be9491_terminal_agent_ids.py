@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9491 -- ``AgentOperationsRepository.get_terminal_agent_ids``, the batch
-liveness check that powers the Hub broadcast/direct fan-out filter.
-
-An agent_id is terminal only when EVERY ``AgentExecution`` row it owns is
-complete/closed/decommissioned. Three properties matter and each gets its own
-test: (1) a mix of live/terminal agent_ids is classified correctly, (2) a
-succession pair (terminal execution, then a LATER active one under the same
-agent_id) must NOT be flagged terminal -- the respawn trap, (3) an agent_id
-with ZERO execution rows must NOT be flagged terminal -- the headless-agent
-trap (a never-tracked agent, or a human user_id sharing this id space via
-MessageRecipient.agent_id, must never be silently excluded).
-
-DB-touching: db_session (TransactionalTestContext). No module-level mutable
-state. Parallel-safe (pytest-xdist). Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -106,8 +91,6 @@ async def test_mix_of_live_and_terminal_agent_ids_classified_correctly(db_sessio
 async def test_succession_pair_terminal_then_active_is_not_flagged_terminal(
     db_session: AsyncSession, test_tenant_key: str
 ):
-    """The respawn trap: one agent_id owns TWO executions -- an earlier one that
-    finished, and a later one still active. Must NOT be treated as dead."""
     project = await _seed_project(db_session, test_tenant_key)
     respawned_agent = str(uuid.uuid4())
     await _seed_execution(db_session, test_tenant_key, project.id, agent_id=respawned_agent, status="complete")
@@ -123,9 +106,6 @@ async def test_succession_pair_terminal_then_active_is_not_flagged_terminal(
 async def test_agent_id_with_zero_execution_rows_is_not_flagged_terminal(
     db_session: AsyncSession, test_tenant_key: str
 ):
-    """The headless-agent trap: an id that was never tracked by the job system
-    (or a human user_id sharing this column) must be treated as live, not dead --
-    a single ``NOT EXISTS(active row)`` shortcut would be vacuously true here."""
     repo = AgentOperationsRepository()
     never_tracked_id = str(uuid.uuid4())
 
@@ -142,8 +122,6 @@ async def test_empty_agent_ids_returns_empty_set_without_a_query(db_session: Asy
 
 
 async def test_terminal_agent_id_from_a_different_tenant_is_not_flagged(db_session: AsyncSession):
-    """Tenant isolation: an agent_id that is entirely terminal under tenant A must
-    not leak into tenant B's terminal set just because the id string collides."""
     project_a = await _seed_project(db_session, "tenant-a-be9491")
     shared_id = str(uuid.uuid4())
     await _seed_execution(db_session, "tenant-a-be9491", project_a.id, agent_id=shared_id, status="complete")

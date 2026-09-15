@@ -11,7 +11,6 @@
     class="navigation-drawer-container"
     @update:model-value="$emit('update:model-value', $event)"
   >
-    <!-- Edge-Aligned Collapse Tab -->
     <div
       v-if="(!rail || temporary) && modelValue"
       class="edge-toggle-tab"
@@ -25,9 +24,7 @@
       <v-icon size="20">mdi-chevron-left</v-icon>
     </div>
 
-    <!-- ─── TOP SECTION: Logo + Product ─── -->
     <div class="nav-top">
-      <!-- Logo -->
       <div class="nav-logo" :class="{ 'nav-logo--rail': rail }">
         <v-img
           v-if="!rail"
@@ -50,7 +47,6 @@
         />
       </div>
 
-      <!-- Expand chevron (rail/collapsed mode only, inline under logo) -->
       <div
         v-if="rail && !temporary"
         class="nav-expand-btn"
@@ -63,7 +59,6 @@
         <v-icon size="22">mdi-chevron-right</v-icon>
       </div>
 
-      <!-- FE-9502c: viewed-tab product (was the server's single active product). -->
       <router-link
         v-if="!rail"
         :to="{ name: 'Products' }"
@@ -74,7 +69,6 @@
       </router-link>
     </div>
 
-    <!-- ─── NAVIGATION ITEMS ─── -->
     <v-list
       v-model:selected="selected"
       density="compact"
@@ -108,21 +102,17 @@
           ></v-img>
           <v-icon v-else>{{ item.icon }}</v-icon>
         </template>
-        <!-- One #append per item (Vue forbids two): Hub unread + FE-9501b (D5) badge. -->
         <template v-if="badgeCount(item) > 0" #append>
           <span :style="hubUnreadBadgeStyle()" :data-testid="badgeTestId(item)">{{ badgeCount(item) > 99 ? '99+' : badgeCount(item) }}</span>
         </template>
       </v-list-item>
     </v-list>
 
-    <!-- ─── BOTTOM SECTION: Bell, Connection, Avatar ─── -->
     <template #append>
       <div class="nav-bottom">
         <div class="nav-orb-row" :class="{ 'nav-orb-row--stacked': rail }">
-          <!-- Notification Bell -->
           <NotificationDropdown :compact="true" />
 
-          <!-- Connection Status -->
           <v-tooltip location="right">
             <template #activator="{ props: tipProps }">
               <div
@@ -143,7 +133,6 @@
             {{ connectionText }}
           </v-tooltip>
 
-          <!-- Log Download (CE only) — via extracted child -->
           <NavLogMenu
             v-if="isCeConfirmed"
             :open="logMenuOpen"
@@ -154,7 +143,6 @@
             @download-archive="downloadArchive"
           />
 
-          <!-- User Avatar — via extracted child -->
           <NavAvatarMenu
             :current-user="currentUser"
             :user-initials="userInitials"
@@ -179,18 +167,15 @@
           />
         </div>
 
-        <!-- Edition Footer -->
         <div class="edition-footer">
           <span class="edition-label">{{ editionFooterLabel }}</span>
         </div>
       </div>
 
-      <!-- Connection Debug Panel (triggered by connection orb) -->
       <ConnectionDebugDialog v-model="showConnectionDebug" />
     </template>
   </v-navigation-drawer>
 
-  <!-- Mobile: floating menu button when drawer is closed -->
   <v-btn
     v-if="temporary && !modelValue"
     icon="mdi-menu"
@@ -258,9 +243,6 @@ const userStore = useUserStore()
 const wsStore = useWebSocketStore()
 const commHub = useCommHubStore()
 const globalActivity = useGlobalActivityStore()
-// FE-9501b (D5) / FE-9502d: "Projects" scopes to projectStore.projects (the
-// viewed product's own rows) -- globalActivity is keyed cross-product; the
-// remainder surfaces on the ProductTabStrip per-tab badge instead.
 function badgeCount(item) {
   if (item.name === 'Hub') return commHub.totalUnread
   if (item.name === 'Projects') {
@@ -308,8 +290,6 @@ function downloadArchive(filename) {
   logMenuOpen.value = false
 }
 
-// FE-6006: default 'unknown' (NOT 'ce') so a failed/timed-out config fetch never assumes
-// CE and renders CE-only chrome (the dead admin link) on a SaaS box (FE-6055).
 const giljoMode = ref('unknown')
 const {
   AccountStatusBadgeComponent,
@@ -324,7 +304,6 @@ const {
   loadAccountStateUI,
 } = useNavDrawerAccount({ giljoMode })
 
-// Edition state
 const edition = ref('')
 const serverVersion = ref('')
 
@@ -336,39 +315,30 @@ async function checkEdition() {
     serverVersion.value = configService.getVersion()
   } catch {
     edition.value = 'community'
-    // Stay 'unknown' on failure — do NOT assume 'ce' (FE-6055). CE-only chrome
-    // gates on isCeConfirmed, so it stays hidden until a real fetch confirms CE.
     giljoMode.value = 'unknown'
     serverVersion.value = ''
   }
 }
 
-// CE-only chrome (admin nav, log download) renders ONLY on positive CE
-// confirmation: mode 'ce' AND a non-fallback config (FE-6055). Computed from
-// configService (CE) — not saas/useSaasMode — to preserve edition isolation.
 const isCeConfirmed = computed(
   () => isCeModeValue(giljoMode.value) && !configService.isFallback(),
 )
 
-// Edition footer label
 const editionFooterLabel = computed(() => {
   switch (giljoMode.value) {
     case 'saas':
       return props.rail ? 'SaaS' : 'SaaS Edition'
     case 'ce':
       return props.rail ? 'CE' : 'Community Edition'
-    // 'unknown' — don't mislabel an unresolved edition as Community (FE-6055).
     default:
       return ''
   }
 })
 
-// About dialog version label
 const versionLabel = computed(() =>
   serverVersion.value ? `v${serverVersion.value}` : 'Version unavailable',
 )
 
-// Reset password (SaaS mode)
 const resetPasswordLoading = ref(false)
 
 async function confirmResetPassword(email) {
@@ -399,18 +369,13 @@ async function confirmResetPassword(email) {
   }
 }
 
-// User initials for avatar
 const userInitials = computed(() => {
   if (!props.currentUser?.username) return '?'
   return props.currentUser.username.substring(0, 2).toUpperCase()
 })
 
-// Connection status (icon / color / tooltip text) derived from the WebSocket
-// store — cohesive composable (INF-6055). Returns stay top-level setup bindings,
-// so the template references them unchanged.
 const { connectionIcon, connectionColor, connectionText } = useNavConnectionStatus()
 
-// Logout
 const handleLogout = async () => {
   try {
     await userStore.logout()
@@ -429,23 +394,13 @@ const handleLogout = async () => {
   }
 }
 
-// Dynamic Giljo icon for Jobs based on route.
-// FE-9110: key the icon off the SAME predicate as the highlight (isJobsRouteActive,
-// via resolveJobsNavIcon) so the icon and highlight can't drift — the icon
-// previously used a narrower path-only check and stayed gray on /launch?via=jobs.
 const jobsIcon = computed(() => resolveJobsNavIcon(route.path, route?.query))
 
-// Navigation items
-// FE-9502c: was the server's single activeProduct; now the viewed tab.
 const hasProduct = computed(() => !!productsStore.currentProduct)
 const hasProject = computed(() => (projectStore.projects?.length ?? 0) > 0)
 
 const navigationItems = computed(() => {
-  // FE-6174c: Jobs nav prefers an in-flight chain run (→ the /jobs multi variant
-  // for the chain's head project), else the active project(s), else launch.
-  // Pick the first active-election run from the hydrated set.
   const jobsPath = resolveJobsNavPath({
-    // FE-9525d: the retired singular reader is replaced by activeProjects (plural).
     activeProject: projectStore.activeProjects[0] ?? null,
     activeProjects: projectStore.activeProjects,
     activeRun: sequenceRunStore.activeRuns[0] ?? sequenceRunStore.reviewPendingRun ?? null,
@@ -490,12 +445,10 @@ const navigationItems = computed(() => {
   return items
 })
 
-// Route-based selection logic
 const updateSelectedFromRoute = () => {
   const items = navigationItems.value
   const currentPath = route.path
 
-  // FE-6165f: delegate Jobs-route detection to the extracted pure helper.
   if (isJobsRouteActive(currentPath, route?.query)) {
     selected.value = ['Jobs']
     return
@@ -518,14 +471,8 @@ onMounted(async () => {
   checkEdition()
   loadAccountStateUI()
 
-  // FE-9104: hydrate the chain-run set so the Jobs nav can resolve to a chain's
-  // ?run= review view after a COLD refresh on any page (the bare project-detail
-  // page never hydrates the store itself). Requests include_review_pending, so a
-  // terminal-but-unreviewed run stays reachable. Fire-and-forget: hydrate() swallows
-  // its own errors, and with no chain runs the resolved nav path is byte-identical.
   sequenceRunStore.hydrate()
 
-  // Check license status
   try {
     await configService.fetchConfig()
     const ed = configService.getEdition()

@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Shared domain enums and value objects.
-
-This package holds cross-layer domain primitives that have no service or
-repository dependencies. The first inhabitant is :mod:`project_status`,
-which defines the canonical :class:`~giljo_mcp.domain.project_status.ProjectStatus`
-enum used by the ORM, the lifecycle services, the REST endpoints, and the
-status-metadata API.
-
-Edition isolation: this package is CE-foundational. Nothing here imports
-from ``saas/`` or ``demo/``. The Deletion Test (CE must run with all
-``saas/`` directories removed) holds because none of these symbols depend
-on SaaS code.
-"""
 
 from giljo_mcp.domain.project_status import (
     IMMUTABLE_PROJECT_STATUSES,

@@ -3,42 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9343 — ``completed_at`` is stamped by the SERVICE, never left to the caller.
-
-The defect: a project could reach a terminal status with ``completed_at`` still
-NULL, because the timestamp was written by *some* callers rather than guaranteed
-by the service layer. ``update_project`` only ever wrote ``completed_at``
-``if field in updates`` (``_mutation_mixin._apply_project_updates``), and the MCP
-adapter builds its update dict from the caller's fields alone — so
-``update_project(status="completed")`` produced ``status=completed,
-completed_at=NULL``. Ten of ten completed BE-93xx projects were measured NULL.
-
-Three consequences, all user-visible: the dashboard's COMPLETED column fell back
-to ``updated_at`` (so archiving a project changed its "completion" date), sorting
-disagreed with the screen, and ``completed_after`` / ``completed_before`` returned
-nothing because NULL matches no range.
-
-This is a MECHANISM fix, so these tests exercise the WRITE path — the layer the
-bug lives on. A UI test would not have caught it and is deliberately not the proof.
-
-Test layers:
-  * ``TestMcpTerminalTransitionStamp`` — the real MCP adapter
-    (``update_project_metadata_for_mcp``) against committed Postgres rows. This is
-    the exact call an agent makes, and the WHERE-clause-shaped date filter is
-    proven against real rows rather than mocks.
-  * ``TestServiceLayerStampRules`` — the stamp's rules at the service boundary:
-    a caller-supplied value wins, an existing value is never re-stamped, and a
-    transition back OUT of a terminal status clears it.
-  * ``TestSoloCloseoutStamp`` — ``write_project_closeout`` on a SOLO project
-    (the branch that previously stamped chain members only).
-
-Parallel-safe: the MCP-path class commits for real (its adapter opens its own
-sessions via ``db_manager``), so it mints a unique tenant_key and purges its rows
-at teardown; the other classes use the rollback-isolated ``db_session``. No
-module-level mutable state, no ordering dependencies.
-
-Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -60,9 +24,6 @@ from tests.helpers.test_db_helper import purge_tenant_rows
 pytestmark = pytest.mark.asyncio
 
 
-# close_project_and_update_memory hard-requires a non-None db_manager at its input
-# gate, but with an injected session it is never dereferenced (mirrors
-# tests/services/test_be6198_closeout_chain_sync.py).
 _DB_MANAGER_SENTINEL = object()
 
 
@@ -74,11 +35,6 @@ async def _seed_product_and_project(
     product_is_active: bool = False,
     completed_at: datetime | None = None,
 ) -> tuple[str, str]:
-    """Seed one product + one project. Returns ``(product_id, project_id)``.
-
-    Each project gets its OWN product so ``series_number=1`` never collides with a
-    sibling test row under ``uq_project_taxonomy``.
-    """
     product = Product(
         id=str(uuid.uuid4()),
         name=f"BE-9343 Product {uuid.uuid4().hex[:6]}",
@@ -123,21 +79,10 @@ async def _reload(session: AsyncSession, project_id: str, tenant_key: str) -> Pr
     return project
 
 
-# ---------------------------------------------------------------------------
-# The MCP write path — real adapter, real committed rows
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
 async def committed_mcp_project(db_manager):
-    """Commit an ACTIVE product + one project, then purge the tenant at teardown.
-
-    ``update_project_metadata_for_mcp`` resolves the active product through a
-    ProductService that opens its OWN session from ``db_manager`` (it does not
-    inherit an injected test session), so a rollback-isolated seed would be
-    invisible to it and the call would fail with "No active product set". These
-    rows are therefore committed for real and cleaned up explicitly.
-    """
     tenant_key = TenantManager.generate_tenant_key()
     async with db_manager.get_session_async(tenant_key=tenant_key) as session:
         _, project_id = await _seed_product_and_project(session, tenant_key, product_is_active=True)
@@ -150,18 +95,11 @@ async def committed_mcp_project(db_manager):
 
 
 class TestMcpTerminalTransitionStamp:
-    """The agent-facing call. This is the layer the defect lives on."""
 
     @pytest.mark.parametrize("terminal_status", ["completed", "cancelled"])
     async def test_mcp_update_to_terminal_status_stamps_completed_at(
         self, db_manager, committed_mcp_project, terminal_status: str
     ) -> None:
-        """THE regression: ``update_project(status="completed")`` must stamp the date.
-
-        A caller doing everything right supplies only the status — exactly what an
-        agent closing a solo project does. Before the fix this landed
-        ``status=completed, completed_at=NULL``.
-        """
         tenant_key, project_id = committed_mcp_project
         service = _service(db_manager, tenant_key)
 
@@ -170,10 +108,6 @@ class TestMcpTerminalTransitionStamp:
             project_id=project_id,
             status=terminal_status,
             tenant_key=tenant_key,
-            # BE-9539: this fixture never runs write_project_closeout, so the
-            # archive lifecycle's closeout-required gate would otherwise refuse
-            # the "completed" case -- orthogonal to what this test pins
-            # (completed_at stamping), so bypass it explicitly.
             force=True,
         )
         after = datetime.now(UTC)
@@ -195,11 +129,6 @@ class TestMcpTerminalTransitionStamp:
     async def test_completed_after_filter_finds_a_project_closed_through_mcp(
         self, db_manager, committed_mcp_project
     ) -> None:
-        """The user-visible acceptance check, against REAL rows.
-
-        "What shipped this week?" returned zero results because the filter reads the
-        real column and NULL matches no range. This is the query that found the bug.
-        """
         tenant_key, project_id = committed_mcp_project
         service = _service(db_manager, tenant_key)
 
@@ -207,7 +136,7 @@ class TestMcpTerminalTransitionStamp:
             project_id=project_id,
             status="completed",
             tenant_key=tenant_key,
-            force=True,  # BE-9539: no closeout ever ran in this fixture; orthogonal to this test.
+            force=True,
         )
 
         window_start = datetime.now(UTC) - timedelta(hours=1)
@@ -225,9 +154,6 @@ class TestMcpTerminalTransitionStamp:
             "path — with completed_at NULL it silently matched nothing"
         )
 
-        # The other side of the filter: a window that ends before the project closed
-        # must NOT return it, so the assertion above cannot pass by the filter simply
-        # being inert.
         stale = await service.list_projects_for_mcp(
             tenant_key=tenant_key,
             include_completed=True,
@@ -238,19 +164,6 @@ class TestMcpTerminalTransitionStamp:
     async def test_bare_completion_date_filter_returns_the_completed_project(
         self, db_manager, committed_mcp_project
     ) -> None:
-        """AUDIT F2: a completion-date filter alone must not exclude completed projects.
-
-        Without ``include_completed=True`` the status filter resolved to the
-        lifecycle-ACTIVE complement and dropped every completed project at the SQL
-        boundary — so the query returned the projects NOT marked completed and hid the
-        ones that were. Before the backfill that returned nothing, which reads as
-        "nothing found"; afterwards it would have returned an INVERTED set, which reads
-        as an answer. That is the worse failure, and it is the one this pins.
-
-        Reachable by design: ``template_seeder.py`` seeds the orchestrator's
-        duplicate/continuation check with ``completed_after`` and marks
-        ``include_completed`` optional, so omitting it is documented-normal.
-        """
         tenant_key, project_id = committed_mcp_project
         service = _service(db_manager, tenant_key)
 
@@ -258,10 +171,9 @@ class TestMcpTerminalTransitionStamp:
             project_id=project_id,
             status="completed",
             tenant_key=tenant_key,
-            force=True,  # BE-9539: no closeout ever ran in this fixture; orthogonal to this test.
+            force=True,
         )
 
-        # Note the ABSENCE of include_completed — this is the bare call shape.
         listing = await service.list_projects_for_mcp(
             tenant_key=tenant_key,
             completed_after=datetime.now(UTC) - timedelta(hours=1),
@@ -272,12 +184,6 @@ class TestMcpTerminalTransitionStamp:
             "completion-date filter is an unambiguous request for finished work"
         )
 
-        # The OTHER operand of the fix's own predicate. ``has_completion_filter`` is
-        # an OR over completed_after and completed_before, and only the first half
-        # was pinned: every other bare-shaped completed_before in the tree passes
-        # include_completed=True, so nothing exercised this branch. A refactor that
-        # dropped ``or completed_before is not None`` would pass the entire suite
-        # while silently restoring the inverted set this test exists to prevent.
         before_listing = await service.list_projects_for_mcp(
             tenant_key=tenant_key,
             completed_before=datetime.now(UTC) + timedelta(hours=1),
@@ -291,12 +197,6 @@ class TestMcpTerminalTransitionStamp:
     async def test_an_explicit_status_still_wins_over_the_implied_include(
         self, db_manager, committed_mcp_project
     ) -> None:
-        """The implication must not override a caller who asked a narrower question.
-
-        ``list_projects(status="active", completed_after=X)`` is coherent, and it must
-        keep excluding completed projects — otherwise the F2 fix would have replaced one
-        wrong answer with another.
-        """
         tenant_key, project_id = committed_mcp_project
         service = _service(db_manager, tenant_key)
 
@@ -304,7 +204,7 @@ class TestMcpTerminalTransitionStamp:
             project_id=project_id,
             status="completed",
             tenant_key=tenant_key,
-            force=True,  # BE-9539: no closeout ever ran in this fixture; orthogonal to this test.
+            force=True,
         )
 
         listing = await service.list_projects_for_mcp(
@@ -318,16 +218,11 @@ class TestMcpTerminalTransitionStamp:
         )
 
 
-# ---------------------------------------------------------------------------
-# The stamp's rules at the service boundary
-# ---------------------------------------------------------------------------
 
 
 class TestServiceLayerStampRules:
-    """Additive, never an override — and symmetric on the way back out."""
 
     async def test_caller_supplied_completed_at_still_wins(self, db_manager, db_session) -> None:
-        """The Archive button passes completed_at explicitly and must keep winning."""
         tenant_key = TenantManager.generate_tenant_key()
         _, project_id = await _seed_product_and_project(db_session, tenant_key)
         service = _service(db_manager, tenant_key, db_session)
@@ -342,11 +237,6 @@ class TestServiceLayerStampRules:
         assert stamped == explicit, "an explicitly supplied completed_at must not be overwritten by the auto-stamp"
 
     async def test_existing_completed_at_is_not_re_stamped(self, db_manager, db_session) -> None:
-        """Already set means already answered — a later terminal write must not re-date it.
-
-        This is what keeps a completed project's real date intact when it is later
-        marked superseded (BE-9157 allows exactly that transition).
-        """
         tenant_key = TenantManager.generate_tenant_key()
         original = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
         _, project_id = await _seed_product_and_project(
@@ -363,7 +253,6 @@ class TestServiceLayerStampRules:
         assert stamped == original, "an existing completed_at must survive a later terminal transition"
 
     async def test_transition_to_terminated_stamps(self, db_manager, db_session) -> None:
-        """``terminated`` is lifecycle-finished too — the set drives this, not a literal list."""
         tenant_key = TenantManager.generate_tenant_key()
         _, project_id = await _seed_product_and_project(db_session, tenant_key)
         service = _service(db_manager, tenant_key, db_session)
@@ -374,12 +263,6 @@ class TestServiceLayerStampRules:
         assert project.completed_at is not None, "every LIFECYCLE_FINISHED status must stamp, not just 'completed'"
 
     async def test_transition_out_of_terminal_clears_completed_at(self, db_manager, db_session) -> None:
-        """A reopened project must not keep a stale completion date.
-
-        Mirrors ``continue_working``, which already clears it on the dashboard path.
-        ``terminated`` is lifecycle-finished but NOT immutable, so this transition is
-        genuinely reachable through the generic write path.
-        """
         tenant_key = TenantManager.generate_tenant_key()
         _, project_id = await _seed_product_and_project(
             db_session, tenant_key, status="terminated", completed_at=datetime(2026, 2, 2, tzinfo=UTC)
@@ -392,10 +275,6 @@ class TestServiceLayerStampRules:
         assert project.completed_at is None, "leaving a terminal status must clear the completion date"
 
     async def test_a_non_status_update_never_touches_completed_at(self, db_manager, db_session) -> None:
-        """The stamp keys on a TRANSITION. Renaming a project must not date it.
-
-        Without this, any PATCH would become a lifecycle event.
-        """
         tenant_key = TenantManager.generate_tenant_key()
         _, project_id = await _seed_product_and_project(db_session, tenant_key)
         service = _service(db_manager, tenant_key, db_session)
@@ -406,20 +285,11 @@ class TestServiceLayerStampRules:
         assert project.completed_at is None, "a metadata-only update must not stamp a completion date"
 
 
-# ---------------------------------------------------------------------------
-# The solo closeout branch
-# ---------------------------------------------------------------------------
 
 
 class TestSoloCloseoutStamp:
-    """``write_project_closeout`` stamped chain members only; solo was skipped."""
 
     async def test_solo_closeout_stamps_completed_at(self, db_session) -> None:
-        """A standalone project closed by an agent is the majority case in this repo.
-
-        It previously depended on someone later pressing Archive to get a date at
-        all — and if nobody did, the row stayed NULL forever.
-        """
         tenant_key = TenantManager.generate_tenant_key()
         _, project_id = await _seed_product_and_project(db_session, tenant_key)
 
@@ -441,7 +311,6 @@ class TestSoloCloseoutStamp:
         )
 
     async def test_solo_closeout_does_not_overwrite_an_existing_date(self, db_session) -> None:
-        """Closeout fills a gap; it does not re-date a project that already has one."""
         tenant_key = TenantManager.generate_tenant_key()
         original = datetime(2026, 1, 9, 10, 11, 12, tzinfo=UTC)
         _, project_id = await _seed_product_and_project(db_session, tenant_key, completed_at=original)
@@ -464,27 +333,6 @@ class TestSoloCloseoutStamp:
         assert stamped == original
 
     async def test_solo_closeout_message_does_not_claim_the_project_was_closed(self, db_session) -> None:
-        """The message this branch returns must not claim what this exact branch refuses to do.
-
-        ``_finalize_chain_member_closeout`` deliberately leaves a solo project's row
-        untouched -- status flip is chain-member-only, by design (BUG #7) -- yet the
-        response text used to read "Project closed and 360 Memory updated successfully"
-        unconditionally. An agent (or a script) trusting that sentence has no reason to
-        ever press Archive, and INF-9252's prod-seeding incident traced a bad
-        assumption to exactly this: the caller believed the project was closed because
-        the tool said so.
-
-        The remedy named must be the one that actually completes a solo project.
-        BE-9384 changed WHICH one that is: ``update_project(status="completed")`` now
-        runs the whole archive lifecycle rather than the bare status write, so it is
-        the supported completion path an agent can reach without leaving MCP. This
-        message used to send callers to the REST endpoint and warn them off the tool
-        precisely because the tool reached only step 3 of 4.
-
-        The invariant this test exists for is unchanged and still asserted first: the
-        message must not claim the project itself was closed, because this branch
-        deliberately does not close it.
-        """
         tenant_key = TenantManager.generate_tenant_key()
         _, project_id = await _seed_product_and_project(db_session, tenant_key)
 
@@ -516,7 +364,5 @@ class TestSoloCloseoutStamp:
             f"the message must still confirm the 360 memory entry, which genuinely was written: {message!r}"
         )
 
-        # Sanity: the status really was left alone by this exact call (the museum-rule
-        # invariant this wording change must not disturb).
         project = await _reload(db_session, project_id, tenant_key)
         assert project.status == "active", "sanity: the solo status must truly be unchanged by this closeout"

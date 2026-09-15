@@ -3,51 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9259: heal neutralized tester/implementer/documenter seed personas for existing tenants.
-
-Revision ID: ce_0084_heal_neutralized_seed_personas
-Revises: ce_0083_projects_parked_status
-Create Date: 2026-07-22
-
-BE-9259 (commit 9f37bfc19) neutralized Role-2/Role-3 dogfooding contamination out
-of the tester, implementer, and documenter default seed personas in
-``template_seeder.py``. ``refresh_tenant_template_instructions()``
-(``template_refresh.py``) is operator-triggered only, does NOT run on startup, and
-(per its own docstring) "cannot be relied on to heal existing rows" -- the same
-class of gap ``ce_0049`` healed for the tool-rename. Worse here: refresh keys
-strictly on ``user_instructions == <current seed text>``; a tenant's PRE-BE-9259
-row holds the OLD seed text, which no longer equals the new seed, so refresh
-treats it as user-edited and SKIPS it -- and the force=True override that would
-otherwise clobber it isn't even reachable from CE (``scripts/refresh_templates.py``
-is stripped by ``.export-exclude``). Existing tenants therefore never receive the
-neutralized personas without this migration.
-
-Scope -- only 3 of the 4 roles BE-9259 touched need a DB heal: tester,
-implementer, documenter. The fourth (orchestrator) is in ``SYSTEM_MANAGED_ROLES``
-and is skipped entirely by ``_seed_tenant_templates`` (``template_seeder.py``,
-around the ``SYSTEM_MANAGED_ROLES`` check) -- no per-tenant ``agent_templates`` row
-is ever created for it, so there is nothing in the DB to heal; callers that build
-the orchestrator mission read the seed dict directly and already see the
-neutralized prose with no row to go stale.
-
-This migration rewrites ``user_instructions`` (all three roles) and
-``description`` (tester only -- the sole one of the three whose description text
-also changed) from the EXACT pre-BE-9259 seed byte string to the new one, for
-rows whose current column value still byte-matches the OLD seed exactly. A row
-whose text differs from the old seed (already healed, or genuinely user-edited)
-is left untouched -- this mirrors the same byte-equality contract
-``refresh_tenant_template_instructions`` uses for its own provably-unedited
-check, just anchored at the OLD seed generation instead of the current one.
-``system_instructions`` (the bootstrap) and the ``version`` column are out of
-scope for this fix (unrelated to the content healed here).
-
-Idempotent: each UPDATE's WHERE clause requires the column to still hold the OLD
-text, so a second run (the CE installer reruns ``alembic upgrade head`` on every
-boot) matches zero rows and is a clean no-op.
-
-Edition Scope: CE -- ``agent_templates`` is a CE table (``migrations/versions/``).
-SaaS inherits this migration unchanged via its next ``preDeploy`` alembic run.
-"""
 
 import sqlalchemy as sa
 from alembic import op
@@ -71,7 +26,6 @@ _NEW_DOCUMENTER_UI = "You are a documentation specialist responsible for maintai
 def upgrade() -> None:
     conn = op.get_bind()
 
-    # tester: description changed AND user_instructions changed.
     conn.execute(
         sa.text("UPDATE agent_templates SET description = :new WHERE name = 'tester' AND description = :old"),
         {"old": _OLD_TESTER_DESCRIPTION, "new": _NEW_TESTER_DESCRIPTION},
@@ -83,7 +37,6 @@ def upgrade() -> None:
         {"old": _OLD_TESTER_UI, "new": _NEW_TESTER_UI},
     )
 
-    # implementer: user_instructions only (description unchanged by BE-9259).
     conn.execute(
         sa.text(
             "UPDATE agent_templates SET user_instructions = :new "
@@ -92,7 +45,6 @@ def upgrade() -> None:
         {"old": _OLD_IMPLEMENTER_UI, "new": _NEW_IMPLEMENTER_UI},
     )
 
-    # documenter: user_instructions only (description unchanged by BE-9259).
     conn.execute(
         sa.text(
             "UPDATE agent_templates SET user_instructions = :new WHERE name = 'documenter' AND user_instructions = :old"

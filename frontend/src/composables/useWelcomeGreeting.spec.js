@@ -1,9 +1,3 @@
-/**
- * useWelcomeGreeting.spec.js — FE-6006 unit 3a
- *
- * Tests for the extracted greeting composable from WelcomeView.vue.
- * Edition scope: CE
- */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { ref } from 'vue'
 
@@ -37,13 +31,11 @@ describe('useWelcomeGreeting', () => {
   })
 
   it('returns morning-appropriate greeting before noon', async () => {
-    // Run many times to ensure the time-based pool is used
     const results = new Set()
     for (let i = 0; i < 50; i++) {
       const { fullGreeting } = await makeGreeting('Test', 9)
       results.add(fullGreeting.value)
     }
-    // Should have produced multiple different greetings (random pool)
     expect(results.size).toBeGreaterThan(1)
   })
 })

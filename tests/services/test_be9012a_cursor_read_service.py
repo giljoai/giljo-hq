@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Service-layer tests for the BE-9012a read cursor (D6) + acted-on state (D4).
-
-Complements the MCP-boundary test (test_be9012a_cursor_read_mcp_boundary.py) with
-the two correctness details the transport tests cannot see cleanly:
-
-- ADR-009 Teams-readiness: the cursor is per-(thread, participant); two
-  participants on the SAME thread have INDEPENDENT cursors (never per-user shared
-  state). One reader draining does not advance another's cursor.
-- Watermark-guard: mark_read combined with a NARROWING filter (directed/action)
-  or truncation must NOT advance the drain watermark — advancing it would silently
-  skip unread posts the filter excluded. The junction ack still records exactly
-  what was seen.
-
-Real DB (rollback-isolated ``db_session``), no mocks. created_at is
-``func.now()`` = Postgres transaction time, so posts here share a timestamp unless
-stamped; we stamp distinct increasing times where the cursor advance is asserted.
-"""
 
 from __future__ import annotations
 
@@ -81,8 +64,6 @@ async def _cursor_row(db_session, tenant, tid, participant_id) -> CommParticipan
 
 
 async def test_cursor_is_per_participant_independent(db_manager, db_session):
-    """ADR-009: beta draining its unread does NOT touch gamma's cursor. The cursor
-    is per-(thread, participant), tenant-scoped — never a shared per-user watermark."""
     tenant = _tk("indep")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -95,22 +76,18 @@ async def test_cursor_is_per_participant_independent(db_manager, db_session):
     m2 = await _post(svc, tid, tenant, "two")
     await _stamp(db_session, tenant, [(m1, _T1), (m2, _T2)])
 
-    # beta drains both.
     beta_first = await svc.get_thread_history(
         thread_id=tid, as_participant="beta", unread_only=True, mark_read=True, tenant_key=tenant
     )
     assert beta_first["count"] == 2
-    # beta re-reads: cursor advanced -> nothing new.
     beta_second = await svc.get_thread_history(
         thread_id=tid, as_participant="beta", unread_only=True, tenant_key=tenant
     )
     assert beta_second["count"] == 0
 
-    # gamma's cursor is untouched -> gamma still sees both as unread.
     gamma = await svc.get_thread_history(thread_id=tid, as_participant="gamma", unread_only=True, tenant_key=tenant)
     assert gamma["count"] == 2
 
-    # And the DB proves it: beta's cursor advanced, gamma's is still NULL.
     beta_row = await _cursor_row(db_session, tenant, tid, "beta")
     gamma_row = await _cursor_row(db_session, tenant, tid, "gamma")
     assert beta_row.last_read_message_id == m2
@@ -120,9 +97,6 @@ async def test_cursor_is_per_participant_independent(db_manager, db_session):
 
 
 async def test_narrowed_mark_read_does_not_advance_watermark(db_manager, db_session):
-    """The corruption guard: mark_read + action_required_only acks the action post
-    but must NOT advance the drain watermark past the unread broadcast below it.
-    A later unread_only read must still return BOTH posts (cursor never moved)."""
     tenant = _tk("guard")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -130,11 +104,10 @@ async def test_narrowed_mark_read_does_not_advance_watermark(db_manager, db_sess
     thread = await svc.create_thread(subject="t", creator_id="alpha", tenant_key=tenant)
     tid = thread["thread_id"]
     await svc.join_thread(thread_id=tid, participant_id="beta", tenant_key=tenant)
-    m1 = await _post(svc, tid, tenant, "broadcast", requires_action=False)  # older
-    m2 = await _post(svc, tid, tenant, "please act", requires_action=True)  # newer
+    m1 = await _post(svc, tid, tenant, "broadcast", requires_action=False)
+    m2 = await _post(svc, tid, tenant, "please act", requires_action=True)
     await _stamp(db_session, tenant, [(m1, _T1), (m2, _T2)])
 
-    # Narrowed mark_read: returns only the action post, acks it, but must hold the cursor.
     narrowed = await svc.get_thread_history(
         thread_id=tid,
         as_participant="beta",
@@ -144,7 +117,6 @@ async def test_narrowed_mark_read_does_not_advance_watermark(db_manager, db_sess
     )
     assert [m["content"] for m in narrowed["messages"]] == ["please act"]
 
-    # D4 ack recorded for the action post only.
     with tenant_session_context(db_session, tenant):
         acked = (
             (
@@ -160,16 +132,13 @@ async def test_narrowed_mark_read_does_not_advance_watermark(db_manager, db_sess
         )
     assert set(acked) == {m2}
 
-    # Watermark NOT advanced: cursor row still NULL, so a plain unread read sees BOTH.
     beta_row = await _cursor_row(db_session, tenant, tid, "beta")
     assert beta_row.last_read_at is None
     unread = await svc.get_thread_history(thread_id=tid, as_participant="beta", unread_only=True, tenant_key=tenant)
-    assert unread["count"] == 2  # the older broadcast was NOT silently skipped
+    assert unread["count"] == 2
 
 
 async def test_full_drain_advances_cursor_and_re_ack_is_idempotent(db_manager, db_session):
-    """A clean unread drain advances the persisted cursor exactly once and acks each
-    post once; repeating the drain is a no-op (no new rows, count 0)."""
     tenant = _tk("drain")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -205,4 +174,4 @@ async def test_full_drain_advances_cursor_and_re_ack_is_idempotent(db_manager, d
         thread_id=tid, as_participant="beta", unread_only=True, mark_read=True, tenant_key=tenant
     )
     assert second["count"] == 0 and second["marked_read"] == 0
-    assert await _ack_count() == 2  # idempotent — no new ack rows
+    assert await _ack_count() == 2

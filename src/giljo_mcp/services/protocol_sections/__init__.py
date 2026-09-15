@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Protocol sections subpackage — focused submodules extracted from protocol_builder.py."""
 
 from giljo_mcp.services.protocol_sections.agent_lifecycle import (
     _generate_orchestrator_protocol,

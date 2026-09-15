@@ -1,6 +1,5 @@
 <template>
   <div>
-    <!-- Title -->
     <div v-if="showTitle" class="tab-header mb-4">
       <h2 class="text-title-large">{{ title }}</h2>
       <p v-if="showInfoBanner" class="text-body-medium text-muted-a11y mt-1">{{ infoBannerText }}</p>
@@ -9,9 +8,7 @@
     <v-card class="db-card smooth-border">
     <v-card-text>
 
-      <!-- Database Configuration Fields -->
       <v-row>
-        <!-- Host -->
         <v-col cols="12" md="6">
           <v-text-field
             v-model="dbConfig.host"
@@ -26,7 +23,6 @@
           />
         </v-col>
 
-        <!-- Port -->
         <v-col cols="12" md="6">
           <v-text-field
             v-model.number="dbConfig.port"
@@ -42,7 +38,6 @@
           />
         </v-col>
 
-        <!-- Database Name -->
         <v-col cols="12" md="6">
           <v-text-field
             v-model="dbConfig.name"
@@ -57,7 +52,6 @@
           />
         </v-col>
 
-        <!-- Username -->
         <v-col cols="12" md="6">
           <v-text-field
             v-model="dbConfig.user"
@@ -72,7 +66,6 @@
           />
         </v-col>
 
-        <!-- Password -->
         <v-col cols="12">
           <v-text-field
             v-model="dbConfig.password"
@@ -89,7 +82,6 @@
         </v-col>
       </v-row>
 
-      <!-- Test Connection Button (moved above divider - Handover 0424d UI tweak) -->
       <div v-if="showTestButton" class="mt-4 mb-4">
         <v-btn
           variant="flat"
@@ -106,10 +98,8 @@
         </v-btn>
       </div>
 
-      <!-- Divider -->
       <v-divider class="my-6" />
 
-      <!-- Connection Test Result Alert -->
       <v-alert
         v-if="connectionTestResult"
         :type="connectionTestResult.success ? 'success' : 'error'"
@@ -119,20 +109,13 @@
         :aria-live="connectionTestResult.success ? 'polite' : 'assertive'"
         data-test="test-result"
       >
-        <!-- SEC-0003: formatTestResultMessage HTML-escapes every
-             backend-supplied field before concatenation and then runs the
-             final string through sanitizeHtml (hardened DOMPurify
-             allow-list) -- no unsanitized content reaches the DOM.
-             v-html sanctioned via eslint.config.js file override. -->
         <div v-html="formatTestResultMessage(connectionTestResult)"></div>
       </v-alert>
     </v-card-text>
 
-    <!-- Action Buttons (Test Connection moved above divider - Handover 0424d) -->
     <v-card-actions v-if="$slots.actions">
       <v-spacer />
 
-      <!-- Actions Slot (for custom buttons like "Reload from Config") -->
       <slot name="actions"></slot>
     </v-card-actions>
   </v-card>
@@ -145,67 +128,40 @@ import api from '@/services/api'
 import { sanitizeHtml } from '@/composables/useSanitizeMarkdown'
 import { escapeHtml } from '@/utils/escapeHtml'
 
-/**
- * DatabaseConnection - Reusable database connection testing component
- *
- * Extracted from Settings component for reuse in:
- * 1. Settings page (database tab)
- * 2. Setup wizard (database verification step)
- *
- * @component
- * @example
- * <DatabaseConnection
- *   :readonly="true"
- *   :show-test-button="true"
- *   :auto-test="true"
- *   @connection-success="handleSuccess"
- *   @connection-error="handleFailure"
- * />
- */
 
-// Props
 const props = defineProps({
-  /** Lock all fields for read-only display */
   readonly: {
     type: Boolean,
     default: false,
   },
-  /** Show test connection button */
   showTestButton: {
     type: Boolean,
     default: true,
   },
-  /** Show title in card header */
   showTitle: {
     type: Boolean,
     default: false,
   },
-  /** Card title text */
   title: {
     type: String,
     default: 'PostgreSQL Database Configuration',
   },
-  /** Show info banner */
   showInfoBanner: {
     type: Boolean,
     default: true,
   },
-  /** Info banner text */
   infoBannerText: {
     type: String,
     default: 'Database settings are configured during installation',
   },
-  /** Test button text */
   testButtonText: {
     type: String,
     default: 'Test Connection',
   },
 })
 
-// Emits
 const emit = defineEmits(['connection-success', 'connection-error'])
 
-// State
 const dbConfig = ref({
   type: 'postgresql',
   host: 'localhost',
@@ -218,16 +174,11 @@ const dbConfig = ref({
 const testing = ref(false)
 const connectionTestResult = ref(null)
 
-// Methods
-/**
- * Test database connection
- */
 const testConnection = async () => {
   testing.value = true
   connectionTestResult.value = null
 
   try {
-    // Use axios client with credentials to avoid cross-origin cookie issues
     const { data: result } = await api.settings.testDatabase()
 
     if (result.success) {
@@ -265,12 +216,8 @@ const testConnection = async () => {
   }
 }
 
-/**
- * Load database settings from API
- */
 const loadSettings = async () => {
   try {
-    // Use axios client with credentials for config fetch as well
     const { data: config } = await api.settings.getDatabase()
 
     dbConfig.value = {
@@ -279,32 +226,18 @@ const loadSettings = async () => {
       port: config.port || 5432,
       name: config.name || 'giljo_mcp',
       user: config.user || 'postgres',
-      password: '********', // Always masked
+      password: '********',
     }
   } catch {
     // Settings fetch failed -- fields keep their defaults
   }
 }
 
-/**
- * Clear test result
- */
 const clearTestResult = () => {
   connectionTestResult.value = null
 }
 
-/**
- * Format test result message with suggestions
- */
 const formatTestResultMessage = (result) => {
-  // SEC-0003 widening: `result.message` and `result.suggestions[]` are
-  // user/backend-controlled strings concatenated INTO an HTML string. Without
-  // pre-escaping, DOMPurify sees attacker-supplied `<` as a real tag
-  // (double-decode class vulnerability) -- the sanitizer then correctly
-  // strips the tag but would still alter the displayed text unpredictably.
-  // We HTML-escape each piece BEFORE concatenation so the sanitizer only
-  // has to verify the static markup shape, then run the final string
-  // through sanitizeHtml as belt-and-suspenders.
   if (result.success) {
     return sanitizeHtml(escapeHtml(result.message))
   }
@@ -323,9 +256,6 @@ const formatTestResultMessage = (result) => {
   return sanitizeHtml(html)
 }
 
-/**
- * Generate helpful suggestions based on error
- */
 const generateSuggestions = (error) => {
   const suggestions = []
   const errorMsg = error.message || error.error || ''
@@ -360,12 +290,10 @@ const generateSuggestions = (error) => {
   return suggestions
 }
 
-// Lifecycle
 onMounted(async () => {
   await loadSettings()
 })
 
-// Expose methods for parent components
 defineExpose({
   testConnection,
   loadSettings,

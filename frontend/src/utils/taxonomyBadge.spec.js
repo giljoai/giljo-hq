@@ -1,11 +1,3 @@
-/**
- * Unit tests for taxonomyBadgeStyle — the shared util consumed by
- * ProjectsView (.project-id-badge) and TasksView (.taxonomy-badge).
- *
- * FE-5046: extracted from ProjectsView's local projectIdBadgeStyle()
- * helper. The two views must produce identical inline styles for the
- * same color input so the Type+Serial badge stays visually consistent.
- */
 import { describe, it, expect } from 'vitest'
 import {
   taxonomyBadgeStyle,
@@ -41,7 +33,6 @@ describe('taxonomyBadgeStyle', () => {
   })
 })
 
-// FE-6049e: TSK origin detection + purple resolution.
 describe('isReservedTaskAlias', () => {
   it('matches TSK-nnnn and legacy TSKnnnn aliases', () => {
     expect(isReservedTaskAlias('TSK-0042')).toBe(true)
@@ -52,7 +43,6 @@ describe('isReservedTaskAlias', () => {
   it('does not match non-TSK aliases or non-strings', () => {
     expect(isReservedTaskAlias('BE-0001')).toBe(false)
     expect(isReservedTaskAlias('FE-0042')).toBe(false)
-    // A custom 4-letter type starting with TSK must NOT false-match.
     expect(isReservedTaskAlias('TSKX-0001')).toBe(false)
     expect(isReservedTaskAlias(null)).toBe(false)
     expect(isReservedTaskAlias(undefined)).toBe(false)

@@ -3,32 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9499b -- the supersede door, MCP-transport boundary.
-
-Operator ruling 2026-08-26 (see project BE-9499b): an agent should be able to
-mark a project superseded over MCP, but `superseded` is meaningless without a
-`successor_project_id` -- a null-successor row is an audit-trail dead end
-(`_memory_helpers.refuse_if_superseded` hands agents that pointer as the
-remedy for hitting a superseded project, which only works if it's always
-populated).
-
-This file pins, at the real `@mcp.tool` transport:
-  1. A supersede with NO successor is refused as a structured Tier-2
-     rejection (SUPERSEDE_REQUIRES_SUCCESSOR), never a 500, never a partial
-     write -- reproduced FAILING first (pre-fix this raised ValidationError
-     for a completely different reason: `superseded` wasn't even in
-     VALID_UPDATE_STATUSES).
-  2. A supersede with an INELIGIBLE successor (cancelled/terminated/deleted/
-     superseded) is refused the SAME way.
-  3. A supersede with a valid successor (active/completed/inactive) succeeds
-     end-to-end, the successor pointer lands on the row, and REST PATCH
-     (`ProjectService.update_project`, the same owning writer) behaves
-     byte-identically.
-  4. `is_immutable` is unweakened: once superseded, a further plain write is
-     still refused.
-
-Parallel-safe: each test generates a fresh tenant_key + cleans up its own rows.
-"""
 
 from __future__ import annotations
 
@@ -223,7 +197,6 @@ class TestSupersedeHappyPath:
             await _cleanup(db_manager, tenant_key)
 
     async def test_further_write_after_supersede_still_refused(self, supersede_client, db_manager):
-        """is_immutable is unweakened: reachable FROM mcp != writable AFTER."""
         client, tenant_key = supersede_client
         _product_id, predecessor_id, successor_id = await _seed(db_manager, tenant_key)
 
@@ -248,10 +221,6 @@ class TestSupersedeHappyPath:
             await _cleanup(db_manager, tenant_key)
 
     async def test_rest_door_matches_mcp_door_byte_identical(self, db_manager):
-        """REST PATCH (ProjectService.update_project) and the MCP tool both call
-        the SAME owning writer -- pin that the REST door's behaviour did not
-        move under this change (ruling 1: one writer, both doors agree).
-        """
         tenant_key = TenantManager.generate_tenant_key()
         tenant_manager = TenantManager()
         tenant_manager.set_current_tenant(tenant_key)
@@ -259,17 +228,12 @@ class TestSupersedeHappyPath:
 
         service = ProjectService(db_manager=db_manager, tenant_manager=tenant_manager)
         try:
-            # No successor -> SUPERSEDE_REQUIRES_SUCCESSOR, raised (REST's
-            # generic PATCH endpoint lets ProjectService exceptions propagate to
-            # its own error-mapping layer -- unlike the MCP adapter's Tier-2
-            # catch, this door was never given a structured-return carve-out).
             from giljo_mcp.exceptions import ValidationError
 
             with pytest.raises(ValidationError) as exc_info:
                 await service.update_project(project_id=predecessor_id, updates={"status": "superseded"})
             assert exc_info.value.error_code == "SUPERSEDE_REQUIRES_SUCCESSOR"
 
-            # Eligible successor -> succeeds, same as the MCP door.
             updated = await service.update_project(
                 project_id=predecessor_id,
                 updates={"status": "superseded", "successor_project_id": successor_id},

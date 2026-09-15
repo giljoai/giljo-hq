@@ -1,21 +1,7 @@
-/**
- * Tests for the self-service Password & Recovery-PIN section on the account
- * Profile page (IMP-5042).
- *
- * The section must:
- *   - render a password-change form in every edition
- *   - render the recovery-PIN form in CE only (hosted editions use email reset)
- *   - hide the recovery-PIN form in SaaS
- *   - call api.auth.changePassword() with the current + new password, then sign
- *     the user out and redirect to /login (SEC-6001 revokes the session)
- *   - set the recovery PIN via api.auth.updateUser({ recovery_pin })
- *   - surface a friendly error when the current password is wrong (401)
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
-// ---------- Module mocks ----------
 
 const changePasswordMock = vi.fn()
 const updateUserMock = vi.fn()
@@ -38,7 +24,6 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: routerPushMock }),
 }))
 
-// setupService.checkEnhancedStatus() drives the CE-vs-SaaS split (isCe).
 const modeRef = { value: 'ce' }
 vi.mock('@/services/setupService', () => ({
   default: {
@@ -63,7 +48,6 @@ vi.mock('@/stores/user', () => ({
   }),
 }))
 
-// ---------- Helper ----------
 
 async function mountPage() {
   setActivePinia(createPinia())
@@ -93,7 +77,6 @@ async function mountPage() {
   return wrapper
 }
 
-// ---------- Suite ----------
 
 describe('ProfilePage — self-service password & PIN (IMP-5042)', () => {
   beforeEach(() => {

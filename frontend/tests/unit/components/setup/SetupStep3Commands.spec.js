@@ -43,13 +43,12 @@ function mountStep3(props = {}) {
 // --- Tests ---
 
 describe('SetupStep3Commands', () => {
-  // Fire the pair of events a real giljo_setup run produces for one tool:
-  // skills first, then the agent templates. Both are needed to clear the gate.
+  // Fire the event a real giljo_setup run produces for one tool: the skills
+  // install (BE-9605c dropped the separate agent-template download signal).
   function fireInstalled(toolName) {
     mockWsOn.mock.calls.find((call) => call[0] === 'setup:commands_installed')[1]({
       tool_name: toolName,
     })
-    mockWsOn.mock.calls.find((call) => call[0] === 'setup:agents_downloaded')[1]({})
   }
 
   beforeEach(() => {
@@ -63,9 +62,9 @@ describe('SetupStep3Commands', () => {
     it('renders heading text', async () => {
       const wrapper = mountStep3()
       await flushPromises()
-      // Gradient Rail redesign (FE-6259b) renamed the heading to cover both
-      // skills and agent templates in one line.
-      expect(wrapper.text()).toContain('Install skills & agents')
+      // BE-9605c retired the agent-template install path; the heading now
+      // covers skills only.
+      expect(wrapper.text()).toContain('Install skills')
     })
 
     it('renders giljo_setup command', async () => {
@@ -129,7 +128,7 @@ describe('SetupStep3Commands', () => {
       const wrapper = mountStep3()
       await flushPromises()
       const items = wrapper.findAll('.checklist-item')
-      expect(items).toHaveLength(2)
+      expect(items).toHaveLength(1)
       expect(wrapper.findAll('.checklist-text--done')).toHaveLength(0)
     })
 
@@ -145,24 +144,7 @@ describe('SetupStep3Commands', () => {
       onCall[1]({})
       await flushPromises()
 
-      expect(wrapper.findAll('.checklist-text--done')).toHaveLength(2)
-    })
-  })
-
-  // -------------------------------------------------------------------
-  // Post-install agent refresh hint (shown after agents are installed)
-  // -------------------------------------------------------------------
-  describe('Post-install agent refresh hint', () => {
-    it('points to giljo_setup "Agents only" after setup completes', async () => {
-      const wrapper = mountStep3()
-      await flushPromises()
-
-      const onCall = mockWsOn.mock.calls.find((c) => c[0] === 'setup:bootstrap_complete')
-      onCall[1]({})
-      await flushPromises()
-
-      expect(wrapper.text()).toContain('giljo_setup')
-      expect(wrapper.text()).toContain('Agents only')
+      expect(wrapper.findAll('.checklist-text--done')).toHaveLength(1)
     })
   })
 
@@ -179,22 +161,7 @@ describe('SetupStep3Commands', () => {
       expect(events[0]).toEqual([false])
     })
 
-    it('stays false when only the skills landed (FE-9497: agents count too)', async () => {
-      const wrapper = mountStep3()
-      await flushPromises()
-
-      const cmdCall = mockWsOn.mock.calls.find(
-        (call) => call[0] === 'setup:commands_installed',
-      )
-      cmdCall[1]({ tool_name: 'claude_code' })
-      await flushPromises()
-
-      const events = wrapper.emitted('can-proceed')
-      const lastEmit = events[events.length - 1]
-      expect(lastEmit).toEqual([false])
-    })
-
-    it('emits can-proceed true once skills AND agents land for at least 1 tool', async () => {
+    it('emits can-proceed true once the skills land for at least 1 tool', async () => {
       const wrapper = mountStep3()
       await flushPromises()
 
@@ -302,7 +269,7 @@ describe('SetupStep3Commands', () => {
       bootstrapCall[1]({})
       await flushPromises()
 
-      expect(wrapper.findAll('.checklist-text--done')).toHaveLength(2)
+      expect(wrapper.findAll('.checklist-text--done')).toHaveLength(1)
       const events = wrapper.emitted('can-proceed')
       expect(events[events.length - 1]).toEqual([true])
     })
@@ -319,7 +286,7 @@ describe('SetupStep3Commands', () => {
       await flushPromises()
 
       expect(wrapper.text()).toContain('Ask your Codex CLI to run:')
-      expect(wrapper.findAll('.checklist-text--done')).toHaveLength(2)
+      expect(wrapper.findAll('.checklist-text--done')).toHaveLength(1)
     })
 
     it('a later-arriving second tool gets its own key too (no stomping the first)', async () => {
@@ -328,7 +295,7 @@ describe('SetupStep3Commands', () => {
       const bootstrapCall = mockWsOn.mock.calls.find((call) => call[0] === 'setup:bootstrap_complete')
       bootstrapCall[1]({})
       await flushPromises()
-      expect(wrapper.findAll('.checklist-text--done')).toHaveLength(2)
+      expect(wrapper.findAll('.checklist-text--done')).toHaveLength(1)
 
       // A second tool connects later (multi-tool walk) -- its own status must
       // start fresh, not reuse or clobber the first tool's completed state.
@@ -419,7 +386,6 @@ describe('SetupStep3Commands', () => {
 
       const eventTypes = mockWsOn.mock.calls.map((c) => c[0])
       expect(eventTypes).toContain('setup:commands_installed')
-      expect(eventTypes).toContain('setup:agents_downloaded')
       expect(eventTypes).toContain('setup:bootstrap_complete')
     })
 
@@ -428,7 +394,7 @@ describe('SetupStep3Commands', () => {
       await flushPromises()
 
       wrapper.unmount()
-      expect(mockUnsub).toHaveBeenCalledTimes(3)
+      expect(mockUnsub).toHaveBeenCalledTimes(2)
     })
   })
 })

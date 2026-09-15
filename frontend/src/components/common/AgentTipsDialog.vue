@@ -28,7 +28,6 @@
         <v-divider />
 
         <v-card-text class="lab-content pa-4">
-          <!-- Manual paste disclaimer -->
           <v-alert type="info" variant="tonal" density="compact" class="mb-4">
             <strong>Manual integration only.</strong> These are suggestions you copy-paste
             into your <strong>project description</strong> or agent missions. Nothing here
@@ -36,7 +35,6 @@
           </v-alert>
 
           <v-expansion-panels variant="accordion" class="lab-panels">
-            <!-- Chapter 1: Monitoring Agents -->
             <v-expansion-panel>
               <v-expansion-panel-title>
                 <v-icon size="18" class="mr-2">mdi-eye-outline</v-icon>
@@ -69,12 +67,11 @@
 
                 <p class="text-body-small text-muted-a11y">
                   Works in both single-terminal (subagent) and multi-terminal mode.
-                  All major CLI agents (Claude Code CLI, Codex, Gemini, Antigravity) support bash sleep polling.
+                  All major CLI agents (Claude Code CLI, Codex, OpenCode) support bash sleep polling.
                 </p>
               </v-expansion-panel-text>
             </v-expansion-panel>
 
-            <!-- Chapter 2: Multi-Terminal Chain Execution -->
             <v-expansion-panel>
               <v-expansion-panel-title>
                 <v-icon size="18" class="mr-2">mdi-monitor-multiple</v-icon>
@@ -106,52 +103,22 @@
                   </div>
                 </div>
 
-                <!-- Tool selector -->
                 <div class="tool-selector mb-3">
                   <div class="tip-subtitle">AI coding agent:</div>
                   <v-chip-group v-model="selectedTool" mandatory selected-class="tool-chip-active">
                     <v-chip size="small" value="claude" variant="outlined">Claude Code CLI</v-chip>
                     <v-chip size="small" value="codex" variant="outlined">Codex</v-chip>
-                    <v-chip size="small" value="gemini" variant="outlined">
-                      Gemini
-                      <v-icon size="12" color="warning" class="ml-1">mdi-alert-circle</v-icon>
-                    </v-chip>
-                    <v-chip size="small" value="antigravity" variant="outlined">Antigravity</v-chip>
                   </v-chip-group>
                 </div>
 
-                <!-- Claude Code spawn -->
                 <div v-if="selectedTool === 'claude'" class="tip-box mb-3">
                   <div class="tip-label">Spawn command (PowerShell):</div>
                   <code class="tip-code">powershell.exe -Command "Start-Process wt -ArgumentList '--title ""TITLE"" --tabColor ""#HEX"" -d ""WORKDIR"" cmd /k claude -p ""PROMPT"" --dangerously-skip-permissions' -Verb RunAs"</code>
                 </div>
 
-                <!-- Codex spawn -->
                 <div v-if="selectedTool === 'codex'" class="tip-box mb-3">
                   <div class="tip-label">Spawn command (PowerShell):</div>
                   <code class="tip-code">powershell.exe -Command "Start-Process wt -ArgumentList '--title ""TITLE"" --tabColor ""#HEX"" -d ""WORKDIR"" cmd /k codex exec ""PROMPT"" --yolo' -Verb RunAs"</code>
-                </div>
-
-                <!-- Gemini spawn -->
-                <div v-if="selectedTool === 'gemini'" class="tip-box mb-3">
-                  <div class="tip-label">Spawn command (PowerShell):</div>
-                  <code class="tip-code">powershell.exe -Command "Start-Process wt -ArgumentList '--title ""TITLE"" --tabColor ""#HEX"" -d ""WORKDIR"" cmd /k gemini -p ""PROMPT"" --yolo' -Verb RunAs"</code>
-                  <v-alert type="warning" variant="tonal" density="compact" class="mt-2">
-                    <strong>Known bug:</strong> Gemini's <code>--yolo</code> flag still prompts
-                    for plan approval despite being enabled (issue #13561). Not reliable for
-                    unattended chains yet.
-                  </v-alert>
-                </div>
-
-                <!-- Antigravity spawn -->
-                <div v-if="selectedTool === 'antigravity'" class="tip-box mb-3">
-                  <div class="tip-label">Spawn command (PowerShell):</div>
-                  <code class="tip-code">powershell.exe -Command "Start-Process wt -ArgumentList '--title ""TITLE"" --tabColor ""#HEX"" -d ""WORKDIR"" cmd /k agy -p ""PROMPT"" --yolo' -Verb RunAs"</code>
-                  <v-alert type="info" variant="tonal" density="compact" class="mt-2">
-                    Antigravity (<code>agy</code>) is the successor to Gemini CLI (GA 2026-06-18)
-                    and reuses Gemini's <code>@agent</code> spawn behavior — same flags, separate
-                    binary and config tree.
-                  </v-alert>
                 </div>
 
                 <div class="tip-section mb-2">
@@ -162,7 +129,6 @@
                     <li>
                       Auto-approve flag:
                       <code v-if="selectedTool === 'claude'">--dangerously-skip-permissions</code>
-                      <code v-else-if="selectedTool === 'codex'">--yolo</code>
                       <code v-else>--yolo</code>
                     </li>
                     <li>Store chain logs in <code>prompts/{project}_chain/chain_log.json</code></li>
@@ -171,7 +137,6 @@
               </v-expansion-panel-text>
             </v-expansion-panel>
 
-            <!-- Chapter 3: Chain Strategy Template -->
             <v-expansion-panel>
               <v-expansion-panel-title>
                 <v-icon size="18" class="mr-2">mdi-file-tree</v-icon>
@@ -208,7 +173,7 @@
                 </v-btn>
 
                 <p class="text-body-small text-muted-a11y mb-0">
-                  Works with any MCP-compatible AI coding tool (Claude Code CLI, Codex CLI, Gemini CLI, Antigravity CLI).
+                  Works with any MCP-compatible AI coding tool (Claude Code CLI, Codex CLI, OpenCode).
                 </p>
               </v-expansion-panel-text>
             </v-expansion-panel>

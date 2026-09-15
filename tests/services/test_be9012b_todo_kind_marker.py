@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9012b (D7) — the structural self-closeout marker (agent_todo_items.todo_kind).
-
-The completion gate used to re-match three keyword regexes against every incomplete
-TODO at complete_job time; a novel wording ("Conductor self-complete") could miss
-and strand a finale (§6 rows 4-6). D7 relocates the classification to the WRITE
-boundary (progress_service stamps ``todo_kind`` once) and the gate reads that durable
-marker instead of re-matching wording. These tests pin:
-
-* the shared classifier (``domain.todo_kinds.classify_todo_kind``);
-* the WRITE boundary — report_progress stamps ``todo_kind`` on the persisted row;
-* the GATE reads the STORED marker and is therefore WORDING-AGNOSTIC — a TODO whose
-  content matches NO regex still auto-clears when its marker says self-closeout (the
-  D7 promise that wording never strands a finale again);
-* NULL-tolerance — a legacy row written before the column existed (todo_kind NULL)
-  falls back to the classifier, so an in-flight closeout TODO still auto-clears
-  (Data-facing DoD answer (a)); an ordinary work TODO still blocks.
-
-Parallel-safe: db_session (TransactionalTestContext). Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -51,13 +32,8 @@ from giljo_mcp.services.orchestration_service import OrchestrationService
 from giljo_mcp.tenant import TenantManager
 
 
-# NOTE: no module-level asyncio mark — the async DB tests run under
-# ``--asyncio-mode=auto`` (pyproject addopts); the classifier tests below are sync.
 
 
-# ---------------------------------------------------------------------------
-# (1) the shared classifier
-# ---------------------------------------------------------------------------
 
 
 def test_classify_narrow_closeout():
@@ -78,9 +54,6 @@ def test_classify_ordinary_work_is_none():
     assert classify_todo_kind(None) is None
 
 
-# ---------------------------------------------------------------------------
-# Fixtures for the write-boundary + gate tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -179,7 +152,7 @@ async def _seed_orchestrator(
                 content=item["content"],
                 status=item.get("status", "in_progress"),
                 sequence=seq,
-                todo_kind=item.get("todo_kind"),  # NULL unless explicitly seeded
+                todo_kind=item.get("todo_kind"),
             )
         )
     await db_session.commit()
@@ -187,9 +160,6 @@ async def _seed_orchestrator(
     return job
 
 
-# ---------------------------------------------------------------------------
-# (2) the WRITE boundary — report_progress stamps todo_kind
-# ---------------------------------------------------------------------------
 
 
 async def test_report_progress_stamps_todo_kind_at_write(
@@ -198,7 +168,6 @@ async def test_report_progress_stamps_todo_kind_at_write(
     test_tenant_key: str,
     active_project: Project,
 ):
-    """A TODO written via report_progress carries its classified kind durably."""
     job = await _seed_orchestrator(db_session, test_tenant_key, active_project.id)
 
     await orchestration_service.report_progress(
@@ -228,9 +197,6 @@ async def test_report_progress_stamps_todo_kind_at_write(
     assert rows["Implement the rate limiter"] is None
 
 
-# ---------------------------------------------------------------------------
-# (3) the GATE reads the STORED marker — wording-agnostic
-# ---------------------------------------------------------------------------
 
 
 async def test_gate_auto_clears_via_stored_marker_regardless_of_wording(
@@ -239,19 +205,14 @@ async def test_gate_auto_clears_via_stored_marker_regardless_of_wording(
     test_tenant_key: str,
     active_project: Project,
 ):
-    """The D7 promise: a TODO whose content matches NO closeout regex still
-    auto-clears at the orchestrator-closeout gate because its STORED marker says
-    self-closeout. Wording can never strand a finale again."""
     job = await _seed_orchestrator(
         db_session,
         test_tenant_key,
         active_project.id,
         todos=[
-            # Content deliberately matches no CLOSEOUT/CHAIN regex...
             {"content": "Ship the grand finale to prod", "status": "in_progress", "todo_kind": TODO_KIND_SELF_CLOSEOUT},
         ],
     )
-    # Sanity: the wording really would NOT be caught by the classifier.
     assert classify_todo_kind("Ship the grand finale to prod") != TODO_KIND_SELF_CLOSEOUT
 
     result = await completion_service.complete_job(
@@ -266,9 +227,6 @@ async def test_gate_auto_clears_via_stored_marker_regardless_of_wording(
     assert item.status == "completed"
 
 
-# ---------------------------------------------------------------------------
-# (4) NULL-tolerance for legacy rows + ordinary work still blocks
-# ---------------------------------------------------------------------------
 
 
 async def test_gate_falls_back_to_classifier_for_legacy_null_kind(
@@ -277,13 +235,11 @@ async def test_gate_falls_back_to_classifier_for_legacy_null_kind(
     test_tenant_key: str,
     active_project: Project,
 ):
-    """A legacy closeout TODO written before the column existed (todo_kind NULL)
-    still auto-clears — the gate falls back to the shared classifier (tolerance)."""
     job = await _seed_orchestrator(
         db_session,
         test_tenant_key,
         active_project.id,
-        todos=[{"content": "Closeout: complete orchestrator job", "status": "in_progress"}],  # todo_kind NULL
+        todos=[{"content": "Closeout: complete orchestrator job", "status": "in_progress"}],
     )
 
     result = await completion_service.complete_job(
@@ -298,7 +254,6 @@ async def test_ordinary_work_todo_still_blocks(
     test_tenant_key: str,
     active_project: Project,
 ):
-    """An ordinary work TODO (NULL kind, non-closeout wording) still blocks closeout."""
     job = await _seed_orchestrator(
         db_session,
         test_tenant_key,

@@ -3,38 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-TSK-9020 -- permanent cross-tenant isolation CI tripwire.
-
-From the 2026-07-02 security posture decision (operator-internal,
-P1): "no cross-tenant read/write path, ENFORCED BY PERMANENT CI TESTS (not a one-off audit)."
-
-Seeds two tenants (A, B) with rows on every major surface (projects, tasks,
-memory, products), then has tenant A attempt to READ and UPDATE
-tenant B's rows via the REAL service/repository path (the same code the API
-and MCP tools call in production -- no raw SQL, no mocking). Every attempt
-must fail (ResourceNotFoundError / ValidationError, or an empty result --
-service-level "not found" is indistinguishable from cross-tenant here by
-design, see individual service docstrings).
-
-This suite is intentionally standalone/additive (no shared fixtures pulled
-from tests/services/conftest.py) so it keeps working as a tripwire even if
-those per-domain regression suites are ever reorganized.
-
-Messaging surface note: the agent message bus (MessageService) was retired in
-BE-9012d (folded into the Hub / comm_threads). Its cross-tenant isolation is
-now covered by tests/api/test_comm_threads_endpoints.py
-(test_tenant_isolation_get_thread / _post_to_thread / _delete_thread), so this
-tripwire no longer exercises the removed MessageService surface.
-
-Memory (ProductMemoryService) note: entries are append-only -- there is no
-update_entry operation to attack, so only the read surface (search_memory)
-is exercised here (test_cross_tenant_read_blocked_across_all_surfaces). Its
-sibling write path, create_entry() (TSK-9022), is exercised separately by
-test_create_entry_rejects_product_tenant_mismatch below: it now cross-checks
-that the DTO's product_id is owned by the DTO's tenant_key before writing,
-instead of trusting the caller-supplied tenant_key alone.
-"""
 
 import random
 import uuid
@@ -57,12 +25,6 @@ from giljo_mcp.tenant import TenantManager
 
 @pytest_asyncio.fixture(scope="function")
 async def two_tenants_full_surface(db_session, db_manager):
-    """
-    Seed tenant A and tenant B each with one row on every major surface:
-    product, project, task, and a 360-memory entry. (The message-bus surface
-    was retired in BE-9012d; the Hub replacement has its own cross-tenant
-    isolation tests -- see the module docstring.)
-    """
     tenant_a = TenantManager.generate_tenant_key()
     tenant_b = TenantManager.generate_tenant_key()
 
@@ -145,11 +107,6 @@ async def two_tenants_full_surface(db_session, db_manager):
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_cross_tenant_read_blocked_across_all_surfaces(db_session, db_manager, two_tenants_full_surface):
-    """
-    Tenant A attempts to READ tenant B's row on every surface via the real
-    service path. Every attempt must fail (not-found error, or an empty
-    result for surfaces whose contract returns empty rather than raising).
-    """
     data = two_tenants_full_surface
     tenant_a = data["tenant_a"]
 
@@ -171,9 +128,6 @@ async def test_cross_tenant_read_blocked_across_all_surfaces(db_session, db_mana
         except ResourceNotFoundError:
             pass
 
-        # Messaging surface retired in BE-9012d (bus -> Hub). Cross-tenant Hub
-        # isolation is covered by tests/api/test_comm_threads_endpoints.py
-        # (test_tenant_isolation_get_thread / _post_to_thread / _delete_thread).
 
         product_service = ProductService(db_manager=db_manager, tenant_key=tenant_a, test_session=db_session)
         try:
@@ -197,12 +151,6 @@ async def test_cross_tenant_read_blocked_across_all_surfaces(db_session, db_mana
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_cross_tenant_update_blocked_across_all_surfaces(db_session, db_manager, two_tenants_full_surface):
-    """
-    Tenant A attempts to UPDATE tenant B's row on every surface that supports
-    an update via the real service path. Every attempt must fail, AND tenant
-    B's row must be verifiably unchanged afterward (a raised exception alone
-    does not prove the write never landed).
-    """
     data = two_tenants_full_surface
     tenant_a = data["tenant_a"]
 
@@ -224,8 +172,6 @@ async def test_cross_tenant_update_blocked_across_all_surfaces(db_session, db_ma
         except ResourceNotFoundError:
             pass
 
-        # Messaging surface retired in BE-9012d (bus -> Hub); Hub cross-tenant
-        # update isolation is covered in tests/api/test_comm_threads_endpoints.py.
 
         product_service = ProductService(db_manager=db_manager, tenant_key=tenant_a, test_session=db_session)
         try:
@@ -236,7 +182,6 @@ async def test_cross_tenant_update_blocked_across_all_surfaces(db_session, db_ma
 
         assert not violations, "CRITICAL: cross-tenant UPDATE leak(s):\n" + "\n".join(f"- {v}" for v in violations)
 
-        # Prove the writes truly never landed, not just that an exception was raised.
         await db_session.refresh(data["project_b"])
         await db_session.refresh(data["task_b"])
         await db_session.refresh(data["product_b"])
@@ -250,17 +195,6 @@ async def test_cross_tenant_update_blocked_across_all_surfaces(db_session, db_ma
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_negative_control_unscoped_query_raises(db_session, two_tenants_full_surface):
-    """
-    Negative control: proves the tripwire can never silently pass.
-
-    A deliberately-unscoped ORM SELECT against a tenant-scoped model, issued
-    with NO active tenant context, MUST raise TenantIsolationError. If this
-    assertion ever fails, the underlying session-level guard has been
-    weakened or removed -- which would mean the READ/UPDATE assertions above
-    could start silently passing for the wrong reason (nothing found because
-    an exception fired) instead of by real tenant filtering. This is the
-    same DB-session guard the whole suite implicitly relies on.
-    """
     data = two_tenants_full_surface
     db_session.info.pop("tenant_key", None)
     db_session.info.pop("tenant_key_source", None)
@@ -281,12 +215,6 @@ async def test_negative_control_unscoped_query_raises(db_session, two_tenants_fu
 @pytest.mark.tenant_isolation
 @pytest.mark.asyncio
 async def test_create_entry_rejects_product_tenant_mismatch(db_session, db_manager, two_tenants_full_surface):
-    """
-    TSK-9022: ProductMemoryService.create_entry() must not trust a
-    caller-supplied ``tenant_key`` that does not actually own the referenced
-    product. Builds a DTO claiming tenant B's product_id under tenant A's
-    tenant_key -- the write must be rejected, and no row must land.
-    """
     data = two_tenants_full_surface
     tenant_a = data["tenant_a"]
     tenant_b = data["tenant_b"]
@@ -306,15 +234,11 @@ async def test_create_entry_rejects_product_tenant_mismatch(db_session, db_manag
     with pytest.raises(ResourceNotFoundError):
         await memory_service.create_entry(params=mismatched_params, session=db_session)
 
-    # sanity: product_b itself must be untouched (refresh bypasses the ORM
-    # tenant guard's statement-level check, same as the UPDATE tripwire above).
     await db_session.refresh(product_b)
     assert product_b.name == "TSK-9020 Tenant B Product"
 
     from giljo_mcp.models.product_memory_entry import ProductMemoryEntry
 
-    # Proving no row landed for product_b requires an active tenant_b context
-    # for the ORM guard to permit the SELECT at all.
     TenantManager.set_current_tenant(tenant_b)
     try:
         leaked = await db_session.execute(

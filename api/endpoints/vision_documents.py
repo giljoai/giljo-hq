@@ -3,27 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Vision Documents API Endpoints.
-
-Implements REST API for vision document management:
-- POST / - Create vision document with file upload or inline content (stored inline)
-- GET /product/{product_id} - List all vision documents for a product
-- PUT /{document_id} - Update vision document content
-- DELETE /{document_id} - Delete vision document
-
-All endpoints enforce multi-tenant isolation via get_tenant_key() dependency.
-
-Handover 0246b: Simplified storage - complete documents stored in vision_document TEXT column.
-
-BE-5115: storage_type collapsed to 'inline'. Uploaded files are decoded and persisted
-to the vision_document column; nothing is written to disk. The hosted platform's
-ephemeral filesystem made the old file path unsafe across deploys.
-
-Per-document and aggregate summaries are written exclusively by the AI
-agent via the ``update_product_context`` MCP tool. Endpoints still trigger
-consolidation to refresh the aggregate hash and timestamp.
-"""
 
 import logging
 import uuid
@@ -59,65 +38,33 @@ router = APIRouter(tags=["Vision Documents"])
 
 
 async def trigger_consolidation(product_id: str, tenant_key: str, db_session: AsyncSession) -> None:
-    """
-    Queue consolidation job for product after vision document changes.
-
-    Runs synchronously since consolidation is relatively fast (~1-2 seconds).
-    Does not block main operation - logs warning if consolidation fails but
-    still returns success for the vision document operation.
-
-    Handover 0377 Phase 4: Automatic consolidation trigger.
-
-    Args:
-        product_id: Product UUID
-        tenant_key: Tenant isolation key
-        db_session: Database session (reuses endpoint's session)
-    """
     try:
         consolidation_service = ConsolidatedVisionService()
         result = await consolidation_service.consolidate_vision_documents(
             product_id=product_id, session=db_session, tenant_key=tenant_key, force=False
         )
 
-        # 0731d: ConsolidatedVisionService returns ConsolidationResult typed model
         logger.info(
             f"vision_documents_consolidated: product_id={sanitize(product_id)}, "
             f"light_tokens={result.light.tokens}, medium_tokens={result.medium.tokens}"
         )
     except ValidationError as e:
-        # Not an error - "no_changes" is expected behavior
         logger.debug(f"consolidation_skipped: product_id={sanitize(product_id)}, reason={sanitize(e.error_code)}")
     except (SQLAlchemyError, ValueError, KeyError, ResourceNotFoundError):
-        # Don't fail the main operation if consolidation fails
         logger.exception(f"consolidation_failed: product_id={sanitize(product_id)}")
 
 
 async def get_db():
-    """
-    Get database session dependency (async).
-
-    Returns:
-        AsyncSession: SQLAlchemy async database session
-    """
     from api.app_state import state
 
     if not state.db_manager:
         raise RuntimeError("Database manager not initialized")
 
-    # Get an async session context manager
     async with state.db_manager.get_session_async() as session:
         yield session
 
 
 def get_vision_service(tenant_key: str = Depends(get_tenant_key)):
-    """
-    Get ProductVisionService instance.
-
-    BE-5022b: Replaced get_vision_repo() to route through service layer.
-
-    Returns:
-        ProductVisionService: Service instance
-    """
     from api.app_state import state
 
     if not state.db_manager:
@@ -130,7 +77,6 @@ def get_vision_service(tenant_key: str = Depends(get_tenant_key)):
 
 
 def _raise_upload_too_large(max_bytes: int) -> None:
-    """Raise the shared structured 413 for oversize uploads (SEC-0001)."""
     raise HTTPException(
         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
         detail={
@@ -142,11 +88,6 @@ def _raise_upload_too_large(max_bytes: int) -> None:
 
 
 async def _read_upload_capped(upload: UploadFile, max_bytes: int) -> bytes:
-    """Stream the upload body in 64 KB chunks; abort at ``max_bytes``.
-
-    FastAPI's ``UploadFile`` does not cap size on its own; this is the
-    Layer-2 size guard paired with the Content-Length pre-check.
-    """
     chunks: list[bytes] = []
     total = 0
     chunk_size = 65536
@@ -210,38 +151,28 @@ async def create_vision_document(
         HTTPException 500: If creation or summarization fails
     """
     try:
-        # Validate product exists and belongs to tenant (ASYNC query)
         result = await db.execute(select(Product).filter(Product.id == product_id, Product.tenant_key == tenant_key))
         product = result.scalar_one_or_none()
 
         if not product:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Product {product_id} not found")
 
-        # Validate product_id is a valid UUID to prevent path traversal
         try:
             uuid.UUID(product_id)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid product ID format.") from None
 
-        # BE-5115: storage_type is always 'inline'. Uploaded files are decoded to
-        # text and persisted in the vision_document column; nothing is written
-        # to disk.
         document_content = content
         file_size = None
 
         if vision_file:
-            # SEC-0001 Phase 2: filename sanitization + extension allowlist +
-            # size cap (Layer 1 Content-Length pre-check + Layer 2 streaming
-            # guard) + strict UTF-8 byte-sniff. Raw filename is NEVER trusted.
             upload_cfg = get_config().upload
             max_bytes = upload_cfg.max_upload_bytes
 
-            # Layer 1: Content-Length pre-check (fast reject before body read).
             declared = request.headers.get("content-length")
             if declared and declared.isdigit() and int(declared) > max_bytes:
                 _raise_upload_too_large(max_bytes)
 
-            # Filename sanitization.
             try:
                 safe_filename = sanitize_upload_filename(vision_file.filename)
             except UploadFilenameError as exc:
@@ -254,7 +185,6 @@ async def create_vision_document(
                     },
                 ) from exc
 
-            # Extension allowlist (415 not 400 -- it's an unsupported media type).
             ext_lower = safe_filename.lower()
             if not any(ext_lower.endswith(ext) for ext in upload_cfg.allowed_extensions):
                 raise HTTPException(
@@ -266,10 +196,8 @@ async def create_vision_document(
                     },
                 )
 
-            # Layer 2: streaming reader with running byte counter (aborts at cap).
             content_bytes = await _read_upload_capped(vision_file, max_bytes)
 
-            # Byte-sniff: reject binary payloads that spoof a .txt/.md extension.
             try:
                 enforce_text_content(content_bytes, sniff_bytes=upload_cfg.sniff_bytes)
             except UploadContentError as exc:
@@ -282,9 +210,6 @@ async def create_vision_document(
                     },
                 ) from exc
 
-            # Strict UTF-8 decode -- no latin-1 fallback (SEC-0001). The
-            # sniff above guarantees this succeeds; defensive try/except
-            # converts any pathological race into the same structured 415.
             try:
                 document_content = content_bytes.decode("utf-8", errors="strict")
             except UnicodeDecodeError as exc:
@@ -298,7 +223,6 @@ async def create_vision_document(
 
             file_size = len(content_bytes)
         elif content:
-            # Inline content - calculate size from string
             file_size = len(content.encode("utf-8"))
 
         if not document_content:
@@ -321,12 +245,8 @@ async def create_vision_document(
         )
         await db.commit()
 
-        # Summaries (per-doc + aggregate) are written by the AI agent via
-        # the update_product_context MCP tool.
-        total_tokens = len(document_content) // 4  # Rough estimate: 1 token ~ 4 chars
+        total_tokens = len(document_content) // 4
 
-        # Auto-chunk large documents (>25K tokens) for pagination support
-        # Handover 0347: Restore chunking removed in 0246b (Claude Code 25K limit)
         if total_tokens > 25000:
             try:
                 from giljo_mcp.context_management.chunker import VisionDocumentChunker
@@ -351,10 +271,8 @@ async def create_vision_document(
                         "Document %s created but chunking failed: %s", doc.id, sanitize(str(chunk_result.get("error")))
                     )
             except (ImportError, SQLAlchemyError, ValueError) as e:
-                # Chunking failed but document created - log warning and continue
                 logger.warning(f"Document {doc.id} created but chunking failed: {e}")
 
-        # Handover 0377 Phase 4: Trigger consolidation after document upload
         await trigger_consolidation(product_id, tenant_key, db)
 
         await db.refresh(doc)
@@ -404,7 +322,7 @@ async def get_vision_document(
         select(VisionDocument).where(
             VisionDocument.id == document_id,
             VisionDocument.tenant_key == tenant_key,
-            VisionDocument.deleted_at.is_(None),  # BE-6130b: trashed docs are not retrievable here
+            VisionDocument.deleted_at.is_(None),
         )
     )
     doc = result.scalar_one_or_none()
@@ -478,7 +396,6 @@ async def update_vision_document(
         HTTPException 500: If update or summarization fails
     """
     try:
-        # Update content
         doc = await vision_service.update_document_content(session=db, document_id=document_id, new_content=content)
 
         if not doc:
@@ -488,10 +405,6 @@ async def update_vision_document(
 
         await db.commit()
 
-        # Per-doc summaries are rewritten by the AI agent via
-        # update_product_context if needed. The content update above resets
-        # per-doc summary state implicitly because the agent will resubmit
-        # summary_light/summary_medium tied to the new content hash.
         await trigger_consolidation(doc.product_id, tenant_key, db)
 
         await db.refresh(doc)
@@ -540,14 +453,13 @@ async def delete_vision_document(
         HTTPException 500: If deletion fails
     """
     try:
-        # Get document before deletion to retrieve product_id for consolidation
         from giljo_mcp.models import VisionDocument
 
         result = await db.execute(
             select(VisionDocument).where(
                 VisionDocument.id == document_id,
                 VisionDocument.tenant_key == tenant_key,
-                VisionDocument.deleted_at.is_(None),  # BE-6130b: only a live doc can be trashed
+                VisionDocument.deleted_at.is_(None),
             )
         )
         doc = result.scalar_one_or_none()
@@ -557,14 +469,12 @@ async def delete_vision_document(
                 status_code=status.HTTP_404_NOT_FOUND, detail=f"Vision document {document_id} not found"
             )
 
-        product_id = doc.product_id  # Store before deletion
+        product_id = doc.product_id
 
-        # Soft-delete the document (already verified existence above)
         delete_result = await vision_service.delete_document(session=db, document_id=document_id)
 
         await db.commit()
 
-        # Handover 0377 Phase 4: Trigger consolidation after document deletion
         await trigger_consolidation(product_id, tenant_key, db)
 
         return DeleteResponse(**delete_result)
@@ -621,7 +531,6 @@ async def restore_vision_document(
         product_id = doc.product_id
         await db.commit()
 
-        # The restored doc re-enters the consolidated-vision aggregate.
         await trigger_consolidation(product_id, tenant_key, db)
 
         await db.refresh(doc)
@@ -633,7 +542,6 @@ async def restore_vision_document(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Vision document {document_id} not found"
         ) from e
     except ValidationError as e:
-        # BE-6130b: recovery window expired (>30d) — a deliberate domain rejection.
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=e.message) from e
     except SQLAlchemyError as e:
@@ -684,20 +592,17 @@ async def regenerate_consolidated_vision(
         HTTPException 400: If consolidation fails or skipped
         HTTPException 404: If product not found
     """
-    # Verify product exists and belongs to tenant
     result = await db.execute(select(Product).filter(Product.id == product_id, Product.tenant_key == tenant_key))
     product = result.scalar_one_or_none()
 
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Product {product_id} not found")
 
-    # Run consolidation service (exception-based error handling)
     consolidation_service = ConsolidatedVisionService()
     consolidation_result = await consolidation_service.consolidate_vision_documents(
         product_id=product_id, session=db, tenant_key=tenant_key, force=force
     )
 
-    # 0731d: ConsolidatedVisionService returns ConsolidationResult typed model
     return {
         "success": True,
         "light_tokens": consolidation_result.light.tokens,
@@ -739,9 +644,6 @@ async def get_ai_summary(
         select(VisionDocument).where(
             VisionDocument.id == document_id,
             VisionDocument.tenant_key == tenant_key,
-            # Same exclusion the GET above applies. Without it these two
-            # endpoints disagreed about one document: GET /{id} returned 404
-            # while GET /{id}/ai-summary/{level} handed over the summary text.
             VisionDocument.deleted_at.is_(None),
         )
     )

@@ -5,10 +5,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Giljo HQ Universal Launcher
-Starts all services with proper dependency ordering
-"""
 
 import os
 import signal
@@ -29,7 +25,6 @@ class GiljoLauncher:
         self.load_config()
 
     def load_config(self):
-        """Load configuration from config.yaml"""
         config_path = Path("config.yaml")
         if not config_path.exists():
             print("Error: config.yaml not found. Please run installer first.")
@@ -39,21 +34,18 @@ class GiljoLauncher:
             self.config = yaml.safe_load(f)
 
     def check_port(self, port: int) -> bool:
-        """Check if a port is available"""
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         result = sock.connect_ex(("127.0.0.1", port))
         sock.close()
         return result != 0
 
     def validate_installation(self) -> bool:
-        """Verify installation is complete"""
         required_files = [".env", "config.yaml"]
         for file in required_files:
             if not Path(file).exists():
                 print(f"Error: Missing {file} - installation incomplete")
                 return False
 
-        # Check ports
         ports = {
             "API": self.config["services"].get("api_port", 8000),
             "WebSocket": self.config["services"].get("websocket_port", 7273),
@@ -68,7 +60,6 @@ class GiljoLauncher:
         return True
 
     def start_service(self, name: str, command: list) -> subprocess.Popen:
-        """Start a single service"""
         print(f"Starting {name}...")
         env = os.environ.copy()
         env["PYTHONPATH"] = str(Path.cwd())
@@ -78,26 +69,22 @@ class GiljoLauncher:
         return proc
 
     def start_all_services(self):
-        """Start all services in order"""
         print("=" * 60)
         print("   Starting Giljo HQ Services")
         print("=" * 60)
         print()
 
-        # Start API server
         api_port = self.config["services"].get("api_port", 8000)
         self.start_service(
             "API Server",
             [sys.executable, "-m", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", str(api_port)],
         )
-        time.sleep(2)  # Wait for startup
+        time.sleep(2)
 
-        # Start WebSocket server
         ws_port = self.config["services"].get("websocket_port", 7273)
         self.start_service("WebSocket Server", [sys.executable, "-m", "giljo_mcp.websocket", "--port", str(ws_port)])
         time.sleep(1)
 
-        # Start Dashboard
         dashboard_port = self.config["services"].get("dashboard_port", 7274)
         self.start_service(
             "Dashboard", [sys.executable, "-m", "http.server", str(dashboard_port), "--directory", "frontend"]
@@ -116,13 +103,11 @@ class GiljoLauncher:
         print(f"  WebSocket: {ws_proto}://localhost:{ws_port}")
         print()
 
-        # Open browser if configured
         if self.config.get("features", {}).get("auto_start_browser", True):
             time.sleep(2)
             webbrowser.open(f"{http_proto}://localhost:{dashboard_port}")
 
     def shutdown(self, signum=None, frame=None):
-        """Gracefully shut down all services"""
         print("\n" + "=" * 60)
         print("   Shutting down services...")
         print("=" * 60)
@@ -131,10 +116,8 @@ class GiljoLauncher:
             if proc.poll() is None:
                 proc.terminate()
 
-        # Wait for graceful shutdown
         time.sleep(2)
 
-        # Force kill if needed
         for proc in self.processes:
             if proc.poll() is None:
                 proc.kill()
@@ -143,11 +126,9 @@ class GiljoLauncher:
         sys.exit(0)
 
     def run(self):
-        """Main launcher entry point"""
         if not self.validate_installation():
             sys.exit(1)
 
-        # Setup signal handlers
         signal.signal(signal.SIGINT, self.shutdown)
         signal.signal(signal.SIGTERM, self.shutdown)
 
@@ -157,10 +138,8 @@ class GiljoLauncher:
             print("Press Ctrl+C to stop all services")
             print()
 
-            # Keep running
             while True:
                 time.sleep(1)
-                # Check if any process died
                 for proc in self.processes:
                     if proc.poll() is not None:
                         print("Warning: A service has stopped unexpectedly")

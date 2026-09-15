@@ -3,30 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Drop vision_document_summaries (BE-5117b).
-
-Revision ID: ce_0035_drop_vision_document_summaries
-Revises: ce_0034_update_is_summarized_comment
-Create Date: 2026-05-27
-
-BE-5117b collapses the parallel vision-summary write paths down to the
-column-based path introduced in BE-5117. The legacy table
-``vision_document_summaries`` is no longer written or read at runtime;
-all per-document summaries live in ``vision_documents.summary_light /
-summary_medium`` and the product aggregate in
-``products.consolidated_vision_light / consolidated_vision_medium``.
-
-Idempotency: ``DROP TABLE IF EXISTS`` and existence checks on the
-``COMMENT ON COLUMN`` refresh.
-
-Downgrade: rebuilds the original table shape (mirrors the baseline at
-v37 / pre-BE-5117b). The data is NOT restored on downgrade -- rows were
-already throwaway on the test install, and the hosted prod
-vision_document_summaries table was empty at the time of the rollout.
-
-Edition Scope: Both -- the ``vision_documents`` / ``vision_document_summaries``
-tables are CE models shared by SaaS via the CE chain.
-"""
 
 import sqlalchemy as sa
 from alembic import op

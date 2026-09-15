@@ -1,22 +1,3 @@
-/**
- * useVisionAnalysis.fe9320.spec.js — FE-9320
- *
- * Two things the pre-existing spec cannot see:
- *
- * 1. THE FINISH STATE COULD NOT ARRIVE. completeAnalysis() is the only thing
- *    that calls patchProductForm — the hook the tutorial uses to advance to the
- *    review screen — and it can only run with a product in hand. When the
- *    completion event fired but fetchProductById threw or returned null, the
- *    advance was skipped AND the same `finally` tore down the FE-9166 poll that
- *    would have retried it. The wizard then sat on "Waiting for your agent's
- *    analysis..." forever, with nothing left running to rescue it.
- *
- * 2. A consumer must be able to stage an analysis WITHOUT the clipboard write,
- *    so a screen that stages as a side effect of another action can own an
- *    explicit copy control instead.
- *
- * Edition scope: Both (shared frontend/src).
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useVisionAnalysis } from './useVisionAnalysis'
@@ -76,7 +57,6 @@ describe('useVisionAnalysis — the finish state can actually arrive (FE-9320)',
     await stage(analysis, productStore)
     await analysis.onVisionAnalysisComplete(completionEvent(), PRODUCT_ID).catch(() => {})
 
-    // Nothing to patch yet — but the recovery poll must still be armed.
     expect(patchProductForm).not.toHaveBeenCalled()
 
     await vi.advanceTimersByTimeAsync(10_000)
@@ -151,11 +131,8 @@ describe('useVisionAnalysis — copyPromptOnStage opt-out (FE-9320)', () => {
     await stageAnalysis({ name: 'My Product', extractionCustomInstructions: '' }, PRODUCT_ID)
 
     expect(copyMock).not.toHaveBeenCalled()
-    // The prompt is still published for an explicit control to copy...
     expect(analysisPromptText.value).toContain(`get_vision_document(product_id="${PRODUCT_ID}")`)
-    // ...and no "clipboard blocked" fallback is armed, because nothing was blocked.
     expect(promptFallbackText.value).toBeNull()
-    // Staging still did its real work.
     expect(analysisInProgress.value).toBe(true)
   })
 

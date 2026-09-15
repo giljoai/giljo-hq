@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Product-related models for Giljo HQ.
-
-This module contains models for products, vision documents, and vision chunks.
-Products are the top-level organizational unit in the system.
-"""
 
 from typing import Any
 
@@ -33,50 +27,23 @@ from sqlalchemy.sql import func
 from .base import Base, generate_uuid
 
 
-# Single source of truth for valid product target platforms.
-# Referenced by: DB check constraint, ProductService validation, MCP tool validation,
-# extraction prompt, frontend checkboxes, and API schema descriptions.
 VALID_TARGET_PLATFORMS = frozenset({"windows", "linux", "macos", "android", "ios", "web", "all"})
 
 
 class Product(Base):
-    """
-    Product model - TOP-level organizational unit.
-    All projects, tasks, and agents belong to a product.
-
-    Vision Storage (BE-5115: inline-only — file-based storage removed):
-    - vision_document: Inline text storage (only supported shape)
-    - vision_path: DEPRECATED, always NULL after BE-5115
-    - chunked: Has vision been chunked into mcp_context_index
-
-    Handover 0316: Added quality_standards field for testing expectations.
-    """
 
     __tablename__ = "products"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
-    # BE-8000c: indexed via explicit Index("idx_product_tenant") below.
     tenant_key = Column(String(36), nullable=False)
     org_id = Column(
         String(36),
         ForeignKey("organizations.id", ondelete="SET NULL"),
         nullable=True,
-        # BE-8000c: indexed via explicit Index("idx_product_org_id") below.
         comment="Organization that owns this product (Handover 0424)",
     )
     name = Column(String(255), nullable=False)
 
-    # BE-9385b: the stable, URL-safe short name that qualifies exported agent
-    # filenames (``<agent-name>--<product-slug>.md``), so the same agent shared by
-    # two products installs twice instead of overwriting itself.
-    #
-    # Allocated ONCE at creation and never rewritten -- not even on rename. That
-    # immutability is the feature: a rename that renamed every exported file would
-    # strand the copies the user already installed. Uniqueness is enforced by the
-    # partial index ``idx_product_slug_unique_per_tenant`` rather than by
-    # convention, so two products whose names slugify identically cannot produce
-    # the same filename. NULL is tolerated on read (the render path derives a slug
-    # from the name) for rows predating ce_0092.
     slug = Column(
         String(64),
         nullable=True,
@@ -84,15 +51,12 @@ class Product(Base):
     )
     description = Column(Text, nullable=True)
 
-    # Handover 0084: Project path for agent export (required for copy-command interface)
     project_path = Column(
         String(500), nullable=True, comment="File system path to product folder (required for agent export)"
     )
 
-    # Handover 0316: Quality standards for testing expectations
     quality_standards = Column(Text, nullable=True, comment="Quality standards and testing expectations")
 
-    # Handover 0425: Target platforms for product deployment
     target_platforms = Column(
         ARRAY(String),
         nullable=False,
@@ -100,15 +64,6 @@ class Product(Base):
         comment="Target platforms: windows, linux, macos, android, ios, web, or all",
     )
 
-    # ✅ Handover 0128e Complete: Deprecated vision fields removed
-    # Migration completed - all production code now uses VisionDocument relationship.
-    # Use these helper properties instead:
-    #    - product.vision_documents (VisionDocument relationship)
-    #    - product.primary_vision_text (helper property)
-    #    - product.primary_vision_path (helper property)
-    #    - product.has_vision (helper property)
-    #    - product.vision_is_chunked (helper property)
-    #    - product.primary_vision_storage_type (helper property)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -117,10 +72,6 @@ class Product(Base):
         nullable=True,
         comment="Timestamp when product was soft deleted (NULL for active products)",
     )
-    # Product status (Handover 0049; reused by FE-9524/D1 — no longer "the one
-    # active product". Now: shown as a tab in the product tab strip. Several
-    # products may be shown at once; there is no per-tenant uniqueness left to
-    # enforce (idx_product_single_active_per_tenant dropped in ce_0099).
     is_active = Column(
         Boolean,
         default=True,
@@ -128,16 +79,6 @@ class Product(Base):
         comment="Shown as a tab in the product tab strip (FE-9524/D1). A new product is shown by default.",
     )
 
-    # FE-9524: is_active/"shown" and "default"
-    # are two different questions and must be two different columns. Default
-    # answers ONE thing: where an unscoped READ resolves when the caller
-    # names no product_id (ProductService.get_default_product). Exactly one
-    # per tenant, enforced by idx_product_single_default_per_tenant --
-    # the single-row guarantee the old idx_product_single_active_per_tenant
-    # used to give get_active_product, moved onto this column so it stays
-    # honest once several products can be shown at once. Writes never
-    # default (BE-9523b's PRODUCT_AMBIGUOUS refusal) -- this exists for the
-    # read fallback only, which is recoverable when wrong.
     is_default = Column(
         Boolean,
         default=False,
@@ -146,12 +87,9 @@ class Product(Base):
         comment="The single per-tenant default product: where an unscoped read resolves. Independent of is_active/shown.",
     )
 
-    # Core features (extracted from config_data in 0840c)
     core_features = Column(Text, nullable=True, comment="Core product features (was config_data->'features'->>'core')")
     brand_guidelines = Column(Text, nullable=True, comment="Brand & design guidelines for frontend-facing agents")
 
-    # 360 Memory Management storage (Handover 0135, updated 0700c)
-    # Note: sequential_history removed in 0700c - use product_memory_entries table
     product_memory = Column(
         JSONB,
         nullable=False,
@@ -159,7 +97,6 @@ class Product(Base):
         comment="Product memory config storage. Contains git_integration settings only.",
     )
 
-    # Product Context Tuning state (Handover 0831)
     tuning_state = Column(
         JSONB,
         nullable=True,
@@ -167,8 +104,6 @@ class Product(Base):
         comment="Context tuning state: last_tuned_at, last_tuned_at_sequence",
     )
 
-    # Consolidated vision summaries (Handover 0377)
-    # These store pre-computed summaries aggregated from ALL active vision documents
     consolidated_vision_light = Column(
         Text, nullable=True, comment="33% summary of all active vision documents (consolidated)"
     )
@@ -188,10 +123,6 @@ class Product(Base):
         DateTime(timezone=True), nullable=True, comment="Timestamp when consolidated summaries were last generated"
     )
 
-    # BE-5117: Gating flag flipped TRUE only when every active vision document
-    # and the product aggregate both have light + medium summaries populated.
-    # Written by ProductVisionService.evaluate_vision_analysis_complete() at the
-    # update_product_context MCP tool write boundary.
     vision_analysis_complete = Column(
         Boolean,
         nullable=False,
@@ -199,17 +130,14 @@ class Product(Base):
         comment="True when all per-doc + product-aggregate summaries are populated. Gates project staging UX (BE-5118).",
     )
 
-    # Handover 0842a: Custom extraction instructions for vision document AI analysis
     extraction_custom_instructions = Column(
         Text, nullable=True, comment="Custom instructions appended to AI vision document extraction prompt"
     )
 
-    # Relationships
     organization = relationship("Organization", back_populates="products")
     projects = relationship("Project", back_populates="product", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="product", cascade="all, delete-orphan")
 
-    # Handover 0043: Multi-Vision Document Support
     vision_documents = relationship(
         "VisionDocument",
         back_populates="product",
@@ -217,15 +145,12 @@ class Product(Base):
         order_by="VisionDocument.display_order",
     )
 
-    # Handover 0390a: 360 Memory Entries
     memory_entries = relationship("ProductMemoryEntry", back_populates="product", cascade="all, delete-orphan")
 
-    # Agent assignments (junction table)
     agent_assignments = relationship(
         "ProductAgentAssignment", back_populates="product", cascade="all, delete-orphan", passive_deletes=True
     )
 
-    # Handover 0840c: Normalized config tables (1:1)
     tech_stack = relationship("ProductTechStack", back_populates="product", uselist=False, cascade="all, delete-orphan")
     architecture = relationship(
         "ProductArchitecture", back_populates="product", uselist=False, cascade="all, delete-orphan"
@@ -236,29 +161,22 @@ class Product(Base):
 
     __table_args__ = (
         Index("idx_product_tenant", "tenant_key"),
-        # TSK-9076: backup watermark sweep — MAX(updated_at) per tenant.
         Index("idx_products_tenant_updated", "tenant_key", "updated_at"),
         Index("idx_product_org_id", "org_id"),
         Index("idx_product_name", "name"),
         Index(
             "idx_product_memory_gin", "product_memory", postgresql_using="gin"
-        ),  # Handover 0135: GIN index for product_memory
+        ),
         Index(
             "idx_products_deleted_at", "deleted_at", postgresql_where=text("deleted_at IS NOT NULL")
-        ),  # Soft delete support
-        Index("idx_products_consolidated_at", "consolidated_at"),  # Handover 0377: Consolidated vision index
-        # FE-9524 (2026-08-29 operator ruling): exactly one default product per
-        # tenant -- the read-fallback guarantee moved off idx_product_single_active_per_tenant
-        # (dropped, ce_0099) onto this column so get_default_product's
-        # single-row read stays honest once several products can be shown.
+        ),
+        Index("idx_products_consolidated_at", "consolidated_at"),
         Index(
             "idx_product_single_default_per_tenant",
             "tenant_key",
             unique=True,
             postgresql_where=text("is_default = true"),
         ),
-        # Handover 0128e: Removed CheckConstraint for deprecated vision_type field
-        # Handover 0425: Validate target_platforms field
         CheckConstraint(
             "target_platforms <@ ARRAY['windows', 'linux', 'macos', 'android', 'ios', 'web', 'all']::VARCHAR[]",
             name="ck_product_target_platforms_valid",
@@ -267,12 +185,6 @@ class Product(Base):
             "NOT ('all' = ANY(target_platforms) AND array_length(target_platforms, 1) > 1)",
             name="ck_product_target_platforms_all_exclusive",
         ),
-        # BE-9385b: exported filenames are qualified by this slug, so a duplicate
-        # within a tenant would mean two products' agents racing for one path. The
-        # index is what makes that impossible by construction rather than by the
-        # allocator remembering to check. Soft-deleted rows are excluded (they
-        # export nothing, and excluding them lets a slug be reused after a delete);
-        # NULL is excluded so rows predating ce_0092 do not collide with each other.
         Index(
             "idx_product_slug_unique_per_tenant",
             "tenant_key",
@@ -284,28 +196,9 @@ class Product(Base):
 
     @property
     def has_config_data(self) -> bool:
-        """Check if product has config data in any of the normalized tables."""
         return bool(self.tech_stack or self.architecture or self.test_config or self.core_features)
 
     def get_memory_field(self, field_path: str, default: Any = None) -> Any:
-        """
-        Get memory field using dot notation (e.g., 'github.enabled')
-
-        Args:
-            field_path: Dot-separated path (e.g., 'github.enabled' or 'context.summary')
-            default: Default value if field not found
-
-        Returns:
-            Field value or default
-
-        Examples:
-            >>> product.get_memory_field('github.enabled')
-            True
-            >>> product.get_memory_field('github.repo_url')
-            'https://github.com/user/repo'
-            >>> product.get_memory_field('context.summary')
-            'A product management system'
-        """
         if not self.product_memory:
             return default
 
@@ -320,24 +213,16 @@ class Product(Base):
 
         return value
 
-    # Handover 0043: Vision Documents properties
     @property
     def has_vision_documents(self) -> bool:
-        """Check if product has any active vision documents"""
         if not hasattr(self, "vision_documents") or not self.vision_documents:
             return False
         return any(doc.is_active for doc in self.vision_documents)
 
-    # Handover 0128e: Migration helper properties (replaces deprecated fields)
     @property
     def primary_vision_text(self) -> str:
-        """
-        Get primary vision document text.
-        Replaces deprecated: product.vision_document field
-        """
         if not self.vision_documents:
             return ""
-        # Get first active document, or first document if none active
         active_docs = [doc for doc in self.vision_documents if doc.is_active]
         doc = active_docs[0] if active_docs else (self.vision_documents[0] if self.vision_documents else None)
         if not doc:
@@ -346,13 +231,8 @@ class Product(Base):
 
     @property
     def primary_vision_path(self) -> str:
-        """
-        Get primary vision file path.
-        Replaces deprecated: product.vision_path field
-        """
         if not self.vision_documents:
             return ""
-        # Get first active document, or first document if none active
         active_docs = [doc for doc in self.vision_documents if doc.is_active]
         doc = active_docs[0] if active_docs else (self.vision_documents[0] if self.vision_documents else None)
         if not doc:
@@ -361,10 +241,6 @@ class Product(Base):
 
     @property
     def has_vision(self) -> bool:
-        """
-        Check if product has vision content.
-        Replaces deprecated: bool(product.vision_document) checks
-        """
         if not self.vision_documents:
             return False
         active_docs = [doc for doc in self.vision_documents if doc.is_active]
@@ -373,13 +249,8 @@ class Product(Base):
 
     @property
     def vision_is_chunked(self) -> bool:
-        """
-        Check if vision is chunked.
-        Replaces deprecated: product.chunked field
-        """
         if not self.vision_documents:
             return False
-        # Get first active document, or first document if none active
         active_docs = [doc for doc in self.vision_documents if doc.is_active]
         doc = active_docs[0] if active_docs else (self.vision_documents[0] if self.vision_documents else None)
         if not doc:
@@ -388,13 +259,8 @@ class Product(Base):
 
     @property
     def primary_vision_storage_type(self) -> str:
-        """
-        Get primary vision storage type.
-        Replaces deprecated: product.vision_type field
-        """
         if not self.vision_documents:
             return "none"
-        # Get first active document, or first document if none active
         active_docs = [doc for doc in self.vision_documents if doc.is_active]
         doc = active_docs[0] if active_docs else (self.vision_documents[0] if self.vision_documents else None)
         if not doc:
@@ -406,7 +272,6 @@ class Product(Base):
 
 
 class ProductTechStack(Base):
-    """Product tech stack configuration (1:1 with Product). Handover 0840c."""
 
     __tablename__ = "product_tech_stacks"
 
@@ -431,10 +296,7 @@ class ProductTechStack(Base):
     product = relationship("Product", back_populates="tech_stack")
 
     __table_args__ = (
-        # BE-8000c: idx_product_tech_stacks_product dropped — the UNIQUE
-        # product_tech_stacks_product_id_key (from product_id unique=True) covers it.
         Index("idx_product_tech_stacks_tenant", "tenant_key"),
-        # TSK-9076: backup watermark sweep — MAX(updated_at) per tenant.
         Index("idx_product_tech_stacks_tenant_updated", "tenant_key", "updated_at"),
     )
 
@@ -443,7 +305,6 @@ class ProductTechStack(Base):
 
 
 class ProductArchitecture(Base):
-    """Product architecture configuration (1:1 with Product). Handover 0840c."""
 
     __tablename__ = "product_architectures"
 
@@ -461,10 +322,7 @@ class ProductArchitecture(Base):
     product = relationship("Product", back_populates="architecture")
 
     __table_args__ = (
-        # BE-8000c: idx_product_architectures_product dropped — the UNIQUE
-        # product_architectures_product_id_key (from product_id unique=True) covers it.
         Index("idx_product_architectures_tenant", "tenant_key"),
-        # TSK-9076: backup watermark sweep — MAX(updated_at) per tenant.
         Index("idx_product_architectures_tenant_updated", "tenant_key", "updated_at"),
     )
 
@@ -473,7 +331,6 @@ class ProductArchitecture(Base):
 
 
 class ProductTestConfig(Base):
-    """Product test configuration (1:1 with Product). Handover 0840c."""
 
     __tablename__ = "product_test_configs"
 
@@ -490,10 +347,7 @@ class ProductTestConfig(Base):
     product = relationship("Product", back_populates="test_config")
 
     __table_args__ = (
-        # BE-8000c: idx_product_test_configs_product dropped — the UNIQUE
-        # product_test_configs_product_id_key (from product_id unique=True) covers it.
         Index("idx_product_test_configs_tenant", "tenant_key"),
-        # TSK-9076: backup watermark sweep — MAX(updated_at) per tenant.
         Index("idx_product_test_configs_tenant_updated", "tenant_key", "updated_at"),
     )
 
@@ -502,41 +356,13 @@ class ProductTestConfig(Base):
 
 
 class VisionDocument(Base):
-    """
-    Vision Document model - stores multiple vision documents per product.
-
-    Handover 0043: Multi-Vision Document Support - Phase 1
-    Enables products to have multiple vision documents (architecture, features, setup, etc.)
-    with chunking, versioning, and flexible storage (file-based or inline).
-
-    Storage Types:
-    - 'inline': vision_document contains text, vision_path is NULL. After BE-5115
-      this is the only supported storage shape. Legacy 'file' / 'hybrid' values
-      were migrated to 'inline' by ce_0032_vision_docs_inline_only.
-
-    Document Types:
-    - 'vision': Primary vision document
-    - 'architecture': Architecture/design documents
-    - 'features': Feature specifications
-    - 'setup': Setup/installation guides
-    - 'api': API documentation
-    - 'testing': Test plans and strategies
-    - 'deployment': Deployment guides
-    - 'custom': User-defined document types
-
-    Multi-tenant isolation: All queries filter by tenant_key.
-    CASCADE deletes: Deleting VisionDocument deletes all chunks (via MCPContextIndex).
-    """
 
     __tablename__ = "vision_documents"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
-    # BE-8000c: tenant lookups served by idx_vision_doc_tenant_product
-    # (tenant_key-leading); no column-level index=True (dropped ix_* twin).
     tenant_key = Column(String(36), nullable=False)
     product_id = Column(String(36), ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
 
-    # Document identification
     document_name = Column(
         String(255), nullable=False, comment="User-friendly document name (e.g., 'Product Architecture', 'API Design')"
     )
@@ -547,8 +373,6 @@ class VisionDocument(Base):
         comment="Document category: vision, architecture, features, setup, api, testing, deployment, custom",
     )
 
-    # Storage configuration (inline-only after BE-5115)
-    # DEPRECATED: vision_path is kept for migration safety only; always NULL after BE-5115.
     vision_path = Column(
         String(500),
         nullable=True,
@@ -559,7 +383,6 @@ class VisionDocument(Base):
         String(20), nullable=False, default="inline", comment="Storage mode: 'inline' (only value after BE-5115)"
     )
 
-    # Chunking state
     chunked = Column(
         Boolean, default=False, nullable=False, comment="Has document been chunked into mcp_context_index for RAG"
     )
@@ -569,7 +392,6 @@ class VisionDocument(Base):
         BigInteger, nullable=True, comment="Original file size in bytes (NULL for inline content without file)"
     )
 
-    # Summarization metadata (Handover 0345b, enhanced in 0345e, cleaned in 0374)
     is_summarized = Column(
         Boolean,
         default=False,
@@ -581,40 +403,29 @@ class VisionDocument(Base):
     )
     original_token_count = Column(Integer, nullable=True, comment="Original document token count before summarization")
 
-    # Multi-level summaries (Handover 0345e, simplified in 0246b, cleaned in 0374)
-    # Handover 0374: 3-tier system (light=33%, medium=66%, full=original)
     summary_light = Column(Text, nullable=True, comment="Light summary (~33% of original, ~13K tokens for 40K doc)")
     summary_medium = Column(Text, nullable=True, comment="Medium summary (~66% of original, ~26K tokens for 40K doc)")
     summary_light_tokens = Column(Integer, nullable=True, comment="Actual token count in light summary")
     summary_medium_tokens = Column(Integer, nullable=True, comment="Actual token count in medium summary")
 
-    # Versioning and integrity
     version = Column(String(50), default="1.0.0", nullable=False, comment="Document version using semantic versioning")
     content_hash = Column(String(64), nullable=True, comment="SHA-256 hash of document content for change detection")
 
-    # Status and display
     is_active = Column(
         Boolean, default=True, nullable=False, comment="Active documents are used for context; inactive are archived"
     )
     display_order = Column(Integer, default=0, nullable=False, comment="Display order in UI (lower numbers first)")
 
-    # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    # BE-6130b: soft-delete (trash/recover). NULL = live, non-NULL = trashed.
-    # A vision doc and its MCPContextIndex RAG chunks recover as ONE unit: the
-    # chunks survive a soft-delete (cascade only fires on a HARD delete), and
-    # every chunk-retrieval / doc read excludes those whose parent doc is trashed.
     deleted_at = Column(
         DateTime(timezone=True),
         nullable=True,
         comment="Timestamp when vision document was soft deleted (NULL for live docs)",
     )
 
-    # Additional metadata
     meta_data = Column(JSONB, default=dict, comment="Additional metadata: author, tags, source_url, etc.")
 
-    # Relationships
     product = relationship("Product", back_populates="vision_documents")
     chunks = relationship(
         "MCPContextIndex",
@@ -624,8 +435,6 @@ class VisionDocument(Base):
     )
 
     __table_args__ = (
-        # Unique document name per product — BE-6130b made this partial (live rows
-        # only) so a name can be reused after its prior doc is trashed.
         Index(
             "uq_vision_doc_product_name",
             "product_id",
@@ -633,35 +442,23 @@ class VisionDocument(Base):
             unique=True,
             postgresql_where=text("deleted_at IS NULL"),
         ),
-        # Partial index over trashed rows for the recover dialog.
         Index("idx_vision_doc_deleted_at", "deleted_at", postgresql_where=text("deleted_at IS NOT NULL")),
-        # BE-8000c: idx_vision_doc_tenant dropped (leftmost-covered by
-        # idx_vision_doc_tenant_product); idx_vision_doc_product dropped
-        # (leftmost-covered by idx_vision_doc_product_type / _product_active).
-        # Query optimization indexes
         Index("idx_vision_doc_type", "document_type"),
         Index("idx_vision_doc_active", "is_active"),
         Index("idx_vision_doc_chunked", "chunked"),
-        # Composite indexes for common queries
         Index("idx_vision_doc_tenant_product", "tenant_key", "product_id"),
-        # TSK-9076: backup watermark sweep — MAX(updated_at) per tenant.
         Index("idx_vision_documents_tenant_updated", "tenant_key", "updated_at"),
         Index("idx_vision_doc_product_type", "product_id", "document_type"),
         Index("idx_vision_doc_product_active", "product_id", "is_active", "display_order"),
-        # Storage type constraint (BE-5115: inline-only)
         CheckConstraint("storage_type = 'inline'", name="ck_vision_doc_storage_type"),
-        # Document type constraint
         CheckConstraint(
             "document_type IN ('vision', 'architecture', 'features', 'setup', 'api', 'testing', 'deployment', 'custom')",
             name="ck_vision_doc_document_type",
         ),
-        # Storage consistency constraint (BE-5115: inline-only).
-        # Replaces ck_vision_doc_storage_consistency dropped in ce_0032_vision_docs_inline_only.
         CheckConstraint(
             "storage_type = 'inline' AND vision_document IS NOT NULL AND vision_path IS NULL",
             name="ck_vision_doc_inline_only",
         ),
-        # Chunk count consistency
         CheckConstraint("chunk_count >= 0", name="ck_vision_doc_chunk_count"),
         CheckConstraint(
             "(chunked = false AND chunk_count = 0) OR (chunked = true AND chunk_count > 0)",

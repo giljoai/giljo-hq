@@ -3,30 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""The MASTER PROMPT for the board-level "Launch staged..." flow (FE-9555).
-
-Ruling 2 of the design session: the conductor retires as a SERVER-MINTED agent.
-The driving harness agent IS the conductor, so what the dashboard hands out is no
-longer a spawn prompt for an agent the server already created -- it is a seed the
-user pastes into ONE terminal, and that session then writes the ``sequence_run``
-record itself via ``link_projects``.
-
-This is deliberately NOT a reuse of ``_build_conductor_bootstrap`` in
-``api/endpoints/prompts.py``. That one is handed a ``run_id`` plus a minted
-conductor's ``job_id`` and ``agent_id``; at the moment THIS prompt is produced,
-none of the three exist yet. The record's sequencing is the reason: the agent
-creates the run, so the run cannot be an input to the prompt that creates the
-agent. Sharing a builder between the two would mean inventing placeholder
-identities purely to satisfy a signature.
-
-What ruling 4 and the BE-9504a drift guard DO require, and what this module is
-for, is that the prose lives server-side in the prompt engine and is generated
-once for both doors -- never hand-written into the Vue dialog, where the UI copy
-and the MCP payload would drift apart a sentence at a time.
-
-Pure: no DB, no session, no network. The caller resolves the projects and the
-public URL and threads them in. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -38,9 +14,6 @@ from giljo_mcp.platform_registry import VALID_EXECUTION_MODES
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
 
 
-# BE-9275b: derived from branding, never a fresh literal. The alias moved once
-# already (giljo_mcp -> giljo_hq) and a hand-written copy here would have survived
-# the rename looking correct.
 _TOOL_PREFIX = f"mcp__{MCP_ALIAS}__"
 
 
@@ -49,10 +22,6 @@ def _render_project_line(index: int, project: dict[str, Any]) -> str:
     name = str(project.get("name") or "(untitled)").strip()
     mission = str(project.get("mission") or "").strip()
     heading = f"{index}. {alias} {name}".strip()
-    # A staged project with no mission yet is a REAL state -- the mission can be
-    # authored after staging. Rendering the project anyway, and saying the mission
-    # is missing, keeps this list identical to the one the confirm dialog showed.
-    # Dropping the line would make the two quietly disagree about what is in the run.
     body = mission if mission else "(no mission authored yet -- write one with update_project_mission)"
     return f"{heading}\n   project_id: {project.get('project_id')}\n   mission: {body}"
 
@@ -64,12 +33,6 @@ def build_master_prompt(
     mcp_url: str,
     harness_is_claude: bool,
 ) -> str:
-    """Build the conductor seed for a set of already-staged projects.
-
-    ``projects`` is rendered in the order given -- that order is the caller's
-    decision (the board's selection, which the user may have sorted by roadmap
-    order), and re-sorting here would silently override a choice already made.
-    """
     if not projects:
         raise ValidationError(
             "A master prompt needs at least one staged project. A seed that lists none "
@@ -85,10 +48,6 @@ def build_master_prompt(
     project_block = "\n\n".join(_render_project_line(i, p) for i, p in enumerate(projects, start=1))
     project_ids = ", ".join(f'"{p.get("project_id")}"' for p in projects)
 
-    # CE-0035: Claude Code defers MCP tool schemas, so its very first tool call
-    # fails without one up-front ToolSearch. Every OTHER harness must not be told
-    # to make a call its client does not have -- hence the branch rather than
-    # including it unconditionally and hoping it is ignored.
     if harness_is_claude:
         bootstrap = (
             "STEP 0 -- TOOLSEARCH BOOTSTRAP (Claude Code only -- do this FIRST):\n"

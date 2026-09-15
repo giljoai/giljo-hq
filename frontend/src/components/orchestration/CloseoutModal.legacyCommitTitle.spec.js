@@ -1,13 +1,3 @@
-/**
- * CloseoutModal.legacyCommitTitle.spec.js — BE-9256 (frontend layer 4).
- *
- * Edition Scope: Both.
- *
- * Stored 360 memory rows can carry a git_commits entry with an empty
- * `message` (legacy bare-SHA normalization, pre-validator). Before this fix,
- * the Git Commits list rendered a blank v-list-item-title for such a row.
- * The floor: an empty message must render the short SHA as the title text.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -42,7 +32,6 @@ vi.mock('@/composables/useFormatDate', () => ({
   useFormatDate: () => ({ formatDateTime: (v) => String(v) }),
 }))
 
-// Import AFTER mocks
 import CloseoutModal from './CloseoutModal.vue'
 
 const globalConfig = {
@@ -91,7 +80,6 @@ describe('CloseoutModal — legacy titleless commit-row floor (BE-9256)', () => 
             summary: 'x',
             entry_type: 'lesson',
             git_commits: [
-              // Legacy row: empty message (pre-validator bare-SHA normalization)
               { sha: '569905bd0abcdef1234567890', message: '', author: 'a', timestamp: '2026-07-01T00:00:00Z' },
               { sha: 'aaa1112223334445556667778', message: 'BE-9256: fail-closed validator', author: 'b' },
             ],

@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tests for write discipline hardening: JSONB validators + field allowlists.
-
-Task 1: JSONB validator coverage for User, APIKey, MCPContextIndex, ProductMemoryEntry.
-Task 2: hasattr() replaced with field allowlists in crud.py and task_service.py.
-
-Sprint: quality-sprint-002
-"""
 
 import pytest
 from pydantic import ValidationError
@@ -28,7 +21,6 @@ from giljo_mcp.schemas.jsonb_validators import (
 
 
 class TestSetupSelectedTools:
-    """Tests for User.setup_selected_tools JSONB validator."""
 
     def test_valid_tool_list(self):
         model = SetupSelectedTools(items=["claude", "codex", "gemini"])
@@ -56,7 +48,6 @@ class TestSetupSelectedTools:
 
 
 class TestValidateSetupSelectedTools:
-    """Tests for validate_setup_selected_tools convenience function."""
 
     def test_none_returns_none(self):
         assert validate_setup_selected_tools(None) is None
@@ -75,7 +66,6 @@ class TestValidateSetupSelectedTools:
 
 
 class TestNotificationPreferences:
-    """Tests for User.notification_preferences JSONB validator."""
 
     def test_valid_full_data(self):
         model = NotificationPreferences(
@@ -107,13 +97,11 @@ class TestNotificationPreferences:
             NotificationPreferences(context_tuning_reminder="not_a_bool_xyz")
 
     def test_extra_fields_rejected(self):
-        """NotificationPreferences has a known schema -- no extra fields."""
         with pytest.raises(ValidationError):
             NotificationPreferences(unknown_field="value")
 
 
 class TestValidateNotificationPreferences:
-    """Tests for validate_notification_preferences convenience function."""
 
     def test_none_returns_none(self):
         assert validate_notification_preferences(None) is None
@@ -134,7 +122,6 @@ class TestValidateNotificationPreferences:
 
 
 class TestAPIKeyPermissions:
-    """Tests for APIKey.permissions JSONB validator."""
 
     def test_valid_permissions(self):
         model = APIKeyPermissions(items=["*"])
@@ -162,7 +149,6 @@ class TestAPIKeyPermissions:
 
 
 class TestValidateAPIKeyPermissions:
-    """Tests for validate_api_key_permissions convenience function."""
 
     def test_none_returns_none(self):
         assert validate_api_key_permissions(None) is None
@@ -177,7 +163,6 @@ class TestValidateAPIKeyPermissions:
 
 
 class TestContextIndexKeywords:
-    """Tests for MCPContextIndex.keywords JSONB validator."""
 
     def test_valid_keywords(self):
         model = ContextIndexKeywords(items=["python", "fastapi", "sqlalchemy"])
@@ -201,7 +186,6 @@ class TestContextIndexKeywords:
 
 
 class TestValidateContextKeywords:
-    """Tests for validate_context_keywords convenience function."""
 
     def test_none_returns_none(self):
         assert validate_context_keywords(None) is None
@@ -216,7 +200,6 @@ class TestValidateContextKeywords:
 
 
 class TestValidateStringList:
-    """Tests for validate_string_list generic validator."""
 
     def test_none_returns_none(self):
         assert validate_string_list(None, "test_field") is None
@@ -251,15 +234,8 @@ class TestValidateStringList:
 
 
 class TestTemplateUpdateAllowlist:
-    """Tests for the template update allowlist (replaces hasattr).
-
-    BE-8000j: the allowlist moved from the REST endpoint (crud.py) into the owning
-    service (TemplateService) when the update write path was migrated there — same
-    home as the sibling _ALLOWED_TASK_UPDATE_FIELDS in task_service.
-    """
 
     def test_allowlist_exists(self):
-        """Verify the allowlist constant is defined."""
         from giljo_mcp.services.template_service import _ALLOWED_TEMPLATE_UPDATE_FIELDS
 
         assert isinstance(_ALLOWED_TEMPLATE_UPDATE_FIELDS, (set, frozenset))
@@ -278,10 +254,8 @@ class TestTemplateUpdateAllowlist:
 
 
 class TestTaskUpdateAllowlist:
-    """Tests for task_service allowlist (replaces hasattr)."""
 
     def test_allowlist_exists(self):
-        """Verify the allowlist constant is defined."""
         from giljo_mcp.services.task_service import _ALLOWED_TASK_UPDATE_FIELDS
 
         assert isinstance(_ALLOWED_TASK_UPDATE_FIELDS, (set, frozenset))
@@ -289,8 +263,6 @@ class TestTaskUpdateAllowlist:
     def test_allowlist_contains_expected_fields(self):
         from giljo_mcp.services.task_service import _ALLOWED_TASK_UPDATE_FIELDS
 
-        # BE-6049c: tasks are TSK-only and TSK is immutable, so task_type_id was
-        # REMOVED from the update allowlist (it must not be settable via update).
         expected_fields = {"title", "description", "status", "priority"}
         assert expected_fields.issubset(_ALLOWED_TASK_UPDATE_FIELDS)
         assert "task_type_id" not in _ALLOWED_TASK_UPDATE_FIELDS

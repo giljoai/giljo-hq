@@ -1,28 +1,13 @@
-/**
- * useTemplateData Composable
- *
- * Encapsulates template data fetching, active-agent stats, and filtering logic
- * for the TemplateManager component.
- *
- * Extracted from TemplateManager.vue (Handover 0950k).
- *
- * @param {import('vue').Ref<string>} search - Search text ref
- * @param {import('vue').Ref<string|null>} filterRole - Role filter ref (matches template.role)
- * @param {import('vue').Ref<string|null>} filterStatus - Status filter ref ('active' | 'inactive', matches template.is_active)
- * @returns {Object} Template data state, computeds, and load methods
- */
 import { ref, computed } from 'vue'
 import api from '@/services/api'
+import { templateRowActive } from '@/components/templates/templateTableConfig'
 
 const ORCHESTRATOR_ROW = Object.freeze({
   id: '__orchestrator__',
   name: 'orchestrator',
   role: 'orchestrator',
   is_active: true,
-  export_status: null,
-  last_exported_at: null,
   updated_at: null,
-  may_be_stale: false,
   _system: true,
 })
 
@@ -39,7 +24,7 @@ const DEFAULT_EDITING_TEMPLATE = () => ({
   tools: null,
 })
 
-export function useTemplateData(search, filterRole, filterStatus) {
+export function useTemplateData(search, filterRole, filterStatus, productId, showAllProducts) {
   const templates = ref([])
   const loading = ref(false)
   const activeStats = ref({
@@ -63,11 +48,9 @@ export function useTemplateData(search, filterRole, filterStatus) {
       filtered = filtered.filter((t) => t.role === filterRole.value)
     }
 
-    // FE-9203: templates have no `status` field — active/inactive maps to the
-    // real `is_active` boolean on the model.
     if (filterStatus.value) {
       filtered = filtered.filter((t) =>
-        filterStatus.value === 'active' ? t.is_active : !t.is_active,
+        filterStatus.value === 'active' ? templateRowActive(t) : !templateRowActive(t),
       )
     }
 
@@ -77,8 +60,6 @@ export function useTemplateData(search, filterRole, filterStatus) {
     return filtered
   })
 
-  // FE-9203: role filter options derived from the roles actually present in
-  // the loaded data — never a hardcoded list that can drift from the model.
   const availableRoles = computed(() =>
     [...new Set(templates.value.map((t) => t.role).filter(Boolean))].sort(),
   )
@@ -114,9 +95,14 @@ export function useTemplateData(search, filterRole, filterStatus) {
   const userAgentLimit = computed(() => activeStats.value.userLimit ?? 15)
 
   const loadTemplates = async () => {
+    const scope = productId?.value || null
+    if (!scope && !showAllProducts?.value) {
+      templates.value = []
+      return
+    }
     loading.value = true
     try {
-      const response = await api.templates.list()
+      const response = await api.templates.list(showAllProducts?.value ? null : scope)
       templates.value = (response.data || []).filter((t) => !t.is_system_role)
     } catch (error) {
       console.error('Failed to load templates:', error)
@@ -126,8 +112,10 @@ export function useTemplateData(search, filterRole, filterStatus) {
   }
 
   const loadActiveCount = async () => {
+    const scope = productId?.value || null
+    if (!scope) return
     try {
-      const response = await api.templates.activeCount()
+      const response = await api.templates.activeCount(scope)
       const data = response.data || {}
       const userActive = data.active_count ?? 0
       const userLimit = data.limit ?? 15
@@ -153,14 +141,13 @@ export function useTemplateData(search, filterRole, filterStatus) {
     editingTemplate.value = DEFAULT_EDITING_TEMPLATE()
   }
 
-  // FE-9203: additive import of the seeded default agents. The server owns the
-  // anti-spam semantics (skip-identical, never overwrite); this just disables
-  // the trigger while in flight and refreshes the table on completion.
   const importingDefaults = ref(false)
   const importDefaults = async () => {
+    const scope = productId?.value || null
+    if (!scope) throw new Error('Select a product tab before adding agents to it.')
     importingDefaults.value = true
     try {
-      const response = await api.templates.importDefaults()
+      const response = await api.templates.importDefaults(scope)
       await loadTemplates()
       await loadActiveCount()
       return response.data

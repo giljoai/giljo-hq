@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Setup-status / fresh-install detection endpoint (IMP-0011 hardened).
-
-Drives the unauthenticated frontend landing decision:
-
-  GILJO_MODE x has_admin_user x has_any_user  ->  route_signal
-
-CE keeps the original "no users -> create admin account" behavior. SaaS
-(including saas-production) NEVER exposes the admin-bootstrap UI publicly --
-it always returns ``show_public_landing=True`` so the router sends the visitor
-to the SaaS landing view. Operators bootstrap the admin user out-of-band via
-the CLI (see ``src/giljo_mcp/saas/cli/admin_bootstrap.py``).
-
-This gate lives in CE because the application must be able to determine its
-own mode to branch safely -- it only reads the ``GILJO_MODE`` string constant
-and imports nothing from ``saas/``. Passes the Deletion Test.
-"""
 
 from __future__ import annotations
 
@@ -42,8 +25,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# Modes that are known to this codebase. Any other value is treated as
-# "not CE" and therefore fail-secure (no admin-bootstrap UI exposure).
 _KNOWN_NON_CE_MODES = frozenset({"saas", "saas-production"})
 _CE_MODE = "ce"
 
@@ -54,36 +35,10 @@ def _compute_setup_signal(
     has_admin_user: bool,
     has_any_user: bool,
 ) -> dict[str, Any]:
-    """Pure policy function for the setup-status endpoint.
-
-    Args:
-        mode: Value of ``GILJO_MODE`` (already lower-cased at import time).
-        has_admin_user: True if at least one user with role='admin' exists.
-        has_any_user: True if any user exists in the database.
-
-    Returns:
-        Dict with the signals the frontend consumes:
-          * is_fresh_install (bool) -- CE-only semantic, true iff CE with zero users.
-          * requires_admin_creation (bool) -- alias of is_fresh_install.
-          * show_public_landing (bool) -- true for saas/unknown modes.
-          * route_signal (str) -- 'create_admin', 'login', or 'public_landing'.
-
-    Policy table:
-      | mode        | has_admin | has_any | route_signal    | fresh | req_admin | landing |
-      |-------------|-----------|---------|-----------------|-------|-----------|---------|
-      | ce          | False     | False   | create_admin    | True  | True      | False   |
-      | ce          | True      | True    | login           | False | False     | False   |
-      | ce          | False     | True    | login (defensive)| False| False     | False   |
-      | saas        | *         | *       | public_landing  | False | False     | True    |
-      | unknown     | *         | *       | public_landing  | False | False     | True    |
-    """
     normalised = (mode or "").strip().lower()
 
     if normalised == _CE_MODE:
         is_fresh = not has_any_user
-        # has_any_user=True but has_admin_user=False is defensively treated as
-        # "not fresh" -- we never want to re-open admin bootstrap after any
-        # user row exists.
         return {
             "is_fresh_install": is_fresh,
             "requires_admin_creation": is_fresh,
@@ -91,10 +46,7 @@ def _compute_setup_signal(
             "route_signal": "create_admin" if is_fresh else "login",
         }
 
-    # saas, saas-production, or anything unknown -> fail-secure path.
-    # The landing page handles both "sign in" and "register" CTAs for
-    # unauthenticated visitors; no admin-bootstrap UI is ever exposed.
-    _ = normalised in _KNOWN_NON_CE_MODES  # intentional: unknown modes share policy
+    _ = normalised in _KNOWN_NON_CE_MODES
     return {
         "is_fresh_install": False,
         "requires_admin_creation": False,
@@ -120,15 +72,6 @@ async def get_setup_security_status(db: AsyncSession = Depends(get_db_session)):
       * environment              (camelCase; echoes GILJO_MODE, defaulting to 'ce')
     """
     try:
-        # Count total users and admin users in a single round-trip.
-        #
-        # This is a PUBLIC, pre-auth endpoint: no JWT has been decoded yet, so
-        # no tenant context exists on the request. The system-wide user counts
-        # below intentionally span all tenants to answer the binary
-        # install-state question (fresh CE install vs. existing system). Under
-        # the fail-closed tenant guard a contextless ``User`` SELECT raises
-        # TenantIsolationError, so we scope a bypass exactly as
-        # ``AuthRepository.get_total_user_count`` does for the first-admin guard.
         total_users_stmt = select(func.count(User.id))
         admin_users_stmt = select(func.count(User.id)).where(User.role == "admin")
 
@@ -171,9 +114,6 @@ async def get_setup_security_status(db: AsyncSession = Depends(get_db_session)):
 
     except (ValueError, KeyError, TenantIsolationError):
         logger.exception("Failed to get setup status")
-        # Fail-secure fallback: hide admin bootstrap regardless of mode.
-        # The frontend will land on the public-landing view and the router
-        # guard will retry setup-status on the next navigation.
         return {
             "setup_complete": False,
             "is_fresh_install": False,
@@ -187,12 +127,10 @@ async def get_setup_security_status(db: AsyncSession = Depends(get_db_session)):
 
 
 def _resolve_sentry_dsn(mode: str) -> str | None:
-    """Return SENTRY_DSN_FRONTEND only in saas mode (INF-5063)."""
     if (mode or "").strip().lower() == "saas":
         return os.environ.get("SENTRY_DSN_FRONTEND") or None
     return None
 
 
 def _resolve_environment(mode: str) -> str:
-    """Echo GILJO_MODE for the frontend Sentry init, defaulting to 'ce'."""
     return (mode or "").strip().lower() or "ce"

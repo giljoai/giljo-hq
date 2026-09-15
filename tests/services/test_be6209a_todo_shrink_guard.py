@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6209a: report_progress guard against a silent todo-list wipe.
-
-Field report friction #4: ``todo_items`` REPLACES the entire persisted TODO list
-on every call, so a PARTIAL list silently drops the missing rows. The pre-existing
-completed-regression guard only catches the case where the COMPLETED count
-shrinks — it misses an agent that re-sends only its still-pending items (or only
-its finished items) while preserving the completed count, which quietly wipes the
-rest.
-
-These tests pin the new guard at the write layer (ProgressService._process_todo_items,
-exercised through the OrchestrationService.report_progress facade, the same path the
-existing 0827d tests use):
-  - a SHORTER todo_items list is rejected (no silent drop) unless replace=True;
-  - a full-list call that does NOT shrink still works (backward compatible);
-  - replace=True allows a genuine destructive shrink.
-
-Parallel-safe: uses the shared transactional db_session fixture, no module-level
-mutable state, no test-ordering dependencies. CE / tenant-scoped.
-"""
 
 import random
 from datetime import UTC, datetime, timedelta
@@ -40,9 +21,6 @@ from giljo_mcp.services.orchestration_service import OrchestrationService
 from giljo_mcp.tenant import TenantManager
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -89,12 +67,6 @@ async def agent_with_mixed_todos(
     test_tenant_key: str,
     shrink_project: Project,
 ) -> AgentJob:
-    """A working agent with 5 todos: 2 completed + 3 pending.
-
-    The 2-completed / 3-pending split is the crux: re-sending only the 2 completed
-    keeps the completed count identical (so the old completed-regression guard does
-    NOT fire) while dropping the 3 pending — exactly the silent wipe BE-6209a fixes.
-    """
     job_id = str(uuid4())
     job = AgentJob(
         job_id=job_id,
@@ -184,9 +156,6 @@ async def _todos(db_session: AsyncSession, job_id: str, tenant_key: str) -> list
     return list(result.scalars().all())
 
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -196,12 +165,6 @@ async def test_partial_todo_items_rejected_without_replace(
     agent_with_mixed_todos: AgentJob,
     test_tenant_key: str,
 ):
-    """A shorter todo_items list must be REJECTED (not silently wipe the rest).
-
-    Re-sends only the 2 completed items. Completed count is preserved (2 == 2),
-    so the old completed-regression guard does NOT catch this — the new shrink
-    guard must. Without it, the 3 pending items would be silently deleted.
-    """
     job = agent_with_mixed_todos
 
     with pytest.raises(ValidationError, match="SHRINK"):
@@ -214,7 +177,6 @@ async def test_partial_todo_items_rejected_without_replace(
             ],
         )
 
-    # The persisted list is untouched — all 5 items survive.
     items = await _todos(db_session, job.job_id, test_tenant_key)
     assert len(items) == 5
     assert sum(1 for i in items if i.status == "pending") == 3
@@ -227,11 +189,6 @@ async def test_full_list_status_update_still_works(
     agent_with_mixed_todos: AgentJob,
     test_tenant_key: str,
 ):
-    """Backward compat: a full (non-shrinking) list still updates normally.
-
-    Sends all 5 items, advancing one pending item to in_progress. Same length,
-    completed count preserved -> no guard fires, write succeeds.
-    """
     job = agent_with_mixed_todos
 
     result = await orchestration_service.report_progress(
@@ -259,7 +216,6 @@ async def test_partial_todo_items_allowed_with_replace(
     agent_with_mixed_todos: AgentJob,
     test_tenant_key: str,
 ):
-    """replace=True opts into a genuine destructive shrink."""
     job = agent_with_mixed_todos
 
     result = await orchestration_service.report_progress(

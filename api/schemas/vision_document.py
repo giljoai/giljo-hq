@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Vision Document API Pydantic schemas for Handover 0043 Phase 5.
-
-Provides request/response models for:
-- Vision document creation (POST /vision-documents/)
-- Vision document listing (GET /vision-documents/product/{product_id})
-- Vision document updates (PUT /vision-documents/{document_id})
-- Vision document deletion (DELETE /vision-documents/{document_id})
-- Re-chunking (POST /vision-documents/{document_id}/rechunk)
-"""
 
 from datetime import datetime
 from typing import Any
@@ -90,11 +80,9 @@ class VisionDocumentResponse(BaseModel):
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime | None = Field(None, description="Last update timestamp")
     chunked_at: datetime | None = Field(None, description="Last chunking timestamp")
-    # BE-6130b: set on the trash/recover ("deleted documents") listing; NULL for live docs.
     deleted_at: datetime | None = Field(None, description="Soft-delete timestamp (NULL for live docs)")
     meta_data: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
-    # Summary fields (Handover 0246b: light/medium only, percentage-based)
     is_summarized: bool = Field(default=False, description="Whether summaries have been generated")
     summary_light: str | None = Field(default=None, description="Light summary (33% of original)")
     summary_medium: str | None = Field(default=None, description="Medium summary (66% of original)")
@@ -107,7 +95,6 @@ class VisionDocumentResponse(BaseModel):
 
     @model_validator(mode="after")
     def compute_has_summaries(self) -> "VisionDocumentResponse":
-        """Compute has_summaries based on presence of summary fields (Handover 0246b)."""
         self.has_summaries = bool(self.summary_light or self.summary_medium)
         return self
 
@@ -122,7 +109,6 @@ class RechunkRequest(BaseModel):
     - Updates vision document metadata (chunked=True, chunk_count, total_tokens)
     """
 
-    # No fields - just a trigger endpoint
 
 
 class RechunkResponse(BaseModel):

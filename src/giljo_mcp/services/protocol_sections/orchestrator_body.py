@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Orchestrator 3-phase coordination protocol body.
-
-BE-6211f: verbatim split from ``agent_lifecycle.py`` — the render is byte-identical;
-only the module location changed. ``agent_lifecycle`` keeps the FORBIDDEN/wake banners
-and the thin ``_generate_orchestrator_protocol`` dispatcher and re-imports this body.
-"""
 
 from __future__ import annotations
 
@@ -21,39 +15,12 @@ from giljo_mcp.platform_registry import giljo_invocation, is_subagent_render
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# BE-8003f (D4): the ONE PREFERRED/FALLBACK/FLOOR capability-ladder formatter.
-# Shared by every preset-active render site (S1 chapters_chain, S2 the multi_terminal
-# per-terminal seed, S3 the orchestrator prose here, S4 worker_body). It lives here —
-# a pure-leaf protocol-section module that the other sites already sit beneath in the
-# import graph — so it is reachable from all four without a cycle, and it is a string
-# formatter, NOT a new architectural layer (D6). It NEVER activates on the None/CLI
-# path: callers only reach it once an effective preset resolves (preset is None keeps
-# today's exact bytes — D1).
-# ---------------------------------------------------------------------------
 def render_capability_ladder(
     preferred: str,
     fallback: str,
     floor_user_line: str,
     preset_display: str = "",
 ) -> str:
-    """Render one PREFERRED / FALLBACK / FLOOR capability ladder (BE-8003f, D4).
-
-    Emits exactly ONE preferred branch (never a menu — avoids prompt bloat / dumb-model
-    choice paralysis), one next-tier-down fallback paragraph, and the always-present
-    floor line, in the fixed shape the EM ADDENDUM D4 specifies::
-
-        [YOUR PATH — <preset display name>]
-        <preferred branch, full detail>
-        [IF YOU CANNOT DO THE ABOVE]
-        <single next-tier-down paragraph>
-        [FLOOR] If none of the above works in your environment: post_to_thread on your
-        coordination thread stating exactly what you cannot do, and show the user this
-        line verbatim: "<one-line human instruction>".
-
-    ``preset_display`` is the resolved preset's user-facing label (``Platform.display_label``
-    — e.g. "Web Sandbox", "Chat"); omitted only in a degenerate/test call.
-    """
     header = f"[YOUR PATH — {preset_display}]" if preset_display else "[YOUR PATH]"
     return (
         f"{header}\n"
@@ -66,14 +33,6 @@ def render_capability_ladder(
     )
 
 
-# ---------------------------------------------------------------------------
-# BE-6208g: conductor role-trim anchors. The project-less CHAIN CONDUCTOR drives
-# sub-orchestrators via CH_CHAIN_DRIVE and never spawns / unblocks / verifies
-# WORKERS — that is each sub-orchestrator's job. So the worker-spawn coordination-
-# action block between these two verbatim anchors is sliced out of the conductor's
-# protocol body (strictly gated on is_chain_conductor). The slice is anchor-based,
-# so the non-conductor body is returned untouched — byte-identical to today.
-# ---------------------------------------------------------------------------
 _WORKER_SPAWN_BLOCK_START = "**COORDINATION ACTIONS (use as needed within the loop):**"
 _PROGRESS_REPORTING_ANCHOR = "**PROGRESS REPORTING (MANDATORY after every coordination action):**"
 _CONDUCTOR_COORDINATION_NOTE = (
@@ -85,16 +44,6 @@ _CONDUCTOR_COORDINATION_NOTE = (
     "    appended below — they are your only coordination actions.\n\n"
 )
 
-# ---------------------------------------------------------------------------
-# BE-6211g (move b): conductor finale-trim anchors. The project-less CHAIN CONDUCTOR
-# runs NO per-project closeout — its only finale is CH_CHAIN_DRIVE's series-summary.
-# So the solo PHASE-3 CLOSEOUT finale (which CH_CHAIN_DRIVE otherwise has to emit-then-
-# retract) is sliced out of the conductor body between these two verbatim anchors and
-# replaced with a compact chain-finale note. Same anchor-slice pattern as the BE-6208g
-# worker-spawn excision; strictly gated on is_chain_conductor, so non-conductor bodies
-# are byte-identical. The ORCHESTRATOR CONSTRAINTS anchor (and everything after it) is
-# the kept END — it remains byte-for-byte.
-# ---------------------------------------------------------------------------
 _PHASE3_CLOSEOUT_START = "### PHASE 3 — CLOSEOUT (all agents complete or decommissioned)"
 _ORCHESTRATOR_CONSTRAINTS_ANCHOR = "## ORCHESTRATOR CONSTRAINTS"
 _CONDUCTOR_CLOSEOUT_NOTE = (
@@ -110,101 +59,13 @@ _CONDUCTOR_CLOSEOUT_NOTE = (
 )
 
 
-# ---------------------------------------------------------------------------
-# BE-6209c: layering fix. A handful of fragments in the orchestrator protocol
-# BODY were hardcoded with multi-terminal-only prose ("copy agent prompts from
-# the dashboard", "tell user to paste in a NEW terminal", "waiting for user to
-# start agents") that rendered in EVERY mode — directly contradicting the
-# subagent-mode wake block ("your subagents are Task()/spawn_agent() processes
-# you spawn autonomously"). They now render mode-conditionally: multi_terminal /
-# generic keep today's EXACT strings (byte-identical render), while CLI subagent
-# modes get self-spawn phrasing. CONDITION at the contradiction point — never
-# emit-then-retract. The per-CLI self-spawn syntax mirrors _FORBIDDEN_BY_TOOL's
-# keys; unknown tools fall back to a generic phrasing.
-# ---------------------------------------------------------------------------
-# Gemini and Antigravity share identical @-syntax spawn behavior (BE-6041b D1-B) —
-# a single shared constant, not a hand-copied duplicate pair.
-_AT_SYNTAX_SPAWN = "@agent-name"
 _SUBAGENT_SPAWN_BY_TOOL: dict[str, str] = {
     "claude-code": "Task(subagent_type=...)",
     "codex": "spawn_agent(name=...)",
-    "gemini": _AT_SYNTAX_SPAWN,
-    "antigravity": _AT_SYNTAX_SPAWN,
 }
 _SUBAGENT_SPAWN_GENERIC = "your CLI's in-process subagent syntax"
 
 
-# ---------------------------------------------------------------------------
-# BE-9035a: shared @-syntax prose templates for Gemini/Antigravity, moved here
-# (from chapters_reference.py) for the 800-line file-size guardrail -- imported
-# back by chapters_reference for _CH3_SPAWN_BLOCKS / _REACTIVATION_SPAWN_BLOCKS.
-# ---------------------------------------------------------------------------
-_CH3_HEADER_WIDTH = 76
-
-
-def _ch3_at_syntax_triple(label: str, agents_dir: str) -> tuple[str, str, str]:
-    """Build the CH3 spawn triple for an @-syntax platform.
-
-    Gemini and Antigravity share identical @-syntax spawn behavior (BE-6041b D1-B:
-    Antigravity reuses Gemini's syntax) — parameterized by label + install dir so
-    the two platforms render from ONE prose template instead of a hand-copied pair
-    (the anti-pattern the pre-existing `_FORBIDDEN_BY_TOOL`/`_WAKE_BY_TOOL` gemini/
-    antigravity entries already fell into).
-    """
-    header_prefix = f"── YOUR PLATFORM: {label.upper()} CLI "
-    header = header_prefix + "─" * max(3, _CH3_HEADER_WIDTH - len(header_prefix))
-    file_mapping = f"agent_name → {agents_dir}{{agent_name}}.md"
-    platform_note = (
-        f"{label} CLI Note:\n"
-        "  - @{agent_name} where agent_name matches the installed agent file\n"
-        "  - agent_name is used as-is (no prefix required)\n"
-        f"  - agent_name binds the MCP DB record and the installed {label} agent template"
-    )
-    execution_mode_block = f"""{header}
-Subagent invocation syntax (IMPLEMENTATION PHASE ONLY - not during staging):
-  @{{agent_name}} followed by instructions
-
-Or use the /agent command:
-  /agent {{agent_name}}
-  <instructions>
-
-CRITICAL: agent_name is used as-is (no prefix required).
-
-WHAT @agent DOES: Loads the INSTALLED agent template file at
-{agents_dir}{{agent_name}}.md which contains the agent's role, behavioral
-instructions, and capabilities. The agent ALREADY KNOWS its role from
-the template — keep your instructions focused on the specific mission.
-
-Example:
-  spawn_job(agent_name='implementer',
-                  agent_display_name='implementer', ...)
-
-  Later in implementation:
-  @implementer <mission-specific instructions only>
-
-DO NOT invoke subagents during staging - this is planning reference only
-"""
-    return (file_mapping, platform_note, execution_mode_block)
-
-
-def _reactivation_at_syntax_block(label: str) -> str:
-    """Build the reactivation spawn block for an @-syntax platform (Gemini/Antigravity
-    share syntax — BE-6041b D1-B). Parameterized so the pair renders from ONE template
-    instead of a hand-copied duplicate."""
-    return f"""Reactivation Spawn — {label} CLI:
-  @{{role}} You are resuming a reactivated Giljo job. Call get_job_mission(job_id="{{job_id}}") immediately to load your mission and prior context.
-  Do NOT call spawn_job again — the job already exists."""
-
-
-# ---------------------------------------------------------------------------
-# BE-6214: lean role-scoped CHAIN render. The runtime conductor_chain_injector wraps
-# the embedded SOLO ``full_protocol`` with this trim before appending the chain
-# chapters, so the chain chapters do not re-ship the solo prose they already own.
-# Same anchor-slice idiom as the BE-6208g/6211g body trims: verbatim module-constant
-# anchor pairs, ``start != -1 and end != -1 and start < end`` guard, splice
-# ``body[:start] + note + body[end:]``, graceful no-op on drift. Solo never reaches
-# the injector (chain_ctx is None returns earlier), so the solo render is untouched.
-# ---------------------------------------------------------------------------
 _CHAIN_PROTOCOL_REGION_START = "## Orchestrator Coordination Protocol (3 Phases)"
 _CHAIN_PROTOCOL_REGION_END = "## ORCHESTRATOR CONSTRAINTS"
 _CONDUCTOR_EMBEDDED_NOTE = (
@@ -217,17 +78,6 @@ _CONDUCTOR_EMBEDDED_NOTE = (
     "waiting→working) and remember the returned `protocol_etag` for any later refetch.\n\n"
 )
 
-# BE-9083c: sub-orch ALSO trims the solo PHASE-1 STARTUP ritual. That block is the SOLO
-# multi_terminal implementation entry ("MANDATORY get_job_mission", the protocol-etag cache
-# note, "Copy agent prompts from the dashboard to start them", "Wake me when agents need
-# attention") — for a chain member it is actively WRONG: a sub-orch has NO human Implement
-# click and self-launches its own workers. CH_SUB_ORCHESTRATOR step 5 ("CONTINUE TO
-# IMPLEMENTATION (no gate, no wait) … call get_job_mission ONCE, passing the protocol_etag …
-# Do NOT wait for a human, do NOT return to the dashboard") is the sub-orch's AUTHORITATIVE
-# entry and supersedes it. The replacement note KEEPS the two non-superseded mechanics (read
-# current_team_state + read the pre-planned TODOs, then begin PHASE 2) so nothing load-bearing
-# is orphaned — same compact-note idiom as the PHASE-3 trim. End anchor is the PHASE 2 header
-# (kept byte-for-byte: the sub-orch runs PHASE 2 "exactly like solo implementation").
 _SUBORCH_PHASE1_START = "### PHASE 1 — STARTUP (execute once, after get_job_mission)"
 _SUBORCH_PHASE1_END = "### PHASE 2 — ACTIVE COORDINATION"
 _SUBORCH_PHASE1_NOTE = (
@@ -242,14 +92,6 @@ _SUBORCH_PHASE1_NOTE = (
     "begin PHASE 2 immediately.\n\n"
 )
 
-# BE-9083d: the STAGING-phase sub-orch fetch defers the implementation-only regions
-# entirely — the coordination loop (PHASE 2), the resting states, and the closeout
-# procedure (PHASE 3) — down to one compact deferral note. They arrive with the
-# post-staging-end get_job_mission (the implementation protocol), so the staging boot
-# payload stays small (the BE-9083a truncation incident was exactly this fetch).
-# DEADLOCK GUARD (BE-6206 class): the note itself RESTATES the bridge — after
-# complete_job (staging-end), call get_job_mission ONCE, no gate, do NOT wait — so
-# phase-scoping can never strand a sub-orch behind a gate that does not exist.
 _SUBORCH_STAGING_IMPL_REGION_START = "### PHASE 2 — ACTIVE COORDINATION"
 _SUBORCH_STAGING_IMPL_REGION_END = "## ORCHESTRATOR CONSTRAINTS"
 _SUBORCH_STAGING_IMPL_NOTE = (
@@ -262,9 +104,6 @@ _SUBORCH_STAGING_IMPL_NOTE = (
     "Until then, stage per CH_SUB_ORCHESTRATOR steps 2-4 above.\n\n"
 )
 
-# Sub-orch trims only the PHASE-3 preamble (pre-closeout verification + deferred-findings
-# + git paragraphs that CH_SUB_ORCHESTRATOR step 7 restates), keeping the solo numbered
-# "Closeout steps" block — "keep more of the solo body".
 _SUBORCH_PHASE3_START = "### PHASE 3 — CLOSEOUT (all agents complete or decommissioned)"
 _SUBORCH_PHASE3_END = "**Closeout steps (order matters):**"
 _SUBORCH_PHASE3_NOTE = (
@@ -284,12 +123,6 @@ _SUBORCH_PHASE3_NOTE = (
 
 
 def _apply_anchor_slice(protocol: str, start_anchor: str, end_anchor: str, note: str) -> str:
-    """Splice ``protocol[start:end]`` down to ``note`` (BE-6214 anchor-slice idiom).
-
-    Graceful drift no-op: if either anchor is missing or out of order the protocol is
-    returned UNCHANGED, so a future edit that moves the anchors degrades to the full
-    embedded render rather than raising or corrupting the prose.
-    """
     start = protocol.find(start_anchor)
     end = protocol.find(end_anchor)
     if start == -1 or end == -1 or start >= end:
@@ -298,30 +131,6 @@ def _apply_anchor_slice(protocol: str, start_anchor: str, end_anchor: str, note:
 
 
 def trim_embedded_protocol_for_chain(protocol: str, role: str, phase: str | None = None) -> str:
-    """Lean-trim the embedded solo orchestrator protocol for a chain role (BE-6214).
-
-    ``role`` in {"conductor", "sub_orchestrator"}; any other value (or a None/empty
-    protocol) returns ``protocol`` unchanged. Each cut uses the anchor-slice idiom
-    (``_apply_anchor_slice``): a missing/out-of-order anchor is a no-op, so the trim
-    degrades to the full embedded render rather than corrupting the prose. Cuts are
-    applied top-to-bottom and each re-finds its anchors on the current string, so an
-    earlier splice never invalidates a later cut's offsets.
-
-    - conductor: splice the whole "## Orchestrator Coordination Protocol (3 Phases)"
-      region (PHASE 1/2 + RESTING + the chain-finale note — all owned by CH_CHAIN_DRIVE
-      STEP A/B + SERIES SUMMARY) down to a compact pointer; keep "## ORCHESTRATOR
-      CONSTRAINTS" onward byte-for-byte.
-    - sub_orchestrator, phase None/"implementation": two cuts (BE-9083c) — (1) the solo
-      PHASE-1 STARTUP ritual (superseded by CH_SUB_ORCHESTRATOR step 5's ungated
-      get_job_mission entry) and (2) the solo PHASE-3 CLOSEOUT preamble (restated by
-      CH_SUB_ORCHESTRATOR step 7); keep PHASE 2 and the numbered "Closeout steps" block
-      byte-for-byte (the sub-orch runs those "exactly like solo implementation").
-    - sub_orchestrator, phase "staging" (BE-9083d phase-scoping): the PHASE-1 cut plus
-      ONE wider cut deferring the whole implementation region (PHASE 2 → PHASE 3) to
-      the post-staging-end fetch; the deferral note restates the bridge (call
-      get_job_mission ONCE, no gate, do NOT wait). ``phase`` defaults to None so every
-      pre-9083d caller keeps today's bytes (the implementation cuts).
-    """
     if not protocol:
         return protocol
     if role == "conductor":
@@ -344,32 +153,10 @@ def trim_embedded_protocol_for_chain(protocol: str, role: str, phase: str | None
     return protocol
 
 
-# ---------------------------------------------------------------------------
-# BE-9083c: chain_mission slicer. CH_SUB_ORCHESTRATOR inlines the CHAIN MISSION so the
-# sub-orch can lift its per-project contract; the conductor writes ONE `### P_i` block per
-# project (CH_CHAIN_STAGING mandates that header format). Inlining the WHOLE mission into
-# EVERY sub-orch is unbounded (a 10-project chain adds tens of KB) and churns the hashed
-# static block (protocol_etag) on every conductor edit of ANY project's block. A sub-orch
-# needs only its OWN contract; cross-project awareness is a get_context fetch away.
-# Lives here (beside trim_embedded_protocol_for_chain) so both chain-payload-diet helpers
-# co-locate; chapters_chain.py already imports from this leaf module.
-# ---------------------------------------------------------------------------
 _CHAIN_MISSION_PI_HEADER = re.compile(r"(?m)^#{1,6}\s*P_(\d+)\b")
 
 
 def slice_chain_mission_for_position(chain_mission: str, position: int) -> str:
-    """Slice the inlined CHAIN MISSION down to THIS sub-orch's own ``### P_i`` block.
-
-    ``position`` is the sub-orch's 1-based index in the run (P_1, P_2, …). Returns the
-    project's contract block (its header through the char before the next ``P_j`` header,
-    right-stripped) on the happy path.
-
-    Tolerance (data-facing convention DoD — NEVER errors). Degenerate cases:
-      * No ``### P_i`` headers at all (a legacy / freeform mission) → return it WHOLE,
-        unsliced — a weak model must not lose its contract to an over-eager slice.
-      * The position's own header is absent (the conductor numbered differently or dropped
-        it) → return it WHOLE and log a WARNING, so nothing is silently withheld.
-    """
     if not chain_mission:
         return chain_mission
     headers = list(_CHAIN_MISSION_PI_HEADER.finditer(chain_mission))
@@ -387,15 +174,6 @@ def slice_chain_mission_for_position(chain_mission: str, position: int) -> str:
     return chain_mission
 
 
-# ---------------------------------------------------------------------------
-# BE-9103: the ORCHESTRATOR-CONSTRAINTS git bullet is ROLE-conditional. Solo and
-# sub-orchestrator sessions CAN self-adopt a job, so their bullet carries the
-# self-adopt commit duty. The project-less CHAIN CONDUCTOR only delegates
-# (CH_CHAIN_DRIVE — it never implements a job itself), so the self-adopt commit
-# prose does not apply to it and would only bloat the BE-6214 lean render; it
-# keeps a compact delegate-only line. Conditioned at the render point (the
-# BE-6209c idiom) — never emit-then-retract.
-# ---------------------------------------------------------------------------
 _GIT_CONSTRAINT_SELF_ADOPT = """- **Git commit requirement does NOT apply *while you are delegating*.** When you SPAWN a
   worker, IT commits its work and you coordinate — you do not commit on its behalf. But a job
   you SELF-ADOPT (implement yourself in this session) carries that worker's commit duty: commit
@@ -407,16 +185,6 @@ _GIT_CONSTRAINT_CONDUCTOR = (
 
 
 def _apply_conductor_body_trims(body: str) -> str:
-    """Apply the conductor role-trims to the rendered protocol body.
-
-    BE-6208g: drop the worker-spawn coordination-action block (the project-less
-    conductor never spawns / unblocks / verifies WORKERS — each sub-orchestrator
-    owns that). BE-6211g (move b): drop the solo PHASE-3 CLOSEOUT finale (the
-    conductor's only finale is CH_CHAIN_DRIVE's series-summary). Both cuts reuse
-    the ``_apply_anchor_slice`` idiom, so each stays independently guarded: a
-    missing / out-of-order anchor pair degrades to the untrimmed span rather
-    than raising — byte-identical behavior to the pre-extraction inline version.
-    """
     body = _apply_anchor_slice(
         body, _WORKER_SPAWN_BLOCK_START, _PROGRESS_REPORTING_ANCHOR, _CONDUCTOR_COORDINATION_NOTE
     )
@@ -432,28 +200,6 @@ def _build_orchestrator_protocol_body(
     tool: str,
     is_chain_conductor: bool = False,
 ) -> str:
-    """
-    Render the complete 3-phase orchestrator protocol string.
-
-    All parameters are injected via f-string; no side effects.
-
-    BE-6208g: when ``is_chain_conductor`` is True (the project-less chain conductor),
-    the worker-spawn coordination-action block is sliced out (the conductor never
-    acts on it). ``is_chain_conductor`` is False for solo / sub-orchestrator / worker,
-    so the returned body is byte-identical to today on every non-conductor path.
-
-    BE-6209c: ``execution_mode``/``tool`` select mode-conditional phrasing for the
-    three body fragments that were multi-terminal-only ("copy prompts from the
-    dashboard" / "tell user to paste in a NEW terminal" / "waiting for user to start
-    agents"). For multi_terminal (``execution_mode == MULTI_TERMINAL``) the strings are
-    byte-identical to today; for CLI subagent modes they become self-spawn phrasing
-    keyed off ``tool`` so the body no longer contradicts the subagent wake block.
-    """
-    # BE-6209c/6209f: pick mode-conditional phrasing for the fragments that assumed a
-    # human-driven multi-terminal workflow. Predicate is the canonical registry signal
-    # (is_subagent_render — Platform.is_subagent), the SAME source of truth used by
-    # _build_forbidden_banner above. multi_terminal keeps today's EXACT strings
-    # (byte-identical render); CLI subagent + unknown modes get self-spawn phrasing.
     is_subagent = is_subagent_render(execution_mode)
     if is_subagent:
         spawn_syntax = _SUBAGENT_SPAWN_BY_TOOL.get(tool, _SUBAGENT_SPAWN_GENERIC)
@@ -467,15 +213,10 @@ def _build_orchestrator_protocol_body(
         resting_wait_block = f"""**If your spawned subagents are running (nothing actionable right now):**
   → `set_agent_status(job_id="{job_id}", status="idle", reason="Monitoring — agents running")`
   → Dashboard shows "Monitoring" — user knows you're available but not burning tokens"""
-        # BE-6209f: the "Unblock an agent" relay step. multi_terminal nudges the human to
-        # the blocked agent's separate terminal; a subagent orchestrator has no such
-        # terminal — its message lands in the subagent's job inbox.
         unblock_relay_line = (
             f"  → The subagent reads your reply on its next get_thread_history poll — relaunch it via "
             f"{spawn_syntax} if it already exited (its first `get_job_mission` rebinds it to the job)"
         )
-        # BE-6209f: verification-agent launch. multi_terminal tells the user to start it
-        # from the dashboard; a subagent orchestrator launches it in-process.
         verification_launch_block = """    - Launch the subagent now via your CLI; its VERY FIRST call MUST be
       `get_job_mission(job_id=<the job_id from step 1>)` so it binds to the record you just created."""
     else:
@@ -491,13 +232,8 @@ def _build_orchestrator_protocol_body(
       `get_job_mission(job_id=<the job_id from step 1>)` so it binds to the record you just created.
     - Multi-terminal: tell the user "Verification agent spawned, start it from the dashboard.\""""
 
-    # BE-9103: role-scoped git bullet — the conductor never self-adopts (see the
-    # module constants above), so it keeps the compact delegate-only line.
     git_commit_constraint = _GIT_CONSTRAINT_CONDUCTOR if is_chain_conductor else _GIT_CONSTRAINT_SELF_ADOPT
 
-    # BE-9260: derive the closeout signoff token from the registry (same idiom as
-    # worker_body._build_conditional_blocks) instead of hardcoding "/giljo" — a
-    # literal would render wrong for tool types that install it as a skill ($giljo).
     giljo_cmd = giljo_invocation(tool)
 
     body = f"""These are your coordination operating procedures. Follow them from startup through closeout.
@@ -701,21 +437,9 @@ re-verify before closeout.
 """  # noqa: S608 — prose protocol template, not SQL
     if not is_chain_conductor:
         return body
-    # BE-6208g worker-spawn + BE-6211g PHASE-3 finale role-trims (extracted helper).
     return _apply_conductor_body_trims(body)
 
 
-# ---------------------------------------------------------------------------
-# BE-9013: generic_mcp CH3 spawn-block rung prose — a REGISTERED harness-agnostic
-# subagent mode (distinct from chapters_reference's _CH3_GENERIC HO1020 fail-safe,
-# which stays the block for an UNKNOWN/unmapped tool). These rungs render through
-# the (f) PREFERRED/FALLBACK/FLOOR capability ladder above (render_capability_ladder),
-# NOT a static triple, because the SELF-ADOPT fallback rung (the absorbed (i)
-# deliverable) is tuned by the resolved harness preset. The prose lives HERE beside
-# the ladder renderer (file-size guardrail moved it out of chapters_reference); the
-# triple builder `_ch3_generic_mcp_triple` stays in chapters_reference beside its
-# _CH3_GENERIC data source.
-# ---------------------------------------------------------------------------
 _CH3_GENERIC_MCP_PREFERRED = r"""DELEGATE FIRST — you are an ORCHESTRATOR, not the implementer. Your default is to
 SPAWN a dedicated agent for every job order and let it do the work; you coordinate.
 Doing the implementation yourself is the LAST resort (the SELF-ADOPT rung below), not
@@ -723,8 +447,10 @@ the first move — reach for it ONLY when your harness genuinely has no way to s
 
 Run one agent per job order IN PARALLEL. spawn_job(...) ALWAYS comes first — it
 mints the job_id + the dashboard audit record — then you launch the agent seeded
-with the thin prompt get_job_mission(job_id='...') (the server-served template
-carries the role). Use whichever launch mechanism your session supports:
+with the thin prompt get_job_mission(job_id='...'). That prompt already ends with a
+HARNESS block for the agent's own harness (launch line + model/effort hints), and the
+role itself arrives in the get_job_mission agent_profile — nothing to look up, nothing
+to install. Use whichever launch mechanism your session supports:
 
 OPTION A — ONE TERMINAL PER AGENT (best: true parallelism, like Multi-Terminal).
 If your TUI / session can open OS terminal windows, launch each agent as its own
@@ -759,9 +485,6 @@ CROSS-AGENT COORDINATION IS MCP-ONLY (spawn_job / post_to_thread / get_thread_hi
 assume a native return value crosses a job. (A subagent MAY use its harness's own
 child-agent feature for INTERNAL decomposition within its single job.)"""
 
-# SELF-ADOPT rung — capable session (has a shell / no preset resolved). Worded as a
-# GRANTED PERMISSION (mode selection IS the opt-in, mirroring link_projects turning
-# a session into the conductor), never an ambient default that could leak to other modes.
 _CH3_GENERIC_MCP_SELF_ADOPT = """VERIFY FIRST: does your harness have ANY spawn / subagent / delegate mechanism
 (a Task tool, an agent spawner, an @-mention, a delegate command, or the ability to
 open a terminal per OPTION A above)? If ANY of these exists, using it is MANDATORY —
@@ -779,9 +502,6 @@ mode's declared fallback, like link_projects turning a session into the conducto
 NOT an ambient default and never applies in multi_terminal mode. Never batch-start the queue
 — finish and complete_job one job before adopting the next."""
 
-# SELF-ADOPT rung — shell-less chat session (preset.has_shell is False, workspace_model
-# 'none'). Self-adopt stays REACHABLE for planning/PM jobs; code jobs fall to FLOOR ((i)
-# DoD-4: a chat surface has no environment to execute code jobs).
 _CH3_GENERIC_MCP_SELF_ADOPT_CHAT = """Your harness has NO subagent mechanism AND no code workspace (a chat-only
 session). You MAY still SELF-ADOPT the PLANNING / PM jobs — get_job_mission(job_id)
 → work → complete_job(job_id) → next, in launch order, one at a time — but you
@@ -794,5 +514,5 @@ below."""
 
 _CH3_GENERIC_MCP_FLOOR_LINE = (
     "This project has code work that can't run in this session — re-stage it on a "
-    "CLI workstation (Claude Code, Codex, Gemini, or Antigravity) and it will run there."
+    "CLI workstation (Claude Code, Codex, or opencode) and it will run there."
 )

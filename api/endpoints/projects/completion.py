@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Project Completion Endpoints - Handover 0125
-
-Handles project completion operations:
-- POST /{project_id}/complete - Complete project
-- POST /{project_id}/continue-working - Resume work on project
-
-All operations use ProjectService.
-
-BE-9143: the registered-but-dead /{project_id}/can-close, /generate-closeout,
-/closeout (GET), and /close-out routes were retired (no remaining caller — the
-CloseoutModal drives archive()/completeWithData() and closeout data is fetched
-through the MCP tools; the ProjectCloseoutService methods they wrapped stay live).
-"""
 
 import logging
 from datetime import UTC, datetime
@@ -63,7 +49,6 @@ async def complete_project(
             detail="Must confirm closeout (confirm_closeout=True)",
         )
 
-    # Service raises exceptions on error
     result = await project_service.complete_project(
         project_id=project_id,
         summary=request.summary,
@@ -105,7 +90,6 @@ async def continue_working(
     """
     logger.info("User %s resuming work on project %s", sanitize(current_user.username), sanitize(project_id))
 
-    # Resume work via ProjectService (raises exceptions on error)
     result = await project_service.lifecycle.continue_working(project_id=project_id, tenant_key=current_user.tenant_key)
 
     logger.info("Resumed work on project %s", sanitize(project_id))

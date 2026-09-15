@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9157 — ``superseded`` project status + successor linking.
-
-Coverage:
-  * ``refuse_if_superseded`` — the shared 360-write refusal helper.
-  * ``list_projects_for_mcp`` default-visibility CHARACTERIZATION (museum rule:
-    pin current behavior first) + the new ``include_superseded`` filter.
-  * ``ProjectService.update_project`` successor-pointer validation (within-tenant,
-    no self-supersession) + successful persistence.
-  * MCP-BOUNDARY refusal (through the real @mcp.tool transport, BE-5042 lesson):
-    a 360 write to a superseded project returns the structured PROJECT_SUPERSEDED
-    rejection as normal content (Tier-2), not an isError.
-
-Parallel-safe: fresh tenant_key per test; DB-backed tests use the rolled-back
-db_session (TransactionalTestContext); no module-level mutable state.
-"""
 
 from __future__ import annotations
 
@@ -39,9 +24,6 @@ from tests.helpers.mcp_session_fixture import create_connected_server_and_client
 _PRODUCT_SERVICE_PATH = "giljo_mcp.services.product_service.ProductService"
 
 
-# ===========================================================================
-# refuse_if_superseded — pure helper
-# ===========================================================================
 
 
 def _fake_project(status: str, project_id: str = "proj-1", successor: str | None = None):
@@ -66,9 +48,6 @@ def test_refuse_helper_handles_none_project():
     assert refuse_if_superseded(None) is None
 
 
-# ===========================================================================
-# list_projects_for_mcp — default visibility + include_superseded
-# ===========================================================================
 
 
 def _make_accessor(tenant_key: str = "tenant-be9157"):
@@ -79,7 +58,7 @@ def _make_accessor(tenant_key: str = "tenant-be9157"):
     db_manager.get_session_async = Mock(return_value=mock_session)
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=False)
-    mock_session.info = {}  # tenant_session_context save/restore target
+    mock_session.info = {}
     tenant_manager = Mock()
     tenant_manager.get_current_tenant = Mock(return_value=tenant_key)
     return ToolAccessor(
@@ -91,7 +70,6 @@ def _make_accessor(tenant_key: str = "tenant-be9157"):
 
 
 def _list_item(project_id: str, status: str):
-    """Minimal ProjectListItem-shaped mock for the post-fetch filter + projection."""
     return SimpleNamespace(
         id=project_id,
         name=f"P-{project_id}",
@@ -107,9 +85,6 @@ def _list_item(project_id: str, status: str):
 
 
 async def _run_list(accessor, repo_rows, **kwargs):
-    """Drive list_projects_for_mcp with a patched repo + projection; capture the
-    ``status`` argument the repo received so the SQL-side default can be asserted.
-    Returns (result, captured_status_arg)."""
     svc = accessor._project_service
     captured: dict[str, Any] = {}
 
@@ -131,8 +106,6 @@ async def _run_list(accessor, repo_rows, **kwargs):
         patch(_PRODUCT_SERVICE_PATH) as mock_ps,
     ):
         mock_ps.return_value.get_default_product = AsyncMock(return_value=mock_product)
-        # BE-9499a: list_projects_for_mcp resolves through resolve_binding_product now
-        # (byte-identical result for an omitted product_id -- the active product).
         mock_ps.return_value.resolve_binding_product = AsyncMock(return_value=mock_product)
         result = await svc.list_projects_for_mcp(tenant_key="tenant-be9157", **kwargs)
     return result, captured["status"]
@@ -140,10 +113,6 @@ async def _run_list(accessor, repo_rows, **kwargs):
 
 @pytest.mark.asyncio
 async def test_characterization_default_excludes_lifecycle_finished_at_sql():
-    """MUSEUM CHARACTERIZATION: with no filters, the default agent view pushes a
-    status set to SQL that INCLUDES active/inactive and EXCLUDES the
-    lifecycle-finished states (completed/cancelled/terminated/deleted) AND the new
-    superseded value. This pins the default visibility agents depend on."""
     accessor = _make_accessor()
     _result, status_arg = await _run_list(accessor, [_list_item("a", "active")])
 
@@ -155,7 +124,6 @@ async def test_characterization_default_excludes_lifecycle_finished_at_sql():
 
 @pytest.mark.asyncio
 async def test_superseded_excluded_by_default_post_fetch():
-    """Even if a superseded row reaches the post-fetch stage, it is dropped by default."""
     accessor = _make_accessor()
     rows = [_list_item("a", "active"), _list_item("s", "superseded")]
     result, _ = await _run_list(accessor, rows)
@@ -165,7 +133,6 @@ async def test_superseded_excluded_by_default_post_fetch():
 
 @pytest.mark.asyncio
 async def test_superseded_hidden_even_with_include_completed():
-    """include_completed surfaces completed/cancelled but NOT superseded (own gate)."""
     accessor = _make_accessor()
     rows = [_list_item("c", "completed"), _list_item("s", "superseded")]
     result, _ = await _run_list(accessor, rows, include_completed=True)
@@ -185,25 +152,18 @@ async def test_include_superseded_true_surfaces_superseded():
 
 @pytest.mark.asyncio
 async def test_explicit_status_superseded_overrides_default_exclusion():
-    """An explicit status='superseded' request wins over the default exclusion."""
     accessor = _make_accessor()
     rows = [_list_item("s", "superseded")]
     result, status_arg = await _run_list(accessor, rows, status="superseded")
     ids = {p["project_id"] for p in result["projects"]}
     assert ids == {"s"}, f"explicit status=superseded must surface it, got {ids}"
-    # And it was pushed to SQL as the explicit filter.
     assert status_arg == "superseded"
 
 
-# ===========================================================================
-# ProjectService.update_project — successor pointer validation + persistence
-# ===========================================================================
 
 
 @pytest_asyncio.fixture
 async def superseding_setup(db_manager, db_session):
-    """Two committed-in-transaction projects under one tenant, plus a service
-    bound to the rolled-back session with tenant context set."""
     from giljo_mcp.models.products import Product
     from giljo_mcp.models.projects import Project
     from giljo_mcp.services.project_service import ProjectService
@@ -263,12 +223,7 @@ async def test_update_persists_superseded_status_and_successor(superseding_setup
 
 @pytest.mark.asyncio
 async def test_update_supersede_allowed_from_completed_immutable_status(superseding_setup):
-    """A COMPLETED (immutable) project can still be marked superseded — the
-    supersede lifecycle transition is carved out of the immutable-write guard,
-    because replacing already-shipped work is the primary use case."""
     svc, victim, successor, _tk = superseding_setup
-    # Move the victim into the immutable COMPLETED state first (direct set, then
-    # the supersede transition must still be permitted from there).
     victim.status = ProjectStatus.COMPLETED
     await svc._test_session.flush()
 
@@ -282,11 +237,6 @@ async def test_update_supersede_allowed_from_completed_immutable_status(supersed
 
 @pytest.mark.asyncio
 async def test_update_accepts_inactive_successor(superseding_setup):
-    """FE-9508: the successor-picker FE filter now offers `inactive` projects
-    (an inactive project is frequently the exact not-yet-started work that
-    replaces older work). Verify the backend write path agrees end-to-end
-    rather than assuming it from the FE change -- `_proj()` seeds both fixture
-    projects as `inactive` by default, so this exercises exactly that status."""
     svc, victim, successor, _tk = superseding_setup
     assert successor.status == "inactive"
 
@@ -320,9 +270,6 @@ async def test_update_rejects_unknown_successor(superseding_setup):
     assert "successor" in str(exc.value).lower()
 
 
-# ===========================================================================
-# MCP-BOUNDARY refusal (through the real @mcp.tool transport — BE-5042 lesson)
-# ===========================================================================
 
 
 def _content_text(result) -> str:
@@ -331,8 +278,6 @@ def _content_text(result) -> str:
 
 @pytest_asyncio.fixture
 async def superseded_tool_client(db_manager, db_session, monkeypatch):
-    """Wire the real ToolAccessor (rolled-back session) into the in-memory MCP
-    transport and seed a SUPERSEDED project. Yields (client, tenant_key, project_id)."""
     from api import app_state
     from api.endpoints.mcp_sdk_server import mcp
     from api.endpoints.mcp_tools import _base
@@ -399,8 +344,6 @@ async def superseded_tool_client(db_manager, db_session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_mcp_boundary_write_to_superseded_is_tier2_rejection(superseded_tool_client):
-    """A 360 write to a superseded project returns PROJECT_SUPERSEDED as normal
-    content (Tier-2), NOT an isError — the agent can self-correct to the successor."""
     client, _tenant_key, project_id = superseded_tool_client
 
     async with client() as mcp_session:

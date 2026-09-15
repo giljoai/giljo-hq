@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""MCP-transport boundary test for BE-9108 — the completion gate clears over the wire
-once a directed ``requires_action`` post is drained via ``get_thread_history(mark_read=true)``.
-
-CLAUDE.md / BE-5042 mandate a regression at the layer the behavior lives. This bug is
-tool-visible: an agent calls ``complete_job`` (FastMCP ``@mcp.tool`` -> ``_call_tool``
--> ``JobCompletionService.complete_job``) and is rejected with COMPLETION_BLOCKED, then
-follows the hint (``get_thread_history`` with ``mark_read=true``), and must be able to
-complete. The regressed gate keyed on the dead ``Message.status`` column instead of the
-``message_acknowledgments`` drain, so that second complete_job stayed blocked forever —
-the live 2026-07-10 deadlock. Only an end-to-end transport test exercises the exact
-tool sequence the orchestration hub uses.
-
-Over the wire:
-- a directed requires_action post blocks complete_job (isError, COMPLETION_BLOCKED);
-- get_thread_history(mark_read=true) as the recipient drains it (writes an ack row);
-- complete_job then SUCCEEDS.
-"""
 
 from __future__ import annotations
 
@@ -46,7 +29,7 @@ from tests.helpers.mcp_session_fixture import create_connected_server_and_client
 
 pytestmark = pytest.mark.asyncio
 
-SENDER = "sender-orch"  # distinct author so the post never self-excludes the recipient
+SENDER = "sender-orch"
 
 
 def _payload(res) -> dict:
@@ -65,12 +48,6 @@ def _error_text(res) -> str:
 
 @pytest_asyncio.fixture
 async def gate_mcp_client(db_manager, db_session, monkeypatch):
-    """Yield ``(new_client, tenant_key, db_session, job_id, agent_id, project_id)``.
-
-    Seeds tenant scaffolding (org/user/taxonomy) plus a product -> project ->
-    orchestrator AgentJob + working AgentExecution, so ``complete_job`` has a real
-    target. ToolAccessor receives ``test_session`` so all tool writes land in the
-    rolled-back transaction (visible to db_session, no commit)."""
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -172,7 +149,6 @@ async def _call(new_client, tool, args):
 async def test_complete_job_clears_after_mark_read_over_the_wire(gate_mcp_client):
     new_client, tenant_key, db_session, job_id, agent_id, project_id = gate_mcp_client
 
-    # Sender opens a project-anchored thread; recipient (the completing agent) joins.
     thread = _payload(
         await _call(new_client, "create_thread", {"subject": "coord", "project_id": project_id, "creator_id": SENDER})
     )
@@ -180,7 +156,6 @@ async def test_complete_job_clears_after_mark_read_over_the_wire(gate_mcp_client
     join = await _call(new_client, "join_thread", {"thread_id": tid, "agent_id": agent_id})
     assert join.is_error is False, _error_text(join)
 
-    # Directed, action-required post to the recipient.
     post = await _call(
         new_client,
         "post_to_thread",
@@ -195,12 +170,10 @@ async def test_complete_job_clears_after_mark_read_over_the_wire(gate_mcp_client
     assert post.is_error is False, _error_text(post)
     message_id = _payload(post)["message_id"]
 
-    # (1) complete_job is BLOCKED over the wire.
     blocked = await _call(new_client, "complete_job", {"job_id": job_id, "result": {"summary": "should block"}})
     assert blocked.is_error is True, "an undrained action-required post must block complete_job"
     assert "COMPLETION_BLOCKED" in _error_text(blocked)
 
-    # (2) Drain via the hint's remedy: read + ack as the recipient participant.
     drained = await _call(
         new_client,
         "get_thread_history",
@@ -209,7 +182,6 @@ async def test_complete_job_clears_after_mark_read_over_the_wire(gate_mcp_client
     assert drained.is_error is False, _error_text(drained)
     assert _payload(drained)["marked_read"] >= 1
 
-    # The ack the gate reads now exists for (message_id, recipient).
     with tenant_session_context(db_session, tenant_key):
         ack_count = (
             await db_session.execute(
@@ -224,7 +196,6 @@ async def test_complete_job_clears_after_mark_read_over_the_wire(gate_mcp_client
         ).scalar_one()
     assert ack_count == 1
 
-    # (3) complete_job now SUCCEEDS over the wire — the deadlock is gone.
     done = await _call(new_client, "complete_job", {"job_id": job_id, "result": {"summary": "drained and closed"}})
     assert done.is_error is False, _error_text(done)
     assert _payload(done).get("status") == "success"

@@ -3,27 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tests for OrgService - organization management business logic.
-
-Handover 0424b: TDD implementation of organization service layer.
-
-This test suite follows TDD discipline (Red → Green → Refactor):
-1. Tests written FIRST (this file)
-2. All tests must FAIL initially (RED phase)
-3. Implementation makes tests pass (GREEN phase)
-4. Refactor for quality (REFACTOR phase)
-
-Test Coverage:
-- Organization creation with owner
-- Slug generation and uniqueness validation
-- Membership management (invite, remove, change role)
-- Owner protection (cannot remove, cannot change role)
-- Permission checks (can_manage_members, can_edit_org, etc.)
-- User organization queries
-- Organization lookup by slug
-- Role queries
-"""
 
 from uuid import uuid4
 
@@ -36,14 +15,11 @@ from giljo_mcp.models.organizations import Organization
 from giljo_mcp.services.org_service import OrgService
 
 
-# Fixtures
 
 
 @pytest_asyncio.fixture
 async def test_user(db_session):
-    """Create test user for organization testing"""
 
-    # Create org first (0424m: tenant_key required)
     tenant_key = f"tenant_{uuid4().hex[:8]}"
     org = Organization(
         name=f"Test Org {uuid4().hex[:8]}", slug=f"test-org-{uuid4().hex[:8]}", tenant_key=tenant_key, is_active=True
@@ -69,9 +45,7 @@ async def test_user(db_session):
 
 @pytest_asyncio.fixture
 async def test_user_2(db_session):
-    """Create second test user for membership testing"""
 
-    # Create org first (0424m: tenant_key required)
     tenant_key = f"tenant2_{uuid4().hex[:8]}"
     org = Organization(
         name=f"Test Org 2 {uuid4().hex[:8]}",
@@ -99,11 +73,9 @@ async def test_user_2(db_session):
 
 
 class TestOrgServiceCreation:
-    """Tests for organization creation."""
 
     @pytest.mark.asyncio
     async def test_create_org_with_owner(self, db_session, test_user):
-        """Test creating org automatically creates owner membership."""
         service = OrgService(db_session)
 
         org = await service.create_organization(
@@ -118,7 +90,6 @@ class TestOrgServiceCreation:
 
     @pytest.mark.asyncio
     async def test_create_org_generates_slug(self, db_session, test_user):
-        """Test slug is auto-generated from name if not provided."""
         service = OrgService(db_session)
 
         org = await service.create_organization(
@@ -129,7 +100,6 @@ class TestOrgServiceCreation:
 
     @pytest.mark.asyncio
     async def test_create_org_duplicate_slug_fails(self, db_session, test_user):
-        """Test duplicate slug raises AlreadyExistsError."""
         service = OrgService(db_session)
 
         await service.create_organization(
@@ -145,19 +115,15 @@ class TestOrgServiceCreation:
 
 
 class TestOrgServiceMembership:
-    """Tests for membership management."""
 
     @pytest.mark.asyncio
     async def test_invite_member_to_org(self, db_session, test_user, test_user_2):
-        """Test inviting a member to organization."""
         service = OrgService(db_session)
 
-        # Create org with test_user as owner
         org = await service.create_organization(
             name="Test Org", slug="test-invite", owner_id=test_user.id, tenant_key=test_user.tenant_key
         )
 
-        # Invite test_user_2 as member
         membership = await service.invite_member(
             org_id=org.id,
             user_id=test_user_2.id,
@@ -173,14 +139,12 @@ class TestOrgServiceMembership:
 
     @pytest.mark.asyncio
     async def test_invite_duplicate_member_fails(self, db_session, test_user, test_user_2):
-        """Test inviting same user twice raises AlreadyExistsError."""
         service = OrgService(db_session)
 
         org = await service.create_organization(
             name="Test Org", slug="test-dup", owner_id=test_user.id, tenant_key=test_user.tenant_key
         )
 
-        # First invite
         await service.invite_member(
             org_id=org.id,
             user_id=test_user_2.id,
@@ -189,7 +153,6 @@ class TestOrgServiceMembership:
             tenant_key=test_user.tenant_key,
         )
 
-        # Second invite (same user)
         with pytest.raises(AlreadyExistsError) as exc_info:
             await service.invite_member(
                 org_id=org.id,
@@ -203,7 +166,6 @@ class TestOrgServiceMembership:
 
     @pytest.mark.asyncio
     async def test_change_member_role(self, db_session, test_user, test_user_2):
-        """Test changing a member's role."""
         service = OrgService(db_session)
 
         org = await service.create_organization(
@@ -224,7 +186,6 @@ class TestOrgServiceMembership:
 
     @pytest.mark.asyncio
     async def test_cannot_change_owner_role(self, db_session, test_user):
-        """Test owner role cannot be changed (raises AuthorizationError)."""
         service = OrgService(db_session)
 
         org = await service.create_organization(
@@ -238,7 +199,6 @@ class TestOrgServiceMembership:
 
     @pytest.mark.asyncio
     async def test_remove_member_from_org(self, db_session, test_user, test_user_2):
-        """Test removing a member from organization."""
         service = OrgService(db_session)
 
         org = await service.create_organization(
@@ -255,13 +215,11 @@ class TestOrgServiceMembership:
 
         await service.remove_member(org_id=org.id, user_id=test_user_2.id)
 
-        # Verify member removed
         members = await service.list_members(org.id)
-        assert len(members) == 1  # Only owner remains
+        assert len(members) == 1
 
     @pytest.mark.asyncio
     async def test_cannot_remove_owner(self, db_session, test_user):
-        """Test owner cannot be removed (raises AuthorizationError)."""
         service = OrgService(db_session)
 
         org = await service.create_organization(
@@ -275,11 +233,9 @@ class TestOrgServiceMembership:
 
 
 class TestOrgServiceQuery:
-    """Tests for organization queries."""
 
     @pytest.mark.asyncio
     async def test_get_user_organizations(self, db_session, test_user):
-        """Test getting all orgs for a user."""
         service = OrgService(db_session)
 
         await service.create_organization(
@@ -295,7 +251,6 @@ class TestOrgServiceQuery:
 
     @pytest.mark.asyncio
     async def test_get_org_by_slug(self, db_session, test_user):
-        """Test getting org by slug."""
         service = OrgService(db_session)
 
         await service.create_organization(
@@ -308,7 +263,6 @@ class TestOrgServiceQuery:
 
     @pytest.mark.asyncio
     async def test_get_user_role_in_org(self, db_session, test_user, test_user_2):
-        """Test getting user's role in org."""
         service = OrgService(db_session)
 
         org = await service.create_organization(
@@ -331,11 +285,9 @@ class TestOrgServiceQuery:
 
 
 class TestOrgServicePermissions:
-    """Tests for permission checks."""
 
     @pytest.mark.asyncio
     async def test_user_can_manage_members_as_owner(self, db_session, test_user):
-        """Test owner can manage members."""
         service = OrgService(db_session)
 
         org = await service.create_organization(
@@ -347,7 +299,6 @@ class TestOrgServicePermissions:
 
     @pytest.mark.asyncio
     async def test_user_can_manage_members_as_admin(self, db_session, test_user, test_user_2):
-        """Test admin can manage members."""
         service = OrgService(db_session)
 
         org = await service.create_organization(
@@ -367,7 +318,6 @@ class TestOrgServicePermissions:
 
     @pytest.mark.asyncio
     async def test_member_cannot_manage_members(self, db_session, test_user, test_user_2):
-        """Test member cannot manage other members."""
         service = OrgService(db_session)
 
         org = await service.create_organization(

@@ -1,7 +1,6 @@
 <template>
   <v-dialog v-model="isVisible" max-width="700" persistent scrollable>
     <v-card v-draggable class="smooth-border">
-      <!-- Header -->
       <div class="dlg-header">
         <div
           class="agent-badge-sq"
@@ -15,7 +14,6 @@
 
       <v-divider />
 
-      <!-- Agent Info -->
       <v-card-text v-if="displayAgent" class="pa-4 pb-0">
         <div class="text-body-small text-muted-a11y">
           <div><strong>Agent ID:</strong> {{ displayAgent.agent_id }}</div>
@@ -24,7 +22,6 @@
         </div>
       </v-card-text>
 
-      <!-- Tabs -->
       <div class="tab-pills px-4 py-2">
         <button
           class="pill-btn"
@@ -48,10 +45,8 @@
 
       <v-divider />
 
-      <!-- Tab Content -->
       <v-card-text class="pa-4">
         <v-window v-model="activeTab">
-          <!-- Mission Tab -->
           <v-window-item value="mission">
             <div v-if="displayAgent" class="mission-section">
               <v-card variant="flat" class="pa-3 smooth-border">
@@ -63,7 +58,6 @@
             </div>
           </v-window-item>
 
-          <!-- Plan Tab -->
           <v-window-item value="plan">
             <div v-if="todoItems.length === 0" class="empty-state pa-4 text-center">
               <v-icon icon="mdi-checkbox-blank-outline" size="32" class="mb-2" />
@@ -95,7 +89,6 @@
 
       <v-divider />
 
-      <!-- Footer -->
       <div class="dlg-footer">
         <v-spacer />
         <v-btn color="primary" @click="handleClose">Close</v-btn>
@@ -109,7 +102,6 @@ import { computed, ref, toRaw, watch } from 'vue'
 import { getAgentBadgeStyle } from '@/utils/colorUtils'
 import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 
-// Props
 const props = defineProps({
   show: {
     type: Boolean,
@@ -126,16 +118,12 @@ const props = defineProps({
   },
 })
 
-// Emits
 const emit = defineEmits(['close'])
 
-// State
 const activeTab = ref(props.initialTab)
 
-// Snapshot: freeze agent data when modal opens to decouple from live WebSocket reactivity
 const agentSnapshot = ref(null)
 
-// Computed
 const isVisible = computed({
   get: () => props.show,
   set: (value) => {
@@ -143,7 +131,6 @@ const isVisible = computed({
   },
 })
 
-// Prefer snapshot data while modal is open; fall back to live prop
 const displayAgent = computed(() => agentSnapshot.value || props.agent)
 
 const todoItems = computed(() =>
@@ -160,7 +147,6 @@ const formattedCreatedAt = computed(() => {
 
 const todoItemsCount = computed(() => todoItems.value.length)
 
-// Watch initialTab to update activeTab when modal opens
 watch(
   () => props.initialTab,
   (newTab) => {
@@ -169,7 +155,6 @@ watch(
   { immediate: true },
 )
 
-// Snapshot agent data on open -- disconnect from live WebSocket reactivity
 watch(
   () => props.show,
   (visible) => {
@@ -181,15 +166,6 @@ watch(
   },
 )
 
-// BE-9416: the snapshot above is deliberate -- it disconnects the open modal from
-// live WS churn. But a mission arriving over agent:created / agent:mission_updated
-// is now BOUNDED (it has to clear the cross-worker broker's byte cap), so a modal
-// opened in the window before the store's top-up lands would freeze an EXCERPT and
-// render it as the whole mission, with nothing to say otherwise.
-//
-// Narrowest possible fix: adopt the full text when it arrives, and ONLY then --
-// this watch fires only on the truncated -> whole transition, so ordinary status
-// churn still cannot reach the snapshot and the disconnect keeps doing its job.
 watch(
   () => props.agent?.mission_truncated,
   (isTruncated, wasTruncated) => {
@@ -199,7 +175,6 @@ watch(
   },
 )
 
-// Methods
 function handleClose() {
   emit('close')
 }

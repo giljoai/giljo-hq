@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""``create_thread``'s product resolution (FE-9530, operator ruling 1, 2026-08-29).
-
-"A thread MUST carry a product, unless application has no product." Split out of
-``CommThreadService`` for the same size-budget reason ``_comm_thread_edit_mixin``,
-``_comm_thread_chain_hub_mixin`` and the rest of that class's mixins exist: the
-owning module sits at its shrink-only 800-line cap.
-
-Mixed into ``CommThreadService``, so it uses that class's ``_db_manager`` through
-``self`` and the public ``create_thread`` API is unchanged.
-
-Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -26,7 +14,6 @@ from giljo_mcp.models.sequence_runs import SequenceRun
 
 
 class CommThreadCreateBindingMixin:
-    """Resolve the product a NEW thread binds to. Mixed into CommThreadService."""
 
     async def _resolve_create_product_id(
         self,
@@ -37,36 +24,6 @@ class CommThreadCreateBindingMixin:
         project_id: str | None,
         sequence_run_id: str | None,
     ) -> str | None:
-        """Resolve ``product_id`` for ``create_thread``, or leave it ``None``.
-
-        An explicit ``product_id`` is returned unchanged; the caller checks that
-        case before calling this.
-
-        - ``project_id`` supplied: derive the product from THAT PROJECT's own
-          ``product_id`` (mirroring ``resolve_or_create_bound_thread``'s existing
-          precedent) rather than from the tenant's shown/default product — a thread
-          anchored to project P belongs to P's product regardless of which tab the
-          caller happens to be viewing.
-        - ``sequence_run_id`` supplied, no ``project_id``: the dedicated chain
-          conductor is deliberately PROJECT-LESS (BE-6184), so its Step-0 hub-thread
-          create must never 422 for lacking a product — that refusal exemption is
-          unchanged. But BE-9537 found the exemption was being read as "leave it
-          untagged" when it only ever meant "don't gate on it": derive the product
-          from the run's HEAD project instead, the same rule
-          ``orchestrator_product_resolver._resolve_product_id`` already uses for the
-          conductor's own identity override, so the two surfaces cannot drift apart.
-          Best-effort and NEVER raises — an empty ``resolved_order``, or a head
-          project id that no longer resolves (purged/renamed), leaves the thread
-          untagged, with FE-9530's seed-text interpolation remaining the fallback
-          for a conductor that copies it faithfully.
-        - Otherwise: ``ProductService.resolve_binding_product(write=True)``, mirroring
-          ``create_task``/``create_project`` — a single product resolves silently
-          (unchanged ergonomics), several with none named raises
-          ``ProductAmbiguousError`` (BE-6081 Tier-2, agent-actionable, carries the
-          full list). A tenant that owns ZERO products has nothing to resolve to —
-          ruling 1's stated exception — so this returns ``None`` rather than raising,
-          leaving a fresh install's very first thread genuinely standalone.
-        """
         if project_id:
             return (
                 await session.execute(
@@ -89,12 +46,6 @@ class CommThreadCreateBindingMixin:
     async def _resolve_product_from_sequence_run(
         self, session: AsyncSession, tenant_key: str, sequence_run_id: str
     ) -> str | None:
-        """Best-effort HEAD-project product for a project-less chain-conductor create.
-
-        Never raises: an unresolvable run (not found, empty ``resolved_order``, or a
-        head project id that no longer names a live project) returns ``None`` rather
-        than blocking the create — see ``_resolve_create_product_id``.
-        """
         run = (
             await session.execute(
                 select(SequenceRun).where(SequenceRun.tenant_key == tenant_key, SequenceRun.id == sequence_run_id)

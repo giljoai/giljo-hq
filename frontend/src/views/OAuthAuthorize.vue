@@ -3,7 +3,6 @@
     <v-row class="align-center justify-center">
       <v-col cols="12" sm="8" md="5" lg="4">
         <v-card elevation="8" class="oauth-card smooth-border">
-          <!-- Header -->
           <v-card-title class="text-center pa-6">
             <div class="d-flex flex-column align-center w-100">
               <v-img
@@ -28,7 +27,6 @@
 
           <v-divider />
 
-          <!-- Error alert -->
           <v-card-text v-if="error" class="pb-0 pt-4 px-6">
             <AppAlert
               type="error"
@@ -40,7 +38,6 @@
             </AppAlert>
           </v-card-text>
 
-          <!-- Missing OAuth parameters warning -->
           <v-card-text v-if="missingParams" class="pa-6">
             <AppAlert type="warning" variant="tonal">
               Invalid authorization request. Required OAuth parameters are missing.
@@ -58,7 +55,6 @@
             </div>
           </v-card-text>
 
-          <!-- Login Form (shown when not authenticated) -->
           <v-card-text v-else-if="!isAuthenticated" class="pa-6">
             <v-form ref="loginForm" @submit.prevent="handleLogin">
               <v-text-field
@@ -115,17 +111,6 @@
             </v-form>
           </v-card-text>
 
-          <!-- Consent Form (shown when authenticated) -->
-          <!--
-            Extension seam (API-0021c): when an override component is provided
-            (via the `overrideConsentComponent` prop OR the runtime SaaS glob
-            below), it replaces this whole consent body. The override receives
-            `client`, `scopes`, and `authorizing` props and emits `allow` /
-            `deny` — same contract as DemoConsentScreen.vue. CE never imports
-            the SaaS file; the glob resolves to {} when frontend/src/saas/ is
-            absent (post-export). Pattern matches Login.vue's
-            ForgotPasswordEmail injection.
-          -->
           <v-card-text v-else class="pa-6">
             <component
               :is="resolvedOverrideComponent"
@@ -138,7 +123,6 @@
               @deny="handleDeny"
             />
             <template v-else>
-              <!-- Client info -->
               <div class="d-flex align-center mb-4">
                 <v-avatar color="primary" size="48" class="mr-4">
                   <v-icon size="24" color="white">mdi-application</v-icon>
@@ -151,7 +135,6 @@
 
               <v-divider class="mb-4" />
 
-              <!-- Requested permissions -->
               <p class="text-title-small font-weight-medium mb-2">Requested permissions</p>
               <v-list density="compact" class="mb-4 bg-transparent">
                 <v-list-item
@@ -173,7 +156,6 @@
 
               <v-divider class="mb-4" />
 
-              <!-- User identity -->
               <div class="d-flex align-center mb-4">
                 <v-icon size="18" class="mr-2 text-muted-a11y">mdi-account-circle</v-icon>
                 <span class="text-body-medium text-muted-a11y">
@@ -181,7 +163,6 @@
                 </span>
               </div>
 
-              <!-- Action buttons -->
               <div class="d-flex ga-3">
                 <v-btn
                   variant="outlined"
@@ -211,7 +192,6 @@
 
           <v-divider />
 
-          <!-- Footer -->
           <v-card-text class="text-center pa-4">
             <p class="text-body-small text-muted-a11y">
               <v-icon size="small" class="mr-1">mdi-shield-lock</v-icon>
@@ -234,25 +214,6 @@ import configService from '@/services/configService'
 import { useGiljoMode } from '@/composables/useGiljoMode'
 import { PRODUCT_NAME } from '@/branding'
 
-// API-0021c — Extension seam contract:
-//
-// Optional `overrideConsentComponent` prop allows a parent (or test) to inject
-// a consent body component directly. In production, the SaaS glob below loads
-// `@/saas/components/DemoConsentScreen.vue` lazily when GILJO_MODE != 'ce'.
-//
-// The override receives:
-//   - client: { id: string, name: string }   — display data only
-//   - scopes: Array<{ scope, label, description, icon }>  — already mapped
-//   - authorizing: boolean                                — async lock state
-//
-// And emits:
-//   - 'allow'  → triggers handleAuthorize()
-//   - 'deny'   → triggers handleDeny()
-//
-// CE never imports from frontend/src/saas/. The import.meta.glob pattern is
-// CE-export safe: when the saas/ directory is stripped, the glob returns {}
-// and the loader silently no-ops. Same pattern as Login.vue's
-// ForgotPasswordEmail and DefaultLayout's TrialBanner.
 const props = defineProps({
   overrideConsentComponent: {
     type: [Object, Function],
@@ -264,28 +225,20 @@ const route = useRoute()
 const userStore = useUserStore()
 const { isNonCeMode } = useGiljoMode()
 
-// Login state
 const username = ref('')
 const password = ref('')
 const showPassword = ref(false)
 const loading = ref(false)
 const loginForm = ref(null)
 
-// Consent state
 const authorizing = ref(false)
 const error = ref('')
 
-// Validation rules
 const rules = {
   username: (value) => !!value || 'Email or username is required',
   password: (value) => !!value || 'Password is required',
 }
 
-// OAuth parameters from URL query.
-// `resource` (RFC 8707) is forwarded from claude.com / claude.ai connector
-// popups so the backend can persist it onto the auth-code record. Phase 2
-// of API-0021d enforces this on the backend; without forwarding here, the
-// downstream /token exchange fails 401 invalid_grant.
 const oauthParams = computed(() => ({
   client_id: route.query.client_id || '',
   redirect_uri: route.query.redirect_uri || '',
@@ -294,25 +247,17 @@ const oauthParams = computed(() => ({
   code_challenge_method: route.query.code_challenge_method || '',
   scope: route.query.scope || '',
   state: route.query.state || '',
-  // SEC-9451: absent must stay absent. `|| ''` turned a missing param into an
-  // empty string, and the backend accepts `None` but rejects `""` — so a
-  // client that sends no `resource` (claude.ai sends none) was 400'd on its
-  // own consent POST. `undefined` is dropped by JSON.stringify, so the key
-  // never reaches the request body. The forwarding above is unaffected.
   resource: route.query.resource || undefined,
 }))
 
-// Check if required OAuth parameters are present
 const missingParams = computed(() => {
   const params = oauthParams.value
   return !params.client_id || !params.redirect_uri || !params.response_type
 })
 
-// Auth state
 const isAuthenticated = computed(() => userStore.isAuthenticated)
 const currentUser = computed(() => userStore.currentUser)
 
-// Map client_id to a human-readable display name
 const clientDisplayName = computed(() => {
   const clientId = oauthParams.value.client_id
   const knownClients = {
@@ -322,28 +267,17 @@ const clientDisplayName = computed(() => {
   return knownClients[clientId] || clientId
 })
 
-// Seam payload for the override component. Single object so future fields
-// (e.g. logo URL once DCR lands per API-0021c backend) can be added without
-// changing the prop signature.
 const seamClient = computed(() => ({
   id: oauthParams.value.client_id,
   name: clientDisplayName.value,
 }))
 
-// Holds a SaaS-injected override loaded via import.meta.glob (see onMounted).
-// shallowRef avoids Vue making the component definition deeply reactive.
 const saasOverrideComponent = shallowRef(null)
 
-// Combined resolution: explicit prop wins over the runtime SaaS glob. The
-// prop is what tests use; the glob is what production demo/saas builds use.
 const resolvedOverrideComponent = computed(
   () => props.overrideConsentComponent || saasOverrideComponent.value,
 )
 
-// Map scope strings to descriptive permission entries.
-// Grantable scopes per API-0021b: `mcp:read`, `mcp:write`. Legacy `mcp` /
-// `read` / `write` strings are kept as fallbacks for older clients during
-// the rollout, but new flows will surface the namespaced form.
 const scopeDescriptions = computed(() => {
   const scopeStr = oauthParams.value.scope || 'mcp:read mcp:write'
   const scopes = scopeStr.split(' ').filter(Boolean)
@@ -384,7 +318,6 @@ const scopeDescriptions = computed(() => {
   )
 })
 
-// Handle login submission
 async function handleLogin() {
   const { valid } = await loginForm.value.validate()
   if (!valid) return
@@ -393,15 +326,11 @@ async function handleLogin() {
   error.value = ''
 
   try {
-    // FE-9556: userStore.login() now throws the axios error on failure, so the
-    // status branching below owns every failure path (it was dead code while
-    // login() swallowed the error into a boolean).
     await userStore.login(username.value, password.value)
   } catch (err) {
     if (err.response?.status === 401) {
       error.value = 'Invalid credentials.'
     } else if (err.response?.status === 429) {
-      // Copy harmonized to PR #1002's approved wording.
       error.value = 'Too many sign-in attempts. Please wait a minute and try again.'
     } else if (err.code === 'ERR_NETWORK' || !err.response) {
       error.value = 'Network error. Please check your connection and try again.'
@@ -414,7 +343,6 @@ async function handleLogin() {
   }
 }
 
-// Handle authorize (consent granted)
 async function handleAuthorize() {
   authorizing.value = true
   error.value = ''
@@ -428,14 +356,9 @@ async function handleAuthorize() {
       code_challenge_method: oauthParams.value.code_challenge_method,
       scope: oauthParams.value.scope,
       state: oauthParams.value.state,
-      // RFC 8707 — forward through to the backend so it can persist the
-      // resource indicator onto the auth-code record. Phase 2 of API-0021d
-      // enforces validation; dropping this here breaks claude.com / claude.ai
-      // connector flows with 401 invalid_grant on /token exchange.
       resource: oauthParams.value.resource,
     })
 
-    // Backend returns a redirect URL with the authorization code
     const redirectUrl = response.data?.redirect_uri || response.data?.redirect_url
     if (redirectUrl) {
       window.location.href = redirectUrl
@@ -455,7 +378,6 @@ async function handleAuthorize() {
   }
 }
 
-// Handle deny (consent refused)
 function handleDeny() {
   const params = oauthParams.value
   const redirectUri = new URL(params.redirect_uri)
@@ -467,7 +389,6 @@ function handleDeny() {
   window.location.href = redirectUri.toString()
 }
 
-// Check auth state on mount
 onMounted(async () => {
   if (!userStore.currentUser) {
     try {
@@ -477,11 +398,6 @@ onMounted(async () => {
     }
   }
 
-  // Dynamically load the SaaS consent override when not in CE mode.
-  // Uses import.meta.glob (Vite-aware) so the file bundles into a chunk for
-  // SaaS/private builds and is silently absent in CE builds where the saas/
-  // directory has been stripped by the export pipeline. CE-export safety:
-  // glob returns {} → loader is undefined → seam stays inert.
   try {
     await configService.fetchConfig()
   } catch {

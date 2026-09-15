@@ -3,83 +3,111 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Pydantic Models for Template Endpoints - Handover 0126
-
-Request/response models for template operations.
-"""
 
 from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
 
-# Maximum template sizes
-MAX_TEMPLATE_SIZE = 100 * 1024  # 100KB
-MAX_USER_INSTRUCTIONS_SIZE = 50 * 1024  # 50KB
+MAX_TEMPLATE_SIZE = 100 * 1024
+MAX_USER_INSTRUCTIONS_SIZE = 50 * 1024
+
+
+HINT_MAX_LENGTH = 120
+
+NAME_MAX_LENGTH = 100
+ROLE_MAX_LENGTH = 50
+CLI_TOOL_MAX_LENGTH = 20
+BACKGROUND_COLOR_MAX_LENGTH = 7
+TOOLS_MAX_LENGTH = 50
+CATEGORY_MAX_LENGTH = 50
+PRODUCT_ID_MAX_LENGTH = 36
 
 
 class TemplateCreate(BaseModel):
     """Request model for creating a template"""
 
-    # Name is optional; when omitted, the backend generates it from role/suffix.
-    name: str | None = Field(None, description="Template name (optional, generated from role when omitted)")
-    role: str = Field(..., description="Agent role")
-    cli_tool: str = Field("claude", description="CLI tool: claude, codex, gemini, generic")
+    product_id: str = Field(..., max_length=PRODUCT_ID_MAX_LENGTH, description="Product this agent belongs to")
+    name: str | None = Field(
+        None, max_length=NAME_MAX_LENGTH, description="Template name (optional, generated from role when omitted)"
+    )
+    role: str = Field(..., max_length=ROLE_MAX_LENGTH, description="Agent role")
+    cli_tool: str = Field("claude", max_length=CLI_TOOL_MAX_LENGTH, description="CLI tool: claude, codex, generic")
     custom_suffix: str | None = Field(None, description="Custom suffix for name generation")
-    background_color: str | None = Field(None, description="Background color (hex)")
+    background_color: str | None = Field(
+        None, max_length=BACKGROUND_COLOR_MAX_LENGTH, description="Background color (hex)"
+    )
     description: str | None = Field(None, description="Template description")
     system_instructions: str | None = Field(
         None, description="Ignored on create; backend always injects canonical MCP bootstrap"
     )
     user_instructions: str | None = Field(None, description="User-customizable role identity prose (max 50KB)")
-    model: str | None = Field("sonnet", description="Model: sonnet, opus, haiku, inherit")
-    tools: str | None = Field(None, description="Tool selection (null = inherit all)")
+    model: str | None = Field(
+        "inherit",
+        max_length=HINT_MAX_LENGTH,
+        description="Preferred model, free text for the harness; 'inherit' = same as the orchestrator",
+    )
+    effort: str | None = Field(
+        "inherit",
+        max_length=HINT_MAX_LENGTH,
+        description="Preferred effort level, free text for the harness; 'inherit' = same as the orchestrator",
+    )
+    tools: str | None = Field(None, max_length=TOOLS_MAX_LENGTH, description="Tool selection (null = inherit all)")
     behavioral_rules: list[str] | None = Field(default_factory=list)
     success_criteria: list[str] | None = Field(default_factory=list)
     tags: list[str] | None = Field(default_factory=list)
     is_default: bool = Field(default=False, description="Set as default for this role")
-    is_active: bool = Field(default=False, description="Set template as active")
-    # Legacy fields
-    category: str | None = Field(None, description="Template category (deprecated)")
+    is_active: bool = Field(default=False, description="Deprecated, inert: the per-product switch is the control")
+    category: str | None = Field(None, max_length=CATEGORY_MAX_LENGTH, description="Template category (deprecated)")
 
     @field_validator("user_instructions")
     @classmethod
     def validate_user_instructions_size(cls, v: str | None) -> str | None:
-        """Validate user instructions size (max 50KB)"""
         if v and len(v.encode("utf-8")) > MAX_USER_INSTRUCTIONS_SIZE:
             raise ValueError("User instructions exceed 50KB limit")
         return v
+
+    @field_validator("model", "effort")
+    @classmethod
+    def normalize_hint_fields(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return v.strip() or "inherit"
 
 
 class TemplateUpdate(BaseModel):
     """Request model for updating a template"""
 
-    # Editable fields
     system_instructions: str | None = Field(
         None, description="System instructions are read-only via API; presence triggers a 403"
     )
     user_instructions: str | None = Field(None, description="User-customizable instructions (max 50KB)")
-    name: str | None = None
-    role: str | None = None
-    cli_tool: str | None = None
-    background_color: str | None = None
+    name: str | None = Field(None, max_length=NAME_MAX_LENGTH)
+    role: str | None = Field(None, max_length=ROLE_MAX_LENGTH)
+    cli_tool: str | None = Field(None, max_length=CLI_TOOL_MAX_LENGTH)
+    background_color: str | None = Field(None, max_length=BACKGROUND_COLOR_MAX_LENGTH)
     description: str | None = None
-    model: str | None = None
+    model: str | None = Field(None, max_length=HINT_MAX_LENGTH)
+    effort: str | None = Field(None, max_length=HINT_MAX_LENGTH)
     behavioral_rules: list[str] | None = None
     success_criteria: list[str] | None = None
     tags: list[str] | None = None
     is_default: bool | None = None
     is_active: bool | None = None
-    user_managed_export: bool | None = None
 
     @field_validator("user_instructions")
     @classmethod
     def validate_user_instructions_size(cls, v: str | None) -> str | None:
-        """Validate user instructions size (max 50KB)"""
         if v and len(v.encode("utf-8")) > MAX_USER_INSTRUCTIONS_SIZE:
             raise ValueError("User instructions exceed 50KB limit")
         return v
+
+    @field_validator("model", "effort")
+    @classmethod
+    def normalize_hint_fields(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return v.strip() or "inherit"
 
 
 class TemplateResponse(BaseModel):
@@ -93,10 +121,12 @@ class TemplateResponse(BaseModel):
     cli_tool: str
     background_color: str | None
     description: str | None
-    # Dual fields (v3.1+)
     system_instructions: str = Field(..., description="Read-only MCP coordination instructions")
     user_instructions: str | None = Field(None, description="User-customizable instructions")
     model: str | None
+    effort: str | None = Field(
+        None, description="Preferred effort level (free text; 'inherit' = same as the orchestrator)"
+    )
     tools: str | None
     behavioral_rules: list[str]
     success_criteria: list[str]
@@ -105,11 +135,6 @@ class TemplateResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime | None
-    # Export tracking (Handover 0335)
-    last_exported_at: datetime | None = Field(default=None, description="Timestamp of last export to CLI")
-    may_be_stale: bool = Field(default=False, description="True if template modified after last export")
-    user_managed_export: bool = Field(default=False, description="User dismissed staleness manually")
-    # Legacy fields
     category: str | None = None
     variables: list[str] = []
     version: str = "1.0.0"

@@ -3,34 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6186: project-less conductor STAGING fetch + rewritten CH_CHAIN_STAGING.
-
-Regression at the failing layer (MissionOrchestrationService.get_staging_instructions
-for a project-less conductor) plus the prose contract of the rewritten chapter:
-
-1. test_projectless_conductor_staging_returns_real_protocol
-   get_staging_instructions for the dedicated, project-less conductor returns the
-   rewritten CH_CHAIN_STAGING (per-project-missions + sub-orch-jobs script + the
-   conductor's OWN job_id) under orchestrator_protocol, NOT the STOP
-   "USE_RUNTIME_MISSION" placeholder.
-
-2. test_non_conductor_projectless_orphan_falls_back_to_stop
-   A project-less orchestrator that is NOT the live conductor of any active run
-   still gets the STOP-shaped directive (the fallback is preserved).
-
-3. test_chain_staging_prose_contract (Task 4 prose checks)
-   The rewritten CH_CHAIN_STAGING contains no TERMINATE_CHAIN, no head-agent
-   "spawn"/"SPAWN its agents" language; complete_job is the last call; head is
-   symmetric.
-
-4. test_solo_staging_render_byte_identical_deletion (DELETION TEST)
-   A solo project's staging render contains none of the chain chapters and is
-   byte-identical to the no-chain render (the chain chapters render only for the
-   conductor).
-
-Parallel-safe: DB-touching tests use db_session (TransactionalTestContext). No
-module-level mutable state. Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -49,16 +21,7 @@ from giljo_mcp.tenant import TenantManager
 
 
 async def _seed_project(session: AsyncSession, tenant_key: str, product_id: str | None = None) -> str:
-    """Seed a chain-member project under a real product (so its product_id resolves).
-
-    BE-6177 (UNIT 1): the conductor reads deep via get_context(product_id=...), so the
-    head project must carry a real product_id. When product_id is None a fresh product
-    is minted; pass the same product_id to put several projects under one product.
-    """
     if product_id is None:
-        # is_active=False so seeding several projects (each its own product) in one
-        # tenant does not violate idx_product_single_active_per_tenant (only one
-        # ACTIVE product per tenant). The deep-read handle only needs a valid FK.
         product = Product(
             id=str(uuid.uuid4()),
             name=f"BE-6186 Product {uuid.uuid4().hex[:6]}",
@@ -107,9 +70,6 @@ def _mission_svc(session: AsyncSession) -> MissionService:
     return MissionService(db_manager=None, tenant_manager=TenantManager(), test_session=session)
 
 
-# ---------------------------------------------------------------------------
-# 1. project-less conductor get_staging_instructions returns the real protocol
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -129,28 +89,21 @@ async def test_projectless_conductor_staging_returns_real_protocol(db_session: A
 
     resp = await _mission_svc(db_session).get_staging_instructions(conductor_job_id, tenant)
 
-    # Not the STOP placeholder.
     assert resp.get("action") != "USE_RUNTIME_MISSION", "conductor must get the real staging protocol, not the STOP"
     assert resp.get("status") == "CHAIN_CONDUCTOR_STAGING"
 
     protocol = resp["orchestrator_protocol"]
     staging = protocol["ch_chain_staging"]
     assert "ch_capability" in protocol, "CH_CAPABILITY must accompany the staging chapter"
-    # BE-6177 (UNIT 1): the script still mints each project's sub-orchestrator
-    # (stage_project) but writes ONLY the chain mission — NEVER each project's mission.
     assert "stage_project" in staging, "the script must stage each project's sub-orchestrator"
     assert "update_project_mission" not in staging, (
         "the conductor writes ONLY the chain mission; it must NOT write each project's mission"
     )
-    # The conductor reads deep before planning (get_context) so its contracts are concrete.
     assert "get_context" in staging, "the conductor must be told to read deep via get_context before planning"
-    # The conductor's OWN job_id appears (its write channel for the chain mission).
     assert conductor_job_id in staging, "the conductor's own job_id must be threaded into CH_CHAIN_STAGING"
     assert f'update_job_mission(job_id="{conductor_job_id}"' in staging, (
         "the chain mission is written to the conductor's OWN job via update_job_mission"
     )
-    # Identity surfaces the conductor's own job_id, project_id None, and the deep-read
-    # product_id handle (head project's product_id; here both seeded projects share it).
     assert resp["identity"]["job_id"] == conductor_job_id
     assert resp["identity"]["project_id"] is None
     assert resp["identity"]["product_id"] is not None, (
@@ -159,17 +112,12 @@ async def test_projectless_conductor_staging_returns_real_protocol(db_session: A
     assert resp["identity"]["product_id"] in staging, "the resolved product_id must be threaded into the read-deep step"
 
 
-# ---------------------------------------------------------------------------
-# 2. a project-less orchestrator that is NOT a live conductor falls back to STOP
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_non_conductor_projectless_orphan_falls_back_to_stop(db_session: AsyncSession) -> None:
-    """A project-less orchestrator with no active conductor run still gets the STOP."""
     tenant = TenantManager.generate_tenant_key()
 
-    # Hand-mint a project-less orchestrator job that is NOT any run's conductor.
     job_id = str(uuid.uuid4())
     agent_id = str(uuid.uuid4())
     db_session.add(
@@ -203,9 +151,6 @@ async def test_non_conductor_projectless_orphan_falls_back_to_stop(db_session: A
     assert resp.get("status") == "CHAIN_CONDUCTOR"
 
 
-# ---------------------------------------------------------------------------
-# 3. CH_CHAIN_STAGING prose contract (Task 4 assertions)
-# ---------------------------------------------------------------------------
 
 
 def test_chain_staging_prose_contract() -> None:
@@ -221,50 +166,26 @@ def test_chain_staging_prose_contract() -> None:
     low = chapter.lower()
 
     assert "terminate_chain" not in low, "no TERMINATE_CHAIN prose in the staging chapter"
-    # No head-agent spawn language (the dropped dual-hat). The conductor spawns no agents.
     assert "spawn its agents" not in low, "no 'SPAWN its agents' head-agent language"
     assert "spawn no agents" in low, "the conductor must be told to spawn NO agents for any project"
-    # complete_job is described as the last call.
     assert "complete_job" in low and "last" in low, "complete_job must be the LAST call"
-    # The head is symmetric, not special.
     assert "symmetric" in low and "not special" in low, "the head must be stated symmetric, NOT special"
-    # The conductor's job_id is threaded in.
     assert "job-77" in chapter
 
-    # BE-6177 (UNIT 1): the conductor mints each project's sub-orchestrator
-    # (stage_project) but writes ONLY the chain mission — it NEVER writes a project
-    # mission, so update_project_mission must be ABSENT from the staging script.
     assert "stage_project" in chapter, "the conductor still mints each project's sub-orchestrator"
     assert "update_project_mission" not in chapter, (
         "the conductor writes ONLY the chain mission; update_project_mission must be gone"
     )
-    # The conductor reads deep before planning (get_context with the threaded product_id).
     assert "get_context" in chapter, "the read-deep step (get_context) must be present"
     assert "prod-x" in chapter, "the product_id must be threaded into the read-deep step"
-    # The chain mission carries a structured per-project contract (consumes/produces/must leave).
     assert "consumes" in low, "the per-project contract must name what each project consumes"
     assert "produces" in low, "the per-project contract must name what each project produces"
     assert "must leave" in low, "the per-project contract must name the invariants each project leaves"
 
 
-# ---------------------------------------------------------------------------
-# 3b. BE-6187: CH_CHAIN_STAGING Step 0 stands up the Hub thread (conductor prose)
-# ---------------------------------------------------------------------------
 
 
 def test_ch_chain_staging_includes_hub_thread_step() -> None:
-    """BE-6187: the conductor creates the Hub thread itself as Step 0 (create_thread).
-
-    BE-9291 DELIBERATELY CHANGED what this asserts. It used to require the chapter to
-    name ``list_threads`` and to carry the run_id "so sub-orchs can find the Hub
-    thread" — because discovery really did work by substring-matching the run_id out of
-    the subject. Discovery now runs on ``comm_threads.sequence_run_id``, a real FK, so
-    naming ``list_threads`` here would pin a mechanism that no longer exists.
-
-    The INTENT is unchanged and still enforced: the chapter must name a discovery path,
-    and the run_id must still appear — but now as the value the conductor STAMPS on the
-    thread, not as a substring anyone parses back out.
-    """
     from giljo_mcp.services.protocol_sections.chapters_chain import _build_ch_chain_staging
 
     chapter = _build_ch_chain_staging(
@@ -272,28 +193,19 @@ def test_ch_chain_staging_includes_hub_thread_step() -> None:
     )
     low = chapter.lower()
 
-    # The conductor stands up the Hub thread itself (no server-side creation).
     assert "create_thread" in chapter, "the conductor must be told to create_thread for the Hub"
-    # It must STAMP the link -- that is the only thing marking the thread as this run's hub.
     assert "sequence_run_id" in chapter, "the conductor must be told to stamp sequence_run_id"
     assert "run-test" in chapter, "the run_id must appear as the value to stamp"
-    # And the chapter must name the discovery path sub-orchs actually use.
     assert "hub_thread_id" in chapter, "the discovery path (get_context chain) must be named"
     assert "list_threads" not in chapter, "the retired substring-discovery path must not be re-introduced here"
-    # Existing prose contracts still hold.
     assert "terminate_chain" not in low, "no TERMINATE_CHAIN prose"
     assert "symmetric" in low and "not special" in low, "head stays symmetric"
     assert "complete_job" in low and "last" in low, "complete_job must be the LAST call"
 
 
-# ---------------------------------------------------------------------------
-# 3c. BE-6187: conductor staging tools expose create_thread + join_thread
-# ---------------------------------------------------------------------------
 
 
 def test_conductor_staging_tools_include_thread_tools() -> None:
-    """BE-6187: build_conductor_staging_response advertises create_thread + join_thread
-    so the conductor can stand up and join the Hub thread during staging."""
     from giljo_mcp.services.conductor_staging_builder import build_conductor_staging_response
     from giljo_mcp.services.sequence_chain_context import ChainContext
 
@@ -313,15 +225,9 @@ def test_conductor_staging_tools_include_thread_tools() -> None:
     assert "join_thread" in tools, "the conductor must be able to join the Hub thread"
 
 
-# ---------------------------------------------------------------------------
-# 4. DELETION TEST: a solo project's staging render is byte-identical
-# ---------------------------------------------------------------------------
 
 
 def test_solo_staging_render_byte_identical_deletion() -> None:
-    """A solo (chain_ctx=None) staging render carries none of the chain chapters and
-    is byte-identical to the no-chain render; the chain chapters render ONLY for the
-    conductor."""
     from giljo_mcp.services.protocol_builder import _build_orchestrator_protocol
 
     common = {

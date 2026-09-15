@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-ProjectDeletionService - Extracted from ProjectService (Handover 0769).
-
-Handles project deletion and purge operations:
-- delete_project (soft delete)
-- nuclear_delete_project (hard delete)
-- purge_all_deleted_projects, purge_expired_deleted_projects
-- restore_project
-"""
 
 import logging
 from datetime import UTC, datetime
@@ -42,7 +33,6 @@ logger = logging.getLogger(__name__)
 
 
 class ProjectDeletionService:
-    """Service for project deletion and purge operations."""
 
     def __init__(
         self,
@@ -59,29 +49,11 @@ class ProjectDeletionService:
         self._repo = ProjectRepository()
 
     def _get_session(self, tenant_key: str | None = None):
-        """Yield a tenant-scoped DB session, honoring an injected test session (shared helper, BE-8000d)."""
         return optional_tenant_session(
             self.db_manager, tenant_key or self.tenant_manager.get_current_tenant(), self._test_session
         )
 
     async def delete_project(self, project_id: str) -> SoftDeleteResult:
-        """
-        Soft delete a project.
-
-        Sets status='deleted' and deleted_at timestamp for the current tenant's project.
-        Actual purge is handled separately by purge_expired_deleted_projects().
-
-        Args:
-            project_id: Project UUID
-
-        Returns:
-            Deletion result dictionary with deleted_at timestamp and cancelled_jobs count
-
-        Raises:
-            ValidationError: No tenant context available
-            ResourceNotFoundError: Project not found or already deleted
-        """
-        # Get current tenant from context
         tenant_key = self.tenant_manager.get_current_tenant()
         if not tenant_key:
             raise ValidationError(message="No tenant context available", context={"project_id": project_id})
@@ -100,7 +72,6 @@ class ProjectDeletionService:
             project.deleted_at = now
             project.updated_at = now
 
-            # Cascade soft delete to agent jobs - cancel all executions for this project (migrated to AgentExecution - Handover 0367a)
             executions = await self._repo.get_active_executions_for_project(session, tenant_key, project_id)
 
             decommissioned_jobs_count = 0
@@ -117,7 +88,6 @@ class ProjectDeletionService:
                 f"Decommissioned {decommissioned_jobs_count} agent jobs."
             )
 
-            # Broadcast status change to all browsers
             if self._websocket_manager:
                 try:
                     await self._websocket_manager.broadcast_project_update(
@@ -135,10 +105,6 @@ class ProjectDeletionService:
 
             deleted_at_iso = project.deleted_at.isoformat() if project.deleted_at else None
 
-        # FE-6175 (RC2): a deleted project must not linger as a member of an active
-        # sequence_run, or the chain views storm 404s fetching its dead members.
-        # Drop it from any active run (runs its own session — after the delete
-        # session above has committed + closed).
         await self._cancel_sequence_membership(project_id, tenant_key)
 
         return SoftDeleteResult(
@@ -148,15 +114,6 @@ class ProjectDeletionService:
         )
 
     async def _cancel_sequence_membership(self, project_id: str, tenant_key: str) -> None:
-        """Drop a just-deleted project from any active sequence_run (FE-6175 RC2).
-
-        Reuses the EXISTING SequenceRunService writers — no new method/endpoint:
-          * pending run -> ``remove_member`` (which already dissolves the run at
-            reduce-to-one), mirroring the /roadmap + hamburger Unlink semantics;
-          * running/stalled (or otherwise ultralocked, where ``remove_member``
-            refuses) -> ``release(mode="cancel")`` to end the whole run.
-        Best-effort: a cascade failure must never block the soft-delete itself.
-        """
         from giljo_mcp.exceptions import ValidationError as _ValidationError
         from giljo_mcp.services.sequence_run_service import SequenceRunService
 
@@ -176,8 +133,6 @@ class ProjectDeletionService:
             try:
                 await seq_service.remove_member(run_id=run_id, project_id=project_id, tenant_key=tenant_key)
             except _ValidationError:
-                # Ultralocked pending run (a member is staging_complete) — remove_member
-                # refuses, so end the whole run instead.
                 await seq_service.release(run_id=run_id, mode="cancel", tenant_key=tenant_key)
         except Exception as cascade_error:  # noqa: BLE001 - cascade must not block the delete
             self._logger.warning(
@@ -187,48 +142,11 @@ class ProjectDeletionService:
     async def nuclear_delete_project(
         self, project_id: str, websocket_manager: Any | None = None
     ) -> NuclearDeleteResult:
-        """
-        Immediately and permanently delete a project and ALL related data (nuclear delete).
-
-        This method performs complete cascade deletion of:
-        - Agent jobs (AgentJob + AgentExecution)
-        - Tasks
-        - Messages
-        - 360 memory entries (marked as deleted)
-        - The project itself
-
-        Special handling:
-        - Deactivates project if it's currently active
-        - Broadcasts WebSocket events for real-time UI cleanup
-        - Ensures multi-tenant isolation (only deletes for current tenant)
-        - Fully transactional (rollback on error)
-
-        Args:
-            project_id: Project UUID
-            websocket_manager: Optional WebSocket manager for real-time updates
-
-        Returns:
-            Deletion details dictionary:
-            - message: str
-            - deleted_counts: dict with counts of each deleted entity type
-            - project_name: str (name of deleted project)
-
-        Raises:
-            ValidationError: No tenant context available
-            ResourceNotFoundError: Project not found or access denied
-
-        Example:
-            >>> result = await service.nuclear_delete_project("abc-123")
-            >>> print(result["deleted_counts"])
-            {"agents": 5, "tasks": 12, "messages": 48, ...}
-        """
-        # Get current tenant from context
         tenant_key = self.tenant_manager.get_current_tenant()
         if not tenant_key:
             raise ValidationError(message="No tenant context available", context={"project_id": project_id})
 
         async with self._get_session(tenant_key) as session:
-            # Fetch project with tenant validation
             project = await self._repo.get_by_id(session, tenant_key, project_id)
 
             if not project:
@@ -240,52 +158,35 @@ class ProjectDeletionService:
             project_name = project.name
             project_product_id = project.product_id
 
-            # Deactivate project if it's active (to avoid constraint issues)
             if project.status == ProjectStatus.ACTIVE:
                 project.status = ProjectStatus.INACTIVE
                 project.updated_at = datetime.now(UTC)
                 await self._repo.flush(session)
                 self._logger.info(f"Deactivated project {project_id} before nuclear delete")
 
-            # Initialize deletion counters
             deleted_counts = {
                 "agent_jobs": 0,
                 "tasks": 0,
                 "messages": 0,
             }
 
-            # BE-9144: bulk-delete each collection in one statement instead of
-            # SELECT-then-per-row ORM delete (was N+1 per collection).
-            # Delete user approvals FIRST: user_approvals has RESTRICT FKs to
-            # agent_executions, agent_jobs AND projects (BE-5029), so it must be
-            # cleared before the cascade below or the delete is blocked with a
-            # RestrictViolationError and the project is never purged (BE-6238).
             deleted_counts["user_approvals"] = await self._repo.bulk_delete_user_approvals_for_project(
                 session, tenant_key, project_id
             )
 
-            # Delete agent jobs + their executions (executions cascade is ORM-level,
-            # so the repo deletes executions first — see bulk_delete_agent_jobs_for_project).
             deleted_counts["agent_jobs"] = await self._repo.bulk_delete_agent_jobs_for_project(
                 session, tenant_key, project_id
             )
 
-            # Tasks stay per-row: the self-referential parent_task_id FK has no DB
-            # ondelete and the ORM 'subtasks' relationship nullifies rather than
-            # cascades, so a blind bulk DELETE could diverge on a cross-project
-            # subtask (a behavior change, not a perf win).
             tasks = await self._repo.get_tasks_for_project(session, tenant_key, project_id)
             for task in tasks:
                 await self._repo.delete_entity(session, task)
             deleted_counts["tasks"] = len(tasks)
 
-            # Delete messages (recipients/acknowledgments/completions cascade at the DB level).
             deleted_counts["messages"] = await self._repo.bulk_delete_messages_for_project(
                 session, tenant_key, project_id
             )
 
-            # Mark 360 memory entries as deleted by user (preserve historical reference)
-            # Handover 0390b: Use repository instead of JSONB mutation
             memory_entries_marked = 0
             if project.product_id:
                 from giljo_mcp.repositories.product_memory_repository import ProductMemoryRepository
@@ -304,10 +205,8 @@ class ProjectDeletionService:
 
             deleted_counts["memory_entries_marked"] = memory_entries_marked
 
-            # Finally, delete the project itself
             await self._repo.delete_entity(session, project)
 
-            # Commit transaction
             await session.commit()
 
             self._logger.info(
@@ -318,7 +217,6 @@ class ProjectDeletionService:
                 f"{deleted_counts['memory_entries_marked']} 360 memory entries marked"
             )
 
-            # Broadcast WebSocket event for real-time UI cleanup
             if websocket_manager:
                 try:
                     await websocket_manager.broadcast_project_update(
@@ -341,7 +239,6 @@ class ProjectDeletionService:
             )
 
     async def _purge_project_records(self, session: AsyncSession, project: Project) -> dict[str, Any]:
-        """Cascade delete a soft-deleted project and its child records."""
         project_info = {
             "id": project.id,
             "name": project.name,
@@ -349,8 +246,6 @@ class ProjectDeletionService:
             "deleted_at": project.deleted_at.isoformat() if project.deleted_at else None,
         }
 
-        # Mark 360 memory entries as deleted by user (preserve historical reference)
-        # Uses ProductMemoryRepository for table-based operations (Handover 0390c)
         if project.product_id:
             from giljo_mcp.repositories.product_memory_repository import ProductMemoryRepository
 
@@ -363,16 +258,12 @@ class ProjectDeletionService:
             if deleted_count > 0:
                 self._logger.info(f"Marked {deleted_count} memory entries as deleted for project {project.id}")
 
-        # TENANT ISOLATION: All cascade deletes filter by tenant_key
         tenant_key = project.tenant_key
 
-        # Delete user approvals first: RESTRICT FKs to agent_executions, agent_jobs
-        # AND projects (BE-5029) block the cascade below unless cleared first (BE-6238).
         user_approvals = await self._repo.get_user_approvals_for_project(session, tenant_key, project.id)
         for approval in user_approvals:
             await self._repo.delete_entity(session, approval)
 
-        # Delete agent jobs (migrated to AgentJob - Handover 0367a)
         agent_jobs = await self._repo.get_agent_jobs_for_project(session, tenant_key, project.id)
         for job in agent_jobs:
             await self._repo.delete_entity(session, job)
@@ -389,22 +280,6 @@ class ProjectDeletionService:
         return project_info
 
     async def purge_all_deleted_projects(self, product_id: str | None = None) -> ProjectPurgeResult:
-        """
-        Nuclear delete all soft-deleted projects for the current tenant,
-        optionally scoped to a product.
-
-        Uses nuclear_delete_project for each project to ensure complete removal.
-        Called when user clicks "Delete All" button in deleted projects modal.
-
-        Args:
-            product_id: Optional product ID to scope purge
-
-        Returns:
-            Purge result dictionary with purged_count and project details list
-
-        Raises:
-            ValidationError: No tenant context available
-        """
         tenant_key = self.tenant_manager.get_current_tenant()
         if not tenant_key:
             raise ValidationError(message="No tenant context available", context={})
@@ -415,7 +290,6 @@ class ProjectDeletionService:
             if not deleted_projects:
                 return ProjectPurgeResult(purged_count=0, projects=[])
 
-        # Use nuclear delete for each project
         purged_projects = []
         for project in deleted_projects:
             try:
@@ -440,38 +314,6 @@ class ProjectDeletionService:
         return ProjectPurgeResult(purged_count=len(purged_projects), projects=purged_projects)
 
     async def purge_expired_deleted_projects(self, days_before_purge: int = 10) -> ProjectPurgeResult:
-        """
-        Nuclear delete projects deleted more than specified days ago.
-
-        Uses nuclear_delete_project to ensure complete removal of expired projects.
-        This function performs COMPLETE cascade deletion:
-        1. Deactivates if active
-        2. Deletes ALL child agents (AgentJob + AgentExecution)
-        3. Deletes ALL tasks
-        4. Deletes ALL messages
-        5. Deletes ALL context indexes
-        6. Deletes ALL large document indexes
-        7. Deletes ALL sessions
-        8. Deletes ALL vision documents
-        9. Deletes the project record
-
-        Called from startup.py on server start for automatic cleanup.
-
-        Args:
-            days_before_purge: Number of days before permanent deletion (default: 10)
-
-        Returns:
-            ProjectPurgeResult: Pydantic model with:
-                - purged_count: int - Number of projects purged
-                - projects: list[dict] - Details of purged projects
-
-        Raises:
-            BaseGiljoError: Database not available
-
-        Example:
-            >>> result = await service.purge_expired_deleted_projects()
-            >>> print(f"Nuclear purged {result.purged_count} expired projects")
-        """
         from datetime import timedelta
 
         if not self.db_manager:
@@ -479,7 +321,6 @@ class ProjectDeletionService:
             raise BaseGiljoError(message="Database not available", context={})
 
         async with self._get_session() as session:
-            # Find projects deleted more than specified days ago
             cutoff_date = datetime.now(UTC) - timedelta(days=days_before_purge)
 
             expired_projects = await self._repo.get_expired_deleted_projects(session, cutoff_date)
@@ -490,7 +331,6 @@ class ProjectDeletionService:
                 )
                 return ProjectPurgeResult(purged_count=0, projects=[])
 
-        # Use nuclear delete for each expired project
         purged_projects = []
         for project in expired_projects:
             try:
@@ -515,34 +355,7 @@ class ProjectDeletionService:
         return ProjectPurgeResult(purged_count=len(purged_projects), projects=purged_projects)
 
     async def restore_project(self, project_id: str, tenant_key: str) -> OperationResult:
-        """
-        Restore a completed, cancelled, or soft-deleted project to inactive status.
-
-        BE-6049b serial handling (decision C):
-        - A **soft-deleted** project freed its serial the moment it was deleted
-          (the global ``max+1`` counter excludes ``deleted_at IS NOT NULL`` rows),
-          so its old number may already have been reused. On restore it is
-          re-assigned a FRESH continue-upward serial via the global counter — the
-          old number is never reused.
-        - A **cancelled or completed** project never left the active pool (its
-          serial was never freed), so it KEEPS its existing number.
-
-        Args:
-            project_id: Project UUID
-            tenant_key: Tenant key for multi-tenant isolation
-
-        Returns:
-            Success message dictionary
-
-        Raises:
-            ResourceNotFoundError: Project not found or access denied
-
-        Example:
-            >>> result = await service.restore_project("abc-123", "tenant-key-456")
-        """
         async with self._get_session(tenant_key) as session:
-            # TENANT ISOLATION: get_by_id filters by both project_id AND tenant_key,
-            # so a cross-tenant project_id resolves to None -> ResourceNotFoundError.
             project = await self._repo.get_by_id(session, tenant_key, project_id)
 
             if project is None:
@@ -551,11 +364,6 @@ class ProjectDeletionService:
                     context={"project_id": project_id, "tenant_key": tenant_key},
                 )
 
-            # Only a soft-deleted project freed its serial; re-allocate a fresh
-            # continue-upward number via the global counter (decision C — the old
-            # number is never reused). No cap here: the assignment cap lives on the
-            # create paths (project_service/task_service); a restore continues the
-            # product's existing high-water mark, which display tolerates (BE-6049a).
             if project.deleted_at is not None:
                 await self._repo.lock_rows_for_series_shared(session, tenant_key, project.product_id)
                 fresh_series = await self._repo.get_next_series_number_shared(session, tenant_key, project.product_id)

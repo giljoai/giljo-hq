@@ -3,28 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9414 — a long Hub message must still cross the cross-worker broker.
-
-Edition Scope: Both (the emitter and the broker are CE code; multi-worker is the
-SaaS deployment shape).
-
-The defect, measured live on prod: ``broadcast_thread_message`` put the whole
-message body on the wire, so any post over ~7 KB produced a NOTIFY payload past
-the pg_notify 7999-byte cap. BE-3008c's guard raised (correctly), the caller
-swallowed it as a WS006 warning (correctly — the local send already happened),
-and every session on a DIFFERENT uvicorn worker silently never saw the message.
-The guard was right; the emitter never adopted ids-not-blobs.
-
-Tested AT THE FAILING LAYER: two real ``WebSocketManager`` + real
-``PostgresNotifyWebSocketEventBroker`` pairs over one routing fake cluster, so a
-publish on worker A has to survive the byte cap and reach a socket on worker B.
-The assertion is on DELIVERY, not on "no exception raised" — the production
-failure is swallowed, so an exception-based assertion would pass on the broken
-code for the wrong reason.
-
-Parallel-safe: no DB, no module-level mutable state; asyncpg is replaced with an
-in-test fake via monkeypatch.
-"""
 
 from __future__ import annotations
 
@@ -41,23 +19,12 @@ from api.websocket import WebSocketManager
 
 CHANNEL = "giljo_ws_events"
 
-# The most expensive character the 20,000-char content cap admits. json.dumps runs
-# ensure_ascii=True, so an astral character is escaped as a SURROGATE PAIR —
-# ``\udbxx\udcxx`` — 12 bytes on the wire for one source character. Measured, not
-# assumed: this is why the bound is computed in bytes and never in characters.
 WORST_CHAR = "\U0001f600"
 CONTENT_CAP_CHARS = 20_000
 
-# Headroom the boundary pin requires between the worst-case envelope and the cap.
-# Everything above the emitter (ws wrapper + broker wrapper) measured 316 bytes at
-# maximal ids; this leaves room for that to grow without silently re-approaching
-# the cliff.
 _REQUIRED_HEADROOM_BYTES = 1_000
 
 
-# ---------------------------------------------------------------------------
-# A fake asyncpg that ROUTES pg_notify between brokers (a one-node cluster)
-# ---------------------------------------------------------------------------
 
 
 class _FakePostgresError(Exception):
@@ -102,7 +69,6 @@ class _RoutingPoolConn:
         self._cluster = cluster
 
     async def execute(self, sql: str, *args) -> None:
-        # The broker only ever issues SELECT pg_notify($1, $2).
         channel, payload = args
         self._cluster.published.append(payload)
         for conn in list(self._cluster.listen_conns):
@@ -133,13 +99,6 @@ class _RoutingPool:
 
 
 class _RoutingFakeAsyncpg:
-    """asyncpg stand-in whose NOTIFY reaches every LISTEN connection.
-
-    The BE-3008c harness records what a pool executed; it does not deliver it
-    anywhere. Cross-worker delivery is the whole subject here, so this one
-    actually routes: a publish from any worker's pool fans out to every other
-    worker's listener, which is what a real single-node cluster does.
-    """
 
     PostgresError = _FakePostgresError
 
@@ -157,7 +116,6 @@ class _RoutingFakeAsyncpg:
 
 
 class _RecordingWS:
-    """A subscribed browser socket on the receiving worker."""
 
     def __init__(self) -> None:
         self.sent: list[str] = []
@@ -178,11 +136,6 @@ def cluster(monkeypatch) -> _RoutingFakeAsyncpg:
 
 @pytest.fixture
 def multiworker(monkeypatch) -> None:
-    """Cross-worker publishing is disabled at worker_count == 1 (m15).
-
-    That is exactly why single-worker CE never hit this defect and every test
-    stayed green — so the failing shape only exists with this forced on.
-    """
     import api.startup.database as db_startup
 
     monkeypatch.setattr(db_startup, "_worker_count", lambda: 2)
@@ -225,19 +178,9 @@ async def _post(manager: WebSocketManager, content: str, **overrides) -> None:
     await broadcast_thread_message(manager, "tk_be9414", **kwargs)
 
 
-# ---------------------------------------------------------------------------
-# DoD 1 — fail-first at the failing layer: delivery across workers
-# ---------------------------------------------------------------------------
 
 
 async def test_a_long_hub_message_reaches_a_session_on_another_worker(cluster, multiworker):
-    """The prod defect, end to end: worker A posts, worker B's browser must see it.
-
-    ~9 KB of content puts the envelope past the 7999-byte cap, which is the size
-    range the prod logs recorded (8307 / 8701 / 9826 / 10286 bytes). Before the
-    fix the publish raises, api/websocket.py swallows it as WS006, and this
-    assertion fails with an empty socket — the silent realtime gap itself.
-    """
     manager_a, broker_a = await _worker(cluster)
     manager_b, broker_b = await _worker(cluster)
     ws_b = _RecordingWS()
@@ -261,7 +204,6 @@ async def test_a_long_hub_message_reaches_a_session_on_another_worker(cluster, m
 
 
 async def test_the_published_payload_stays_under_the_pg_notify_cap(cluster, multiworker):
-    """The guard must never be the thing that stops it — the emitter fits first."""
     manager_a, broker_a = await _worker(cluster)
     try:
         await _post(manager_a, "x" * 9_000)
@@ -275,13 +217,6 @@ async def test_the_published_payload_stays_under_the_pg_notify_cap(cluster, mult
 
 
 async def test_a_truncated_delivery_names_the_message_so_the_receiver_can_fetch_it(cluster, multiworker):
-    """ids-not-blobs: what does not fit must still be findable.
-
-    A receiver that gets an excerpt has to be able to say WHICH message it holds
-    an excerpt of, and that it holds one at all. Without the flag the client
-    cannot tell a shortened body from a short body, and would render the excerpt
-    forever.
-    """
     manager_a, broker_a = await _worker(cluster)
     manager_b, broker_b = await _worker(cluster)
     ws_b = _RecordingWS()
@@ -305,7 +240,6 @@ async def test_a_truncated_delivery_names_the_message_so_the_receiver_can_fetch_
 
 
 async def test_a_normal_length_message_is_delivered_whole_and_unflagged(cluster, multiworker):
-    """Regression guard: the fix must not rewrite the 99% that already worked."""
     manager_a, broker_a = await _worker(cluster)
     manager_b, broker_b = await _worker(cluster)
     ws_b = _RecordingWS()
@@ -326,20 +260,9 @@ async def test_a_normal_length_message_is_delivered_whole_and_unflagged(cluster,
         await broker_b.stop()
 
 
-# ---------------------------------------------------------------------------
-# DoD 2 — boundary math, pinned as a test rather than asserted in a comment
-# ---------------------------------------------------------------------------
 
 
 async def test_worst_case_envelope_fits_the_cap_with_stated_headroom(cluster, multiworker):
-    """The 20,000-char cap at 12 bytes/char, with maximal ids, still fits.
-
-    Worst case on every axis the service's own caps permit: content at
-    MCP_MESSAGE_MAX entirely in astral characters (surrogate-pair escaped, the
-    most expensive encoding json.dumps can produce), a 64-char tenant_key,
-    64-char ids, a 200-char display name, and requires_action True. This is the
-    number that makes the fix a bound rather than a hope.
-    """
     manager_a, broker_a = await _worker(cluster)
     try:
         await _post(
@@ -370,20 +293,6 @@ async def test_worst_case_envelope_fits_the_cap_with_stated_headroom(cluster, mu
 
 
 async def test_the_excerpt_never_splits_a_character_in_half(cluster, multiworker):
-    """The excerpt must be valid TEXT, not valid-looking bytes.
-
-    The bound binary-searches CHARACTER prefixes, and a Python string slice cannot
-    land inside a code point. The obvious "optimisation" — slicing the encoded
-    bytes instead (``content.encode()[:n].decode(..., "replace")``) — is faster and
-    silently emits U+FFFD mid-word.
-
-    Deliberately CJK, not the emoji used elsewhere in this file. A byte slice of
-    pure 4-byte astral text happens to land on character boundaries anyway, so an
-    emoji fixture passes under that mutation and proves nothing; 3-byte characters
-    do not divide evenly and expose it. Measured, not assumed: the emoji version of
-    this test was written first, stayed green under the byte-slice mutation, and
-    was replaced.
-    """
     cjk = "中文" * (CONTENT_CAP_CHARS // 2)
     manager_a, broker_a = await _worker(cluster)
     manager_b, broker_b = await _worker(cluster)
@@ -406,12 +315,6 @@ async def test_the_excerpt_never_splits_a_character_in_half(cluster, multiworker
 
 
 async def test_the_worst_case_content_really_is_twelve_bytes_per_character(cluster):
-    """Pins the premise the budget rests on, so it cannot rot silently.
-
-    If json.dumps ever stopped escaping to ASCII, the per-character cost would
-    drop and the budget would merely be conservative. If some future field made
-    it WORSE than 12, the budget would be wrong and this fails first.
-    """
     one = len(json.dumps({"c": WORST_CHAR}).encode("utf-8"))
     two = len(json.dumps({"c": WORST_CHAR * 2}).encode("utf-8"))
     assert two - one == 12, "an astral character must cost 12 bytes as an escaped surrogate pair"

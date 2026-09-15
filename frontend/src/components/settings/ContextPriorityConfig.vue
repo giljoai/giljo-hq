@@ -17,7 +17,6 @@
     <v-card variant="flat" class="smooth-border context-card">
     <v-progress-linear v-if="loading || saving" indeterminate color="primary" height="2" />
     <v-card-text>
-      <!-- Git Integration Alert -->
       <v-alert
         v-if="!props.gitIntegrationEnabled"
         type="info"
@@ -39,14 +38,12 @@
         </div>
       </v-alert>
 
-      <!-- Section: Toggle Configuration -->
       <div class="mb-4">
         <div class="text-title-small font-weight-medium mb-2">Toggle Configuration (What to Fetch)</div>
         <v-alert type="info" variant="tonal" density="compact" class="mb-3">
           Toggle fields on/off to include or exclude from context.
         </v-alert>
 
-        <!-- Locked Product Info -->
         <div class="context-row locked-row d-flex justify-space-between align-center py-2">
           <div class="d-flex align-center flex-grow-1">
             <span class="text-body-medium context-label">Product Info</span>
@@ -61,7 +58,6 @@
           </v-chip>
         </div>
 
-        <!-- Locked Project Description -->
         <div class="context-row locked-row d-flex justify-space-between align-center py-2">
           <div class="d-flex align-center flex-grow-1">
             <span class="text-body-medium context-label">Project Description</span>
@@ -76,7 +72,6 @@
           </v-chip>
         </div>
 
-        <!-- Toggle-only Context Rows -->
         <div
           v-for="context in toggleOnlyContexts"
           :key="context.key"
@@ -98,21 +93,18 @@
 
       <v-divider class="my-4" />
 
-      <!-- Section: Depth Configuration -->
       <div>
         <div class="text-title-small font-weight-medium mb-2">Depth Configuration (How Much Detail)</div>
         <v-alert type="info" variant="tonal" density="compact" class="mb-3">
           Control the level of detail for context fields with adjustable depth.
         </v-alert>
 
-        <!-- Depth-controlled Context Rows -->
         <div
           v-for="context in depthControlledContexts"
           :key="context.key"
           class="context-row d-flex justify-space-between align-center py-2"
           :class="{ 'disabled-row': isContextDisabled(context.key) }"
         >
-          <!-- Context Name and Toggle -->
           <div class="d-flex align-center flex-grow-1">
             <span class="text-body-medium context-label">{{ context.label }}</span>
             <v-switch
@@ -139,7 +131,6 @@
             </v-tooltip>
           </div>
 
-          <!-- Depth/Count Pill Dropdown -->
           <v-menu
             v-model="depthMenuOpen[context.key]"
             :close-on-content-click="true"
@@ -201,7 +192,6 @@ const props = defineProps({
   },
 })
 
-// Context definitions (product_info + project_description locked as "Always On" above)
 const contexts = [
   { key: 'tech_stack', label: 'Tech Stack' },
   { key: 'architecture', label: 'Architecture' },
@@ -225,8 +215,6 @@ const contexts = [
   },
 ]
 
-// Map UI categories to backend categories for API requests
-// product_core and project_description are always on (not sent)
 const UI_TO_BACKEND_CATEGORY_MAP: Record<string, string> = {
   tech_stack: 'tech_stack',
   architecture: 'architecture',
@@ -236,7 +224,6 @@ const UI_TO_BACKEND_CATEGORY_MAP: Record<string, string> = {
   git_history: 'git_history',
 }
 
-// Reverse mapping: backend keys to frontend keys
 const BACKEND_TO_UI_CATEGORY_MAP: Record<string, string[]> = {
   tech_stack: ['tech_stack'],
   architecture: ['architecture'],
@@ -246,10 +233,8 @@ const BACKEND_TO_UI_CATEGORY_MAP: Record<string, string[]> = {
   git_history: ['git_history'],
 }
 
-// Menu state
 const depthMenuOpen = ref<Record<string, boolean>>({})
 
-// Get depth label for display
 function getDepthLabel(key: string): string {
   const value = getDepthValue(key)
   if (key === 'memory_360') {
@@ -263,7 +248,6 @@ function getDepthLabel(key: string): string {
   return String(value)
 }
 
-// State
 interface ContextConfig {
   enabled: boolean
   depth?: string
@@ -286,7 +270,6 @@ const fetchingVisionStats = ref(false)
 const visionStats = ref(null)
 const configLoaded = ref(false)
 
-// Computed properties to split contexts into two groups
 const toggleOnlyContexts = computed(() => {
   return contexts.filter(c => !c.options && c.key !== 'vision_documents')
 })
@@ -295,7 +278,6 @@ const depthControlledContexts = computed(() => {
   return contexts.filter(c => c.options || c.key === 'vision_documents')
 })
 
-// Methods
 function toggleContext(key: string) {
   config.value[key].enabled = !config.value[key].enabled
   saveConfig()
@@ -369,17 +351,14 @@ function navigateToIntegrations() {
   router.push({ name: 'Tools', query: { tab: 'connect' } })
 }
 
-// Handover 0408: Sync git_history toggle with git integration state
 watch(() => props.gitIntegrationEnabled, (enabled, oldEnabled) => {
   if (!configLoaded.value) return
   if (enabled === oldEnabled) return
 
   if (!enabled && config.value.git_history?.enabled) {
-    // Integration turned OFF → disable git_history
     config.value.git_history.enabled = false
     saveConfig()
   } else if (enabled && !config.value.git_history?.enabled) {
-    // Integration turned ON → convenience-enable git_history
     config.value.git_history.enabled = true
     config.value.git_history.count = config.value.git_history.count || 5
     saveConfig()
@@ -410,24 +389,20 @@ function formatTokenCount(tokens) {
 async function fetchConfig() {
   loading.value = true
   try {
-    // Fetch toggle config from field-priority endpoint (v3.0 format)
     const toggleResponse = await apiClient.get('/api/v1/users/me/field-priority')
     const toggles = toggleResponse.data?.priorities || {}
 
-    // Apply backend toggles to frontend keys using reverse mapping
     Object.entries(toggles).forEach(([backendKey, value]) => {
       const frontendKeys = BACKEND_TO_UI_CATEGORY_MAP[backendKey] || [backendKey]
 
       frontendKeys.forEach((frontendKey) => {
         if (config.value[frontendKey]) {
-          // v3.0 format: {"toggle": true} or flat boolean
           let enabled: boolean
           if (typeof value === 'object' && value !== null && 'toggle' in value) {
             enabled = (value as { toggle: boolean }).toggle
           } else if (typeof value === 'boolean') {
             enabled = value
           } else if (typeof value === 'number') {
-            // Legacy v2.x compat: priority 4 = disabled, else enabled
             enabled = (value as number) !== 4
           } else {
             enabled = true
@@ -441,7 +416,6 @@ async function fetchConfig() {
       })
     })
 
-    // Fetch depth config from context/depth endpoint
     try {
       const depthResponse = await apiClient.get('/api/v1/users/me/context/depth')
       const depthData = depthResponse.data?.depth_config || {}
@@ -464,8 +438,6 @@ async function fetchConfig() {
 
     configLoaded.value = true
 
-    // Enforce integration-off → context-off invariant on load
-    // If git integration is OFF but context somehow has git_history ON, fix it
     if (!props.gitIntegrationEnabled && config.value.git_history?.enabled) {
       config.value.git_history.enabled = false
       saveConfig()
@@ -481,13 +453,11 @@ async function fetchConfig() {
 async function saveConfig() {
   saving.value = true
   try {
-    // Save toggles to field-priority endpoint (v3.0 format)
     await apiClient.put('/api/v1/users/me/field-priority', {
       version: '3.0',
       priorities: convertToBackendFormat(config.value),
     })
 
-    // Save depth config to context/depth endpoint
     try {
       await apiClient.put('/api/v1/users/me/context/depth', {
         depth_config: {
@@ -537,13 +507,11 @@ function convertToBackendFormat(localConfig: Record<string, ContextConfig>): Rec
   return backendToggles
 }
 
-// Lifecycle
 onMounted(async () => {
   fetchConfig()
   await fetchVisionStats()
 })
 
-// Expose for testing
 defineExpose({
   contexts,
   toggleOnlyContexts,

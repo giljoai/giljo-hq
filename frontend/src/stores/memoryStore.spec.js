@@ -1,17 +1,3 @@
-/**
- * memoryStore.spec.js — FE-5042
- *
- * Proves the FE-3007 normalized contract + the client-side search/filter/sort
- * the 360 Memory browser relies on:
- *   - _upsertEntry is the single write path (immutable Map replacement).
- *   - fetchMemoryEntries reuses the EXISTING read endpoint and maps
- *     response.data.entries through that one path.
- *   - search (summary/outcomes/decisions/project/tags), tag filter, project
- *     filter, and the four sort modes are correct.
- *   - 1000-entry search is correct AND fast (client-side, trivially <200ms).
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 
@@ -59,12 +45,10 @@ describe('memoryStore — FE-5042 normalized owner + client-side search', () => 
     const store = useMemoryStore()
     const before = store.byId
     store._upsertEntry(entry({ id: 'a' }))
-    // New Map reference each write (immutableMapSet — no in-place mutation).
     expect(store.byId).not.toBe(before)
     expect(store.byId.get('a')).toBeTruthy()
     expect(store.entries).toHaveLength(1)
 
-    // Upsert same id overwrites, does not duplicate.
     store._upsertEntry(entry({ id: 'a', summary: 'updated' }))
     expect(store.entries).toHaveLength(1)
     expect(store.byId.get('a').summary).toBe('updated')
@@ -119,7 +103,6 @@ describe('memoryStore — FE-5042 normalized owner + client-side search', () => 
     expect(store.filteredEntries.map((e) => e.id)).toEqual(['tag'])
     store.searchText = 'browser'
     expect(store.filteredEntries.map((e) => e.id)).toEqual(['proj'])
-    // Case-insensitive
     store.searchText = 'TENANT'
     expect(store.filteredEntries.map((e) => e.id)).toEqual(['sum'])
   })
@@ -202,7 +185,6 @@ describe('memoryStore — FE-5042 normalized owner + client-side search', () => 
 
     await store.searchMemoryEntries('prod-1', '   ')
 
-    // Blank term -> reuse the read endpoint with NO search param (client-side path).
     expect(mockGetMemoryEntries).toHaveBeenCalledWith('prod-1', { limit: 100 })
     expect(store.serverSearch).toBe(false)
     expect(store.entries).toHaveLength(2)
@@ -210,17 +192,14 @@ describe('memoryStore — FE-5042 normalized owner + client-side search', () => 
 
   it('when serverSearch is active, filteredEntries trusts the server text match', async () => {
     const store = useMemoryStore()
-    // Server returns a relevance/stemmed match whose summary does NOT contain the
-    // raw search substring; the client must not re-filter it away.
     mockGetMemoryEntries.mockResolvedValue({
       data: { entries: [entry({ id: 'r1', summary: 'Stemmed running result' })], total_count: 1, filtered_count: 1 },
     })
 
     await store.searchMemoryEntries('prod-1', 'run')
-    store.searchText = 'run' // raw substring not in the returned summary
+    store.searchText = 'run'
     expect(store.filteredEntries.map((e) => e.id)).toEqual(['r1'])
 
-    // After clearFilters, serverSearch resets and client-side filtering resumes.
     store.clearFilters()
     expect(store.serverSearch).toBe(false)
   })
@@ -237,7 +216,6 @@ describe('memoryStore — FE-5042 normalized owner + client-side search', () => 
       })
       seeded.set(e.id, e)
     }
-    // Seed directly (single owner) to isolate the filter-latency measurement.
     store.byId = seeded
     expect(store.entries).toHaveLength(1000)
 
@@ -251,9 +229,6 @@ describe('memoryStore — FE-5042 normalized owner + client-side search', () => 
     expect(elapsed).toBeLessThan(200)
   })
 
-  // FE-9338 follow-up: inFlightSearch is public store state, so it must not
-  // outlive the search it describes. A settled promise left parked in the ref
-  // is a permanently-rejected value every later awaiter re-throws on.
   it('clears inFlightSearch once a successful search settles', async () => {
     const store = useMemoryStore()
     mockGetMemoryEntries.mockResolvedValue({
@@ -261,7 +236,7 @@ describe('memoryStore — FE-5042 normalized owner + client-side search', () => 
     })
 
     const started = store.searchMemoryEntries('prod-1', 'tenant guard')
-    expect(store.inFlightSearch).not.toBeNull() // assigned synchronously
+    expect(store.inFlightSearch).not.toBeNull()
     await started
 
     expect(store.inFlightSearch).toBeNull()
@@ -269,12 +244,8 @@ describe('memoryStore — FE-5042 normalized owner + client-side search', () => 
 
   it('clears inFlightSearch when a search rejects, so later awaiters do not re-throw', async () => {
     const store = useMemoryStore()
-    // The one synchronous throw path outside _runSearch's try block: a non-string
-    // term has no .trim(). Reachable from the store API, not from the view.
     await expect(store.searchMemoryEntries('prod-1', 12345)).rejects.toThrow()
 
-    // The whole point: awaiting the ref again must be a harmless no-op rather
-    // than re-throwing the rejection for the lifetime of the store.
     expect(store.inFlightSearch).toBeNull()
     await store.inFlightSearch
   })
@@ -291,7 +262,6 @@ describe('memoryStore — FE-5042 normalized owner + client-side search', () => 
     store.searchMemoryEntries('prod-1', 'older')
     const newer = store.searchMemoryEntries('prod-1', 'newer')
 
-    // The slow FIRST search lands after the second is already in flight.
     resolveA()
     await Promise.resolve()
     await Promise.resolve()
@@ -302,12 +272,6 @@ describe('memoryStore — FE-5042 normalized owner + client-side search', () => 
     expect(store.inFlightSearch).toBeNull()
   })
 
-  // IMP-9342 item 1 — response sequencing. The FE-9338 guard above only protects
-  // the inFlightSearch REF; the loaded set itself was still last-writer-wins, so a
-  // slow older response landed on top of a newer one after an awaiter already
-  // believed the store had settled. Reachable: type a term, pause past the view's
-  // 250ms debounce, type more — if the first response is slower, the list shows
-  // results for the earlier prefix while the box shows the later one.
   function deferredEntries(id) {
     let resolve
     const promise = new Promise((r) => {
@@ -324,14 +288,13 @@ describe('memoryStore — FE-5042 normalized owner + client-side search', () => 
       .mockImplementationOnce(() => slowA.promise)
       .mockImplementationOnce(() => fastB.promise)
 
-    store.searchMemoryEntries('prod-1', 'a') // older, slow
-    const newer = store.searchMemoryEntries('prod-1', 'ab') // newer, fast
+    store.searchMemoryEntries('prod-1', 'a')
+    const newer = store.searchMemoryEntries('prod-1', 'ab')
 
     fastB.resolve()
     await newer
     expect(store.entries.map((e) => e.id)).toEqual(['FAST-B'])
 
-    // The superseded response lands last. It must be dropped, not applied.
     slowA.resolve()
     await slowA.promise
     await Promise.resolve()
@@ -352,7 +315,6 @@ describe('memoryStore — FE-5042 normalized owner + client-side search', () => 
 
     slowA.resolve()
     await older
-    // The newer search has not landed yet, so the view must still read as loading.
     expect(store.loading).toBe(true)
     expect(store.entries).toHaveLength(0)
 
@@ -364,15 +326,13 @@ describe('memoryStore — FE-5042 normalized owner + client-side search', () => 
 
   it('a slow blank-term full reload must not overwrite a newer search', async () => {
     const store = useMemoryStore()
-    // User clears the box (blank -> full client-side reload), then immediately
-    // types again. The full reload is the slower of the two.
     const slowFull = deferredEntries('FULL-SET')
     const fastSearch = deferredEntries('SEARCH-HIT')
     mockGetMemoryEntries
       .mockImplementationOnce(() => slowFull.promise)
       .mockImplementationOnce(() => fastSearch.promise)
 
-    store.searchMemoryEntries('prod-1', '   ') // blank -> fetchMemoryEntries path
+    store.searchMemoryEntries('prod-1', '   ')
     const newer = store.searchMemoryEntries('prod-1', 'tenant')
 
     fastSearch.resolve()
@@ -384,8 +344,6 @@ describe('memoryStore — FE-5042 normalized owner + client-side search', () => 
     await slowFull.promise
     await Promise.resolve()
     await Promise.resolve()
-    // The stale full reload must not resurrect the unsearched set, and must not
-    // flip serverSearch off underneath the newer server-search result.
     expect(store.entries.map((e) => e.id)).toEqual(['SEARCH-HIT'])
     expect(store.serverSearch).toBe(true)
   })

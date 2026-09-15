@@ -3,11 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Pydantic schema tests for the user_approvals primitive (BE-5029 Phase A).
-
-These guard the tool-layer 422 contract: bad agent input must fail validation
-before reaching the service or DB.
-"""
 
 import pytest
 from pydantic import ValidationError as PydanticValidationError

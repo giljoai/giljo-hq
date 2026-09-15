@@ -3,26 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6194: ChainContext.chain_mission — additive read-through field.
-
-A later combined sub-orch script needs the LIVE chain mission injected into the
-sub-orchestrator's runtime protocol (no stale snapshot). The resolver reads it
-straight off the already-serialized run dict (sequence_runs.chain_mission, BE-6185);
-no extra DB read.
-
-1. test_chain_context_has_chain_mission_field (unit)
-   ChainContext carries chain_mission when supplied; defaults None when omitted.
-
-2. test_resolve_populates_chain_mission (DB-touching)
-   resolve_for_conductor surfaces the run's written chain_mission.
-
-3. test_solo_resolve_chain_mission_none (DB-touching)
-   A project in no active run -> resolve() returns None (solo byte-identical;
-   nothing to read).
-
-Parallel-safe: DB-touching tests use db_session (TransactionalTestContext). No
-module-level mutable state. Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -40,8 +20,6 @@ from tests.helpers.taxonomy_seeds import next_series_number
 
 
 async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -58,8 +36,6 @@ async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
         status="active",
         tenant_key=tenant_key,
         product_id=_owning_product_project.id,
-        # BE-9429: uq_project_taxonomy_active is NULLS NOT DISTINCT, so these
-        # NULL-product/NULL-type rows collide unless the serial differs.
         series_number=next_series_number(),
         execution_mode="claude_code_cli",
         created_at=datetime.now(UTC),
@@ -82,9 +58,6 @@ def _resolver(session: AsyncSession) -> SequenceChainContextResolver:
     )
 
 
-# ---------------------------------------------------------------------------
-# 1. ChainContext carries chain_mission; defaults None when omitted
-# ---------------------------------------------------------------------------
 
 
 def test_chain_context_has_chain_mission_field() -> None:
@@ -110,9 +83,6 @@ def test_chain_context_has_chain_mission_field() -> None:
     assert default_ctx.chain_mission is None
 
 
-# ---------------------------------------------------------------------------
-# 2. resolve_for_conductor surfaces the written chain mission
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -127,8 +97,6 @@ async def test_resolve_populates_chain_mission(db_session: AsyncSession) -> None
         execution_mode="claude_code_cli",
         tenant_key=tenant,
     )
-    # BE-6185 ultralock: a freshly-created 'pending' run is NOT ultralocked, so the
-    # conductor-owned chain_mission write succeeds.
     await _run_svc(db_session).update(
         run_id=run["id"],
         tenant_key=tenant,
@@ -146,9 +114,6 @@ async def test_resolve_populates_chain_mission(db_session: AsyncSession) -> None
     assert chain_ctx.chain_mission == "ship the whole chain end to end"
 
 
-# ---------------------------------------------------------------------------
-# 3. solo project in no active run -> resolve() returns None
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

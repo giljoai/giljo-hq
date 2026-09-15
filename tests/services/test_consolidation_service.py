@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Unit tests for ConsolidatedVisionService.
-
-The service performs aggregate-hash + timestamp bookkeeping only. Per-doc
-and aggregate summary text is written by the AI agent via the
-``update_product_context`` MCP tool. These tests assert that contract.
-"""
 
 import hashlib
 from unittest.mock import AsyncMock, MagicMock
@@ -23,7 +16,6 @@ from tests.helpers.model_factories import make_product, make_vision_document
 
 @pytest.fixture
 def mock_db_manager():
-    """Mock database manager with async session support."""
     db_manager = MagicMock()
     session = AsyncMock()
     session.__aenter__ = AsyncMock(return_value=session)
@@ -33,7 +25,7 @@ def mock_db_manager():
     session.refresh = AsyncMock()
     session.add = MagicMock()
     session.execute = AsyncMock()
-    session.info = {}  # tenant_session_context save/restore target
+    session.info = {}
     db_manager.get_session_async = MagicMock(return_value=session)
     return db_manager, session
 
@@ -52,17 +44,6 @@ def _make_product(docs, *, hash_value=None):
 
 
 def _make_doc(name, body, *, is_active=True, display_order=0, deleted_at=None, doc_id=None):
-    """Build a real transient VisionDocument for the aggregate builder.
-
-    INF-9417: this was a spec'd VisionDocument mock that had to set ``deleted_at``
-    by hand on every call -- a spec'd mock auto-vivifies the BE-6130b
-    ``deleted_at`` column to a truthy child, and
-    ``vision_hash._active_sorted_docs`` then drops the doc from the aggregate,
-    which is the empty-output failure these fixtures were written to guard
-    against. A real instance answers ``None`` for an unset nullable column, so
-    that hand-pin is no longer load-bearing. ``deleted_at`` remains a parameter
-    only because several tests deliberately pass a soft-delete stamp.
-    """
     return make_vision_document(
         id=doc_id,
         document_name=name,
@@ -75,7 +56,6 @@ def _make_doc(name, body, *, is_active=True, display_order=0, deleted_at=None, d
 
 @pytest.mark.asyncio
 async def test_consolidate_updates_hash_and_timestamp(mock_db_manager):
-    """First-run consolidation writes hash+timestamp and returns current summaries."""
     from giljo_mcp.services.consolidation_service import ConsolidatedVisionService
 
     _db_manager, session = mock_db_manager
@@ -98,13 +78,10 @@ async def test_consolidate_updates_hash_and_timestamp(mock_db_manager):
     assert result.medium.summary == "agent-written medium"
     assert product.consolidated_vision_hash == result.hash
     assert product.consolidated_at is not None
-    # commit goes through self._repo.commit; that call path is exercised
-    # indirectly by the absence of any exception above.
 
 
 @pytest.mark.asyncio
 async def test_consolidate_respects_display_order(mock_db_manager):
-    """Documents are ordered by display_order in the aggregate text."""
     from giljo_mcp.services.consolidation_service import ConsolidatedVisionService
 
     _db_manager, _session = mock_db_manager
@@ -126,7 +103,6 @@ async def test_consolidate_respects_display_order(mock_db_manager):
 
 @pytest.mark.asyncio
 async def test_consolidate_skips_inactive_docs(mock_db_manager):
-    """Inactive documents are excluded from the aggregate."""
     from giljo_mcp.services.consolidation_service import ConsolidatedVisionService
 
     doc1 = _make_doc("Active Doc 1", "Active content 1", display_order=1)
@@ -146,7 +122,6 @@ async def test_consolidate_skips_inactive_docs(mock_db_manager):
 
 @pytest.mark.asyncio
 async def test_consolidate_detects_no_changes(mock_db_manager):
-    """Hash unchanged → raises ValidationError(NO_CHANGES) and does NOT commit."""
     from giljo_mcp.services.consolidation_service import ConsolidatedVisionService
 
     _db_manager, session = mock_db_manager
@@ -173,7 +148,6 @@ async def test_consolidate_detects_no_changes(mock_db_manager):
 
 @pytest.mark.asyncio
 async def test_consolidate_force_updates_even_when_unchanged(mock_db_manager):
-    """force=True overrides the hash check and refreshes the timestamp."""
     from giljo_mcp.services.consolidation_service import ConsolidatedVisionService
 
     _db_manager, session = mock_db_manager
@@ -198,7 +172,6 @@ async def test_consolidate_force_updates_even_when_unchanged(mock_db_manager):
 
 @pytest.mark.asyncio
 async def test_consolidate_handles_product_not_found(mock_db_manager):
-    """Non-existent product_id → raises ResourceNotFoundError(PRODUCT_NOT_FOUND)."""
     from giljo_mcp.services.consolidation_service import ConsolidatedVisionService
 
     _db_manager, session = mock_db_manager
@@ -220,15 +193,6 @@ async def test_consolidate_handles_product_not_found(mock_db_manager):
 
 @pytest.mark.asyncio
 async def test_consolidate_excludes_soft_deleted_sibling(mock_db_manager):
-    """BE-6130b regression: a soft-deleted (trashed) doc is excluded from the
-    aggregate while its active siblings are included.
-
-    Guards the soft-delete read filter in vision_hash._active_sorted_docs, which
-    excludes deleted_at-stamped docs. (This docstring used to guard a second half --
-    every fixture pinning deleted_at by hand so a spec'd mock could not auto-vivify
-    it truthy. INF-9417 removed the need: the fixtures now build real
-    VisionDocument instances, which answer None for an unset nullable column.)
-    """
     from datetime import UTC, datetime
 
     from giljo_mcp.services.consolidation_service import ConsolidatedVisionService

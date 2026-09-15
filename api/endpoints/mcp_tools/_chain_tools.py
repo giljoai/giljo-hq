@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Chain (linked multi-project) tools -- @mcp.tool wrappers (BE-6221a).
-
-``start_chain_run`` is the headless/CLI entry point the dashboard "Run Sequential"
-button already has but MCP lacked. The wrapper registers against the shared ``mcp``
-instance from ``_base`` as a decorator side effect at import time and delegates to
-the ChainToolsMixin method via ``_call_tool`` (which injects the caller's tenant
-from the MCP context). Mirrors _job_tools / _project_tools exactly.
-
-BE-9500b: ``action`` grows the SAME reverse-gear pattern ``stage_project`` uses
-(BE-9499b) -- one registered tool, no new name, roster-lock untouched.
-``action="terminate_remaining"``/``"mark_reviewed"`` are the two surviving chain
-verbs; ``project_ids``/``execution_mode`` are only required for ``action="start"``.
-"""
 
 from typing import Annotated, Any
 

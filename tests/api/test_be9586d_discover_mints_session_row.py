@@ -3,42 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9586d — a modern client announces itself with ``server/discover``, and we must hear it.
-
-THE REGRESSION. The MCP spec grew a second way for a client to attach. A
-2026-07-28 client opens with ``server/discover``; if the server answers it
-completely -- ours does, ``resultType: "complete"`` -- the client has everything
-it needs and **never sends ``initialize``**. We mint the ``mcp_sessions`` row only
-on ``initialize``, so a modern client leaves no row: no harness recorded, no
-per-tool connect status, no green dot. Tool calls continue to work without a
-session row, so the gap is not user-visible as an error -- only as a missing
-connection record.
-
-NOT AUTH-SPECIFIC. The gate is ``method == "initialize"`` in BOTH auth branches, so
-API-key and OAuth clients are affected identically.
-
-THE clientInfo LIVES SOMEWHERE ELSE, and missing that would make this fix look like
-it worked while recording nothing useful:
-
-    initialize      -> params.clientInfo
-    server/discover -> params._meta["io.modelcontextprotocol/clientInfo"]
-
-Captured off the wire from Claude Code 2.1.245. Read only the first location and
-every harness resolves to ``generic``: the dot lights up but the Connect page still
-cannot say WHICH tool attached.
-
-ONE ROW PER CLIENT, NOT PER CALL. BE-3011 and BE-9066 both exist because this table
-grew unbounded once. A modern client may re-discover (our reply advertises
-``ttlMs: 0``), so minting per discover would re-create exactly that. The row is
-touch-or-insert per (tenant, user, client) -- which is also all
-``connected_harnesses`` needs, since it groups by harness and takes the newest
-timestamp.
-
-Failing-layer discipline (CLAUDE.md): every case drives a real JSON-RPC frame through
-``MCPAuthMiddleware`` -- the transport boundary where the branch skips.
-
-Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -64,12 +28,6 @@ _MODERN = "2026-07-28"
 
 
 def _discover_body(client_name: str = "claude-code", version: str = "2.1.245") -> bytes:
-    """The EXACT frame shape Claude Code 2.1.245 opens with.
-
-    Captured off the wire rather than composed from the spec: the identity rides
-    ``params._meta``, not ``params.clientInfo``, and a test that put it in the
-    familiar place would pass against an implementation that never reads the real one.
-    """
     import json
 
     return json.dumps(
@@ -124,7 +82,6 @@ async def _rows(db_manager, tenant_key: str) -> list[MCPSession]:
 
 
 async def test_a_discover_mints_a_session_row(db_manager, jwt_env):  # noqa: F811
-    """THE DEFECT: today this leaves nothing behind."""
     tenant_key, user_id = await _seed_oauth_user(db_manager)
 
     status, _headers, inner = await _drive(db_manager, tenant_key=tenant_key, user_id=user_id, body=_discover_body())
@@ -135,12 +92,6 @@ async def test_a_discover_mints_a_session_row(db_manager, jwt_env):  # noqa: F81
 
 
 async def test_the_row_captures_clientinfo_from_the_meta_envelope(db_manager, jwt_env):  # noqa: F811
-    """The trap: read ``params.clientInfo`` and this row exists but names nobody.
-
-    ``connected_harnesses`` resolves the harness FROM ``session_data['client_info']``,
-    so a row minted without it satisfies a count and still leaves the Connect page
-    blank — the failure mode that looks fixed.
-    """
     tenant_key, user_id = await _seed_oauth_user(db_manager)
 
     await _drive(db_manager, tenant_key=tenant_key, user_id=user_id, body=_discover_body())
@@ -152,7 +103,6 @@ async def test_the_row_captures_clientinfo_from_the_meta_envelope(db_manager, jw
 
 
 async def test_the_connected_tool_is_reported_after_a_discover(db_manager, jwt_env):  # noqa: F811
-    """The operator's surface: the dot and the Connect page read this, not the row count."""
     from giljo_mcp.repositories.auth_repository import AuthRepository
 
     tenant_key, user_id = await _seed_oauth_user(db_manager)
@@ -166,12 +116,6 @@ async def test_the_connected_tool_is_reported_after_a_discover(db_manager, jwt_e
 
 
 async def test_repeated_discover_does_not_duplicate_rows(db_manager, jwt_env):  # noqa: F811
-    """ONE row per client, not per call — the BE-3011 / BE-9066 growth invariant.
-
-    Our discover reply advertises ``ttlMs: 0``, so a client is entitled to re-ask as
-    often as it likes. Minting per call would re-create the unbounded growth both of
-    those projects removed. Three discovers, one row.
-    """
     tenant_key, user_id = await _seed_oauth_user(db_manager)
 
     for _ in range(3):
@@ -181,12 +125,6 @@ async def test_repeated_discover_does_not_duplicate_rows(db_manager, jwt_env):  
 
 
 async def test_a_second_different_client_gets_its_own_row(db_manager, jwt_env):  # noqa: F811
-    """The negative control for the dedupe above.
-
-    Without this, a fix that collapsed every discover onto one row per TENANT would
-    pass the duplicate test while making the Connect page unable to show two tools —
-    the multi-harness case the per-tool cards exist for.
-    """
     tenant_key, user_id = await _seed_oauth_user(db_manager)
 
     await _drive(db_manager, tenant_key=tenant_key, user_id=user_id, body=_discover_body("claude-code"))

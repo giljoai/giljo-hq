@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""IMP-5036 task d7d8a5ea (BE-5072) -- 002e sub-service test coverage.
-
-ExecutionPromptBuilderBase was the only Sprint 002e extraction shipped
-without any test file. Per IMP-5036 mission DoD: at minimum 1 new unit
-test per sub-service that previously had none.
-
-Coverage targets here:
-- the base class composes the documented section order
-- subclasses must implement platform_name and _build_spawning_section
-- git-enabled closeout adds a commit block; disabled omits it
-- agent-list section handles empty and non-empty agent lists
-- subclass overrides (extra sections, completion section) compose correctly
-"""
 
 from __future__ import annotations
 
@@ -27,9 +14,6 @@ from giljo_mcp.prompts.execution_prompt_base import ExecutionPromptBuilderBase
 
 
 class _MinimalBuilder(ExecutionPromptBuilderBase):
-    """Concrete subclass providing the bare minimum needed to call
-    build_execution_prompt without NotImplementedError.
-    """
 
     @property
     def platform_name(self) -> str:
@@ -66,14 +50,12 @@ def _make_agent_job(
 
 class TestPlatformNameRequired:
     def test_platform_name_default_raises(self):
-        """Direct base instances must raise NotImplementedError on platform_name."""
         with pytest.raises(NotImplementedError, match="platform_name"):
             _ = ExecutionPromptBuilderBase().platform_name
 
 
 class TestSpawningSectionRequired:
     def test_default_spawning_raises(self):
-        """Subclasses must override _build_spawning_section."""
 
         class _Bare(ExecutionPromptBuilderBase):
             @property
@@ -86,11 +68,6 @@ class TestSpawningSectionRequired:
 
 class TestBuildExecutionPromptSectionOrder:
     def test_sections_compose_in_documented_order(self):
-        """build_execution_prompt MUST produce sections in the order:
-        context_recap -> agent_list -> spawning -> monitoring -> context_refresh
-        -> extra -> completion. Order is the API contract for builders that
-        override individual sections.
-        """
         builder = _MinimalBuilder()
         project = _make_project()
         agent_jobs = [_make_agent_job()]
@@ -122,30 +99,20 @@ class TestAgentList:
         long_mission = "x" * 250
         agent = _make_agent_job(mission=long_mission)
         prompt = builder.build_execution_prompt("orch-1", _make_project(), [agent], git_enabled=False)
-        # Truncation is at 100 chars + "..."
         assert "x" * 100 + "..." in prompt
-        # Full mission must NOT appear (would mean truncation broke)
         assert long_mission not in prompt
 
 
 class TestNewAgentSpawnJobFirstRule:
-    """INF-6002 regression: the EXECUTION DIRECTIVE must tell the orchestrator
-    that a NEW agent (not in the spawned team list — e.g. a deferred
-    tester/reviewer) requires spawn_job FIRST, before launching it. Without
-    this, orchestrators launch verification agents straight through the
-    harness spawn mechanism and they get no MCP record / audit trail.
-    """
 
     def test_directive_carries_spawn_job_first_rule(self):
         builder = _MinimalBuilder()
         prompt = builder.build_execution_prompt("orch-1", _make_project(), [_make_agent_job()], git_enabled=False)
         assert "spawn_job" in prompt
         assert "untracked and unauditable" in prompt
-        # The rule must reference the deferred verification case explicitly.
         assert "tester/reviewer" in prompt
 
     def test_rule_present_even_with_no_agents(self):
-        """The rule is unconditional — it renders regardless of the team list."""
         builder = _MinimalBuilder()
         prompt = builder.build_execution_prompt("orch-1", _make_project(), [], git_enabled=False)
         assert "spawn_job` FIRST" in prompt
@@ -173,9 +140,6 @@ class TestGitCloseout:
 
 class TestSubclassOverrides:
     def test_extra_sections_inserted_before_completion(self):
-        """_build_extra_sections content lands between context_refresh and
-        completion (per the build_execution_prompt section list).
-        """
 
         class _WithExtras(_MinimalBuilder):
             def _build_extra_sections(self, orchestrator_id, project, agent_jobs):

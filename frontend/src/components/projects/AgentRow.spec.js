@@ -1,13 +1,3 @@
-/**
- * AgentRow.spec.js — FE-6042a
- *
- * Unit tests for the AgentRow presentational component.
- * Edition scope: CE
- *
- * TDD protocol: written before AgentRow.vue exists.
- * The <tr>-root component is mounted via a <table><tbody> harness to satisfy
- * jsdom's HTML structure requirements and ensure find() works correctly.
- */
 
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -18,9 +8,6 @@ import { useUserStore } from '@/stores/user'
 
 const vuetify = createVuetify()
 
-// ---------------------------------------------------------------------------
-// Stubs — mirror what JobsTab.spec.js uses for v-tooltip/v-btn/v-menu
-// ---------------------------------------------------------------------------
 const tooltipStub = {
   props: ['text'],
   template: `<div class="v-tooltip" :data-tooltip-text="text"><slot name="activator" :props="{}" /></div>`,
@@ -45,9 +32,6 @@ const stubs = {
   'v-list': { template: `<div class="v-list"><slot /></div>` },
 }
 
-// ---------------------------------------------------------------------------
-// Mount harness: wrap <tr>-root AgentRow in a real <table><tbody>
-// ---------------------------------------------------------------------------
 function makeWrapperComponent(agentRowProps) {
   return {
     components: { AgentRow },
@@ -78,9 +62,6 @@ async function mountRow(props) {
   return wrapper
 }
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
 function makeAgent(overrides = {}) {
   return {
     job_id: 'job-001',
@@ -94,11 +75,8 @@ function makeAgent(overrides = {}) {
   }
 }
 
-const NOW_MS = 1_700_000_000_000 // fixed timestamp for deterministic duration tests
+const NOW_MS = 1_700_000_000_000
 
-// ---------------------------------------------------------------------------
-// Phase badge variants
-// ---------------------------------------------------------------------------
 
 describe('AgentRow — phase badge variants', () => {
   it('shows "All" when isSubagentMode=true', async () => {
@@ -129,7 +107,6 @@ describe('AgentRow — phase badge variants', () => {
       isSubagentMode: false,
     })
     const badge = wrapper.find('[data-testid="phase-badge"]')
-    // em-dash rendered as HTML entity or Unicode
     expect(badge.text()).toMatch(/—/)
   })
 
@@ -144,10 +121,6 @@ describe('AgentRow — phase badge variants', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// Agent badge initials (FE-9490): punctuation in the display name must not
-// leak into the rendered badge.
-// ---------------------------------------------------------------------------
 
 describe('AgentRow — agent badge initials', () => {
   it('does not leak a bracket for a parenthetical display name ("Reviewer (Phase 5)" -> "R(")', async () => {
@@ -181,9 +154,6 @@ describe('AgentRow — agent badge initials', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// Status chip: label + color
-// ---------------------------------------------------------------------------
 
 describe('AgentRow — status chip', () => {
   it('renders status chip with the correct label for "waiting"', async () => {
@@ -211,14 +181,10 @@ describe('AgentRow — status chip', () => {
       now: NOW_MS,
     })
     const chip = wrapper.find('[data-testid="status-chip"]')
-    // "working" status color is white (#ffffff) per statusConfig
     expect(chip.attributes('style')).toContain('color: rgb(255, 255, 255)')
   })
 })
 
-// ---------------------------------------------------------------------------
-// Play button visibility
-// ---------------------------------------------------------------------------
 
 describe('AgentRow — play button visibility', () => {
   it('shows copy-prompt button when shouldShowCopy=true', async () => {
@@ -254,9 +220,6 @@ describe('AgentRow — play button visibility', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// Message badge: zero vs has-msgs (FE-9184 restore of the 0870j column)
-// ---------------------------------------------------------------------------
 
 describe('AgentRow — message badge', () => {
   it('renders zero-class badge when messages_waiting_count=0', async () => {
@@ -292,12 +255,6 @@ describe('AgentRow — message badge', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// action_required_unread badge (BE-9273): the subset of messages_waiting_count
-// that is genuinely blocking (requires_action + non-auto_generated) must read
-// as a DISTINCT, stronger signal than plain unread -- "this agent is waiting
-// on YOU" vs "this agent has unread mail."
-// ---------------------------------------------------------------------------
 
 describe('AgentRow — action_required_unread badge (BE-9273)', () => {
   it('renders needs-action class when action_required_unread > 0', async () => {
@@ -310,8 +267,6 @@ describe('AgentRow — action_required_unread badge (BE-9273)', () => {
     expect(badge.classes()).toContain('needs-action')
     expect(badge.classes()).not.toContain('has-msgs')
     expect(badge.classes()).not.toContain('zero')
-    // The badge count itself stays the BROADER messages_waiting_count total —
-    // only the tint escalates for the action-required subset.
     expect(badge.text()).toBe('2')
   })
 
@@ -346,8 +301,6 @@ describe('AgentRow — action_required_unread badge (BE-9273)', () => {
   })
 
   it('treats a missing action_required_unread field as 0 (backwards-compatible default)', async () => {
-    // No action_required_unread key at all on the agent object -- must not
-    // throw and must not spuriously mark the badge as needs-action.
     const wrapper = await mountRow({
       agent: makeAgent({ messages_waiting_count: 2 }),
       now: NOW_MS,
@@ -378,9 +331,6 @@ describe('AgentRow — action_required_unread badge (BE-9273)', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// Duration formatting via now prop (pure, no timer in AgentRow)
-// ---------------------------------------------------------------------------
 
 describe('AgentRow — duration formatting via now prop', () => {
   it('shows "---" when agent has no duration_seconds and no working_started_at', async () => {
@@ -398,12 +348,10 @@ describe('AgentRow — duration formatting via now prop', () => {
       now: NOW_MS,
     })
     const cell = wrapper.find('[data-testid="duration"]')
-    // 75s → 1m 15s
     expect(cell.text()).toBe('1m 15s')
   })
 
   it('ticks live duration from working_started_at when status is working', async () => {
-    // Set working_started_at to exactly 5 seconds before NOW_MS
     const startedAt = new Date(NOW_MS - 5000).toISOString()
     const wrapper = await mountRow({
       agent: makeAgent({ status: 'working', working_started_at: startedAt, duration_seconds: null }),
@@ -430,9 +378,6 @@ describe('AgentRow — duration formatting via now prop', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// Action emits — each action emits the correct event
-// ---------------------------------------------------------------------------
 
 describe('AgentRow — action emits', () => {
   it('emits "messages" with agent when messages button is clicked', async () => {
@@ -513,9 +458,6 @@ describe('AgentRow — action emits', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// data-testid and attribute completeness
-// ---------------------------------------------------------------------------
 
 describe('AgentRow — required testid and attribute presence', () => {
   it('renders agent-row testid on the <tr>', async () => {
@@ -547,9 +489,6 @@ describe('AgentRow — required testid and attribute presence', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// BE-8003j — isolated-PR chain hand-off: PR link on the job card
-// ---------------------------------------------------------------------------
 
 describe('AgentRow — isolated-PR hand-off (BE-8003j)', () => {
   it('shows a PR link when the completion result carries a pr_url', async () => {

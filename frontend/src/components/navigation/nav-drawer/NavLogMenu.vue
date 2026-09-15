@@ -89,8 +89,6 @@ function formatArchiveDate(dateStr) {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-// Size-rotated archives can share a date, so the date alone does not identify
-// them. Legacy date-named archives have no index and need no suffix.
 function archiveTitle(archive) {
   const when = formatArchiveDate(archive.date)
   return archive.rotation_index ? `${when} (#${archive.rotation_index})` : when

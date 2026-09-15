@@ -75,13 +75,6 @@ const liveApproval = computed(() => {
   return approvalsStore.findByJobId(props.orchestratorJobId)
 })
 
-// Snapshot the approval the first time we see it for this open cycle and HOLD
-// the reference until the dialog closes. Critical because the server's
-// "decide accepted" WebSocket broadcast can arrive at the browser BEFORE the
-// POST /decide response does. Without the snapshot, the WS event clears the
-// store row, the v-if below flips false, ApprovalCard unmounts mid-await,
-// and ApprovalCard's 'decided' emit fires into a dead listener — the parent
-// never learns the user clicked. Reproduced in Chrome devtools on the test install.
 const stickyApproval = ref(null)
 watch(
   liveApproval,

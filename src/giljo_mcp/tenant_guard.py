@@ -3,26 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tenant-isolation guard: the fail-closed ``do_orm_execute`` enforcement path.
-
-Extracted verbatim from ``database.py`` (BE-6063c) to keep that module under the
-800-line CI guardrail; this is the cohesive security boundary (CE/SaaS model
-registry, the per-query AST-walk classifier + its BE-6063c shape memo, the
-bypass / context managers, and the SQLAlchemy event listeners). ``database.py``
-re-exports every public name so external import paths
-(``giljo_mcp.database.register_tenant_scoped_models``, ``TENANT_SCOPED_MODELS``,
-``tenant_session_context``, ``TenantIsolationError`` ...) are unchanged.
-
-The invariant this exists to hold: every UPDATE/DELETE reaching a tenant-scoped
-table must carry a predicate binding it to the tenant whose context the session
-is running under. The guard re-injects that predicate where it can, refuses the
-statement where it cannot, and logs what it saw either way. Anything it could not
-scope is also announced on ``signals.SIGNAL_UNSCOPED_WRITE`` -- a plain statement
-of fact with no opinion about who, if anyone, is listening.
-
-Edition-pure: imports ZERO ``saas/`` modules (Deletion Test). SaaS widens the
-scoped set at import time via ``register_tenant_scoped_models``.
-"""
 
 import logging
 import os
@@ -85,43 +65,6 @@ from .tenant import TenantManager
 logger = logging.getLogger(__name__)
 
 
-# CE built-in tenant-scoped models -- the source of CE truth. Edition-pure: MUST
-# NOT contain any SaaS-only model (CE core may not import from saas/). SaaS widens
-# the allowed set at import time via register_tenant_scoped_models() (BE-6031a).
-#
-# SEC-9272 / SEC-9276 (registry coverage-gap sweep, see tests/security/
-# test_sec9272_ce_tenant_registry_completeness.py): six CE models were found to carry
-# a NOT NULL tenant_key with real, already caller-scoped bulk writes yet were
-# invisible to this guard entirely -- not even audit-logged, unlike a registered
-# model's benign Class-A no-match. All six are now registered.
-#
-# CommParticipant and CommThread were registered in SEC-9272: audited clean (all
-# real write paths -- comm_thread_service.py's tenant_session_context, and
-# comm_thread_repository.hard_delete's session.delete(), which fires a raw PK-only
-# DELETE with no tenant_key predicate at the SQL level and is now guard-injected)
-# and the full comm-thread test suite (82 tests) passes unchanged with them
-# registered.
-#
-# Notification, Roadmap, RoadmapItem, and SequenceRun were audited the same way and
-# registered in SEC-9276: their OWNING services (notification_service.py,
-# roadmap_service.py, sequence_run_service.py) already thread tenant_key correctly
-# on every write. Registering them surfaced a SEPARATE, pre-existing problem: ~20
-# test files shared a single db_session/db_manager session across MULTIPLE tenants,
-# or ran an autouse teardown that bulk-deleted the whole table with no tenant
-# predicate at all (`delete(SequenceRun)`, no WHERE) -- both patterns were silently
-# safe only because these models were guard-invisible. SEC-9276 fixed the affected
-# test files (wrapped cross-tenant test setup/teardown in tenant_isolation_bypass,
-# or moved cross-tenant seeding/verification into per-tenant
-# tenant_session_context blocks) so the guard's coverage now extends to these four
-# models with no loss of test signal.
-#
-# Configuration (models/config.py) was reviewed and deliberately EXCLUDED
-# permanently: its tenant_key is nullable BY DESIGN (NULL = a global/system-default
-# row that sits alongside per-tenant override rows in the same table -- see
-# ConfigurationRepository.get_all_values_for_key). Registering it would make the
-# guard inject `WHERE tenant_key = <this tenant>` on every SELECT touching the
-# table whenever a tenant context is active, which would silently hide the global
-# fallback row (`tenant_key IS NULL`) exactly when callers need the fallback most.
 _CE_TENANT_SCOPED_MODELS = frozenset(
     {
         APIKey,
@@ -132,10 +75,6 @@ _CE_TENANT_SCOPED_MODELS = frozenset(
         ApiMetrics,
         CommParticipant,
         CommThread,
-        # FE-9530: CommThreadProjectTag's only writer (CommThreadProjectTagsMixin.
-        # set_project_tags in _comm_thread_project_tags_mixin.py) already filters
-        # tenant_key on every select/delete/insert -- audited clean the same way
-        # CommThread/CommParticipant were in SEC-9272.
         CommThreadProjectTag,
         DownloadToken,
         MCPSession,
@@ -173,31 +112,14 @@ _CE_TENANT_SCOPED_MODELS = frozenset(
     }
 )
 
-# SaaS extension seam (BE-6031a): SaaS registers tenant-scoped models here at import time via
-# register_tenant_scoped_models. Empty in pure-CE installs, so the Deletion Test holds.
 _REGISTERED_TENANT_SCOPED_MODELS: set[type] = set()
 
 
-# Memoized live union (BE-6031a perf): tenant-isolation hot path (_enforce_tenant_scope runs per
-# select/update/delete). Rebuilt ONLY by register_tenant_scoped_models() (CE built-ins frozen).
 _TENANT_SCOPED_CACHE: dict[str, Any] = {"models": frozenset(), "tables": {}}
 
 
-# Statement-shape walk memo (BE-6063c perf). The do_orm_execute guard ran a full
-# ``visitors.iterate`` walk on EVERY execute (spike: 1.0 walk/execute, 47-83us pure-Python
-# CPU/query on the single sync worker -- NOT amortized by SQLAlchemy's compiled-statement
-# cache, which only caches SQL-string compilation). The walk's STRUCTURAL output is a pure
-# function of statement SHAPE + the registered model set, so it is memoized keyed on
-# SQLAlchemy's ``_generate_cache_key()`` -- which is tenant-INDEPENDENT (bind-parameter
-# VALUES are excluded from the key) and collision-safe (distinct WHERE structures /
-# aliased-vs-plain hash to distinct keys). The cached VALUE holds ONLY model sets; it NEVER
-# embeds a tenant_key. The per-execute ``with_loader_criteria`` (which closes over tenant_key)
-# and the explicit-predicate tenant VALUES are recomputed fresh every execute -- never cached.
-# Invalidated wholesale whenever register_tenant_scoped_models() mutates the model set.
 _WALK_MEMO_MODELS: dict[Any, frozenset[type[Any]]] = {}
 _WALK_MEMO_PREDICATE: dict[Any, frozenset[type[Any]]] = {}
-# Bounded so adversarial / high-cardinality statement shapes (e.g. raw text() with varying
-# SQL) cannot grow the memo without limit. On overflow we clear (cheap; recomputes on miss).
 _WALK_MEMO_MAX = 4096
 
 
@@ -207,13 +129,6 @@ def _clear_walk_memo() -> None:
 
 
 def _statement_cache_key(statement: Any) -> Any | None:
-    """Tenant-independent, collision-safe memo key for a statement, or None if uncacheable.
-
-    Returns the hashable ``.key`` of SQLAlchemy's compiled-statement cache key. Some
-    constructs opt out of caching (``_generate_cache_key()`` returns None) -- callers then
-    fall back to the live walk. Any failure to produce a key degrades to None (walk), never
-    to a wrong-but-cached answer.
-    """
     generate = getattr(statement, "_generate_cache_key", None)
     if generate is None:
         return None
@@ -233,34 +148,21 @@ def _all_tenant_scoped_tables() -> dict:
 
 
 def register_tenant_scoped_models(*models: type) -> None:
-    """Register additional tenant-scoped models (SaaS extension seam, BE-6031a).
-
-    Idempotent, additive-only: only WIDENS the allowed set; never weakens the per-call
-    ``models=`` scoping in ``tenant_isolation_bypass``. SaaS calls this at import time so
-    its reaper can bypass cross-tenant scans without CE importing a SaaS model. Rebuilds
-    the memoized cache so readers honor the registration immediately (no-arg call rebuilds).
-
-    Invalidates the BE-6063c statement-shape walk memo too: a memoized model set computed
-    before a new model joined the scoped union would silently omit it (isolation drop).
-    """
     _REGISTERED_TENANT_SCOPED_MODELS.update(models)
     union = _CE_TENANT_SCOPED_MODELS | frozenset(_REGISTERED_TENANT_SCOPED_MODELS)
     _TENANT_SCOPED_CACHE["models"] = union
-    # hasattr filter: only mapped models give a table key; non-mapped still count for membership.
     _TENANT_SCOPED_CACHE["tables"] = {m.__table__: m for m in union if hasattr(m, "__table__")}
     _clear_walk_memo()
 
 
-register_tenant_scoped_models()  # initialize cache at module load (registry empty here)
+register_tenant_scoped_models()
 
 
 def __getattr__(name: str):
-    # PEP 562 hook: expose the public names as the LIVE union (not a static snapshot)
-    # so external readers (e.g. saas/auth/oauth_client.py) see SaaS registrations too.
     if name == "TENANT_SCOPED_MODELS":
         return _all_tenant_scoped_models()
     if name == "TENANT_SCOPED_TABLES":
-        return dict(_all_tenant_scoped_tables())  # copy: external readers must not mutate the cache
+        return dict(_all_tenant_scoped_tables())
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -273,15 +175,9 @@ class TenantIsolationError(RuntimeError):
     pass
 
 
-# BE6004C-0: env-gated audit (observe-only) ramp for the fail-closed tenant guard.
-# Default is "enforce". ONLY the literal "audit" disables raising; any other value
-# (unset, empty, typo) falls through to enforce. Read on every call so tests can
-# monkeypatch the env (do NOT cache at import).
 _TENANT_GUARD_MODE_ENV = "GILJO_TENANT_GUARD_MODE"
 _TENANT_GUARD_AUDIT_MODE = "audit"
 
-# Bounded de-dupe set for audit warnings, keyed by (path, frozenset(model_names)).
-# List endpoints and WS reconnect storms would otherwise flood the log (Risk R7).
 _AUDIT_WARN_SEEN: set[tuple[str | None, frozenset[str]]] = set()
 _AUDIT_WARN_SEEN_MAX = 2048
 
@@ -303,11 +199,6 @@ def _audit_warn(
     execute_state: ORMExecuteState,
     unscoped_write: bool = False,
 ) -> None:
-    """Log a tenant-guard audit warning (de-duped).
-
-    ``unscoped_write`` marks the case the guard could not scope to the active tenant, which
-    is additionally announced on :data:`SIGNAL_UNSCOPED_WRITE`; the log line itself is
-    identical regardless."""
     model_names = sorted(model.__name__ for model in models)
     path = _best_effort_request_path(session)
     dedupe_key = (path, frozenset(model_names))
@@ -335,8 +226,6 @@ def _audit_warn(
     )
 
     if unscoped_write:
-        # Neutral announcement: the guard states what it saw and stops. Nothing is
-        # registered in a plain install, so this is a no-op there (see signals.py).
         publish_signal(
             SIGNAL_UNSCOPED_WRITE,
             {"models": model_names, "statement_type": statement_type, "path": path},
@@ -369,11 +258,6 @@ def _tenant_models_for_statement_uncached(statement: Any) -> frozenset[type[Any]
 
 
 def _tenant_models_for_statement(statement: Any) -> frozenset[type[Any]]:
-    """Walk1 (BE-6063c-memoized): tenant-scoped models a statement touches.
-
-    Pure function of statement shape + registered model set => memoizable on the
-    tenant-independent cache key. A None key (uncacheable construct) runs the live walk.
-    """
     key = _statement_cache_key(statement)
     if key is None:
         return _tenant_models_for_statement_uncached(statement)
@@ -410,13 +294,6 @@ def _models_with_tenant_predicate_uncached(statement: Any) -> frozenset[type[Any
 
 
 def _models_with_tenant_predicate(statement: Any) -> frozenset[type[Any]]:
-    """Walk2 (BE-6063c-memoized): models carrying an explicit ``tenant_key == ...`` predicate.
-
-    WHICH models have a tenant predicate is structural (shape-dependent), so it is memoized.
-    The tenant VALUES in those predicates are NOT cached here -- ``_tenant_predicate_values``
-    re-reads bind params live every execute. This is walk2/_tenant_column_model, the spike's
-    largest per-query contributor (O(models x binary-exprs)).
-    """
     key = _statement_cache_key(statement)
     if key is None:
         return _models_with_tenant_predicate_uncached(statement)
@@ -431,23 +308,6 @@ def _models_with_tenant_predicate(statement: Any) -> frozenset[type[Any]]:
 
 
 def _bind_operand_values(element: Any, parameters: Any) -> frozenset[str]:
-    """Resolve a tenant_key-predicate operand's value(s) -- SEC-9272 FIX1.
-
-    ``BindParameter.value`` is populated at STATEMENT-BUILD time for the common
-    ``Model.tenant_key == "literal"`` shape (SQLAlchemy compiles the literal into
-    the bind immediately), but stays ``None`` for a deferred ``bindparam("name")``
-    bound later via ``session.execute(stmt, {"name": value})`` or an executemany
-    ``params=[{...}, ...]`` list -- SQLAlchemy's idiomatic bulk UPDATE/DELETE shape.
-    Reading ``.value`` alone (pre-FIX1 behavior) sees an empty value set for that
-    shape, which the no-match branch's discriminator would then treat as
-    not-scoped-to-this-tenant and falsely raise on an otherwise correctly-scoped
-    write. Fall back to resolving by ``.key`` against the execute-time parameters:
-    a single dict (``session.execute(stmt, {...})``) or an executemany list of
-    dicts (``session.execute(stmt, [{...}, {...}])``) -- the caller is scoped to a
-    value only if that value is present in EVERY row that carries the key, so a
-    mixed-tenant executemany surfaces every distinct value here and the caller
-    (``_tenant_predicate_values``) can still fail the ``== {tenant_key}`` check.
-    """
     if not isinstance(element, BindParameter):
         return frozenset()
     if isinstance(element.value, str):
@@ -605,46 +465,12 @@ def _enforce_tenant_scope(execute_state: ORMExecuteState) -> None:
         )
         return
 
-    # SEC-9094: resolve the UPDATE/DELETE target model via the SAME unwrap the DETECTION walk
-    # uses (_table_model unwraps an AnnotatedTable's .original), instead of a raw identity check.
-    # A mapped-class bulk update(Model)/delete(Model) sets statement.table to an AnnotatedTable
-    # that is not `is` model.__table__, so the old identity loop could not inject on it and the
-    # write fell through to the warn branch below (the ~123/143 weekly benign warns). Routing
-    # through _table_model injects on BOTH the raw-table shape (identical result -- same model)
-    # AND the mapped-class shape. The `in models` guard keeps us from ever injecting on a model
-    # the walk did not flag (target_model is guaranteed in `models` whenever it resolves, since
-    # the walk adds _table_model(statement.table); the explicit check is defensive).
     statement_table = getattr(execute_state.statement, "table", None)
     target_model = _table_model(statement_table) if statement_table is not None else None
     if target_model is not None and target_model in models:
         execute_state.statement = execute_state.statement.where(target_model.tenant_key == tenant_key)
         return
 
-    # TSK-9008 Step 2 (fail-closed, SEC-9156, shipped): the statement touches a tenant-scoped
-    # model but no model's table matched the UPDATE/DELETE target, so no tenant predicate could
-    # be injected. The explicit-predicate detail separates "truly unscoped write" (Class-B) from
-    # "scoped by the caller but unmatched statement shape" (Class-A) -- after SEC-9094 the
-    # remaining no-match cases are statements whose UPDATE/DELETE target table is not itself a
-    # detected tenant model (e.g. a non-tenant target with a tenant-scoped model referenced only
-    # via a subquery/join), where nothing is injectable. Class-B now RAISES (genuinely unscoped,
-    # unless observe-only audit mode is set); Class-A stays warn-and-continue (the 23 observed
-    # benign caller-scoped hits -- raising there would break legitimate writes).
-    #
-    # SEC-9272 (discriminator hardening, pre-existing weakness -- predates SEC-9156): this closes
-    # the VALUE dimension only -- an explicit tenant predicate being PRESENT never meant the
-    # predicate's VALUE was checked against THIS tenant. A caller bug (wrong variable threaded
-    # into the query) or a statement that references a real OTHER tenant's row could carry a
-    # syntactically-valid `tenant_key == <value>` predicate for a DIFFERENT tenant and still slip
-    # through as "benign" Class-A. Cross-check the predicate's VALUE against the resolved
-    # tenant_key for this execute (the same technique the flush-derived branch above already uses
-    # via _tenant_predicate_values) -- only an explicit predicate whose value set is EXACTLY
-    # {tenant_key} counts as caller-scoped-to-this-tenant; anything else (absent, or present-but-
-    # wrong-tenant) is treated as Class-B. This does NOT touch the separate COVERAGE dimension --
-    # whether EVERY touched model individually carries a matching predicate on its OWN tenant_key
-    # column -- which stays exactly as SEC-9156 left it (explicit_tenant_models is a set of ANY
-    # registered model with a matching predicate anywhere on the statement, not a per-model
-    # completeness check); that is a separate, pre-existing, out-of-scope question with no live
-    # caller shape that hits it.
     explicit_tenant_values = (
         _tenant_predicate_values(execute_state.statement, execute_state.parameters)
         if explicit_tenant_models
@@ -659,10 +485,6 @@ def _enforce_tenant_scope(execute_state: ORMExecuteState) -> None:
         message = f"{message}; statement carries an explicit tenant predicate on: {explicit_names}"
         if not caller_scoped_to_this_tenant:
             message = f"{message}; predicate value(s) {sorted(explicit_tenant_values)} do not match this tenant"
-    # SEC-9093 (D2), hardened by SEC-9272: a statement counts as unscoped when it carries no
-    # explicit tenant predicate, OR carries one that does not resolve to THIS tenant. A
-    # statement that IS explicitly scoped to this tenant stays log-only. _audit_warn fires
-    # BEFORE the raise below so a blocked write is never silent.
     _audit_warn(
         session,
         reason=message,
@@ -670,10 +492,6 @@ def _enforce_tenant_scope(execute_state: ORMExecuteState) -> None:
         execute_state=execute_state,
         unscoped_write=not caller_scoped_to_this_tenant,
     )
-    # An unscoped write fails closed -- but observe-only audit mode suppresses the raise (the
-    # _audit_warn above still fires), exactly like the two sibling raises earlier in this
-    # function, so GILJO_TENANT_GUARD_MODE=audit stays a working kill switch to stop a bad flip
-    # without a redeploy.
     if not caller_scoped_to_this_tenant and not audit_mode:
         raise TenantIsolationError(message)
     return

@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Unit tests for OAuthAuthorizationCode model.
-
-Tests verify model structure, field defaults, and constraints
-without requiring a database connection.
-"""
 
 from datetime import UTC, datetime, timedelta
 
@@ -17,7 +11,6 @@ from giljo_mcp.models.oauth import OAuthAuthorizationCode
 
 
 class TestGenerateUuid:
-    """Tests for the generate_uuid utility used by OAuthAuthorizationCode."""
 
     def test_generate_uuid_returns_string(self):
         result = generate_uuid()
@@ -35,13 +28,11 @@ class TestGenerateUuid:
 
 
 class TestOAuthAuthorizationCodeModel:
-    """Tests for OAuthAuthorizationCode model structure and defaults."""
 
     def test_tablename(self):
         assert OAuthAuthorizationCode.__tablename__ == "oauth_authorization_codes"
 
     def test_model_has_expected_columns(self):
-        """Verify all expected columns exist on the model."""
         mapper = OAuthAuthorizationCode.__table__
         column_names = {col.name for col in mapper.columns}
         expected = {
@@ -116,7 +107,6 @@ class TestOAuthAuthorizationCodeModel:
         assert col.server_default is not None
 
     def test_instantiation_with_required_fields(self):
-        """Verify model can be instantiated with all required fields."""
         expires = datetime.now(UTC) + timedelta(minutes=10)
         instance = OAuthAuthorizationCode(
             code="test_auth_code_abc123",
@@ -147,13 +137,6 @@ class TestOAuthAuthorizationCodeModel:
         assert "tenant-abc" in result
 
     def test_tenant_key_indexed(self):
-        """Tenant key must be indexed for efficient tenant-isolated queries.
-
-        BE-8000c: the index is declared as an explicit Index("idx_oauth_code_tenant")
-        in __table_args__ (not column-level index=True, which duplicated it as a
-        second ix_* index). Assert the outcome — an index leads on tenant_key —
-        rather than the mechanism.
-        """
         table = OAuthAuthorizationCode.__table__
         assert any(list(ix.columns)[:1] == [table.c.tenant_key] for ix in table.indexes), (
             "expected an index leading on tenant_key"

@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Transport-layer tests for the ``request_approval`` MCP tool (BE-5029).
-
-Closes the regression-test-at-the-failing-layer gap flagged by the tester:
-``tests/tools/test_request_approval.py`` covers ``ToolAccessor.request_approval``
-directly, but the ``@mcp.tool`` wrapper at ``api/endpoints/mcp_sdk_server.py:705``
-is itself untested. The wrapper invokes ``_resolve_tenant(ctx)`` (reading
-``tenant_key`` from the ASGI session set by ``MCPAuthMiddleware``) and dispatches
-through ``_call_tool`` -- that whole boundary is what these tests exercise.
-
-Pattern reference: ``tests/integration/test_task_tools_mcp_transport.py`` -- same
-in-memory ``create_connected_server_and_client_session`` transport, same
-``_resolve_tenant`` / ``_resolve_user_id`` monkeypatch trick, same shared-session
-service rebinding so DB writes/reads happen inside the rolled-back test
-transaction.
-"""
 
 from __future__ import annotations
 
@@ -42,13 +27,9 @@ from tests.helpers.mcp_session_fixture import create_connected_server_and_client
 pytestmark = pytest.mark.asyncio
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _payload(call_tool_result) -> dict:
-    """Decode a CallToolResult into a dict (mirrors the harness helper)."""
     if getattr(call_tool_result, "structuredContent", None):
         return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
@@ -59,7 +40,6 @@ def _payload(call_tool_result) -> dict:
 
 
 def _error_text(call_tool_result) -> str:
-    """Concatenate error text blocks from an error CallToolResult."""
     parts = []
     for block in call_tool_result.content:
         text = getattr(block, "text", None)
@@ -69,16 +49,6 @@ def _error_text(call_tool_result) -> str:
 
 
 async def _seed_approval_context(db_session, tenant_key: str, job_type: str = "orchestrator") -> dict:
-    """Create org + product + project + agent_job + agent_execution for tenant.
-
-    Returns dict with keys: project, job, execution -- mirrors the seed fixture
-    in tests/tools/test_request_approval.py but creates everything for an
-    arbitrary tenant_key so cross-tenant isolation can be tested.
-
-    BE-9054 (a): request_approval is orchestrator-only, so the default seed is
-    an orchestrator job; pass job_type="implementer" to exercise the worker
-    rejection.
-    """
     suffix = uuid4().hex[:8]
     org = Organization(
         name=f"Org {suffix}",
@@ -139,9 +109,6 @@ async def _seed_approval_context(db_session, tenant_key: str, job_type: str = "o
     return {"project": project, "job": job, "execution": execution}
 
 
-# ---------------------------------------------------------------------------
-# Fixtures: shared-session ToolAccessor + tenant-aware MCP client
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
@@ -155,7 +122,6 @@ async def secondary_tenant_key() -> str:
 
 
 class _TenantSwitch:
-    """Mutable holder so tests can flip the resolved tenant_key per call."""
 
     def __init__(self, value: str):
         self.value = value
@@ -163,25 +129,6 @@ class _TenantSwitch:
 
 @pytest_asyncio.fixture
 async def approval_mcp_client(db_manager, db_session, primary_tenant_key, monkeypatch):
-    """Yield ``(new_client, tenant_switch)`` for in-memory FastMCP transport tests.
-
-    ``new_client()`` returns a one-shot async context manager around an
-    initialized ``ClientSession``. ``tenant_switch.value`` is the tenant_key the
-    monkeypatched ``_resolve_tenant`` returns -- mutating it between calls lets
-    a single test flip the active tenant without spinning up a second fixture.
-
-    Three deltas vs production wiring:
-    1. Replace ``ToolAccessor._user_approval_service`` with a service bound to
-       the test ``db_session`` so writes happen inside the rolled-back test
-       transaction (otherwise a fresh session would see no
-       project/job/execution rows and would commit live rows past teardown).
-    2. Monkeypatch ``_resolve_tenant`` / ``_resolve_user_id`` to read from the
-       tenant_switch closure (no auth middleware in the in-memory transport).
-    3. Belt-and-brace ``app_state.db_manager`` so the post-call
-       ``auto_clear_silent`` / ``touch_heartbeat`` paths in ``_call_tool`` find
-       a live db_manager when ``job_id`` is in kwargs (which it always is for
-       request_approval).
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from giljo_mcp.services.user_approval_service import UserApprovalService
@@ -207,8 +154,6 @@ async def approval_mcp_client(db_manager, db_session, primary_tenant_key, monkey
 
     tenant_switch = _TenantSwitch(primary_tenant_key)
 
-    # BE-6042d: _resolve_tenant/_resolve_user_id moved to mcp_tools._base (the
-    # _call_tool call site reads them there). Patch _base, not mcp_sdk_server.
     from api.endpoints.mcp_tools import _base
 
     monkeypatch.setattr(
@@ -233,19 +178,9 @@ async def approval_mcp_client(db_manager, db_session, primary_tenant_key, monkey
         state.db_manager = prior_db_manager
 
 
-# ---------------------------------------------------------------------------
-# request_approval wrapper (mcp_sdk_server.py:705-737)
-# ---------------------------------------------------------------------------
 
 
 async def test_request_approval_happy_path_through_wrapper(approval_mcp_client, db_session, primary_tenant_key):
-    """Call request_approval via the FastMCP client and assert:
-
-    1. Response shape matches ``{"approval_id": "<uuid>", "status": "pending"}``.
-    2. The persisted row's tenant_key is the one resolved from the ASGI session
-       (the monkeypatched ``_resolve_tenant``), proving the wrapper is using the
-       session-derived tenant_key and NOT trusting client kwargs.
-    """
     new_client, _switch = approval_mcp_client
     seed = await _seed_approval_context(db_session, primary_tenant_key)
 
@@ -266,9 +201,6 @@ async def test_request_approval_happy_path_through_wrapper(approval_mcp_client, 
 
     assert result.is_error is False, _error_text(result)
     payload = _payload(result)
-    # IMP-6038: the FastMCP server echoes `_meta:{skills_version}` on every MCP
-    # response (per-device skills nudge), so require the contract keys as a subset
-    # while still rejecting any extra key other than `_meta`.
     assert {"approval_id", "status"} <= set(payload.keys()), f"unexpected response keys: {payload!r}"
     assert set(payload.keys()) - {"approval_id", "status"} <= {"_meta"}, f"unexpected extra keys: {payload!r}"
     assert payload["status"] == "pending"
@@ -290,20 +222,8 @@ async def test_request_approval_is_tenant_scoped_at_transport_boundary(
     primary_tenant_key,
     secondary_tenant_key,
 ):
-    """Tenant A creates an approval through the transport. Switch the
-    monkeypatched ``_resolve_tenant`` to tenant B and try to interact with
-    tenant A's job through the same transport: the wrapper must reject because
-    tenant B's scope cannot see tenant A's AgentJob row.
-
-    This is the regression that proves the ``@mcp.tool`` wrapper passes the
-    session-derived tenant_key through to the service correctly. If the wrapper
-    ever started trusting a client-supplied tenant_key kwarg, this test would
-    flip green for the wrong reason -- so we also assert the persisted tenant_A
-    row is invisible from tenant B's view.
-    """
     new_client, switch = approval_mcp_client
 
-    # Tenant A: full seed + create approval via the wrapper.
     switch.value = primary_tenant_key
     a_seed = await _seed_approval_context(db_session, primary_tenant_key)
 
@@ -321,13 +241,8 @@ async def test_request_approval_is_tenant_scoped_at_transport_boundary(
     assert a_result.is_error is False, _error_text(a_result)
     a_approval_id = _payload(a_result)["approval_id"]
 
-    # Tenant B: seed independent context so tenant B has its own job/project.
     await _seed_approval_context(db_session, secondary_tenant_key)
 
-    # Tenant B switches active session and tries to request approval against
-    # tenant A's job_id + project_id. Service must reject because the
-    # AgentJob lookup filters by (tenant_key, job_id) and tenant B cannot
-    # see tenant A's job.
     switch.value = secondary_tenant_key
     async with new_client() as session:
         cross_tenant_result = await session.call_tool(
@@ -349,8 +264,6 @@ async def test_request_approval_is_tenant_scoped_at_transport_boundary(
         f"expected ResourceNotFoundError-style message, got: {err!r}"
     )
 
-    # And the persisted tenant-A approval still belongs to tenant A only --
-    # confirm by direct DB read scoped to tenant B finds nothing.
     rows_for_b = (
         (
             await db_session.execute(
@@ -367,14 +280,6 @@ async def test_request_approval_is_tenant_scoped_at_transport_boundary(
 
 
 async def test_request_approval_worker_rejected_at_mcp_boundary(approval_mcp_client, db_session, primary_tenant_key):
-    """BE-9054 (a) regression AT THE FAILING LAYER (the MCP transport):
-
-    A worker job calling request_approval through the FastMCP transport gets the
-    BE-6081 structured domain rejection as NORMAL tool content (isError False,
-    success False, error=ORCHESTRATOR_ONLY_APPROVAL) — not an exception — and
-    the worker is NOT parked in awaiting_user (no unreachable dead end: the
-    dashboard's Approve/Reject card binds only to the orchestrator's job).
-    """
     new_client, _switch = approval_mcp_client
     seed = await _seed_approval_context(db_session, primary_tenant_key, job_type="implementer")
 
@@ -399,7 +304,6 @@ async def test_request_approval_worker_rejected_at_mcp_boundary(approval_mcp_cli
     assert payload["calling_agent_role"] == "implementer"
     assert "post_to_thread" in payload["message"]
 
-    # No approval row persisted; the worker's status is untouched.
     rows = (
         (await db_session.execute(select(UserApproval).where(UserApproval.job_id == seed["job"].job_id)))
         .scalars()
@@ -413,6 +317,4 @@ async def test_request_approval_worker_rejected_at_mcp_boundary(approval_mcp_cli
     assert execution.status == "working", "rejected worker must not be flipped to awaiting_user"
 
 
-# Suppress unused-import warning: random/datetime are kept for future
-# parameterization; keep them imported so contributors don't re-add them.
 _ = random

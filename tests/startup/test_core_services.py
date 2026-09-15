@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tests for core services initialization module"""
 
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -15,7 +14,6 @@ from api.app_state import APIState
 
 @pytest.mark.asyncio
 async def test_init_core_services_initializes_tenant_manager():
-    """Should initialize TenantManager on state"""
     from api.startup.core_services import init_core_services
 
     state = APIState()
@@ -38,7 +36,6 @@ async def test_init_core_services_initializes_tenant_manager():
 
 @pytest.mark.asyncio
 async def test_init_core_services_initializes_websocket_manager():
-    """Should initialize WebSocketManager before ToolAccessor"""
     from api.startup.core_services import init_core_services
 
     state = APIState()
@@ -61,7 +58,6 @@ async def test_init_core_services_initializes_websocket_manager():
 
 @pytest.mark.asyncio
 async def test_init_core_services_initializes_tool_accessor():
-    """ToolAccessor should be initialized with db_manager, tenant_manager, websocket_manager"""
     from api.startup.core_services import init_core_services
 
     state = APIState()
@@ -84,7 +80,6 @@ async def test_init_core_services_initializes_tool_accessor():
 
         await init_core_services(state)
 
-        # Verify ToolAccessor was called with all required dependencies
         mock_tool_accessor.assert_called_once_with(
             state.db_manager, mock_tenant_instance, websocket_manager=mock_ws_instance
         )
@@ -93,7 +88,6 @@ async def test_init_core_services_initializes_tool_accessor():
 
 @pytest.mark.asyncio
 async def test_init_core_services_initializes_auth_manager():
-    """AuthManager should be initialized with config and db=None"""
     from api.startup.core_services import init_core_services
 
     state = APIState()
@@ -116,7 +110,6 @@ async def test_init_core_services_initializes_auth_manager():
 
 @pytest.mark.asyncio
 async def test_init_core_services_loads_api_key_from_env():
-    """Should load API_KEY from environment if available"""
     from api.startup.core_services import init_core_services
 
     state = APIState()
@@ -139,7 +132,6 @@ async def test_init_core_services_loads_api_key_from_env():
 
         await init_core_services(state)
 
-        # Verify API key was added to AuthManager
         assert api_key in state.auth.api_keys
         assert state.auth.api_keys[api_key]["name"] == "Installer Generated"
         assert state.auth.api_keys[api_key]["active"] is True
@@ -147,7 +139,6 @@ async def test_init_core_services_loads_api_key_from_env():
 
 @pytest.mark.asyncio
 async def test_init_core_services_loads_giljo_mcp_api_key():
-    """Should load GILJO_MCP_API_KEY as fallback"""
     from api.startup.core_services import init_core_services
 
     state = APIState()
@@ -170,13 +161,11 @@ async def test_init_core_services_loads_giljo_mcp_api_key():
 
         await init_core_services(state)
 
-        # Verify API key was added
         assert api_key in state.auth.api_keys
 
 
 @pytest.mark.asyncio
 async def test_init_core_services_starts_heartbeat_task():
-    """Should start WebSocket heartbeat task"""
     from api.startup.core_services import init_core_services
 
     state = APIState()
@@ -200,14 +189,12 @@ async def test_init_core_services_starts_heartbeat_task():
 
         await init_core_services(state)
 
-        # Verify heartbeat task was created
         mock_create_task.assert_called_once()
         assert state.heartbeat_task is not None
 
 
 @pytest.mark.asyncio
 async def test_init_core_services_correct_initialization_order():
-    """Services must be initialized in correct order: TenantManager → WebSocketManager → ToolAccessor → AuthManager"""
     from api.startup.core_services import init_core_services
 
     state = APIState()
@@ -244,22 +231,11 @@ async def test_init_core_services_correct_initialization_order():
     ):
         await init_core_services(state)
 
-        # Verify order
         assert call_order == ["tenant", "websocket", "tool_accessor", "auth"]
 
 
 @pytest.mark.asyncio
 async def test_auth_manager_failure_aborts_boot_and_leaves_state_auth_unset():
-    """SEC-9572: the four core-service blocks are FATAL by design, not "non-fatal".
-
-    Their comments used to read "startup resilience, non-fatal initialization"
-    while the bodies re-raised. Production proved the code right and the comment
-    wrong -- a worker whose AuthManager raised did not degrade, it died, and took
-    the uvicorn parent with it. This pins the behaviour so the comment cannot
-    drift back: a half-built AuthManager must abort boot, because ``state.auth``
-    stays None and AuthMiddleware is wired with a callable that never reaches its
-    own not-configured guard.
-    """
     from api.startup.core_services import init_core_services
 
     state = APIState()

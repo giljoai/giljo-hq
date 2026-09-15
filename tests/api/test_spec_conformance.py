@@ -3,41 +3,16 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Regression tests for API-0021h — MCP spec-version conformance declaration.
-
-Locks the publicly advertised MCP spec versions and the `/.well-known/mcp-server-info`
-endpoint shape so future refactors cannot silently drop a declared version or
-break the capability/version-discovery contract documented in CONFORMANCE.md.
-
-Failing-layer discipline (per CLAUDE.md): every test exercises the FastAPI
-route, not the handler function directly. The bug class this guards against
-(silent metadata regression) lives at the HTTP boundary — that is the layer
-that must be asserted.
-
-Test categories:
-- TestSpecVersionsConstant: MCP_SPEC_VERSIONS_SUPPORTED is the single source
-  of truth — imported from the canonical module, not duplicated.
-- TestAuthorizationServerMetadataAdvertisesSpecVersions: the AS-metadata
-  response (RFC 8414, both canonical /api/oauth/.well-known/... and root mirror)
-  carries `mcp_spec_versions_supported` containing every declared version.
-- TestMcpServerInfoEndpoint: the new GET /.well-known/mcp-server-info returns
-  declared versions, capabilities (read from canonical TOOL_SCOPES source),
-  server_name, and server_version (from giljo_mcp.__version__).
-"""
 
 import pytest
 
 from api.endpoints.oauth import MCP_SPEC_VERSIONS_SUPPORTED
 
 
-# Declared list locked here as well so a refactor that mutates the constant
-# fails this test even if both sides still agree. Update both intentionally.
 EXPECTED_DECLARED_VERSIONS: list[str] = ["2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"]
 
 
 class TestSpecVersionsConstant:
-    """The declared-version list is the single source of truth."""
 
     def test_constant_matches_expected_declared_versions(self):
         assert MCP_SPEC_VERSIONS_SUPPORTED == EXPECTED_DECLARED_VERSIONS, (
@@ -46,19 +21,15 @@ class TestSpecVersionsConstant:
         )
 
     def test_constant_is_immutable_shape(self):
-        # The constant must be a list of plain version strings — no nested
-        # structures, no objects. Downstream serializers depend on this shape.
         assert isinstance(MCP_SPEC_VERSIONS_SUPPORTED, list)
         for version in MCP_SPEC_VERSIONS_SUPPORTED:
             assert isinstance(version, str)
-            # Spec versions are YYYY-MM-DD dated identifiers
             assert len(version) == 10 and version.count("-") == 2, (
                 f"declared spec version not in YYYY-MM-DD form: {version!r}"
             )
 
 
 class TestAuthorizationServerMetadataAdvertisesSpecVersions:
-    """RFC 8414 AS-metadata MUST advertise `mcp_spec_versions_supported`."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("declared_version", EXPECTED_DECLARED_VERSIONS)
@@ -106,7 +77,6 @@ class TestAuthorizationServerMetadataAdvertisesSpecVersions:
 
 
 class TestMcpServerInfoEndpoint:
-    """`GET /.well-known/mcp-server-info` is the conformance discovery surface."""
 
     @pytest.mark.asyncio
     async def test_endpoint_returns_200(self, api_client):
@@ -143,9 +113,6 @@ class TestMcpServerInfoEndpoint:
 
         response = await api_client.get("/.well-known/mcp-server-info")
         body = response.json()
-        # The MCP server is registered as `name=branding.MCP_ALIAS` in FastMCP
-        # (see api/endpoints/mcp_tools/_base.py). The server_name field must
-        # match that identity exactly (BE-9275a: alias flipped to giljo_hq).
         assert body["server_name"] == branding.MCP_ALIAS, (
             f"server_name must match the FastMCP registered name, got {body['server_name']!r}"
         )
@@ -168,9 +135,6 @@ class TestMcpServerInfoEndpoint:
         body = response.json()
         capabilities = body["capabilities"]
         assert isinstance(capabilities, dict), f"capabilities must be a dict, got {type(capabilities).__name__}"
-        # The endpoint must expose a `tools` block — at minimum a count and
-        # the per-tool scope map. Both are derivable from TOOL_SCOPES, the
-        # canonical source.
         assert "tools" in capabilities, f"capabilities.tools missing: {capabilities}"
         tools_block = capabilities["tools"]
         assert "count" in tools_block, f"capabilities.tools.count missing: {tools_block}"

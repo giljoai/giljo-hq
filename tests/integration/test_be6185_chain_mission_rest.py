@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6185 — REST integration tests for the chain_mission edit/lock path.
-
-Proves the FE edit pen can PATCH chain_mission, that an over-cap value returns a
-clean 422 (not a DB-constraint 500), and that a write on a running (ultralocked)
-run returns 422 (read-only after Implement) — the failing layer here is the PATCH
-boundary, so these run through the real ASGI transport.
-
-Parallel-safety rules (per DELIVERY_PIPELINE.md): db_manager-seeded, no
-module-level mutable state, each test owns its setup.
-
-Pattern reference: tests/integration/test_be6131a_sequence_run_rest.py.
-"""
 
 from __future__ import annotations
 

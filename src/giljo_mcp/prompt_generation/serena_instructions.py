@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Serena MCP guidance — single source of truth (INF-6007).
-
-Two entry points, both driven by the `integrations.serena_mcp.use_in_prompts`
-toggle:
-
-- `generate_serena_instructions(enabled)` — the original generic ~50-token
-  notice. Retained for backward compatibility.
-- `for_role(role, enabled)` — role-specific guidance. This consolidates the
-  six role variants that previously lived in
-  `template_manager._get_serena_guidance` (which never reached the orchestrator
-  because of a broken string-anchor inject) plus a sensible default.
-
-Both reach the runtime paths agents actually read:
-- `for_role("orchestrator")` is surfaced in `get_staging_instructions`.
-- `for_role(job.job_type)` is prepended to every agent mission.
-"""
 
 import logging
 
@@ -36,12 +19,6 @@ Serena provides 80-90% token savings vs full file reads.
 """.strip()
 
 
-# BE-6209c: the Serena guidance blocks render whenever the
-# `integrations.serena_mcp.use_in_prompts` UI toggle is on — which does NOT
-# guarantee Serena is actually installed/registered in the agent's session. So the
-# guidance is framed CONDITIONALLY ("prefer Serena when available, else Read/Grep")
-# instead of asserting its presence and mandating its use. Shared lead-in woven into
-# every role block via `for_role`, mirroring how `_PYTHON_ONLY_CAVEAT` travels.
 _AVAILABILITY_LEAD = (
     "If Serena MCP tools are available in your session, prefer them for the steps below; "
     "if they are not registered, fall back to Read/Grep — the workflow is the same, only "
@@ -49,13 +26,6 @@ _AVAILABILITY_LEAD = (
 )
 
 
-# Caveat shared by every role: Serena's LSP only covers the language(s) it is
-# configured for in a given workspace (Python-only in THIS repo). Symbol tools
-# silently return nothing on files outside that coverage, which reads as a
-# "no results" false negative rather than an error. Steer agents to pattern
-# search for anything outside the configured language(s). BE-9260: worded
-# conditionally rather than asserting "Python-only" as a universal fact — the
-# customer's own product may configure Serena for a different language.
 _PYTHON_ONLY_CAVEAT = (
     "Serena's symbol tools (find_symbol, find_referencing_symbols, replace_symbol_body, "
     "rename_symbol, etc.) cover only the language(s) its LSP is configured for in this "
@@ -224,36 +194,12 @@ _ROLE_GUIDANCE: dict[str, str] = {
 
 
 def generate_serena_instructions(enabled: bool = True) -> str:
-    """
-    Generate the simplified, role-agnostic Serena MCP notice (~50 tokens).
-
-    Args:
-        enabled: Whether Serena MCP is enabled.
-
-    Returns:
-        Generic notice if enabled, empty string if disabled.
-    """
     if not enabled:
         return ""
     return _GENERIC_NOTICE
 
 
 def for_role(role: str | None, enabled: bool = True) -> str:
-    """
-    Generate role-specific Serena MCP guidance.
-
-    This is the single source of truth for Serena guidance text. The
-    orchestrator instructions builder and the agent-mission builder both call
-    it so every surface gets the same, role-appropriate guidance.
-
-    Args:
-        role: Agent role (orchestrator, analyzer, implementer, tester,
-            reviewer, documenter). Unknown/None falls back to a generic block.
-        enabled: Whether Serena MCP is enabled.
-
-    Returns:
-        Role-specific guidance if enabled, empty string if disabled.
-    """
     if not enabled:
         return ""
 

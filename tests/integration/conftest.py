@@ -3,9 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Integration test fixtures for Handover 0316
-"""
 
 from uuid import uuid4
 
@@ -20,17 +17,15 @@ from tests.helpers.mcp_session_fixture import create_connected_server_and_client
 
 @pytest_asyncio.fixture
 async def test_user(db_session: AsyncSession):
-    """Create test user with tenant"""
     from giljo_mcp.models.organizations import Organization
 
     unique_suffix = uuid4().hex[:8]
-    tenant_key = TenantManager.generate_tenant_key()  # 0424m: Generate before org creation
+    tenant_key = TenantManager.generate_tenant_key()
 
-    # Create org first (0424m: org_id is NOT NULL, tenant_key required)
     org = Organization(
         name=f"Test User Org {unique_suffix}",
         slug=f"test-user-org-{unique_suffix}",
-        tenant_key=tenant_key,  # 0424m: Required NOT NULL
+        tenant_key=tenant_key,
         is_active=True,
     )
     db_session.add(org)
@@ -39,10 +34,10 @@ async def test_user(db_session: AsyncSession):
     user = User(
         username=f"testuser_{unique_suffix}",
         email=f"test_{uuid4().hex[:8]}@example.com",
-        tenant_key=tenant_key,  # 0424m: Use same tenant_key
+        tenant_key=tenant_key,
         role="developer",
         password_hash="hashed_password",
-        org_id=org.id,  # Required after 0424j
+        org_id=org.id,
     )
     db_session.add(user)
     await db_session.commit()
@@ -52,20 +47,12 @@ async def test_user(db_session: AsyncSession):
 
 @pytest.fixture(autouse=True)
 def set_tenant_context(test_user: User):
-    """Ensure TenantManager is set to the primary test user's tenant."""
     TenantManager.set_current_tenant(test_user.tenant_key)
     return test_user.tenant_key
 
 
-# In-process MCP transport (avoids TCP port + auth middleware) -- the SDK's
-# create_connected_server_and_client_session wires the FastMCP instance to a
-# ClientSession via in-memory streams. Fixture yields an async context manager
-# (not the session directly) so anyio task-group setup/teardown stays inside
-# one coroutine task, sidestepping pytest-asyncio's "exit cancel scope in a
-# different task" finalization bug.
 @pytest_asyncio.fixture
 async def mcp_client(db_manager):
-    """Yield an async context manager that produces an initialized MCP ClientSession."""
     from api.app_state import state
     from api.endpoints.mcp_sdk_server import mcp
     from giljo_mcp.tools.tool_accessor import ToolAccessor

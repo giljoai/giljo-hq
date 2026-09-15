@@ -3,52 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Unified baseline migration for v3.7 schema
-
-Revision ID: baseline_v37
-Revises: None
-Create Date: 2026-04-23
-
-Consolidated baseline squashed from baseline_v36 + 16 incrementals:
-
-  baseline_v36 - Full schema (39 tables)
-  rename_type_only - Data: rename depth 'type_only' to 'basic' (no DDL)
-  add_last_activity_at - Add last_activity_at to agent_executions
-  add_hidden_to_projects - Add hidden column to projects
-  bbdc55534128 - Add org_setup_complete to organizations
-  9f1f46a46029 - Data: rename old MCP tool names in agent_templates (no DDL)
-  a3c7e1f9d024 - Drop 4 orphan tables (discovery_config, git_configs, optimization_rules, optimization_metrics)
-  2c7b0f717e1d - Add product_id to taxonomy unique index
-  fk_templates_product - Add FK on agent_templates.product_id (then reverted)
-  revert_product_templates - Revert to tenant-scoped templates (swap unique constraint, drop FK/index)
-  add_user_managed_export - Add user_managed_export to agent_templates
-  create_product_agent_assignments - New junction table
-  fix_taxonomy_nulls_not_distinct - NULLS NOT DISTINCT on taxonomy index
-  9254a70aef1d - Data: scope orchestrator prompt per-tenant (no DDL)
-  50520bba0d1d - Merge head
-  b0b658095851 - Merge head
-
-Tables created (36 total):
-  1. organizations           19. agent_executions
-  2. users                   20. agent_todo_items
-  3. org_memberships         21. configurations
-  4. api_keys                22. git_commits
-  5. api_key_ip_log          23. setup_state
-  6. products                24. settings
-  7. project_types           25. download_tokens
-  8. projects                26. api_metrics
-  9. mcp_sessions            27. oauth_authorization_codes
- 10. tasks                   28. message_recipients
- 11. messages                29. message_acknowledgments
- 12. vision_documents        30. message_completions
- 13. mcp_context_index       31. user_field_priorities
- 14. product_memory_entries   32. vision_document_summaries
- 15. agent_templates         33. product_tech_stacks
- 16. template_archives       34. product_architectures
- 17. template_usage_stats    35. product_test_configs
- 18. agent_jobs              36. product_agent_assignments
-
-"""
 
 from collections.abc import Sequence
 
@@ -57,7 +11,6 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 
-# revision identifiers, used by Alembic.
 revision: str = "baseline_v37"
 down_revision: str | Sequence[str] | None = None
 branch_labels: str | Sequence[str] | None = None
@@ -65,11 +18,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
 
-    # =========================================================================
-    # 1. organizations - MUST BE FIRST (referenced by users, products, etc.)
-    # =========================================================================
     op.create_table(
         "organizations",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -87,11 +36,6 @@ def upgrade() -> None:
     op.create_index("idx_org_slug", "organizations", ["slug"], unique=True)
     op.create_index("idx_org_active", "organizations", ["is_active"], unique=False)
 
-    # =========================================================================
-    # 2. users (FK -> organizations)
-    #    v3.4: removed field_priority_config, depth_config JSONB columns (0840d)
-    #    v3.4: added 7 depth columns (0840d)
-    # =========================================================================
     op.create_table(
         "users",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -179,9 +123,6 @@ def upgrade() -> None:
     op.create_index(op.f("ix_users_username"), "users", ["username"], unique=True)
     op.create_index(op.f("ix_users_email"), "users", ["email"], unique=True)
 
-    # =========================================================================
-    # 3. org_memberships (FK -> organizations, users)
-    # =========================================================================
     op.create_table(
         "org_memberships",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -202,9 +143,6 @@ def upgrade() -> None:
     op.create_index("idx_membership_user", "org_memberships", ["user_id"], unique=False)
     op.create_index("idx_membership_tenant", "org_memberships", ["tenant_key"], unique=False)
 
-    # =========================================================================
-    # 4. api_keys (FK -> users)
-    # =========================================================================
     op.create_table(
         "api_keys",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -231,9 +169,6 @@ def upgrade() -> None:
     op.create_index("idx_apikey_permissions_gin", "api_keys", ["permissions"], unique=False, postgresql_using="gin")
     op.create_index(op.f("ix_api_keys_key_hash"), "api_keys", ["key_hash"], unique=True)
 
-    # =========================================================================
-    # 5. api_key_ip_log (FK -> api_keys)
-    # =========================================================================
     op.create_table(
         "api_key_ip_log",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -248,12 +183,6 @@ def upgrade() -> None:
     )
     op.create_index("idx_api_key_ip_log_last_seen", "api_key_ip_log", ["last_seen_at"], unique=False)
 
-    # =========================================================================
-    # 6. products (FK -> organizations)
-    #    v3.4: removed meta_data (0840a), config_data (0840c)
-    #    v3.4: added core_features (0840c), extraction_custom_instructions (0842a),
-    #           brand_guidelines (0844a)
-    # =========================================================================
     op.create_table(
         "products",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -381,9 +310,6 @@ def upgrade() -> None:
         postgresql_where=sa.text("is_active = true"),
     )
 
-    # =========================================================================
-    # 7. project_types (no FK dependencies)
-    # =========================================================================
     op.create_table(
         "project_types",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -406,12 +332,6 @@ def upgrade() -> None:
     )
     op.create_index("idx_project_type_tenant", "project_types", ["tenant_key"], unique=False)
 
-    # =========================================================================
-    # 8. projects (FK -> products, project_types)
-    #    v3.4: removed meta_data (0840e)
-    #    v3.4: added cancellation_reason, deactivation_reason, early_termination (0840e)
-    #    v3.4: replaced uq_project_taxonomy constraint with partial index (0845a)
-    # =========================================================================
     op.create_table(
         "projects",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -564,7 +484,6 @@ def upgrade() -> None:
         postgresql_where=sa.text("status = 'active'"),
     )
     op.create_index(op.f("ix_projects_alias"), "projects", ["alias"], unique=True)
-    # Partial unique index: one active taxonomy per product (NULLS NOT DISTINCT requires PG15+)
     op.execute(
         sa.text(
             "CREATE UNIQUE INDEX uq_project_taxonomy_active "
@@ -574,9 +493,6 @@ def upgrade() -> None:
         )
     )
 
-    # =========================================================================
-    # 9. mcp_sessions (FK -> api_keys, users, projects)
-    # =========================================================================
     op.create_table(
         "mcp_sessions",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -607,10 +523,6 @@ def upgrade() -> None:
     op.create_index("idx_mcp_session_data_gin", "mcp_sessions", ["session_data"], unique=False, postgresql_using="gin")
     op.create_index(op.f("ix_mcp_sessions_session_id"), "mcp_sessions", ["session_id"], unique=True)
 
-    # =========================================================================
-    # 10. tasks (FK -> products, projects, organizations, users)
-    #     v3.4: removed meta_data (0840a)
-    # =========================================================================
     op.create_table(
         "tasks",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -651,11 +563,6 @@ def upgrade() -> None:
     op.create_index("idx_task_tenant_created_user", "tasks", ["tenant_key", "created_by_user_id"], unique=False)
     op.create_index("idx_task_converted_to_project", "tasks", ["converted_to_project_id"], unique=False)
 
-    # =========================================================================
-    # 11. messages (FK -> projects)
-    #     v3.4: removed to_agents, acknowledged_by, completed_by, meta_data (0840b)
-    #     v3.4: added from_agent_id, from_display_name, auto_generated (0840b)
-    # =========================================================================
     op.create_table(
         "messages",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -685,8 +592,6 @@ def upgrade() -> None:
             nullable=False,
             comment="True if recipient must take action. False for informational messages.",
         ),
-        # FE-6140: auto-check-in interval (minutes) carried on a loop_directive
-        # message. Mirrored by idempotent migration ce_0060 for existing DBs.
         sa.Column("loop_interval_minutes", sa.Integer(), nullable=True),
         sa.ForeignKeyConstraint(["project_id"], ["projects.id"]),
         sa.PrimaryKeyConstraint("id"),
@@ -696,10 +601,6 @@ def upgrade() -> None:
     op.create_index("idx_message_priority", "messages", ["priority"], unique=False)
     op.create_index("idx_message_created", "messages", ["created_at"], unique=False)
 
-    # =========================================================================
-    # 12. vision_documents (FK -> products)
-    #     v3.4: meta_data changed from JSON to JSONB (0840e)
-    # =========================================================================
     op.create_table(
         "vision_documents",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -812,10 +713,6 @@ def upgrade() -> None:
         "idx_vision_doc_product_active", "vision_documents", ["product_id", "is_active", "display_order"], unique=False
     )
 
-    # =========================================================================
-    # 13. mcp_context_index (FK -> products, vision_documents)
-    #     v3.4: keywords changed from JSON to JSONB (0840e)
-    # =========================================================================
     op.create_table(
         "mcp_context_index",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
@@ -867,9 +764,6 @@ def upgrade() -> None:
         "idx_mcp_context_product_vision_doc", "mcp_context_index", ["product_id", "vision_document_id"], unique=False
     )
 
-    # =========================================================================
-    # 14. product_memory_entries (FK -> products, projects)
-    # =========================================================================
     op.create_table(
         "product_memory_entries",
         sa.Column("id", postgresql.UUID(as_uuid=True), server_default=sa.text("gen_random_uuid()"), nullable=False),
@@ -991,11 +885,6 @@ def upgrade() -> None:
         postgresql_where=sa.text("deleted_by_user = true"),
     )
 
-    # =========================================================================
-    # 15. agent_templates (FK -> organizations)
-    #     v3.4: variables, behavioral_rules, success_criteria, tags, meta_data
-    #            changed from JSON to JSONB (0840e)
-    # =========================================================================
     op.create_table(
         "agent_templates",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -1052,11 +941,6 @@ def upgrade() -> None:
     op.create_index("idx_template_active", "agent_templates", ["is_active"], unique=False)
     op.create_index("idx_template_tool", "agent_templates", ["tool"], unique=False)
 
-    # =========================================================================
-    # 16. template_archives (FK -> agent_templates)
-    #     v3.4: removed meta_data (0840a)
-    #     v3.4: variables, behavioral_rules, success_criteria changed JSON->JSONB (0840e)
-    # =========================================================================
     op.create_table(
         "template_archives",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -1090,10 +974,6 @@ def upgrade() -> None:
     op.create_index("idx_archive_version", "template_archives", ["version"], unique=False)
     op.create_index("idx_archive_date", "template_archives", ["archived_at"], unique=False)
 
-    # =========================================================================
-    # 17. template_usage_stats (FK -> agent_templates, projects)
-    #     v3.4: variables_used, augmentations_applied changed JSON->JSONB (0840e)
-    # =========================================================================
     op.create_table(
         "template_usage_stats",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -1116,9 +996,6 @@ def upgrade() -> None:
     op.create_index("idx_usage_project", "template_usage_stats", ["project_id"], unique=False)
     op.create_index("idx_usage_date", "template_usage_stats", ["used_at"], unique=False)
 
-    # =========================================================================
-    # 18. agent_jobs (FK -> projects, agent_templates)
-    # =========================================================================
     op.create_table(
         "agent_jobs",
         sa.Column("job_id", sa.String(length=36), nullable=False),
@@ -1160,10 +1037,6 @@ def upgrade() -> None:
     op.create_index("idx_agent_jobs_tenant_project", "agent_jobs", ["tenant_key", "project_id"], unique=False)
     op.create_index("idx_agent_jobs_status", "agent_jobs", ["status"], unique=False)
 
-    # =========================================================================
-    # 19. agent_executions (FK -> agent_jobs)
-    #     v3.4: result changed from JSON to JSONB (0840e)
-    # =========================================================================
     op.create_table(
         "agent_executions",
         sa.Column("id", sa.String(length=36), nullable=False, server_default=sa.text("gen_random_uuid()::text")),
@@ -1319,9 +1192,6 @@ def upgrade() -> None:
     op.create_index("idx_agent_executions_last_progress", "agent_executions", ["last_progress_at"], unique=False)
     op.create_index("idx_agent_executions_agent_id", "agent_executions", ["agent_id"])
 
-    # =========================================================================
-    # 20. agent_todo_items (FK -> agent_jobs)
-    # =========================================================================
     op.create_table(
         "agent_todo_items",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -1336,9 +1206,6 @@ def upgrade() -> None:
             comment="Item status: pending, in_progress, completed, skipped",
         ),
         sa.Column("sequence", sa.Integer(), nullable=False, comment="Display order (0-based index in agent TODO list)"),
-        # BE-9012b (D7): structural self-closeout marker (parity with incremental
-        # ce_0071 so a fresh install and an upgraded deployment converge to the
-        # same shape). NULL = an ordinary work TODO.
         sa.Column(
             "todo_kind",
             sa.String(length=32),
@@ -1357,10 +1224,6 @@ def upgrade() -> None:
     op.create_index("idx_todo_items_tenant_status", "agent_todo_items", ["tenant_key", "status"], unique=False)
     op.create_index("idx_todo_items_job_sequence", "agent_todo_items", ["job_id", "sequence"], unique=False)
 
-    # =========================================================================
-    # 21. configurations (FK -> projects)
-    #     v3.4: value changed from JSON to JSONB (0840e)
-    # =========================================================================
     op.create_table(
         "configurations",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -1379,12 +1242,6 @@ def upgrade() -> None:
     )
     op.create_index("idx_config_category", "configurations", ["category"], unique=False)
 
-    # =========================================================================
-    # =========================================================================
-    # 22. git_commits (FK -> projects)
-    #     v3.4: removed meta_data (0840a)
-    #     v3.4: files_changed, webhook_response changed JSON->JSONB (0840e)
-    # =========================================================================
     op.create_table(
         "git_commits",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -1420,10 +1277,6 @@ def upgrade() -> None:
     op.create_index("idx_git_commit_date", "git_commits", ["committed_at"], unique=False)
     op.create_index("idx_git_commit_trigger", "git_commits", ["triggered_by"], unique=False)
 
-    # =========================================================================
-    # 25. setup_state (no FK)
-    #     v3.4: removed meta_data (0840a)
-    # =========================================================================
     op.create_table(
         "setup_state",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -1533,9 +1386,6 @@ def upgrade() -> None:
     op.create_index(op.f("ix_setup_state_tenant_key"), "setup_state", ["tenant_key"], unique=True)
     op.create_index(op.f("ix_setup_state_first_admin_created"), "setup_state", ["first_admin_created"], unique=False)
 
-    # =========================================================================
-    # 26. settings (no FK)
-    # =========================================================================
     op.create_table(
         "settings",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -1549,11 +1399,6 @@ def upgrade() -> None:
     )
     op.create_index("idx_settings_category", "settings", ["category"], unique=False)
 
-    # =========================================================================
-    # =========================================================================
-    # 25. download_tokens (no FK)
-    #     v3.4: removed meta_data (0840e), added filename (0840e)
-    # =========================================================================
     op.create_table(
         "download_tokens",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
@@ -1597,9 +1442,6 @@ def upgrade() -> None:
     op.create_index("idx_download_token_tenant_type", "download_tokens", ["tenant_key", "download_type"], unique=False)
     op.create_index(op.f("ix_download_tokens_token"), "download_tokens", ["token"], unique=True)
 
-    # =========================================================================
-    # 30. api_metrics (no FK)
-    # =========================================================================
     op.create_table(
         "api_metrics",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -1612,9 +1454,6 @@ def upgrade() -> None:
     op.create_index("idx_api_metrics_tenant_date", "api_metrics", ["tenant_key", "date"], unique=False)
     op.create_index(op.f("ix_api_metrics_tenant_key"), "api_metrics", ["tenant_key"], unique=True)
 
-    # =========================================================================
-    # 31. oauth_authorization_codes (FK -> users)
-    # =========================================================================
     op.create_table(
         "oauth_authorization_codes",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -1638,9 +1477,6 @@ def upgrade() -> None:
     op.create_index("idx_oauth_code_lookup", "oauth_authorization_codes", ["code", "tenant_key"], unique=False)
     op.create_index(op.f("ix_oauth_authorization_codes_code"), "oauth_authorization_codes", ["code"], unique=True)
 
-    # =========================================================================
-    # 32. message_recipients (FK -> messages) -- NEW in v3.4 (0840b)
-    # =========================================================================
     op.create_table(
         "message_recipients",
         sa.Column("id", sa.String(length=36), primary_key=True, server_default=sa.text("gen_random_uuid()::text")),
@@ -1652,9 +1488,6 @@ def upgrade() -> None:
     )
     op.create_index("idx_message_recipients_agent", "message_recipients", ["agent_id", "tenant_key"])
 
-    # =========================================================================
-    # 33. message_acknowledgments (FK -> messages) -- NEW in v3.4 (0840b)
-    # =========================================================================
     op.create_table(
         "message_acknowledgments",
         sa.Column("id", sa.String(length=36), primary_key=True, server_default=sa.text("gen_random_uuid()::text")),
@@ -1666,9 +1499,6 @@ def upgrade() -> None:
     )
     op.create_index("idx_message_acks_agent", "message_acknowledgments", ["agent_id", "tenant_key"])
 
-    # =========================================================================
-    # 34. message_completions (FK -> messages) -- NEW in v3.4 (0840b)
-    # =========================================================================
     op.create_table(
         "message_completions",
         sa.Column("id", sa.String(length=36), primary_key=True, server_default=sa.text("gen_random_uuid()::text")),
@@ -1680,9 +1510,6 @@ def upgrade() -> None:
     )
     op.create_index("idx_message_completions_agent", "message_completions", ["agent_id", "tenant_key"])
 
-    # =========================================================================
-    # 35. user_field_priorities (FK -> users) -- NEW in v3.4 (0840d)
-    # =========================================================================
     op.create_table(
         "user_field_priorities",
         sa.Column("id", sa.String(length=36), primary_key=True, server_default=sa.text("gen_random_uuid()::text")),
@@ -1696,10 +1523,6 @@ def upgrade() -> None:
     )
     op.create_index("idx_user_field_priorities_user", "user_field_priorities", ["user_id", "tenant_key"])
 
-    # =========================================================================
-    # 36. vision_document_summaries (FK -> vision_documents, products)
-    #     NEW in v3.4 (0842a)
-    # =========================================================================
     op.create_table(
         "vision_document_summaries",
         sa.Column("id", sa.String(length=36), primary_key=True),
@@ -1721,9 +1544,6 @@ def upgrade() -> None:
     op.create_index("idx_vds_lookup", "vision_document_summaries", ["tenant_key", "document_id", "source", "ratio"])
     op.create_index("idx_vds_product", "vision_document_summaries", ["tenant_key", "product_id"])
 
-    # =========================================================================
-    # 37. product_tech_stacks (FK -> products) -- NEW in v3.4 (0840c)
-    # =========================================================================
     op.create_table(
         "product_tech_stacks",
         sa.Column("id", sa.String(length=36), primary_key=True),
@@ -1752,10 +1572,6 @@ def upgrade() -> None:
     )
     op.create_index("idx_product_tech_stacks_tenant", "product_tech_stacks", ["tenant_key"])
 
-    # =========================================================================
-    # 38. product_architectures (FK -> products) -- NEW in v3.4 (0840c)
-    #     v3.4: added coding_conventions (0844a)
-    # =========================================================================
     op.create_table(
         "product_architectures",
         sa.Column("id", sa.String(length=36), primary_key=True),
@@ -1777,9 +1593,6 @@ def upgrade() -> None:
     )
     op.create_index("idx_product_architectures_tenant", "product_architectures", ["tenant_key"])
 
-    # =========================================================================
-    # 39. product_test_configs (FK -> products) -- NEW in v3.4 (0840c)
-    # =========================================================================
     op.create_table(
         "product_test_configs",
         sa.Column("id", sa.String(length=36), primary_key=True),
@@ -1800,9 +1613,6 @@ def upgrade() -> None:
     )
     op.create_index("idx_product_test_configs_tenant", "product_test_configs", ["tenant_key"])
 
-    # =========================================================================
-    # 36. product_agent_assignments (FK -> products, agent_templates)
-    # =========================================================================
     op.create_table(
         "product_agent_assignments",
         sa.Column("id", sa.String(36), nullable=False),
@@ -1831,9 +1641,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Downgrade schema - drop all 36 tables in reverse FK order."""
 
-    # New tables (drop first - they depend on base tables)
     op.drop_table("product_agent_assignments")
     op.drop_table("product_test_configs")
     op.drop_table("product_architectures")
@@ -1844,7 +1652,6 @@ def downgrade() -> None:
     op.drop_table("message_acknowledgments")
     op.drop_table("message_recipients")
 
-    # Original tables in reverse FK order
     op.drop_table("oauth_authorization_codes")
     op.drop_table("api_metrics")
     op.drop_table("download_tokens")

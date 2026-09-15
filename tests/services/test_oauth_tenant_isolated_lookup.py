@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression tests for API-0022 (folds API-0024): OAuth lookup defense-in-depth.
-
-These tests pin the service-layer WHERE clauses on the two OAuth lookups
-that previously queried by token_hash / code alone:
-
-  - ``oauth_refresh_service.refresh_token_grant`` — refresh-token lookup
-  - ``OAuthService.exchange_code_for_token`` — authorization-code lookup
-
-Per BE-5042 (test at the failing layer), the bug — if it ever regresses —
-would manifest at the SQL WHERE clause emitted by the service. So these
-tests drive the same ``select(...).where(...)`` predicate the service
-emits and assert that a row seeded under (tenant_A, client_X) is NOT
-returned when the lookup is bound to client_Y.
-
-``oauth_clients.client_id`` is a UUIDv4 primary key (globally unique), so
-binding the lookup to ``client_id`` is equivalent to binding to
-``tenant_key`` without a second round-trip. The explicit cross-client
-guard inside the service stays as the second defense layer.
-"""
 
 from __future__ import annotations
 
@@ -64,12 +45,6 @@ async def user_a(db_session, tenant_a):
 
 @pytest.mark.asyncio
 async def test_oauth_refresh_service_tenant_isolated_lookup(db_session, tenant_a, user_a):
-    """Defense-in-depth: refresh-token lookup MUST bind client_id.
-
-    Seed a refresh row under (tenant_a, client_X). Run the same WHERE
-    clause the service emits but with client_Y. Expect None — the lookup
-    itself must refuse to resolve the row, not rely on a later guard.
-    """
     raw_token = "regression-raw-token-value"
     token_hash = hash_refresh_token(raw_token)
     client_x = f"client-x-{uuid4().hex[:8]}"
@@ -90,7 +65,6 @@ async def test_oauth_refresh_service_tenant_isolated_lookup(db_session, tenant_a
     db_session.add(row)
     await db_session.commit()
 
-    # Sanity: the row IS findable under the correct client_id.
     sanity = await db_session.execute(
         select(OAuthRefreshToken).where(
             OAuthRefreshToken.token_hash == token_hash,
@@ -99,7 +73,6 @@ async def test_oauth_refresh_service_tenant_isolated_lookup(db_session, tenant_a
     )
     assert sanity.scalar_one_or_none() is not None, "seed row must be findable under its own client_id"
 
-    # Regression: same query under a foreign client_id resolves nothing.
     isolated = await db_session.execute(
         select(OAuthRefreshToken).where(
             OAuthRefreshToken.token_hash == token_hash,
@@ -115,11 +88,6 @@ async def test_oauth_refresh_service_tenant_isolated_lookup(db_session, tenant_a
 
 @pytest.mark.asyncio
 async def test_oauth_service_auth_code_tenant_isolated_lookup(db_session, tenant_a, user_a):
-    """Defense-in-depth: auth-code lookup MUST bind client_id.
-
-    Same pattern as the refresh-token test but for
-    ``OAuthService.exchange_code_for_token``'s code lookup.
-    """
     code_value = f"code-{uuid4().hex}"
     client_x = f"client-x-{uuid4().hex[:8]}"
     client_y = f"client-y-{uuid4().hex[:8]}"

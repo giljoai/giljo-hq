@@ -1,6 +1,5 @@
 <template>
   <v-container>
-    <!-- Header (matches Tasks/Projects pattern) -->
     <v-row class="align-center mb-4 main-window-reveal main-window-reveal--hero main-window-delay-1">
       <v-col>
         <h1 class="text-headline-large">Products</h1>
@@ -21,7 +20,6 @@
       </v-col>
     </v-row>
 
-    <!-- Filter Bar -->
     <div class="filter-bar main-window-reveal main-window-delay-2">
         <v-text-field
           v-model="search"
@@ -65,7 +63,6 @@
         </v-btn>
       </div>
 
-      <!-- Product Cards (floating, no wrapper card) -->
               <v-row v-if="loading" class="main-window-reveal main-window-delay-3">
                 <v-col cols="12" class="text-center py-8">
                   <v-progress-circular indeterminate color="primary"></v-progress-circular>
@@ -110,9 +107,7 @@
                 </v-col>
               </v-row>
 
-    <!-- Extracted Component Dialogs -->
 
-    <!-- Create/Edit Product Dialog -->
     <ProductForm
       v-model="showDialog"
       v-model:saving="savingProduct"
@@ -129,10 +124,6 @@
       @clear-upload-error="visionUploadError = null"
     />
 
-    <!-- Duplicate-name Modal — blocks the user with an actionable message
-         when the backend rejects a product create due to an active duplicate.
-         The ProductForm dialog underneath stays open so all typed-in fields
-         are preserved; user dismisses, renames, retries. -->
     <v-dialog v-model="showDuplicateNameModal" max-width="480" persistent>
       <v-card class="smooth-border">
         <div class="dlg-header dlg-header--warning">
@@ -152,7 +143,6 @@
       </v-card>
     </v-dialog>
 
-    <!-- Product Details Dialog -->
     <ProductDetailsDialog
       v-model="showDetailsDialog"
       :product="selectedProduct"
@@ -167,7 +157,6 @@
       @refresh-product="handleProductRefresh"
     />
 
-    <!-- Delete Confirmation Dialog -->
     <ProductDeleteDialog
       v-model="showDeleteDialog"
       :product="deletingProduct"
@@ -178,7 +167,6 @@
       @cancel="cancelDelete"
     />
 
-    <!-- Deleted Products Recovery Dialog -->
     <DeletedProductsRecoveryDialog
       v-model="showDeletedProductsDialog"
       :deleted-products="deletedProducts"
@@ -215,7 +203,6 @@ const router = useRouter()
 const productStore = useProductStore()
 const settingsStore = useSettingsStore()
 const { showToast } = useToast()
-// State
 const loading = ref(false)
 const search = ref('')
 const sortBy = ref('name')
@@ -228,23 +215,14 @@ const deletingProduct = ref(null)
 const selectedProduct = ref(null)
 const tuningProduct = ref(null)
 const deleting = ref(false)
-const autoSavedForAnalysis = ref(null) // Holds product ID if auto-saved for stage-analysis, null otherwise
-// Owned here (not inside ProductForm) so we can reset the spinner from
-// the saveProduct() catch block when the backend rejects (e.g. duplicate
-// active-product name). Two-way bound via v-model:saving on <ProductForm>.
+const autoSavedForAnalysis = ref(null)
 const savingProduct = ref(false)
-// Duplicate-name modal — used instead of a toast for active-product name
-// collisions because the form stays open behind it and the user must
-// pick a different name (blocking decision, not a passive notification).
 const showDuplicateNameModal = ref(false)
 const duplicateNameMessage = ref('')
 const detailsVisionDocuments = ref([])
 const cascadeImpact = ref(null)
 const loadingCascadeImpact = ref(false)
 
-// Upload composable — manages vision file upload state and upload flow.
-// editingProduct and autoSavedForAnalysis are passed by reference so the
-// composable's auto-create path can mutate the view's product identity.
 const {
   uploadingVision,
   uploadProgress,
@@ -269,16 +247,13 @@ const {
   purgeAllDeletedProducts,
 } = useProductSoftDelete(() => loadProducts())
 
-// Sort options
 const sortOptions = [
   { label: 'Name (A-Z)', value: 'name' },
   { label: 'Date Created (Newest)', value: 'date-newest' },
   { label: 'Date Created (Oldest)', value: 'date-oldest' },
 ]
 
-// Computed
 const filteredProducts = computed(() => {
-  // Filter by search
   let products = productStore.products
   if (search.value) {
     const searchLower = search.value.toLowerCase()
@@ -289,18 +264,14 @@ const filteredProducts = computed(() => {
     )
   }
 
-  // Sort products - SHOWN PRODUCTS FIRST (leftmost/top)
   const sorted = [...products]
 
-  // Primary sort: shown products first
   sorted.sort((a, b) => {
-    // If one is shown and the other isn't, shown comes first
     const aActive = isProductActive(a)
     const bActive = isProductActive(b)
     if (aActive && !bActive) return -1
     if (!aActive && bActive) return 1
 
-    // Both active or both inactive - apply secondary sort
     switch (sortBy.value) {
       case 'name':
         return a.name.localeCompare(b.name)
@@ -320,7 +291,6 @@ const deletedProductsCount = computed(() => {
   return deletedProducts.value.length
 })
 
-// Product stats for details dialog
 const productStats = computed(() => {
   if (!selectedProduct.value) {
     return {
@@ -334,20 +304,10 @@ const productStats = computed(() => {
   }
 })
 
-// Methods — FE-9524/D1: single source of truth is the product's OWN is_active
-// field ("shown as a tab"), not the legacy singular productStore.activeProduct
-// -- several products may be shown at once, so comparing against one id was
-// the exact stale reader the operator hit in prod (BE-9525a's sibling bug).
 function isProductActive(product) {
   return !!product.is_active
 }
 
-// FE-9529: compares against the RESOLVED default (productStore.activeProduct,
-// from GET /refresh-active -> ProductService.get_default_product), NOT the
-// product's raw is_default column. A tenant's sole product can be the real
-// fallback target while its own column is still false (never auto-set on
-// create) -- comparing the raw column would show an unticked box on a
-// tenant whose reads plainly work.
 function isProductDefault(product) {
   return !!productStore.activeProduct && productStore.activeProduct.id === product.id
 }
@@ -370,12 +330,10 @@ async function setDefaultProduct(product) {
   }
 }
 
-// Handover 0320: Handler for ProductForm remove-vision event (delete existing document)
 async function removeVisionDocument(doc) {
   try {
     await api.visionDocuments.delete(doc.id)
 
-    // Remove from existing documents list
     const index = existingVisionDocuments.value.findIndex((d) => d.id === doc.id)
     if (index > -1) {
       existingVisionDocuments.value.splice(index, 1)
@@ -397,11 +355,6 @@ async function removeVisionDocument(doc) {
 }
 
 async function showProductDetails(product) {
-  // BE-6066 P4: Details renders tech_stack / architecture / test_config, which
-  // the lean list object no longer carries — fetch the full product on open.
-  // Both fetches key off product.id, so they run in PARALLEL: detail-on-click
-  // must not cost more round-trip latency than the one fetch this dialog
-  // already paid pre-P4.
   const [full, visionResult] = await Promise.all([
     productStore.fetchProductById(product.id),
     api.visionDocuments.listByProduct(product.id).catch((error) => {
@@ -431,13 +384,8 @@ async function handleProductRefresh() {
   await loadProducts()
 
   if (selectedProduct.value) {
-    // BE-6066 P4: productStore.products is now LEAN — re-syncing from it would
-    // strip the detail relations the Details dialog renders. Re-fetch the full
-    // product instead.
     const full = await productStore.fetchProductById(selectedProduct.value.id)
     selectedProduct.value = full || selectedProduct.value
-    // FE-6138: also refresh the active vision-docs list so a just-restored
-    // document re-appears without closing/reopening the Details dialog.
     const visionResult = await api.visionDocuments
       .listByProduct(selectedProduct.value.id)
       .catch(() => null)
@@ -455,13 +403,6 @@ function openNewProductDialog() {
 }
 
 async function editProduct(product) {
-  // BE-6066 P4: the list object is now lean (no tech_stack / architecture /
-  // test_config — those load on demand). Fetch the full product so ProductForm
-  // receives the detail fields it edits. Fall back to the lean object on failure
-  // so Edit still opens (degraded) with a heads-up.
-  // Both fetches key off product.id, so they run in PARALLEL: Edit-open already
-  // paid the vision-docs round trip pre-P4; the detail fetch must not add a
-  // second serial one.
   const [full] = await Promise.all([
     productStore.fetchProductById(product.id),
     loadExistingVisionDocuments(product.id),
@@ -480,23 +421,15 @@ async function editProduct(product) {
 
 async function confirmDelete(product) {
   deletingProduct.value = product
-  // Drop the previous product's impact before the dialog can paint. The dialog
-  // opens before the fetch resolves, and the close paths (successful delete,
-  // 404 cleanup) do not reset this — so without the clear here, a failed fetch
-  // leaves the last product's counts on screen under THIS product's name.
-  // Clearing at the single entry point keeps that invariant true for any future
-  // exit path too.
   cascadeImpact.value = null
   showDeleteDialog.value = true
 
-  // Fetch cascade impact
   loadingCascadeImpact.value = true
   try {
     const response = await api.products.getCascadeImpact(product.id)
     cascadeImpact.value = response.data
   } catch (error) {
     if (error?.response?.status === 404) {
-      // Product already gone from DB — let user confirm removal of ghost card
       cascadeImpact.value = null
     } else {
       console.error('Failed to get cascade impact:', error)
@@ -515,48 +448,33 @@ async function saveProduct(payload) {
   const { productData } = payload
 
   try {
-    // Create or update — vision files already uploaded on attach
     if (editingProduct.value) {
       await productStore.updateProduct(editingProduct.value.id, productData)
     } else {
       await productStore.createProduct(productData)
     }
 
-    // Product is now permanent — clear auto-save cleanup flag
     autoSavedForAnalysis.value = null
 
-    // Refresh products
     await loadProducts()
 
-    // Close dialog
     showDialog.value = false
 
     const wasCreating = !editingProduct.value
     showToast({
-      // FE-9524/D1: a new product is shown by default -- no activation step
-      // left to prompt for.
       message: wasCreating ? 'Product created' : 'Product updated successfully',
       type: 'success',
       timeout: wasCreating ? 6000 : 3000,
     })
 
-    // Reset state
     editingProduct.value = null
     resetUploadState()
   } catch (error) {
     console.error('Failed to save product:', error)
-    // Surface the real backend message instead of a generic
-    // "check your connection" toast. The server returns a structured
-    // {error_code, message} payload (a duplicate product name, unconditional
-    // per tenant -- not scoped to shown/hidden) that the user needs verbatim
-    // to know what to fix.
     const parsed = parseErrorResponse(error)
     const isDuplicateName =
       parsed?.message && /already exists/i.test(parsed.message)
     if (isDuplicateName) {
-      // Modal beats a toast for blocking errors that require user action,
-      // and avoids any visual confusion with the WebSocket-driven toast
-      // surface. Form stays open behind the modal with all fields intact.
       duplicateNameMessage.value = `${parsed.message}. Pick a different name, or rename the existing product.`
       showDuplicateNameModal.value = true
     } else {
@@ -567,9 +485,6 @@ async function saveProduct(payload) {
       })
     }
   } finally {
-    // Reset the save-button spinner whether the call succeeded or failed.
-    // Without this, a 4xx left the button stuck in :loading state and the
-    // UI looked frozen / "backend locked up".
     savingProduct.value = false
   }
 }
@@ -579,22 +494,18 @@ async function confirmDeleteProduct() {
   try {
     await productStore.deleteProduct(deletingProduct.value.id)
 
-    // If was active product, clear active state
     if (productStore.currentProductId === deletingProduct.value.id) {
       productStore.currentProductId = null
       productStore.currentProduct = null
       localStorage.removeItem('currentProductId')
     }
 
-    // Close dialog
     showDeleteDialog.value = false
     const productName = deletingProduct.value.name
     deletingProduct.value = null
 
-    // Refresh products (includes deleted products list)
     await loadProducts()
 
-    // Show success message
     showToast({
       message: `${productName} moved to trash. Recoverable for 10 days.`,
       type: 'info',
@@ -602,7 +513,6 @@ async function confirmDeleteProduct() {
     })
   } catch (error) {
     if (error?.response?.status === 404) {
-      // Product already gone from DB (orphan card) — clean up UI
       showDeleteDialog.value = false
       const productName = deletingProduct.value?.name || 'Product'
       deletingProduct.value = null
@@ -628,7 +538,6 @@ function cancelDelete() {
 }
 
 async function closeDialog() {
-  // Clean up auto-saved product if user never did a real save (404 = already gone, ignore)
   if (autoSavedForAnalysis.value) {
     try {
       await productStore.deleteProduct(autoSavedForAnalysis.value)
@@ -642,19 +551,12 @@ async function closeDialog() {
   editingProduct.value = null
   resetUploadState()
 
-  // Refresh product list on close
   loadProducts()
 }
 
 async function loadProducts() {
   loading.value = true
   try {
-    // FE-9529: the Default checkbox needs the RESOLVED default
-    // (productStore.activeProduct), not just the raw list -- fetch it here
-    // rather than assume DefaultLayout's app-boot fetch has already landed
-    // by the time this view mounts (child components mount before their
-    // parent's onMounted runs). Deduped/short-TTL at the api.js layer
-    // (FE-9529), so this is not a new independent network call in practice.
     await Promise.all([productStore.fetchProducts(), productStore.fetchActiveProduct()])
     await loadDeletedProducts()
   } finally {
@@ -663,18 +565,11 @@ async function loadProducts() {
 }
 
 onMounted(async () => {
-  // FE-9200: the onboarding tutorial's "I'll fill it in myself" door lands
-  // here with ?create=true — open the classic ProductForm straight away
-  // (same idiom as WelcomeView's openSetup/openGuide query triggers).
   if (route.query.create === 'true') {
     openNewProductDialog()
     router.replace({ path: route.path })
   }
 
-  // FE-9222: the context-tuning banner deep-links here with ?tune=<product_id>
-  // to open the tuning dialog for that product. Captured before loadProducts so
-  // a concurrent ?create strip cannot swallow it; the lookup runs after the list
-  // loads, and an unknown/missing id fails soft (no dialog, param still stripped).
   const tuneProductId = route.query.tune
 
   await loadProducts()
@@ -684,7 +579,6 @@ onMounted(async () => {
     if (target) showProductTuning(target)
     router.replace({ path: route.path })
   }
-  // Load field toggle configuration (Handover 0049, 0820)
   try {
     await settingsStore.fetchFieldToggleConfig()
   } catch {

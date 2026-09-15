@@ -6,30 +6,22 @@
 
 <script setup>
 import { computed } from 'vue'
+import { retiredHarnessLabel } from '@/config/retiredHarness'
 
 const props = defineProps({
-  /**
-   * Raw resolved_harness token from OrchestratorJobResponse.detected_harness
-   * (TSK-9038 / BE-9035c). One of the concrete harness_resolver tokens, the
-   * "generic" fail-safe, or null/undefined when nothing has been detected yet.
-   */
   harness: {
     type: String,
     default: null,
   },
 })
 
-// ADR-010: rendering-only, never an input/auth signal. "generic" and absent
-// both mean "nothing useful to show" -- no taxonomy is invented for either.
 const HARNESS_LABELS = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
-  gemini: 'Gemini',
-  antigravity: 'Antigravity',
   opencode: 'opencode',
 }
 
-const label = computed(() => HARNESS_LABELS[props.harness] || null)
+const label = computed(() => HARNESS_LABELS[props.harness] || retiredHarnessLabel(props.harness))
 </script>
 
 <style scoped lang="scss">

@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6209c (Q2) — protocol_etag cache prose.
-
-BE-6208g wired the opt-in protocol ETag mechanism end-to-end (service computes the
-etag, MissionResponse carries protocol_etag/protocol_unchanged, get_job_mission passes
-protocol_etag through) but NOTHING told the agent to capture the etag on call #1 and
-echo it on a later call. The etag can only be carried by the AGENT across calls (the
-tool layer is stateless), so the fix is PROSE: a cache note in both protocols telling
-the agent to remember protocol_etag and reuse the cached protocol when
-protocol_unchanged=true comes back.
-
-Pure-string assertions (no DB, no module-level mutable state) — parallel-safe.
-Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -24,7 +11,6 @@ from giljo_mcp.services.protocol_sections.agent_protocol import _generate_agent_
 
 
 def test_worker_protocol_has_etag_cache_note() -> None:
-    """The worker 5-phase protocol Phase-1 tells the agent to remember + reuse protocol_etag."""
     proto = _generate_agent_protocol(
         job_id="job-6209c",
         tenant_key="tk_6209c",
@@ -41,7 +27,6 @@ def test_worker_protocol_has_etag_cache_note() -> None:
 
 
 def test_orchestrator_protocol_has_etag_cache_note() -> None:
-    """The orchestrator 3-phase protocol Phase-1 MANDATORY block carries the same cache note."""
     proto = _generate_orchestrator_protocol(
         job_id="job-6209c",
         tenant_key="tk_6209c",

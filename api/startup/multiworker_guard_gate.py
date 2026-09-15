@@ -3,50 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Multi-worker boot-prerequisite guard (INF-3009e) — fail-loud, never silent.
-
-The single-worker fence used to exist only in comments and operator memory
-(ARCHITECTURE_AUDIT_2026-06-11): nothing in code refused ``WEB_CONCURRENCY>1``.
-Flipping that env var without the prerequisite work ships four simultaneous
-incident classes from one variable — duplicate reaper/customer emails, per-user
-rate limits multiplied by worker count, per-process license/cache state, and
-dropped cross-worker WebSocket events.
-
-This gate encodes the fence IN CODE. With ``worker_count > 1`` it refuses to boot
-unless EVERY prerequisite is live, and the error names each missing one:
-
-1. **WebSocket broker** must be cross-worker capable (not ``in_memory``). Already
-   enforced upstream at core-services init by ``ensure_broker_supports_worker_count``
-   (BE-3008c); re-asserted here so this gate is a single documented checkpoint
-   that survives phase reordering.
-2. **Background jobs** must be OFF in a multi-worker web process
-   (``GILJO_RUN_BACKGROUND_JOBS`` falsey, INF-3009b) — these jobs must run in
-   exactly one process, else concurrent web workers race them and duplicate
-   customer emails / destructive sweeps.
-3. **Shared cache/license backend** (SaaS only) must be a live Redis
-   (``state.redis_mode == "connected"``, INF-3009c/d) — per-process dicts make
-   license and OAuth-idempotency state incoherent across workers.
-4. **Tenant rate-limit store** (SaaS only) must construct
-   (``build_default_store()`` non-None, the 2026-07-11 amendment) — a ``None``
-   store silently drops the per-user limiter, so per-IP counts multiply by N.
-
-Contract:
-
-- ``worker_count <= 1``: pure no-op for ANY config. CE single-process and any
-  un-split single-web-process SaaS deployment stay byte-identical to today.
-- ``worker_count > 1``: raise ``RuntimeError`` listing every unmet prerequisite.
-  Callers must NOT catch it — it propagates out of ``lifespan()`` and aborts
-  uvicorn, the same fail-loud pattern as the Phase 0 license check and the
-  INF-3009c Redis gate. Refusing to boot is the whole point: a degraded
-  multi-worker process looks healthy while silently corrupting shared state.
-
-CE never imports anything under a ``saas`` tree: the two SaaS-only checks reach
-``api.saas_middleware`` through ``importlib`` and only when ``giljo_mode == "saas"``,
-so the Deletion Test holds regardless of whether the SaaS tree exists.
-
-The actual test/prod ``WEB_CONCURRENCY`` flip stays operator-gated and out of
-scope for this module.
-"""
 
 from __future__ import annotations
 
@@ -69,16 +25,6 @@ logger = logging.getLogger("api.app")
 
 
 def log_deploy_posture() -> None:
-    """Log the effective restart policy + worker count so incident logs self-describe.
-
-    Restart policy and worker posture are otherwise only visible in
-    deployment-platform state, which is hard to reconstruct after the fact
-    once an incident is already underway. This one INFO line puts both in
-    every boot log. ``GILJO_RESTART_POLICY`` is an environment-provided value
-    naming how this process was started, so ``restart_policy=unset`` is
-    itself a signal: this process was not launched with that value set (e.g.
-    CE, local dev, or an ad-hoc override).
-    """
     policy = os.getenv("GILJO_RESTART_POLICY", "").strip() or "unset"
     logger.info(
         "Deploy posture: restart_policy=%s, workers=%d (WEB_CONCURRENCY).",
@@ -88,20 +34,13 @@ def log_deploy_posture() -> None:
 
 
 def assert_multiworker_prerequisites(state: APIState, *, giljo_mode: str) -> None:
-    """Refuse to boot under ``WEB_CONCURRENCY>1`` unless every prerequisite is live.
-
-    No-op when the process is a single worker (after logging the deploy posture).
-    See the module docstring for the full per-prerequisite contract and rationale.
-    """
     log_deploy_posture()
     worker_count = _worker_count()
     if worker_count <= 1:
-        # Single worker: shared state is complete per-process — nothing to guard.
         return
 
     missing: list[str] = []
 
-    # 1. Cross-worker WebSocket broker (edition-neutral).
     broker = getattr(state, "websocket_broker", None)
     if broker is None or isinstance(broker, InMemoryWebSocketEventBroker):
         missing.append(
@@ -110,7 +49,6 @@ def assert_multiworker_prerequisites(state: APIState, *, giljo_mode: str) -> Non
             "dropped. Set GILJO_WS_BROKER=postgres_notify."
         )
 
-    # 2. Background-job split (edition-neutral, INF-3009b).
     if should_run_background_jobs():
         missing.append(
             f"Background jobs are ON in this web process ({BACKGROUND_JOBS_ENV_VAR} "
@@ -120,10 +58,7 @@ def assert_multiworker_prerequisites(state: APIState, *, giljo_mode: str) -> Non
             "the shared loops in the dedicated worker service."
         )
 
-    # 3 + 4: SaaS-only shared stores. CE never reaches the saas tree.
     if giljo_mode == "saas":
-        # 3. Shared cache/license backend (INF-3009c/d). "connected" means Redis
-        #    was verified reachable at boot; anything else is per-process dicts.
         if getattr(state, "redis_mode", None) != "connected":
             missing.append(
                 "Shared cache/license backend is not on Redis (redis_mode="
@@ -132,8 +67,6 @@ def assert_multiworker_prerequisites(state: APIState, *, giljo_mode: str) -> Non
                 "across workers. Set REDIS_URL to a reachable Redis."
             )
 
-        # 4. Tenant rate-limit store (amendment). None = the per-user limiter is
-        #    silently absent, so the CE per-IP floor multiplies by worker count.
         rate_limiter_mod = importlib.import_module("api.saas_middleware.rate_limiter_tenant")
         if rate_limiter_mod.build_default_store() is None:
             missing.append(

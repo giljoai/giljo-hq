@@ -3,29 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-ProductService - Dedicated service for product domain logic
-
-Handover 0127b: Extract product operations from direct database access
-to follow established service layer pattern.
-
-Responsibilities:
-- CRUD operations for products
-- Product lifecycle management (activate/deactivate == show/hide, restore;
-  archive is deferred per the 2026-08-28 multi-product design decision, D10)
-- Default product management (get_default_product/set_default_product --
-  the single per-tenant read-fallback target, independent of shown/hidden)
-- Product metrics and statistics
-- Vision document management
-- Cascade impact analysis
-
-Design Principles:
-- Single Responsibility: Only product domain logic
-- Dependency Injection: Accepts DatabaseManager and tenant_key
-- Async/Await: Full SQLAlchemy 2.0 async support
-- Error Handling: Consistent exception handling and logging
-- Testability: Can be unit tested independently
-"""
 
 import logging
 from datetime import UTC, datetime
@@ -57,17 +34,6 @@ logger = logging.getLogger(__name__)
 
 
 class ProductAmbiguousError(ValidationError):
-    """Raised by ``resolve_binding_product(write=True)`` when a create omits
-    ``product_id`` and the tenant owns more than one product (BE-9523b).
-
-    A ``ValidationError`` subclass so an unexpected path still yields a 4xx --
-    but the MCP tool dispatch chokepoint (``api/endpoints/mcp_tools/_base.py``)
-    catches THIS type specifically and returns the BE-6081 Tier-2 structured
-    rejection instead of letting it surface as ``isError``. The distinction is
-    the point: an agent can fix this by supplying ``product_id`` (the rejection
-    carries the full list to choose from), so it belongs on the normal tool
-    content path with a remedy, not as an opaque error.
-    """
 
     code = "PRODUCT_AMBIGUOUS"
 
@@ -84,7 +50,6 @@ class ProductAmbiguousError(ValidationError):
         self.products = products
 
 
-# FE-9320: matches the String(500) products.project_path column.
 PROJECT_PATH_MAX_LENGTH = 500
 
 _ALLOWED_PRODUCT_FIELDS = {
@@ -95,7 +60,6 @@ _ALLOWED_PRODUCT_FIELDS = {
     "brand_guidelines",
     "extraction_custom_instructions",
     "target_platforms",
-    # BE-5117: aggregate-vision summaries are written via update_product_context MCP tool.
     "consolidated_vision_light",
     "consolidated_vision_light_tokens",
     "consolidated_vision_medium",
@@ -105,23 +69,6 @@ _ALLOWED_PRODUCT_FIELDS = {
 
 
 class ProductService:
-    """
-    Service for managing product lifecycle and operations.
-
-    This service handles all product-related operations including:
-    - Creating, reading, updating, deleting products
-    - Product activation/deactivation (FE-9524/D1: show/hide a tab; several
-      products may be shown per tenant at once)
-    - Product metrics and statistics
-    - Vision document management
-    - Quality standards updates (Handover 0316)
-    - Cascade impact analysis for deletions
-
-    Lifecycle state changes are delegated to ProductLifecycleService.
-    Statistics and memory helpers are delegated to ProductMemoryService.
-
-    Thread Safety: Each instance is session-scoped. Do not share across requests.
-    """
 
     def __init__(
         self,
@@ -130,15 +77,6 @@ class ProductService:
         websocket_manager=None,
         test_session: AsyncSession | None = None,
     ):
-        """
-        Initialize ProductService with database and tenant isolation.
-
-        Args:
-            db_manager: Database manager for async database operations
-            tenant_key: Tenant key for multi-tenant isolation
-            websocket_manager: Optional WebSocket manager for event emission (Handover 0139a)
-            test_session: Optional AsyncSession for tests to share the same transaction
-        """
         self.db_manager = db_manager
         self.tenant_key = tenant_key
         self._test_session = test_session
@@ -146,7 +84,6 @@ class ProductService:
         self._logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         self._repo = ProductRepository()
 
-        # Sprint 002f: Public sub-services for direct caller access (collapsed pass-throughs)
         self.lifecycle = ProductLifecycleService(
             db_manager=db_manager,
             tenant_key=tenant_key,
@@ -159,23 +96,12 @@ class ProductService:
             test_session=test_session,
         )
 
-    # Shared product-field translator (BE-6225d). The single place that groups a flat
-    # {column: value} mapping into update_product() kwargs (direct columns + relation
-    # blocks). Both the vision-extraction writer and the context-tuning writer route
-    # through this, so there is no longer a parallel block-grouping mapper per caller.
-    # Implementation lives in services/product_field_map.py.
     assemble_update_kwargs = staticmethod(assemble_update_kwargs)
 
     def _get_session(self):
-        """Yield a tenant-scoped DB session, honoring an injected test session (shared helper, BE-8000d)."""
         return tenant_context_session(self.db_manager, self.tenant_key, self._test_session)
 
     async def _emit_websocket_event(self, event_type: str, data: dict[str, Any]) -> None:
-        """Emit a tenant-scoped WebSocket event; graceful no-op if no manager is wired.
-
-        FE-9501c (D10): shared shape with ProductLifecycleService._emit_websocket_event
-        -- best-effort, never raises into the caller's write path.
-        """
         if not self._websocket_manager:
             return
         try:
@@ -188,19 +114,6 @@ class ProductService:
             self._logger.warning(f"Failed to emit WebSocket event {event_type}: {e}", exc_info=True)
 
     def _validate_target_platforms(self, target_platforms: list[str]) -> tuple[bool, str | None]:
-        """
-        Validate target_platforms field (Handover 0425).
-
-        Args:
-            target_platforms: List of platform values
-
-        Returns:
-            Tuple of (is_valid, error_message)
-
-        Validation Rules:
-            - All values must be in VALID_TARGET_PLATFORMS
-            - If 'all' is present, it must be the only value
-        """
         if not target_platforms:
             return False, "target_platforms cannot be empty"
 
@@ -217,11 +130,6 @@ class ProductService:
 
     @staticmethod
     def _column_holds_a_value(value: Any) -> bool:
-        """True when a config column already carries content worth protecting.
-
-        NULL and whitespace-only text are treated as empty — a column the user has
-        never filled must never block a write (FE-9320).
-        """
         if value is None:
             return False
         if isinstance(value, str):
@@ -229,12 +137,6 @@ class ProductService:
         return True
 
     def _collides_per_column(self, product: Product, incoming_blocks: dict[str, Any]) -> dict[str, list[str]]:
-        """Return {block: [columns]} for incoming columns that already hold a value.
-
-        FE-9320: the overwrite guard's granularity. A block whose relation row does
-        not exist yet cannot collide at all; a block whose row exists collides only
-        on the specific columns that are already populated.
-        """
         collisions: dict[str, list[str]] = {}
         for block_name, incoming in incoming_blocks.items():
             if not incoming or not isinstance(incoming, dict):
@@ -248,13 +150,6 @@ class ProductService:
         return collisions
 
     def _validate_project_path(self, project_path: Any, *, operation: str, product_id: str | None = None) -> None:
-        """Reject an over-length project_path at the owning-service write boundary.
-
-        FE-9320: ``products.project_path`` is String(500) at the DB but the MCP tool
-        boundary caps it at 20000, and nothing in between checked — so an over-long
-        path became an opaque sanitized 500 instead of an actionable rejection.
-        Mirrors the BE-9215 name cap.
-        """
         if project_path is None or len(project_path) <= PROJECT_PATH_MAX_LENGTH:
             return
         context: dict[str, Any] = {"operation": operation}
@@ -268,29 +163,8 @@ class ProductService:
             context=context,
         )
 
-    # ============================================================================
-    # CRUD Operations
-    # ============================================================================
 
     async def _allocate_product_slug(self, session, name: str) -> str:
-        """Return a slug for ``name`` that is free within this tenant (BE-9385b).
-
-        The slug qualifies exported agent filenames, so two live products in one
-        tenant must never share one. ``slugify_product_name`` is deterministic and
-        lossy -- "Acme Corp" and "Acme-Corp" both reduce to ``acme-corp`` -- so
-        this appends the lowest free numeric suffix (``acme-corp-2``, ``-3``, …),
-        matching how the ce_0092 backfill de-duplicates existing rows.
-
-        Only LIVE products are considered, mirroring the partial unique index:
-        deleting a product frees its slug for reuse, which is what a user renaming
-        and recreating would expect.
-
-        Concurrency: the unique index is the real guarantee; this loop exists so
-        the common case yields a readable slug rather than an integrity error. Two
-        simultaneous creates in one tenant could still collide and raise -- the
-        same shape as the existing duplicate-name check a few lines below, and a
-        tenant is a single user (ADR-009), so the window is theoretical.
-        """
         base = slugify_product_name(name)
 
         stmt = select(Product.slug).where(
@@ -302,10 +176,6 @@ class ProductService:
 
         if base not in taken:
             return base
-        # Bounded rather than while-True: a tenant cannot hold enough products to
-        # exhaust this, and an unbounded loop over a query result is how a wedge
-        # gets written. The uuid tail is unreachable in practice and exists so the
-        # function is total.
         for suffix in range(2, 1000):
             candidate = f"{base}-{suffix}"
             if candidate not in taken:
@@ -325,33 +195,7 @@ class ProductService:
         product_memory: dict[str, Any] | None = None,
         target_platforms: list[str] | None = None,
     ) -> Product:
-        """
-        Create a new product.
-
-        Handover 0840i: Accepts normalized config fields directly instead of config_data dict.
-
-        Args:
-            name: Product name (required)
-            description: Product description
-            project_path: File system path to product folder
-            tech_stack: Tech stack configuration dict
-            architecture: Architecture configuration dict
-            test_config: Test configuration dict
-            core_features: Core product features string
-            product_memory: 360 Memory data (git integration, sequential_history, context) - Handover 0135
-            target_platforms: Target platforms (windows, linux, macos, android, ios, web, or all) - Handover 0425
-
-        Returns:
-            Product ORM model after commit and refresh
-
-        Raises:
-            ValidationError: If target_platforms invalid or product name already exists
-            BaseGiljoError: If database operation fails
-        """
         try:
-            # BE-9215: name column is String(255). Cap at the owning-service write
-            # so every transport (REST, MCP create_product, vision extraction) gets
-            # a clean 422 instead of a raw StringDataRightTruncation 500.
             if name is not None and len(name) > 255:
                 raise ValidationError(
                     message=f"Product name exceeds 255 character limit (got {len(name)}).",
@@ -371,11 +215,6 @@ class ProductService:
                         context={"product_name": name, "tenant_key": self.tenant_key},
                     )
 
-                # Handover 0135 + 0700c: Initialize product_memory (history in table)
-                # BE-9261: seed key renamed github -> git_integration (server_default
-                # column left untouched; _ensure_product_memory_initialized backfills
-                # existing rows, and the git_integration-preferred/github-legacy read
-                # fallback in _build_product_memory_response covers pre-rename rows).
                 default_memory = {
                     "git_integration": {},
                     "context": {},
@@ -383,13 +222,6 @@ class ProductService:
 
                 product_id = str(uuid4())
 
-                # BE-9385b: allocate the export slug ONCE, here, and never again.
-                # It qualifies every exported agent filename, so rewriting it on a
-                # later rename would strand the files the user already installed --
-                # immutability is the point, not an oversight. Uniqueness is also
-                # enforced by idx_product_slug_unique_per_tenant; this allocator
-                # picks a free suffix so the user gets a readable name instead of
-                # an IntegrityError on a second product with a similar name.
                 slug = await self._allocate_product_slug(session, name)
 
                 validated_memory = validate_product_memory(product_memory) or default_memory
@@ -404,26 +236,12 @@ class ProductService:
                     brand_guidelines=brand_guidelines,
                     product_memory=validated_memory,
                     target_platforms=target_platforms or ["all"],
-                    # FE-9524/D1: a new product just exists, shown by default --
-                    # no on/off ceremony. Explicit True (rather than relying on
-                    # the column default) so this stays correct if the ORM
-                    # default is ever changed independently of this call site.
                     is_active=True,
-                    # is_default is deliberately NOT auto-set here (even for a
-                    # tenant's first product): ProductRepository.get_default_product's
-                    # sole-shown-product fallback already resolves an unscoped
-                    # read correctly whenever exactly one product is shown, so
-                    # auto-defaulting here would just create a row that
-                    # DISAGREES with is_active the moment the product is later
-                    # hidden (default is independent of shown/hidden by design
-                    # -- see set_default_product -- so hiding must not silently
-                    # clear it, but nothing should silently SET it either).
                     created_at=datetime.now(UTC),
                 )
 
                 await self._repo.add(session, product)
 
-                # Handover 0840i: Create normalized config table rows from typed fields
                 config_parts = {}
                 if tech_stack:
                     config_parts["tech_stack"] = tech_stack
@@ -434,10 +252,13 @@ class ProductService:
                 if config_parts:
                     await self._repo.create_config_relations(session, product_id, self.tenant_key, config_parts)
 
+                from giljo_mcp.product_crew import seed_product_crew
+
+                crew = await seed_product_crew(session, self.tenant_key, product_id)
                 await session.commit()
                 await self._repo.refresh(session, product)
 
-                self._logger.info(f"Created product {product.id} for tenant {self.tenant_key}")
+                self._logger.info(f"Created product {product.id} for tenant {self.tenant_key}, {len(crew)} agent(s)")
 
                 await self._emit_websocket_event(
                     event_type="product:created",
@@ -448,7 +269,7 @@ class ProductService:
 
         except ValidationError:
             raise
-        except Exception as e:  # Broad catch: service boundary, wraps in BaseGiljoError
+        except Exception as e:
             self._logger.exception("Failed to create product")
             raise BaseGiljoError(
                 message=f"Failed to create product: {e!s}",
@@ -456,19 +277,6 @@ class ProductService:
             ) from e
 
     async def get_product(self, product_id: str) -> Product:
-        """
-        Get a specific product by ID.
-
-        Args:
-            product_id: Product UUID
-
-        Returns:
-            Product ORM model
-
-        Raises:
-            ResourceNotFoundError: If product not found
-            BaseGiljoError: If database operation fails
-        """
         try:
             async with self._get_session() as session:
                 product = await self._repo.get_by_id(session, self.tenant_key, product_id, eager_load=True)
@@ -478,18 +286,15 @@ class ProductService:
                         message="Product not found", context={"product_id": product_id, "tenant_key": self.tenant_key}
                     )
 
-                # Handover 0136: Ensure product_memory is initialized (backward compatibility)
                 await self.memory._ensure_product_memory_initialized(session, product)
 
-                # Handover 0412: Force refresh to ensure we have latest DB data
-                # Handover 0840h: Include relationships so refresh doesn't discard eager loads
                 await self._repo.refresh(session, product)
 
                 return product
 
         except ResourceNotFoundError:
             raise
-        except Exception as e:  # Broad catch: service boundary, wraps in BaseGiljoError
+        except Exception as e:
             self._logger.exception("Failed to get product")
             raise BaseGiljoError(
                 message=f"Failed to get product: {e!s}",
@@ -497,22 +302,6 @@ class ProductService:
             ) from e
 
     async def list_products(self, include_inactive: bool = False, lean: bool = False) -> list[Product]:
-        """
-        List all products for tenant with optional filtering.
-
-        Args:
-            include_inactive: Include inactive products (default: False)
-            lean: BE-6066 P4 — when True, skip eager-loading the 4 detail relations
-                (the lean products LIST serializes only columns + aggregates). The
-                caller MUST NOT read tech_stack / architecture / test_config /
-                vision_documents off the returned models in lean mode.
-
-        Returns:
-            List of Product ORM models
-
-        Raises:
-            BaseGiljoError: If database operation fails
-        """
         try:
             async with self._get_session() as session:
                 products = await self._repo.list_products(
@@ -520,41 +309,20 @@ class ProductService:
                 )
 
                 for product in products:
-                    # Handover 0136: Ensure product_memory is initialized (backward compatibility)
                     await self.memory._ensure_product_memory_initialized(session, product)
 
                 self._logger.debug(f"Found {len(products)} products for tenant {self.tenant_key}")
 
                 return products
 
-        except Exception as e:  # Broad catch: service boundary, wraps in BaseGiljoError
+        except Exception as e:
             self._logger.exception("Failed to list products")
             raise BaseGiljoError(
                 message=f"Failed to list products: {e!s}", context={"tenant_key": self.tenant_key}
             ) from e
 
     async def update_product(self, product_id: str, force: bool = False, **updates) -> Product:
-        """
-        Update a product.
-
-        Args:
-            product_id: Product UUID
-            force: If True, allow overwriting populated JSONB fields (tech_stack, architecture, test_config)
-            **updates: Fields to update (name, description, project_path, tech_stack, architecture,
-                test_config, core_features, product_memory, target_platforms, etc.)
-
-        Returns:
-            Product ORM model after commit and refresh
-
-        Raises:
-            ResourceNotFoundError: If product not found
-            ValidationError: If product is not active, target_platforms invalid, or JSONB fields
-                already populated without force=True
-            BaseGiljoError: If database operation fails
-        """
         try:
-            # BE-9215: name column is String(255). Reject an over-long rename with
-            # a clean 422 at the write boundary rather than a DB truncation 500.
             if updates.get("name") is not None and len(updates["name"]) > 255:
                 raise ValidationError(
                     message=f"Product name exceeds 255 character limit (got {len(updates['name'])}).",
@@ -574,22 +342,12 @@ class ProductService:
                         message="Product not found", context={"product_id": product_id, "tenant_key": self.tenant_key}
                     )
 
-                # Note: Active product guard removed — blocking users from editing their own
-                # products has no valid use case. Overwrite confirmation (WI-2) is sufficient
-                # protection against agents accidentally clobbering populated fields.
 
-                # Handover 0840i: Handle normalized config fields
                 tech_stack = updates.pop("tech_stack", None)
                 architecture_data = updates.pop("architecture", None)
                 test_config = updates.pop("test_config", None)
                 core_features = updates.pop("core_features", None)
 
-                # WI-2: Overwrite Confirmation — prevent accidental overwrites of populated
-                # config fields. FE-9320: the guard used to fire on the relation ROW existing
-                # (``product.tech_stack is not None``), but that row is created by the FIRST
-                # write, so every later repair call had its whole block rejected — discarding
-                # columns that were still EMPTY. It now compares COLUMN by COLUMN: only the
-                # columns that actually hold a value collide, and the rest of the block writes.
                 if not force:
                     populated_columns = self._collides_per_column(
                         product,
@@ -605,8 +363,6 @@ class ProductService:
                         )
                         raise ValidationError(
                             message=f"Fields already populated: {detail}. Pass force=True to overwrite.",
-                            # populated_fields stays the block-name list every existing caller
-                            # reads; populated_columns carries the per-column detail.
                             context={
                                 "populated_fields": list(populated_columns),
                                 "populated_columns": populated_columns,
@@ -638,15 +394,7 @@ class ProductService:
 
                 self._logger.info(f"Updated product {sanitize(product_id)}")
 
-                # TSK-9265: no product:memory:updated emit here. product_memory is
-                # not in _ALLOWED_PRODUCT_FIELDS, so this method never applies it —
-                # the removed emit keyed on the RAW input dict and broadcast stale
-                # memory for a silently-dropped field. The owning write paths
-                # (write_memory_entry / project closeout) emit their own event.
 
-                # FE-9501c (D10): product:updated. This is the ONE owning writer for
-                # both doors (REST PATCH /products/{id} and the update_product_context
-                # MCP tool both route here), so one emit covers both.
                 await self._emit_websocket_event(
                     event_type="product:updated",
                     data={"product_id": str(product.id), "name": product.name},
@@ -656,110 +404,30 @@ class ProductService:
 
         except (ResourceNotFoundError, ValidationError):
             raise
-        except Exception as e:  # Broad catch: service boundary, wraps in BaseGiljoError
+        except Exception as e:
             self._logger.exception("Failed to update product")
             raise BaseGiljoError(
                 message=f"Failed to update product: {e!s}",
                 context={"product_id": product_id, "tenant_key": self.tenant_key},
             ) from e
 
-    # ============================================================================
-    # Lifecycle Management -- delegated to ProductLifecycleService
-    # ============================================================================
 
     async def activate_product(self, product_id: str) -> Product:
-        """Show a product's tab (FE-9524/D1). Delegated to ProductLifecycleService."""
         return await self.lifecycle.activate_product(product_id)
 
     async def deactivate_product(self, product_id: str) -> Product:
-        """Hide a product's tab (FE-9524/D1). Delegated to ProductLifecycleService."""
         return await self.lifecycle.deactivate_product(product_id)
 
-    # ============================================================================
-    # Default Product Management -- delegated to ProductLifecycleService
-    # (FE-9524: read-fallback target, distinct from shown/hidden)
-    # ============================================================================
 
     async def get_default_product(self, *, eager_load: bool = True) -> Product | None:
-        """Get the tenant's DEFAULT product. Delegated to ProductLifecycleService."""
         return await self.lifecycle.get_default_product(eager_load=eager_load)
 
     async def set_default_product(self, product_id: str) -> Product:
-        """Set the tenant's DEFAULT product. Delegated to ProductLifecycleService."""
         return await self.lifecycle.set_default_product(product_id)
 
     async def resolve_binding_product(
         self, product_id: str | None, *, operation: str, action: str = "created", write: bool
     ) -> Product:
-        """Resolve the product an MCP call scopes to (BE-9411, generalized BE-9499a).
-
-        Originally the create-path binder; BE-9499a reuses it for READ tools
-        (list/get/search) too via the ``action`` param, which only changes the
-        not-found error's verb ("nothing was <action>") to match what the
-        caller was actually trying to do -- the resolution + validation logic
-        is identical for both. Existing create callers are unaffected: the
-        default stays ``"created"``, so their error text is byte-identical.
-
-        The default product is mutable shared state: another session, or the
-        operator changing it in the dashboard, moves it under a running agent. A
-        create that resolves it at write time therefore lands wherever the
-        server happens to be pointing at that instant — which is how a staged
-        orchestrator filed a task onto a product that was not its own.
-
-        Two paths, and the difference between them is the whole point:
-
-        - ``product_id`` omitted → the DEFAULT product (``is_default``; see the
-          FE-9524 note below). This
-          keeps every existing caller working and is still subject to the flip;
-          that is documented behavior, not a bug. **Exception (BE-9523b):** when
-          ``write=True`` and the tenant owns MORE THAN ONE product, an omitted
-          ``product_id`` no longer falls back silently -- it raises
-          :class:`ProductAmbiguousError` carrying the full product list, because
-          a defaulted WRITE is not recoverable the way a defaulted read is. A
-          single-product tenant is never affected: the ambiguity check only
-          fires when there is more than one product to be ambiguous between.
-        - ``product_id`` supplied → validated as belonging to THIS tenant and
-          returned regardless of which product is active. Agent input is never
-          trusted: the lookup is tenant-scoped (``ProductRepository.get_by_id``
-          filters on ``tenant_key`` and excludes soft-deleted rows), so another
-          tenant's real id is as unusable as a made-up one.
-
-        A supplied id that does not resolve raises ``ValidationError`` — a clean
-        422-class rejection that surfaces verbatim to the agent. It must NEVER
-        fall back to the default product: a silent fallback would recreate the
-        exact defect while reporting success.
-
-        Deliberately does not require the target to be the *default*. Binding
-        to a product other than the default one is the reason this exists.
-
-        FE-9524: the fallback below resolves the
-        DEFAULT product (``is_default``), not "the shown/active one" --
-        "shown" and "default" are separate columns now that several products
-        may be shown at once. See ``ProductRepository.get_default_product``.
-
-        Args:
-            product_id: Explicit product UUID, or None/empty for the default product.
-            operation: Calling operation name, for the error context.
-            action: Past-tense verb for the not-found error ("nothing was
-                <action>") -- "created" for a write, "read"/"listed"/"searched"
-                for a query. Purely cosmetic; the resolution logic is identical.
-            write: True for a call that BINDS NEW DATA to the resolved product
-                (a create, or a write that lazily creates child rows under it --
-                e.g. ``upsert_roadmap_items``). False for a read/list/search,
-                which keeps the default-product fallback unconditionally. Required
-                (no default) so every call site states its intent explicitly --
-                see the BE-9523b audit in this project's PR body for the full list.
-
-        Returns:
-            The bound Product (read for its ``id`` and ``name``; detail relations
-            are NOT eager-loaded, so callers must not touch them).
-
-        Raises:
-            ValidationError: No default product set, or the supplied id does not
-                belong to this tenant.
-            ProductAmbiguousError: ``write=True``, ``product_id`` omitted, and the
-                tenant owns more than one product.
-        """
         if not product_id or not str(product_id).strip():
             if write:
                 products = await self.list_products(include_inactive=True, lean=True)

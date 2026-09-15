@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-BE6004C-0: env-gated audit (observe-only) mode for the fail-closed tenant guard.
-
-Verifies that:
-- unset / garbage GILJO_TENANT_GUARD_MODE behaves exactly as enforce (raises),
-- =audit converts a contextless tenant-scoped query into a logged WARNING (no raise),
-- =audit still applies the tenant filter when a tenant_key IS resolvable (true superset,
-  never a blanket no-op).
-
-Parallel-safe: monkeypatch for env + module-global dedupe set, TransactionalTestContext
-for DB touches, no test-ordering dependencies.
-"""
 
 import logging
 from uuid import uuid4
@@ -46,21 +34,12 @@ def _product(tenant_key: str, name: str) -> Product:
 
 @pytest.fixture(autouse=True)
 def _isolate_audit_dedupe(monkeypatch):
-    """Give each test a fresh dedupe set so warnings fire deterministically.
-
-    The guard mutates tenant_guard._AUDIT_WARN_SEEN — the canonical binding
-    (giljo_mcp.database merely re-exports it via __getattr__, so patching the
-    database module would only create a dead shadow attribute). monkeypatch
-    restores the original binding at teardown; xdist workers are separate
-    processes, so no cross-worker mutable state is shared.
-    """
     monkeypatch.setattr(guard_module, "_AUDIT_WARN_SEEN", set())
 
 
 @pytest.mark.parametrize("mode_value", [None, "foo", "enfore", ""])
 @pytest.mark.asyncio
 async def test_contextless_query_raises_when_not_audit(db_manager, monkeypatch, mode_value):
-    """Unset / typo / empty / garbage values all behave as enforce: contextless raises."""
     if mode_value is None:
         monkeypatch.delenv("GILJO_TENANT_GUARD_MODE", raising=False)
     else:
@@ -83,7 +62,6 @@ async def test_contextless_query_raises_when_not_audit(db_manager, monkeypatch, 
 
 @pytest.mark.asyncio
 async def test_contextless_query_warns_and_continues_in_audit(db_manager, monkeypatch, caplog):
-    """audit: a contextless tenant-scoped query LOGS a WARNING and does NOT raise."""
     monkeypatch.setenv("GILJO_TENANT_GUARD_MODE", "audit")
 
     async with TransactionalTestContext(db_manager) as session:
@@ -106,13 +84,11 @@ async def test_contextless_query_warns_and_continues_in_audit(db_manager, monkey
     message = warnings[0].getMessage()
     assert "Product" in message
     assert "statement_type=select" in message
-    # The query ran (no raise); audit must not 500.
     assert isinstance(rows, list)
 
 
 @pytest.mark.asyncio
 async def test_uppercase_audit_value_is_normalized(db_manager, monkeypatch, caplog):
-    """Env read is .strip().lower(): 'AUDIT' (with whitespace) still enables observe mode."""
     monkeypatch.setenv("GILJO_TENANT_GUARD_MODE", "  AUDIT ")
 
     async with TransactionalTestContext(db_manager) as session:
@@ -134,8 +110,6 @@ async def test_uppercase_audit_value_is_normalized(db_manager, monkeypatch, capl
 
 @pytest.mark.asyncio
 async def test_audit_still_applies_tenant_filter_when_context_resolvable(db_manager, monkeypatch):
-    """audit is a strict SUPERSET of enforce: when tenant_key is resolvable the filter
-    is STILL applied. A row for another tenant must NOT leak through (not a no-op)."""
     monkeypatch.setenv("GILJO_TENANT_GUARD_MODE", "audit")
     tenant_a = _tenant_key()
     tenant_b = _tenant_key()
@@ -153,7 +127,6 @@ async def test_audit_still_applies_tenant_filter_when_context_resolvable(db_mana
 
 @pytest.mark.asyncio
 async def test_audit_dedupes_repeated_contextless_warnings(db_manager, monkeypatch, caplog):
-    """Risk R7: repeated identical contextless queries emit ONE warning, not a flood."""
     monkeypatch.setenv("GILJO_TENANT_GUARD_MODE", "audit")
 
     async with TransactionalTestContext(db_manager) as session:
@@ -177,19 +150,6 @@ async def test_audit_dedupes_repeated_contextless_warnings(db_manager, monkeypat
 
 @pytest.mark.asyncio
 async def test_update_no_match_branch_logs_and_raises(db_manager, monkeypatch, caplog):
-    """TSK-9008 Step 2 (fail-closed, SEC-9156, shipped): a Class-B UPDATE/DELETE -- touches a
-    tenant-scoped model set, no model's table matches the target (no predicate injectable), AND
-    carries no explicit tenant predicate -- LOGS via _audit_warn (still, unchanged) and now
-    RAISES TenantIsolationError under enforce (the default mode). Superseded assertion: this
-    branch used to warn-and-continue (Step 1, log-only); Step 2 makes it fail-closed for the
-    genuinely-unscoped case. The Class-A (explicit-predicate) sibling stays warn-and-continue --
-    see test_sec9156_guard_failclosed.py::test_classa_explicitly_scoped_delete_does_not_raise.
-
-    This variant forces the branch deterministically (independent of statement shape) by
-    making the walk report an unrelated tenant-scoped model as "touched" -- the DELETE's own
-    table then never matches any model in that set. The natural statement shape that reaches
-    the same branch is covered by test_mapped_class_bulk_update_hits_no_match_branch below.
-    """
     tenant_key = _tenant_key()
     product = _product(tenant_key, "no-match-target")
 
@@ -210,18 +170,11 @@ async def test_update_no_match_branch_logs_and_raises(db_manager, monkeypatch, c
     assert "would have blocked" in message
     assert "Task" in message
     assert "statement_type=delete" in message
-    # No explicit tenant predicate in this statement, so no explicit-predicate suffix.
     assert "explicit tenant predicate" not in message
 
 
 @pytest.mark.asyncio
 async def test_mapped_class_bulk_update_now_injects(db_manager, caplog):
-    """SEC-9094 flip: a mapped-class bulk update (``update(Product)``) wraps the table in an
-    AnnotatedTable, which the OLD identity match could not resolve -- so it used to reach the
-    TSK-9008 log-only (warn) branch. The SEC-9094 matcher routes injection through the same
-    ``_table_model`` unwrap the detection walk uses, so this shape now INJECTS the tenant
-    predicate: the write applies AND the guard is quiet (no "would have blocked" warn). The
-    genuinely-unmatchable case still warns AND now raises -- see test_update_no_match_branch_logs_and_raises."""
     tenant_key = _tenant_key()
 
     async with TransactionalTestContext(db_manager) as session:
@@ -233,7 +186,6 @@ async def test_mapped_class_bulk_update_now_injects(db_manager, caplog):
         with caplog.at_level(logging.WARNING, logger="giljo_mcp.database"):
             await session.execute(update(Product).where(Product.tenant_key == tenant_key).values(name="bulk-renamed"))
 
-        # bulk UPDATE bypasses the identity map; populate_existing forces a fresh DB read.
         renamed = (
             await session.execute(
                 select(Product).where(Product.id == product.id).execution_options(populate_existing=True)
@@ -247,12 +199,6 @@ async def test_mapped_class_bulk_update_now_injects(db_manager, caplog):
 
 @pytest.mark.asyncio
 async def test_normal_update_is_still_tenant_scoped(db_manager):
-    """Regression guard: the new no-match branch must not affect the ordinary UPDATE/DELETE
-    path, where the target table DOES match a tenant-scoped model (statement.table identity
-    matches model.__table__, the pre-existing match branch) and the tenant predicate is
-    injected exactly as before. (Bulk-update against the raw Table -- rather than the mapped
-    class -- is what actually satisfies that identity check; see the module's `is` comparison.)
-    """
     tenant_a = _tenant_key()
     tenant_b = _tenant_key()
 
@@ -264,7 +210,6 @@ async def test_normal_update_is_still_tenant_scoped(db_manager):
         await session.execute(update(Product.__table__).values(name="renamed"))
         session.expire_all()
 
-        # Reads are tenant-scoped too, so verify each tenant's row under its own context.
         rows_a = (await session.execute(select(Product))).scalars().all()
         session.info["tenant_key"] = tenant_b
         rows_b = (await session.execute(select(Product))).scalars().all()

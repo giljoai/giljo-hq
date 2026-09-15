@@ -47,23 +47,6 @@
 </template>
 
 <script setup>
-/**
- * TokenActionPage — shared chrome for email-link "token action" landing
- * pages (dup-10: AccountDeletionCancel, AccountDeletionConfirm,
- * VerifyEmailChangePage). Owns the full-screen card shell (logo, title,
- * footer link) and the loading/token-missing/success/prompt/error slot
- * switch; each page supplies its own state-specific copy, icon, and actions
- * via the named slots.
- *
- * The optional `prompt` slot (BE-9040c) lets a page show a choice BEFORE
- * acting instead of firing its action on mount — it renders when `prompt`
- * is true and none of loading/token-missing/success apply. It defaults to
- * false so existing choice-free consumers (AccountDeletionCancel,
- * VerifyEmailChangePage) are unaffected.
- *
- * CE-space component (edition rule): SaaS views import this, never the
- * reverse.
- */
 import { PRODUCT_NAME } from '@/branding'
 
 const productName = PRODUCT_NAME

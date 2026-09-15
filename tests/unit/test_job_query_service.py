@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tests for JobQueryService (Sprint 002e extraction).
-
-Expanded from 1-function smoke test to meaningful coverage:
-- Empty result (no jobs)
-- Filtering by project_id
-- Filtering by status_filter
-- Filtering by agent_display_name
-- Pagination (limit/offset)
-- _derive_steps_summary from metadata and todo_items
-- Tenant isolation
-"""
 
 from unittest.mock import MagicMock
 
@@ -23,12 +12,6 @@ from giljo_mcp.services.job_query_service import JobQueryService
 
 
 async def _seed_product(session, tenant_key):
-    """A product for a seeded project to belong to (BE-9437: product_id is NOT NULL).
-
-    ONE PRODUCT PER PROJECT, deliberately. ``idx_project_single_active_per_product``
-    permits a single ACTIVE project per product and these seeds are active, so a
-    shared product would make the second one a unique violation.
-    """
     import uuid
 
     from giljo_mcp.models import Product
@@ -47,7 +30,6 @@ async def _seed_product(session, tenant_key):
 
 @pytest.fixture
 def job_query_service(db_session, test_tenant_key):
-    """Create a JobQueryService with a test session."""
     db_manager = MagicMock()
     tenant_manager = MagicMock()
     tenant_manager.get_current_tenant.return_value = test_tenant_key
@@ -60,7 +42,6 @@ def job_query_service(db_session, test_tenant_key):
 
 @pytest.mark.asyncio
 async def test_list_jobs_returns_empty_for_no_jobs(job_query_service, test_tenant_key):
-    """list_jobs returns empty result when no jobs exist."""
     result = await job_query_service.list_jobs(test_tenant_key)
     assert result.jobs == []
     assert result.total == 0
@@ -68,7 +49,6 @@ async def test_list_jobs_returns_empty_for_no_jobs(job_query_service, test_tenan
 
 @pytest.mark.asyncio
 async def test_list_jobs_returns_created_job(db_session, db_manager, test_tenant_key):
-    """list_jobs returns a job that was inserted into the database."""
     import uuid
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
@@ -124,13 +104,10 @@ async def test_list_jobs_returns_created_job(db_session, db_manager, test_tenant
 
 @pytest.mark.asyncio
 async def test_list_jobs_filter_by_project_id(db_session, db_manager, test_tenant_key):
-    """list_jobs filters results by project_id."""
     import uuid
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
 
-    # BE-9437: a product EACH -- both projects are active, and one product
-    # holds at most one active project.
     product_a = await _seed_product(db_session, test_tenant_key)
     product_b = await _seed_product(db_session, test_tenant_key)
     proj_a = Project(
@@ -191,7 +168,6 @@ async def test_list_jobs_filter_by_project_id(db_session, db_manager, test_tenan
 
 @pytest.mark.asyncio
 async def test_list_jobs_filter_by_status(db_session, db_manager, test_tenant_key):
-    """list_jobs filters results by execution status."""
     import uuid
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
@@ -245,7 +221,6 @@ async def test_list_jobs_filter_by_status(db_session, db_manager, test_tenant_ke
 
 @pytest.mark.asyncio
 async def test_list_jobs_pagination(db_session, db_manager, test_tenant_key):
-    """list_jobs respects limit and offset for pagination."""
     import uuid
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
@@ -301,7 +276,6 @@ async def test_list_jobs_pagination(db_session, db_manager, test_tenant_key):
 
 @pytest.mark.asyncio
 async def test_list_jobs_tenant_isolation(db_session, db_manager, test_tenant_key):
-    """Jobs from one tenant are not visible to another tenant."""
     import uuid
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
@@ -354,7 +328,6 @@ async def test_list_jobs_tenant_isolation(db_session, db_manager, test_tenant_ke
 
 
 def test_derive_steps_summary_from_metadata():
-    """_derive_steps_summary extracts counts from job_metadata.todo_steps."""
     service = JobQueryService(MagicMock(), MagicMock())
     job = MagicMock()
     job.job_metadata = {"todo_steps": {"total_steps": 5, "completed_steps": 3, "skipped_steps": 1}}
@@ -366,7 +339,6 @@ def test_derive_steps_summary_from_metadata():
 
 
 def test_derive_steps_summary_from_todo_items():
-    """_derive_steps_summary falls back to todo_items when metadata is empty."""
     service = JobQueryService(MagicMock(), MagicMock())
     job = MagicMock()
     job.job_metadata = {}
@@ -385,7 +357,6 @@ def test_derive_steps_summary_from_todo_items():
 
 
 def test_derive_steps_summary_returns_none_when_empty():
-    """_derive_steps_summary returns None when no metadata and no todo_items."""
     service = JobQueryService(MagicMock(), MagicMock())
     job = MagicMock()
     job.job_metadata = {}

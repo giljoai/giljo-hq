@@ -1,22 +1,3 @@
-/**
- * useTutorialState.abandoned-draft.spec.js — FE-9566 / FE-9579
- *
- * The tour's door D and door A silently pre-create an empty product so the
- * agent has a card to fill in. `releaseAbandonedDraft` is the hatch that stops
- * that draft haunting the dashboard when the user walks away from the tour.
- *
- * It could not do its job. It bailed on `row.is_active`, written when is_active
- * meant "THE active product" — but FE-9524/D1 redefined it as "shown as a tab",
- * and ProductService.create_product sets it True for every product, a nameless
- * draft included (pinned in tests/integration/test_fe9566_door_d_draft_create_contract.py).
- * So the hatch skipped the very drafts it exists to clean, and every abandoned
- * run leaked a product permanently.
- *
- * The emptiness check is what actually protects the user's data here, and these
- * tests hold it in place: anything with content, and anything named, is kept.
- *
- * Edition scope: Both (shared frontend/src).
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const h = vi.hoisted(() => ({
@@ -39,7 +20,6 @@ vi.mock('@/stores/user', () => ({
 
 import { useTutorialState } from './useTutorialState'
 
-/** A door-D draft exactly as create_product makes it: empty, and SHOWN. */
 const UNTOUCHED_SHOWN_DRAFT = {
   id: 'draft-1',
   name: '',

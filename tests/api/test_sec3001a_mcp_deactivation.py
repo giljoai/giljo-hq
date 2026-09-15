@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-3001a item 1 (deactivation propagation) — /mcp JWT transport.
-
-The /mcp transport authenticates through ``MCPAuthMiddleware`` (a SEPARATE ASGI
-path from the REST ``get_current_user`` dependency), so it must independently
-re-check ``is_active``: a user deactivated AFTER token issue still presents a
-valid, non-revoked, self-contained JWT. Before this fix a deactivated user kept
-full /mcp access until the token's 24h expiry.
-
-Failing layer = the real ``MCPAuthMiddleware`` ASGI middleware, driven exactly
-like a production client (Authorization: Bearer <JWT>). NOT a helper unit test
-(BE-5042 lesson). Two-sided: the ACTIVE user's JWT reaches the inner SDK app
-(200), then deactivation flips the SAME token to 401 and the inner app is never
-reached.
-
-xdist-safe: unique tenant_key + user per test, no module-level mutable state,
-no ordering deps.
-"""
 
 from __future__ import annotations
 
@@ -31,9 +14,6 @@ import pytest
 import pytest_asyncio
 
 
-# The MCP middleware derives the expected JWT audience from the request scope's
-# base URL. With a ``host: test`` header and an http scope the canonical URI is
-# deterministic, so the JWT's ``aud`` must match exactly.
 _CANONICAL_AUD = "http://test/mcp"
 
 
@@ -43,7 +23,6 @@ async def _drive_middleware(
     headers: list[tuple[bytes, bytes]],
     body: bytes,
 ) -> tuple[int, bool]:
-    """Run one POST /mcp request through ``middleware``; return (status, inner_called)."""
     inner_called = {"flag": False}
 
     async def inner_app(scope, receive, send) -> None:
@@ -52,7 +31,6 @@ async def _drive_middleware(
         await send({"type": "http.response.start", "status": 200, "headers": []})
         await send({"type": "http.response.body", "body": b'{"jsonrpc":"2.0","id":1,"result":{}}'})
 
-    # MCPAuthMiddleware wraps the inner app; build a one-off instance per drive.
     mw = middleware(inner_app)
 
     scope = {
@@ -97,7 +75,6 @@ async def jwt_env(monkeypatch):
 
 
 async def _seed_user(db_manager) -> tuple[str, str, str]:
-    """Create org+user; return (user_id, username, tenant_key)."""
     from giljo_mcp.models.auth import User
     from giljo_mcp.models.organizations import Organization
     from giljo_mcp.tenant import TenantManager
@@ -145,7 +122,6 @@ def _mint_jwt(*, user_id: str, username: str, tenant_key: str) -> str:
 
 
 class TestDeactivatedUserJwtIs401:
-    """A user deactivated after JWT issue must lose /mcp access on the next call."""
 
     @pytest.mark.asyncio
     async def test_active_then_deactivated_jwt(self, db_manager, jwt_env):
@@ -163,26 +139,19 @@ class TestDeactivatedUserJwtIs401:
             (b"host", b"test"),
             (b"content-type", b"application/json"),
         ]
-        # tools/list is a post-initialize, session-id-less request: it passes the
-        # protocol-version default and the session lifecycle passthrough, so a
-        # valid auth reaches the inner SDK app — letting us assert the auth
-        # verdict cleanly without the initialize session-minting machinery.
         body = _jsonrpc("tools/list")
 
         prior_db = state.db_manager
         state.db_manager = db_manager
         try:
-            # Happy path: the ACTIVE user's JWT authenticates and reaches inner app.
             status, inner_called = await _drive_middleware(MCPAuthMiddleware, headers=headers, body=body)
             assert status == 200, f"active user's JWT must authenticate on /mcp, got {status}"
             assert inner_called is True, "active user's request must reach the inner SDK app"
 
-            # Offboard the user.
             async with db_manager.get_session_async(tenant_key=tenant_key) as session:
                 await session.execute(update(User).where(User.id == user_id).values(is_active=False))
                 await session.commit()
 
-            # The SAME (valid, non-revoked) JWT is now rejected — deactivation propagated.
             status2, inner_called2 = await _drive_middleware(MCPAuthMiddleware, headers=headers, body=body)
             assert status2 == 401, (
                 f"deactivated user's still-valid JWT must 401 on /mcp (deactivation propagation), got {status2}"

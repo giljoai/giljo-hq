@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6213 P0 — a conductor's own Hub post authored under its DISPLAY NAME must
-not arm its own completion gate.
-
-post_to_thread stores ``from_agent_id`` = the self-declared display name
-("Conductor"), not the execution UUID. The BE-6208c self-exclusion compared
-only against ``execution.agent_id`` (the UUID), so a conductor's own
-"chain complete" Hub post slipped past the self-match and blocked its own
-complete_job (COMPLETION_BLOCKED, unread=1, the blocking message being its
-own). Broadening the self-match to {agent_id, agent_display_name} fixes it.
-
-A genuine cross-agent message (neither the UUID nor the display name) must
-still block.
-"""
 
 from __future__ import annotations
 
@@ -89,8 +76,6 @@ async def _seed_conductor(
     is_conductor: bool = True,
     project_id: str | None = None,
 ) -> tuple[AgentJob, AgentExecution]:
-    """Seed a project-less chain conductor (project_id None + chain_conductor metadata)
-    by default, or a non-conductor job when is_conductor=False / project_id set."""
     job_id = str(uuid4())
     job = AgentJob(
         job_id=job_id,
@@ -133,8 +118,6 @@ async def _add_pending_message(
         from_agent_id=from_agent_id,
         content="chain complete",
         status="pending",
-        # BE-9012b (D7): the gate keys on requires_action, so a message that must
-        # BLOCK is action-required. A self-authored one is still excluded (row 14).
         requires_action=True,
         created_at=datetime.now(UTC) - timedelta(minutes=1),
     )
@@ -150,11 +133,7 @@ async def test_conductor_self_post_under_label_does_not_block(
     completion_service: JobCompletionService,
     test_tenant_key: str,
 ):
-    """The conductor's own Hub post on its standalone (NULL-project) thread,
-    authored under its free-text LABEL (agent_name 'Conductor', not the UUID) and
-    fanned back to itself, must NOT block its finale complete_job."""
     job, execution = await _seed_conductor(db_session, test_tenant_key)
-    # Standalone conductor thread => project_id None; post authored under the label.
     await _add_pending_message(db_session, test_tenant_key, None, execution.agent_name, execution.agent_id)
 
     result = await completion_service.complete_job(
@@ -171,8 +150,6 @@ async def test_other_agent_message_still_blocks_conductor(
     completion_service: JobCompletionService,
     test_tenant_key: str,
 ):
-    """A genuine message from another agent (neither UUID nor a conductor label)
-    still arms the conductor's gate."""
     job, execution = await _seed_conductor(db_session, test_tenant_key)
     await _add_pending_message(db_session, test_tenant_key, None, "SomeOtherAgent", execution.agent_id)
 
@@ -193,10 +170,6 @@ async def test_non_conductor_keeps_uuid_only_self_match(
     test_tenant_key: str,
     active_project: Project,
 ):
-    """SOLO IS SACRED: a NON-conductor agent (no chain_conductor metadata) is NOT
-    label-broadened. A genuine message from a DIFFERENT agent that happens to share
-    this agent's display name MUST still block (the broadening is conductor-gated, so
-    solo/worker/sub-orch gates stay UUID-only and byte-identical)."""
     job, execution = await _seed_conductor(
         db_session,
         test_tenant_key,
@@ -205,7 +178,6 @@ async def test_non_conductor_keeps_uuid_only_self_match(
         is_conductor=False,
         project_id=active_project.id,
     )
-    # Another agent posts under the SAME generic label this agent uses.
     await _add_pending_message(db_session, test_tenant_key, active_project.id, "orchestrator", execution.agent_id)
 
     with pytest.raises(ValidationError) as exc_info:

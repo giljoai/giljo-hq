@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""INF-6049a -- MCP-boundary test for the new ``get_giljo_guide`` tool.
-
-CLAUDE.md mandates a regression test at the layer the change lives (BE-5042
-precedent: a tool can pass every service-layer test yet fail at the FastMCP
-@mcp.tool wrapper). ``get_giljo_guide`` is a no-arg static-content tool, so this
-drives it through the SDK's in-memory transport and asserts the consolidated
-recipe sections actually surface over the wire (not just that a function returns
-a string in isolation).
-"""
 
 from __future__ import annotations
 
@@ -19,7 +10,6 @@ import json
 
 import pytest
 
-# Importing the transport module registers every @mcp.tool on the shared instance.
 from api.endpoints.mcp_sdk_server import mcp
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
@@ -34,7 +24,6 @@ def _payload(result) -> dict:
 
 
 async def test_get_giljo_guide_is_callable_through_transport():
-    """The tool dispatches and returns a JSON dict with a 'guide' string, no args."""
     async with create_connected_server_and_client_session(mcp) as session:
         result = await session.call_tool("get_giljo_guide", {})
 
@@ -44,52 +33,27 @@ async def test_get_giljo_guide_is_callable_through_transport():
 
 
 async def test_guide_carries_the_consolidated_recipe_sections():
-    """The five judgment-layer sections sourced from the slash bodies must surface."""
     async with create_connected_server_and_client_session(mcp) as session:
         result = await session.call_tool("get_giljo_guide", {})
 
     guide = _payload(result)["guide"]
-    # (a) project-vs-task routing, (b) chain convention, (c) Edition Scope,
-    # (d) read-vs-write + never-tenant_key + product resolution, (e) lifecycle.
     assert "create_task" in guide and "create_project" in guide
-    assert "TSK" in guide  # task auto-tag advertising preserved from the slash bodies
-    assert "suffix" in guide and "series_number" in guide  # chain convention
+    assert "TSK" in guide
+    assert "suffix" in guide and "series_number" in guide
     assert "Edition Scope" in guide
-    assert "tenant_key" in guide  # never-pass rule
-    # BE-9543: "binds to the active product" was retired (FE-9524 Show/Hide split;
-    # BE-9523b's PRODUCT_AMBIGUOUS refusal for a multi-product tenant) -- the guide
-    # now teaches the DEFAULT-product-or-refuse model instead.
+    assert "tenant_key" in guide
     assert "PRODUCT_AMBIGUOUS" in guide
     assert "default product" in guide.lower()
     assert "get_context" in guide and "list_projects" in guide and "list_tasks" in guide
 
 
 async def test_guide_carries_the_agent_message_hub_recipe():
-    """BE-6054d: the §8 Agent Message Hub recipe surfaces over the wire, names all NINE
-    hub tools, and frames every operation as tenant-scoped (no cross-tenant leak).
-
-    BE-9565: was "all 11", and the roster below was PADDED WITH DUPLICATES to reach it.
-    BE-9554 merged three tools away -- await_my_turn into get_my_turn(wait_seconds=),
-    search_threads into list_threads(query=), pass_baton into set_next_actor -- and its
-    sweep rewrote the retired names in this tuple to their survivors, leaving
-    ``get_my_turn`` and ``list_threads`` listed twice. Eleven entries, nine distinct
-    names, and the "Eleven tools" assertion below still passing.
-
-    So this test was HOLDING THE DEFECT IN PLACE: it asserted a false count is present
-    in customer-facing prose, and it read as coverage while doing it. Same shape as
-    BE-9554's own RETIRED_TOOL_NAMES map, whose keys that sweep rewrote into the live
-    set. A rename sweep will happily edit the test that would have caught it.
-
-    The no-duplicates assertion is the fix for the mechanism rather than the instance:
-    padding cannot recreate the illusion, because a repeated name now fails outright.
-    """
     async with create_connected_server_and_client_session(mcp) as session:
         result = await session.call_tool("get_giljo_guide", {})
 
     guide = _payload(result)["guide"]
     assert "Agent Message Hub" in guide
     assert "Nine tools" in guide
-    # All nine hub tools are discoverable from the guide.
     hub_tools = (
         "create_thread",
         "join_thread",
@@ -109,16 +73,13 @@ async def test_guide_carries_the_agent_message_hub_recipe():
     assert len(hub_tools) == 9, f"expected 9 hub tools, roster lists {len(hub_tools)}"
     for tool_name in hub_tools:
         assert tool_name in guide, f"hub tool '{tool_name}' missing from the guide"
-    # The shareable chat id + the loop directive (BE-6054c) are taught.
     assert "CHT-" in guide
     assert "loop_directive" in guide
-    # Tenant-safe framing: never pass tenant_key; cannot reach another tenant's threads.
     assert "never pass `tenant_key`" in guide
     assert "another tenant" in guide
 
 
 async def test_guide_is_registered_with_read_scope_and_no_args():
-    """Advertised surface: no required args, read scope (visible to read-only callers)."""
     from api.endpoints.mcp_sdk_server import TOOL_SCOPES
 
     assert TOOL_SCOPES.get("get_giljo_guide") == "mcp:read"
@@ -128,33 +89,17 @@ async def test_guide_is_registered_with_read_scope_and_no_args():
 
 
 async def test_guide_closeout_sequence_has_no_redundant_memory_write():
-    """BE-6230: the canonical closeout sequence must be complete_job -> write_project_closeout
-    (NOT ...-> write_memory_entry -> write_project_closeout). write_project_closeout writes the
-    single project_closeout 360 entry itself, so prescribing a separate write_memory_entry in
-    the closeout step double-writes the 360. The guide must say so without changing any tool
-    contract (write_memory_entry stays for non-closeout records / the conductor series-summary)."""
     async with create_connected_server_and_client_session(mcp) as session:
         result = await session.call_tool("get_giljo_guide", {})
     guide = _payload(result)["guide"]
-    # The canonical sequence no longer chains write_memory_entry before write_project_closeout.
     assert "`write_memory_entry` -> `write_project_closeout`" not in guide
     assert "`complete_job` -> `write_project_closeout`" in guide
-    # The redundancy is called out explicitly, and write_memory_entry is preserved for other use.
     low = guide.lower()
     assert "redundant" in low
     assert "series-summary" in low or "series summary" in low
 
 
 async def test_guide_opens_with_the_current_product_name():
-    """BE-9361: the guide greets every connected agent, and it opened with the
-    dead pre-rebrand name ("GiljoAI MCP") for months after BE-9275 renamed the
-    product to Giljo HQ -- the residual that started this project.
-
-    Pinned to ``branding.PRODUCT_NAME`` rather than to the literal on purpose:
-    a future rebrand that flips branding.py but forgets this agent-facing header
-    goes RED here, which is the exact regression class BE-9361 exists to close.
-    A literal would happily pass while the guide went stale again.
-    """
     from giljo_mcp.branding import PRODUCT_NAME
 
     async with create_connected_server_and_client_session(mcp) as session:
@@ -165,16 +110,29 @@ async def test_guide_opens_with_the_current_product_name():
     assert PRODUCT_NAME in first_line, (
         f"guide header must name the current product ({PRODUCT_NAME!r}), got {first_line!r}"
     )
-    # The dead name must not survive anywhere in the agent-facing body. The
-    # house brand on its own ("the GiljoAI dashboard") is correct and stays.
     assert "GiljoAI MCP" not in guide, "guide still carries the pre-rebrand product name"
 
 
 async def test_guide_carries_verbatim_artifact_principle():
-    """BE-6207: the guide states the server-authored-artifact = verbatim discipline
-    (the durable principle that reinforces the inline chain STEP A spawn directive)."""
     async with create_connected_server_and_client_session(mcp) as session:
         result = await session.call_tool("get_giljo_guide", {})
     guide = _payload(result)["guide"].lower()
     assert "verbatim" in guide, "guide must carry the verbatim-artifact principle"
     assert "-argumentlist" in guide or "array form" in guide, "principle should name the reformat footgun"
+
+
+@pytest.mark.asyncio
+async def test_guide_carries_hub_etiquette_and_status_vocabulary():
+    async with create_connected_server_and_client_session(mcp) as session:
+        result = await session.call_tool("get_giljo_guide", {})
+    guide = _payload(result)["guide"]
+
+    assert "Hub etiquette" in guide
+    assert "join_thread" in guide
+    for word in ("active", "inactive", "parked", "completed", "cancelled", "superseded"):
+        assert word in guide, word
+    for word in ("pending", "in_progress", "blocked"):
+        assert word in guide, word
+    for word in ("open", "resolved", "closed"):
+        assert word in guide, word
+    assert "Status vocabulary" in guide

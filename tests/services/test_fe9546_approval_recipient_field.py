@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-9546 — the approval-notification recipient field.
-
-Operator-reported: every Chrome notification read "Needs your approval" even for
-agent-to-agent posts that never concerned the operator. The frontend's
-``APPROVAL_FOCUS`` gate (``useHubNotifications.js``) checked only
-``requires_action === true``, unlike its two siblings which both test who the
-event is actually for. The frontend half of the fix needs a recipient field on
-the wire; this file pins the SERVER half: ``comm_thread_service.post_to_thread``
-must return the RESOLVED ``to_participant`` (the "user" alias already expanded to
-the operator's real id -- see ``resolve_operator_alias``), and
-``broadcast_thread_message`` must carry it onto the ``hub:thread_message`` WS
-event, additively, so the client can finally tell "directed at me" from "directed
-at someone else".
-
-Parallel-safe: rollback-isolated ``db_session``, fresh tenant per test, no
-module-level mutable state.
-"""
 
 from __future__ import annotations
 
@@ -47,12 +30,6 @@ async def _seed(db_session, tenant: str) -> None:
 
 
 async def _seed_with_operator(db_session, tenant: str) -> str:
-    """Seed taxonomy + the tenant's single human. Returns the operator's id.
-
-    Mirrors test_comm_handover_notification.py's fixture: resolve_operator_alias
-    requires exactly one row in the tenant's users table before "user" resolves
-    to anything.
-    """
     with tenant_session_context(db_session, tenant):
         await ensure_default_types_seeded(db_session, tenant)
         operator = User(
@@ -77,13 +54,9 @@ async def _thread(svc: CommThreadService, tenant: str) -> str:
     return thread_id
 
 
-# ---------------------------------------------------------------------------
-# The service resolves and returns the addressee
-# ---------------------------------------------------------------------------
 
 
 async def test_post_to_thread_returns_the_directed_recipient(db_manager, db_session):
-    """A post directed at a lane agent must say so in its result."""
     tenant = _tk("directed")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -102,10 +75,6 @@ async def test_post_to_thread_returns_the_directed_recipient(db_manager, db_sess
 
 
 async def test_post_to_thread_resolves_the_user_alias_before_returning_it(db_manager, db_session):
-    """FE-9546's whole point: an agent addresses the operator by the "user" alias,
-    never by their uuid (see resolve_operator_alias). If this returned the raw
-    alias instead of the resolved id, the frontend's `to_participant === userId`
-    match could never succeed for a genuine approval sent the normal way."""
     tenant = _tk("alias")
     real_user_id = await _seed_with_operator(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -125,7 +94,6 @@ async def test_post_to_thread_resolves_the_user_alias_before_returning_it(db_man
 
 
 async def test_a_broadcast_returns_no_recipient(db_manager, db_session):
-    """Omitted to_participant stays omitted (None) -- a broadcast has no one addressee."""
     tenant = _tk("broadcast")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -142,13 +110,9 @@ async def test_a_broadcast_returns_no_recipient(db_manager, db_session):
     assert result.get("to_participant") is None
 
 
-# ---------------------------------------------------------------------------
-# The WS payload
-# ---------------------------------------------------------------------------
 
 
 async def test_thread_message_event_carries_to_participant_additively():
-    """The new field must not disturb the payload every existing caller sends."""
     from api.endpoints._comm_ws import broadcast_thread_message
 
     sent: list[dict] = []
@@ -174,8 +138,6 @@ async def test_thread_message_event_carries_to_participant_additively():
     assert sent[0]["data"]["to_participant"] == "CI2"
 
     sent.clear()
-    # An existing caller that never passes it gets None -- the shape a pre-FE-9546
-    # client already ignores (it never read this key).
     await broadcast_thread_message(
         _Manager(),
         "tk_x",
@@ -193,7 +155,6 @@ async def test_thread_message_event_carries_to_participant_additively():
 
 
 def test_to_participant_is_optional_and_defaults_to_none():
-    """Defaulted, so no existing caller had to change."""
     from api.endpoints._comm_ws import broadcast_thread_message
 
     assert inspect.signature(broadcast_thread_message).parameters["to_participant"].default is None

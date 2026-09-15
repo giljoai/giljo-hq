@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Settings Service for Giljo HQ system settings management.
-
-SettingsService handles CRUD operations for tenant-scoped settings (general, network, database).
-Handover 0506: Settings endpoints implementation.
-Updated Handover 0731: Reviewed for typed returns - dict[str, Any] retained because
-settings are genuinely dynamic key-value pairs with user-configurable schemas that
-vary by category and deployment. No fixed Pydantic model can represent the full range
-of settings configurations.
-"""
 
 import logging
 from typing import Any, ClassVar
@@ -33,25 +23,13 @@ from giljo_mcp.schemas.jsonb_validators import validate_settings_by_category
 logger = logging.getLogger(__name__)
 
 AGENT_SILENCE_THRESHOLD_KEY = "agent_silence_threshold_minutes"
-# FE-9296b: the account-level agent check-in cadence. Replaces the per-project
-# auto check-in slider as the durable "how often should agents check in" value;
-# hosted exactly like the silence threshold (system_settings for CE, per-tenant
-# configurations override for SaaS), NOT in the settings JSONB bag.
 AGENT_CHECKIN_CADENCE_KEY = "agent_checkin_cadence_minutes"
 GLOBAL_GENERAL_SETTING_KEYS = {AGENT_SILENCE_THRESHOLD_KEY, AGENT_CHECKIN_CADENCE_KEY}
-# FE-9241: shared upper bound for the SaaS per-tenant override (configurations
-# table). CE's deployment-wide system_settings write path is intentionally left
-# unbounded above (Field(ge=1) only) so this constant does NOT touch CE behavior.
 MAX_AGENT_SILENCE_THRESHOLD_MINUTES = 1440
 MAX_AGENT_CHECKIN_CADENCE_MINUTES = 1440
-# Matches the retired per-project slider's default interval, so a deployment that
-# never touches the setting keeps the cadence it always had.
 DEFAULT_AGENT_CHECKIN_CADENCE_MINUTES = 10
 
-# INF-6049a: deployment-wide counter for the first-3-boots CE tool-rename notice
-# (the get_orchestrator_instructions -> get_staging_instructions migration prompt).
 TOOL_RENAME_BOOT_COUNT_KEY = "tool_rename_notice_boot_count"
-# Surface the notice for this many CE process boots, then stop counting/showing.
 TOOL_RENAME_NOTICE_MAX_BOOTS = 3
 
 
@@ -60,28 +38,7 @@ def _without_global_general_keys(settings_data: dict[str, Any]) -> dict[str, Any
 
 
 class SettingsService:
-    """
-    SettingsService - Manages tenant-scoped system settings.
 
-    Supports categories: general, network, database, integrations, security, runtime.
-
-    Args:
-        session: AsyncSession - Database session
-        tenant_key: str - Tenant identifier for multi-tenant isolation
-
-    Methods:
-        get_settings(category) - Get settings for category (returns {} if not found)
-        get_setting_value(category, key, default) - Get single nested key from category
-        update_settings(category, settings_data) - Upsert settings for category
-
-    Raises:
-        ValidationError if category is invalid or data fails schema validation
-    """
-
-    # BE-9148: "runtime" retired — it was seeded/validated but had zero readers,
-    # no REST endpoint, and no frontend. A legacy "runtime" row on an existing
-    # install is never read; get_settings/update_settings for it now raise the
-    # standard invalid-category error (no caller relies on it).
     VALID_CATEGORIES: ClassVar[set[str]] = {
         "general",
         "network",
@@ -96,20 +53,6 @@ class SettingsService:
         self._repo = SettingsRepository()
 
     async def get_settings(self, category: str) -> dict[str, Any]:
-        """
-        Get settings for category.
-
-        Args:
-            category: Settings category (general, network, database, integrations, security)
-
-        Returns:
-            dict[str, Any] - Settings data (empty dict if not found).
-            Intentionally returns dict because settings are dynamic key-value
-            pairs with user-configurable schemas that vary by category.
-
-        Raises:
-            ValidationError: if category is invalid
-        """
         if category not in self.VALID_CATEGORIES:
             raise ValidationError(f"Invalid category: {category}. Must be one of {self.VALID_CATEGORIES}")
 
@@ -125,61 +68,19 @@ class SettingsService:
         return settings_data
 
     async def get_setting_value(self, category: str, key: str, default: Any = None) -> Any:
-        """
-        Get a single top-level key from a settings category.
-
-        Convenience method for callers that only need one value (e.g., tools
-        checking git_integration.enabled).
-
-        Args:
-            category: Settings category
-            key: Top-level key within the settings_data dict
-            default: Default value if key or category not found
-
-        Returns:
-            The value for the key, or default if not found.
-        """
         data = await self.get_settings(category)
         return data.get(key, default)
 
     async def git_integration_enabled(self) -> bool:
-        """Canonical read of the master Git + 360 Memory toggle (BE-9103).
-
-        The SINGLE source of truth for whether git integration is on for this
-        tenant: the Connect-tab toggle writes ``integrations.git_integration.enabled``
-        via :func:`api.endpoints.git.toggle_git_integration`, and every consumer that
-        gates commit instructions or serves git history reads THIS — never the legacy
-        per-product ``product_memory.git_integration`` blob (which the current UI never
-        writes, so it defaulted disabled forever). Read side only; no write.
-        """
         git_settings = await self.get_setting_value("integrations", "git_integration", {})
         if not isinstance(git_settings, dict):
             return False
         return bool(git_settings.get("enabled", False))
 
     async def update_settings(self, category: str, settings_data: dict[str, Any]) -> dict[str, Any]:
-        """
-        Update settings for category (upsert).
-
-        Validates settings_data against category-specific JSONB schema
-        before persisting. For categories with known schemas (integrations,
-        security), strict validation is applied. For others
-        (general, network, database), the generic SettingsData validator is used.
-
-        Args:
-            category: Settings category
-            settings_data: dict[str, Any] - Settings to save
-
-        Returns:
-            dict[str, Any] - Validated and updated settings data.
-
-        Raises:
-            ValidationError: if category is invalid or data fails schema validation
-        """
         if category not in self.VALID_CATEGORIES:
             raise ValidationError(f"Invalid category: {category}. Must be one of {self.VALID_CATEGORIES}")
 
-        # JSONB validation at write boundary (post-0962 discipline)
         try:
             validated_data = validate_settings_by_category(category, settings_data)
         except PydanticValidationError as e:
@@ -204,13 +105,11 @@ class SettingsService:
 
 
 class SystemSettingsService:
-    """Manages deployment-wide settings stored in system_settings."""
 
     def __init__(self, session: AsyncSession):
         self.session = session
 
     async def _get_minutes_setting(self, key: str) -> int | None:
-        """Read a deployment-wide minutes value, or None if unset/malformed."""
         result = await self.session.execute(select(SystemSetting.value).where(SystemSetting.key == key))
         value = result.scalar_one_or_none()
 
@@ -223,7 +122,6 @@ class SystemSettingsService:
             return None
 
     async def _update_minutes_setting(self, key: str, minutes: int) -> int:
-        """Upsert a deployment-wide minutes value (integer >= 1)."""
         if type(minutes) is not int or minutes < 1:
             raise ValidationError(f"{key} must be an integer greater than or equal to 1")
 
@@ -247,14 +145,12 @@ class SystemSettingsService:
         return await self._update_minutes_setting(AGENT_SILENCE_THRESHOLD_KEY, minutes)
 
     async def get_agent_checkin_cadence_minutes(self) -> int | None:
-        """FE-9296b: the deployment-wide agent check-in cadence, or None if unset."""
         return await self._get_minutes_setting(AGENT_CHECKIN_CADENCE_KEY)
 
     async def update_agent_checkin_cadence_minutes(self, minutes: int) -> int:
         return await self._update_minutes_setting(AGENT_CHECKIN_CADENCE_KEY, minutes)
 
     async def get_tool_rename_boot_count(self) -> int:
-        """Return the deployment-wide tool-rename-notice boot count (0 if unset)."""
         result = await self.session.execute(
             select(SystemSetting.value).where(SystemSetting.key == TOOL_RENAME_BOOT_COUNT_KEY)
         )
@@ -267,13 +163,6 @@ class SystemSettingsService:
             return 0
 
     async def increment_tool_rename_boot_count(self) -> int:
-        """Bump the tool-rename-notice boot counter by one and return the new value.
-
-        MUST be called exactly ONCE per process startup (not per banner-emit
-        cycle), so the "first 3 boots" window counts boots rather than
-        update-checker ticks. Saturates one past the notice window
-        (``MAX_BOOTS + 1``) so it never grows unbounded after the notice retires.
-        """
         result = await self.session.execute(
             select(SystemSetting).where(SystemSetting.key == TOOL_RENAME_BOOT_COUNT_KEY)
         )
@@ -287,7 +176,6 @@ class SystemSettingsService:
                 current = 0
 
         if current > TOOL_RENAME_NOTICE_MAX_BOOTS:
-            # Already past the window — stop counting (no unbounded growth).
             return current
 
         new_value = current + 1
@@ -306,20 +194,6 @@ async def resolve_agent_checkin_cadence_minutes(
     tenant_key: str | None = None,
     project: Any = None,
 ) -> int:
-    """Resolve the effective agent check-in cadence in minutes (FE-9296b).
-
-    THE single precedence rule, so every consumer (mission render, workflow
-    status, Hub loop directives) agrees on the number:
-
-    1. Per-project override — a row whose slider-era ``auto_checkin_enabled``
-       flag is set keeps its ``auto_checkin_interval`` (tolerance for values
-       users dialed in before the slider was retired; there is no UI to set
-       these anymore).
-    2. Per-tenant override in ``configurations`` — written by the SaaS settings
-       path only; CE never writes this row, so the read is edition-neutral.
-    3. Deployment-wide ``system_settings`` value.
-    4. ``DEFAULT_AGENT_CHECKIN_CADENCE_MINUTES``.
-    """
     if project is not None and getattr(project, "auto_checkin_enabled", False):
         interval = getattr(project, "auto_checkin_interval", None)
         if type(interval) is int and interval >= 1:
@@ -328,8 +202,6 @@ async def resolve_agent_checkin_cadence_minutes(
     if tenant_key:
         from giljo_mcp.repositories.configuration_repository import ConfigurationRepository
 
-        # The repo's db_manager is only used by its session-less callers; every
-        # read here passes the caller's session explicitly.
         raw = await ConfigurationRepository(None).get_value(session, tenant_key, AGENT_CHECKIN_CADENCE_KEY)
         if raw is not None and not isinstance(raw, bool):
             try:
@@ -348,9 +220,6 @@ async def resolve_checkin_cadence_safe(
     tenant_key: str | None = None,
     project: Any = None,
 ) -> int | None:
-    """Never-raising variant for best-effort callers (mission render, status
-    reads, hot polls) — a settings lookup must not fail those paths. Returns
-    None on any failure; the caller applies its own fallback."""
     try:
         return await resolve_agent_checkin_cadence_minutes(session, tenant_key, project)
     except Exception:  # noqa: BLE001
@@ -359,12 +228,6 @@ async def resolve_checkin_cadence_safe(
 
 
 async def load_integrations_and_cadence(get_session, tenant_key: str, project: Any = None) -> tuple[dict, int | None]:
-    """BE-5008 + FE-9296b: integration toggles + resolved check-in cadence, one session.
-
-    ``get_session`` is the caller's tenant-scoped session-context factory (e.g.
-    MissionService._get_session). Best-effort: a settings failure must never
-    break mission delivery — callers get ({}, None) and apply their fallbacks.
-    """
     integrations: dict = {}
     cadence: int | None = None
     try:
@@ -377,22 +240,12 @@ async def load_integrations_and_cadence(get_session, tenant_key: str, project: A
 
 
 class TenantSkillsAckService:
-    """Tenant-scoped read/write for the skills-bundle acknowledgement row.
-
-    The single validated write path for ``tenant_skills_ack``. ``/giljo_setup``
-    calls :meth:`acknowledge` with the server's bundled ``SKILLS_VERSION``; the
-    skills-drift banner reads :meth:`get_acknowledged_version` to decide whether
-    THIS tenant is behind. Every query is scoped to ``self.tenant_key`` via
-    ``tenant_session_context`` (the guard injects the ``WHERE tenant_key = ?``
-    filter), so no caller can read or write another tenant's row.
-    """
 
     def __init__(self, session: AsyncSession, tenant_key: str):
         self.session = session
         self.tenant_key = tenant_key
 
     async def get_acknowledged_version(self) -> str | None:
-        """Return the version this tenant last acknowledged, or None if never."""
         with tenant_session_context(self.session, self.tenant_key):
             result = await self.session.execute(
                 select(TenantSkillsAck.acknowledged_version).where(TenantSkillsAck.tenant_key == self.tenant_key)
@@ -400,19 +253,6 @@ class TenantSkillsAckService:
             return result.scalar_one_or_none()
 
     async def acknowledge(self, version: str) -> str:
-        """Upsert this tenant's acknowledged skills version (single write path).
-
-        Args:
-            version: the server's bundled ``SKILLS_VERSION`` the tenant just
-                installed via ``/giljo_setup``.
-
-        Returns:
-            The acknowledged version persisted for the tenant.
-
-        Raises:
-            ValidationError: if ``version`` is not a non-empty string within the
-                column length (untrusted-input guard; clean 422, not a DB 500).
-        """
         if not isinstance(version, str) or not version.strip():
             raise ValidationError("acknowledged skills version must be a non-empty string")
         version = version.strip()

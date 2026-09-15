@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tests for orchestration, template, consolidation, and auth service Pydantic response models.
-
-Split from test_service_responses.py — covers SpawnResult, MissionResponse,
-MissionUpdateResult, InstructionsResponse, ConsolidationResult, AuthResult,
-SetupState.
-
-Created: Handover 0731
-Updated BE-8000j: dropped TemplateListResult coverage — the model was removed with
-the never-production-called TemplateService.list_templates method.
-"""
 
 import pytest
 from pydantic import ValidationError
@@ -29,13 +18,9 @@ from giljo_mcp.schemas.service_responses import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Orchestration Service Models
-# ---------------------------------------------------------------------------
 
 
 class TestSpawnResult:
-    """Tests for SpawnResult model (Handover 0731c: expanded with agent_id, prompt fields)."""
 
     def test_creation_with_required_fields(self):
         result = SpawnResult(
@@ -64,7 +49,6 @@ class TestSpawnResult:
         assert len(result.thin_client_note) == 2
 
     def test_no_token_fields(self):
-        """Handover 0825: SpawnResult no longer has token estimation fields."""
         result = SpawnResult(job_id="j", agent_id="a", agent_prompt="p")
         assert not hasattr(result, "prompt_tokens") or "prompt_tokens" not in result.model_fields
         assert not hasattr(result, "mission_tokens") or "mission_tokens" not in result.model_fields
@@ -100,7 +84,6 @@ class TestSpawnResult:
 
 
 class TestMissionResponse:
-    """Tests for MissionResponse model (Handover 0731c: expanded with team-aware fields)."""
 
     def test_creation_with_required_fields(self):
         result = MissionResponse(job_id="job-1")
@@ -134,11 +117,9 @@ class TestMissionResponse:
         assert result.agent_identity is not None
 
     def test_no_estimated_tokens_field(self):
-        """Handover 0825: MissionResponse no longer has estimated_tokens field."""
         assert "estimated_tokens" not in MissionResponse.model_fields
 
     def test_agent_identity_optional(self):
-        """Handover 0825: agent_identity is None by default."""
         result = MissionResponse(job_id="j")
         assert result.agent_identity is None
 
@@ -170,7 +151,6 @@ class TestMissionResponse:
 
 
 class TestMissionUpdateResult:
-    """Tests for MissionUpdateResult model (Handover 0731c: added mission_length field)."""
 
     def test_creation_with_required_fields(self):
         result = MissionUpdateResult(job_id="job-1")
@@ -200,12 +180,6 @@ class TestMissionUpdateResult:
 
 
 class TestInstructionsResponse:
-    """Tests for InstructionsResponse model.
-
-    InstructionsResponse is a legacy alias kept for backward compatibility.
-    get_staging_instructions() returns dict[str, Any] (genuinely dynamic),
-    so InstructionsResponse is aliased to SuccessionContextResult.
-    """
 
     def test_is_alias_for_succession_context_result(self):
         from giljo_mcp.schemas.service_responses import SuccessionContextResult
@@ -231,13 +205,9 @@ class TestInstructionsResponse:
         assert InstructionsResponse.model_config.get("from_attributes") is True
 
 
-# ---------------------------------------------------------------------------
-# Consolidation Service Models
-# ---------------------------------------------------------------------------
 
 
 class TestConsolidationResult:
-    """Tests for ConsolidationResult model (Handover 0731c: updated with SummaryLevel fields)."""
 
     def test_creation_defaults(self):
         result = ConsolidationResult()
@@ -276,13 +246,9 @@ class TestConsolidationResult:
         assert ConsolidationResult.model_config.get("from_attributes") is True
 
 
-# ---------------------------------------------------------------------------
-# Auth Service Models
-# ---------------------------------------------------------------------------
 
 
 class TestAuthResult:
-    """Tests for AuthResult model (Handover 0731c: enhanced with profile fields)."""
 
     def test_creation_with_required_fields(self):
         result = AuthResult(
@@ -296,7 +262,6 @@ class TestAuthResult:
         assert result.token == "jwt-token-here"
         assert result.tenant_key == "tenant-abc"
         assert result.role == "user"
-        # Optional fields default to None/True
         assert result.email is None
         assert result.full_name is None
         assert result.is_active is True
@@ -364,7 +329,6 @@ class TestAuthResult:
 
 
 class TestSetupState:
-    """Tests for SetupState/SetupStateInfo model (Handover 0731c: renamed with new fields)."""
 
     def test_creation_with_tenant_key(self):
         state = SetupState(tenant_key="test_tenant")

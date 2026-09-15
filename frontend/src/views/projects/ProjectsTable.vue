@@ -1,10 +1,6 @@
 <template>
   <v-card class="project-table-card smooth-border main-window-reveal main-window-delay-3">
     <div class="project-list-container">
-      <!-- BE-6076: server mode — the server applies search/filter/sort/pagination.
-           :items is the current page, :items-length the filtered total, and
-           @update:options reports page/itemsPerPage/sortBy changes upward so the
-           parent re-fetches (no client-side slicing or sort). -->
       <v-data-table-server
         :headers="headers"
         :items="projects"
@@ -21,12 +17,6 @@
         :item-props="getRowProps"
         @update:options="$emit('update:options', $event)"
       >
-        <!-- FE-6131e: Select column — checkbox for sequential-run selection.
-             Only INACTIVE projects are runnable, so only they get a checkbox.
-             FE-6180: once a project is in an active chain (any pending/running/stalled
-             run) its tickbox is a PASSIVE indicator — force-ticked + DISABLED by
-             membership (inChainIds), not just run.locked. Back-out is via the kebab
-             (Deactivate Chain), never by unticking. Non-chain rows tick freely. -->
         <template #item.select="{ item }">
           <div v-if="normalizeStatus(item.status) === 'inactive'" class="select-cell">
             <v-checkbox-btn
@@ -42,13 +32,9 @@
           </div>
         </template>
 
-        <!-- Name Column -->
         <template #item.name="{ item }">
           <div class="py-2">
             <span class="project-name-text">{{ item.name }}</span>
-            <!-- BE-2002: "Archived" badge on archived (hidden) rows — surfaced so
-                 search results that include archived projects are visibly tagged.
-                 Backend field is `hidden`; UI calls it "archived". -->
             <v-chip
               v-if="item.hidden"
               size="x-small"
@@ -64,8 +50,6 @@
           </div>
         </template>
 
-        <!-- Serial Column (colorized tinted badge) -->
-        <!-- FE-5061: badge is the sole click target for opening a project -->
         <template #item.series_number="{ item }">
           <button
             v-if="item.taxonomy_alias"
@@ -87,14 +71,7 @@
           <span v-else class="staged-dash">—</span>
         </template>
 
-        <!-- Quick Action Column — play button to activate + launch -->
         <template #item.quick_action="{ item }">
-          <!-- FE-6178: no solo activate-launch for an in-chain project — it's part of an
-               active chain; "Deactivate Chain" in the kebab is its only toggle. -->
-          <!-- FE-9525d: the cross-project "Another project is active" grey-out is
-               retired -- multiple projects may be active per product now
-               (BE-9525a/b). Only per-row reasons (an election in progress) still
-               disable this button. -->
           <v-tooltip v-if="normalizeStatus(item.status) === 'inactive' && !inChainIds.includes(item.id)" :text="electionActive ? 'Projects are elected — use Run Sequential to launch them' : (isProjectStaged(item) ? 'Activate & resume' : 'Activate & launch')">
             <template #activator="{ props: ttProps }">
               <button
@@ -112,7 +89,6 @@
           </v-tooltip>
         </template>
 
-        <!-- Staged Column (0870h: tinted style) -->
         <template #item.staging_status="{ item }">
           <v-icon
             v-if="isProjectStaged(item)"
@@ -123,21 +99,11 @@
           <span v-else class="staged-dash">—</span>
         </template>
 
-        <!-- Created Date Column -->
         <template #item.created_at="{ item }">
           <span class="date-full date-cell">{{ formatDateWithTime(item.created_at) }}</span>
           <span class="date-compact date-cell">{{ formatDateCompactWithTime(item.created_at) }}</span>
         </template>
 
-        <!-- Completed Date Column.
-             BE-9343: no `|| item.updated_at` fallback. This column is headed COMPLETED
-             but rendered last-modified, so ANY later write — including the archive/hide
-             toggle, which is usually the last thing to touch a finished project —
-             silently moved the date on screen, and it disagreed with the sort (which
-             reads the real column). The backend now stamps completed_at on every
-             terminal transition and ce_0088 backfilled the historical rows, so the real
-             column is the one to show. A terminal row still lacking one gets the same
-             em-dash as a running project rather than a borrowed date. -->
         <template #item.completed_at="{ item }">
           <div class="text-center">
             <template
@@ -150,20 +116,8 @@
           </div>
         </template>
 
-        <!-- Status Column (display-only badge).
-             FE-6170: "In chain" pill shown here (moved from select cell).
-             FE-6171b (item C): when a project is in-chain AND inactive, show ONE badge
-             "In chain" using the inactive StatusBadge design token — REPLACING the
-             inactive badge (kills the double [inactive][In chain] anti-pattern).
-             FE-6221b: when a project is in-chain AND active/implementing, show the
-             status badge AND an "In chain" pill alongside it — so chain membership
-             is always visible regardless of the member's run phase, matching /roadmap. -->
         <template #item.status="{ item }">
           <div class="d-flex align-center justify-center gap-1 flex-wrap">
-            <!-- FE-6171b: in-chain + inactive → single "In chain" badge using the SAME
-                 styling as the inactive StatusBadge (the span reuses .in-chain-pill which
-                 we now style identically to StatusBadge for inactive). The separate
-                 inactive StatusBadge is suppressed for these rows. -->
             <template v-if="inChainIds.includes(item.id) && normalizeStatus(item.status) === 'inactive'">
               <span
                 class="in-chain-pill"
@@ -179,10 +133,6 @@
                 </template>
               </v-tooltip>
             </template>
-            <!-- FE-6221b: in-chain + active/implementing → show the live status badge
-                 AND an "In chain" pill. Members transition out of inactive when the
-                 conductor drives them; their badge must reflect both the active state
-                 and the chain membership. Matches /roadmap's persistent "In chain" pill. -->
             <template v-else-if="inChainIds.includes(item.id)">
               <span class="status-full d-flex align-center gap-1">
                 <StatusBadge :status="normalizeStatus(item.status)" />
@@ -218,7 +168,6 @@
           </div>
         </template>
 
-        <!-- Actions Column -->
         <template #item.menu="{ item }">
           <div class="d-flex align-center justify-center">
             <v-menu>
@@ -233,9 +182,6 @@
               </template>
 
               <v-list density="compact" min-width="180">
-                <!-- FE-6178/6180: Deactivate Chain — back out of the WHOLE chain (resets
-                     every member to original + dissolves the run). The single chain
-                     back-out; the per-project Unlink was removed (FE-6180). -->
                 <v-list-item
                   v-if="inChainIds.includes(item.id)"
                   prepend-icon="mdi-pause-circle-outline"
@@ -243,9 +189,6 @@
                   data-testid="deactivate-chain-item"
                   @click="$emit('status-action', { action: 'deactivate-chain', projectId: item.id })"
                 ></v-list-item>
-                <!-- FE-6180: Reset — return a SOLO staged/launched project to original
-                     state (clears staging + agents/jobs, no audit). The chain equivalent
-                     is Deactivate Chain above; hidden for chain members + clean projects. -->
                 <v-list-item
                   v-if="!inChainIds.includes(item.id) && item.staging_status"
                   prepend-icon="mdi-backup-restore"
@@ -253,7 +196,6 @@
                   data-testid="reset-project-item"
                   @click="$emit('status-action', { action: 'reset', projectId: item.id })"
                 ></v-list-item>
-                <!-- Status-aware actions (Activate is suppressed for in-chain projects) -->
                 <v-list-item
                   v-for="sa in getStatusActions(item)"
                   :key="sa.key"
@@ -265,21 +207,17 @@
 
                 <v-divider class="my-1" />
 
-                <!-- Edit (not available for completed/cancelled/terminated) -->
                 <v-list-item
                   v-if="!['completed', 'cancelled', 'terminated'].includes(normalizeStatus(item.status))"
                   prepend-icon="mdi-pencil"
                   title="Edit Project"
                   @click="$emit('edit-project', item)"
                 ></v-list-item>
-                <!-- Duplicate -->
                 <v-list-item
                   prepend-icon="mdi-content-copy"
                   title="Duplicate"
                   @click="$emit('duplicate-project', item)"
                 ></v-list-item>
-                <!-- CE-OPT-4 / BE-2002: Archive/Unarchive toggle (backend field is
-                     `hidden`; UI copy says "archived"). -->
                 <v-list-item
                   :prepend-icon="item.hidden ? 'mdi-archive-arrow-up' : 'mdi-archive'"
                   :title="item.hidden ? 'Unarchive' : 'Archive'"
@@ -297,7 +235,6 @@
           </div>
         </template>
 
-        <!-- No data state -->
         <template #no-data>
           <div class="text-center py-8">
             <v-icon size="48" color="medium-emphasis" class="mb-4">mdi-folder-open</v-icon>
@@ -311,9 +248,6 @@
     </div>
   </v-card>
 
-  <!-- BE-9157: Mark Superseded successor picker (self-contained store write).
-       v-if so the store/Vuetify-dependent dialog only mounts when actually
-       opened — never at table render (keeps presentational table specs green). -->
   <SupersedeProjectModal
     v-if="showSupersedeModal"
     :show="showSupersedeModal"
@@ -336,12 +270,10 @@ import { useFormatDate } from '@/composables/useFormatDate'
 import { API_MAX_PAGE_SIZE } from '@/composables/useProjectFilters'
 
 const props = defineProps({
-  // BE-6076: server mode — `projects` is the current page (not the full set).
   projects: {
     type: Array,
     required: true,
   },
-  // BE-6076: filtered total from the server (X-Total-Count) for :items-length.
   total: {
     type: Number,
     default: 0,
@@ -350,7 +282,6 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  // Controlled by useProjectFilters in the parent (server-driven pagination/sort).
   currentPage: {
     type: Number,
     default: 1,
@@ -359,41 +290,26 @@ const props = defineProps({
     type: Number,
     default: 10,
   },
-  // Single-column server sort state owned by the parent composable.
   sortBy: {
     type: Array,
     default: () => [{ key: 'created_at', order: 'desc' }],
   },
-  // FE-6131e: ids currently selected for a sequential run (drives the checkboxes).
   selectedIds: {
     type: Array,
     default: () => [],
   },
-  // FE-6165a: true while ANY project is elected for a sequential run. Fades +
-  // disables the per-row play button so the only launch affordance is Run
-  // Sequential.
   electionActive: {
     type: Boolean,
     default: false,
   },
-  // FE-6165f: project ids that are members of an active (in-flight) chain run.
-  // Checkbox is force-ticked + locked (disabled) for these rows; an "In chain"
-  // pill is rendered next to the checkbox.
   inChainIds: {
     type: Array,
     default: () => [],
   },
-  // FE-6171b: project ids whose run is in the locked (Staged) tier (run.locked=true).
-  // Drives tickbox disable on /projects. Distinct from inChainIds: a project in-chain
-  // with run.locked=false (Editing tier) has its tickbox ENABLED for the raw-toggle
-  // untick (FE-6175 -- not a removeMember dual-write, see FE-9503a).
   lockedChainIds: {
     type: Array,
     default: () => [],
   },
-  // FE-6176: link/chain mode — swaps the play-button "Actions" column for the
-  // "Linked" checkbox column so users select projects for Run Sequential without
-  // any play-button disable logic.
   linkMode: {
     type: Boolean,
     default: false,
@@ -409,18 +325,10 @@ const emit = defineEmits([
   'toggle-hidden',
   'confirm-delete',
   'new-project',
-  // BE-6076: bundled page/itemsPerPage/sortBy change from v-data-table-server.
   'update:options',
-  // FE-6131e: toggle a project's selection for a sequential run.
   'toggle-select',
 ])
 
-// BE-9157: the "Mark Superseded" kebab action opens a self-contained successor
-// picker here (rather than a parent-owned dialog) — the parent ProjectsView is
-// held at its file-size budget, so the small feature lives with the trigger. The
-// modal writes through the store (reactive status-chip update); on success we
-// re-emit ``status-action`` so the parent reloads the list uniformly, exactly as
-// it does after every other status action (the superseded row then filters out).
 const showSupersedeModal = ref(false)
 const supersedeProjectId = ref(null)
 const supersedeProjectName = ref('')
@@ -440,31 +348,15 @@ function onSupersedeDone() {
   showSupersedeModal.value = false
   supersedeProjectId.value = null
   supersedeProjectName.value = ''
-  // Uniform parent contract: any status action ends in a list reload.
   emit('status-action', { action: 'superseded', projectId: supersededId })
 }
 
 const { formatDateWithTime, formatDateCompactWithTime } = useFormatDate()
 
-// FE-6050: responsive display breakpoint
 const { smAndDown } = useDisplay()
 
-// BE-9455: this table is SERVER-mode — every page size becomes an HTTP `limit`,
-// so the options may only offer sizes the endpoint will actually serve (max
-// API_MAX_PAGE_SIZE). Vuetify's default list ends in `{ value: -1, title: 'All' }`,
-// and that "All" could never be honoured here: the server caps a page well below
-// this tenant's project count, so the option promised something no single request
-// can return, and shipped a 422 instead of a wider list. Offering the true
-// maximum is the honest version of it — a control that cannot keep its promise is
-// worse than one that is absent. (Plain client-side v-data-table mounts elsewhere
-// keep their "All"; there it is true, because they already hold every row.)
 const itemsPerPageOptions = [10, 25, 50, 100, API_MAX_PAGE_SIZE]
 
-// FE-6176: Two header variants per breakpoint.
-// Normal  → play-button "Actions" column; no checkbox column (de-clutter).
-// Link    → "Linked" checkbox column placed after Completed; no play-button column.
-// The select (checkbox) and quick_action (play) slots are defined in the template
-// for both keys; the headers array determines which one actually renders.
 const FULL_BASE = [
   { title: 'Serial', key: 'series_number', sortable: true, width: '10%' },
   { title: 'Name', key: 'name', sortable: true, width: '28%' },
@@ -507,16 +399,8 @@ function getRowProps({ item }) {
   return rowProps
 }
 
-// FE-2004: the collapsed status dot must carry the SAME active color as the
-// full-size StatusBadge pill, which resolves the `color-agent-implementer`
-// token (#6db3e4, blue). Sourcing from getAgentColor('implementer') keeps the
-// dot and pill on one color source — the old COLOR_SURFACE (#ffffff) rendered
-// the active dot white in the ≤1280px collapsed view.
 const DOT_ACTIVE = getAgentColor('implementer').hex
 
-// IMP-9258: the collapsed "parked" dot mirrors the full-size StatusBadge pill,
-// which resolves the `color-agent-reviewer` (Lavender) token — same technique
-// as DOT_ACTIVE above, so the dot and pill never drift onto separate palettes.
 const DOT_PARKED = getAgentColor('reviewer').hex
 
 function statusDotColor(status) {
@@ -544,8 +428,6 @@ const statusActionDefs = {
   deactivate: { label: 'Deactivate', icon: 'mdi-pause-circle', color: null, confirm: true },
   complete: { label: 'Complete', icon: 'mdi-check-circle', color: null, confirm: true },
   cancel: { label: 'Cancel Project', icon: 'mdi-cancel', color: 'warning', confirm: true },
-  // IMP-9258: Park sets a project aside without cancelling it — non-destructive
-  // and fully resumable (unlike Cancel), so no confirm dialog.
   park: { label: 'Park Project', icon: 'mdi-parking', color: null, confirm: false },
   unpark: { label: 'Unpark', icon: 'mdi-play-circle-outline', color: 'success', confirm: false },
   reopen: { label: 'Reopen', icon: 'mdi-refresh', color: 'success', confirm: false },
@@ -559,8 +441,6 @@ const actionsByStatus = {
   completed: ['review', 'superseded'],
   cancelled: ['review'],
   terminated: ['review'],
-  // IMP-9258: parked is a two-way door (not lifecycle-finished, not immutable)
-  // — its only status-aware action is Unpark, straight back to inactive.
   parked: ['unpark'],
 }
 
@@ -570,10 +450,6 @@ function getStatusActions(item) {
   if (normalized === 'cancelled' && !isProjectStaged(item)) {
     keys.unshift('reopen')
   }
-  // FE-6178: a project in a chain IS the activated chain member — "Deactivate Chain"
-  // is its single activate/deactivate counterpart, so suppress the solo
-  // activate/deactivate actions (they'd be wrong: you back out the whole chain, not
-  // one member). complete/cancel/review stay available.
   if (props.inChainIds.includes(item.id)) {
     keys = keys.filter((key) => key !== 'activate' && key !== 'deactivate')
   }

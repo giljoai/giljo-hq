@@ -3,31 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression (service layer): a FILTERED ``mark_read`` must not report a count it
-did not earn, and must say out loud that it left the read cursor where it was.
-
-The reported failure was "``get_thread_history(mark_read=true,
-action_required_only=true)`` returns ``marked_read: N`` and clears nothing". Half of
-that is true and half of it is not, and the tests below pin both halves so neither
-can drift:
-
-- The acks ARE written, exactly for the posts returned, and the project-scoped
-  completion gate (``agent_completion_repository.get_unread_messages_for_agent``,
-  keyed on ``message_acknowledgments``) DOES clear. A filtered drain is a real
-  acknowledgement.
-- The per-participant cursor deliberately does NOT advance on a narrowed read
-  (BE-9012a: the returned set is not the contiguous run up to newest, so advancing
-  would skip the posts the filter excluded). That refusal is preserved here.
-- What was dishonest is the count. ``marked_read`` was ``len(messages)`` — the posts
-  RETURNED — so calling the same filtered read twice reported the same non-zero count
-  twice while the second call changed nothing at all. A caller had no way to tell an
-  acknowledgement from a no-op, which is exactly the signal the completion gate exists
-  to make trustworthy. It now counts acks NEWLY written, and a narrowed read carries
-  ``cursor_advanced=false`` plus a note naming the unfiltered call that advances it.
-
-Parallel-safe: db_session (TransactionalTestContext); each test owns its setup and its
-own generated tenant_key. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -54,7 +29,7 @@ from giljo_mcp.tenant import TenantManager
 
 pytestmark = pytest.mark.asyncio
 
-SENDER = "sender-orch"  # a distinct author so a post never self-excludes the recipient
+SENDER = "sender-orch"
 
 
 def _comm_service(db_manager, db_session: AsyncSession) -> CommThreadService:
@@ -70,7 +45,6 @@ def _completion_service(db_session: AsyncSession, tenant_key: str) -> JobComplet
 async def _seed_project_and_orchestrator(
     db_session: AsyncSession, tenant_key: str
 ) -> tuple[Project, AgentJob, AgentExecution]:
-    """Product -> Project -> orchestrator AgentJob + working AgentExecution."""
     with tenant_session_context(db_session, tenant_key):
         await ensure_default_types_seeded(db_session, tenant_key)
 
@@ -128,12 +102,6 @@ async def _seed_project_and_orchestrator(
 async def _thread_with_mixed_posts(
     comm: CommThreadService, tenant_key: str, project_id: str, recipient: str
 ) -> tuple[str, list[str], list[str]]:
-    """A project thread carrying interleaved informational + action-required posts.
-
-    Interleaving matters: the action-required posts are a NON-CONTIGUOUS subset, which
-    is the whole reason a narrowed drain cannot advance a high-water cursor.
-    Returns ``(thread_id, action_required_ids, informational_ids)``.
-    """
     thread = await comm.create_thread(
         subject="coordination", project_id=project_id, creator_id=SENDER, tenant_key=tenant_key
     )
@@ -167,9 +135,6 @@ async def _acked_ids(db_session: AsyncSession, tenant_key: str, agent_id: str) -
     return set(rows)
 
 
-# ---------------------------------------------------------------------------
-# The defect: a repeated filtered drain re-reported a count it had not earned
-# ---------------------------------------------------------------------------
 
 
 async def test_repeated_filtered_mark_read_reports_zero_the_second_time(db_manager, db_session: AsyncSession):
@@ -192,8 +157,6 @@ async def test_repeated_filtered_mark_read_reports_zero_the_second_time(db_manag
     assert first["marked_read"] == len(action_required), "the first filtered drain really does ack"
 
     second = await comm.get_thread_history(**drain_args)
-    # The same posts come back (the cursor is deliberately unmoved) but NOTHING new was
-    # acknowledged, so the count must be 0. Reporting len(messages) here was the defect.
     assert second["count"] == len(action_required)
     assert second["marked_read"] == 0
 
@@ -218,7 +181,6 @@ async def test_filtered_mark_read_declares_the_cursor_did_not_move(db_manager, d
     assert "cursor" in note.lower()
     assert "unread_only" in note, "the note must name the flag that will keep repeating"
 
-    # And the stored watermark really is untouched (BE-9012a's deliberate refusal).
     participant = (
         await db_session.execute(
             select(CommParticipant).where(
@@ -232,9 +194,6 @@ async def test_filtered_mark_read_declares_the_cursor_did_not_move(db_manager, d
     assert participant.last_read_message_id is None
 
 
-# ---------------------------------------------------------------------------
-# What the filtered drain DOES honour: exact per-message acks + the gate
-# ---------------------------------------------------------------------------
 
 
 async def test_filtered_mark_read_acks_exactly_the_posts_it_returned(db_manager, db_session: AsyncSession):
@@ -288,9 +247,6 @@ async def test_filtered_mark_read_clears_the_completion_gate(db_manager, db_sess
     assert result.status == "success"
 
 
-# ---------------------------------------------------------------------------
-# The unfiltered drain still advances the cursor (the behaviour that must not regress)
-# ---------------------------------------------------------------------------
 
 
 async def test_unfiltered_drain_advances_the_cursor_and_reports_it(db_manager, db_session: AsyncSession):
@@ -310,7 +266,6 @@ async def test_unfiltered_drain_advances_the_cursor_and_reports_it(db_manager, d
     assert drained["cursor_advanced"] is True
     assert "mark_read_note" not in drained
 
-    # Cursor moved => the next unread read is empty, and reports no new acks.
     again = await comm.get_thread_history(
         thread_id=tid,
         as_participant=execution.agent_id,

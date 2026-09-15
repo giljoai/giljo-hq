@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Product service response models."""
 
 from datetime import datetime
 

@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""TSK-9262: git-mode update checker must follow the remote's DEFAULT branch.
-
-Bug: ``_update_check_loop`` hardcoded ``branch = f"{remote}/master"``. A CE fork
-whose remote default branch is ``main`` got a clean ``rev-list`` failure every
-cycle (count=None -> "leave state unchanged"), so update notices silently never
-appeared. The failing layer is the update-checker loop itself, so the regression
-test drives the loop against a mocked git whose remote HEAD points at ``main``.
-
-Fix under test: ``_resolve_default_branch()`` reads
-``git symbolic-ref refs/remotes/<remote>/HEAD`` (with a ``git remote set-head
-<remote> --auto`` retry when the symbolic ref is unset) and falls back to
-``<remote>/master`` on any git error, preserving graceful-None behavior.
-"""
 
 import asyncio
 import contextlib
@@ -33,12 +20,6 @@ def _make_fake_git(
     set_head_works: bool = True,
     behind: int = 3,
 ):
-    """Fake ``_run_git`` for a repo whose remote default branch is *default_branch*.
-
-    ``rev-list HEAD..origin/<default_branch>`` succeeds with *behind*; rev-list
-    against any other ref fails like real git ("bad revision"). Returns the fake
-    and a mutable call-state dict for assertions.
-    """
     call_state = {"set_head_called": False, "symref_set": symbolic_ref_set}
 
     async def fake_run_git(*args: str) -> tuple[int, str, str]:
@@ -65,11 +46,8 @@ def _make_fake_git(
 
 
 async def _run_one_check_cycle(state) -> None:
-    """Drive ``_update_check_loop`` through its first check, then cancel it."""
     task = asyncio.create_task(update_checker._update_check_loop(state))
     try:
-        # The fake git calls resolve in a handful of event-loop turns; poll until
-        # the first cycle lands or the budget runs out (loop then sits in its 6h sleep).
         for _ in range(200):
             if state.update_available is not None:
                 break
@@ -81,8 +59,6 @@ async def _run_one_check_cycle(state) -> None:
 
 
 class TestMainDefaultForkGetsUpdateNotices:
-    """The previously-silent failure: remote HEAD -> main must still produce a
-    working update check."""
 
     @pytest.mark.asyncio
     async def test_fork_defaulting_to_main_sees_updates(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,12 +72,10 @@ class TestMainDefaultForkGetsUpdateNotices:
             "a fork whose remote default branch is 'main' silently saw no update notice"
         )
         assert state.update_available["commits_behind"] == 3
-        # The neutral CE update message must be preserved verbatim.
         assert "Run 'git pull', then restart your server to update." in state.update_available["message"]
 
     @pytest.mark.asyncio
     async def test_master_default_repo_still_sees_updates(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Mainline guard: the stock master-default clone keeps working."""
         fake_git, _ = _make_fake_git(default_branch="master", behind=1)
         monkeypatch.setattr(update_checker, "_run_git", fake_git)
         state = SimpleNamespace(update_available=None, websocket_manager=None)
@@ -113,7 +87,6 @@ class TestMainDefaultForkGetsUpdateNotices:
 
 
 class TestResolveDefaultBranch:
-    """Unit coverage for the resolution ladder: symbolic-ref -> set-head retry -> master."""
 
     @pytest.mark.asyncio
     async def test_symbolic_ref_present_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -140,7 +113,6 @@ class TestResolveDefaultBranch:
 
     @pytest.mark.asyncio
     async def test_git_error_falls_back_to_master(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Graceful-None discipline: any git-layer error degrades to the old default."""
 
         async def exploding_git(*args: str) -> tuple[int, str, str]:
             raise FileNotFoundError("git binary not on PATH")

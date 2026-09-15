@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-MCP Context Index model for Giljo HQ.
-
-Stores chunked vision documents for agentic RAG. Keyword search uses the
-`keywords` JSONB column (see context_repository).
-"""
 
 from sqlalchemy import (
     Column,
@@ -27,25 +21,13 @@ from .base import Base
 
 
 class MCPContextIndex(Base):
-    """
-    MCP Context Index model - stores chunked vision documents for agentic RAG.
-
-    Chunks are created by EnhancedChunker from the vision_document column
-    content (BE-5115: inline-only storage). Keyword lookup uses the
-    `keywords` JSONB column.
-
-    Multi-tenant isolation: All queries filter by tenant_key.
-    """
 
     __tablename__ = "mcp_context_index"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    # BE-8000c: tenant lookups served by idx_mcp_context_tenant_product
-    # (tenant_key-leading); no column-level index=True (dropped ix_* twin).
     tenant_key = Column(String(36), nullable=False)
     product_id = Column(String(36), ForeignKey("products.id", ondelete="CASCADE"), nullable=True)
 
-    # Handover 0043: Multi-Vision Document Support
     vision_document_id = Column(
         String(36),
         ForeignKey("vision_documents.id", ondelete="CASCADE"),
@@ -59,13 +41,11 @@ class MCPContextIndex(Base):
     chunk_order = Column(Integer, nullable=True, comment="Sequential chunk number for maintaining document order")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # Relationships
     product = relationship("Product", backref="context_chunks")
     vision_document = relationship("VisionDocument", back_populates="chunks", foreign_keys=[vision_document_id])
 
     __table_args__ = (
         Index("idx_mcp_context_tenant_product", "tenant_key", "product_id"),
-        # Handover 0043: Vision document indexes
         Index("idx_mcp_context_vision_doc", "vision_document_id"),
         Index("idx_mcp_context_product_vision_doc", "product_id", "vision_document_id"),
     )

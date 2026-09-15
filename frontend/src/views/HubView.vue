@@ -1,12 +1,6 @@
 <template>
   <v-container fluid class="hub-view pa-0" data-testid="hub-view">
-    <!-- LIST VIEW. FE-9365c: the list and the thread are two views of the same region,
-         not two panes side by side. Opening a card REPLACES the list. -->
     <template v-if="!commHub.selectedThreadId">
-      <!-- FE-9368 (A): ONE column for the whole list view. The card column was capped
-           at 1120px while the bar above it ran the full page width, so the two never
-           lined up. Capping and centring them together keeps the readable card width
-           and makes the bar exactly as wide as the cards it filters. -->
       <div class="hub-view__column">
       <v-row class="align-center mb-4 main-window-reveal main-window-reveal--hero main-window-delay-1">
         <v-col>
@@ -32,12 +26,7 @@
         </v-col>
       </v-row>
 
-      <!-- Tabs get their OWN row: putting them inside the filter bar would break the
-           canonical search | select | primary | outlined shape the other lists use. -->
       <div class="tab-pills hub-view__tabs main-window-reveal main-window-delay-2" role="tablist">
-          <!-- FE-9289c: relabelled General / Projects; the scope prop + store getters
-               are unchanged. The per-tab unread COUNT badges are dropped — the design
-               bar is no numbers on the screen except relative times. -->
           <button
             type="button"
             class="pill-btn"
@@ -62,9 +51,6 @@
           </button>
         </div>
 
-        <!-- The shared list-filter-bar shape, ordered exactly as Products/Projects:
-             search -> sort -> filled primary -> outlined. The Deleted / New Thread
-             buttons moved here from the page's top-right corner. -->
         <div class="filter-bar main-window-reveal main-window-delay-2">
           <v-text-field
             v-model="search"
@@ -80,7 +66,8 @@
           />
           <v-select
             v-model="sort"
-            class="filter-select"
+            class="filter-select hub-view__select"
+            :style="selectWidthStyle(sortOptions)"
             :items="sortOptions"
             prepend-inner-icon="mdi-sort"
             variant="solo"
@@ -89,12 +76,10 @@
             hide-details
             data-testid="hub-sort"
           />
-          <!-- FE-9530: the viewed-tab scoping is now the DEFAULT filter, not the
-               only option -- "All products" reaches everything, "No product" finds
-               what "no migration" left untagged. -->
           <v-select
             v-model="productScopeModel"
-            class="filter-select"
+            class="filter-select hub-view__select"
+            :style="selectWidthStyle(productScopeOptions)"
             :items="productScopeOptions"
             prepend-inner-icon="mdi-filter-variant"
             variant="solo"
@@ -103,9 +88,6 @@
             hide-details
             data-testid="hub-product-scope"
           />
-          <!-- FE-9368 (B): the icon toolbar ProjectsView already uses (FE-6176). The
-               labels moved into the tooltips; the deleted COUNT moved onto the trash
-               icon as an alert dot, so the row reads as icons rather than sentences. -->
           <v-btn
             color="primary"
             variant="flat"
@@ -125,9 +107,6 @@
           />
         </div>
 
-        <!-- At most ONE attention strip (handoff §7), General tab only. Derived from
-             next_action_owner === you and nothing else — the same honesty rule as the
-             yellow card. Prose in a post can never light this up. -->
         <button
           v-if="activeTab === 'town' && attentionThread"
           type="button"
@@ -154,95 +133,10 @@
       </div>
     </template>
 
-    <!-- THREAD VIEW — replaces the list in the same region. -->
     <template v-else>
       <HubThreadToolbar v-model="messageSearch" @back="backToList" />
       <div class="hub-view__main">
-          <!-- Thread header: the sharing moment. Rename lives here as well as on the
-               card (DoD 3), and the id sits in a terminal block with the join_thread
-               hint because this is where the operator actually hands it to an agent. -->
-          <div class="hub-view__thread-head" data-testid="thread-header">
-            <div class="hub-view__thread-title-row">
-              <template v-if="renamingHeader">
-                <input
-                  ref="headerRenameInput"
-                  v-model="headerDraft"
-                  class="hub-view__thread-rename smooth-border"
-                  data-testid="thread-header-rename-input"
-                  @keydown.enter="saveHeaderRename"
-                  @keydown.esc="renamingHeader = false"
-                  @blur="renamingHeader = false"
-                />
-                <span class="hub-view__thread-rename-hint">↵ save · esc cancel</span>
-              </template>
-
-              <template v-else>
-                <!-- FE-9365e acceptance fix: §8 puts the serial BEFORE the title, 19px
-                     yellow — it is the handle the operator quotes to an agent, and the
-                     header is where they read it mid-conversation. -->
-                <span class="hub-view__thread-serial" data-testid="thread-header-serial">
-                  {{ commHub.selectedThread?.chat_id }}
-                </span>
-                <h2 class="hub-view__thread-title" data-testid="thread-header-title">
-                  {{ headerTitle }}
-                </h2>
-                <button
-                  type="button"
-                  class="hub-view__thread-action"
-                  :title="headerLocked ? 'Project logs are named after their project' : 'Rename'"
-                  :aria-label="headerLocked ? 'Locked — named after its project' : 'Rename thread'"
-                  data-testid="thread-header-rename"
-                  @click="startHeaderRename"
-                >
-                  <v-icon size="16">{{ headerLocked ? 'mdi-lock-outline' : 'mdi-pencil-outline' }}</v-icon>
-                </button>
-                <button
-                  type="button"
-                  class="hub-view__thread-action"
-                  title="Copy thread id"
-                  aria-label="Copy thread id"
-                  data-testid="thread-header-copy"
-                  @click="copyThreadId"
-                >
-                  <v-icon size="16">mdi-content-copy</v-icon>
-                </button>
-              </template>
-            </div>
-
-            <!-- §8: pills identical to the card's (same component), scope note
-                 right-aligned on the SAME row — the prototype's layout. -->
-            <div class="hub-view__thread-meta">
-              <div v-if="headerAgents.length" class="hub-view__thread-pills" data-testid="thread-header-pills">
-                <AgentPill v-for="a in headerAgents" :key="a.participant_id" :participant="a" />
-              </div>
-              <!-- FE-9530: the only way an old thread ever gets a product. -->
-              <ThreadRetagMenu
-                v-if="commHub.selectedThreadId"
-                :product-id="commHub.selectedThread?.product_id"
-                :products="productStore.products"
-                @retag="onRetagProduct"
-              />
-              <div class="hub-view__thread-scope" data-testid="thread-header-scope">
-                <v-icon v-if="headerLocked" size="13" class="mr-1">mdi-eye-off-outline</v-icon>
-                {{ headerScopeNote }}
-              </div>
-            </div>
-
-            <!-- The same copyable terminal block the card carries. Display-only here was
-                 an acceptance miss: this is the exact place the operator hands the id to
-                 an agent mid-conversation. -->
-            <button
-              type="button"
-              class="hub-view__thread-id"
-              title="Copy thread id"
-              data-testid="thread-header-id"
-              @click="copyThreadId"
-            >
-              <span class="hub-view__thread-id-cmd">join_thread</span>
-              <span class="hub-view__thread-id-val">{{ commHub.selectedThreadId }}</span>
-              <v-icon size="13">mdi-content-copy</v-icon>
-            </button>
-          </div>
+          <HubThreadHeader />
 
         <ThreadTimeline
           class="hub-view__timeline"
@@ -254,19 +148,16 @@
       </div>
     </template>
 
-    <!-- New thread dialog -->
     <NewThreadDialog
       v-model="showNewThread"
       @created="onThreadCreated"
     />
 
-    <!-- Post-create hint: thread id + copy affordance -->
     <ThreadCreatedDialog
       v-model="showThreadCreated"
       :thread="createdThread"
     />
 
-    <!-- Deleted threads: recover surface -->
     <ThreadDeletedDialog
       v-model="showDeletedThreads"
       :deleted-threads="deletedThreads"
@@ -277,20 +168,16 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useCommHubStore } from '@/stores/commHubStore'
 import { useUserStore } from '@/stores/user'
-import { useProductStore } from '@/stores/products'
 import { registerReconnectResync } from '@/stores/websocketEventRouter'
 import { useToast } from '@/composables/useToast'
-import { useClipboard } from '@/composables/useClipboard'
 import api from '@/services/api'
 import ThreadList from '@/components/hub/ThreadList.vue'
-import AgentPill from '@/components/hub/AgentPill.vue'
 import DeletedCountButton from '@/components/common/DeletedCountButton.vue'
 import ThreadTimeline from '@/components/hub/ThreadTimeline.vue'
-import ThreadRetagMenu from '@/components/hub/ThreadRetagMenu.vue'
 import HubComposer from '@/components/hub/HubComposer.vue'
 import HubThreadToolbar from '@/components/hub/HubThreadToolbar.vue'
 import NewThreadDialog from '@/components/hub/NewThreadDialog.vue'
@@ -302,14 +189,13 @@ import {
   focusReasonOf,
 } from '@/components/hub/hubThreadRoute'
 import { threadDisplayName } from '@/components/hub/threadDisplayName'
+import HubThreadHeader from '@/components/hub/HubThreadHeader.vue'
 
 const commHub = useCommHubStore()
 const userStore = useUserStore()
-const productStore = useProductStore()
 const route = useRoute()
 const router = useRouter()
 const { showToast } = useToast()
-const { copy } = useClipboard()
 const showNewThread = ref(false)
 const showThreadCreated = ref(false)
 const createdThread = ref(null)
@@ -317,11 +203,8 @@ const showDeletedThreads = ref(false)
 const deletedThreads = ref([])
 const restoringId = ref(null)
 
-// FE-9012c (D2): which tab is active. 'project' (project-bound) is primary — the
-// /jobs message icon deep-links here to a project's bound thread (D3).
 const activeTab = ref('project')
 
-// FE-9365c: filter-bar state, matching the Products/Projects shape.
 const search = ref('')
 const sort = ref('activity')
 const sortOptions = [
@@ -330,7 +213,6 @@ const sortOptions = [
   { title: 'Serial', value: 'serial' },
 ]
 
-// FE-9530: exposes commHub.productScope directly -- no second source of truth.
 const productScopeOptions = [
   { title: 'This product', value: 'viewed' },
   { title: 'All products', value: 'all' },
@@ -341,19 +223,16 @@ const productScopeModel = computed({
   set: (val) => commHub.setProductScope(val),
 })
 
-// FE-9368 (D): the in-thread message filter. Cleared whenever the open thread changes,
-// so a query typed in one conversation never silently hides messages in the next one.
+const SELECT_CHROME_PX = 84
+function selectWidthStyle(options) {
+  const longest = options.reduce((n, o) => Math.max(n, String(o.title || '').length), 0)
+  return { width: `calc(${longest}ch + ${SELECT_CHROME_PX}px)` }
+}
+
 const messageSearch = ref('')
 watch(() => commHub.selectedThreadId, () => { messageSearch.value = '' })
 
-// The header's pill row: agent participants of the open thread, same filter as the
-// card. The user is not a "registered agent" here either.
-const headerAgents = computed(() =>
-  commHub.participantsFor(commHub.selectedThreadId || '').filter((p) => p.participant_type !== 'user'),
-)
 
-// The one thread allowed to claim the operator's attention: the newest open General
-// thread whose baton points at THEM. next_action_owner only — never the words in a post.
 const TERMINAL = new Set(['resolved', 'closed'])
 const attentionThread = computed(() => {
   const me = userStore.currentUser?.id
@@ -365,101 +244,19 @@ const attentionThread = computed(() => {
   )
 })
 
-/** Leave the thread view and return to the list. Clearing the selection is what
- *  swaps the region back, since the two are v-if branches over one selection. */
 function backToList() {
   commHub.selectThread(null)
 }
 
-// FE-9289c: useHubNotifications() is NOT mounted here anymore — it moved to
-// DefaultLayout so the handover bell reaches the operator on ANY page, not only while
-// they are already looking at the Hub. Do NOT re-add it here: it de-dupes per instance,
-// so a second mount would double-fire every toast and browser notification.
-
-// ---- thread header (DoD 3 rename + DoD 5 the join_thread hint) ----
-// A project thread is named after its project and kept with its 360 memory, so the
-// pencil becomes a lock that says why — never a missing button.
-const headerLocked = computed(() => commHub.selectedThread?.project_id != null)
-const headerTitle = computed(() => {
-  const t = commHub.selectedThread?.title || commHub.selectedThread?.subject
-  return t || 'Untitled thread'
-})
-const headerScopeNote = computed(() =>
-  headerLocked.value
-    ? 'Audit record — never sent back to agents during context fetch'
-    : 'Visible to the agents registered here, on their next poll',
-)
-
-const renamingHeader = ref(false)
-const headerDraft = ref('')
-const headerRenameInput = ref(null)
-
-async function startHeaderRename() {
-  if (headerLocked.value) {
-    showToast({ type: 'info', message: 'Project logs are named after their project.' })
-    return
-  }
-  headerDraft.value = commHub.selectedThread?.subject || ''
-  renamingHeader.value = true
-  await nextTick()
-  headerRenameInput.value?.focus()
-  headerRenameInput.value?.select()
-}
-
-async function saveHeaderRename() {
-  const next = headerDraft.value.trim()
-  const current = commHub.selectedThread?.subject
-  renamingHeader.value = false
-  if (!next || next === current) return
-  try {
-    await commHub.renameThread(commHub.selectedThreadId, next)
-    showToast({ type: 'success', message: 'Thread renamed.' })
-  } catch (err) {
-    const msg = err?.response?.data?.detail || err?.message || 'Could not rename this thread.'
-    showToast({ type: 'error', message: msg })
-  }
-}
-
-// ---- FE-9530: retag the open thread's product (ThreadRetagMenu.vue owns the
-// menu itself; this is the write + toast, matching the rename/delete pattern
-// where the child emits and the parent talks to the store). Unlike rename,
-// retagging is NOT locked on a project-bound thread — a bound thread's product
-// still reflects its project by default, but the operator can correct it same
-// as any other. ----
-async function onRetagProduct(productId) {
-  const threadId = commHub.selectedThreadId
-  if (!threadId) return
-  try {
-    await commHub.retagThread(threadId, { productId })
-    showToast({ type: 'success', message: productId ? 'Product updated.' : 'Product cleared.' })
-  } catch (err) {
-    const msg = err?.response?.data?.detail || err?.message || 'Could not retag this thread.'
-    showToast({ type: 'error', message: msg })
-  }
-}
-
-// The UUID, not the CHT alias — the UUID is what an agent needs to join.
-async function copyThreadId() {
-  const ok = await copy(commHub.selectedThreadId)
-  showToast(
-    ok
-      ? { type: 'success', message: 'Thread id copied — paste it into any harness.' }
-      : { type: 'error', message: 'Browser blocked the copy — select and copy manually.' },
-  )
-}
 
 let unregisterResync = null
 
 onMounted(async () => {
-  // Initial load
   await commHub.loadThreads()
-  // FE-9365c: the Deleted button now carries a COUNT and disables itself at zero, so
-  // the list has to be known before the operator clicks rather than fetched on click.
   await loadDeletedThreads()
 
   await applyThreadDeepLink()
 
-  // Register reconnect-resync: reload threads and re-fetch selected thread on WS reconnect
   unregisterResync = registerReconnectResync(async () => {
     await commHub.loadThreads(commHub.filters)
     if (commHub.selectedThreadId) {
@@ -473,32 +270,16 @@ onBeforeUnmount(() => {
 })
 
 async function onThreadSelect(threadId) {
-  // FE-9410: SELECT first, then fetch. Selection is the only thing that swaps this
-  // region from the list to the thread (the two are v-if branches over
-  // selectedThreadId), and loadThread() deliberately does not set it. ThreadList
-  // selects inside its own onSelect before emitting, so card clicks always worked and
-  // every caller that reached this function DIRECTLY — the attention strip, the
-  // ?thread= deep link — fetched a thread it never opened. Re-selecting an already
-  // selected thread is idempotent, so the ThreadList path is unaffected.
   commHub.selectThread(threadId)
   await commHub.loadThread(threadId)
   await commHub.loadParticipants(threadId)
 }
 
-/**
- * FE-9410: the attention strip navigates rather than selecting in place, so it travels
- * the identical route as the app-wide banner row — one hand-off, one landing.
- */
 function openAttentionThread() {
   if (!attentionThread.value) return
   router.push(hubThreadRoute(attentionThread.value))
 }
 
-/**
- * FE-9012c (D3): the /jobs message icon deep-links via ?thread=<id>&tab=project.
- * Honor an explicit tab, then open the thread and align the tab to its binding
- * (project_id present => Project threads, else General threads).
- */
 async function applyThreadDeepLink() {
   if (route.query.tab === 'project' || route.query.tab === 'town') {
     activeTab.value = route.query.tab
@@ -510,23 +291,12 @@ async function applyThreadDeepLink() {
   if (t) activeTab.value = t.project_id != null ? 'project' : 'town'
 }
 
-// FE-9410: mount is not enough. The your-turn banner is app-wide, so it is clickable
-// while the operator is ALREADY standing in the Hub, and that push changes the query
-// under a component that never remounts. Without this watch the second notification for
-// the same hand-off does nothing at all.
 watch(() => route.query.thread, (threadId) => { if (threadId) applyThreadDeepLink() })
 
-/**
- * FE-9410 / FE-9418: which message the operator was sent here to read. The rule itself
- * lives beside the route that writes the anchor — see `resolveFocusMessageId`.
- */
 const focusMessageId = computed(() =>
   resolveFocusMessageId(route.query, commHub.selectedThreadId, commHub.messagesFor(commHub.selectedThreadId)),
 )
 
-// FE-9436: why they were sent — the words on the mark, nothing more. Read from the SAME
-// query that authorised the focus above, so the two cannot disagree: an id resolves only
-// when that query names a recognised reason, and this returns that same reason.
 const focusReason = computed(() => focusReasonOf(route.query))
 
 function onThreadCreated(thread) {
@@ -534,7 +304,6 @@ function onThreadCreated(thread) {
     commHub.selectThread(thread.thread_id)
     commHub.loadThread(thread.thread_id)
     commHub.loadParticipants(thread.thread_id)
-    // Surface the copyable thread id once, unless the operator opted out forever.
     if (!isThreadCreatedHintHidden()) {
       createdThread.value = thread
       showThreadCreated.value = true
@@ -542,9 +311,6 @@ function onThreadCreated(thread) {
   }
 }
 
-/** Fetch the recoverable threads. Silent on failure when called from mount — the
- *  count is decoration there, and a toast on page load for a surface the operator has
- *  not asked for would be noise. Opening the dialog reports properly. */
 async function loadDeletedThreads({ notify = false } = {}) {
   try {
     const res = await api.threads.getDeleted()
@@ -566,7 +332,6 @@ async function onRestoreThread(thread) {
   try {
     await api.threads.restore(thread.thread_id)
     deletedThreads.value = deletedThreads.value.filter((t) => t.thread_id !== thread.thread_id)
-    // FE-9436: the shared naming rule. The old fallback rendered a raw thread UUID here.
     showToast({ type: 'success', message: `${threadDisplayName(thread)} restored.` })
     await commHub.loadThreads(commHub.filters)
   } catch (err) {
@@ -591,6 +356,16 @@ async function onRestoreThread(thread) {
   padding: 30px 40px 40px;
 
   @include filterBar.list-filter-bar;
+  // FE-9593: below the tablet breakpoint the bar may wrap instead of squeezing the
+  // search field to nothing — the shared mixin every other list view already uses.
+  @include filterBar.list-filter-bar-responsive;
+
+  // FE-9593: the selects no longer share the row's free width with the search field
+  // (a `.v-input` is `flex: 1 1 auto` by default, which is what made both far wider
+  // than their text). Their width is set per select from its longest option above.
+  &__select {
+    flex: 0 0 auto;
+  }
 
   // FE-9368 (A): the list view's single column. 1120px is the card width FE-9365c
   // chose for readability; hanging the header, tabs, bar and cards off ONE cap is
@@ -649,144 +424,12 @@ async function onRestoreThread(thread) {
     color: $color-brand-yellow;
   }
 
-  &__thread-meta {
-    display: flex;
-    align-items: center;
-    gap: v.$spacing-sm;
-    min-width: 0;
-  }
-
   &__main {
     display: flex;
     flex-direction: column;
     min-height: 0;
   }
 
-  &__thread-serial {
-    flex: none;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 1.1875rem; // 19 — the header's louder cousin of the card's 15
-    font-weight: 700;
-    color: $color-brand-yellow;
-    letter-spacing: 0.01em;
-    margin-right: v.$spacing-sm;
-  }
-
-  &__thread-pills {
-    display: flex;
-    flex-wrap: wrap;
-    gap: v.$spacing-xs;
-    margin: v.$spacing-xs 0;
-  }
-
-  &__thread-head {
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: v.$spacing-sm v.$spacing-md v.$spacing-md;
-  }
-
-  &__thread-title-row {
-    display: flex;
-    align-items: center;
-    gap: v.$spacing-sm;
-    min-height: 28px;
-  }
-
-  &__thread-title {
-    font-family: 'Outfit', sans-serif;
-    font-size: 1.0625rem; // 17
-    font-weight: 600;
-    color: var(--text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  &__thread-action {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    flex-shrink: 0;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    border-radius: $border-radius-default; // 8
-    cursor: pointer;
-    transition: color $transition-fast, background $transition-fast;
-
-    &:hover {
-      color: var(--text-primary);
-      background: rgba(255, 255, 255, 0.08);
-    }
-  }
-
-
-  &__thread-rename {
-    flex: 1;
-    min-width: 0;
-    font-family: 'Outfit', sans-serif;
-    font-size: 1.0625rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    background: rgba(255, 255, 255, 0.05);
-    border: none;
-    border-radius: $border-radius-md; // 12 — inputs
-    padding: 4px 10px;
-
-    &:focus { outline: none; }
-  }
-
-  &__thread-rename-hint,
-  &__thread-id-cmd { color: var(--text-muted); }
-  &__thread-id-val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  &__thread-id {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    border: none;
-    cursor: pointer;
-    min-width: 0;
-    .v-icon { color: $color-brand-yellow; flex: none; }
-
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.6875rem; // 11 — the floor
-    color: var(--text-muted);
-    white-space: nowrap;
-  }
-
-  &__thread-scope {
-    display: flex;
-    align-items: center;
-    margin-left: auto; // right-aligned on the pill row, per the prototype
-    flex: none;
-    font-size: 0.71875rem; // 11.5
-    color: var(--text-muted);
-  }
-
-  &__thread-id-cmd { color: var(--text-muted); }
-  &__thread-id-val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-  &__thread-id {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    border: none;
-    cursor: pointer;
-    min-width: 0;
-    .v-icon { color: $color-brand-yellow; flex: none; }
-
-    align-self: flex-start;
-    padding: 3px 8px;
-    border-radius: $border-radius-default; // 8
-    background: rgba(0, 0, 0, 0.28);
-    overflow-x: auto;
-    max-width: 100%;
-  }
 
   &__timeline {
     flex: 1;

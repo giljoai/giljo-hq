@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""(a) TLS reachable + certificate valid through the real edge.
-
-This is the unique value localhost can't reproduce: it proves the deployed host
-terminates TLS with a chain-valid, hostname-matching, unexpired certificate via
-the real Cloudflare -> nginx -> uvicorn path.
-"""
 
 from __future__ import annotations
 
@@ -21,12 +15,6 @@ import pytest
 
 @pytest.mark.network
 def test_tls_handshake_and_cert_valid(target):
-    """A default (verifying) TLS handshake succeeds and the cert is unexpired.
-
-    ``ssl.create_default_context()`` verifies the certificate chain AND the
-    hostname; an invalid/expired/mismatched cert raises during ``wrap_socket``,
-    failing the test. The explicit ``notAfter`` check is belt-and-suspenders.
-    """
     if target.scheme != "https":
         pytest.skip(reason="target is not https; TLS cert check not applicable")
 

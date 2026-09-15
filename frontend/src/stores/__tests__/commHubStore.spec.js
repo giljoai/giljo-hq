@@ -1,17 +1,7 @@
-/**
- * commHubStore.spec.js — FE-6054e
- *
- * Tests:
- *  - normalizeMessage produces expected shape
- *  - handleThreadMessage upserts (store-first, dedupe by message_id, immutable)
- *  - handleThreadUpdate patches meta (status, next_action_owner)
- *  - handleThreadUpdate update_type "created" for unknown thread triggers loadThreads
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useCommHubStore } from '@/stores/commHubStore'
 
-// Mock api so no real HTTP calls are made
 const listMock = vi.fn()
 vi.mock('@/services/api', () => ({
   default: {
@@ -63,9 +53,6 @@ describe('commHubStore', () => {
     listMock.mockResolvedValue({ data: { threads: [], count: 0 } })
   })
 
-  // ---------------------------------------------------------------------------
-  // normalizeMessage shape
-  // ---------------------------------------------------------------------------
   it('normalizeMessage: produces expected shape from handleThreadMessage', () => {
     store.handleThreadMessage(MSG_1)
     const messages = store.messagesFor('thr-001')
@@ -78,9 +65,6 @@ describe('commHubStore', () => {
     expect(m.message_type).toBe('broadcast')
   })
 
-  // ---------------------------------------------------------------------------
-  // handleThreadMessage: store-first upsert
-  // ---------------------------------------------------------------------------
   it('handleThreadMessage: appends new message to the store', () => {
     store.handleThreadMessage(MSG_1)
     expect(store.messagesFor('thr-001')).toHaveLength(1)
@@ -99,7 +83,6 @@ describe('commHubStore', () => {
     const MSG_2 = { ...MSG_1, message_id: 'msg-002', content: 'Second message' }
     store.handleThreadMessage(MSG_2)
 
-    // listBefore should still have length 1 (original array not mutated)
     expect(listBefore).toHaveLength(1)
     expect(store.messagesFor('thr-001')).toHaveLength(2)
   })
@@ -114,19 +97,10 @@ describe('commHubStore', () => {
     expect(messages[0].requires_action).toBe(true)
   })
 
-  // ---------------------------------------------------------------------------
-  // handleThreadUpdate: patches thread meta
-  // ---------------------------------------------------------------------------
   it('handleThreadUpdate: patches status on existing thread', () => {
-    // Seed the thread
-    store.handleThreadMessage(MSG_1) // creates entry in messagesByThreadId
-    // Also seed thread meta via internal helper by calling handleThreadUpdate
-    // after manually inserting the thread
-    // We use the store's handleThreadMessage-triggered bump + a separate thread seed
-    // Seed thread meta directly via handleThreadUpdate "created" type
+    store.handleThreadMessage(MSG_1)
     listMock.mockResolvedValueOnce({ data: { threads: [THREAD_1], count: 1 } })
 
-    // Insert thread via loadThreads
     return store.loadThreads().then(() => {
       expect(store.threadsById.has('thr-001')).toBe(true)
 
@@ -164,7 +138,6 @@ describe('commHubStore', () => {
       update_type: 'created',
     })
 
-    // Give the async loadThreads call a tick to be fired
     await new Promise((r) => setTimeout(r, 0))
     expect(listMock).toHaveBeenCalled()
   })
@@ -174,7 +147,6 @@ describe('commHubStore', () => {
     await store.loadThreads()
     listMock.mockClear()
 
-    // Thread is already known — "created" event should just patch, not reload
     store.handleThreadUpdate({
       thread_id: 'thr-001',
       status: 'open',
@@ -182,13 +154,9 @@ describe('commHubStore', () => {
     })
 
     await new Promise((r) => setTimeout(r, 0))
-    // loadThreads should NOT have been called again
     expect(listMock).not.toHaveBeenCalled()
   })
 
-  // ---------------------------------------------------------------------------
-  // $reset
-  // ---------------------------------------------------------------------------
   it('$reset clears all state', () => {
     store.handleThreadMessage(MSG_1)
     store.selectedThreadId = 'thr-001'
@@ -198,9 +166,6 @@ describe('commHubStore', () => {
     expect(store.threadList).toHaveLength(0)
   })
 
-  // ---------------------------------------------------------------------------
-  // threadList sorted newest-first
-  // ---------------------------------------------------------------------------
   it('threadList is sorted newest last_activity_at first', async () => {
     const older = { ...THREAD_1, thread_id: 'thr-older', last_activity_at: '2026-06-17T08:00:00Z' }
     const newer = { ...THREAD_1, thread_id: 'thr-newer', last_activity_at: '2026-06-17T12:00:00Z' }

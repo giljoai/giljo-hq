@@ -1,17 +1,3 @@
-/**
- * Login.errorStatus.spec.js (FE-9556)
- *
- * Every login failure showed the generic "Login failed. Please check your
- * credentials." because userStore.login() swallowed the axios error into a
- * bare boolean -- Login.vue's carefully status-branched catch block
- * (401 detail branching, 403, 429, network) was dead code for a real login
- * attempt. The store now rethrows after clearing local state, so the
- * already-written catch block owns failures. Each case below was proven RED
- * against the pre-fix code (generic copy rendered for every status).
- *
- * Mounting pattern: Login.rateLimit.spec.js (PR #1002), which this builds on.
- * Edition scope: Both -- Login.vue is CE+SaaS shared.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'

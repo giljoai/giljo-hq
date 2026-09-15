@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Unit tests for ToolAccessor.create_project() — signature and hardcoded behavior.
-
-Test Coverage:
-- Method signature: mission is optional, no context_budget, no status param
-- Always creates projects with status "inactive"
-- Mission parameter default and explicit forwarding
-"""
 
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -22,14 +14,6 @@ from giljo_mcp.tools.tool_accessor import ToolAccessor
 
 
 def _stub_binding_resolution():
-    """Stand in for BE-9411 product resolution.
-
-    These tests supply an explicit ``product_id`` against a ``Mock()`` db_manager.
-    Since BE-9411 that id is validated against the tenant instead of being trusted,
-    which needs a real session -- and validation is not what these tests are about
-    (they pin status/mission forwarding). Real validation coverage lives in
-    ``tests/integration/test_be9411_explicit_product_id_on_creates.py``.
-    """
     product = Mock()
     product.id = "prod-status"
     product.name = "Stubbed Product"
@@ -43,7 +27,6 @@ def _stub_binding_resolution():
 
 @pytest.fixture(autouse=True)
 def _autopatch_valid_project_types():
-    """Stub _get_valid_project_types so the omitted-type hint path doesn't hit the DB."""
     with patch.object(
         ProjectService,
         "_get_valid_project_types",
@@ -54,11 +37,9 @@ def _autopatch_valid_project_types():
 
 
 class TestCreateProjectHardcodedBehavior:
-    """Test suite for hardcoded behaviors (status always inactive)."""
 
     @pytest.mark.asyncio
     async def test_always_creates_with_inactive_status(self):
-        """Test that status is always 'inactive' regardless of any other input."""
         db_manager = Mock()
         tenant_manager = Mock()
         tenant_manager.get_current_tenant = Mock(return_value="tenant-abc")
@@ -95,13 +76,11 @@ class TestCreateProjectHardcodedBehavior:
                 tenant_key="tenant-abc",
             )
 
-            # Verify ProjectService was called with status="inactive"
             call_kwargs = mock_create.call_args[1]
             assert call_kwargs["status"] == "inactive", "Status must always be 'inactive'"
 
     @pytest.mark.asyncio
     async def test_mission_defaults_to_empty_string(self):
-        """Test that mission defaults to empty string when not provided."""
         db_manager = Mock()
         tenant_manager = Mock()
         tenant_manager.get_current_tenant = Mock(return_value="tenant-abc")
@@ -143,7 +122,6 @@ class TestCreateProjectHardcodedBehavior:
 
     @pytest.mark.asyncio
     async def test_passes_explicit_mission_when_provided(self):
-        """Test that an explicitly provided mission is forwarded correctly."""
         db_manager = Mock()
         tenant_manager = Mock()
         tenant_manager.get_current_tenant = Mock(return_value="tenant-abc")

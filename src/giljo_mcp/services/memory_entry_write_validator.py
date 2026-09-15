@@ -3,38 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""INF-WriteShape: shared write-side validator for product_memory_entries.
-
-This module owns the SINGLE validated write boundary used by both
-write_memory_entry and write_project_closeout. Field allowlist +
-size caps live here and nowhere else -- no parallel write paths, no
-setattr-based shortcuts.
-
-Caps (Step C ratified by analyzer 2026-04-25):
-  summary           : <= 1500 chars (2-3 sentence headline)
-  key_outcomes      : <= 5 items, each <= 250 chars
-  decisions_made    : <= 5 items, each <= 250 chars
-  deliverables      : <= 3 items, each <= 100 chars   [drop-cap]
-  tags              : <= 8 items, drawn from CONTROLLED_TAG_VOCABULARY
-
-## DELIBERATELY NOT IN VOCABULARY (Step C, 2026-04-25)
-
-Excluded categories and rationale -- the safeguard against drift in 6 months:
-
-* ``saas`` / ``ce`` / ``demo``: edition-specific identifiers belong in the
-  release-channel metadata, not in 360-memory tags. Keeping them out
-  prevents the vocab from accidentally becoming a routing index.
-* ``deprecation`` / ``breaking-change`` / ``regression``: collapse into the
-  existing ``refactor`` and ``bug-fix`` tags. A breaking change IS a
-  refactor; a regression IS a bug-fix. Two ways to tag the same event
-  fragment retrieval.
-* ``hotfix`` / ``rollback``: collapse into ``bug-fix``. The urgency is
-  signal at write time, not retrieval time.
-* version strings (``v1.x.x``, sprint codes): change every release;
-  burnable cardinality. Use commit metadata instead.
-
-Add to vocab only after a written tag-vocab review -- not in passing.
-"""
 
 from __future__ import annotations
 
@@ -48,19 +16,14 @@ MEMORY_KEY_OUTCOME_MAX = 250
 MEMORY_KEY_OUTCOMES_COUNT = 5
 MEMORY_DECISION_MAX = 250
 MEMORY_DECISIONS_COUNT = 5
-# 89.4% of legacy entries are byte-identical to key_outcomes (analyzer 2026-04-25). Drop-cap; full removal scheduled post-demo.
 MEMORY_DELIVERABLES_COUNT = 3
 MEMORY_DELIVERABLE_MAX = 100
 MEMORY_TAG_MAX_LEN = 30
 MEMORY_TAGS_COUNT = 8
 
 
-# Step C controlled vocabulary (16 tags, two-axis + 1 operational).
-# Strict enum on the write side -- legacy entries are normalized on read via
-# LEGACY_TAG_MAPPING in get_360_memory.py.
 CONTROLLED_TAG_VOCABULARY: frozenset[str] = frozenset(
     {
-        # Axis 1 -- Change type (8)
         "feature",
         "bug-fix",
         "refactor",
@@ -69,7 +32,6 @@ CONTROLLED_TAG_VOCABULARY: frozenset[str] = frozenset(
         "docs",
         "test",
         "chore",
-        # Axis 2 -- Domain/layer (7)
         "frontend",
         "backend",
         "database",
@@ -77,14 +39,12 @@ CONTROLLED_TAG_VOCABULARY: frozenset[str] = frozenset(
         "infrastructure",
         "ui-ux",
         "integration",
-        # Axis 3 -- Operational class (1)
         "migration",
     }
 )
 
 
 class _UnknownTagError(ValueError):
-    """Internal carrier so the pydantic validator surfaces the bad tag verbatim."""
 
     def __init__(self, tag: str):
         self.tag = tag
@@ -92,14 +52,7 @@ class _UnknownTagError(ValueError):
 
 
 def _validate_tag_token(tag: str) -> str:
-    """Tag-vocabulary gate.
-
-    Accepts any tag in CONTROLLED_TAG_VOCABULARY (length already <= cap).
-    Raises ValueError on anything else (Pydantic converts to a field error).
-    """
     if not isinstance(tag, str):
-        # Pydantic field_validators convert ValueError to a clean field
-        # error; TypeError bypasses that handling, so we keep ValueError.
         raise ValueError("tag must be a string")  # noqa: TRY004
     if len(tag) > MEMORY_TAG_MAX_LEN:
         raise ValueError(f"tag '{tag[:20]}...' exceeds {MEMORY_TAG_MAX_LEN} characters")
@@ -136,25 +89,6 @@ _GUIDANCE = {
 
 
 class MemoryEntryWriteValidationError(Exception):
-    """Structured rejection raised when an agent-supplied write payload exceeds caps.
-
-    Surface contract (single source of truth for both write tools):
-        error       = "validation_failed"
-        field       = first offending field name
-        actual_size = observed size (chars or item count)
-        max_size    = configured cap
-        guidance    = actionable trim guidance for the agent
-
-    Tag-vocab failures additionally carry ``invalid_tag`` and ``allowed`` so
-    the agent gets the full enum back without a second round-trip.
-
-    BE-6208a (batch blockers): when more than one cap/vocab constraint fails on
-    the same write, ``all_failures`` carries one ``to_dict()``-shaped entry per
-    offending field so the agent learns EVERY blocker in one round-trip. The
-    primary ``field``/``actual_size``/``max_size`` stay populated from the first
-    failure (back-compat); ``all_failures`` is omitted when only one constraint
-    failed.
-    """
 
     def __init__(
         self,
@@ -178,26 +112,6 @@ class MemoryEntryWriteValidationError(Exception):
         super().__init__(f"validation_failed: {field} actual={actual_size} max={max_size} -- {guidance}")
 
     def __str__(self) -> str:
-        """Render the FULL structured rejection, not just the primary field.
-
-        BE-8003b: the default ``Exception.__str__`` (from ``args[0]``) only ever
-        carried the primary field/size/guidance line. Because the MCP `@mcp.tool`
-        boundary surfaces this exception via ``str(exc)`` (FastMCP's
-        ``ToolError(f"...: {e}")``), ``all_failures``/``allowed``/``invalid_tag`` --
-        already computed correctly by ``_translate_pydantic_error`` -- were being
-        silently dropped before reaching the agent, forcing the exact N-resend
-        dance this rejection type exists to prevent. This renders every batched
-        violation and the full controlled vocabulary inline.
-
-        TSK-9003: ``all_failures[0]`` is ALWAYS the primary's own entry --
-        ``_translate_pydantic_error`` builds ``primary`` from ``errors[0]`` and
-        then builds ``failures`` from the same ``errors`` list starting with an
-        empty dedupe set, so ``errors[0]``'s translation is always first in.
-        Skip it by INDEX, not by field-name equality: comparing by field name
-        also drops a genuine second violation on the SAME field (e.g. two
-        ``decisions_made`` items both over the char cap), silently costing the
-        agent one extra resend.
-        """
         line = self.args[0]
         if self.invalid_tag is not None:
             line += f" (invalid_tag={self.invalid_tag!r})"
@@ -286,7 +200,6 @@ class MemoryEntryWriteSchema(BaseModel):
 
 
 def _translate_one(first: dict[str, Any], payload: dict[str, Any]) -> MemoryEntryWriteValidationError:
-    """Translate a SINGLE pydantic error dict into a structured rejection."""
     loc = first.get("loc", ())
     field = str(loc[0]) if loc else "unknown"
     raw = payload.get(field)
@@ -306,7 +219,6 @@ def _translate_one(first: dict[str, Any], payload: dict[str, Any]) -> MemoryEntr
         "tags": (MEMORY_TAGS_COUNT, MEMORY_TAG_MAX_LEN),
     }
     if field == "tags":
-        # Tag-specific path: surface the invalid tag + allowed enum on vocab miss.
         ctx = first.get("ctx") or {}
         underlying = ctx.get("error")
         invalid_tag: str | None = None
@@ -370,15 +282,6 @@ def _translate_one(first: dict[str, Any], payload: dict[str, Any]) -> MemoryEntr
 
 
 def _translate_pydantic_error(exc: ValidationError, payload: dict[str, Any]) -> MemoryEntryWriteValidationError:
-    """Translate a pydantic ValidationError into the structured rejection exception.
-
-    The PRIMARY error keeps the first offending field/cap (back-compat,
-    deterministic surface). BE-6208a: when more than one field fails, attach
-    one ``to_dict()`` entry per OFFENDING FIELD as ``all_failures`` so the agent
-    learns every cap/vocab blocker in one round-trip instead of fixing them one
-    at a time. Deduplicated by field so multiple item-level errors on the same
-    field collapse to a single entry.
-    """
     errors = exc.errors()
     if not errors:
         return MemoryEntryWriteValidationError(
@@ -402,13 +305,6 @@ def _translate_pydantic_error(exc: ValidationError, payload: dict[str, Any]) -> 
 
 
 def validate_memory_entry_write(payload: dict[str, Any]) -> MemoryEntryWriteSchema:
-    """Single validated write boundary for product_memory_entries.
-
-    Both write_memory_entry and write_project_closeout call this BEFORE
-    constructing MemoryEntryCreateParams. Pydantic ValidationError is
-    translated to MemoryEntryWriteValidationError (a structured rejection
-    that the tool surfaces upstream).
-    """
     try:
         return MemoryEntryWriteSchema(**payload)
     except ValidationError as exc:

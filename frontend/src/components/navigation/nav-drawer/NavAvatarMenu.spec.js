@@ -1,9 +1,3 @@
-/**
- * NavAvatarMenu.spec.js — FE-6006 unit 3a
- *
- * Smoke tests: avatar renders, user info shows, key menu items present.
- * Edition scope: Both
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -106,9 +100,6 @@ describe('NavAvatarMenu', () => {
     expect(wrapper.text()).not.toContain('Admin Settings')
   })
 
-  // FE-9172: the Admin role chip + Owner org-role badge are CE-only display.
-  // Hosted SaaS is single-user/account-owner — the badges are meaningless
-  // chrome there. role="admin" logic (isAdmin prop, guards) is unchanged.
   describe('role/owner badges edition visibility (FE-9172)', () => {
     it('shows the role chip and org-role badge in CE mode', () => {
       const wrapper = mountMenu({ giljoMode: 'ce', orgRole: 'owner' })
@@ -136,23 +127,12 @@ describe('NavAvatarMenu', () => {
     expect(wrapper.emitted('logout')).toBeTruthy()
   })
 
-  // FE-9419: the account-status badge reaches this component from
-  // NavigationDrawer.vue as a KEBAB-CASE TEMPLATE ATTRIBUTE, and that is the
-  // layer the bug lived at — the prop was declared `AccountStatusBadgeComponent`
-  // with a leading capital, which `camelize('account-status-badge-component')`
-  // can never produce, so the binding fell through to $attrs and the badge was
-  // never rendered in SaaS. Every test above passes props as an OBJECT, whose
-  // keys Vue Test Utils maps straight through, so none of them could see it.
-  // Mount through a real parent template or this stays invisible.
   describe('account-status badge arrives through a template binding (FE-9419)', () => {
     const Badge = {
       name: 'StubAccountStatusBadge',
       template: '<span data-test="account-status-badge-stub" />',
     }
 
-    // markRaw: VTU wraps `props` in reactive(), and a reactive component
-    // definition makes Vue warn ("received a Component that was made a
-    // reactive object"). Production uses shallowRef for the same reason.
     const Parent = {
       components: { NavAvatarMenu },
       props: { badge: { type: Object, default: null } },
@@ -178,8 +158,6 @@ describe('NavAvatarMenu', () => {
       const wrapper = mountViaTemplate(Badge)
       const menu = wrapper.findComponent(NavAvatarMenu)
       expect(menu.props('accountStatusBadgeComponent')).toBe(Badge)
-      // The failure mode was the component object being stringified into a DOM
-      // attribute — `<div account-status-badge-component="[object Object]">`.
       expect(wrapper.html()).not.toContain('account-status-badge-component=')
     })
 

@@ -12,13 +12,11 @@
     @confirm="handleConfirm"
     @cancel="handleCancel"
   >
-    <!-- Loading State -->
     <div v-if="loading" class="text-center py-4">
       <v-progress-circular indeterminate color="warning"></v-progress-circular>
       <div class="text-body-small mt-2">Calculating impact...</div>
     </div>
 
-    <!-- Warning Content -->
     <template v-else>
       <v-alert type="info" variant="tonal" density="compact" class="mb-4">
         <div class="text-body-large font-weight-bold mb-2">Move to Trash?</div>
@@ -28,7 +26,6 @@
         </div>
       </v-alert>
 
-      <!-- Cascade Impact -->
       <div v-if="cascadeImpact" class="mb-4">
         <div class="text-title-small mb-2">Kept with this product in the trash:</div>
 
@@ -84,7 +81,6 @@ const props = defineProps({
     type: Object,
     default: () => ({}),
   },
-  // Shape matches the backend CascadeImpact model (api/endpoints/products/models.py).
   cascadeImpact: {
     type: Object,
     default: () => ({

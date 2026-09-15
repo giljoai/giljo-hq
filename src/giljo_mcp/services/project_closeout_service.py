@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-ProjectCloseoutService - Extracted from ProjectService (Handover 0769).
-
-Handles project closeout operations:
-- close_out_project, get_closeout_data, can_close_project
-- generate_closeout_prompt
-"""
 
 import logging
 from datetime import UTC, datetime
@@ -52,14 +45,10 @@ from giljo_mcp.tenant import TenantManager
 
 logger = logging.getLogger(__name__)
 
-# Agent statuses that never block closeout and are excluded from the readiness
-# scan (BE-3010c: unified from the former tools-layer _SKIP_STATUSES/SKIP_STATUSES
-# duplicates, which carried identical members under divergent names).
 _CLOSEOUT_SKIP_STATUSES: frozenset[str] = frozenset({"decommissioned", "closed"})
 
 
 class ProjectCloseoutService:
-    """Service for project closeout operations."""
 
     def __init__(
         self,
@@ -77,30 +66,11 @@ class ProjectCloseoutService:
         self._lifecycle_repo = ProjectLifecycleRepository()
 
     def _get_session(self, tenant_key: str | None = None):
-        """Yield a tenant-scoped DB session, honoring an injected test session (shared helper, BE-8000d)."""
         return optional_tenant_session(self.db_manager, tenant_key, self._test_session)
 
     async def close_out_project(self, project_id: str, tenant_key: str) -> ProjectCloseOutResult:
-        """
-        Close out project and decommission agents (Handover 0113).
-
-        Marks project as completed with timestamp and optionally decommissions
-        associated agents if agent jobs are tracked.
-
-        Args:
-            project_id: Project UUID
-            tenant_key: Tenant key for multi-tenant isolation
-
-        Returns:
-            Dict with success status, message, and decommissioned agent details
-
-        Raises:
-            ResourceNotFoundError: When project not found or access denied
-            BaseGiljoError: When operation fails
-        """
         try:
             async with self._get_session(tenant_key) as session:
-                # Fetch project with tenant validation
                 project = await self._project_repo.get_by_id(session, tenant_key, project_id)
 
                 if not project:
@@ -109,18 +79,11 @@ class ProjectCloseoutService:
                         context={"project_id": project_id, "tenant_key": tenant_key},
                     )
 
-                # Mark project as completed
                 project.status = ProjectStatus.COMPLETED
                 project.completed_at = datetime.now(UTC)
                 project.updated_at = datetime.now(UTC)
                 project.closeout_executed_at = datetime.now(UTC)
 
-                # BE-6181: a chain member closing out is the terminal "completed"
-                # signal the C1 conductor guard (job_completion_service
-                # _guard_conductor_chain_incomplete) keys on — NOTHING wrote it
-                # before this, so a conductor could never finish its chain. Marks
-                # project_statuses[project]="completed" in the active run. Solo (no
-                # run) -> no-op. Best-effort: never fails the closeout.
                 await mark_chain_member_status(
                     db_manager=self.db_manager,
                     tenant_manager=self.tenant_manager,
@@ -131,7 +94,6 @@ class ProjectCloseoutService:
                     websocket_manager=self._websocket_manager,
                 )
 
-                # Decommission associated agents with smart lifecycle drain (Handover 0498)
                 executions_to_decommission = await self._lifecycle_repo.get_active_agent_executions(
                     session, tenant_key, project_id
                 )
@@ -148,7 +110,6 @@ class ProjectCloseoutService:
                     f"Closed out project {project_id} with {len(decommissioned_ids)} agents decommissioned"
                 )
 
-                # Broadcast status change to all browsers
                 if self._websocket_manager:
                     try:
                         await self._websocket_manager.broadcast_project_update(
@@ -173,9 +134,8 @@ class ProjectCloseoutService:
                 )
 
         except ResourceNotFoundError:
-            # Re-raise our custom exceptions
             raise
-        except Exception as e:  # Broad catch: service boundary, wraps in BaseGiljoError
+        except Exception as e:
             self._logger.exception("Failed to close out project")
             raise BaseGiljoError(
                 message=f"Failed to close out project: {e!s}",
@@ -188,39 +148,13 @@ class ProjectCloseoutService:
         project_id: str,
         tenant_key: str,
     ) -> tuple[list[str], list[AgentStatusChangeEvent]]:
-        """
-        Decommission all active agents for a project (session-in pattern).
-
-        Sets execution status to 'decommissioned' for any still-active agents.
-        Caller owns the session and transaction boundary.
-
-        Args:
-            session: Active database session (caller-managed).
-            project_id: Project UUID being closed.
-            tenant_key: Tenant isolation key.
-
-        Returns:
-            Tuple of (agent display names decommissioned, one AgentStatusChangeEvent
-            per agent). BE-9246: the display-name list is unchanged (additive); the
-            caller must emit the events POST-COMMIT, never mid-flush.
-        """
         active_statuses = ["waiting", "working", "blocked", "silent"]
         executions = await self._lifecycle_repo.get_executions_by_status(
             session, tenant_key, project_id, active_statuses
         )
 
-        # BE-9242 defense-in-depth: resolve_terminal_agent_cursors forwards each
-        # agent's action-required cursor to the LIVE orchestrator, which is
-        # re-resolved from the DB per iteration. Setting the orchestrator's own
-        # row to 'decommissioned' first would autoflush it out of the live set,
-        # so a peer processed afterward would find "no live orchestrator" and be
-        # left un-acked even though one WAS live at call start. Process the
-        # orchestrator's row LAST (stable sort keeps all other ordering intact)
-        # so every peer still sees it live while forwarding.
         executions = sorted(executions, key=lambda e: e.agent_display_name == "orchestrator")
 
-        # BE-9246: build events BEFORE the overwrite below so old_status is the
-        # pre-transition value; the caller emits them POST-COMMIT.
         status_events = build_agent_status_change_events(executions, "decommissioned")
 
         decommissioned_names: list[str] = []
@@ -228,9 +162,6 @@ class ProjectCloseoutService:
             execution.status = "decommissioned"
             label = execution.agent_display_name or execution.agent_name or execution.agent_id
             decommissioned_names.append(label)
-            # BE-9242: decommissioned is terminal -- resolve any live message
-            # cursor this agent still holds (auto-ack informational, forward
-            # action-required to the live orchestrator) so it cannot linger.
             await resolve_terminal_agent_cursors(
                 session,
                 tenant_key=tenant_key,
@@ -251,26 +182,8 @@ class ProjectCloseoutService:
         project_id: str,
         tenant_key: str,
     ) -> tuple[list[str], list[AgentStatusChangeEvent]]:
-        """
-        Transition all 'complete' agents to 'closed' during project closeout (session-in pattern).
-
-        Normal closeout = accepted work. Agents in 'complete' become 'closed'
-        (final acceptance). Caller owns the session and transaction boundary.
-
-        Args:
-            session: Active database session (caller-managed).
-            project_id: Project UUID being closed.
-            tenant_key: Tenant isolation key.
-
-        Returns:
-            Tuple of (agent display names closed, one AgentStatusChangeEvent per
-            agent). BE-9246: the display-name list is unchanged (additive); the
-            caller must emit the events POST-COMMIT, never mid-flush.
-        """
         executions = await self._lifecycle_repo.get_executions_by_status(session, tenant_key, project_id, ["complete"])
 
-        # BE-9246: build events BEFORE the overwrite below so old_status is the
-        # pre-transition value; the caller emits them POST-COMMIT.
         status_events = build_agent_status_change_events(executions, "closed")
 
         closed_names: list[str] = []
@@ -278,7 +191,6 @@ class ProjectCloseoutService:
             execution.status = "closed"
             label = execution.agent_display_name or execution.agent_name or execution.agent_id
             closed_names.append(label)
-            # BE-9242: closed is terminal -- same auto-resolve as decommission above.
             await resolve_terminal_agent_cursors(
                 session,
                 tenant_key=tenant_key,
@@ -303,56 +215,27 @@ class ProjectCloseoutService:
         project_id: str,
         tenant_key: str,
     ) -> list[str]:
-        """
-        Transition 'complete' agents to 'closed' and commit in a single transaction.
-
-        Session-owning wrapper around close_completed_agents for use from endpoints
-        that should not manage sessions directly.
-
-        Args:
-            project_id: Project UUID being closed.
-            tenant_key: Tenant isolation key.
-
-        Returns:
-            List of agent display names that were closed.
-        """
         async with self._get_session(tenant_key) as session:
             closed_names, status_events = await self.close_completed_agents(
                 session=session,
                 project_id=project_id,
                 tenant_key=tenant_key,
             )
-            # BE-9518: this method never otherwise loads the project row; a cheap
-            # PK lookup before commit is the only source for product_id here.
             project_for_broadcast = await self._project_repo.get_by_id(session, tenant_key, project_id)
             product_id = project_for_broadcast.product_id if project_for_broadcast else None
             await session.commit()
 
-        # BE-9246 POST-COMMIT: emit only after `session.commit()` above and only
-        # after the `async with` block has released the session -- never mid-flush,
-        # so a broadcast can never announce a status a rollback could still undo.
         await broadcast_agent_status_events(
             self._websocket_manager,
             tenant_key=tenant_key,
             project_id=project_id,
-            product_id=product_id,  # BE-9518
+            product_id=product_id,
             events=status_events,
         )
 
         return closed_names
 
     async def get_closeout_data(self, project_id: str, db_session: Any | None = None) -> CloseoutData:
-        """
-        Generate dynamic closeout checklist and prompt for project completion.
-
-        Called by GET /api/projects/{project_id}/closeout.
-
-        Returns:
-            ProjectCloseoutDataResponse payload.
-
-        Raises:
-            ResourceNotFoundError: Project not found or access denied
-        """
         tenant_key = self.tenant_manager.get_current_tenant()
 
         if db_session:
@@ -364,16 +247,6 @@ class ProjectCloseoutService:
     async def can_close_project(
         self, project_id: str, tenant_key: str | None = None, db_session: Any | None = None
     ) -> CanCloseResult:
-        """
-        Determine whether a project can be closed based on agent status.
-
-        Returns:
-            Can-close response data
-
-        Raises:
-            ValidationError: Tenant context missing
-            ResourceNotFoundError: Project not found or access denied
-        """
         tenant_key = tenant_key or self.tenant_manager.get_current_tenant()
 
         if not tenant_key:
@@ -388,16 +261,6 @@ class ProjectCloseoutService:
     async def generate_closeout_prompt(
         self, project_id: str, tenant_key: str | None = None, db_session: Any | None = None
     ) -> CloseoutPromptResult:
-        """
-        Generate closeout prompt with checklist and agent summary.
-
-        Returns:
-            Closeout prompt data
-
-        Raises:
-            ValidationError: Tenant context missing
-            ResourceNotFoundError: Project not found or access denied
-        """
         tenant_key = tenant_key or self.tenant_manager.get_current_tenant()
 
         if not tenant_key:
@@ -410,12 +273,6 @@ class ProjectCloseoutService:
             return await self._build_closeout_prompt(project_id, tenant_key, session)
 
     async def _build_closeout_data(self, project_id: str, tenant_key: str, session: Any) -> CloseoutData:
-        """
-        Internal helper to build closeout data using provided session.
-
-        Raises:
-            ResourceNotFoundError: Project not found or access denied
-        """
         project = await self._get_project_for_tenant(project_id, tenant_key, session)
 
         if not project:
@@ -446,12 +303,6 @@ class ProjectCloseoutService:
         )
 
     async def _build_can_close_response(self, project_id: str, tenant_key: str, session: Any) -> CanCloseResult:
-        """
-        Build readiness response for can-close endpoint.
-
-        Raises:
-            ResourceNotFoundError: Project not found or access denied
-        """
         project = await self._get_project_for_tenant(project_id, tenant_key, session)
 
         if not project:
@@ -460,10 +311,6 @@ class ProjectCloseoutService:
                 context={"project_id": project_id, "tenant_key": tenant_key},
             )
 
-        # BE-3010c: route the coarse can-close counts through the unified readiness
-        # method so all three former readiness sites share one source of truth.
-        # status_counts is derived from the same _aggregate_agent_statuses, so the
-        # can-close output is byte-identical.
         report = await self.evaluate_closeout_readiness(session, project_id, tenant_key)
         status_counts = report.status_counts
         all_agents_finished = status_counts["total"] > 0 and status_counts["active"] == 0
@@ -488,12 +335,6 @@ class ProjectCloseoutService:
         )
 
     async def _build_closeout_prompt(self, project_id: str, tenant_key: str, session: Any) -> CloseoutPromptResult:
-        """
-        Build a bash closeout prompt and checklist for the project.
-
-        Raises:
-            ResourceNotFoundError: Project not found or access denied
-        """
         project = await self._get_project_for_tenant(project_id, tenant_key, session)
 
         if not project:
@@ -551,16 +392,12 @@ class ProjectCloseoutService:
         )
 
     async def _aggregate_agent_statuses(self, project_id: str, tenant_key: str, session: Any) -> dict[str, Any]:
-        """
-        Aggregate agent status counts for closeout operations (migrated to AgentExecution - Handover 0367a).
-        """
         job_counts = await self._lifecycle_repo.get_agent_status_counts(session, tenant_key, project_id)
 
         total_agents = sum(job_counts.values())
         completed_agents = job_counts.get("complete", 0)
         blocked_agents = job_counts.get("blocked", 0)
         silent_agents = job_counts.get("silent", 0)
-        # Valid statuses after 0491: waiting, working, blocked, complete, silent, decommissioned
         active_statuses = {"working", "waiting", "blocked", "silent"}
         active_agents = sum(job_counts.get(status, 0) for status in active_statuses)
 
@@ -574,14 +411,8 @@ class ProjectCloseoutService:
         }
 
     async def _get_project_for_tenant(self, project_id: str, tenant_key: str, session: Any) -> Project | None:
-        """
-        Fetch a project scoped to tenant for closeout operations.
-        """
         return await self._project_repo.get_by_id(session, tenant_key, project_id)
 
-    # ========================================================================
-    # Closeout readiness — the ONE source of truth (BE-3010c)
-    # ========================================================================
 
     async def evaluate_closeout_readiness(
         self,
@@ -591,22 +422,6 @@ class ProjectCloseoutService:
         *,
         orchestrator_job_id: str | None = None,
     ) -> CloseoutReadinessReport:
-        """Gather the SUPERSET of closeout-readiness findings for a project.
-
-        The single source of readiness truth. The former three divergent
-        implementations now derive from this one method:
-        - ``tools/project_closeout._check_agent_readiness`` (rich blocker list),
-        - ``tools/write_memory_entry._check_closeout_readiness`` (envelope), and
-        - ``can_close`` / ``_build_can_close_response`` (coarse counts, via
-          ``status_counts``).
-        A change to WHAT is inspected (the readiness rule) is made HERE once and
-        every caller observes it. Rendering (blocker shape) stays with the caller.
-
-        Per-agent data is gathered for every non-skipped agent. When
-        ``orchestrator_job_id`` is supplied the orchestrator is excluded from the
-        agent scan and its own incomplete TODOs are gathered separately (the
-        former ``_check_closeout_readiness`` Check 4).
-        """
         exec_stmt = (
             select(AgentExecution)
             .join(AgentJob, AgentExecution.job_id == AgentJob.job_id)
@@ -619,11 +434,6 @@ class ProjectCloseoutService:
         )
         executions = (await session.execute(exec_stmt)).scalars().all()
 
-        # BE-9144: the former per-execution TODO + approval lookups were an N+1
-        # (one query per non-skipped agent, plus one per awaiting_user agent).
-        # Gather the scanned set once, then batch both lookups into a single
-        # GROUP-BY-style IN(...) query each — the same technique
-        # workflow_status_service uses via get_todo_counts_by_job.
         scanned = [
             execution
             for execution in executions
@@ -639,7 +449,6 @@ class ProjectCloseoutService:
         approval_exec_ids = [execution.id for execution in scanned if execution.status == "awaiting_user"]
         approval_by_exec = await pending_approval_ids_by_execution(session, approval_exec_ids, tenant_key)
 
-        # TSK-9268: the live ack-based unread store the mark_read drain writes.
         live_unread_by_agent = await live_action_required_unread_by_agent(session, tenant_key, project_id, scanned)
 
         findings: list[AgentReadinessFinding] = []
@@ -672,10 +481,6 @@ class ProjectCloseoutService:
             orch_pending = sum(1 for t in orch if t.status == "pending")
             orch_in_progress = sum(1 for t in orch if t.status == "in_progress")
 
-        # Coarse status counts derived from the SAME execution scan (no extra
-        # query) so the can-close view shares this method without a second round
-        # trip. Shape matches _aggregate_agent_statuses (the other closeout
-        # endpoints' source) so can_close stays byte-identical.
         job_counts: dict[str, int] = {}
         for execution in executions:
             job_counts[execution.status] = job_counts.get(execution.status, 0) + 1
@@ -697,24 +502,8 @@ class ProjectCloseoutService:
             orchestrator_in_progress=orch_in_progress,
         )
 
-    # ========================================================================
-    # Orchestrator self-healing diagnostic (BE-6111c / BE-5055)
-    # ========================================================================
 
     async def diagnose_project_state(self, project_id: str, tenant_key: str | None = None) -> dict[str, Any]:
-        """Read-only lifecycle diagnostic for a project (no writes, no new tables).
-
-        Composes the project's lifecycle gates (status, execution_mode,
-        staging_status, implementation_launched_at), the agent/job status
-        counts, and the closeout-readiness findings into ONE report so an
-        orchestrator can detect and recover from a wedged project without
-        guessing. Reuses :meth:`evaluate_closeout_readiness` (the single
-        readiness source) and the project read; tenant-filtered throughout.
-
-        Raises:
-            ValidationError: Tenant context missing.
-            ResourceNotFoundError: Project not found or access denied.
-        """
         tenant_key = tenant_key or self.tenant_manager.get_current_tenant()
         if not tenant_key:
             raise ValidationError(message="Tenant context missing", context={"project_id": project_id})
@@ -742,13 +531,6 @@ class ProjectCloseoutService:
             )
             all_finished = counts["total"] > 0 and counts["active"] == 0
 
-            # BE-8003a: `suggested_actions` (below) is deliberately NOT migrated to
-            # the canonical `next_action` envelope. It's a multi-item list mapped
-            # 1:1 to independent `stuck` conditions that can co-occur (e.g. silent
-            # agents AND a pending approval at once) -- collapsing it to a single
-            # next_action would drop remedies for every condition but the first.
-            # Allowlisted in tests/unit/test_be8003a_next_action_envelope_surface.py.
-            # BE-9499b: computation moved to diagnose_staging_hints.py (Guardrail-1).
             stuck, suggested = compute_stuck_conditions(
                 execution_mode=execution_mode,
                 is_terminal=is_terminal,

@@ -3,30 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-RoadmapService — owning service for the Roadmapping Pane (FE-6022a).
-
-Owns ALL writes to ``roadmaps`` + ``roadmap_items``. Mirrors ProjectService /
-TaskService conventions: session handling, tenant scoping, exceptions-on-error
-(post-0480 — never a success-dict). Every read and write filters ``tenant_key``
-and scopes to the active product.
-
-Responsibilities:
-- Lazy-create the product's single roadmap on first write (race-safe via
-  ``INSERT ... ON CONFLICT (product_id) DO NOTHING`` then re-select).
-- Bulk upsert roadmap items (``INSERT ... ON CONFLICT ON CONSTRAINT
-  uq_roadmap_item DO UPDATE``) — de-dupes on (roadmap, item_type, project/task).
-- Reorder items by sort_order after a drag.
-- Read the roadmap joined to project/task display fields, sorted by sort_order.
-
-Validation discipline (no unvalidated agent input → DB): item_type / risk /
-complexity membership and the sort_order cap are enforced here BEFORE any DB
-write, raising ValidationError (→ 422) rather than letting a DB constraint
-produce a 500. Items may only reference entities of the active product +
-tenant (no cross-product leakage).
-
-Edition Scope: CE.
-"""
 
 import logging
 from datetime import UTC, datetime
@@ -69,7 +45,6 @@ logger = logging.getLogger(__name__)
 
 
 class RoadmapService:
-    """Service for the per-product roadmap. Session-scoped; do not share across requests."""
 
     def __init__(
         self,
@@ -80,12 +55,11 @@ class RoadmapService:
     ):
         self.db_manager = db_manager
         self.tenant_manager = tenant_manager
-        self._session = session  # injected test session for transaction isolation
+        self._session = session
         self._websocket_manager = websocket_manager
         self._logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def _get_session(self, tenant_key: str | None = None):
-        """Yield a tenant-scoped DB session, honoring an injected test session (shared helper, BE-8000d)."""
         return optional_tenant_session(
             self.db_manager,
             tenant_key or (self.tenant_manager.get_current_tenant() if self.tenant_manager else None),
@@ -112,16 +86,6 @@ class RoadmapService:
         action: str = "read",
         write: bool,
     ) -> str:
-        """Resolve the product a roadmap call scopes to (BE-9499a).
-
-        Omitted ``product_id`` -> the active product, byte-identical to the
-        pre-existing ``_resolve_default_product_id`` behaviour. Supplied, it is
-        validated as belonging to this tenant and used regardless of which
-        product is active -- never a silent fallback. See
-        ``ProductService.resolve_binding_product`` (``write`` -- BE-9523b --
-        governs whether an omitted id raises on a multi-product tenant instead
-        of silently binding to the active one; callers must state it).
-        """
         from giljo_mcp.services.product_service import ProductService
 
         product_service = ProductService(
@@ -134,16 +98,8 @@ class RoadmapService:
         )
         return str(product.id)
 
-    # ------------------------------------------------------------------
-    # Roadmap lazy-create (race-safe)
-    # ------------------------------------------------------------------
 
     async def _get_or_create_roadmap(self, session: AsyncSession, tenant_key: str, product_id: str) -> Roadmap:
-        """Return the product's roadmap, creating it on first write.
-
-        Race-safe: ON CONFLICT (product_id) DO NOTHING then re-select, so a
-        concurrent first write does not raise a unique violation.
-        """
         from giljo_mcp.models.base import generate_uuid
 
         insert_stmt = (
@@ -158,9 +114,6 @@ class RoadmapService:
         )
         return result.scalar_one()
 
-    # ------------------------------------------------------------------
-    # Writes
-    # ------------------------------------------------------------------
 
     async def upsert_metadata(
         self,
@@ -172,31 +125,6 @@ class RoadmapService:
         tenant_key: str | None = None,
         product_id: str | None = None,
     ) -> dict[str, Any]:
-        """Bulk upsert roadmap items for the active product's roadmap, or an explicit product_id.
-
-        Validates every item at the boundary, lazy-creates the roadmap, asserts
-        each referenced project/task belongs to the target product + tenant,
-        then upserts (de-duping on the uq_roadmap_item constraint).
-
-        BE-9499a: ``product_id`` is optional. Omitted, it resolves the active
-        product exactly as before. Supplied, it is validated as belonging to
-        this tenant and the roadmap write targets it regardless of which
-        product is active.
-
-        ``patch_fields`` (BE-9477) switches the UPDATE half of that upsert from
-        write-every-column to write-only-what-was-sent: an OMITTED metadata key
-        keeps its stored value, a key present but empty CLEARS it. It defaults
-        OFF, and off means the pre-BE-9477 path with nothing added -- which is
-        what makes it safe to land in an already-staged release. Whether it ever
-        becomes the default is a separate decision and is not taken here.
-
-        ``remove`` (0006) is an optional list of ``{item_type, project_id |
-        task_id}`` refs to drop from the active roadmap IN THE SAME transaction.
-        Removal is scoped to this product's roadmap + tenant and is idempotent:
-        a ref that matches no row is a clean no-op (counted 0), never an error.
-        When the same item appears in both ``items`` and ``remove``, removal
-        runs last and wins. Returns ``items_upserted`` + ``items_removed``.
-        """
         try:
             effective_tenant_key = tenant_key or (
                 self.tenant_manager.get_current_tenant() if self.tenant_manager else None
@@ -204,7 +132,6 @@ class RoadmapService:
             if not effective_tenant_key:
                 raise ValidationError(message="tenant_key is required", context={"operation": "upsert_roadmap_items"})
 
-            # BE-9474: one rejection covering both lists, naming every bad row.
             validated, validated_remove = validate_upsert_payload(items, remove, patch_fields=patch_fields)
 
             resolved_product_id = await self._resolve_scoped_product_id(
@@ -214,14 +141,11 @@ class RoadmapService:
 
             async with self._get_session(effective_tenant_key) as session:
                 roadmap = await self._get_or_create_roadmap(session, effective_tenant_key, product_id)
-                # BE-9474: aliases become ids first, so everything below sees ids only.
                 await resolve_refs(session, effective_tenant_key, product_id, validated, validated_remove)
                 await assert_items_in_product(session, effective_tenant_key, product_id, validated)
 
                 await upsert_many(session, effective_tenant_key, roadmap.id, validated, patch_fields=patch_fields)
 
-                # Removal runs AFTER the upsert so a contradictory same-item
-                # (in both lists) ends removed — predictable last-write-wins.
                 items_removed = await self._remove_refs(session, effective_tenant_key, roadmap.id, validated_remove)
 
                 roadmap.last_generated_at = datetime.now(UTC)
@@ -239,13 +163,6 @@ class RoadmapService:
                 effective_tenant_key,
             )
 
-            # FE-6022c: broadcast a tenant-scoped event so the Roadmap pane
-            # re-fetches live and clears its "Waiting for your agent…" indicator
-            # without a manual refresh. Mirrors TaskService's task:updated emit
-            # (task_service.py:599-613). Pass tenant_key EXPLICITLY — the
-            # ToolAccessor RoadmapService is a long-lived singleton, so we must
-            # not rely on ambient tenant context here. Non-critical: a broadcast
-            # failure is logged but never blocks the write.
             ws = self._websocket_manager
             if ws:
                 try:
@@ -271,7 +188,7 @@ class RoadmapService:
             }
         except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
             raise
-        except Exception as e:  # Broad catch: service boundary, wraps in BaseGiljoError
+        except Exception as e:
             self._logger.exception("Failed to upsert roadmap metadata")
             raise BaseGiljoError(message=str(e), context={"operation": "upsert_roadmap_items"}) from e
 
@@ -282,13 +199,6 @@ class RoadmapService:
         roadmap_id: str,
         refs: list[dict[str, Any]],
     ) -> int:
-        """Delete the roadmap_items matching ``{item_type, project_id|task_id}``
-        refs in ONE statement (BE-9144), scoped to this roadmap + tenant.
-        Returns the count actually deleted. A ref outside this roadmap (other
-        tenant/product, or simply not on it) matches nothing — idempotent no-op,
-        never a cross-scope delete. Removes ONLY the junction row; the underlying
-        project/task is untouched.
-        """
         if not refs:
             return 0
 
@@ -317,12 +227,6 @@ class RoadmapService:
         updates: Any,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
-        """Bulk sort_order update for the active product's roadmap items.
-
-        Only items belonging to the active product's roadmap (tenant-scoped) are
-        updated; unknown / cross-tenant / cross-product ids are silently skipped
-        (the count reflects what was actually changed).
-        """
         try:
             effective_tenant_key = tenant_key or (
                 self.tenant_manager.get_current_tenant() if self.tenant_manager else None
@@ -377,7 +281,7 @@ class RoadmapService:
             return {"roadmap_id": roadmap_id, "product_id": product_id, "items_reordered": updated}
         except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
             raise
-        except Exception as e:  # Broad catch: service boundary, wraps in BaseGiljoError
+        except Exception as e:
             self._logger.exception("Failed to reorder roadmap")
             raise BaseGiljoError(message=str(e), context={"operation": "reorder_roadmap"}) from e
 
@@ -389,21 +293,6 @@ class RoadmapService:
         task_id: str,
         new_project_id: str,
     ) -> bool:
-        """Re-point a roadmap item from a converted task to its new project, IN PLACE.
-
-        Called from the task→project conversion flow (TaskConversionService)
-        BEFORE the task row is hard-deleted, so the ON DELETE CASCADE on
-        ``roadmap_items.task_id`` (ce_0047) does not silently remove the item.
-        The item keeps its sort_order/position — only the discriminator flips
-        (``item_type`` task→project, ``task_id``→NULL, ``project_id`` set). The
-        user runs Refresh if they want a re-rank; conversion never reorders.
-
-        Operates within the CALLER's session/transaction (flush only, no commit
-        — the conversion owns the commit). Returns True if any item was
-        re-pointed. Handles the rare ``uq_roadmap_item`` conflict where the new
-        project is ALREADY on the same roadmap: the orphaned task item is
-        deleted instead (the existing project item stands).
-        """
         res = await session.execute(
             select(RoadmapItem).where(
                 RoadmapItem.tenant_key == tenant_key,
@@ -417,9 +306,6 @@ class RoadmapService:
 
         repointed = False
         for item in items:
-            # Would flipping collide with an existing project item on the same
-            # roadmap (uq_roadmap_item, NULLS NOT DISTINCT)? If so, the project
-            # is already roadmapped — drop the orphaned task item instead.
             existing = await session.execute(
                 select(RoadmapItem.id).where(
                     RoadmapItem.tenant_key == tenant_key,
@@ -452,16 +338,6 @@ class RoadmapService:
         item_id: str,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
-        """Remove ONE item from the active product's roadmap (FE-6022c-polish).
-
-        Scoped to the caller's tenant_key AND the active product's roadmap: an
-        ``item_id`` belonging to another tenant, or to a different product's
-        roadmap, or simply unknown, is a clean no-op (``removed=0``) — never a
-        500 and never a cross-tenant/cross-product delete. Removes ONLY the
-        ``roadmap_item`` row; the underlying project/task is untouched. Raises
-        ResourceNotFoundError (→ 404) only when no product is active (mirrors
-        ``get_roadmap`` / ``reorder``).
-        """
         try:
             effective_tenant_key = tenant_key or (
                 self.tenant_manager.get_current_tenant() if self.tenant_manager else None
@@ -485,8 +361,6 @@ class RoadmapService:
                 if roadmap is None:
                     return {"product_id": product_id, "roadmap_id": None, "removed": 0}
 
-                # Tenant + active-product scoped lookup: an id outside this
-                # roadmap (other tenant / other product / unknown) finds nothing.
                 item_res = await session.execute(
                     select(RoadmapItem).where(
                         RoadmapItem.tenant_key == effective_tenant_key,
@@ -511,21 +385,11 @@ class RoadmapService:
             return {"product_id": product_id, "roadmap_id": roadmap_id, "removed": 1}
         except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
             raise
-        except Exception as e:  # Broad catch: service boundary, wraps in BaseGiljoError
+        except Exception as e:
             self._logger.exception("Failed to remove roadmap item")
             raise BaseGiljoError(message=str(e), context={"operation": "remove_roadmap_item"}) from e
 
     async def _broadcast_agent_active(self, tenant_key: str, product_id: str) -> None:
-        """Best-effort "an agent just connected to work on the roadmap" signal.
-
-        FE-6240: emitted from the MCP ``get_roadmap`` read path (the agent's
-        first touch) so the Roadmap pane raises its "Waiting for your agent…"
-        spinner on the REAL agent connection rather than the user's copy-prompt
-        click. Non-critical: a broadcast failure is logged and never blocks the
-        read. Pass ``tenant_key`` EXPLICITLY — the ToolAccessor RoadmapService is
-        a long-lived singleton, so there is no ambient tenant context to rely on
-        (mirrors the ``upsert_metadata`` broadcast).
-        """
         ws = self._websocket_manager
         if not ws:
             return
@@ -538,32 +402,10 @@ class RoadmapService:
         except (RuntimeError, ValueError, OSError) as ws_error:
             self._logger.warning("Failed to broadcast roadmap:agent_active event: %s", ws_error)
 
-    # ------------------------------------------------------------------
-    # Read
-    # ------------------------------------------------------------------
 
     async def get_roadmap(
         self, tenant_key: str | None = None, emit_agent_active: bool = False, product_id: str | None = None
     ) -> dict[str, Any]:
-        """Return the active product's roadmap + items joined to display fields, or an explicit product_id's.
-
-        Shape: ``{product_id, roadmap: {...}|null, items: [...]}``. Items are
-        sorted by sort_order (then created_at). 0006 (HARD AUTO-DROP): terminal
-        projects/tasks are EXCLUDED from the active roadmap — this deliberately
-        REVERSES the FE-6022c choice to surface them with a badge, because a
-        terminal item with no actionable state pins/locks the plan. See
-        ``_build_item_rows`` for the exact drop rule.
-
-        BE-9499a: ``product_id`` is optional. Omitted, this resolves the active
-        product exactly as before (ResourceNotFoundError when none is active).
-        Supplied, it is validated as belonging to this tenant via
-        ``ProductService.resolve_binding_product`` (ValidationError when it
-        does not) and read regardless of which product is active.
-
-        Raises ResourceNotFoundError when no product is active and product_id
-        was omitted; ValidationError when a supplied product_id does not
-        belong to this tenant.
-        """
         try:
             effective_tenant_key = tenant_key or (
                 self.tenant_manager.get_current_tenant() if self.tenant_manager else None
@@ -581,10 +423,6 @@ class RoadmapService:
                     raise ResourceNotFoundError(message="No active product set.", context={"operation": "get_roadmap"})
             product_id = resolved_product_id
 
-            # FE-6240: the MCP read path (agent's first touch) passes
-            # emit_agent_active=True so the Roadmap pane shows its waiting
-            # spinner the moment the agent connects. The REST read (the user's
-            # own page load) leaves it False, so a user visit never trips it.
             if emit_agent_active:
                 await self._broadcast_agent_active(effective_tenant_key, product_id)
 
@@ -621,7 +459,7 @@ class RoadmapService:
                 }
         except (BaseGiljoError, ResourceNotFoundError, ValidationError, AuthorizationError):
             raise
-        except Exception as e:  # Broad catch: service boundary, wraps in BaseGiljoError
+        except Exception as e:
             self._logger.exception("Failed to read roadmap")
             raise BaseGiljoError(message=str(e), context={"operation": "get_roadmap"}) from e
 
@@ -631,17 +469,6 @@ class RoadmapService:
         tenant_key: str,
         items: list[RoadmapItem],
     ) -> list[dict[str, Any]]:
-        """Join items to project/task display fields in two batched queries.
-
-        0006 (HARD AUTO-DROP): a project whose effective status is terminal
-        (``LIFECYCLE_FINISHED_STATUSES`` = completed/cancelled/terminated/
-        deleted, or soft-deleted via ``deleted_at``) and a task whose status is
-        terminal (``TASK_LIFECYCLE_FINISHED_STATUSES`` = completed/cancelled) are
-        DROPPED from the active roadmap — they no longer pin/lock the plan. The
-        live ``active`` (ACTIVATED) project status is NOT terminal: it stays
-        (reversible via Deactivate). Hard-deleted rows (project/task gone) drop
-        as before. Reverses the FE-6022c surface-with-badge behavior on purpose.
-        """
         project_ids = [it.project_id for it in items if it.item_type == "project" and it.project_id]
         task_ids = [it.task_id for it in items if it.item_type == "task" and it.task_id]
 
@@ -659,8 +486,6 @@ class RoadmapService:
             res = await session.execute(
                 select(Task)
                 .options(joinedload(Task.task_type))
-                # BE-6130b: trashed tasks drop off the roadmap (the row builder
-                # below already skips a task_id that resolves to None).
                 .where(Task.tenant_key == tenant_key, Task.deleted_at.is_(None), Task.id.in_(task_ids))
             )
             tasks = {t.id: t for t in res.scalars().all()}
@@ -669,39 +494,22 @@ class RoadmapService:
         for it in items:
             if it.item_type == "project":
                 proj = projects.get(it.project_id)
-                # Project.status is a Postgres enum (ProjectStatus member); coerce
-                # to its string value for the wire contract + the terminal check.
                 proj_status = getattr(proj.status, "value", proj.status) if proj else None
-                # Drop HARD-deleted projects (row gone — the roadmap_item is being
-                # cascaded away too).
                 if proj is None:
                     continue
                 status = "deleted" if proj.deleted_at is not None else proj_status
-                # 0006 HARD AUTO-DROP: a terminal project no longer pins the
-                # active roadmap (reverses FE-6022c surfacing). `active` is NOT
-                # terminal — an activated project stays (reversible).
                 if status in LIFECYCLE_FINISHED_STATUSES:
                     continue
-                # IMP-9258: `parked` is its OWN hidden-but-not-finished
-                # exclusion -- deliberately NOT folded into
-                # LIFECYCLE_FINISHED_STATUSES (it is resumable and stays
-                # visible in normal project lists), but a parked project
-                # should not pin the active roadmap plan either.
                 if status == ProjectStatus.PARKED:
                     continue
                 title = proj.name
                 taxonomy_alias = proj.taxonomy_alias or ""
-                # Per-taxonomy color (TaxonomyType.color) so the roadmap alias
-                # chip matches the tinted serial badge in the project/task lists,
-                # instead of a single static color. None falls back client-side.
                 taxonomy_color = proj.project_type.color if proj.project_type else None
             else:
                 task = tasks.get(it.task_id)
                 if task is None:
                     continue
                 status = task.status
-                # 0006 HARD AUTO-DROP: a terminal task (completed/cancelled) is
-                # excluded too — symmetric with projects, so it can't pin the plan.
                 if status in TASK_LIFECYCLE_FINISHED_STATUSES:
                     continue
                 title = task.title

@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Manual integration test script for Download API endpoints (Handover 0094)
-Tests all download functionality with real API and database.
-
-Run this script manually to verify the download system works end-to-end.
-"""
 
 import asyncio
 import importlib
@@ -17,8 +11,6 @@ import sys
 from pathlib import Path
 
 
-# Add src to path
-# TODO: Remove after editable install confirmed on all platforms
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from dotenv import dotenv_values, load_dotenv  # noqa: E402
@@ -29,7 +21,6 @@ from giljo_mcp.models import AgentTemplate, User  # noqa: E402
 
 
 def test_module_import_does_not_mutate_environ():
-    """Re-importing this module must not write to os.environ (BE-5040 invariant)."""
     pre_snapshot = dict(os.environ)
     module = sys.modules[__name__]
     importlib.reload(module)
@@ -40,7 +31,6 @@ def test_module_import_does_not_mutate_environ():
 
 
 def test_dotenv_values_is_read_only(tmp_path, monkeypatch):
-    """dotenv_values must parse without mutating os.environ."""
     env_file = tmp_path / ".env"
     env_file.write_text("DOWNLOADS_MANUAL_PROBE=alpha\n")
 
@@ -55,7 +45,6 @@ def test_dotenv_values_is_read_only(tmp_path, monkeypatch):
 
 
 class DownloadsTester:
-    """Manual test runner for downloads system"""
 
     def __init__(self):
         self.base_url = "http://localhost:7272"
@@ -64,13 +53,11 @@ class DownloadsTester:
         self.test_user = None
 
     async def setup(self):
-        """Setup test environment"""
         print("=" * 70)
         print("DOWNLOADS API MANUAL INTEGRATION TEST")
         print("=" * 70)
         print("")
 
-        # Connect to database
         db_url = os.getenv("DATABASE_URL")
         if not db_url:
             print("ERROR: DATABASE_URL not set in environment")
@@ -79,7 +66,6 @@ class DownloadsTester:
         self.db = DatabaseManager(db_url, is_async=True)
         print(f"[OK] Connected to database: {db_url.split('@')[-1] if '@' in db_url else db_url}")
 
-        # Get test user
         async with self.db.get_session_async() as session:
             result = await session.execute(select(User).where(User.is_active == True).limit(1))  # noqa: E712 — SQLAlchemy filter
             self.test_user = result.scalar_one_or_none()
@@ -93,7 +79,6 @@ class DownloadsTester:
         print("")
 
     async def create_test_templates(self):
-        """Create test agent templates"""
         print("Creating test agent templates...")
 
         templates = [
@@ -132,7 +117,6 @@ class DownloadsTester:
         ]
 
         async with self.db.get_session_async() as session:
-            # Remove existing test templates
             existing = await session.execute(
                 select(AgentTemplate).where(
                     AgentTemplate.name.like("test_%"),
@@ -143,7 +127,6 @@ class DownloadsTester:
                 await session.delete(template)
             await session.commit()
 
-            # Add new test templates
             session.add_all(templates)
             await session.commit()
 
@@ -151,7 +134,6 @@ class DownloadsTester:
         print("")
 
     def test_result(self, test_name: str, passed: bool, details: str = ""):
-        """Record test result"""
         status = "PASS" if passed else "FAIL"
         self.results.append({"test": test_name, "passed": passed, "details": details})
         print(f"[{status}] {test_name}")
@@ -159,14 +141,12 @@ class DownloadsTester:
             print(f"      {details}")
 
     async def test_slash_commands_download(self):
-        """Test slash commands download endpoint"""
         print("Testing /api/download/slash-commands.zip...")
 
         try:
             import httpx
 
             async with httpx.AsyncClient() as client:
-                # Test without authentication (should fail)
                 response = await client.get(f"{self.base_url}/api/download/slash-commands.zip")
                 self.test_result(
                     "Slash commands - unauthenticated",
@@ -174,8 +154,6 @@ class DownloadsTester:
                     f"Status: {response.status_code}",
                 )
 
-                # For authenticated test, we need a valid token
-                # This is a limitation of manual testing - in production, use Bearer token
                 print("      Note: Authenticated test requires valid JWT token")
                 print("      Skipping authenticated test (use Postman/curl with real token)")
 
@@ -185,14 +163,12 @@ class DownloadsTester:
         print("")
 
     async def test_agent_templates_download(self):
-        """Test agent templates download endpoint"""
         print("Testing /api/download/agent-templates.zip...")
 
         try:
             import httpx
 
             async with httpx.AsyncClient() as client:
-                # Test without authentication (should fail)
                 response = await client.get(f"{self.base_url}/api/download/agent-templates.zip")
                 self.test_result(
                     "Agent templates - unauthenticated",
@@ -209,14 +185,12 @@ class DownloadsTester:
         print("")
 
     async def test_install_scripts(self):
-        """Test install script downloads"""
         print("Testing install scripts...")
 
         try:
             import httpx
 
             async with httpx.AsyncClient() as client:
-                # Test Unix script
                 response = await client.get(
                     f"{self.base_url}/api/download/install-script.sh?script_type=slash-commands"
                 )
@@ -226,7 +200,6 @@ class DownloadsTester:
                     f"Status: {response.status_code}",
                 )
 
-                # Test PowerShell script
                 response = await client.get(
                     f"{self.base_url}/api/download/install-script.ps1?script_type=agent-templates"
                 )
@@ -236,7 +209,6 @@ class DownloadsTester:
                     f"Status: {response.status_code}",
                 )
 
-                # Test invalid extension
                 response = await client.get(
                     f"{self.base_url}/api/download/install-script.bat?script_type=slash-commands"
                 )
@@ -252,11 +224,9 @@ class DownloadsTester:
         print("")
 
     async def test_utility_functions(self):
-        """Test utility functions directly"""
         print("Testing utility functions...")
 
         try:
-            # Test ZIP creation inline
             import io
             import zipfile
 
@@ -275,7 +245,6 @@ class DownloadsTester:
                     f"Created ZIP with {len(namelist)} files",
                 )
 
-            # Test YAML frontmatter generation inline
             yaml_lines = [
                 "---",
                 "name: test_agent",
@@ -292,7 +261,6 @@ class DownloadsTester:
                 "Generated valid YAML frontmatter",
             )
 
-            # Test server URL construction
             url = "http://localhost:7272"
             self.test_result(
                 "get_server_url (inline)",
@@ -306,12 +274,10 @@ class DownloadsTester:
         print("")
 
     async def test_database_templates(self):
-        """Test database template retrieval"""
         print("Testing database template retrieval...")
 
         try:
             async with self.db.get_session_async() as session:
-                # Query templates for test user
                 result = await session.execute(
                     select(AgentTemplate)
                     .where(
@@ -324,11 +290,10 @@ class DownloadsTester:
 
                 self.test_result(
                     "Database - retrieve active templates",
-                    len(templates) >= 2,  # Should have at least our test templates
+                    len(templates) >= 2,
                     f"Found {len(templates)} active templates",
                 )
 
-                # Verify test templates exist
                 template_names = [t.name for t in templates]
                 self.test_result(
                     "Database - test templates exist",
@@ -336,7 +301,6 @@ class DownloadsTester:
                     f"Templates: {', '.join(template_names[:5])}...",
                 )
 
-                # Verify inactive template not returned
                 self.test_result(
                     "Database - inactive templates filtered",
                     "test_inactive" not in template_names,
@@ -349,12 +313,10 @@ class DownloadsTester:
         print("")
 
     async def cleanup(self):
-        """Cleanup test data"""
         print("Cleaning up test data...")
 
         try:
             async with self.db.get_session_async() as session:
-                # Remove test templates
                 result = await session.execute(
                     select(AgentTemplate).where(
                         AgentTemplate.name.like("test_%"),
@@ -373,7 +335,6 @@ class DownloadsTester:
         print("")
 
     def print_summary(self):
-        """Print test summary"""
         print("=" * 70)
         print("TEST SUMMARY")
         print("=" * 70)
@@ -406,7 +367,6 @@ class DownloadsTester:
         print("")
 
     async def run_all_tests(self):
-        """Run all integration tests"""
         await self.setup()
         await self.create_test_templates()
         await self.test_utility_functions()
@@ -419,7 +379,6 @@ class DownloadsTester:
 
 
 async def main():
-    """Main test runner"""
     load_dotenv()
     tester = DownloadsTester()
     await tester.run_all_tests()

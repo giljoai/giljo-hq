@@ -3,17 +3,11 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tests for tag_utils — shared tag cleanup utility (BE-5022f, Task 3).
-
-TDD: tests written before implementation.
-"""
 
 from giljo_mcp.utils.tag_utils import clean_tags, sanitize_tag, strip_tag_punctuation
 
 
 class TestStripTagPunctuation:
-    """Tests for strip_tag_punctuation (no truncation)."""
 
     def test_strips_boundary_punctuation(self):
         assert strip_tag_punctuation("(refactor)") == "refactor"
@@ -29,16 +23,13 @@ class TestStripTagPunctuation:
         assert strip_tag_punctuation("") == ""
 
     def test_all_punctuation_returns_empty(self):
-        """A tag that is entirely boundary punctuation strips to empty string."""
         assert strip_tag_punctuation("(),:;.!?") == ""
 
     def test_strips_all_strip_chars_from_boundaries(self):
-        """All chars in STRIP_CHARS are stripped from both ends."""
         assert strip_tag_punctuation("(),:;.!?hello(),:;.!?") == "hello"
 
 
 class TestSanitizeTag:
-    """Tests for individual tag sanitization."""
 
     def test_strips_trailing_punctuation(self):
         assert sanitize_tag("refactor.") == "refactor"
@@ -74,7 +65,6 @@ class TestSanitizeTag:
 
 
 class TestCleanTags:
-    """Tests for the full clean_tags pipeline."""
 
     def test_filters_stopwords(self):
         tags = ["the", "refactor", "from", "database"]
@@ -133,7 +123,6 @@ class TestCleanTags:
         assert "bug_fix:auth_timeout" in result
 
     def test_combined_pipeline(self):
-        """Stopwords removed, punctuation stripped, deduped, capped."""
         tags = ["The", "(database)", "database", "from", "refactor.", "auth"]
         result = clean_tags(tags)
         assert "The" not in result
@@ -144,7 +133,6 @@ class TestCleanTags:
         assert "auth" in result
 
     def test_filters_all_28_stopwords(self):
-        """Every stopword in the list is filtered out."""
         all_stopwords = [
             "from",
             "with",
@@ -180,13 +168,10 @@ class TestCleanTags:
         assert result == [], f"Expected empty result, got {result}"
 
     def test_single_char_tag_not_stopword_preserved(self):
-        """Single-char tags that aren't stopwords are kept (edge case)."""
-        # "a" and "i" are both stopwords — "x" is not
         result = clean_tags(["a", "x"])
         assert "a" not in result
         assert "x" in result
 
     def test_non_list_type_returns_empty(self):
-        """Falsy non-list input (empty string, 0) returns empty list."""
         assert clean_tags("") == []
         assert clean_tags(0) == []

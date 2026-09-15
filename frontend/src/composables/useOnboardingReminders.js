@@ -1,17 +1,5 @@
 import { ref, computed } from 'vue'
 
-/**
- * Manages onboarding reminder banners on the dashboard.
- *
- * Integration reminder:
- *   - Appears after the user creates their first project.
- *   - If dismissed, re-appears after 2 days (once).
- *   - Never appears again after the second dismissal.
- *
- * Agent/context reminder:
- *   - Appears after the user's first project completes.
- *   - Shows once, never again after dismissal.
- */
 
 const LS_INTEG_COUNT = 'giljo_onboard_integ_count'
 const LS_INTEG_DISMISSED_AT = 'giljo_onboard_integ_dismissed_at'
@@ -29,16 +17,11 @@ export function useOnboardingReminders() {
   const integDismissedAt = ref(localStorage.getItem(LS_INTEG_DISMISSED_AT) || null)
   const agentDismissed = ref(localStorage.getItem(LS_AGENT_DISMISSED) === 'true')
 
-  /**
-   * Whether the integration reminder should display.
-   * @param {boolean} hasProjects - true if the user has at least one project
-   */
   const showIntegrationReminder = computed(() => {
     return (hasProjects) => {
       if (!hasProjects) return false
       if (integDismissCount.value >= 2) return false
       if (integDismissCount.value === 0) return true
-      // Dismissed once — check if 2 days have passed
       if (integDismissedAt.value) {
         const elapsed = Date.now() - new Date(integDismissedAt.value).getTime()
         return elapsed >= TWO_DAYS_MS
@@ -47,10 +30,6 @@ export function useOnboardingReminders() {
     }
   })
 
-  /**
-   * Whether the agent/context reminder should display.
-   * @param {boolean} hasCompletedProject - true if user has a completed project
-   */
   const showAgentReminder = computed(() => {
     return (hasCompletedProject) => {
       if (!hasCompletedProject) return false

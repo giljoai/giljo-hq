@@ -5,14 +5,7 @@
       Account-level actions. These are permanent — proceed carefully.
     </p>
 
-    <!-- IMP-5042 layout: Export + Account-deletion as a 2-up row; the
-         orchestrator-prompt editor sits full-width beneath. -->
     <div class="danger-top">
-      <!--
-      Download My Data (BE-5062 — GDPR data portability).
-      Visible in CE (single-user, no role gate) and in SaaS for org admins.
-      Server gates the endpoint itself; this v-if is UX hygiene.
-    -->
       <div
         v-if="canExportData"
         class="danger-card danger-card--enabled smooth-border"
@@ -32,7 +25,6 @@
             agents, memory, tasks, and configuration. Credentials are redacted.
           </div>
 
-          <!-- Progress feed (driven by WebSocket tenant:export_progress events). -->
           <div
             v-if="exporting || exportProgress"
             class="export-progress"
@@ -50,7 +42,6 @@
             </div>
           </div>
 
-          <!-- Completed: download link + expiry + model counts. -->
           <div v-if="exportResult" class="export-result" data-test="export-result">
             <a
               :href="exportResult.download_url"
@@ -76,7 +67,6 @@
             </ul>
           </div>
 
-          <!-- Error surface. -->
           <div v-if="exportError" class="export-error" data-test="export-error">
             {{ exportError }}
           </div>
@@ -96,7 +86,6 @@
         </div>
       </div>
 
-      <!-- Delete card (SaaS-only) -->
       <div
         v-if="isSaas"
         class="danger-card danger-card--enabled smooth-border"
@@ -137,8 +126,6 @@
           </div>
         </div>
         <div class="danger-card-action">
-          <!-- when a deletion is pending or confirmed, the SAFE
-             primary action is "Cancel pending deletion" (warning, not red). -->
           <v-btn
             v-if="hasPendingDeletion"
             color="warning"
@@ -165,30 +152,12 @@
       </div>
     </div>
 
-    <!--
-      FE-6130h: Backup & restore self-service (SaaS-only). Extracted into its own
-      saas/ component to keep DangerPage under the 800-line file-size limit and
-      to keep the /api/saas/account/* path strings + request-restore dialog out of
-      the CE bundle. Lazy-glob loaded (CE export strips saas/ → glob empties → the
-      component stays null and never renders), gated SaaS-only.
-    -->
     <component :is="DangerZoneRestore" v-if="isSaas && DangerZoneRestore" />
 
-    <!--
-      Orchestrator prompt (IMP-5042). Tenant-scoped power-user setting relocated
-      here from the admin panel: editing it can break orchestrator coordination,
-      so it belongs in the Danger Zone. Rendered full-width beneath the 2-up row
-      so the editor has room. Admin-only — the /orchestrator-prompt endpoints are
-      require_admin, so a non-admin member never sees or reaches it.
-    -->
     <div v-if="canEditPrompt" class="prompt-section" data-test="orchestrator-prompt-section">
       <SystemPromptTab />
     </div>
 
-    <!-- Lazy-load the SaaS-only dialog so the import never appears in CE bundles.
-         BE-9040d: the old "cancel your subscription first in Billing" dead-end dialog
-         is removed — deletion now auto-cancels the subscription. The dialog shows a
-         pro-rata-forfeit notice when the account has an active subscription. -->
     <component
       :is="DeleteAccountDialog"
       v-if="isSaas && DeleteAccountDialog"
@@ -199,18 +168,6 @@
 </template>
 
 <script setup>
-/**
- * Account "Danger Zone" sub-tab.
- *
- * Two stacked accent-bordered cards (Export, Delete) using the same
- * smooth-border + accent-stripe pattern as WelcomeView quick-launch cards.
- *
- * Edition gating:
- * - Export card is edition-neutral (still a stub for both editions).
- * - Delete card and its dialog are SaaS-only — gated via configService and
- *   the dialog is dynamically imported from saas/, so neither the import
- *   nor the deletion path strings end up in the CE bundle.
- */
 import { ref, shallowRef, computed, onMounted, onBeforeUnmount } from 'vue'
 import configService from '@/services/configService'
 import { useToast } from '@/composables/useToast'
@@ -221,41 +178,23 @@ import SystemPromptTab from '@/components/settings/tabs/SystemPromptTab.vue'
 
 const showDeleteDialog = ref(false)
 const DeleteAccountDialog = shallowRef(null)
-// FE-6130h: SaaS-only backup & restore controls, extracted to its own saas/
-// component and lazy-glob loaded so it never enters the CE bundle.
 const DangerZoneRestore = shallowRef(null)
 const { showToast } = useToast()
 
-// Edition flags. `getEdition()` returns 'community' for GILJO_MODE=ce, 'saas'
-// for saas. We use this for visibility of CE-only / SaaS-only affordances on
-// this page (matches the existing pattern for the SaaS-only delete card).
-// configService is the mode source of truth for components rendered well after
-// initial navigation (ADR-002 § "Rule 1").
 const isCe = computed(() => configService.getEdition() === 'community')
 const isSaas = computed(() => configService.getEdition() !== 'community')
 
-// BE-5062: Download My Data is available in CE (single-user, no role gate)
-// and in SaaS for org admins. Tenant isolation is enforced server-side regardless.
 const userStore = useUserStore()
 const canExportData = computed(() => {
   if (isCe.value) return true
   return isSaas.value && userStore.isAdmin
 })
 
-// IMP-5042: the orchestrator-prompt editor is admin-only (its endpoints are
-// require_admin). In CE and SaaS Solo the single user is the admin, so they see
-// it; a future Team non-admin member does not.
 const canEditPrompt = computed(() => userStore.isAdmin)
 
-// ---------------------------------------------------------------------------
-// BE-5062 — Download My Data
-// ---------------------------------------------------------------------------
 const exporting = ref(false)
 const exportError = ref('')
-// Latest WebSocket progress frame: { model, current, total, phase }.
 const exportProgress = ref(null)
-// Final result from POST /api/v1/account/export:
-//   { download_url, expires_at, model_counts }
 const exportResult = ref(null)
 
 const exportPercent = computed(() => {
@@ -272,7 +211,6 @@ const exportStatusText = computed(() => {
   if (p.phase === 'complete') {
     return p.records != null ? `Export complete — ${p.records} records.` : 'Export complete.'
   }
-  // "exporting" phase — model + counts.
   const model = p.model || '…'
   return `Exporting ${model} (${p.current} / ${p.total})…`
 })
@@ -299,15 +237,10 @@ const modelCountEntries = computed(() => {
   return Object.entries(counts).sort(([a], [b]) => a.localeCompare(b))
 })
 
-// Subscribe to tenant:export_progress on the shared WebSocket connection.
-// ws.on(...) returns an unsubscribe function — we capture it so the handler
-// doesn't leak past this component's lifetime.
 const ws = useWebSocketStore()
 let unsubscribeExportProgress = null
 
 function handleExportProgress(payload) {
-  // Payload is normalized to the flat data shape by the WS store; the data
-  // field may be nested or flat depending on transport. Read defensively.
   const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload
   if (!data) return
   exportProgress.value = {
@@ -326,8 +259,6 @@ async function onGenerateExport() {
   exportProgress.value = null
   exportResult.value = null
 
-  // Subscribe lazily on first click so we don't pay handler cost for users
-  // who never trigger an export.
   if (!unsubscribeExportProgress) {
     unsubscribeExportProgress = ws.on('tenant:export_progress', handleExportProgress)
   }
@@ -344,9 +275,6 @@ async function onGenerateExport() {
       throw new Error('Backend did not return a download URL.')
     }
   } catch (err) {
-    // Backend exception handlers can return either { detail } (FastAPI default)
-    // or { error_code, message, timestamp } (wrapped). Surface either, plus
-    // the 403 "Data export is not available in this edition." case.
     const data = err?.response?.data
     const message =
       data?.detail ||
@@ -360,7 +288,6 @@ async function onGenerateExport() {
   }
 }
 
-// lazy account-state store handle (CE-export safe).
 const accountStateStoreRef = shallowRef(null)
 const hasPendingDeletion = computed(
   () => accountStateStoreRef.value?.isAccountScheduledForDeletion ?? false,
@@ -371,10 +298,6 @@ const cardAccent = computed(() =>
 const cancellingDeletion = ref(false)
 const checkingDeleteEligibility = ref(false)
 
-// BE-9040d: an active paid subscription no longer BLOCKS deletion — it is
-// auto-cancelled as part of the delete flow. We still read the flag so the
-// confirmation dialog can show the pro-rata-forfeit notice (access ends now,
-// no further charges, remaining paid days forfeited, no refund).
 const hasActiveSubscription = computed(
   () => accountStateStoreRef.value?.hasCurrentPaidSubscription ?? false,
 )
@@ -384,8 +307,6 @@ async function onOpenDeleteAccount() {
   checkingDeleteEligibility.value = true
   try {
     if (store?.fetchStatus) {
-      // Refresh subscription state so the dialog's forfeit notice reflects the
-      // live plan — bypass the short-TTL dedupe cache (FE-6059).
       await store.fetchStatus({ force: true })
     }
     showDeleteDialog.value = true
@@ -412,21 +333,10 @@ async function onCancelPendingDeletion() {
   }
 }
 
-// CE-export safety: use Vite's static glob discovery so the import string
-// is *not* statically bound to a path that may have been stripped from the
-// CE tree. In CE builds saas/ is removed before `vite build` runs, the glob
-// resolves to an empty map, and DeleteAccountDialog stays null (and the
-// gating v-if above keeps the card off the page anyway). Same pattern as
-// main.js uses to load saas/routes/index.js.
 const dlgLoaders = import.meta.glob('@/saas/components/DeleteAccountDialog.vue')
 
-// also lazy-load the account-state store so the Cancel-pending
-// affordance can read deletion status. CE export drops both globs.
 const acctStoreLoaders = import.meta.glob('@/saas/stores/useAccountStateStore.js')
 
-// FE-6130h: lazy-load the SaaS-only backup & restore controls component.
-// Same static-glob pattern — CE export strips saas/ so the glob resolves to an
-// empty map in CE builds and the component stays null (never rendered).
 const restoreSectionLoaders = import.meta.glob('@/saas/components/account/DangerZoneRestore.vue')
 
 onBeforeUnmount(() => {
@@ -457,16 +367,12 @@ onMounted(async () => {
       const mod = await storeLoader()
       const store = mod.useAccountStateStore()
       accountStateStoreRef.value = store
-      // Refresh on mount in case the user landed here directly.
       store.fetchStatus()
     } catch (e) {
       console.warn('[DangerPage] account-state store unavailable:', e?.message)
     }
   }
 
-  // FE-6130h: load the SaaS-only backup & restore controls component. It owns
-  // its own state/API calls (statically imported from saas/), so DangerPage just
-  // mounts it once resolved.
   const [restoreSectionLoader] = Object.values(restoreSectionLoaders)
   if (restoreSectionLoader) {
     try {

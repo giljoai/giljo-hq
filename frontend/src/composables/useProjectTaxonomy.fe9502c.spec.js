@@ -1,15 +1,3 @@
-/**
- * useProjectTaxonomy.fe9502c.spec.js — FE-9502c
- *
- * The tabbed product shell needs series-number lookups to resolve against
- * the VIEWED tab's product, not whichever product happens to be server-active
- * (api/endpoints/projects/series.py's product_id override, this same
- * project). Proves the composable actually forwards `productId` to every
- * one of the three live-lookup API calls -- the override is useless if
- * nothing on the frontend passes it.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ref, nextTick } from 'vue'
 import { useProjectTaxonomy } from './useProjectTaxonomy'

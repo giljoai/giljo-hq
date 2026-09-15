@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Security helper modules for Giljo HQ (Community Edition).
-
-Subpackages:
-    upload_guard: Filename sanitization and text-content byte-sniff for the
-        vision document upload surface (SEC-0001 Phase 2).
-"""
 
 from .upload_guard import (
     TEXT_EXTENSIONS,

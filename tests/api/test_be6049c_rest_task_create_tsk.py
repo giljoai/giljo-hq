@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6049c H2 regression — REST ``POST /api/v1/tasks`` forces the TSK tag.
-
-The dashboard "New Task" flow hits this REST endpoint (not the MCP path). When
-tasks became TSK-only, the MCP ``create_task_for_mcp`` was rewritten to force
-TSK + always allocate the global serial, but the REST endpoint was initially
-missed — it still resolved an inbound ``task_type`` and only allocated a serial
-when a type was present, so a dashboard-created task came out UNTYPED and
-serial-less, contradicting the TSK-only dialog (which shows a fixed "TSK" type
-and an auto serial).
-
-These tests pin the REST boundary: a created task is always TSK with a
-``TSK-nnnn`` alias, whether the client omits ``task_type`` (the real FE payload)
-or passes a bogus/legacy value (which must be ignored, not error).
-"""
 
 from __future__ import annotations
 
@@ -38,7 +24,6 @@ _TEST_CSRF_TOKEN = secrets.token_urlsafe(32)
 
 
 async def _seed_user_with_product(db_manager) -> dict:
-    """Create org + user + ACTIVE product in a fresh tenant; return auth + ids."""
     async with db_manager.get_session_async() as session:
         suffix = uuid.uuid4().hex[:8]
         tenant_key = TenantManager.generate_tenant_key()
@@ -88,7 +73,6 @@ async def seeded_product(db_manager):
 async def test_rest_create_task_without_type_forces_tsk_and_serial(
     api_client: AsyncClient, seeded_product: dict
 ) -> None:
-    """The real FE payload omits task_type -> task must come out TSK with a serial."""
     resp = await api_client.post(
         "/api/v1/tasks/",
         headers=seeded_product["headers"],
@@ -107,7 +91,6 @@ async def test_rest_create_task_without_type_forces_tsk_and_serial(
 
 @pytest.mark.asyncio
 async def test_rest_create_task_ignores_inbound_type(api_client: AsyncClient, seeded_product: dict) -> None:
-    """A legacy/bogus task_type is accepted-but-ignored (no error) -> still TSK."""
     resp = await api_client.post(
         "/api/v1/tasks/",
         headers=seeded_product["headers"],
@@ -126,9 +109,6 @@ async def test_rest_create_task_ignores_inbound_type(api_client: AsyncClient, se
 
 @pytest.mark.asyncio
 async def test_rest_create_task_gated_at_serial_cap(api_client: AsyncClient, seeded_product: dict, db_manager) -> None:
-    """BE-6079: the REST create auto-assigns the global serial, so it must be gated
-    by the centralized >9999 cap. Seed the product at the 9999 watermark, then a
-    create must fail (400 'serial space exhausted') instead of minting 10000."""
     import uuid as _uuid
 
     from giljo_mcp.models import Project

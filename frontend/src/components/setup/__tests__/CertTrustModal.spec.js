@@ -1,7 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 
-// ---------- Stub heavy dependencies ----------
 
 vi.mock('@/config/api', () => ({
   getApiBaseURL: vi.fn().mockReturnValue('http://localhost:8000'),
@@ -15,14 +14,8 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ showToast: vi.fn() }),
 }))
 
-// Stub Vuetify components used inside the modal
 const globalStubs = {
   Teleport: true,
-  // FE-9419: use Vue Test Utils' built-in transition stub rather than a
-  // hand-written `<slot />` one. A bare slot renders a fragment and declares no
-  // props, so <Transition name="overlay-fade"> in CertTrustModal fell through
-  // as an extraneous attribute on every mount. The built-in stub is a real
-  // element and absorbs it.
   Transition: true,
   'v-btn': { template: '<button @click="$emit(\'click\', $event)"><slot /></button>', emits: ['click'] },
   'v-icon': { template: '<i><slot /></i>' },
@@ -42,7 +35,6 @@ async function mountModal(open = true) {
   })
 }
 
-// -----------------------------------------------------------------------
 
 describe('CertTrustModal — honest copy (INF-6241)', () => {
   it('does not contain mkcert / rootCA framing in the displayed copy', async () => {
@@ -56,7 +48,6 @@ describe('CertTrustModal — honest copy (INF-6241)', () => {
   it('renders the both-cases intro (public-cert done + self-signed trust steps)', async () => {
     const wrapper = await mountModal()
     const text = wrapper.text()
-    // FE-6245: em dashes removed; copy rephrased
     expect(text).toContain('not one issued by GiljoAI')
     expect(text).toContain('If your browser showed no certificate warning')
     expect(text).toContain('If your browser warned you')
@@ -95,7 +86,6 @@ describe('CertTrustModal — "Don\'t show again" checkbox (INF-6040)', () => {
   it('emits continue with true when the checkbox is checked and Continue is clicked', async () => {
     const wrapper = await mountModal()
 
-    // Check the checkbox
     const checkbox = wrapper.find('input[type="checkbox"]')
     await checkbox.setValue(true)
 

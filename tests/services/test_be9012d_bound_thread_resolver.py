@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Service-layer tests for the shared bound-thread resolver (BE-9012d).
-
-``CommThreadService.resolve_or_create_bound_thread`` is the single source of truth
-for "THE project's bound thread" — used by the D9 send_message shim and the D1(a)
-360-pane, and the SAME precedence the ce_0072 fold migration replicates. This
-covers the ORM/create path (the migration test covers the raw-SQL path):
-
-  1. exactly one bound thread -> that thread (any subject);
-  2. none                     -> create one with the "(project comms)" marker;
-  3. several                  -> the marker-subject one if present, else the OLDEST.
-
-An organic bound thread (a chain hub) is REUSED, never duplicated — this is what
-makes the /jobs + ThreadList resolution deterministic post-(d). Real DB
-(rollback-isolated ``db_session``), tenant-scoped (ADR-009).
-"""
 
 from __future__ import annotations
 

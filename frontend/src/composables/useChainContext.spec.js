@@ -1,12 +1,3 @@
-/**
- * useChainContext.spec.js — FE-6174b
- *
- * Unit tests for the harvested conditional-chain-layer data source. All external
- * dependencies are mocked; the composable is driven via loadRun() directly
- * (mirrors useChainCockpit.spec.js — bypasses the route watcher).
- *
- * Edition scope: CE.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -30,12 +21,7 @@ const {
   projectByIdMock: vi.fn(),
   getProjectStateMock: vi.fn(() => null),
   registerResyncMock: vi.fn(() => vi.fn()),
-  // Defaults to "not reviewed" so completed members show needsReview=true by default.
   isReviewedMock: vi.fn(() => false),
-  // BE-9540: a plain holder (no vue import -- vi.hoisted runs before this file's
-  // own imports resolve) populated with the REAL vue ref() below, inside the
-  // vi.mock factory, which runs lazily after 'vue' has resolved. The test body
-  // mutates `retiredRunNoticeBridge.ref.value` directly to fire the watcher.
   retiredRunNoticeBridge: {},
   clearRetiredRunNoticeMock: vi.fn(),
   showToastMock: vi.fn(),
@@ -61,9 +47,6 @@ vi.mock('@/stores/sequenceRunStore', () => {
     useSequenceRunStore: () => ({
       fetchRun: fetchRunMock,
       activeRun: ref(null),
-      // Mirrors pinia's auto-unwrap of a setup-store ref: each access reads the
-      // CURRENT value, so a later `retiredRunNoticeBridge.ref.value = X` from the
-      // test is visible to any watcher already reading this getter.
       get retiredRunNotice() {
         return notice.value
       },
@@ -95,7 +78,6 @@ vi.mock('@/composables/useAgentJobs', () => ({
   useAgentJobs: () => ({ sortedJobs: { value: [] } }),
 }))
 
-// Import AFTER mocks
 import { useChainContext } from '@/composables/useChainContext'
 
 function makeRun(overrides = {}) {
@@ -136,12 +118,11 @@ beforeEach(() => {
   vi.clearAllMocks()
   routeMock.query = {}
   fetchRunMock.mockResolvedValue(makeRun())
-  // resolveProjects warms the store via fetchProject then reads back via projectById.
   fetchProjectMock.mockResolvedValue(undefined)
   projectByIdMock.mockImplementation((id) => makeProject(id))
   getProjectStateMock.mockReturnValue(null)
   registerResyncMock.mockReturnValue(vi.fn())
-  isReviewedMock.mockReturnValue(false) // default: not reviewed
+  isReviewedMock.mockReturnValue(false)
   retiredRunNoticeBridge.ref.value = null
 })
 
@@ -168,7 +149,6 @@ describe('useChainContext — null contract (deletion test)', () => {
   })
 
   it('degrades to solo when ALL members 404 (orphaned run — FE-6175 RC2)', async () => {
-    // Every member fetch rejects (hard-deleted) -> zero resolvable projects.
     fetchProjectMock.mockRejectedValue(new Error('404'))
     setup()
     await ctx.loadRun('run-1')
@@ -179,7 +159,6 @@ describe('useChainContext — null contract (deletion test)', () => {
   })
 
   it('keeps the run + skips only the dead member when SOME members resolve (partial orphan)', async () => {
-    // p2 is hard-deleted; p1 + p3 resolve. The run stays, p2 is dropped.
     fetchProjectMock.mockImplementation((id) =>
       id === 'p2' ? Promise.reject(new Error('404')) : Promise.resolve(undefined),
     )
@@ -190,24 +169,11 @@ describe('useChainContext — null contract (deletion test)', () => {
     expect(ctx.projects.value.map((p) => p.id)).toEqual(['p1', 'p3'])
   })
 
-  // BE-9540: the run vanished out from under an OPEN chain view -- the incident
-  // this closes had the operator's dashboard sitting on a Review card for a run
-  // the headless path had just PURGED. The store detects this (retiredRunNotice)
-  // and this composable must meet it with a designed terminal state, not leave a
-  // stale run.value pointing at a row that no longer exists (which is what would
-  // let a later click storm more 404s against it).
-  // FE-9553: was 'degrades to solo and toasts...'. The degradation claim is
-  // unchanged and still the important half; only the SURFACE moved. This fires
-  // from a watch on a store notice fed by a live event -- the chain finished on
-  // its own and nobody clicked -- so by ruling 6 it is not the toast's to
-  // carry, and being informational rather than actionable it belongs in the
-  // bell. Asserting the bell row rather than deleting the
-  // assertion, so "the operator is still told" stays pinned.
   it('degrades to solo and records a bell row when the OPEN run is retired mid-view (BE-9540)', async () => {
     setup()
     await ctx.loadRun('run-1')
     await flushPromises()
-    expect(ctx.chainCtx.value).not.toBeNull() // sanity: the chain view is genuinely open
+    expect(ctx.chainCtx.value).not.toBeNull()
 
     retiredRunNoticeBridge.ref.value = { runId: 'run-1' }
     await flushPromises()
@@ -219,7 +185,6 @@ describe('useChainContext — null contract (deletion test)', () => {
     expect(addNotificationMock).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'chain-retired:run-1', severity: 'info' }),
     )
-    // Acks the notice so it does not re-fire (a real event, not stale reactive state).
     expect(clearRetiredRunNoticeMock).toHaveBeenCalled()
   })
 
@@ -233,10 +198,6 @@ describe('useChainContext — null contract (deletion test)', () => {
 
     expect(ctx.run.value).not.toBeNull()
     expect(showToastMock).not.toHaveBeenCalled()
-    // FE-9553: and no bell row either -- the notice is for another run, so it
-    // must not reach ANY surface. Before this milestone the toast assertion
-    // carried that claim alone; now both surfaces are checked, or moving the
-    // signal would have quietly dropped the coverage.
     expect(addNotificationMock).not.toHaveBeenCalled()
   })
 })
@@ -246,9 +207,6 @@ describe('useChainContext — chain bundle', () => {
     setup()
     await ctx.loadRun('run-1')
     await flushPromises()
-    // resolveProjects must warm projectStore (NOT a raw axios GET) so a sibling
-    // tab switch finds the project already resident — the FE-6174b fix for the
-    // spinner unmount/remount + double-fetch regression.
     expect(fetchProjectMock).toHaveBeenCalledWith('p1')
     expect(fetchProjectMock).toHaveBeenCalledWith('p2')
     expect(fetchProjectMock).toHaveBeenCalledWith('p3')
@@ -316,26 +274,26 @@ describe('useChainContext — tab states', () => {
         project_statuses: { p1: 'completed', p2: 'pending', p3: 'pending' },
       }),
     )
-    isReviewedMock.mockReturnValue(false) // not reviewed
+    isReviewedMock.mockReturnValue(false)
     setup()
     await ctx.loadRun('run-1')
     await flushPromises()
     const [t1, t2] = ctx.chainCtx.value.tabs
-    expect(t1.needsReview).toBe(true)  // completed + not reviewed
-    expect(t2.needsReview).toBe(false) // pending — not completed
+    expect(t1.needsReview).toBe(true)
+    expect(t2.needsReview).toBe(false)
   })
 
   it('needsReview is false when isReviewed returns true (already confirmed)', async () => {
     fetchRunMock.mockResolvedValue(
       makeRun({ project_statuses: { p1: 'completed', p2: 'pending', p3: 'pending' } }),
     )
-    isReviewedMock.mockReturnValue(true) // already reviewed
+    isReviewedMock.mockReturnValue(true)
     setup()
     await ctx.loadRun('run-1')
     await flushPromises()
     const [t1] = ctx.chainCtx.value.tabs
     expect(t1.isCompleted).toBe(true)
-    expect(t1.needsReview).toBe(false) // completed but reviewed
+    expect(t1.needsReview).toBe(false)
   })
 
   it('needsReview is false for awaiting_review status (dead state — BE never writes it)', async () => {
@@ -350,8 +308,8 @@ describe('useChainContext — tab states', () => {
     await ctx.loadRun('run-1')
     await flushPromises()
     const [t1, , t3] = ctx.chainCtx.value.tabs
-    expect(t1.needsReview).toBe(true)  // completed + not reviewed
-    expect(t3.needsReview).toBe(false) // awaiting_review ≠ 'completed' → dead state
+    expect(t1.needsReview).toBe(true)
+    expect(t3.needsReview).toBe(false)
   })
 })
 
@@ -386,8 +344,6 @@ describe('useChainContext — resync', () => {
 
 describe('useChainContext — tab isWorking derivation (bug fix: position != activity)', () => {
   it('staging-head bug repro: current-head with pending status has isWorking===false', async () => {
-    // Bug repro: current_index=0 but p1 is still pending (sub-orchestrator not started).
-    // Old code keyed on isCurrent, so this would have driven a WORKING badge prematurely.
     fetchRunMock.mockResolvedValue(
       makeRun({
         current_index: 0,
@@ -398,12 +354,9 @@ describe('useChainContext — tab isWorking derivation (bug fix: position != act
     await ctx.loadRun('run-1')
     await flushPromises()
     const [t1, t2, t3] = ctx.chainCtx.value.tabs
-    // The current-position tab is NOT working — still pending
     expect(t1.isCurrent).toBe(true)
     expect(t1.isWorking).toBe(false)
-    // Only the implementing member is working
     expect(t2.isWorking).toBe(true)
-    // staged is not a recognized working status
     expect(t3.isWorking).toBe(false)
   })
 
@@ -459,8 +412,6 @@ describe('useChainContext — tab isPlanning derivation (FE-9493, rewritten from
   })
 
   it('isPlanning is false for a completed member even if project_statuses is stale "planning"', async () => {
-    // Guards the FE precedence (isCompleted checked before isPlanning) independent
-    // of the BE forward-only guard already covering this at the write boundary.
     fetchRunMock.mockResolvedValue(
       makeRun({ project_statuses: { p1: 'completed', p2: 'pending', p3: 'pending' } }),
     )
@@ -489,10 +440,6 @@ describe('useChainContext — tab isPlanning derivation (FE-9493, rewritten from
     fetchRunMock.mockResolvedValue(
       makeRun({ project_statuses: { p1: 'implementing', p2: 'pending', p3: 'pending' } }),
     )
-    // Simulates the OLD bug's trigger: visiting p2 populates projectStateStore
-    // (ProjectLaunchView -> stores/projects.js _upsertEntity -> setProject())
-    // with isStaged derived from staging_status === 'staged'. The FIX must not
-    // even consult this store for isPlanning/isWorking any more.
     getProjectStateMock.mockImplementation((id) =>
       id === 'p2' ? { isStaging: false, isStaged: true } : null,
     )
@@ -517,10 +464,6 @@ describe('useChainContext — tab isPlanning derivation (FE-9493, rewritten from
         project_statuses: { p1: 'implementing', p2: 'pending', p3: 'pending', p4: 'pending' },
       }),
     )
-    // "Open members 2, 3 and 4" == the user clicked each tab, which navigates and
-    // populates projectStateStore for that member (isStaged: true, mirroring
-    // Stage Chain leaving every member at staging_status 'staged'). None of that
-    // may influence the badge any more.
     getProjectStateMock.mockImplementation((id) =>
       ['p2', 'p3', 'p4'].includes(id) ? { isStaging: false, isStaged: true } : null,
     )

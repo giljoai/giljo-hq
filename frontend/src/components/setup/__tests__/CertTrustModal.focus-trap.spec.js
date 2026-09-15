@@ -1,23 +1,3 @@
-/**
- * CertTrustModal.focus-trap.spec.js — IMP-9342 item 2
- *
- * The dialog is `role="dialog" aria-modal="true"`, which is a promise to the
- * user agent that focus is contained. It was not: the component carried no
- * focus-management code at all, so Tab walked straight out of the open overlay
- * into the page behind it. From the Connect tab that let a keyboard user tab
- * out, reach the inline cert-trust link, press Enter, and end up with two
- * identical overlays stacked at the same z-index — closing the top one revealed
- * another, which reads as "the close button didn't work".
- *
- * Pinned here: focus enters the dialog on open, Tab and Shift+Tab wrap inside
- * it, Escape closes it, and focus returns whence it came on close.
- *
- * Museum rule: the backdrop deliberately does NOT close this dialog (it matches
- * SetupWizardOverlay). The last test pins that so a later "improvement" to
- * dismiss-on-backdrop has to argue with a failing test first.
- *
- * Edition scope: CE.
- */
 import { describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
@@ -33,11 +13,8 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ showToast: vi.fn() }),
 }))
 
-// Same stub set as CertTrustModal.spec.js, but the buttons must be real focusable
-// <button> elements — the whole point of the test is where focus lands.
 const globalStubs = {
   Teleport: true,
-  // FE-9419: built-in transition stub — see CertTrustModal.spec.js.
   Transition: true,
   'v-btn': { template: '<button @click="$emit(\'click\', $event)"><slot /></button>', emits: ['click'] },
   'v-icon': { template: '<i><slot /></i>' },
@@ -54,7 +31,7 @@ async function mountModal(open = true) {
   return mount(CertTrustModal, {
     props: { modelValue: open },
     global: { stubs: globalStubs },
-    attachTo: document.body, // real focus needs the nodes in the document
+    attachTo: document.body,
   })
 }
 
@@ -110,7 +87,6 @@ describe('CertTrustModal — focus containment (IMP-9342)', () => {
 
     expect(wrapper.emitted('update:modelValue')).toBeTruthy()
     expect(wrapper.emitted('update:modelValue')[0]).toEqual([false])
-    // Same payload contract as Skip/close: the "don't show again" choice rides along.
     expect(wrapper.emitted('continue')[0]).toEqual([false])
     wrapper.unmount()
   })
@@ -124,7 +100,7 @@ describe('CertTrustModal — focus containment (IMP-9342)', () => {
 
     const wrapper = await mountModal(false)
     await wrapper.setProps({ modelValue: true })
-    await flushPromises() // the watcher awaits nextTick before focusing the panel
+    await flushPromises()
     expect(document.activeElement).not.toBe(opener)
 
     await wrapper.setProps({ modelValue: false })

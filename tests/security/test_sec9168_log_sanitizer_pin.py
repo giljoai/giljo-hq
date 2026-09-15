@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-9168 pin-behavior regression: ``sanitize()`` output is frozen.
-
-Class of bug this catches:
-    The CodeQL wave (SEC-9168) rewrote ``sanitize()`` so every return path --
-    including non-str input -- flows through a literal ``str.replace`` chain
-    before the control-char regex (CodeQL only models literal replace chains
-    as CWE-117 log-injection barriers; ``re.sub`` alone is not recognized).
-    The rewrite must be output-identical to the pre-rewrite implementation
-    for every string input and for non-str input whose ``str()`` form is
-    control-char free. This pin test freezes that contract so a future
-    "simplification" (e.g. dropping the seemingly redundant replace chain,
-    or re-adding a ``str(value)`` early-return that bypasses the barrier)
-    cannot silently change log output or re-open the 305 CodeQL findings.
-
-Edition Scope: Both (sanitize() is CE-shipped and used by SaaS code too).
-
-Parallel-safe: pure-function assertions; no DB, no env mutation, no
-module-level mutable state, no ordering dependency.
-"""
 
 import uuid
 
@@ -29,7 +10,6 @@ from giljo_mcp.utils.log_sanitizer import mask_token, sanitize
 
 
 class TestSanitizePinnedBehavior:
-    """Byte-for-byte pins of sanitize() output."""
 
     def test_plain_string_unchanged(self):
         assert sanitize("agent-alpha finished step 3") == "agent-alpha finished step 3"
@@ -72,7 +52,6 @@ class TestSanitizePinnedBehavior:
 
 
 class TestMaskTokenPinnedBehavior:
-    """mask_token() is untouched by SEC-9168 -- pin it anyway."""
 
     def test_long_token_masked(self):
         assert mask_token("a1b2c3d4e5f6") == "a1b2c3d4..."
@@ -88,18 +67,6 @@ class TestMaskTokenPinnedBehavior:
 
 
 class TestMaskTokenStripsControlChars:
-    """SEC-9173 regression: mask_token() output is control-char free.
-
-    Class of bug this catches:
-        Pre-SEC-9173, mask_token() returned tokens of 8 chars or fewer
-        verbatim and long tokens as a raw slice -- so a token like
-        ``"ab\\ncd"`` (a user-supplied URL path segment) carried its
-        newline straight into the log line, forging entries (CWE-117).
-        The slice/passthrough also propagated CodeQL taint, keeping the
-        9 straggler log-injection alerts open despite the SEC-9168
-        sanitize() wraps around them. mask_token() must route every
-        return through the sanitize() barrier.
-    """
 
     def test_short_token_newline_stripped(self):
         assert mask_token("ab\ncd") == "abcd"
@@ -108,11 +75,7 @@ class TestMaskTokenStripsControlChars:
         assert mask_token("x\n2026-07-14 INFO fake") == "x2026-0..."
 
     def test_long_token_control_chars_in_prefix_stripped(self):
-        # Mask applies to the RAW token (first 8 raw chars), then the
-        # masked form is sanitized -- exposure never exceeds 8 raw chars.
         assert mask_token("a\rb\nc\td4e5f6g7h8") == "abcd4..."
 
     def test_masking_applies_before_stripping(self):
-        # 9 chars raw -> masked as first-8 + "...", THEN control chars
-        # removed from the masked form (never unmask by strip-then-slice).
         assert mask_token("\x00abcdefgh") == "abcdefg..."

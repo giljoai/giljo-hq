@@ -3,42 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Boundary regression tests for API-0021b — scope-aware MCP tool gating.
-
-Per the CLAUDE.md mandatory rule (BE-5042 lesson), tests live at the layer the
-constraint lives. Scope gating is enforced at the FastMCP transport boundary
-(tools/list filter + tools/call dispatch gate) and at the MCPAuthMiddleware
-ASGI layer where the scope claim is decoded into request state. Tests:
-
-- S1: MCPAuthMiddleware stamps `auth_method="jwt"` + `scopes=[...]` for an
-  aud-bound JWT carrying a `scope` claim.
-- S2: MCPAuthMiddleware stamps `auth_method="jwt"` + default scopes
-  ["mcp:read", "mcp:write"] for a JWT with NO scope claim (legacy/cookie
-  path).
-- S3: MCPAuthMiddleware stamps `auth_method="api_key"` for the API-key path.
-- S4: tools/list with token scope = {mcp:read} advertises ONLY mcp:read tools.
-- S5: tools/list with token scope = {mcp:read, mcp:write} advertises read+write
-  but NOT mcp:agent tools.
-- S6: tools/list with API-key auth (bypass) advertises ALL tools incl. agent.
-- S7: tools/call against an mcp:write tool with mcp:read-only token returns
-  ToolError (defense-in-depth, not just hiding).
-- S8: tools/call against an mcp:agent tool with mcp:read+mcp:write token
-  returns ToolError.
-- S9: tools/call with API-key auth (bypass) succeeds for agent-scope tools.
-- S10: OAuth `/authorize` now ACCEPTS `mcp:agent` (BE-6168) but still rejects
-  any non-grantable token.
-- S11: OAuthService.exchange_code_for_token forwards `auth_code.scope` into
-  the issued JWT's `scope` claim.
-- S12: TOOL_SCOPES registry-completeness — every registered FastMCP tool has
-  an entry, and every entry resolves to a registered tool.
-- S13 (BE-6168): an OAuth token granted `mcp:agent` reaches API-key parity —
-  sees AND can dispatch the agent-lifecycle tools.
-- S14 (BE-6167): `get_staging_instructions` is `mcp:agent` — a read/write-only
-  token cannot drive its BE-5122 self-close (project -> COMPLETED) write.
-- S15 (BE-6168 guard): every state-mutating orchestration tool maps to
-  `mcp:agent` (a mis-map to read/write fails OPEN).
-"""
 
 from __future__ import annotations
 
@@ -58,9 +22,6 @@ JWT_SECRET = "test_secret_key"
 JWT_ALG = "HS256"
 
 
-# ---------------------------------------------------------------------------
-# Helpers (mirror the API-0021a transport-driver pattern)
-# ---------------------------------------------------------------------------
 
 
 def _make_jwt(
@@ -88,7 +49,6 @@ def _make_jwt(
 
 
 class _CapturingInnerApp:
-    """ASGI app that records the scope state set by MCPAuthMiddleware."""
 
     def __init__(self) -> None:
         self.called: bool = False
@@ -137,9 +97,6 @@ async def _drive_middleware(middleware, headers: list[tuple[bytes, bytes]]) -> t
     return captured_status["code"], captured_headers, bytes(captured_body)
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
@@ -156,12 +113,6 @@ async def mcp_canonical_uri_env(monkeypatch):
 
 @pytest_asyncio.fixture
 async def scope_mcp_client(db_manager, monkeypatch):
-    """In-memory MCP client that lets each test pin a scope set / auth method.
-
-    Returns (new_client, scope_holder). scope_holder.scopes is the value
-    `_scopes_from_request` will return for every request — None for API-key
-    bypass, a set for JWT, empty set for empty-scope.
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from giljo_mcp.tenant import TenantManager
@@ -185,10 +136,6 @@ async def scope_mcp_client(db_manager, monkeypatch):
 
     holder = _ScopeHolder()
 
-    # BE-6042d: _scopes_from_request is read by the scope-filter/gate functions
-    # that stayed in mcp_sdk_server (transport layer) — patch it there. But
-    # _resolve_tenant/_resolve_user_id moved with _call_tool into mcp_tools._base,
-    # so the in-memory-transport monkeypatch for those must target _base.
     from api.endpoints.mcp_tools import _base
 
     monkeypatch.setattr(
@@ -218,9 +165,6 @@ async def scope_mcp_client(db_manager, monkeypatch):
         state.db_manager = prior_db_manager
 
 
-# ---------------------------------------------------------------------------
-# S1-S3: MCPAuthMiddleware stamps auth_method + scopes onto scope[state]
-# ---------------------------------------------------------------------------
 
 
 class TestS1JwtWithScopeClaimStampsScopes:
@@ -232,8 +176,6 @@ class TestS1JwtWithScopeClaimStampsScopes:
         from api.endpoints.mcp_sdk_server import MCPAuthMiddleware
         from giljo_mcp.tenant import TenantManager
 
-        # SEC-3001a: is_user_active skips when db_manager is None — ensure
-        # isolation so DB state from other tests doesn't contaminate this test.
         monkeypatch.setattr(_app_state_mod.state, "db_manager", None)
         tenant_key = TenantManager.generate_tenant_key()
         token = _make_jwt(aud=CANONICAL_MCP_URI, tenant_key=tenant_key, scope="mcp:read mcp:write")
@@ -255,12 +197,8 @@ class TestS2JwtMissingScopeClaimDefaultsToReadWrite:
         from api.endpoints.mcp_sdk_server import MCPAuthMiddleware
         from giljo_mcp.tenant import TenantManager
 
-        # SEC-3001a: is_user_active skips when db_manager is None — ensure
-        # isolation so DB state from other tests doesn't contaminate this test.
         monkeypatch.setattr(_app_state_mod.state, "db_manager", None)
         tenant_key = TenantManager.generate_tenant_key()
-        # API-0022: aud-less tokens are now hard-rejected at /mcp. Test only
-        # the missing-scope-claim default; aud must be present and canonical.
         token = _make_jwt(aud=CANONICAL_MCP_URI, tenant_key=tenant_key, scope=None)
 
         inner = _CapturingInnerApp()
@@ -329,15 +267,11 @@ class TestS3ApiKeyStampsApiKeyAuthMethod:
             status, _headers, _body = await _drive_middleware(mw, headers=[(b"x-api-key", raw_key.encode())])
             assert status == 200, f"API key auth returned {status}"
             assert inner.scope_state.get("auth_method") == "api_key"
-            # Per design, API-key path leaves scopes unset (bypass).
             assert "scopes" not in inner.scope_state or inner.scope_state.get("scopes") is None
         finally:
             state.db_manager = prior_db_manager
 
 
-# ---------------------------------------------------------------------------
-# S4-S6: tools/list filter at the FastMCP transport boundary
-# ---------------------------------------------------------------------------
 
 
 class TestS4ListToolsReadOnlyToken:
@@ -384,22 +318,17 @@ class TestS6ListToolsApiKeyBypass:
         from api.endpoints.mcp_sdk_server import TOOL_SCOPES
 
         new_client, holder = scope_mcp_client
-        holder.scopes = None  # API-key bypass
+        holder.scopes = None
 
         async with new_client() as session:
             result = await session.list_tools()
 
         advertised = {t.name for t in result.tools}
         assert advertised == set(TOOL_SCOPES.keys()), f"API-key client missing {set(TOOL_SCOPES.keys()) - advertised}"
-        # Ensure at least one mcp:agent tool is present (defense vs accidental
-        # bypass-bypass).
         agent_tools = {name for name, scope in TOOL_SCOPES.items() if scope == "mcp:agent"}
         assert agent_tools.issubset(advertised), f"API-key bypass missed agent tools: {agent_tools - advertised}"
 
 
-# ---------------------------------------------------------------------------
-# S7-S9: tools/call dispatch gate (defense-in-depth)
-# ---------------------------------------------------------------------------
 
 
 class TestS7CallToolReadOnlyTokenAgainstWriteToolFails:
@@ -409,7 +338,6 @@ class TestS7CallToolReadOnlyTokenAgainstWriteToolFails:
         holder.scopes = {"mcp:read"}
 
         async with new_client() as session:
-            # `create_project` is mcp:write — must be rejected for a read-only token
             result = await session.call_tool(
                 "create_project",
                 {"name": "should not be created", "description": "test"},
@@ -428,7 +356,6 @@ class TestS8CallToolReadWriteTokenAgainstAgentToolFails:
         holder.scopes = {"mcp:read", "mcp:write"}
 
         async with new_client() as session:
-            # `spawn_job` is mcp:agent — must be rejected for read+write token
             result = await session.call_tool(
                 "spawn_job",
                 {
@@ -447,11 +374,8 @@ class TestS8CallToolReadWriteTokenAgainstAgentToolFails:
 class TestS9CallToolApiKeyBypassAllowsAgentTool:
     @pytest.mark.asyncio
     async def test_api_key_bypass_does_not_block_agent_tool_dispatch(self, scope_mcp_client):
-        """Bypass means the gate doesn't reject; downstream tool may still error
-        for missing args/state, but the rejection text must NOT mention scope.
-        """
         new_client, holder = scope_mcp_client
-        holder.scopes = None  # bypass
+        holder.scopes = None
 
         async with new_client() as session:
             result = await session.call_tool(
@@ -459,25 +383,14 @@ class TestS9CallToolApiKeyBypassAllowsAgentTool:
                 {"project_id": str(uuid4())},
             )
 
-        # The call may succeed (empty workflow) OR fail (missing project) — both
-        # are fine; what must NOT happen is a scope-rejection error.
         text_blocks = [getattr(b, "text", "") for b in result.content]
         joined = "\n".join(text_blocks)
         assert "not authorized for this token's scope" not in joined
 
 
-# ---------------------------------------------------------------------------
-# S10: OAuth /authorize rejects mcp:agent
-# ---------------------------------------------------------------------------
 
 
 class TestS10AuthorizeAcceptsAgentScope:
-    """BE-6168: OAuth /authorize now ACCEPTS `mcp:agent` (was rejected pre-6168).
-
-    OAuth is the default auth method, so an OAuth client must reach API-key
-    parity. The boundary rule lives in OAuthService._validate_scope_string; the
-    HTTP-layer mirror is in tests/api/test_oauth_audience_binding.py.
-    """
 
     @pytest.mark.asyncio
     async def test_validate_authorize_request_accepts_mcp_agent_scope(self, db_session):
@@ -488,7 +401,6 @@ class TestS10AuthorizeAcceptsAgentScope:
         )
 
         service = OAuthService(db_session=db_session)
-        # Must NOT raise — mcp:agent is grantable as of BE-6168.
         await service.validate_authorize_request(
             client_id=BUILTIN_CLIENT_ID,
             redirect_uri="http://localhost:8080/callback",
@@ -502,7 +414,6 @@ class TestS10AuthorizeAcceptsAgentScope:
 
     @pytest.mark.asyncio
     async def test_validate_authorize_request_still_rejects_unknown_scope(self, db_session):
-        """The grantable-set guard still bites: a bogus token is rejected."""
         from giljo_mcp.services.oauth_service import BUILTIN_CLIENT_ID, OAuthService
 
         service = OAuthService(db_session=db_session)
@@ -526,7 +437,6 @@ class TestS10AuthorizeAcceptsAgentScope:
         )
 
         service = OAuthService(db_session=db_session)
-        # Should not raise.
         await service.validate_authorize_request(
             client_id=BUILTIN_CLIENT_ID,
             redirect_uri="http://localhost:8080/callback",
@@ -538,9 +448,6 @@ class TestS10AuthorizeAcceptsAgentScope:
         )
 
 
-# ---------------------------------------------------------------------------
-# S11: OAuthService.exchange_code_for_token forwards scope to JWT
-# ---------------------------------------------------------------------------
 
 
 class TestS11ExchangeForwardsScopeIntoJwt:
@@ -576,7 +483,6 @@ class TestS11ExchangeForwardsScopeIntoJwt:
         db_session.add(user)
         await db_session.flush()
 
-        # Build a real S256 challenge for a known verifier
         import base64
         import hashlib
 
@@ -613,9 +519,6 @@ class TestS11ExchangeForwardsScopeIntoJwt:
         assert decoded.get("scope") == "mcp:read mcp:write"
 
 
-# ---------------------------------------------------------------------------
-# S12: TOOL_SCOPES registry-completeness regression
-# ---------------------------------------------------------------------------
 
 
 class TestS12RegistryCompleteness:
@@ -641,10 +544,6 @@ class TestS12RegistryCompleteness:
         assert not invalid, f"invalid scope values: {invalid}"
 
 
-# ---------------------------------------------------------------------------
-# S13 (BE-6168): an OAuth token GRANTED mcp:agent reaches API-key parity —
-# it both sees AND can dispatch the agent-lifecycle tools.
-# ---------------------------------------------------------------------------
 
 
 class TestS13OAuthAgentScopeReachesParity:
@@ -659,20 +558,14 @@ class TestS13OAuthAgentScopeReachesParity:
             result = await session.list_tools()
 
         advertised = {t.name for t in result.tools}
-        # Parity: an agent-scoped token sees the WHOLE surface (read+write+agent).
         assert advertised == set(TOOL_SCOPES.keys()), (
             f"agent-scoped token missing {set(TOOL_SCOPES.keys()) - advertised}"
         )
-        # And specifically the agent-lifecycle tools the API-0021b boundary used
-        # to hide from every OAuth client.
         for agent_tool in ("spawn_job", "post_to_thread", "launch_implementation", "get_staging_instructions"):
             assert agent_tool in advertised, f"agent-scoped token did not see {agent_tool}"
 
     @pytest.mark.asyncio
     async def test_agent_scoped_token_can_dispatch_agent_tool(self, scope_mcp_client):
-        """The dispatch gate must NOT scope-reject an agent tool for an
-        agent-scoped token (it may still error downstream on missing state —
-        that is fine; what must not appear is the scope-rejection text)."""
         new_client, holder = scope_mcp_client
         holder.scopes = {"mcp:read", "mcp:write", "mcp:agent"}
 
@@ -686,10 +579,6 @@ class TestS13OAuthAgentScopeReachesParity:
         assert "not authorized for this token's scope" not in joined
 
 
-# ---------------------------------------------------------------------------
-# S14 (BE-6167): get_staging_instructions is now mcp:agent — a read/write-only
-# token CANNOT drive its BE-5122 self-close (project -> COMPLETED) write.
-# ---------------------------------------------------------------------------
 
 
 class TestS14StagingInstructionsIsAgentScoped:
@@ -704,8 +593,6 @@ class TestS14StagingInstructionsIsAgentScoped:
     @pytest.mark.asyncio
     async def test_read_write_token_cannot_call_get_staging_instructions(self, scope_mcp_client):
         new_client, holder = scope_mcp_client
-        # The strongest case: even a read+WRITE token (no agent) is rejected,
-        # so the self-close write is unreachable without the agent grant.
         holder.scopes = {"mcp:read", "mcp:write"}
 
         async with new_client() as session:
@@ -717,13 +604,6 @@ class TestS14StagingInstructionsIsAgentScoped:
         assert "not authorized" in joined or "scope" in joined.lower()
 
 
-# ---------------------------------------------------------------------------
-# S15 (BE-6168 guard): every state-mutating orchestration tool maps to
-# mcp:agent. TOOL_SCOPES is the WHOLE boundary; a mis-map to read/write fails
-# OPEN (a read-only OAuth token could then mutate orchestration state). This
-# curated set is the canonical orchestration-mutation surface from the
-# API-0021b audit; adding a new such tool without mcp:agent fails this test.
-# ---------------------------------------------------------------------------
 
 
 class TestS15StateMutatingToolsAreAgentScoped:
@@ -732,7 +612,6 @@ class TestS15StateMutatingToolsAreAgentScoped:
             "spawn_job",
             "complete_job",
             "finalize_job",
-            # BE-9012b (BE-6225e): reactivate_job + dismiss_reactivation merged.
             "resume_or_dismiss_job",
             "report_progress",
             "set_agent_status",
@@ -741,8 +620,7 @@ class TestS15StateMutatingToolsAreAgentScoped:
             "stage_project",
             "get_implementation_prompt",
             "launch_implementation",
-            "get_staging_instructions",  # BE-6167: mutates via BE-5122 self-close
-            # BE-9012d: send_message / receive_messages hard-removed (bus retired).
+            "get_staging_instructions",
             "create_thread",
             "join_thread",
             "post_to_thread",

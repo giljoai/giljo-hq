@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Services module for Giljo HQ.
-
-This module contains service classes for managing integrations and external tools.
-
-Handover 0121 (Phase 1): ProjectService extracted from ToolAccessor
-Handover 0123 (Phase 2): TemplateService, TaskService, MessageService, OrchestrationService extracted
-Handover 0127b: ProductService extracted from direct database access
-Handover 0322 (Phase 1/2): AuthService, UserService added
-Handover 0424b: OrgService added for organization management
-Handover 0950n: ProjectSummaryService extracted from ProjectService
-Handover 0950n: MissionOrchestrationService extracted from MissionService
-"""
 
 from .auth_service import AuthService
 from .config_service import ConfigService

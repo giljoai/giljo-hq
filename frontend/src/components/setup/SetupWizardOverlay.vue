@@ -10,15 +10,8 @@
         :aria-label="setupAriaLabel"
         @keydown.escape="handleDismiss"
       >
-        <!-- Backdrop — click does NOT close -->
         <div class="setup-wizard-backdrop" />
 
-        <!-- ============================================================
-             SETUP MODE — Gradient Rail (FE-6259b).
-             Left: vertical gradient stepper. Right: step content + footer.
-             (Learning mode was replaced by the onboarding tutorial —
-             frontend/src/components/tutorial/TutorialOverlay.vue, FE-9200.)
-             ============================================================ -->
         <div class="wizard-rail-panel smooth-border" tabindex="-1">
           <v-btn
             icon
@@ -31,14 +24,12 @@
             <v-icon>mdi-close</v-icon>
           </v-btn>
 
-          <!-- Closing state: all checkmarks, brief confirmation (replaces the whole body) -->
           <div v-if="closingWithCheckmarks" class="closing-confirmation">
             <v-icon size="48" color="success" class="closing-icon">mdi-check-circle</v-icon>
             <div class="closing-text">Setup complete</div>
           </div>
 
           <template v-else>
-            <!-- Left rail: gradient stepper -->
             <aside class="wizard-rail">
               <div class="rail-top">
                 <img src="/icons/Giljo_YW_Face.svg" alt="" class="rail-logo" />
@@ -81,8 +72,6 @@
                     </span>
                   </div>
 
-                  <!-- Connect stage: per-tool sub-rows (green done / amber pulse current /
-                       blank ahead). State comes from wizard progression, never event attribution. -->
                   <div
                     v-if="step.id === 'connect' && currentStep === 1 && connectSubRows.length"
                     class="rail-subs"
@@ -102,10 +91,8 @@
               </div>
             </aside>
 
-            <!-- Right: step content + footer -->
             <main class="wizard-main">
               <div class="wizard-content" data-testid="wizard-content">
-                <!-- Step 0: Choose Tools -->
                 <div v-if="currentStep === 0" class="step-tools">
                   <p class="step-heading-grad">Choose your tools</p>
                   <p class="step-sub">
@@ -146,7 +133,6 @@
                   </div>
                 </div>
 
-                <!-- Step 1: Connect — walk one tool at a time (FE-9204) -->
                 <SetupStep2Connect
                   v-else-if="currentStep === 1"
                   :selected-tools="localSelectedTools"
@@ -156,7 +142,6 @@
                   @advance-step="handleNext"
                 />
 
-                <!-- Step 2: Install (0855e) -->
                 <SetupStep3Commands
                   v-else-if="currentStep === 2"
                   :selected-tools="localSelectedTools"
@@ -165,7 +150,6 @@
                   @step-data="step3Data = $event"
                 />
 
-                <!-- Step 3: Launch (0855f) -->
                 <SetupStep4Complete v-else-if="currentStep === 3" />
               </div>
 
@@ -233,7 +217,6 @@
       </div>
     </Transition>
 
-    <!-- Restart confirmation dialog -->
     <v-dialog v-model="showRestartConfirm" max-width="380">
       <v-card class="smooth-border">
         <div class="dlg-header dlg-header--warning">
@@ -275,10 +258,8 @@ const STEPS = [
   { id: 'launch', label: 'Launch' },
 ]
 
-// Rail node descriptions (Gradient Rail pixel spec). One per STEPS entry.
-const STEP_DESC = ['Pick your AI agents', 'Attach them to GiljoAI', 'Skills & agent templates', "You're ready"]
+const STEP_DESC = ['Pick your AI agents', 'Attach them to GiljoAI', 'Skills & marker block', "You're ready"]
 
-// Node colors sampled along the brand gradient (design-tokens.scss / main.scss).
 const STEP_COLORS = ['var(--gradient-step-1)', 'var(--gradient-step-2)', 'var(--gradient-step-3)', 'var(--gradient-step-4)']
 
 const props = defineProps({
@@ -311,7 +292,6 @@ const emit = defineEmits([
   'step-complete',
 ])
 
-// Internal state
 const localSelectedTools = ref([...props.selectedTools])
 const step2CanProceed = ref(false)
 const step2Data = ref({})
@@ -320,8 +300,6 @@ const step3CanProceed = ref(false)
 const step3Data = ref({})
 const showRestartConfirm = ref(false)
 
-// Edition drives the choose-grid method tags (CE = every tool API KEY; SaaS = per
-// capability). Positively confirm 'ce'; default to SaaS/unknown on uncertainty.
 const isCe = ref(false)
 async function loadEdition() {
   try {
@@ -334,8 +312,6 @@ async function loadEdition() {
 }
 onMounted(loadEdition)
 
-// FE-9569 detector 2: a wizard resumed DIRECTLY onto Install leaves
-// connectedTools empty forever (see the composable's doc comment).
 useConnectedToolsResumeSeed({
   currentStep: () => props.currentStep,
   selectedTools: () => localSelectedTools.value,
@@ -352,7 +328,6 @@ function handleRestartConfirmed() {
   emit('update:currentStep', 0)
 }
 
-// Sync when prop changes externally
 watch(
   () => props.selectedTools,
   (newVal) => {
@@ -360,11 +335,8 @@ watch(
   },
 )
 
-// Connected tools from Step 2 data, passed to Step 3
 const step2ConnectedTools = computed(() => step2Data.value?.connectedTools || [])
 
-// Connect-stage rail sub-rows: one per selected tool, state from the walk
-// (done = connected, current = tool being walked, ahead = not yet reached).
 const connectSubRows = computed(() => {
   const w = step2WalkState.value
   if (!w?.order?.length) return []
@@ -381,19 +353,14 @@ const connectSubRows = computed(() => {
   })
 })
 
-// Rail: spine fill height tracks progress (0 → 100%, 3 gaps for 4 steps).
 const spineFillPct = computed(() => (Math.min(props.currentStep, 3) / 3) * 100)
 
-// Rail nodes: only completed (done) steps are clickable — mirrors the
-// authoritative pixel spec (see the design-system reference).
 function goToStep(i) {
   if (i < props.currentStep) {
     emit('update:currentStep', i)
   }
 }
 
-// Footer skip control (steps 1 & 2 only). Centralized here so both steps
-// share one footer element instead of each child owning its own skip link.
 const footerSkipLabel = computed(() => {
   if (props.currentStep === 1) return 'Skip for now'
   if (props.currentStep === 2) return "Skip, I'll do this later"
@@ -434,7 +401,6 @@ const canProceed = computed(() => {
   if (props.currentStep === 2) {
     return step3CanProceed.value
   }
-  // Step 3 (Launch) has its own card-based navigation
   return false
 })
 
@@ -463,9 +429,6 @@ function handleBack() {
 }
 
 function handleStep2Skip() {
-  // User opts out of connecting now (e.g. OAuth-incapable harness, HTTP-on-LAN,
-  // or they'll wire it up later). Advance past the MCP-attach step without
-  // requiring a live connection. Mirrors the Install step's skip.
   emit('step-complete', { step: 1, data: { connectedTools: [], skipped: true } })
   if (props.currentStep < STEPS.length - 1) {
     emit('update:currentStep', props.currentStep + 1)
@@ -487,16 +450,13 @@ function handleFinish() {
 const closingWithCheckmarks = ref(false)
 
 function handleDismiss() {
-  // If setup is already done and we're on the final step, show all-complete state then auto-close
   if (props.mode === 'setup' && props.currentStep === 3 && !closingWithCheckmarks.value) {
     closingWithCheckmarks.value = true
-    // Force all steps to show as completed visually
     emit('update:currentStep', 4)
     setTimeout(() => {
       closingWithCheckmarks.value = false
       emit('dismiss')
       emit('update:modelValue', false)
-      // Reset back to step 3 for next open
       emit('update:currentStep', 3)
     }, 1200)
     return

@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9053 items 1+2: degraded-services visibility + maintenance-loop resilience.
-
-Item 2 failing layer: a CE maintenance loop hit by ONE unexpected exception
-(anything outside the old narrow catch tuple) died permanently and silently —
-the API-metrics flusher was proven killable by a single transient DB error.
-The loops now catch-log-continue (SaaS reaper pattern), and every loop task
-carries a done-callback that logs at ERROR if the task ever finishes for any
-reason other than cancellation.
-
-Item 1 failing layer: the /health endpoint never read state.degraded_services.
-
-Parallel-safe: no DB, no module-level mutable state; monkeypatch everywhere.
-"""
 
 from __future__ import annotations
 
@@ -31,11 +18,6 @@ from api.startup.metrics_flushers import log_task_death, sync_api_metrics_to_db
 
 
 def _fast_sleep(monkeypatch, max_iterations: int):
-    """Replace asyncio.sleep in the loop modules with an instant, bounded fake.
-
-    After ``max_iterations`` awaited sleeps it cancels the loop naturally, so a
-    broken continue-path can never hang the test.
-    """
     real_sleep = asyncio.sleep
     calls = {"n": 0}
 
@@ -51,8 +33,6 @@ def _fast_sleep(monkeypatch, max_iterations: int):
 
 @pytest.mark.asyncio
 async def test_api_metrics_flusher_survives_unexpected_error(monkeypatch, caplog):
-    """One unexpected (non-SQLAlchemy) error must be logged and the loop must
-    keep iterating — this exact loop was proven killable by one DB hiccup."""
     state = MagicMock()
     state.api_call_count = {"tk_test": 3}
     state.mcp_call_count = {}
@@ -68,16 +48,13 @@ async def test_api_metrics_flusher_survives_unexpected_error(monkeypatch, caplog
         with pytest.raises(asyncio.CancelledError):
             await sync_api_metrics_to_db(state)
 
-    # The loop iterated PAST the first failure (sleep awaited again after it).
     assert calls["n"] > 1
     assert any("Error during API metrics sync" in rec.message for rec in caplog.records)
-    # Counters restored on failure so the window is retried next cycle.
     assert state.api_call_count == {"tk_test": 3}
 
 
 @pytest.mark.asyncio
 async def test_download_token_cleanup_survives_unexpected_error(monkeypatch, caplog):
-    """Same guarantee for a representative gated maintenance loop."""
     from api.startup import background_tasks
 
     state = MagicMock()
@@ -108,7 +85,6 @@ async def test_download_token_cleanup_survives_unexpected_error(monkeypatch, cap
 
 @pytest.mark.asyncio
 async def test_log_task_death_logs_error_when_loop_dies(caplog):
-    """A maintenance task finishing with an escaped exception logs at ERROR."""
 
     async def doomed():
         raise ValueError("escaped the loop")
@@ -118,7 +94,6 @@ async def test_log_task_death_logs_error_when_loop_dies(caplog):
     with caplog.at_level(logging.ERROR, logger="api.startup.metrics_flushers"):
         with pytest.raises(ValueError):
             await task
-        # done-callbacks run via call_soon — yield once so it fires.
         await asyncio.sleep(0)
 
     assert any("maintenance_loop_died" in rec.message for rec in caplog.records)
@@ -126,7 +101,6 @@ async def test_log_task_death_logs_error_when_loop_dies(caplog):
 
 @pytest.mark.asyncio
 async def test_log_task_death_logs_error_when_loop_returns(caplog):
-    """A maintenance task RETURNING (loop exited without exception) also logs."""
 
     async def returns():
         return None
@@ -142,7 +116,6 @@ async def test_log_task_death_logs_error_when_loop_returns(caplog):
 
 @pytest.mark.asyncio
 async def test_log_task_death_silent_on_cancellation(caplog):
-    """Cancellation is the one legitimate exit — no ERROR noise at shutdown."""
 
     async def forever():
         while True:
@@ -160,9 +133,6 @@ async def test_log_task_death_silent_on_cancellation(caplog):
     assert not any("maintenance_loop" in rec.message for rec in caplog.records)
 
 
-# ---------------------------------------------------------------------------
-# Item 1: /health exposes degraded_services
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

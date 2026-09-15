@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-3004a — contract matrix for the single auth validator (validate_principal).
-
-This is the behavior every transport must exhibit once SEC-3004b/c wire them to
-``validate_principal``. It is the canonical spec the four transports are measured
-against: valid / expired / revoked / deactivated / malformed x JWT / API-key,
-plus the MCP-only audience binding and the BE-6063a prefetched-user reuse.
-
-Two-sided throughout: the happy path (valid credential authenticates) is asserted
-right next to every reject, because the happy path is the load-bearing half — a
-validator that rejects everything is not "secure," it is broken.
-
-Parallel-safe (pytest-xdist): each test seeds a unique tenant/user, clears the
-revocation + api-key verdict TTL caches around mutate steps, and uses the
-transaction-isolated ``db_manager``. No module-level mutable state, no ordering
-deps.
-"""
 
 from __future__ import annotations
 
@@ -57,7 +41,6 @@ def jwt_secret(monkeypatch):
 
 
 async def _seed_user(db_manager, *, is_active: bool = True) -> tuple[str, str, str]:
-    """Create org+user; return (user_id, username, tenant_key)."""
     from giljo_mcp.models.auth import User
     from giljo_mcp.models.organizations import Organization
     from giljo_mcp.tenant import TenantManager
@@ -93,7 +76,6 @@ async def _seed_user(db_manager, *, is_active: bool = True) -> tuple[str, str, s
 
 
 async def _seed_api_key(db_manager, *, expires_at: datetime | None = None, user_active: bool = True) -> tuple[str, str]:
-    """Create org+user+api_key; return (raw_key, tenant_key)."""
     from giljo_mcp.models.auth import APIKey, User
     from giljo_mcp.models.organizations import Organization
     from giljo_mcp.tenant import TenantManager
@@ -158,7 +140,6 @@ def _mint(
 
 
 def _mint_expired(user_id: str, tenant_key: str, secret: str) -> str:
-    """Craft a structurally-valid access JWT whose exp is already in the past."""
     now = datetime.now(UTC)
     return jwt.encode(
         {
@@ -176,9 +157,6 @@ def _mint_expired(user_id: str, tenant_key: str, secret: str) -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# JWT axis
-# ---------------------------------------------------------------------------
 
 
 class TestJwtContract:
@@ -221,7 +199,6 @@ class TestJwtContract:
         user_id, username, tk = await _seed_user(db_manager)
         token = _mint(user_id, username, tk)
 
-        # Valid first (happy path is load-bearing).
         async with db_manager.get_session_async() as db:
             principal = await validate_principal(db, jwt_token=token)
         assert principal.user_id == user_id
@@ -261,7 +238,6 @@ class TestJwtContract:
             await db.commit()
         clear_revocation_cache()
 
-        # B's distinct token must still authenticate.
         async with db_manager.get_session_async() as db:
             principal = await validate_principal(db, jwt_token=token_b)
         assert principal.user_id == ub
@@ -278,9 +254,6 @@ class TestJwtContract:
         clear_revocation_cache()
 
 
-# ---------------------------------------------------------------------------
-# Audience binding (MCP resource-server extension)
-# ---------------------------------------------------------------------------
 
 
 class TestAudienceBinding:
@@ -307,24 +280,19 @@ class TestAudienceBinding:
 
     @pytest.mark.asyncio
     async def test_audless_token_rejected_at_resource_server(self, db_manager, jwt_secret):
-        # API-0022: a resource server (expected_audience set) rejects aud-less tokens.
         clear_revocation_cache()
         user_id, username, tk = await _seed_user(db_manager)
-        token = _mint(user_id, username, tk)  # no audience
+        token = _mint(user_id, username, tk)
         async with db_manager.get_session_async() as db:
             with pytest.raises(PrincipalValidationError) as exc:
                 await validate_principal(db, jwt_token=token, expected_audience=_CANONICAL_AUD)
         assert exc.value.reason == AuthErrorReason.INVALID_AUDIENCE
-        # ...but the SAME aud-less token authenticates when no audience is demanded (cookie/WS).
         async with db_manager.get_session_async() as db:
             principal = await validate_principal(db, jwt_token=token)
         assert principal.user_id == user_id
         clear_revocation_cache()
 
 
-# ---------------------------------------------------------------------------
-# API-key axis
-# ---------------------------------------------------------------------------
 
 
 class TestApiKeyContract:
@@ -379,9 +347,6 @@ class TestApiKeyContract:
         clear_api_key_verify_cache()
 
 
-# ---------------------------------------------------------------------------
-# No-credential + prefetched-user reuse (BE-6063a cache-in-front)
-# ---------------------------------------------------------------------------
 
 
 class TestEdgeCases:
@@ -398,7 +363,6 @@ class TestEdgeCases:
         user_id, username, tk = await _seed_user(db_manager)
         token = _mint(user_id, username, tk)
 
-        # Load the user in its own session to act as the request-stashed object.
         from sqlalchemy import select as _select
 
         from giljo_mcp.models.auth import User
@@ -413,9 +377,6 @@ class TestEdgeCases:
 
     @pytest.mark.asyncio
     async def test_stale_inactive_prefetched_user_is_ignored(self, db_manager, jwt_secret):
-        # A stash whose is_active=False must NOT be trusted: the authoritative
-        # DB load (active row) wins. Guards against a deactivated-then-reactivated
-        # race riding a stale stash, and proves the re-assertion gate works.
         clear_revocation_cache()
         user_id, username, tk = await _seed_user(db_manager)
         token = _mint(user_id, username, tk)
@@ -426,8 +387,6 @@ class TestEdgeCases:
 
         async with db_manager.get_session_async(tenant_key=tk) as seed_db:
             stash = (await seed_db.execute(_select(User).where(User.id == user_id))).scalar_one()
-            # Detach BEFORE poisoning so the mutation never reaches the DB row —
-            # the row stays active; only the in-memory stash claims inactive.
             seed_db.expunge(stash)
         stash.is_active = False
 

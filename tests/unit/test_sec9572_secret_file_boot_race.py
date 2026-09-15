@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-9572 -- the shared secret files must survive a multi-worker boot race.
-
-``uvicorn --workers N`` boots N processes against one home directory, so more
-than one process can reach a shared secret file while another is still
-establishing it.
-
-The invariant these tests pin: a partially-written secret file must never be
-accepted. Both the encryption key and the JWT secret are read through a retry
-that requires a complete, valid payload before use, and exactly one process
-is the creator.
-
-The reads here are driven through the retry loop's own wait rather than through
-real timing, so the interleaving is exact instead of probabilistic.
-"""
 
 import threading
 
@@ -28,7 +14,6 @@ from giljo_mcp.auth_manager import AuthManager
 
 
 class _WaitThatFillsTheFile:
-    """Stands in for the retry loop's wait: the winner's bytes land during it."""
 
     def __init__(self, path, payload):
         self._path = path
@@ -42,7 +27,6 @@ class _WaitThatFillsTheFile:
 
 @pytest.fixture
 def giljo_home(tmp_path, monkeypatch):
-    """An isolated ~/.giljo-mcp for one test (no module-level state, xdist-safe)."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.delenv("GILJO_MCP_ENCRYPTION_KEY", raising=False)
@@ -52,15 +36,13 @@ def giljo_home(tmp_path, monkeypatch):
 
 
 def _auth_manager():
-    """AuthManager with the JWT secret pinned, so only the key path is under test."""
     return AuthManager(config=object())
 
 
 def test_torn_encryption_key_read_retries_instead_of_killing_the_worker(giljo_home, monkeypatch):
-    """A key file the creator has not yet filled must be waited out, not consumed."""
     monkeypatch.setenv("JWT_SECRET", "jwt-secret-not-under-test")
     key_file = giljo_home / "encryption_key"
-    key_file.write_bytes(b"")  # created by the winner; its bytes have not landed yet
+    key_file.write_bytes(b"")
     winning_key = Fernet.generate_key()
     waiter = _WaitThatFillsTheFile(key_file, winning_key)
     monkeypatch.setattr(secret_files_module, "time", waiter)
@@ -72,7 +54,6 @@ def test_torn_encryption_key_read_retries_instead_of_killing_the_worker(giljo_ho
 
 
 def test_torn_jwt_secret_read_waits_for_the_complete_payload(giljo_home, monkeypatch):
-    """The JWT secret is held to the same rule: only a complete payload is used."""
     monkeypatch.delenv("JWT_SECRET", raising=False)
     monkeypatch.delenv("GILJO_MCP_SECRET_KEY", raising=False)
     secret_file = giljo_home / "jwt_secret"
@@ -86,7 +67,6 @@ def test_torn_jwt_secret_read_waits_for_the_complete_payload(giljo_home, monkeyp
 
 
 def test_racing_workers_all_end_up_on_the_same_key(giljo_home, monkeypatch):
-    """O_CREAT|O_EXCL picks ONE creator, so every process agrees on one key."""
     monkeypatch.setenv("JWT_SECRET", "jwt-secret-not-under-test")
     start = threading.Barrier(8)
     keys = []
@@ -110,7 +90,6 @@ def test_racing_workers_all_end_up_on_the_same_key(giljo_home, monkeypatch):
 
 
 def test_permanently_unreadable_key_file_fails_loudly_and_names_itself(giljo_home, monkeypatch):
-    """A key file that never becomes readable must say so, not raise a bare crypto error."""
     monkeypatch.setenv("JWT_SECRET", "jwt-secret-not-under-test")
     key_file = giljo_home / "encryption_key"
     key_file.write_bytes(b"")
@@ -125,7 +104,6 @@ def test_permanently_unreadable_key_file_fails_loudly_and_names_itself(giljo_hom
 
 
 def test_malformed_encryption_key_env_var_names_the_variable(giljo_home, monkeypatch):
-    """A bad GILJO_MCP_ENCRYPTION_KEY must name itself, not just fail Fernet's shape check."""
     monkeypatch.setenv("JWT_SECRET", "jwt-secret-not-under-test")
     monkeypatch.setenv("GILJO_MCP_ENCRYPTION_KEY", "openssl-rand-hex-32-is-not-a-fernet-key")
 
@@ -138,7 +116,6 @@ def test_malformed_encryption_key_env_var_names_the_variable(giljo_home, monkeyp
 
 
 def test_valid_encryption_key_env_var_is_still_used_verbatim(giljo_home, monkeypatch):
-    """The env-var branch keeps working -- the new check must not reject a good key."""
     monkeypatch.setenv("JWT_SECRET", "jwt-secret-not-under-test")
     good_key = Fernet.generate_key()
     monkeypatch.setenv("GILJO_MCP_ENCRYPTION_KEY", good_key.decode())

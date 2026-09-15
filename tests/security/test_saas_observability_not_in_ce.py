@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Error-tracking code must not live in CE-shipped guard/gate paths.
-
-Both files below once carried an inline, ``GILJO_MODE == "saas"``-gated Sentry
-capture. That shape is invisible to every gate we have — the SaaS import is lazy
-so the import-boundary scanner sees nothing, there is no DB access so the
-SaaS-table check sees nothing, and the Deletion Test runs at ``GILJO_MODE=""``
-so the branch is simply skipped. The capture now lives behind the extension
-pattern in ``saas/observability/tripwires.py``.
-
-This test is the standing proof that it stays there: CE announces a neutral
-signal and imports nothing to act on it.
-"""
 
 from __future__ import annotations
 
@@ -42,7 +30,6 @@ def test_ce_guard_path_does_not_reference_sentry(relative_path):
 
 
 def test_signal_hub_imports_nothing_beyond_the_stdlib():
-    """The hub is the CE/deployment seam; a dependency here would defeat the point."""
     source = (_REPO_ROOT / "src/giljo_mcp/signals.py").read_text(encoding="utf-8")
     imports = [line.strip() for line in source.splitlines() if line.startswith(("import ", "from "))]
     assert imports == [
@@ -54,7 +41,6 @@ def test_signal_hub_imports_nothing_beyond_the_stdlib():
 
 
 def test_repeated_registration_does_not_double_announce():
-    """Both boot-time registrations can run more than once (import-time safety nets)."""
     from giljo_mcp import signals
 
     signals.clear_signal_observers()
@@ -73,7 +59,6 @@ def test_repeated_registration_does_not_double_announce():
 
 
 def test_a_failing_observer_does_not_block_the_others_or_the_publisher():
-    """Fan-out isolation: publishing is best-effort for the publisher AND per observer."""
     from giljo_mcp import signals
 
     signals.clear_signal_observers()
@@ -88,7 +73,7 @@ def test_a_failing_observer_does_not_block_the_others_or_the_publisher():
 
         signals.register_signal_observer("test.signal", boom)
         signals.register_signal_observer("test.signal", ok)
-        signals.publish_signal("test.signal", {"x": 1})  # must not raise
+        signals.publish_signal("test.signal", {"x": 1})
         assert reached == [{"x": 1}]
     finally:
         signals.clear_signal_observers()

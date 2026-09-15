@@ -1,6 +1,5 @@
 <template>
   <div class="product-tuning-menu">
-    <!-- Tune Context Button -->
     <v-btn
       v-if="!hideTrigger"
       variant="outlined"
@@ -14,7 +13,6 @@
       Tune Context
     </v-btn>
 
-    <!-- Section Selection Panel -->
     <v-expand-transition>
       <v-card v-if="panelOpen" variant="flat" class="mt-3 smooth-border tuning-card">
         <v-card-title class="text-body-large d-flex align-center">
@@ -25,13 +23,11 @@
         <v-divider />
 
         <v-card-text>
-          <!-- Loading state -->
           <div v-if="loadingSections" class="d-flex align-center justify-center py-4">
             <v-progress-circular indeterminate color="primary" size="24" class="mr-3" />
             <span class="text-body-medium">Loading available sections...</span>
           </div>
 
-          <!-- Error state -->
           <v-alert
             v-else-if="sectionsError"
             type="error"
@@ -42,9 +38,7 @@
             {{ sectionsError }}
           </v-alert>
 
-          <!-- Sections list -->
           <div v-else-if="sections.length > 0">
-            <!-- Select All -->
             <v-checkbox
               :model-value="allSelected"
               :indeterminate="someSelected && !allSelected"
@@ -58,7 +52,6 @@
 
             <v-divider class="my-2" />
 
-            <!-- Individual section checkboxes -->
             <v-checkbox
               v-for="section in sections"
               :key="section"
@@ -72,7 +65,6 @@
             />
           </div>
 
-          <!-- No sections available -->
           <v-alert
             v-else
             type="info"
@@ -110,7 +102,6 @@
       </v-card>
     </v-expand-transition>
 
-    <!-- Generated Prompt Display -->
     <v-expand-transition>
       <v-card v-if="generatedPrompt" ref="generatedPromptCard" variant="flat" class="mt-3 smooth-border tuning-card">
         <v-card-title class="text-body-large d-flex align-center">
@@ -182,19 +173,16 @@ const props = defineProps({
 const { copy: clipboardCopy, copied } = useClipboard()
 const { showToast } = useToast()
 
-// Panel state
 const panelOpen = ref(false)
 const sections = ref([])
 const selectedSections = ref([])
 const loadingSections = ref(false)
 const sectionsError = ref('')
 
-// Prompt generation state
 const generatingPrompt = ref(false)
 const generatedPrompt = ref('')
 const generatedPromptCard = ref(null)
 
-// Section display labels
 const SECTION_LABELS = {
   description: 'Product Description',
   tech_stack: 'Tech Stack',
@@ -209,7 +197,6 @@ const SECTION_LABELS = {
   vision_documents: 'Vision Documents',
 }
 
-// Computed: selection state
 const allSelected = computed(() => {
   return sections.value.length > 0 && selectedSections.value.length === sections.value.length
 })
@@ -218,17 +205,10 @@ const someSelected = computed(() => {
   return selectedSections.value.length > 0
 })
 
-/**
- * Get human-readable label for a section key
- */
 function getSectionLabel(section) {
   return SECTION_LABELS[section] || section.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-/**
- * Toggle the section selection panel.
- * Fetches available sections on first open.
- */
 async function togglePanel() {
   if (panelOpen.value) {
     panelOpen.value = false
@@ -239,9 +219,6 @@ async function togglePanel() {
   await fetchSections()
 }
 
-/**
- * Fetch eligible tuning sections from the API
- */
 async function fetchSections() {
   loadingSections.value = true
   sectionsError.value = ''
@@ -250,7 +227,6 @@ async function fetchSections() {
     const response = await api.products.getTuningSections(props.productId)
     const data = response.data
     sections.value = data.sections || []
-    // Pre-select all sections by default
     selectedSections.value = [...sections.value]
   } catch (error) {
     const message = error.response?.data?.detail || 'Failed to load tuning sections'
@@ -274,9 +250,6 @@ watch(
   { immediate: true },
 )
 
-/**
- * Toggle select-all / deselect-all
- */
 function toggleSelectAll(value) {
   if (value) {
     selectedSections.value = [...sections.value]
@@ -285,9 +258,6 @@ function toggleSelectAll(value) {
   }
 }
 
-/**
- * Generate the tuning prompt for selected sections
- */
 async function generatePrompt() {
   generatingPrompt.value = true
 
@@ -304,7 +274,6 @@ async function generatePrompt() {
       showToast({ message: 'No prompt was generated. Check that selected sections have data.', type: 'warning' })
     } else {
       await nextTick()
-      // v-expand-transition animates height, so wait a frame for it to settle before scrolling
       requestAnimationFrame(() => {
         const el = generatedPromptCard.value?.$el ?? generatedPromptCard.value
         if (el && typeof el.scrollIntoView === 'function') {
@@ -321,9 +290,6 @@ async function generatePrompt() {
   }
 }
 
-/**
- * Copy the generated prompt to clipboard
- */
 async function copyPrompt() {
   const success = await clipboardCopy(generatedPrompt.value)
   if (success) {

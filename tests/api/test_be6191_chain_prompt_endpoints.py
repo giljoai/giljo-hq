@@ -3,28 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6191: chain STAGING + IMPLEMENTATION prompt endpoints point at the
-dedicated, PROJECT-LESS chain orchestrator and return a THIN bootstrap.
-
-Before BE-6191 both chain endpoints resolved the HEAD project's orchestrator
-job (project_id != NULL), so the conductor never resolved as the chain
-orchestrator (CH_CHAIN_STAGING never rendered) and the endpoint fat-pasted the
-chapter bodies + a dangling agent_templates appendix. After BE-6191:
-
-- the endpoints resolve run["conductor_agent_id"] -> the project-less job;
-- they return a thin bootstrap whose START NOW step 2 calls
-  get_staging_instructions (staging) / get_job_mission (implementation), so the
-  orchestrator fetches its own full chain protocol;
-- the ToolSearch STEP 0 bootstrap appears only for the claude-code harness.
-
-Failing layer: the chain prompt ENDPOINTS (api/endpoints/prompts.py). Tests run
-at that layer through the ASGI app. Plus two protocol-literal checks at the
-service layer (CH_CAPABILITY mode wording).
-
-Parallel-safe: each test seeds its own tenant via SequenceRunService.create
-(which mints the project-less conductor). No module-level mutable state.
-Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -51,14 +29,9 @@ pytestmark = pytest.mark.asyncio
 _TEST_CSRF_TOKEN = secrets.token_urlsafe(32)
 
 
-# ---------------------------------------------------------------------------
-# Seed helper: uses SequenceRunService.create so the DEDICATED project-less
-# conductor is minted (run.conductor_agent_id is populated).
-# ---------------------------------------------------------------------------
 
 
 async def _seed(db_manager, *, execution_mode: str = "claude_code_cli") -> dict:
-    """Create tenant + user + two projects + a SequenceRun with a real conductor."""
     async with db_manager.get_session_async() as session:
         suffix = uuid.uuid4().hex[:8]
         tenant_key = TenantManager.generate_tenant_key()
@@ -94,11 +67,6 @@ async def _seed(db_manager, *, execution_mode: str = "claude_code_cli") -> dict:
         session.add(product)
         await session.flush()
 
-        # BE-9486: series_number MUST come from a collision-free source, not a
-        # random draw -- p1/p2 share (tenant_key, product_id), so a random draw
-        # over the same range for both rows can land on the same number and
-        # trip uq_project_taxonomy_active (see test_fe6172_chain_staging_prompt.py,
-        # this file's sibling, which is how BE-9486 was actually caught).
         p1 = Project(
             id=str(uuid.uuid4()),
             name=f"Alpha {suffix}",
@@ -152,7 +120,6 @@ async def _seed(db_manager, *, execution_mode: str = "claude_code_cli") -> dict:
 
 
 async def _projectless_job_id(db_manager, tenant_key: str, conductor_agent_id: str) -> str:
-    """Resolve the job_id of the minted project-less conductor by its agent_id."""
     async with db_manager.get_session_async() as session:
         session.info["tenant_key"] = tenant_key
         row = await session.execute(
@@ -164,9 +131,6 @@ async def _projectless_job_id(db_manager, tenant_key: str, conductor_agent_id: s
         return str(row.scalar_one())
 
 
-# ---------------------------------------------------------------------------
-# 1. STAGING returns a THIN, project-less prompt
-# ---------------------------------------------------------------------------
 
 
 async def test_chain_staging_returns_thin_projectless_prompt(api_client: AsyncClient, db_manager):
@@ -181,23 +145,16 @@ async def test_chain_staging_returns_thin_projectless_prompt(api_client: AsyncCl
     body = resp.json()
     prompt = body["prompt"]
 
-    # (a) START NOW step 2 calls get_staging_instructions with the project-less job_id.
     assert "get_staging_instructions(" in prompt, "staging bootstrap must call get_staging_instructions"
     assert projectless_job_id in prompt, "the project-less conductor job_id must appear in the prompt"
 
-    # (b) THIN: no fat chapter BODY inlined (the bootstrap may NAME the chapters it
-    #     tells the orchestrator to fetch, but must not paste their body content).
     assert "AGENT TEMPLATES" not in prompt, "the agent_templates appendix must NOT be inlined"
     assert "ORDER OF OPERATIONS" not in prompt, "the chapter body must NOT be inlined"
     assert "STAND UP THE HUB THREAD" not in prompt, "the staging chapter body must NOT be inlined"
 
-    # (c) the response orchestrator_job_id IS the project-less job.
     assert body["orchestrator_job_id"] == projectless_job_id
 
 
-# ---------------------------------------------------------------------------
-# 2. the resolved job is the PROJECT-LESS conductor, not the head sub-orch
-# ---------------------------------------------------------------------------
 
 
 async def test_resolved_job_is_projectless(api_client: AsyncClient, db_manager):
@@ -221,9 +178,6 @@ async def test_resolved_job_is_projectless(api_client: AsyncClient, db_manager):
     assert project_id is None, "resolved job must be the project-less chain orchestrator (project_id IS NULL)"
 
 
-# ---------------------------------------------------------------------------
-# 3. ToolSearch STEP 0 bootstrap renders for a claude harness
-# ---------------------------------------------------------------------------
 
 
 async def test_staging_toolsearch_bootstrap_for_claude(api_client: AsyncClient, db_manager):
@@ -238,9 +192,6 @@ async def test_staging_toolsearch_bootstrap_for_claude(api_client: AsyncClient, 
     assert "ToolSearch(query=" in prompt, "the one-line ToolSearch call must be rendered"
 
 
-# ---------------------------------------------------------------------------
-# 4. NEGATIVE: a codex harness must NOT carry the ToolSearch bootstrap
-# ---------------------------------------------------------------------------
 
 
 async def test_staging_no_toolsearch_for_codex(api_client: AsyncClient, db_manager):
@@ -254,9 +205,6 @@ async def test_staging_no_toolsearch_for_codex(api_client: AsyncClient, db_manag
     assert "TOOLSEARCH BOOTSTRAP" not in prompt, "codex harness must NOT carry the ToolSearch bootstrap"
 
 
-# ---------------------------------------------------------------------------
-# 5. multi_terminal mode renders the multi_terminal CH_CAPABILITY contract
-# ---------------------------------------------------------------------------
 
 
 async def test_mode_correct_protocol_multi_terminal(api_client: AsyncClient, db_manager):
@@ -270,15 +218,10 @@ async def test_mode_correct_protocol_multi_terminal(api_client: AsyncClient, db_
         ).get_staging_instructions(projectless_job_id, seed["tenant_key"])
 
     capability = resp["orchestrator_protocol"]["ch_capability"]
-    # BE-6205: the conductor ALWAYS spawns each sub-orch in its OWN FRESH OS TERMINAL
-    # (mode-independent); literal verified in chapters_chain.py _build_ch_capability.
     assert "FRESH OS TERMINAL" in capability, "CH_CAPABILITY must name the fresh OS terminal sub-orch spawn"
     assert "EXECUTION MODE = multi_terminal" in capability
 
 
-# ---------------------------------------------------------------------------
-# 6. subagent (claude_code_cli) mode renders the subagent CH_CAPABILITY contract
-# ---------------------------------------------------------------------------
 
 
 async def test_mode_correct_protocol_subagent(api_client: AsyncClient, db_manager):
@@ -292,14 +235,10 @@ async def test_mode_correct_protocol_subagent(api_client: AsyncClient, db_manage
         ).get_staging_instructions(projectless_job_id, seed["tenant_key"])
 
     capability = resp["orchestrator_protocol"]["ch_capability"]
-    # Literal verified in chapters_chain.py _build_ch_capability (subagent branch).
     assert "Task()/subagent" in capability, "subagent CH_CAPABILITY must name the Task()/subagent path"
     assert "EXECUTION MODE = claude_code_cli" in capability
 
 
-# ---------------------------------------------------------------------------
-# 7. IMPLEMENTATION returns a project-less drive bootstrap
-# ---------------------------------------------------------------------------
 
 
 async def test_chain_implementation_returns_projectless_drive_bootstrap(api_client: AsyncClient, db_manager):
@@ -314,25 +253,18 @@ async def test_chain_implementation_returns_projectless_drive_bootstrap(api_clie
     body = resp.json()
     prompt = body["prompt"]
 
-    # START NOW step 2 calls get_job_mission with the project-less job_id.
     assert "get_job_mission(" in prompt, "implementation bootstrap must call get_job_mission"
     assert projectless_job_id in prompt, "the project-less conductor job_id must appear"
     assert body["orchestrator_job_id"] == projectless_job_id
-    # claude harness -> carries the ToolSearch bootstrap.
     assert "TOOLSEARCH BOOTSTRAP" in prompt
-    # THIN: no fat drive-chapter BODY inlined (naming the chapter to fetch is fine).
     assert "AUTO-CONTINUE LOOP" not in prompt, "the drive chapter body must NOT be inlined"
     assert "CRASH-RESUME" not in prompt, "the drive chapter body must NOT be inlined"
 
 
-# ---------------------------------------------------------------------------
-# 8. a legacy run without a conductor returns 409 (recreate the chain)
-# ---------------------------------------------------------------------------
 
 
 async def test_legacy_run_without_conductor_409(api_client: AsyncClient, db_manager):
     seed = await _seed(db_manager)
-    # NULL the conductor to simulate a pre-BE-6184 legacy run.
     from giljo_mcp.models.sequence_runs import SequenceRun
 
     async with db_manager.get_session_async() as session:
@@ -352,5 +284,4 @@ async def test_legacy_run_without_conductor_409(api_client: AsyncClient, db_mana
         headers=seed["headers"],
     )
     assert resp.status_code == 409, f"Expected 409 for legacy run, got {resp.status_code}: {resp.text}"
-    # The custom StarletteHTTPException handler maps a plain-string detail to "message".
     assert "recreate the chain" in resp.json()["message"].lower()

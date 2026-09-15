@@ -1,18 +1,3 @@
-/**
- * TutorialReviewScreen.harness-hint.spec.js — FE-9503b, superseded by FE-9569 Part 3
- *
- * Ruling 19: both doors (dashboard, harness) are permanent and equal, and the
- * tutorial must teach both without preferring or replacing either. FE-9503b
- * originally pinned this as a SEPARATE hint paragraph next to the Activate
- * button. FE-9569 (operator spec, 2026-09-03) retired "Activate product" as a
- * user-facing concept and consolidated that separate harness hint + the old
- * "want changes, tell your agent" hint into ONE post-button subtitle that
- * still names both paths — the dual-door teaching principle is unchanged,
- * only the copy's shape is. This file now pins THAT subtitle instead of the
- * removed `tutorial-activate-harness-hint` element.
- *
- * Edition scope: Both (shared frontend/src).
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'

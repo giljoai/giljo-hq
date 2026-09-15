@@ -1,13 +1,3 @@
-/**
- * SetupStep4Complete.spec.js — FE-9503b
- *
- * The Launch step's cards are informational only (FE-6259b) — the wizard's
- * three original cards (product/dashboard/guide) stay exactly as they were,
- * and the new "drive from your terminal" card is additive: informational,
- * no toggle, nothing stored, no preference. Ruling 19.
- *
- * Edition scope: Both (shared frontend/src).
- */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import SetupStep4Complete from './SetupStep4Complete.vue'
