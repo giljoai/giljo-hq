@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""The current user's notification-preferences endpoints.
-
-Split out of ``users.py`` by FE-9553 to keep that module within the
-repository's per-file size limit. Splitting rather than shaving comments leaves
-the next author real headroom instead of landing exactly on the limit.
-
-The router here carries NO prefix of its own and is included by ``users.py``,
-so both paths stay exactly where they were:
-``/api/v1/users/me/settings/notification-preferences``. Moving the URL would
-have been a breaking change for a size problem, which is never a good trade.
-
-**Edition Scope:** Both
-"""
 
 from __future__ import annotations
 
@@ -75,8 +62,6 @@ async def update_notification_preferences(
     """
     prefs = await user_service.update_notification_preferences(
         user_id=current_user.id,
-        # exclude_unset is load-bearing: it sends only the keys the caller
-        # actually set, which is what makes a single-key write safe.
         payload=payload.model_dump(exclude_unset=True),
     )
 

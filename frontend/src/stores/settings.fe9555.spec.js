@@ -1,20 +1,3 @@
-/**
- * settings.fe9555.spec.js — FE-9555
- *
- * The account-level execution-mode default behind the Tools -> Agents control.
- *
- * Ruling 6: "Execution mode must be ASKED, both doors." `stage_project` refuses
- * an omitted mode rather than picking one, and a refusal with no off switch is a
- * nag — so the ruling pairs it with exactly ONE account default: ask every time
- * (the default) / terminals / subagents. This store owns the client half of it.
- *
- * The load path is where the real risk sits. A failed read that leaves the ref
- * undefined would render the select as blank, a user would "fix" it by picking a
- * mode, and they would have silently turned OFF the asking this project exists to
- * turn ON. So a failure falls back to 'ask' rather than propagating.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 

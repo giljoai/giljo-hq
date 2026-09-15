@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Seed global agent silence threshold system setting (BE-6009).
-
-Revision ID: ce_0037_seed_agent_silence_threshold_system_setting
-Revises: ce_0036_add_ctx_taxonomy_type
-Create Date: 2026-05-29
-
-BE-6009 moves ``agent_silence_threshold_minutes`` out of tenant-scoped
-``settings.general`` and into the deployment-wide ``system_settings`` table.
-
-Idempotency: upgrade inserts the default only when the key is absent.
-Downgrade deletes only this key.
-
-Edition Scope: Both -- ``system_settings`` is a CE model shared by SaaS via the
-CE migration chain, while the runtime write endpoint is CE-only.
-"""
 
 import sqlalchemy as sa
 from alembic import op

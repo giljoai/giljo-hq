@@ -74,7 +74,6 @@
         </div>
       </div>
 
-      <!-- Live Preview -->
       <v-alert type="info" variant="tonal" density="compact" class="mt-4">
         <div class="d-flex align-center">
           <div
@@ -91,7 +90,6 @@
         </div>
       </v-alert>
 
-      <!-- Error alert -->
       <v-alert
         v-if="submitError"
         type="error"
@@ -156,7 +154,6 @@ const colorSwatches = PROJECT_TYPE_COLOR_SWATCHES
 const abbreviationRules = [
   (v) => !!v || 'Abbreviation is required',
   (v) => /^[A-Z]{2,4}$/.test(v) || 'Must be 2-4 uppercase letters',
-  // TSK is reserved for tasks (BE-6049c) — reject it as a custom project type.
   (v) => v !== RESERVED_TASK_TYPE_ABBR || `${RESERVED_TASK_TYPE_ABBR} is reserved for tasks`,
 ]
 

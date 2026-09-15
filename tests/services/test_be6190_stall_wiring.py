@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6190: stall wiring — wire the dead mark_stalled_if_past_deadline into SilenceDetector.
-
-The previously dead SequenceChainContextResolver.mark_stalled_if_past_deadline now has a
-runtime caller: SilenceDetector._stall_runs_for_silenced_projects flips an active chain run
-to "stalled" when its CURRENT in-flight member's orchestrator has gone silent past the
-threshold. It reuses the agents the silence cycle already marked silent (no second scan,
-no new background timer).
-
-Invariants under test:
-1/2. mark_stalled_if_past_deadline flips status="stalled" past the deadline, no-ops before.
-3.   _stall_runs_for_silenced_projects stalls the run when the silent project is CURRENT.
-4.   A silent NON-current member does NOT stall the run.
-5.   A silent solo project (no active run) is a no-op (never raises).
-
-Parallel-safe: DB-touching tests use db_session (TransactionalTestContext). No module-level
-mutable state. Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -38,8 +21,6 @@ from tests.helpers.taxonomy_seeds import next_series_number
 
 
 async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -56,8 +37,6 @@ async def _seed_project(session: AsyncSession, tenant_key: str) -> str:
         status="active",
         tenant_key=tenant_key,
         product_id=_owning_product_project.id,
-        # BE-9429: uq_project_taxonomy_active is NULLS NOT DISTINCT, so these
-        # NULL-product/NULL-type rows collide unless the serial differs.
         series_number=next_series_number(),
         execution_mode="claude_code_cli",
         created_at=datetime.now(UTC),
@@ -77,14 +56,9 @@ def _resolver(session: AsyncSession) -> SequenceChainContextResolver:
 
 
 def _detector(session: AsyncSession) -> SilenceDetector:
-    # The stall path only uses self.db (forwarded as test_session into the resolver/run svc).
-    # ws_manager is unused by _stall_runs_for_silenced_projects, so None is sufficient.
     return SilenceDetector(db_manager=None, ws_manager=None)
 
 
-# ---------------------------------------------------------------------------
-# 1. mark_stalled flips a running run to stalled past the deadline
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -112,9 +86,6 @@ async def test_mark_stalled_flips_run_past_deadline(db_session: AsyncSession) ->
     assert refreshed["status"] == "stalled"
 
 
-# ---------------------------------------------------------------------------
-# 2. mark_stalled is a no-op before the deadline
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -141,9 +112,6 @@ async def test_mark_stalled_noop_before_deadline(db_session: AsyncSession) -> No
     assert refreshed["status"] != "stalled"
 
 
-# ---------------------------------------------------------------------------
-# 3. the wired method stalls the run when the silent project is CURRENT
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -167,9 +135,6 @@ async def test_stall_current_member_run(db_session: AsyncSession) -> None:
     assert refreshed["status"] == "stalled"
 
 
-# ---------------------------------------------------------------------------
-# 4. a silent NON-current member does NOT stall the run
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -186,7 +151,6 @@ async def test_no_stall_for_noncurrent_member(db_session: AsyncSession) -> None:
         current_index=0,
     )
 
-    # p1 is index 1 — NOT the current in-flight member.
     silenced = [(tenant, p1, datetime.now(UTC) - timedelta(minutes=60), 10)]
     await _detector(db_session)._stall_runs_for_silenced_projects(db_session, silenced)
 
@@ -194,9 +158,6 @@ async def test_no_stall_for_noncurrent_member(db_session: AsyncSession) -> None:
     assert refreshed["status"] != "stalled"
 
 
-# ---------------------------------------------------------------------------
-# 5. a silent solo project (no active run) is a no-op
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -205,5 +166,4 @@ async def test_no_stall_solo_no_run(db_session: AsyncSession) -> None:
     pid = await _seed_project(db_session, tenant)
 
     silenced = [(tenant, pid, datetime.now(UTC) - timedelta(minutes=60), 10)]
-    # No active run contains pid => the loop finds nothing and never raises.
     await _detector(db_session)._stall_runs_for_silenced_projects(db_session, silenced)

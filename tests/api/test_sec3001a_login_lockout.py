@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Endpoint-layer regression for SEC-3001a Wave 2 item 6 — login lockout wiring.
-
-Drives the real HTTP ``POST /api/auth/login`` through FastAPI DI (the failing
-layer / boundary) to prove the lockout is consulted: sustained wrong-password
-attempts from one (identifier, IP) lock the account, the lock then refuses even
-the CORRECT password (two-sided), and the window auto-unlocks.
-
-The per-IP login rate limiter (5/min) is neutralized via ``GILJO_RL_LOGIN`` so
-the test can reach the 10-attempt lockout threshold; the lockout itself is the
-behavior under test.
-
-Parallel-safe: unique user per test; lockout rows are keyed by the unique
-username so they never collide across tests.
-"""
 
 from __future__ import annotations
 
@@ -75,27 +61,20 @@ async def seeded_user(db_manager) -> dict:
 
 @pytest.mark.asyncio
 async def test_login_lockout_blocks_then_auto_unlocks(api_client, seeded_user, db_manager, monkeypatch) -> None:
-    """Two-sided: 10 wrong attempts lock the account (correct password then 429),
-    and forcing the window into the past auto-unlocks it (correct password 200)."""
-    # Take the per-IP rate limiter out of the way so we can reach the threshold.
     monkeypatch.setenv("GILJO_RL_LOGIN", "10000")
     username = seeded_user["username"]
 
-    # Attempts 1..9 are ordinary credential failures (401).
     for i in range(MAX_FAILED_ATTEMPTS - 1):
         resp = await api_client.post(_LOGIN_URL, json={"username": username, "password": "wrong-password"})
         assert resp.status_code == 401, f"attempt {i + 1}: {resp.text}"
 
-    # Attempt 10 crosses the threshold and trips the lock (429).
     tripped = await api_client.post(_LOGIN_URL, json={"username": username, "password": "wrong-password"})
     assert tripped.status_code == 429, tripped.text
 
-    # Kill half: the CORRECT password is refused while locked (lockout wins).
     locked = await api_client.post(_LOGIN_URL, json={"username": username, "password": _PASSWORD})
     assert locked.status_code == 429, locked.text
     assert locked.headers.get("Retry-After")
 
-    # Auto-unlock: shove the window into the past, then the correct password works.
     async with db_manager.get_session_async() as session:
         await session.execute(
             update(LoginLockout)
@@ -111,21 +90,17 @@ async def test_login_lockout_blocks_then_auto_unlocks(api_client, seeded_user, d
 
 @pytest.mark.asyncio
 async def test_successful_login_does_not_accumulate_lock(api_client, seeded_user, monkeypatch) -> None:
-    """Happy path: a few failures then a success clears the counter, so the next
-    failures start fresh (a legitimate fat-fingering user is never locked)."""
     monkeypatch.setenv("GILJO_RL_LOGIN", "10000")
     username = seeded_user["username"]
 
-    for _ in range(MAX_FAILED_ATTEMPTS - 2):  # 8 failures, below threshold
+    for _ in range(MAX_FAILED_ATTEMPTS - 2):
         resp = await api_client.post(_LOGIN_URL, json={"username": username, "password": "nope"})
         assert resp.status_code == 401, resp.text
 
-    # Correct password succeeds and clears the (identifier, IP) counter.
     ok = await api_client.post(_LOGIN_URL, json={"username": username, "password": _PASSWORD})
     assert ok.status_code == 200, ok.text
 
-    # The counter restarted: another sub-threshold burst still authenticates.
-    for _ in range(MAX_FAILED_ATTEMPTS - 1):  # 9 fresh failures
+    for _ in range(MAX_FAILED_ATTEMPTS - 1):
         resp = await api_client.post(_LOGIN_URL, json={"username": username, "password": "nope"})
         assert resp.status_code == 401, resp.text
     final = await api_client.post(_LOGIN_URL, json={"username": username, "password": _PASSWORD})

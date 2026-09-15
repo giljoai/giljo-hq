@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Dynamic Network Adapter IP Detection for Giljo HQ.
-
-This module provides runtime IP detection for network adapters to support
-CORS configuration updates when adapter IPs change.
-"""
 
 import logging
 
@@ -19,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 
 class AdapterIPDetector:
-    """Detect current IP address of network adapters for CORS configuration."""
 
     def __init__(self):
         self.virtual_patterns = [
@@ -38,7 +31,6 @@ class AdapterIPDetector:
         self.loopback_patterns = ["lo", "Loopback"]
 
     def get_adapter_ip(self, adapter_id: str) -> str | None:
-        """Get current IP address of a specific network adapter."""
         try:
             interfaces = psutil.net_if_addrs()
 
@@ -49,7 +41,7 @@ class AdapterIPDetector:
             addresses = interfaces[adapter_id]
 
             for addr in addresses:
-                if addr.family == 2:  # AF_INET (IPv4)
+                if addr.family == 2:
                     ip = addr.address
                     if not ip.startswith("127."):
                         logger.debug(f"Adapter {adapter_id!r} has IP: {ip}")
@@ -63,10 +55,6 @@ class AdapterIPDetector:
             return None
 
     def detect_ip_change(self, config: dict) -> tuple[bool, str | None, str | None]:
-        """Detect if network adapter IP has changed from initial/stored configuration.
-
-        If no adapter is configured but mode is 'auto', will auto-detect best adapter.
-        """
         try:
             security = config.get("security", {})
             network = security.get("network", {})
@@ -75,16 +63,13 @@ class AdapterIPDetector:
             adapter_id = network.get("selected_adapter")
             initial_ip = network.get("initial_ip")
 
-            # Auto-detect adapter if not specified and mode is 'auto'
             if not adapter_id and mode == "auto":
                 recommended = self.get_recommended_adapter()
                 if recommended:
                     adapter_id, current_ip = recommended
                     logger.info(f"Auto-detected adapter: {adapter_id!r} with IP {current_ip}")
-                    # First run - no initial IP to compare
                     if not initial_ip:
                         return False, current_ip, adapter_id
-                    # Compare with stored initial IP
                     if current_ip != initial_ip:
                         logger.info(f"IP changed from initial: {initial_ip} -> {current_ip}")
                         return True, current_ip, adapter_id
@@ -116,7 +101,6 @@ class AdapterIPDetector:
             return False, None, None
 
     def get_recommended_adapter(self) -> tuple[str, str] | None:
-        """Get recommended network adapter for LAN binding."""
         try:
             interfaces = psutil.net_if_addrs()
             interface_stats = psutil.net_if_stats()
@@ -131,7 +115,7 @@ class AdapterIPDetector:
                 is_active = stats.isup if stats else False
 
                 for addr in addresses:
-                    if addr.family == 2:  # AF_INET
+                    if addr.family == 2:
                         ip = addr.address
 
                         if not ip.startswith("127.") and is_active and not is_loopback:

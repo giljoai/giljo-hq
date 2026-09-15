@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""(e) WebSocket upgrade handshake is honored through the proxy path.
-
-The unique value here is proving the Cloudflare -> nginx -> uvicorn chain
-forwards an ``Upgrade: websocket`` handshake to the ASGI app at
-``/ws/{client_id}`` (the regression class behind the BE-6029 WS storm). We send
-a raw, dependency-free handshake and inspect the HTTP status line — no valid
-auth required.
-"""
 
 from __future__ import annotations
 
@@ -23,7 +15,6 @@ import pytest
 
 
 def _ws_handshake_status(target, path: str = "/ws/e2e-probe", timeout: int = 15):
-    """Send a raw RFC 6455 upgrade handshake and return (status_code, status_line)."""
     key = base64.b64encode(os.urandom(16)).decode("ascii")
     request = (
         f"GET {path} HTTP/1.1\r\n"
@@ -55,17 +46,5 @@ def _ws_handshake_status(target, path: str = "/ws/e2e-probe", timeout: int = 15)
 
 @pytest.mark.network
 def test_websocket_upgrade_handshake(target):
-    """The /ws route participates in the upgrade negotiation through the edge.
-
-    Accepted outcomes:
-      * 101 — upgrade accepted (setup mode or an authenticated probe).
-      * 401/403 — the app's WS auth rejected an UNAUTHENTICATED probe (the
-        common case on a configured host: authenticate_websocket raises before
-        accept, so the handshake is refused at the HTTP layer). This still
-        proves the route exists and the proxy forwarded the Upgrade.
-
-    A 404 (route missing / SPA fallback) or 5xx (proxy dropped the upgrade) is a
-    real failure.
-    """
     code, status_line = _ws_handshake_status(target)
     assert code in (101, 401, 403), f"unexpected WS handshake response: {status_line!r}"

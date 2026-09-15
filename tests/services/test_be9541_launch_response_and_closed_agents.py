@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9541: two lifecycle response-shape bugs, both found while driving these
-tools from an MCP client.
-
-Defect 1 -- ``launch_implementation`` answers one fact (the launch timestamp)
-with two fields, exactly one of which is populated depending on an internal
-distinction (first-launch vs already-launched) the caller cannot see. A caller
-checking the "wrong" field for the path it happened to take reads a successful
-launch as a failure.
-
-Defect 2 -- ``get_workflow_status`` never counts agents in the ``closed``
-execution status anywhere. A project whose sole agent is ``closed`` (not
-``complete``) reports 0 completed, 0% progress, and "Unknown" stage -- the
-healthiest possible end-state renders as if nothing had started.
-
-Parallel-safe: DB-touching tests use db_session (TransactionalTestContext). No
-module-level mutable state. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -41,9 +24,6 @@ from giljo_mcp.tenant import TenantManager
 pytestmark = pytest.mark.asyncio
 
 
-# ---------------------------------------------------------------------------
-# Defect 1 -- launch_implementation's null-timestamp trap
-# ---------------------------------------------------------------------------
 
 
 def _staging_service(db_manager, tenant_key, db_session) -> ProjectStagingService:
@@ -74,12 +54,6 @@ async def _staged_project(db_session, tenant_key: str) -> Project:
 
 
 async def test_first_launch_populates_a_timestamp_an_honest_caller_can_read(db_manager, db_session, test_tenant_key):
-    """FAILS on current code: first launch left ``launched_at`` null.
-
-    Pre-fix the result is ``{implementation_launched_at: <ts>, launched_at:
-    None}`` on a first launch -- a caller reading ``launched_at`` (the field
-    populated on the OTHER path) sees None and concludes the launch failed.
-    """
     svc = _staging_service(db_manager, test_tenant_key, db_session)
     project = await _staged_project(db_session, test_tenant_key)
 
@@ -94,7 +68,6 @@ async def test_first_launch_populates_a_timestamp_an_honest_caller_can_read(db_m
 
 
 async def test_already_launched_reply_also_populates_both_fields(db_manager, db_session, test_tenant_key):
-    """The mirror path: FAILS on current code with implementation_launched_at=None."""
     svc = _staging_service(db_manager, test_tenant_key, db_session)
     project = await _staged_project(db_session, test_tenant_key)
 
@@ -110,7 +83,6 @@ async def test_already_launched_reply_also_populates_both_fields(db_manager, db_
 
 
 async def test_launch_still_does_not_activate_be9532_pin(db_manager, db_session, test_tenant_key):
-    """Museum-rule pin: BE-9532's reporting fields must keep passing untouched."""
     svc = _staging_service(db_manager, test_tenant_key, db_session)
     project = await _staged_project(db_session, test_tenant_key)
     project.status = ProjectStatus.INACTIVE
@@ -125,9 +97,6 @@ async def test_launch_still_does_not_activate_be9532_pin(db_manager, db_session,
 async def test_mcp_tool_boundary_passes_a_readable_timestamp_through(
     db_manager, db_session, test_tenant_key, monkeypatch
 ):
-    """Boundary test: the audience that hit this bug reaches it through the MCP
-    tool's ``{"status": "launched", **result}`` spread, not the service directly.
-    """
     from giljo_mcp.tools.tool_accessor._project_tools import ProjectToolsMixin
 
     project = await _staged_project(db_session, test_tenant_key)
@@ -160,9 +129,6 @@ async def test_mcp_tool_boundary_passes_a_readable_timestamp_through(
     )
 
 
-# ---------------------------------------------------------------------------
-# Defect 2 -- get_workflow_status loses closed agents from every bucket
-# ---------------------------------------------------------------------------
 
 
 def _workflow_svc(session: AsyncSession) -> WorkflowStatusService:
@@ -217,13 +183,6 @@ async def _seed_project_with_one_closed_agent(session: AsyncSession, tenant_key:
 
 
 async def test_a_fully_closed_project_does_not_read_as_zero_percent_unknown(db_session: AsyncSession) -> None:
-    """FAILS on current code: a solo closed agent reports 0/0.0%/Unknown.
-
-    Live observation this reproduces: a project whose SOLE agent was
-    ``closed`` with all TODOs done reported ``completed_agents: 0,
-    progress_percent: 0.0, current_stage: "Unknown"`` -- the healthiest
-    possible end-state read as an unstarted project.
-    """
     tenant = TenantManager.generate_tenant_key()
     pid = await _seed_project_with_one_closed_agent(db_session, tenant)
 

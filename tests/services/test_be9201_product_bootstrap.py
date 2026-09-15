@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Function/service-layer tests for the BE-9201 product-bootstrap tools.
-
-Covers the validation and ingest-parity behavior of
-``tools.vision_analysis.create_vision_document`` (size cap, filename
-discipline, staleness-machinery integration) and the
-``ToolAccessor.create_product`` adapter's input discipline — the layers BELOW
-the MCP transport (which has its own regression file,
-``tests/integration/test_be9201_product_bootstrap_mcp_transport.py``).
-"""
 
 import uuid
 
@@ -51,9 +41,6 @@ async def product_a(db_session: AsyncSession, tenant_a: str) -> Product:
 CONTENT = "# Vision\n\nAgent-authored vision body.\n\n## Scope\n\nOnboarding tutorial paths B and D."
 
 
-# ---------------------------------------------------------------------------
-# create_vision_document — validation
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -69,8 +56,6 @@ async def test_empty_content_rejected(db_session, tenant_a, product_a):
 
 @pytest.mark.asyncio
 async def test_oversize_content_rejected_at_the_rest_cap(db_session, tenant_a, product_a, monkeypatch):
-    """The byte cap is get_config().upload.max_upload_bytes — the SAME cap the
-    REST upload enforces (single source of truth, not a new constant)."""
     from giljo_mcp.tools import vision_analysis as va
 
     real_config = va.get_config()
@@ -87,7 +72,6 @@ async def test_oversize_content_rejected_at_the_rest_cap(db_session, tenant_a, p
 
 @pytest.mark.asyncio
 async def test_bad_document_name_rejected(db_session, tenant_a, product_a):
-    """Path-traversal names are refused by the shared SEC-0001 sanitizer."""
     with pytest.raises(ValidationError, match="Invalid document_name"):
         await create_vision_document(
             product_id=product_a.id,
@@ -111,8 +95,6 @@ async def test_unknown_product_not_found(db_session, tenant_a):
 
 @pytest.mark.asyncio
 async def test_duplicate_document_name_rejected(db_session, tenant_a, product_a):
-    """Second doc with the same name for the same product is a clean rejection
-    (the service's duplicate guard), not a 500."""
     first = await create_vision_document(
         product_id=product_a.id,
         tenant_key=tenant_a,
@@ -132,17 +114,10 @@ async def test_duplicate_document_name_rejected(db_session, tenant_a, product_a)
         )
 
 
-# ---------------------------------------------------------------------------
-# create_vision_document — ingest parity (the load-bearing WO requirement)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_feeds_the_same_staleness_machinery_as_the_ui_upload(db_session, tenant_a, product_a):
-    """After the write, the persisted consolidated_vision_hash equals the
-    derived vision_inputs_hash — the SAME freshness contract the UI upload
-    establishes (services/vision_hash.py). This is what makes the agent-written
-    doc indistinguishable from an uploaded one to the CTX orchestrator."""
     result = await create_vision_document(
         product_id=product_a.id,
         tenant_key=tenant_a,
@@ -171,7 +146,6 @@ async def test_feeds_the_same_staleness_machinery_as_the_ui_upload(db_session, t
     assert derived == f"sha256:{product.consolidated_vision_hash}", (
         "agent-written doc must land in the same consolidation/staleness pipeline as a UI upload"
     )
-    # And the completion flag is FALSE until the agent writes summaries (BE-5118 parity).
     assert product.vision_analysis_complete is False
 
 
@@ -195,9 +169,6 @@ async def test_default_name_and_extension_append(db_session, tenant_a, product_a
     assert extensionless["document_name"] == "roadmap.md"
 
 
-# ---------------------------------------------------------------------------
-# create_product adapter — input discipline
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -226,6 +197,5 @@ async def test_create_product_adapter_strips_name_and_defaults(db_manager, db_se
     result = await accessor.create_product(name=f"  {name}  ", tenant_key=tenant_a)
     assert result["success"] is True
     assert result["name"] == name
-    # FE-9524/D1: a new product is shown by default -- no on/off ceremony.
     assert result["is_active"] is True
     assert result["target_platforms"] == ["all"]

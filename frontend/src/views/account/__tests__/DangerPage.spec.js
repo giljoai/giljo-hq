@@ -1,22 +1,8 @@
-/**
- * Tests for the Download My Data section on the account Danger Zone page.
- *
- * BE-5062 — GDPR data portability. The section must:
- *   - render in CE (edition === 'community')
- *   - render in SaaS when the current user is an org admin
- *   - be hidden in SaaS when the current user is NOT an org admin
- *   - be hidden when edition is not 'community' and user is not an admin
- *   - call api.account.exportMyData() when the user clicks Generate Export
- *   - reflect WebSocket `tenant:export_progress` events in the UI
- *   - surface the download link when the export completes
- */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
-// ---------- Module mocks ----------
 
-// Capture the on-handlers so the test can simulate WebSocket events.
 const wsHandlers = new Map()
 function emitWsEvent(type, payload) {
   const set = wsHandlers.get(type)
@@ -49,8 +35,6 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }))
 
-// configService.getEdition() controls edition-aware visibility (matches existing
-// pattern in this file for the SaaS-only delete card).
 const editionRef = { value: 'community' }
 vi.mock('@/services/configService', () => ({
   default: {
@@ -58,7 +42,6 @@ vi.mock('@/services/configService', () => ({
   },
 }))
 
-// useUserStore exposes isAdmin; BE-5062 SaaS gate reads it for the export card.
 const userIsAdminRef = { value: false }
 vi.mock('@/stores/user', () => ({
   useUserStore: () => ({
@@ -68,7 +51,6 @@ vi.mock('@/stores/user', () => ({
   }),
 }))
 
-// ---------- Helper ----------
 
 async function mountPage() {
   setActivePinia(createPinia())
@@ -88,15 +70,12 @@ async function mountPage() {
           template: '<div class="v-progress-linear-stub" :data-value="modelValue" />',
           props: ['modelValue', 'indeterminate', 'color', 'height'],
         },
-        // IMP-5042: the relocated orchestrator-prompt editor. Stub it so mounting
-        // DangerPage as an admin doesn't trigger the real component's api.system call.
         SystemPromptTab: { template: '<div data-test="orchestrator-prompt-stub" />' },
       },
     },
   })
 }
 
-// ---------- Suite ----------
 
 describe('DangerPage — Download My Data section (BE-5062)', () => {
   beforeEach(() => {
@@ -163,7 +142,6 @@ describe('DangerPage — Download My Data section (BE-5062)', () => {
   })
 
   it('updates the progress indicator on tenant:export_progress events', async () => {
-    // Keep the API call pending so the progress UI stays mounted.
     exportMyDataMock.mockImplementation(
       () =>
         new Promise(() => {
@@ -192,14 +170,11 @@ describe('DangerPage — Download My Data section (BE-5062)', () => {
 
     const status = wrapper.find('[data-test="export-progress-status"]')
     expect(status.exists()).toBe(true)
-    // Status text should reference the current model and counts.
     expect(status.text()).toMatch(/Project/i)
     expect(status.text()).toContain('3')
     expect(status.text()).toContain('10')
   })
 
-  // IMP-5042: the orchestrator-prompt editor moved here from the admin panel.
-  // It is admin-only (its endpoints are require_admin).
   it('shows the orchestrator-prompt section for an admin', async () => {
     editionRef.value = 'community'
     userIsAdminRef.value = true

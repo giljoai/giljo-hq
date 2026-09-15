@@ -52,7 +52,6 @@
 <script setup>
 import { getAgentColor } from '@/config/agentColors'
 
-// Real agent colors from the single source of truth — never restated hex.
 const CREW_ROLES = ['Orchestrator', 'Analyzer', 'Implementer', 'Documenter', 'Reviewer', 'Tester']
 
 function hexToTinted(hex) {

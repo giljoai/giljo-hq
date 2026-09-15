@@ -3,30 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6221c -- headless chain recipe + conductor-protocol completeness.
-
-Three discoverability/completeness gaps that stranded a naive headless conductor
-(headless_alpha_test + Windows11 conductor + P1/P2 sub-orch field reports,
-2026-06-28), all CHAIN-scoped so SOLO stays byte-identical:
-
-  1. get_giljo_guide had chain CREATION (a/b/c suffix) but NO chain-DRIVE recipe.
-     A naive ``/giljo`` agent could not discover the headless chain entry point.
-     BE-9554 renamed that entry point ``start_chain_run`` -> ``link_projects``; the
-     guarantee this file pins is unchanged, only the tool it names.
-  2c. CH_SUB_ORCHESTRATOR omitted the three Hub tools from its documented bootstrap
-      query, forcing a guaranteed second ToolSearch round-trip every chain run.
-  2a. CH_SUB_ORCHESTRATOR's workers-inert line is now explicit ("do NOT launch them
-      before that gate") and chain-aware (RE-POLL, never "click Implement").
-  2b. CH_CHAIN_DRIVE already blesses the background self-wake pacing pattern; pinned
-      here so it cannot regress.
-
-SOLO IS SACRED: none of the new strings leak into the solo (chain_ctx=None) render,
-and the sub-orch render stays inside the BE-6214 byte band.
-
-Pure tests (no DB, no module-level mutable state) except the transport guide test,
-which drives the real @mcp.tool boundary (BE-5042 precedent: test at the failing
-layer). Parallel-safe under pytest-xdist -n auto. Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -34,7 +10,6 @@ import json
 
 import pytest
 
-# Importing the transport module registers every @mcp.tool on the shared instance.
 from api.endpoints.mcp_sdk_server import mcp
 from giljo_mcp.services.protocol_sections.agent_lifecycle import _generate_orchestrator_protocol
 from giljo_mcp.services.protocol_sections.chapters_chain import (
@@ -70,37 +45,23 @@ def _chain_drive() -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# 1. get_giljo_guide headless-chain DRIVE recipe (the discoverability fix)
-# ---------------------------------------------------------------------------
 
 
 def test_guide_carries_headless_chain_drive_recipe() -> None:
-    """The guide now teaches the headless chain DRIVE (link_projects -> conductor),
-    not just chain CREATION. A naive /giljo agent can route 'run/link these projects'."""
     guide = build_giljo_guide()["guide"]
     assert "link_projects" in guide, "guide must name the headless chain entry point"
-    # Intent-routing vocabulary so the agent routes by meaning, not a single keyword.
     low = guide.lower()
     for verb in ("run", "link", "join", "chain"):
         assert verb in low, f"intent-routing verb {verb!r} must appear in the guide"
-    # execution_mode is REQUIRED and the canonical values are shown (BE-9058:
-    # the guide must teach 'subagent'/'multi_terminal', never a legacy CLI token).
     assert "execution_mode" in guide and "subagent" in guide and "multi_terminal" in guide
-    # The conductor handoff: returns conductor id + bootstraps via get_staging_instructions.
     assert "conductor" in low
     assert "get_staging_instructions" in guide
-    # Drive/advance gate + names->UUIDs resolution.
     assert "ready_to_advance" in guide
     assert "list_projects" in guide
-    # It states plainly that invoking turns the session into the conductor.
     assert "CONDUCTOR" in guide
 
 
 def test_guide_chain_recipe_carries_stage_halt_go_drive_sequence() -> None:
-    """BE-6221e: the headless chain recipe inserts the human-in-the-loop GO step between
-    staging and driving — end staging -> HALT/report -> wait for the user's explicit GO
-    -> only then drive on ready_to_advance. A conductor must not auto-drive past staging."""
     guide = build_giljo_guide()["guide"]
     low = guide.lower()
     i_end = low.find("complete_job to end staging")
@@ -120,8 +81,6 @@ def test_guide_chain_recipe_carries_stage_halt_go_drive_sequence() -> None:
 
 @pytest.mark.asyncio
 async def test_guide_headless_chain_recipe_surfaces_over_transport() -> None:
-    """Regression at the failing layer: the recipe must reach an agent over the real
-    get_giljo_guide @mcp.tool transport, not merely from the in-process function."""
     async with create_connected_server_and_client_session(mcp) as session:
         result = await session.call_tool("get_giljo_guide", {})
     assert result.is_error is False, f"get_giljo_guide errored at the transport boundary: {result}"
@@ -131,55 +90,37 @@ async def test_guide_headless_chain_recipe_surfaces_over_transport() -> None:
     assert "ready_to_advance" in guide
 
 
-# ---------------------------------------------------------------------------
-# 2c. Sub-orch ToolSearch bootstrap now lists the three Hub tools
-# ---------------------------------------------------------------------------
 
 
 def test_suborch_bootstrap_lists_hub_thread_tools() -> None:
-    """CH_SUB_ORCHESTRATOR's documented bootstrap query now names join_thread,
-    post_to_thread and get_thread_history so the sub-orch loads them in ONE
-    ToolSearch (no forced second round-trip per the P1/P2 field reports)."""
     body = _suborch()
     assert "TOOLSEARCH BOOTSTRAP" in body, "the chapter must carry an explicit bootstrap directive"
     for tool in ("join_thread", "post_to_thread", "get_thread_history"):
         assert tool in body, f"Hub tool {tool!r} must be in the sub-orch bootstrap query"
-    # Framed as a single FIRST load, not a second mid-staging round-trip.
     low = body.lower()
     assert "first toolsearch" in low
     assert "second toolsearch" in low or "round-trip" in low
 
 
 def test_suborch_bootstrap_is_mode_agnostic() -> None:
-    """The bootstrap directive is not execution_mode-branched: it renders identically
-    for multi_terminal and a subagent mode (every chain sub-orch needs the Hub tools)."""
     mt = _suborch("multi_terminal")
     cli = _suborch("claude_code_cli")
     for tool in ("join_thread", "post_to_thread", "get_thread_history"):
         assert tool in mt and tool in cli
 
 
-# ---------------------------------------------------------------------------
-# 2a. Workers-inert explicit line + chain-aware blocked framing
-# ---------------------------------------------------------------------------
 
 
 def test_suborch_states_workers_inert_explicitly() -> None:
-    """The explicit workers-inert line is present: spawned-in-staging workers are INERT
-    until staging-end complete_job + get_job_mission, and must NOT launch before then."""
     body = _suborch()
-    # Collapse prose line-wraps so the explicit phrase is matched as a reader sees it.
     flat = " ".join(body.split())
     assert "INERT" in body
     assert "do NOT launch them before that gate" in flat
-    # Chain-aware: a blocked chain worker RE-POLLs; it is never sent to a human gate.
     assert "RE-POLL" in body
     assert "no human gate" in flat
 
 
 def test_suborch_workers_inert_note_is_mode_agnostic_byte_identical() -> None:
-    """The workers-inert NOTE is not mode-branched: byte-identical across modes so no
-    mode can read a weaker form of the gate rule."""
 
     def _note(text: str) -> str:
         start = text.find("NOTE (workers-inert)")
@@ -191,8 +132,6 @@ def test_suborch_workers_inert_note_is_mode_agnostic_byte_identical() -> None:
 
 
 def test_chain_worker_block_message_is_chain_aware() -> None:
-    """The get_job_mission chain-member blocked message never tells a chain worker to
-    click the non-existent Implement button (BE-6213 P1; re-pinned for BE-6221c)."""
     from giljo_mcp.services.mission_service import _CHAIN_WORKER_STAGING_BLOCK_MESSAGE
 
     msg = _CHAIN_WORKER_STAGING_BLOCK_MESSAGE
@@ -200,15 +139,9 @@ def test_chain_worker_block_message_is_chain_aware() -> None:
     assert "get_job_mission" in msg and "no human gate" in msg
 
 
-# ---------------------------------------------------------------------------
-# 2b. Conductor self-wake pacing pattern (blessed in CH_CHAIN_DRIVE)
-# ---------------------------------------------------------------------------
 
 
 def test_chain_drive_blesses_background_self_wake_pattern() -> None:
-    """CH_CHAIN_DRIVE documents the official Claude-Code conductor pacing pattern: a
-    background `sleep 1 N` self-wake, and warns that set_agent_status(sleeping)+stop
-    STALLS the chain forever (it is a dashboard label only, it does not re-invoke)."""
     chapter = _chain_drive()
     low = chapter.lower()
     assert "sleep 1 60" in chapter, "must give the concrete `sleep 1 N` self-wake command"
@@ -222,10 +155,6 @@ def test_chain_drive_blesses_background_self_wake_pattern() -> None:
     assert "stall" in low, "must warn that sleeping-and-stopping stalls the chain"
 
 
-# ---------------------------------------------------------------------------
-# SOLO IS SACRED -- the chain-only additions never leak into the solo render,
-# and the sub-orch render stays inside the BE-6214 byte band.
-# ---------------------------------------------------------------------------
 
 _NEW_CHAIN_ONLY_STRINGS = (
     "do NOT launch them before that gate",
@@ -235,8 +164,6 @@ _NEW_CHAIN_ONLY_STRINGS = (
 
 
 def test_new_chain_strings_absent_from_solo_render() -> None:
-    """None of the BE-6221c chain-only strings appear in a solo (chain_ctx=None)
-    orchestrator render -- they live only in the gated CH_SUB_ORCHESTRATOR chapter."""
     solo = _generate_orchestrator_protocol(
         job_id="job-solo",
         tenant_key="tk_solo",
@@ -250,13 +177,6 @@ def test_new_chain_strings_absent_from_solo_render() -> None:
 
 
 def test_suborch_render_stays_within_be6214_band() -> None:
-    """The BE-6221c additions keep the sub-orch INJECTOR render inside the BE-6214
-    band [20_000, 23_500] -- the chain render guard is not weakened, only filled.
-
-    BE-9012d widened the upper bound from 22_500: the bus->Hub coordination-call
-    conversion (get_thread_history(thread_id=..., as_participant=..., unread_only=true,
-    mark_read=true) replacing receive_messages(agent_id=...)) is structurally more
-    verbose per call site."""
     solo = _generate_orchestrator_protocol(
         job_id="job-6214",
         tenant_key="tk_6214",

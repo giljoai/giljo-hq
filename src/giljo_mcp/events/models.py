@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-WebSocket Event Pydantic models.
-
-Contains all data and event models for WebSocket communications.
-The EventFactory (which constructs these models) lives in schemas.py.
-
-Handover 0086A: Production-Grade Stage Project Architecture
-Created: 2025-11-02
-Split from schemas.py: 2026-04-18 (Sprint 003a, CI guardrail: 800 line limit)
-"""
 
 from datetime import datetime
 from typing import Any, Literal
@@ -20,9 +10,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 
-# ============================================================================
-# Base Event Structures
-# ============================================================================
 
 
 class EventMetadata(BaseModel):
@@ -42,7 +29,6 @@ class EventMetadata(BaseModel):
     @field_validator("timestamp")
     @classmethod
     def validate_timestamp(cls, v: str) -> str:
-        """Validate timestamp is valid ISO 8601 format."""
         try:
             datetime.fromisoformat(v.replace("Z", "+00:00"))
             return v
@@ -50,9 +36,6 @@ class EventMetadata(BaseModel):
             raise ValueError(f"Invalid ISO 8601 timestamp: {v}") from e
 
 
-# ============================================================================
-# Project Events
-# ============================================================================
 
 
 class ProjectMissionUpdatedData(BaseModel):
@@ -95,9 +78,6 @@ class ProjectMissionUpdatedEvent(BaseModel):
     }
 
 
-# ============================================================================
-# Agent Events
-# ============================================================================
 
 
 class AgentCreatedData(BaseModel):
@@ -110,7 +90,6 @@ class AgentCreatedData(BaseModel):
     @field_validator("agent")
     @classmethod
     def validate_agent_data(cls, v: dict[str, Any]) -> dict[str, Any]:
-        """Validate agent data contains minimum required fields."""
         required_fields = ["id", "agent_display_name", "status"]
         missing = [f for f in required_fields if f not in v]
         if missing:
@@ -162,7 +141,6 @@ class AgentStatusChangedData(BaseModel):
     @field_validator("status")
     @classmethod
     def validate_status_transition(cls, v: str, info) -> str:
-        """Validate status is a known agent status value."""
         valid_statuses = {
             "waiting",
             "working",
@@ -247,17 +225,8 @@ class AgentSilentEvent(BaseModel):
     }
 
 
-# BE-9012d: the bus's message:sent / message:received / message:acknowledged event
-# schemas (MessageSentData/Event, MessageReceivedData/Event, MessageAcknowledgedData/
-# Event) were removed with the bus hard-removal. The Hub's WS events
-# (thread_message / thread_update) are emitted separately by api/endpoints/_comm_ws.py
-# (called from the REST router + MCP wrapper, not from CommThreadService itself,
-# which stays side-effect-free) and are NOT modeled here as typed Pydantic events.
 
 
-# ============================================================================
-# Setup Wizard Events
-# ============================================================================
 
 
 class SetupToolConnectedData(BaseModel):
@@ -265,7 +234,7 @@ class SetupToolConnectedData(BaseModel):
 
     tenant_key: str = Field(..., min_length=1, description="Tenant identifier")
     user_id: str = Field(..., min_length=1, description="User identifier")
-    tool_name: str = Field(..., min_length=1, description="AI tool name (claude_code, codex_cli, gemini_cli)")
+    tool_name: str = Field(..., min_length=1, description="AI tool name (claude_code, codex_cli, opencode, generic)")
     connected_at: str = Field(..., description="ISO 8601 timestamp of connection")
 
 
@@ -296,26 +265,6 @@ class SetupCommandsInstalledEvent(BaseModel):
     data: SetupCommandsInstalledData
 
 
-class SetupAgentsDownloadedData(BaseModel):
-    """Data payload for setup:agents_downloaded event."""
-
-    tenant_key: str = Field(..., min_length=1, description="Tenant identifier")
-    user_id: str = Field(..., min_length=1, description="User identifier")
-    agent_count: int = Field(..., ge=0, description="Number of agent templates downloaded")
-
-
-class SetupAgentsDownloadedEvent(BaseModel):
-    """Complete event structure for setup:agents_downloaded."""
-
-    type: Literal["setup:agents_downloaded"] = "setup:agents_downloaded"
-    timestamp: str = Field(..., description="ISO 8601 timestamp")
-    schema_version: str = Field(default="1.0", description="Event schema version")
-    data: SetupAgentsDownloadedData
-
-
-# ============================================================================
-# Event Type Union
-# ============================================================================
 
 WebSocketEvent = (
     ProjectMissionUpdatedEvent
@@ -324,13 +273,9 @@ WebSocketEvent = (
     | AgentSilentEvent
     | SetupToolConnectedEvent
     | SetupCommandsInstalledEvent
-    | SetupAgentsDownloadedEvent
 )
 
 
-# ============================================================================
-# Public API
-# ============================================================================
 
 __all__ = [
     "AgentCreatedData",
@@ -342,8 +287,6 @@ __all__ = [
     "EventMetadata",
     "ProjectMissionUpdatedData",
     "ProjectMissionUpdatedEvent",
-    "SetupAgentsDownloadedData",
-    "SetupAgentsDownloadedEvent",
     "SetupCommandsInstalledData",
     "SetupCommandsInstalledEvent",
     "SetupToolConnectedData",

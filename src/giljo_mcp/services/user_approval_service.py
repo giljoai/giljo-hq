@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Service for the user_approvals primitive (BE-5029 Phase A).
-
-The single validated write path. ``create_pending`` is atomic: it inserts the
-user_approvals row, flips the agent's execution status to ``awaiting_user``, and
-emits a WebSocket broadcast in the same transaction. If any step fails the
-transaction rolls back.
-
-Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -45,11 +36,6 @@ logger = logging.getLogger(__name__)
 async def build_awaiting_user_blocker(
     session: AsyncSession, execution: AgentExecution, tenant_key: str
 ) -> dict[str, Any]:
-    """Closeout blocker dict for an agent parked on a pending user_approval.
-
-    Returns the standard blocker shape with ``approval_id`` resolved so callers
-    can deep-link to ``POST /api/approvals/{id}/decide``.
-    """
     stmt = select(UserApproval.id).where(
         UserApproval.tenant_key == tenant_key,
         UserApproval.agent_execution_id == execution.id,
@@ -68,24 +54,6 @@ async def build_awaiting_user_blocker(
 
 
 def _compute_approval_banner_state(*, project: Project | None, execution: AgentExecution | None) -> str:
-    """FE-9511: derive the closed-set banner state from server-tracked state.
-
-    Approval-scoped by design -- this is NOT a
-    product-wide scan for staging-paused projects or blocked executions with
-    no approval attached. It classifies ONE pending approval's own project +
-    execution:
-
-    - ``waiting_at_staging`` -- the approval's project is sitting at the
-      staging pause (implementation not yet launched).
-    - ``blocked`` -- the approval's own requesting execution is blocked.
-    - ``decision_needed`` -- neither of the above: the default, and the
-      overwhelmingly common case (a pending approval already means the agent
-      asked a decision question).
-
-    ``input_needed`` is a reserved catch-all with no server signal today (see
-    VALID_APPROVAL_BANNER_STATES) -- deliberately unreachable here rather than
-    guessed at, per "do not enumerate ten states up front."
-    """
     if (
         project is not None
         and project.staging_status == "staging_complete"
@@ -98,7 +66,6 @@ def _compute_approval_banner_state(*, project: Project | None, execution: AgentE
 
 
 class UserApprovalService:
-    """Single owning service for user_approvals writes."""
 
     def __init__(
         self,
@@ -113,13 +80,9 @@ class UserApprovalService:
         self._websocket_manager = websocket_manager
         self._test_session = test_session
         self._repo = UserApprovalRepository(db_manager)
-        # BE-9012d: the bus's send_message notify was replaced by a Hub post to the
-        # project's bound thread (CommThreadService.resolve_or_create_bound_thread +
-        # post_to_thread) — see _notify_orchestrator_of_decision.
         self._comm_thread_service = comm_thread_service
 
     def _get_session(self, tenant_key: str | None = None):
-        """Yield a tenant-scoped DB session, honoring an injected test session (shared helper, BE-8000d)."""
         effective_tenant_key = tenant_key or self.tenant_manager.get_current_tenant()
         return optional_tenant_session(self.db_manager, effective_tenant_key, self._test_session)
 
@@ -130,7 +93,6 @@ class UserApprovalService:
         tenant_key: str,
         job_id: str,
     ) -> AgentExecution:
-        """Resolve the most recent AgentExecution for a job within the tenant."""
         result = await session.execute(
             select(AgentExecution)
             .where(
@@ -177,31 +139,6 @@ class UserApprovalService:
         context: dict | None,
         park_execution: bool = True,
     ) -> UserApproval:
-        """Atomically create a pending approval and flip the agent to awaiting_user.
-
-        BE-9153: ``park_execution`` (default True — every pre-existing caller is
-        byte-identical) may be set False to create the approval WITHOUT parking the
-        agent in ``awaiting_user`` and WITHOUT broadcasting the park. That is the
-        chain-settlement path: a findings-bearing chain link is accepted
-        PROVISIONALLY (the agent completes, the conductor advances) while its
-        approval joins the settlement queue that gates the CHAIN's own closeout.
-
-        Single-pending-per-agent invariant: a second pending approval for the same
-        execution is rejected with ValidationError (matches ``blocked`` semantics).
-
-        BE-9054 (a): orchestrator-only. The dashboard's Approve/Reject UI
-        (CloseoutModal -> ApprovalCard) binds to the ORCHESTRATOR's job, so an
-        approval created by a worker job would park that agent in awaiting_user
-        with no UI able to clear it. Rejected here with
-        ``error_code="ORCHESTRATOR_ONLY_APPROVAL"``; the MCP tool adapter converts
-        that into the BE-6081 structured domain rejection.
-
-        BE-9054 (b): the execution's pre-approval status is recorded under the
-        server-reserved ``pre_approval_status`` context key (agent-supplied values
-        for that key are stripped — never trusted) so ``mark_decided`` can restore
-        it instead of hardcoding ``working``. Only recorded when it differs from
-        ``working`` (absence == restore to ``working``).
-        """
         validated_options = validate_user_approval_options(options)
         validated_context = validate_user_approval_context(context)
 
@@ -239,9 +176,6 @@ class UserApprovalService:
 
             old_status = execution.status
             stored_context = dict(validated_context) if validated_context else {}
-            # Server-reserved key: an agent-supplied value must never drive the
-            # post-decide status restore (it could smuggle in 'complete' and skip
-            # completion gates).
             stored_context.pop("pre_approval_status", None)
             if old_status and old_status != "working":
                 stored_context["pre_approval_status"] = old_status
@@ -257,9 +191,6 @@ class UserApprovalService:
                 context=stored_context or None,
             )
 
-            # BE-9153: the chain-settlement path (park_execution=False) creates the
-            # approval but leaves the execution free to complete (provisional link
-            # closeout); no awaiting_user park, no park broadcast.
             if park_execution:
                 execution.status = "awaiting_user"
 
@@ -286,20 +217,6 @@ class UserApprovalService:
         offset: int = 0,
         status: str = "pending",
     ) -> tuple[list[UserApprovalRead], int]:
-        """Read-only list of approvals scoped to ``tenant_key``, by status.
-
-        Tenant isolation: the repository query filters by ``tenant_key``.
-        Cross-tenant rows are unreachable. Returns ``(reads, total_count)``.
-
-        BE-9514: ``status`` defaults to ``"pending"`` (the original/only shape)
-        but now accepts any ``VALID_USER_APPROVAL_STATUSES`` value -- decided
-        approvals had no read surface at all, which meant ``decided_via``
-        (and ``decided_by_user_id``) could not be verified end-to-end.
-
-        FE-9511: each row is returned as a fully-built ``UserApprovalRead``
-        carrying the server-derived ``banner_state`` and the project's
-        ``taxonomy_alias`` -- see ``_build_reads_with_banner_context``.
-        """
         if limit < 1 or limit > 200:
             raise ValidationError(f"limit must be 1..200 (got {limit})")
         if offset < 0:
@@ -330,12 +247,6 @@ class UserApprovalService:
         tenant_key: str,
         rows: list[UserApproval],
     ) -> list[UserApprovalRead]:
-        """Attach the FE-9511 banner state + project taxonomy_alias to each row.
-
-        Two batched lookups (not N+1): every distinct project and every
-        distinct requesting execution referenced by ``rows``. Both queries are
-        tenant-scoped, mirroring ``_resolve_execution``/``_verify_job`` above.
-        """
         if not rows:
             return []
 
@@ -388,30 +299,6 @@ class UserApprovalService:
         user_id: str | None,
         decided_via: str,
     ) -> UserApproval:
-        """Atomically resolve a pending approval and resume the awaiting agent.
-
-        Single transaction: validates option_id, validates pending status, sets
-        ``decided_*`` fields, flips the bound execution from ``awaiting_user``
-        back to its pre-approval status (BE-9054 (b): recorded by
-        ``create_pending`` under the ``pre_approval_status`` context key;
-        ``working`` when absent — legacy rows and the common case), then
-        broadcasts the resume on the existing ``agent:status_changed`` channel.
-        An already-finished agent (e.g. ``complete``) is therefore no longer
-        resurrected to ``working``, which used to block its own closeout.
-        Cross-tenant access is rejected as ``ResourceNotFoundError`` (do not
-        leak existence).
-
-        BE-9514: ``decided_via`` (``"ui"`` | ``"mcp"``) is the ONE place this
-        fact is written -- every caller (the REST ``/decide`` endpoint, the
-        ``decide_approval`` MCP tool, and the dormant MRTR elicitation round-2
-        path) passes its own literal channel here rather than this method
-        trying to infer it from ``user_id``. Inferring from ``user_id`` would
-        be wrong: an MCP session CAN carry a resolved ``user_id`` (a non-legacy,
-        non-API-key session), so "user_id present" does not mean "the UI door
-        was used" -- only the caller genuinely knows which door it is.
-        ``decided_by_user_id`` is untouched by this and keeps meaning exactly
-        what it always has: the resolved person, or NULL when there is none.
-        """
         if decided_via not in ("ui", "mcp"):
             raise ValidationError(f"decided_via must be 'ui' or 'mcp' (got {decided_via!r})")
 
@@ -442,7 +329,6 @@ class UserApprovalService:
                 decided_via=decided_via,
             )
             if decided is None:
-                # Lost race: another caller flipped status between get and update.
                 raise ValidationError(f"UserApproval id={approval_id} was modified concurrently; retry")
 
             execution = await self._resolve_execution(
@@ -481,18 +367,6 @@ class UserApprovalService:
         return decided
 
     async def _drain_chain_settlement_if_applicable(self, *, decided: UserApproval, tenant_key: str) -> None:
-        """BE-9153: re-check a chain's closeout when one of its SETTLEMENT approvals is decided.
-
-        A findings-bearing chain link was accepted provisionally; its settlement
-        approval gates the CHAIN's own closeout (see
-        ``project_helpers.complete_chain_run_if_finished``). Deciding it (via the REST
-        ``/decide`` endpoint or the MCP inline-approval path — both route through
-        ``mark_decided``) must re-trigger that check so the run purges once the LAST
-        settlement approval is resolved.
-
-        Best-effort / non-fatal: the decide's status flip + broadcast already
-        committed upstream; a drain failure here must NEVER fail the decide.
-        """
         ctx = decided.context or {}
         if ctx.get("chain_settlement") is not True:
             return
@@ -521,19 +395,6 @@ class UserApprovalService:
         decided: UserApproval,
         option_id: str,
     ) -> None:
-        """Post a 'user decided' message to the orchestrator's Hub bound thread so the
-        agent learns the choice on its next get_thread_history poll.
-
-        BE-9012d: the bus's send_message notify was retired; this now resolves the
-        project's bound Hub thread and posts a DIRECTED, action-required message to
-        the agent's agent_id (mirrors the wake semantics the bus notify used to carry
-        — see the MCP wrapper / REST adapter's auto_block_for_thread_post pairing for
-        the same directed+requires_action pattern).
-
-        Best-effort: failure here must not roll back the decide transaction. The
-        status flip + WebSocket broadcast have already happened upstream; the Hub
-        post is the explicit semantic channel the agent reads.
-        """
         if self._comm_thread_service is None:
             return
         agent_id = execution.agent_id
@@ -564,13 +425,6 @@ class UserApprovalService:
                 requires_action=True,
                 tenant_key=tenant_key,
             )
-            # BE-9292a-F2: a DECLINED post is RETURNED, not raised (the BE-6081 domain
-            # rejection shape), so the except below never sees it. Until BE-9292a this
-            # call could not be declined at all — it forwards no baton, and only the
-            # baton target was screened; screening the addressee made a refusal reachable
-            # here. Left unread it would drop the gate-cleared notice in total silence
-            # while the orchestrator polls a thread that will never tell it. Best-effort
-            # stays best-effort: this reports, it does not raise.
             if isinstance(posted, dict) and posted.get("success") is False:
                 logger.warning(
                     "[USER_APPROVAL] Hub declined the decision notice approval=%s job=%s to=%s: %s",
@@ -613,7 +467,7 @@ class UserApprovalService:
                     "status": execution.status,
                     "user_approval_id": approval_id,
                     "decided_option_id": decided_option_id,
-                    "duration_seconds": execution.duration_seconds,  # BE-5107
+                    "duration_seconds": execution.duration_seconds,
                     "working_started_at": execution.working_started_at.isoformat()
                     if execution.working_started_at
                     else None,
@@ -650,7 +504,7 @@ class UserApprovalService:
                     "old_status": old_status,
                     "status": "awaiting_user",
                     "user_approval_id": approval_id,
-                    "duration_seconds": execution.duration_seconds,  # BE-5107
+                    "duration_seconds": execution.duration_seconds,
                     "working_started_at": execution.working_started_at.isoformat()
                     if execution.working_started_at
                     else None,

@@ -1,20 +1,7 @@
-/**
- * ProjectTabs.chainReview.spec.js
- *
- * Verifies the `chainAwareProjectDoneStatus` computed behaviour via the real
- * `buildChainAwareProjectDoneStatus` helper (importd from reviewDispatch.js).
- *
- * Chain context:
- *   - member isCompleted && !needsReview → 'completed' (green chip shows)
- *   - member needsReview or not yet completed → null (review button takes the slot)
- * Solo context (chainCtx null): passes projectDoneStatus through unchanged.
- *
- * Edition scope: CE.
- */
 import { describe, it, expect } from 'vitest'
 import { buildChainAwareProjectDoneStatus } from './reviewDispatch.js'
 
-const chainCtx = { run: {}, tabs: [] } // any truthy value
+const chainCtx = { run: {}, tabs: [] }
 
 describe('buildChainAwareProjectDoneStatus (banner green-flip)', () => {
   it('chain + completed + reviewed (!needsReview) → "completed" (green chip)', () => {

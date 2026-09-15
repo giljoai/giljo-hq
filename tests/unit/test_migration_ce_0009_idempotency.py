@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""IMP-0023: ce_0009 migration idempotency tests."""
 
 from unittest.mock import MagicMock, patch
 

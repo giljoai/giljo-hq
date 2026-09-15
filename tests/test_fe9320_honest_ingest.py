@@ -3,28 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-9320 — every product-card field is writable, and the ingest is honest.
-
-Four defects, each tested at the layer it lives on:
-
-1. ``dev_tools`` is a real ``product_tech_stacks`` column that no extraction field
-   could reach, so content about tooling had nowhere to land but
-   ``architecture_notes``.
-2. **The museum-rule item.** Overwrite protection guarded on the relation ROW
-   existing (``product.tech_stack is not None``) rather than on the COLUMN holding
-   a value. The row is created on the first write, so every later repair call had
-   its whole block stripped -- discarding columns that were still EMPTY.
-   ``test_repair_write_lands_empty_columns_in_a_populated_block`` reproduces that
-   loss and FAILED before the guard became per-column.
-3. ``vision_summaries`` dropped an unmatched ``doc_id`` with a log line while
-   telling the caller ``vision_summaries`` was written -- the only true silent data
-   loss in the ingest.
-4. The extraction spec mandated ONE call covering everything (a real run died at
-   62,420 bytes) and the caller had to INFER whether the completion flag flipped.
-
-Parallel-safe: every test takes the rolled-back ``db_session``, generates its own
-tenant key, and owns its own setup. No module-level mutable state.
-"""
 
 from __future__ import annotations
 
@@ -72,10 +50,6 @@ async def _tech_stack(session: AsyncSession, product: Product, tenant_key: str) 
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
-# ---------------------------------------------------------------------------
-# Item 2 -- MUSEUM RULE. Written and watched FAIL on the block-level guard
-# before the guard was changed to per-column.
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -84,14 +58,6 @@ async def test_repair_write_lands_empty_columns_in_a_populated_block(
     fe9320_tenant: str,
     fe9320_product: Product,
 ):
-    """FAIL-FIRST. First call fills ONE tech_stack column. A second call carrying a
-    DIFFERENT, still-empty column of the same block must land it.
-
-    On the block-level guard this failed: the first write created the relation row,
-    so ``product.tech_stack is not None`` reported the whole block "already
-    populated", the tool stripped the entire block, and ``infrastructure`` -- which
-    held nothing at all -- was silently discarded.
-    """
     from giljo_mcp.tools.vision_analysis import update_product_fields
 
     first = await update_product_fields(
@@ -126,8 +92,6 @@ async def test_repair_write_splits_populated_from_empty_within_one_block(
     fe9320_tenant: str,
     fe9320_product: Product,
 ):
-    """A mixed repair call: one column collides, one is empty. The empty one lands,
-    the populated one is skipped BY NAME (not as a whole block) and keeps its value."""
     from giljo_mcp.tools.vision_analysis import update_product_fields
 
     await update_product_fields(
@@ -161,8 +125,6 @@ async def test_repair_write_preserves_empty_columns_across_all_three_blocks(
     fe9320_tenant: str,
     fe9320_product: Product,
 ):
-    """The same loss applied to architecture (incl. coding_conventions) and
-    test_config. One repair call must fill every still-empty column in all three."""
     from giljo_mcp.tools.vision_analysis import update_product_fields
 
     await update_product_fields(
@@ -220,8 +182,6 @@ async def test_force_still_overwrites_a_populated_column(
     fe9320_tenant: str,
     fe9320_product: Product,
 ):
-    """The load-bearing HAPPY half: force=True still overwrites, and the per-column
-    guard did not quietly become a no-op that lets every write through."""
     from giljo_mcp.tools.vision_analysis import update_product_fields
 
     await update_product_fields(
@@ -244,9 +204,6 @@ async def test_force_still_overwrites_a_populated_column(
     assert row.programming_languages == "Rust"
 
 
-# ---------------------------------------------------------------------------
-# Item 1 -- dev_tools is writable
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -255,8 +212,6 @@ async def test_dev_tools_is_writable(
     fe9320_tenant: str,
     fe9320_product: Product,
 ):
-    """dev_tools is a real column; content about tooling must land THERE, not be
-    forced into architecture_notes for lack of an extraction field."""
     from giljo_mcp.tools.vision_analysis import update_product_fields
 
     result = await update_product_fields(
@@ -273,13 +228,6 @@ async def test_dev_tools_is_writable(
 
 
 def test_every_writable_product_card_column_has_an_extraction_field():
-    """DoD 1: no product-card column may be unreachable from the extraction path.
-
-    Locks the gap that made dev_tools unwritable -- a column added to a relation
-    block with no FIELD_MAP entry trips this instead of silently having nowhere to
-    land. ``products.quality_standards`` is excluded because it is dead: the field
-    routes to test_config and the read path uses ``tc.quality_standards``.
-    """
     from giljo_mcp.services.product_field_map import RELATION_BLOCK_FIELDS
     from giljo_mcp.tools.vision_analysis import FIELD_MAP
 
@@ -292,9 +240,6 @@ def test_every_writable_product_card_column_has_an_extraction_field():
             )
 
 
-# ---------------------------------------------------------------------------
-# Item 3 -- vision_summaries misses are REPORTED, never silently dropped
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -303,8 +248,6 @@ async def test_unmatched_vision_summary_doc_id_is_reported_to_the_caller(
     fe9320_tenant: str,
     fe9320_product: Product,
 ):
-    """An unknown doc_id used to vanish into a log line while the response still
-    said vision_summaries was written. It must come back as a named skip."""
     from giljo_mcp.tools.vision_analysis import update_product_fields
 
     doc = VisionDocument(
@@ -352,8 +295,6 @@ async def test_vision_summary_for_another_product_is_reported_not_silently_dropp
     fe9320_tenant: str,
     fe9320_product: Product,
 ):
-    """A doc_id that exists for this tenant but belongs to a DIFFERENT product is
-    the second silent-drop branch -- it must be reported with its own reason."""
     from giljo_mcp.tools.vision_analysis import update_product_fields
 
     other = Product(
@@ -396,9 +337,6 @@ async def test_vision_summary_for_another_product_is_reported_not_silently_dropp
     assert misses[0]["doc_id"] == other_doc.id
 
 
-# ---------------------------------------------------------------------------
-# Item 4 -- staged writes: the caller is TOLD the completion state
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -407,8 +345,6 @@ async def test_response_reports_completion_state_and_what_is_missing(
     fe9320_tenant: str,
     fe9320_product: Product,
 ):
-    """A staged call must not force the agent to INFER whether the flag flipped.
-    Every response carries vision_analysis_complete + missing_for_completion."""
     from giljo_mcp.tools.vision_analysis import update_product_fields
 
     doc = VisionDocument(
@@ -429,7 +365,6 @@ async def test_response_reports_completion_state_and_what_is_missing(
     db_session.add(doc)
     await db_session.flush()
 
-    # Stage 1: structured fields only -- nothing about summaries yet.
     stage_one = await update_product_fields(
         product_id=fe9320_product.id,
         tenant_key=fe9320_tenant,
@@ -439,7 +374,6 @@ async def test_response_reports_completion_state_and_what_is_missing(
     assert stage_one["vision_analysis_complete"] is False
     assert stage_one["missing_for_completion"], "an incomplete analysis must say what is missing"
 
-    # Stage 2: the per-doc summary lands; the consolidated aggregate is still absent.
     stage_two = await update_product_fields(
         product_id=fe9320_product.id,
         tenant_key=fe9320_tenant,
@@ -449,7 +383,6 @@ async def test_response_reports_completion_state_and_what_is_missing(
     assert stage_two["vision_analysis_complete"] is False
     assert any("consolidated" in reason for reason in stage_two["missing_for_completion"])
 
-    # Stage 3: the final staged call declares completion explicitly.
     stage_three = await update_product_fields(
         product_id=fe9320_product.id,
         tenant_key=fe9320_tenant,
@@ -470,8 +403,6 @@ async def test_emit_completion_emits_even_when_the_final_call_writes_nothing(
     fe9320_tenant: str,
     fe9320_product: Product,
 ):
-    """The WS emit is gated on fields_written, so a pure "I am done" call was silent.
-    emit_completion must still signal the wizard."""
     from unittest.mock import AsyncMock
 
     from giljo_mcp.tools.vision_analysis import update_product_fields
@@ -496,9 +427,6 @@ async def test_per_write_websocket_emit_survives_for_progressive_fill(
     fe9320_tenant: str,
     fe9320_product: Product,
 ):
-    """Do NOT narrow the emit to completion only. TutorialPromptScreen.vue documents
-    a ratified PROGRESSIVE-FILL contract that uses vision:analysis_complete as
-    a per-write refresh tick -- a section write with the flag still false must emit."""
     from unittest.mock import AsyncMock
 
     from giljo_mcp.tools.vision_analysis import update_product_fields
@@ -516,9 +444,6 @@ async def test_per_write_websocket_emit_survives_for_progressive_fill(
     ws.broadcast_event_to_tenant.assert_awaited_once()
 
 
-# ---------------------------------------------------------------------------
-# Item 5 -- the two guards
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -527,8 +452,6 @@ async def test_over_length_project_path_is_a_clean_rejection_not_an_opaque_500(
     fe9320_tenant: str,
     fe9320_product: Product,
 ):
-    """project_path is String(500) at the DB and 20000 at the tool boundary, with no
-    service guard in between -- an over-length value became a sanitized 500."""
     from giljo_mcp.exceptions import ValidationError
     from giljo_mcp.services.product_service import ProductService
 
@@ -547,11 +470,10 @@ async def test_project_path_at_the_limit_still_writes(
     fe9320_tenant: str,
     fe9320_product: Product,
 ):
-    """Two-sided: the guard must reject over-length WITHOUT breaking a legal path."""
     from giljo_mcp.services.product_service import ProductService
 
     service = ProductService(db_manager=None, tenant_key=fe9320_tenant, test_session=db_session)
-    legal = "/srv/" + "x" * 495  # exactly 500
+    legal = "/srv/" + "x" * 495
 
     await service.update_product(fe9320_product.id, force=True, project_path=legal)
 
@@ -564,7 +486,6 @@ async def test_create_product_rejects_an_over_length_project_path(
     db_session: AsyncSession,
     fe9320_tenant: str,
 ):
-    """Same column, same cap, other write path -- create must not 500 either."""
     from giljo_mcp.exceptions import ValidationError
     from giljo_mcp.services.product_service import ProductService
 
@@ -577,16 +498,6 @@ async def test_create_product_rejects_an_over_length_project_path(
 
 
 def test_product_create_still_accepts_a_blank_name_on_purpose():
-    """The nameless-product fix does NOT belong at creation, and this locks that.
-
-    FE-9320 originally planned a min_length here; that was refuted with evidence and
-    ruled out: the onboarding "existing codebase" door pre-creates a nameless
-    draft precisely so the agent can name it, because update_product_context writes
-    product_name ONLY while the existing name is blank and skips it once non-empty
-    (tests/test_fe9200_tutorial_prompt_contract.py). A create-time guard makes that
-    door fall back to "My product", which the agent can then never rename -- strictly
-    worse than the nameless row. The guard lives at ACTIVATION, in the wizard.
-    """
     from api.endpoints.products.models import ProductCreate
 
     assert ProductCreate(name="").name == ""

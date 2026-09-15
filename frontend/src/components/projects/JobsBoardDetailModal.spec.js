@@ -1,13 +1,3 @@
-/**
- * JobsBoardDetailModal.spec.js — FE-9548
- *
- * The Jobs board's "Jobs detail" diagnostics modal. DoD: Agent ID and Job ID
- * render FULL/untruncated with a working copy button each (diagnostics, per
- * the operator), and the footer strip routes to the existing review pane --
- * not a new review flow.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createVuetify } from 'vuetify'
@@ -63,10 +53,6 @@ beforeEach(() => {
 
 describe('JobsBoardDetailModal', () => {
 
-  // FE-9550 REGRESSION: the review strip asserts "All agents closed" and offers
-  // the review action, so it must not render on a project that is not finished.
-  // It used to render unconditionally -- observed live on test.giljo.ai telling
-  // the user a Staged project with a Waiting agent was fully closed.
   it('hides the review strip when the project is NOT ready for review (FE-9550)', () => {
     const wrapper = mountModal({
       project: { id: 'p-staged', taxonomy_alias: 'INF-6176', name: 'Staged work', status: 'active', implementation_launched_at: null },
@@ -94,7 +80,6 @@ describe('JobsBoardDetailModal', () => {
     const jobIds = wrapper.findAll('[data-testid="jb-detail-job-id"]').map((n) => n.text())
     expect(agentIds).toContain('5c15df26-1bd2-40cd-b155-419cadda28d8')
     expect(jobIds).toContain('3e900a9d-f3b6-4be8-a85e-fd797a186116')
-    // Untruncated: no ellipsis, no substring slicing.
     expect(agentIds[0]).not.toContain('…')
     expect(agentIds[0].length).toBe(36)
   })
@@ -117,9 +102,6 @@ describe('JobsBoardDetailModal', () => {
     expect(btn.text()).toContain('Go to review pane')
   })
 
-  // FE-9551: reuses the shared .agent-badge-sq square instead of a bespoke
-  // .jb-badge, and the shared .msg-badge pill (with 'zero'/'has-msgs'
-  // modifiers) instead of a bespoke .jb-msg.
   it('uses the shared .agent-badge-sq and .msg-badge classes, not bespoke ones', () => {
     const wrapper = mountModal()
     const badges = wrapper.findAll('[data-testid="jb-detail-row"] .agent-badge-sq')
@@ -127,18 +109,12 @@ describe('JobsBoardDetailModal', () => {
 
     const msgCells = wrapper.findAll('.msg-badge')
     expect(msgCells.length).toBe(2)
-    // Both fixture agents have messages_waiting_count: 0.
     expect(msgCells[0].classes()).toContain('zero')
   })
 
-  // FE-9551: the copy affordance uses mdi icons (direct precedent:
-  // ProjectReviewModal.vue's identical copy-button pattern), not literal
-  // ✓/⧉ glyphs.
   it('the copy buttons render mdi-content-copy, switching to mdi-check once copied', async () => {
     const wrapper = mountModal()
     const copyBtn = wrapper.findAll('[data-testid="jb-detail-copy-agent"]')[0]
-    // v-icon is globally stubbed (tests/setup.js) to render its default slot
-    // as plain text, so the icon NAME is the observable signal here.
     expect(copyBtn.text()).toBe('mdi-content-copy')
 
     await copyBtn.trigger('click')

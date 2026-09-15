@@ -3,11 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Integration tests for ``GET /api/v1/task-statuses/`` (FE-5041 Phase 1).
-
-Mirrors the BE-5039 ``test_project_statuses_endpoint`` pattern verbatim.
-The endpoint contract test is the regression artefact for FE-5041.
-"""
 
 from __future__ import annotations
 

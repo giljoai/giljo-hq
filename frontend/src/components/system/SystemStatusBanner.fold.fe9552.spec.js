@@ -1,20 +1,3 @@
-/**
- * SystemStatusBanner.fold.fe9552.spec.js — FE-9552
- *
- * Operator instruction, 2026-08-31, verbatim: "I don't want to take up the
- * entire top page with banners, never stack banners, instead fold them."
- * Observed live: activating two projects stacked two lifecycle banners on top
- * of a Tools advisory -- three full-width strips before page content began.
- *
- * ONE banner strip, ever. When more than one banner is live, they fold into
- * it: {chevron} {qty} {main content} {banner CTA} {X}. Ordering:
- * decision-needed > lifecycle > advisories. The CTA click also dismisses its
- * banner (acting on it IS handling it); X dismisses without acting. Either
- * way the next queued banner surfaces automatically -- the visible slot is a
- * pure function of "what's still live", not a manually-advanced pointer.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -121,11 +104,8 @@ describe('SystemStatusBanner banner fold (FE-9552)', () => {
       ],
     })
 
-    // ONE strip container.
     expect(wrapper.findAll('.system-status-banner').length).toBe(1)
-    // Only the top banner painted, not both.
     expect(wrapper.findAll(SYSTEM).length).toBe(1)
-    // The fold controls announce the fold.
     expect(wrapper.find(CHEVRON).exists()).toBe(true)
     expect(wrapper.find(QTY).text()).toBe('2')
   })

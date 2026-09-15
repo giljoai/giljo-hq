@@ -3,34 +3,17 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Unit tests for products CRUD response building - Handover 0126.
-
-BE-5118 regression guard: _build_product_response must surface the AI-owned
-vision-analysis fields end-to-end.
-"""
 
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 
 class TestBuildProductResponseVisionAnalysisFields:
-    """BE-5118 regression: ProductResponse must surface the AI-owned vision-analysis
-    state (vision_analysis_complete + consolidated_vision_*) end-to-end.
-
-    The frontend unlock gate (BE-5118) reads these fields off the strict pydantic
-    response model. BE-5117 added them to the ORM/DB layer but did not wire them
-    through _build_product_response, so the API silently dropped them and the gate
-    was non-functional. This test locks the mapping in at the failing layer.
-    """
 
     def _make_product(self, **overrides):
         product = MagicMock()
         product.id = "prod-be5118"
         product.name = "BE-5118 fixture"
-        # BE-9385b: ProductResponse now carries the export slug, and a bare MagicMock
-        # attribute is not a string Pydantic will accept. None is the honest value --
-        # a row predating ce_0092 has no slug and the render path derives one.
         product.slug = None
         product.description = "fixture"
         product.project_path = "/tmp/be5118"
@@ -88,9 +71,6 @@ class TestBuildProductResponseVisionAnalysisFields:
         assert response.consolidated_vision_medium is None
 
     def test_null_flag_coerced_to_false(self):
-        """Newly-created products may have vision_analysis_complete=NULL until the
-        DB default lands. The response layer must coerce to a strict bool so the
-        frontend gate has a defined value."""
         from api.endpoints.products.crud import _build_product_response
 
         response = _build_product_response(self._make_product(vision_analysis_complete=None))
@@ -99,14 +79,11 @@ class TestBuildProductResponseVisionAnalysisFields:
 
 
 class TestBuildProductResponseMemoryDefault:
-    """BE-9261: the product_memory None-fallback seeds the renamed git_integration
-    key, not the legacy github key."""
 
     def _make_product(self, **overrides):
         product = MagicMock()
         product.id = "prod-be9261"
         product.name = "BE-9261 fixture"
-        # BE-9385b: see the note above -- ProductResponse validates slug as str|None.
         product.slug = None
         product.description = "fixture"
         product.project_path = "/tmp/be9261"

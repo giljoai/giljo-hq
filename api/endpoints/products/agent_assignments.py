@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Product Agent Assignment Endpoints
-
-Per-product toggle for tenant-wide agent templates.
-Templates belong to the tenant; products reference which ones are active.
-
-Endpoints:
-- GET  /{product_id}/agent-assignments — list assignments for product
-- PUT  /{product_id}/agent-assignments/{template_id} — toggle active/inactive
-"""
 
 import logging
 
@@ -23,6 +13,7 @@ from api.dependencies import get_tenant_key
 from giljo_mcp.auth.dependencies import get_current_active_user
 from giljo_mcp.exceptions import (
     BaseGiljoError,
+    ProjectStateError,
     ResourceNotFoundError,
     ValidationError,
 )
@@ -37,9 +28,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# ============================================================================
-# Request/Response Models
-# ============================================================================
 
 
 class ToggleAssignmentRequest(BaseModel):
@@ -78,15 +66,11 @@ class ToggleAssignmentResponse(BaseModel):
     is_active: bool
 
 
-# ============================================================================
-# Dependency
-# ============================================================================
 
 
 async def get_assignment_service(
     tenant_key: str = Depends(get_tenant_key),
 ) -> ProductAgentAssignmentService:
-    """Get ProductAgentAssignmentService with tenant isolation."""
     from api.app_state import state
 
     return ProductAgentAssignmentService(
@@ -95,9 +79,6 @@ async def get_assignment_service(
     )
 
 
-# ============================================================================
-# Endpoints
-# ============================================================================
 
 
 @router.get(
@@ -143,13 +124,18 @@ async def toggle_agent_assignment(
     service: ProductAgentAssignmentService = Depends(get_assignment_service),
 ) -> ToggleAssignmentResponse:
     """
-    Toggle an agent template assignment for a product.
+    Switch an agent on or off for a product.
 
     Creates the assignment if it doesn't exist, or updates the is_active flag.
+    Switching on is refused with 409 when the product already has its full
+    complement of agent roles (BE-9610a: the context budget follows the switch
+    that spends it).
     """
     try:
         result = await service.toggle_assignment(product_id, template_id, body.is_active)
         return ToggleAssignmentResponse(**result)
+    except ProjectStateError as e:
+        raise HTTPException(status_code=409, detail=e.message) from e
     except ValidationError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     except ResourceNotFoundError as e:

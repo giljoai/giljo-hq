@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""TODO read-back context tool (INF-5077).
-
-Returns the full content + status of every AgentTodoItem for a given job_id
-so an orchestrator can construct a faithful full-replacement payload when it
-needs to force-complete a stuck agent's pending TODO. Before this tool
-existed, the only available read surface was `get_workflow_status`, which
-returns counts (completed=N, pending=N, …) but not the item strings —
-forcing orchestrators to reconstruct the list from session memory and
-degrading audit fidelity.
-
-Surfaced during INF-5070 closeout (2026-05-14): orchestrator rebuilt a
-16-item TODO list from session memory because no read-back tool existed.
-Read-only; routes through ProgressRepository.get_todo_items().
-"""
 
 from __future__ import annotations
 
@@ -33,13 +19,6 @@ logger = logging.getLogger(__name__)
 
 
 def _estimate_tokens(data: Any) -> int:
-    """chars÷4 measured and found SAFE here, unlike get_tasks.py's identifier-dense
-    rows. TODO content is prose (natural-language sentences),
-    not identifier-dense JSON -- measured on the real wire serializer
-    (pydantic_core.to_json) against tiktoken o200k_base across short/long/mixed-50
-    realistic TODO content: 4.10-5.65 chars/token, i.e. ÷4 OVERestimates token cost
-    here (the safe direction) rather than understating it. Left unchanged.
-    """
     import json
 
     return len(json.dumps(data, default=str)) // 4
@@ -69,20 +48,6 @@ async def get_todos(
     db_manager: DatabaseManager | None = None,
     session: AsyncSession | None = None,
 ) -> dict[str, Any]:
-    """Fetch the full TODO list (sequence, content, status) for a job.
-
-    Args:
-        job_id: Job UUID whose TODOs to read.
-        tenant_key: Tenant isolation key (mandatory).
-        db_manager: Database manager (required if `session` is None).
-        session: Optional preexisting session (test injection / shared txn).
-
-    Returns:
-        Dict with:
-        - source: "todos"
-        - data: {"todos": [<rows>], "total": N}
-        - metadata: {tenant_key, job_id, estimated_tokens}
-    """
     if not tenant_key:
         raise ValueError("tenant_key is required")
     if not job_id:

@@ -3,89 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-8003f golden-snapshot gate for the S1-S4 render sites.
-
-Freezes the rendered output of the four v1 branch sites (S1 conductor/chain-drive, S2
-multi_terminal per-terminal agent seed, S3 orchestrator mission prose, S4 worker mission
-prose) with ``preset=None``, so an UNINTENDED render drift is caught byte-for-byte.
-
-BE-9035c RE-BASELINE (owner-blessed): the execution-mode collapse (6 modes → 2) plus the
-BE-9034 universal-subagent prose absorption DELIBERATELY changed the subagent renders, so
-this fixture was regenerated to a NEW mode-by-harness key scheme: multi_terminal renders once;
-subagent renders once PER DETECTED HARNESS (claude-code / codex / gemini / antigravity /
-opencode / generic). The multi_terminal keys stay byte-identical to the pre-collapse render
-(the collapse never touches the human-driven multi_terminal path) — if a multi_terminal
-golden value EVER changes, multi_terminal broke: STOP and fix, do not re-baseline it. A
-subagent-key change is only legitimate when it accompanies an INTENTIONAL prose change;
-otherwise treat any drift as a regression to diagnose, not to bless away.
-
-CONDUCTOR-CHAPTER CARVE-OUT (TSK-6232): the S1 conductor keys s1_chain_drive::* and s1_step_a
-render the chain-conductor protocol chapter (CH_CHAIN_DRIVE / STEP A), edited by deliberate
-conductor-protocol work and legitimately re-baselined on such a change — the multi_terminal-
-never-changes rule above is the S2/S3/S4 HUMAN-path invariant (seed / exec-prompt / orchestrator-
-and-worker prose), NOT these conductor-chapter keys. Re-baseline s1_chain_drive::* / s1_step_a
-only alongside an intentional CH_CHAIN_DRIVE edit; any OTHER key drifting is still a regression.
-
-BE-9260 RE-BASELINE: the S3/S4 orchestrator + worker prose hardcoded the Claude-Code-only
-"TodoWrite" tool name for EVERY tool, including multi_terminal (a harness-neutral seat) —
-that was itself the bug this project fixes. The rendered text now derives the task-list
-phrasing from ``task_list_phrase(tool)`` (platform_registry.py): "TodoWrite list" only for
-the detected claude-code harness, "task list" for every other tool INCLUDING multi_terminal.
-The same closeout-signoff render also picked up a pre-existing, related bug fix: the
-orchestrator body's "Project complete" line now derives the /giljo vs $giljo token from
-``giljo_invocation(tool)`` instead of hardcoding "/giljo" — so the codex and antigravity
-s3_orch keys flip from the wrong "/giljo" to the correct "$giljo" (matching how they're
-actually installed, same as ``TestGiljoSignoffToken`` already pins for the worker signoff
-block). The s4_worker keys additionally carry the mission-ordered shell-probe fallback:
-Phase-1 Step 0 now tells workers what to do when ``python`` is not on PATH
-(``echo $SHELL`` on POSIX / ``echo %COMSPEC%`` on Windows), so every s4_worker golden
-gained that fallback line. This intentionally changed 21 golden keys (the multi_terminal
-and per-harness s3_orch/s4_worker prose covered by the three changes above) — a
-deliberate, mission-scoped exception to the "multi_terminal never changes" rule above,
-not a silent re-baseline. Any OTHER key drifting is still a regression.
-
-BE-9256 RE-BASELINE: the s4_worker git-integration-enabled block (Phase-4 "Git
-Commit" instructions) taught a bare-SHA example -- `"commits": ["abc123"]` --
-which is the exact shape the closeout validator now fails closed on. The
-example is now a titled string (`"<sha> <one-line commit title>"`), so all 7
-`s4_worker::*::git=True` keys (multi_terminal + the 6 per-harness subagent
-renders) changed; every other key (git=False, s1-s3) is untouched — a
-deliberate, narrowly-scoped re-baseline, not a silent one.
-
-BE-9275b RE-BASELINE: the MCP tool prefix flipped `mcp__giljo_mcp__` ->
-`mcp__giljo_hq__` (derived from `branding.MCP_ALIAS`), touching the
-multi_terminal_prompt_builder.py per-terminal agent seed and the Claude-Code
-ToolSearch bootstrap in the S2 execution prompt. Diff-verified: only the tool
-prefix changed (`mcp__giljo_mcp__*` -> `mcp__giljo_hq__*` in the ToolSearch
-select query and the bare seed lines) -- a deliberate, narrowly-scoped
-re-baseline of `s2_seed_block::{claude-code,multi_terminal,codex,gemini}` and
-`s2_exec_prompt::{claude-code,multi_terminal}`; every other key untouched.
-
-FE-9493 RE-BASELINE: `advance_chain_member_to_implementing` now writes
-`project_statuses[member] = "planning"` at a chain member's own staging-end
-(promoted to `"implementing"` separately, once that member's first worker
-actually spawns) -- a deliberate two-stage status split. CH_CHAIN_DRIVE's STEP
-B prose told the conductor the server marks the member `"implementing"` at
-that point, which is now wrong, so chapters_chain.py's STEP B text was edited
-to say `"planning"` (CONDUCTOR-CHAPTER CARVE-OUT above). Diff-verified: only
-`s1_chain_drive::multi_terminal` and `s1_chain_drive::subagent` changed, each
-by exactly the one `"implementing"` -> `"planning"` word on the STEP B line;
-every other key (including `s1_step_a`) is untouched.
-
-BE-9543 RE-BASELINE: ``worker_body.py``'s "Phase 4 — ORCHESTRATOR ADDENDUM" section was
-deleted -- it rendered unconditionally into every WORKER's protocol (implementer, tester,
-reviewer, ...) despite being addressed to orchestrators, who never reach this renderer at
-all (``job_type == "orchestrator"`` branches to ``orchestrator_body.py`` before
-``_build_worker_protocol_body`` is ever called -- see ``agent_protocol.py``). Worse, its
-content was wrong: it told the reader to call ``write_memory_entry`` between
-``complete_job`` and ``write_project_closeout``, which double-writes the 360 (verified by
-call path: ``write_project_closeout`` already persists its own ``project_closeout`` entry).
-Diff-verified: every ``s4_worker::*`` key (7 harnesses x 2 git states, 14 keys) shrank by
-exactly that dead section; every other key (s1-s3) is untouched.
-
-The fixture is regenerated by running this module as a script:
-    python tests/services/test_be8003f_render_ladder.py --write
-"""
 
 from __future__ import annotations
 
@@ -116,8 +33,6 @@ from giljo_mcp.services.protocol_sections.orchestrator_body import render_capabi
 
 _FIXTURE = Path(__file__).with_name("_be8003f_render_goldens.json")
 
-# Deterministic, side-effect-free render inputs. Fixed literals so the snapshot is a
-# pure function of the builder templates, never of the environment.
 _RUN_ID = "RUN-GOLD-0000"
 _ORDER = ["P1-0000-0000", "P2-0000-0000", "P3-0000-0000"]
 _JOB = "JOB-0000-0000"
@@ -125,18 +40,10 @@ _TENANT = "TENANT-GOLD"
 _EXEC = "EXEC-0000-0000"
 _COND = "COND-0000-0000"
 
-# BE-9035c: the mode-by-harness golden matrix. After the collapse a subagent project's
-# execution_mode is the single canonical ``subagent``; the DETECTED HARNESS (the render
-# ``tool``) is what varies the per-harness prose. So S3/S4 render multi_terminal ONCE and
-# subagent ONCE PER HARNESS — the 3 dedicated CLIs (claude-code/codex/gemini), the two
-# universal-ladder harnesses (antigravity/opencode), and the ``generic`` floor. The old
-# per-legacy-mode keys (s3_orch::claude_code_cli...) are gone by design (owner-blessed
-# re-baseline — see the module docstring + DESIGN §6).
-_SUBAGENT_HARNESSES: tuple[str, ...] = ("claude-code", "codex", "gemini", "antigravity", "opencode", "generic")
+_SUBAGENT_HARNESSES: tuple[str, ...] = ("claude-code", "codex", "opencode", "generic")
 
 
 def _stub_jobs() -> list[SimpleNamespace]:
-    """Three fake spawned agent jobs, one per cli_tool variant the seed routes on."""
     return [
         SimpleNamespace(agent_display_name="ui-impl", job_id="AJ-1", cli_tool="claude"),
         SimpleNamespace(agent_display_name="be-impl", job_id="AJ-2", cli_tool="codex"),
@@ -155,16 +62,6 @@ def _stub_project() -> SimpleNamespace:
 
 
 def _render_goldens() -> dict[str, str]:
-    """Render every S1-S4 entry point on the None/CLI (preset-less) path.
-
-    Called by BOTH the fixture writer and the byte-identity test so the two can never
-    drift. Uses NO ``preset`` argument -> exercises exactly the default (today's bytes).
-
-    TSK-9263 ride-along: the goldens byte-pin ``pwsh -NoExit``; on a Windows
-    contributor box without PS7 the launch-shell ladder would render ``powershell``
-    and every Windows golden would mismatch. Pin pwsh-present for the render so the
-    suite is host-independent (same pin as test_be6205_conductor_spawn_render).
-    """
     with mock.patch.object(lcs, "_pwsh_available", return_value=True):
         return _render_goldens_unpinned()
 
@@ -173,7 +70,6 @@ def _render_goldens_unpinned() -> dict[str, str]:
     cases: dict[str, str] = {}
     builder = MultiTerminalPromptBuilder()
 
-    # --- S1: conductor / chain-drive (chapters_chain.py) ---------------------
     for mode in (None, *EXECUTION_MODES):
         cases[f"s1_capability::{mode}"] = _build_ch_capability(mode, True)
     for mode in EXECUTION_MODES:
@@ -187,8 +83,7 @@ def _render_goldens_unpinned() -> dict[str, str]:
         )
     cases["s1_step_a"] = _build_chain_drive_step_a(_RUN_ID, "<<SPAWN_COMMAND_PLACEHOLDER>>")
 
-    # --- S2: multi_terminal per-terminal agent seed --------------------------
-    for tool in ("claude-code", "multi_terminal", "codex", "gemini"):
+    for tool in ("claude-code", "multi_terminal", "codex"):
         cases[f"s2_seed_block::{tool}"] = builder._build_agent_seed_block(_stub_jobs(), tool)
         cases[f"s2_seed_block_empty::{tool}"] = builder._build_agent_seed_block([], tool)
     for tool in ("claude-code", "multi_terminal"):
@@ -200,8 +95,6 @@ def _render_goldens_unpinned() -> dict[str, str]:
             tool=tool,
         )
 
-    # --- S3: orchestrator mission prose — mode x harness (agent_lifecycle + orchestrator_body) -
-    # multi_terminal renders once (its own tool); subagent renders once per detected harness.
     for cond in (False, True):
         cases[f"s3_orch::multi_terminal::conductor={cond}"] = _generate_orchestrator_protocol(
             _JOB, _TENANT, _EXEC, execution_mode="multi_terminal", tool="multi_terminal", is_chain_conductor=cond
@@ -212,7 +105,6 @@ def _render_goldens_unpinned() -> dict[str, str]:
                 _JOB, _TENANT, _EXEC, execution_mode="subagent", tool=harness, is_chain_conductor=cond
             )
 
-    # --- S4: worker mission prose — mode x harness (worker_body.py) ----------
     def _worker(execution_mode: str, tool: str, git: bool) -> str:
         return _generate_agent_protocol(
             _JOB,
@@ -223,9 +115,6 @@ def _render_goldens_unpinned() -> dict[str, str]:
             git_integration_enabled=git,
             job_type="implementer",
             tool=tool,
-            # BE-9012d: render the PRIMARY (thread-bound) worker prose in the
-            # golden — a real worker always has a resolved bound thread. The
-            # None-degradation path is covered by test_be9012d_worker_hub_mission.
             comm_thread_id="comm-thread-golden",
         )
 
@@ -247,24 +136,18 @@ def _load_fixture() -> dict[str, str]:
 
 
 def test_s1_s4_render_byte_identical_on_none_path():
-    """Every S1-S4 entry point renders BYTE-IDENTICAL to the committed golden on the
-    preset-less (None/CLI) path. This is the D1 invariant: preset is None -> today's bytes."""
     golden = _load_fixture()
     current = _render_goldens()
 
-    # Key set must match exactly — a dropped/added case is itself a regression signal.
     assert set(current) == set(golden), (
         f"case-set drift: added={sorted(set(current) - set(golden))} removed={sorted(set(golden) - set(current))}"
     )
-    # Per-key compare for a readable diff on the first offending site.
     mismatches = [key for key in golden if current[key] != golden[key]]
     assert not mismatches, f"byte-identity BROKE on the None/CLI path for: {mismatches}"
 
 
 @pytest.mark.parametrize("key", sorted(_render_goldens()))
 def test_each_site_present_and_nonempty(key):
-    """Sanity: every declared render case produces non-empty prose (an empty seed block
-    for an empty team is the one legitimate empty case)."""
     value = _render_goldens()[key]
     if key.startswith("s2_seed_block_empty::"):
         assert value == ""
@@ -272,26 +155,14 @@ def test_each_site_present_and_nonempty(key):
         assert value.strip(), f"empty render for {key}"
 
 
-# =====================================================================================
-# PART B — preset-render marker tests (D5.2) + helper/registry unit tests.
-#
-# On a preset-active render the ladder activates. These assert, per site x preset:
-#   * NO gated CLI/terminal markers (where D3 gates them at that site)
-#   * the [FLOOR] line is present
-#   * the S1 inline-conducting marker is present for a non-terminal preset
-# =====================================================================================
 
-# All three registered presets are shell-less / non-terminal today.
 _PRESETS = list(PRESET_NAMES)
-# Terminal-launch markers S1 gates (the wt/gnome-terminal/osascript spawn command + the
-# $DISPLAY/$WAYLAND_DISPLAY fail-loud clause — DoD-5 "$DISPLAY retirement").
 _S1_GATED = ("wt -w 0", "gnome-terminal", "osascript", "$DISPLAY", "$WAYLAND_DISPLAY")
 _FLOOR = "[FLOOR]"
 _INLINE = "INLINE CONDUCTING"
 
 
 def test_render_capability_ladder_shape():
-    """The D4 formatter emits exactly the PREFERRED/FALLBACK/FLOOR shape."""
     out = render_capability_ladder("PREF", "FALL", "do X yourself", preset_display="Chat")
     assert out == (
         "[YOUR PATH — Chat]\n"
@@ -302,12 +173,10 @@ def test_render_capability_ladder_shape():
         "coordination thread stating exactly what you cannot do, and show the user this "
         'line verbatim: "do X yourself".'
     )
-    # Degenerate (no preset name) still has a header and the floor.
     assert render_capability_ladder("P", "F", "L").startswith("[YOUR PATH]\n")
 
 
 def test_platform_has_shell_matches_workspace_model():
-    """has_shell is True iff the platform is not a pure chat surface (workspace_model != none)."""
     by_name = {p.execution_mode: p for p in PLATFORM_PRESETS}
     assert by_name["web_sandbox"].has_shell is True
     assert by_name["desktop_app"].has_shell is True
@@ -347,11 +216,9 @@ def test_s2_seed_block_preset_is_session_worded_with_floor(preset_name):
     assert _FLOOR in out
     assert "## PER-SESSION AGENT SEED" in out
     assert "NEW SESSION" in out
-    # Never "terminal"/"CLI prompt" container wording on a preset-active render (D3-S2).
     assert "## PER-TERMINAL AGENT SEED" not in out
     assert "as the CLI\nprompt" not in out
     assert "### Terminal:" not in out
-    # Chat (no execution environment) gets the code-vs-planning note.
     if not preset.has_shell:
         assert "code-WRITING job needs a session" in out
 
@@ -363,9 +230,7 @@ def test_s3_orchestrator_preset_has_waiting_ladder(preset_name):
         "J", "T", "E", execution_mode="multi_terminal", tool="multi_terminal", preset=preset
     )
     assert _FLOOR in out
-    assert "COORDINATING FROM A" in out  # the shell-less waiting ladder banner
-    # None of the CLI-only asides D3-S3 gates (they do not live in the orchestrator prose,
-    # so this must stay true — a regression that reintroduced one would fail here).
+    assert "COORDINATING FROM A" in out
     for marker in ("ToolSearch", "TodoWrite", "sleep 1 "):
         assert marker not in out, f"S3 orchestrator[{preset_name}] leaked {marker!r}"
 
@@ -384,12 +249,9 @@ def test_s4_worker_shell_asides_gated_on_has_shell(preset_name):
         preset=preset,
     )
     if preset.has_shell:
-        # web_sandbox / desktop_app keep the shell env-detection block unchanged: the
-        # worker shell block uses `sleep N`, never the `sleep 1 N` background-wake trick.
         assert "ENVIRONMENT DETECTION" in out
         assert "sleep 1 " not in out
     else:
-        # chat: shell asides suppressed, replaced by the no-shell ladder.
         assert "ENVIRONMENT DETECTION" not in out
         assert "Start-Sleep -Seconds N" not in out
         assert _FLOOR in out
@@ -401,9 +263,6 @@ if __name__ == "__main__":  # pragma: no cover - fixture regeneration entry poin
 
     if "--write" in sys.argv:
         payload = json.dumps(_render_goldens(), indent=2, ensure_ascii=False)
-        # Force LF so the fixture matches the repo line-ending convention (the golden
-        # string VALUES are \n-escaped inside the JSON, so this only normalizes the
-        # container, never the guarded prose).
         _FIXTURE.write_text(payload + "\n", encoding="utf-8", newline="\n")
         print(f"wrote {len(_render_goldens())} golden cases to {_FIXTURE}")
     else:

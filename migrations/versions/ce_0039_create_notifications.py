@@ -3,27 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Create notifications table (DB-backed notification bell).
-
-Revision ID: ce_0039_create_notifications
-Revises: ce_0038_drop_projects_activated_at_deactivation_reason
-Create Date: 2026-06-02
-
-IMP-5037a Phase 1: persistent backing store for the dashboard notification bell.
-
-Adds:
-- ``notifications`` table (tenant-scoped, optionally user-scoped).
-- UNIQUE PARTIAL index ``uq_notifications_tenant_dedupe_open`` on
-  ``(tenant_key, dedupe_key) WHERE resolved_at IS NULL`` — emit-time de-dupe so
-  at most one OPEN notification exists per natural key.
-- ``idx_notifications_tenant_user_created`` on ``(tenant_key, user_id,
-  created_at DESC)`` — list endpoint, newest-first.
-
-Idempotent: every CREATE is guarded by an information_schema / pg_indexes
-existence check. The CE installer reruns ``alembic upgrade head`` on every boot.
-
-Edition Scope: CE -- ``notifications`` is a CE model.
-"""
 
 import sqlalchemy as sa
 from alembic import op

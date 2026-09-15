@@ -3,53 +3,17 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Base class for platform-specific execution prompt builders.
-
-Extracted shared sections from Claude/Codex/Gemini builders (quality-sprint-002e).
-Each builder overrides only platform-specific methods:
-- platform_name: Header label (e.g., "Claude Code CLI Mode")
-- _build_spawning_section: Platform-specific agent invocation syntax
-- _build_agent_name_line: How agent names are displayed per platform
-- _build_extra_sections: Optional extra sections (e.g., Claude's CLI constraints)
-- _build_completion_section: Override if platform needs different completion logic
-"""
 
 from __future__ import annotations
 
 
 class ExecutionPromptBuilderBase:
-    """Base class providing shared prompt sections for execution-phase builders.
-
-    Subclasses must implement:
-    - platform_name (property): e.g., "Claude Code CLI Mode"
-    - _build_spawning_section: Platform-specific spawning template
-    - _build_agent_name_line: Agent name formatting per platform
-
-    Subclasses may override:
-    - _build_extra_sections: Additional platform-specific sections (default: empty)
-    - _build_completion_section: If completion logic differs from base
-    - _build_execution_directive_text: Platform-specific wording for the directive
-    """
 
     @property
     def platform_name(self) -> str:
-        """Return the platform name for the prompt header."""
         raise NotImplementedError("Subclasses must define platform_name")
 
     def build_execution_prompt(self, orchestrator_id: str, project, agent_jobs: list, git_enabled: bool = False) -> str:
-        """Build the full execution prompt by composing shared and platform-specific sections.
-
-        This is the public interface. All builders produce prompts via this method.
-
-        Args:
-            orchestrator_id: Job ID for the orchestrator
-            project: Project model (needs .name, .id, .product_id, .taxonomy_alias)
-            agent_jobs: List of agent job objects
-            git_enabled: Whether git integration is enabled
-
-        Returns:
-            Complete execution prompt string
-        """
         sections = [
             self._build_context_recap(orchestrator_id, project, agent_jobs),
             self._build_agent_list(orchestrator_id, project, agent_jobs),
@@ -65,7 +29,6 @@ class ExecutionPromptBuilderBase:
         return "\n".join(lines)
 
     def _build_context_recap(self, orchestrator_id: str, project, agent_jobs: list) -> list[str]:
-        """Build identity, health check, and context recap section (shared)."""
         return [
             f"# GiljoAI Implementation Phase - {self.platform_name}",
             "",
@@ -118,18 +81,12 @@ class ExecutionPromptBuilderBase:
         ]
 
     def _build_execution_plan_details(self) -> list[str]:
-        """Build additional execution plan detail lines.
-
-        ClaudePromptBuilder includes extra detail about plan contents.
-        Other builders keep it minimal.
-        """
         return [
             "Follow this plan to coordinate agents.",
             "",
         ]
 
     def _build_agent_list(self, orchestrator_id: str, project, agent_jobs: list) -> list[str]:
-        """Build the agent jobs listing section (shared, with per-platform name formatting)."""
         agent_spawn_lines = []
         if agent_jobs:
             for idx, agent in enumerate(agent_jobs, 1):
@@ -167,18 +124,15 @@ class ExecutionPromptBuilderBase:
         ]
 
     def _build_agent_list_preamble(self) -> list[str]:
-        """Preamble text before agent listing. Override for platform-specific wording."""
         return [
             "Below are the specialist agents spawned during staging.",
             "",
         ]
 
     def _build_agent_name_line(self, agent) -> str:
-        """Format the agent name line. Overridden per platform."""
         return f"   - Agent Name: `{agent.agent_name}`"
 
     def _build_execution_directive_text(self) -> list[str]:
-        """Execution directive wording. Override for platform-specific tool references."""
         return [
             "After fetching your mission, you MUST invoke every agent listed above.",
             "Do NOT skip agents. Do NOT summarize the plan and stop. Your job is to",
@@ -188,11 +142,9 @@ class ExecutionPromptBuilderBase:
         ]
 
     def _build_spawning_section(self, agent_jobs: list) -> list[str]:
-        """Build platform-specific spawning template. Must be overridden."""
         raise NotImplementedError("Subclasses must implement _build_spawning_section")
 
     def _build_monitoring_section(self, project) -> list[str]:
-        """Build the monitoring section (shared)."""
         return [
             "## Monitoring Agent Progress",
             "",
@@ -206,7 +158,6 @@ class ExecutionPromptBuilderBase:
         ]
 
     def _build_context_refresh_section(self, orchestrator_id: str) -> list[str]:
-        """Build the context refresh section (shared)."""
         return [
             "## Refreshing Your Context",
             "",
@@ -218,19 +169,14 @@ class ExecutionPromptBuilderBase:
         ]
 
     def _build_extra_sections(self, orchestrator_id: str, project, agent_jobs: list) -> list[list[str]]:
-        """Return additional platform-specific sections. Default: none."""
         return []
 
     def _build_git_closeout_lines(self, project, git_enabled: bool) -> list[str]:
-        """Build git closeout commit lines (shared helper)."""
         if not git_enabled:
             return []
         tag = getattr(project, "taxonomy_alias", None) or project.name
         return [
             "### Git Closeout Commit",
-            # BE-9103: orchestrator = committer of last resort. A worker that self-adopted
-            # or exited without committing leaves this project's work uncommitted; a clean
-            # closeout marker on top of that dirty tree is exactly the bug this guards against.
             "**Committer of last resort:** BEFORE the closeout marker, check the working tree "
             "(`git status --short`). If it is DIRTY with this project's work — a worker that "
             "did not commit, or your own residue — commit those files first "
@@ -249,7 +195,6 @@ class ExecutionPromptBuilderBase:
     def _build_completion_section(
         self, orchestrator_id: str, project, agent_jobs: list, git_enabled: bool
     ) -> list[str]:
-        """Build the completion section. Override for extended completion (e.g., Claude)."""
         git_closeout_lines = self._build_git_closeout_lines(project, git_enabled)
         return [
             "## When You're Done",

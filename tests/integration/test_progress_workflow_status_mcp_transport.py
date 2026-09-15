@@ -3,36 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Transport-layer regression test for BE-5079 (Wave 1 deferred item 3).
-
-Investigates the alleged stale TODO counts in ``get_workflow_status`` immediately
-after ``report_progress``. Wave 1 static analysis found no obvious bug at the
-service/repository layer:
-- ``ProgressService.report_progress`` commits explicitly via
-  ``self._repo.commit(session)`` before broadcasting.
-- ``WorkflowStatusService.get_workflow_status`` opens a fresh session and runs
-  ``AgentOperationsRepository.get_todo_counts_by_job`` (a plain SELECT GROUP BY,
-  no caching, no identity-map carryover across sessions).
-- PG18 default READ COMMITTED -- a session opened after the writer's commit
-  must observe the new rows.
-
-The hypothesis (per the orchestrator mission) is that the report is a
-client-side caching artefact, not a server-side visibility race. This test
-proves that hypothesis at the MCP transport boundary -- the same boundary the
-dashboard hits -- by alternating ``report_progress`` and ``get_workflow_status``
-calls in a tight loop with varying TODO mixes and asserting exact count
-equality on every iteration.
-
-Per CLAUDE.md "Regression test at the failing layer" rule, the test exercises
-the ``@mcp.tool`` wrappers in ``api/endpoints/mcp_sdk_server.py`` (lines 994
-and 1289) -- not the underlying services directly -- because the BE-5042
-lesson showed that service-only coverage misses transport-wrapper bugs.
-
-Note on file justification (bloat budget): no existing integration test
-module covers the progress/workflow_status MCP boundary. The closest neighbour
-is ``test_workflow_status_service.py`` in tests/unit/ but that operates at the
-service layer and would not catch a transport-wrapper visibility bug.
-"""
 
 from __future__ import annotations
 
@@ -55,9 +25,6 @@ from tests.helpers.mcp_session_fixture import create_connected_server_and_client
 pytestmark = pytest.mark.asyncio
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _payload(call_tool_result) -> dict:
@@ -80,11 +47,6 @@ def _error_text(call_tool_result) -> str:
 
 
 async def _seed_progress_context(db_session, tenant_key: str) -> dict:
-    """Create org + product + project + job + execution for a tenant.
-
-    Mirrors the seeding pattern from test_request_approval_mcp_transport.py.
-    Returns dict with keys: project, job, execution.
-    """
     suffix = uuid4().hex[:8]
     org = Organization(
         name=f"Org {suffix}",
@@ -145,9 +107,6 @@ async def _seed_progress_context(db_session, tenant_key: str) -> dict:
     return {"project": project, "job": job, "execution": execution}
 
 
-# ---------------------------------------------------------------------------
-# Fixtures: shared-session ToolAccessor + tenant-aware MCP client
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
@@ -162,20 +121,6 @@ class _TenantSwitch:
 
 @pytest_asyncio.fixture
 async def progress_mcp_client(db_manager, db_session, primary_tenant_key, monkeypatch):
-    """Yield ``(new_client, tenant_switch)`` for in-memory FastMCP transport.
-
-    Identical to the pattern in test_request_approval_mcp_transport.py and
-    test_task_tools_mcp_transport.py: build a fresh ToolAccessor bound to the
-    test session so every service (including the inner ProgressService and
-    WorkflowStatusService held by OrchestrationService) reads/writes inside
-    the rolled-back test transaction.
-
-    ``test_session=db_session`` propagates through OrchestrationService into
-    its sub-services (``_progress`` and ``_workflow_status``) -- both honour
-    the injected session. This is critical: without shared-session binding,
-    ProgressService would write to a session whose commit is invisible to
-    the test fixture's session, and the test would assert against an empty DB.
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from giljo_mcp.tools.tool_accessor import ToolAccessor
@@ -199,8 +144,6 @@ async def progress_mcp_client(db_manager, db_session, primary_tenant_key, monkey
 
     tenant_switch = _TenantSwitch(primary_tenant_key)
 
-    # BE-6042d: _resolve_tenant/_resolve_user_id moved to mcp_tools._base (the
-    # _call_tool call site reads them there). Patch _base, not mcp_sdk_server.
     from api.endpoints.mcp_tools import _base
 
     monkeypatch.setattr(
@@ -225,28 +168,9 @@ async def progress_mcp_client(db_manager, db_session, primary_tenant_key, monkey
         state.db_manager = prior_db_manager
 
 
-# ---------------------------------------------------------------------------
-# The regression test: report_progress -> get_workflow_status visibility
-# ---------------------------------------------------------------------------
 
 
 def _todo_mix_for_iteration(i: int) -> tuple[list[dict], dict[str, int]]:
-    """Generate a TODO mix that varies per iteration so successive calls
-    produce different counts -- catches both initial-write bugs AND
-    update-write bugs (e.g. a stale snapshot returned after a delete+insert).
-
-    Returns (todo_items, expected_counts).
-
-    The server enforces a regression guard (ProgressService) that rejects
-    incoming todo_items lists with FEWER completed items than the DB already
-    has. To stay valid agent behaviour, completed grows monotonically with
-    ``i``; in_progress and pending vary freely so the read path still has to
-    surface a fresh snapshot every iteration.
-
-    Each iteration rebuilds the list from scratch with brand-new content, so the
-    TOTAL count can shrink between iterations. Per BE-6209a that is a destructive
-    full replacement, so the caller passes ``replace=True`` below to opt in.
-    """
     completed = i + 1
     in_progress = (i % 3) + 1
     pending = (i % 5) + 1
@@ -267,15 +191,6 @@ def _todo_mix_for_iteration(i: int) -> tuple[list[dict], dict[str, int]]:
 async def test_workflow_status_observes_report_progress_immediately(
     progress_mcp_client, db_session, primary_tenant_key
 ):
-    """report_progress -> get_workflow_status (back-to-back, 10 iterations).
-
-    Asserts that the TODO counts surfaced by ``get_workflow_status`` match
-    the most recent ``report_progress`` call exactly, on every iteration.
-
-    A failure here would prove the BE-5079 item 3 bug exists at the server
-    boundary. A pass proves the server is consistent and the staleness must
-    live in the dashboard / client cache.
-    """
     new_client, _switch = progress_mcp_client
     seed = await _seed_progress_context(db_session, primary_tenant_key)
     job_id = seed["job"].job_id
@@ -287,8 +202,6 @@ async def test_workflow_status_observes_report_progress_immediately(
 
             progress_result = await session.call_tool(
                 "report_progress",
-                # replace=True: each iteration is a full fresh-content list whose
-                # total may shrink vs the prior one (BE-6209a shrink guard).
                 {"job_id": job_id, "todo_items": todo_items, "replace": True},
             )
             assert progress_result.is_error is False, _error_text(progress_result)
@@ -318,28 +231,17 @@ async def test_workflow_status_observes_report_progress_immediately(
             )
 
 
-# ---------------------------------------------------------------------------
-# BE-6182 (alpha AF5): worker happy-path lifecycle regression — a spawned agent
-# runs get_job_mission -> report_progress(pending) -> report_progress(completed)
-# -> complete_job cleanly through the MCP transport. Guards the baseline so the
-# happy path cannot silently regress.
-# ---------------------------------------------------------------------------
 
 
 async def test_be6182_worker_lifecycle_mission_progress_complete(progress_mcp_client, db_session, primary_tenant_key):
-    """get_job_mission -> report_progress(pending) -> report_progress(completed)
-    -> complete_job runs clean for a spawned implementer agent (no error at any
-    step). This is the AF5 happy-path baseline."""
     new_client, _switch = progress_mcp_client
     seed = await _seed_progress_context(db_session, primary_tenant_key)
     job_id = seed["job"].job_id
 
     async with new_client() as session:
-        # 1. Load the mission (the agent's first action).
         mission_result = await session.call_tool("get_job_mission", {"job_id": job_id})
         assert mission_result.is_error is False, _error_text(mission_result)
 
-        # 2. Report a pending TODO, then 3. flip it to completed.
         pending = await session.call_tool(
             "report_progress",
             {"job_id": job_id, "todo_items": [{"content": "Deliver the feature", "status": "pending"}]},
@@ -352,7 +254,6 @@ async def test_be6182_worker_lifecycle_mission_progress_complete(progress_mcp_cl
         )
         assert completed.is_error is False, _error_text(completed)
 
-        # 4. complete_job runs clean (deliverable TODO is completed; no gate trip).
         done = await session.call_tool(
             "complete_job",
             {"job_id": job_id, "result": {"summary": "Feature delivered"}},

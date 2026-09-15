@@ -3,32 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9523d -- tool descriptions must state the SHIPPED rule, not the plan.
-
-Each assertion below pins prose to a merged behavior change so the two cannot
-silently drift apart again:
-
-- ``create_project`` / ``create_task``: a bare multi-product create is
-  refused with ``PRODUCT_AMBIGUOUS`` (``ProductService.resolve_binding_product``,
-  ``write=True``) -- the old "falls back to the active product" framing was
-  only ever true for a single-product tenant.
-- ``launch_implementation``: reachable from any connected MCP client, gated
-  on the tenant's Headless toggle -- not "from the CLI" (a real claude.ai
-  chat session reached this tool and flagged its own CLI-only framing).
-  Crossing the gate does not activate the project (``project_active`` /
-  ``next_action`` in the response).
-- ``stage_project`` / ``get_implementation_prompt``: the human gate has two doors,
-  not one.
-- ``start_chain_run``: a headlessly-completed member under
-  ``review_policy='per_card'`` auto-satisfies the review gate.
-- ``giljo_setup``: states the skills-drift notify-never-auto-install rule in
-  its own text, not only in a generated skill file.
-
-Uses the live ``mcp`` instance the same way ``test_be9469_query_description_
-truthfulness.py`` does -- this is schema-level prose, not a call/detector path.
-
-Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -60,19 +34,12 @@ def _param_description(tool_name: str, param_name: str) -> str:
 
 
 class TestCreateProjectStatesShippedAmbiguityRule:
-    """``create_project``'s ``product_id`` param carries no ``Field(description=...)``
-    (unlike ``create_task``'s) -- FastMCP's schema exposes no per-arg text for it,
-    so the top-level tool description is the ONLY agent-visible surface for this
-    rule and is what these assertions pin."""
 
     def test_mentions_product_ambiguous(self):
         description = _tool_description("create_project")
         assert "PRODUCT_AMBIGUOUS" in description
 
     def test_does_not_claim_unconditional_active_product_fallback(self):
-        """The old claim ('omit it and the project binds to the active
-        product') is only true for a single-product tenant -- the description
-        must not assert it as the unconditional rule."""
         description = _tool_description("create_project")
         assert "single-product tenant" in description
 
@@ -113,26 +80,11 @@ class TestStageAndImplementProjectDescribeBothDoors:
         assert "launch_implementation" in description
 
     def test_get_implementation_prompt_names_launch_implementation_as_a_door(self):
-        """BE-9554 re-based: the tool renamed to get_implementation_prompt (it returns a
-        prompt; it does not implement). BE-9523d's guarantee is unchanged -- the reader
-        must learn the headless door exists -- so the pin follows the prose to the live
-        tool rather than staying on the compat shim, whose description is only a pointer."""
         description = _tool_description("get_implementation_prompt")
         assert "launch_implementation" in description
 
 
 class TestLinkedRunsTellTheAgentAdvancementIsAutomatic:
-    """BE-9523d pinned that start_chain_run's `review_policy` said a headlessly-finished
-    member is "auto-marked reviewed", so an agent would not sit waiting on a review step
-    nobody was there to click, or reach for a mark_reviewed call it did not need.
-
-    BE-9554 RE-BASED THIS, and the reason is stronger than the original pin. The
-    retirement removes BOTH `review_policy` and `mark_reviewed` from the agent surface
-    entirely -- there is no longer a review knob to misread or a review call to make
-    wrongly, so the confusion the prose defended against is now structurally impossible.
-    What still MUST be said is the fact underneath it: advancement is automatic and
-    ready_to_advance is how you see it. That moved to link_projects, and this pin moved
-    with it."""
 
     def test_link_projects_says_advancement_is_automatic(self):
         description = _tool_description("link_projects")

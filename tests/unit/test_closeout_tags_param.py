@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-BE-5032: tests for the agent-supplied `tags` parameter on
-close_project_and_update_memory.
-
-Replaces the prior _extract_tags() word-splitter behaviour. Tags must now
-come from the 16-entry CONTROLLED_TAG_VOCABULARY enforced by
-MemoryEntryWriteSchema; invalid tags raise MemoryEntryWriteValidationError.
-"""
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -27,7 +19,6 @@ from tests.helpers.model_factories import make_product, make_project
 
 
 def _build_session_mocks(tenant_key: str):
-    """Return (mock_session, mock_db_manager, mock_project, mock_product, captured)."""
     project_id = str(uuid4())
     product_id = str(uuid4())
 
@@ -42,7 +33,7 @@ def _build_session_mocks(tenant_key: str):
     mock_product = make_product(id=product_id, tenant_key=tenant_key, product_memory={})
 
     mock_session = AsyncMock()
-    mock_session.info = {}  # tenant_session_context save/restore target
+    mock_session.info = {}
     mock_db_manager = MagicMock()
     mock_db_manager.get_session_async.return_value.__aenter__ = AsyncMock(return_value=mock_session)
     mock_db_manager.get_session_async.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -57,7 +48,6 @@ def _build_session_mocks(tenant_key: str):
         elif call_count["n"] == 2:
             result.scalar_one_or_none.return_value = mock_product
         else:
-            # Readiness query -- no agents -> empty list, gate passes
             scalars = MagicMock()
             scalars.all.return_value = []
             result.scalars.return_value = scalars
@@ -75,7 +65,6 @@ async def _run_closeout(
     tags,
     captured: dict,
 ):
-    """Run closeout with mocked memory service and capture the create_entry params."""
     mock_entry = MagicMock()
     mock_entry.id = str(uuid4())
     mock_entry.to_dict.return_value = {"id": str(mock_entry.id)}
@@ -87,6 +76,7 @@ async def _run_closeout(
     with patch("giljo_mcp.tools.project_closeout.ProductMemoryService") as mock_svc_cls:
         svc = mock_svc_cls.return_value
         svc.get_next_sequence = AsyncMock(return_value=1)
+        svc.get_closeout_entry_for_project = AsyncMock(return_value=None)
         svc.create_entry = AsyncMock(side_effect=_capture_create)
 
         with patch(
@@ -108,7 +98,6 @@ async def _run_closeout(
 
 @pytest.mark.asyncio
 async def test_close_with_valid_tags_persists_exact_tags():
-    """Valid controlled-vocab tags are persisted verbatim."""
     tenant_key = "test-tenant"
     _, db_manager, _, _, project_id = _build_session_mocks(tenant_key)
     captured: dict = {}
@@ -128,7 +117,6 @@ async def test_close_with_valid_tags_persists_exact_tags():
 
 @pytest.mark.asyncio
 async def test_close_with_invalid_tag_raises_structured_error():
-    """An out-of-vocab tag triggers MemoryEntryWriteValidationError with invalid_tag + allowed."""
     tenant_key = "test-tenant"
     _, db_manager, _, _, project_id = _build_session_mocks(tenant_key)
     captured: dict = {}
@@ -146,12 +134,11 @@ async def test_close_with_invalid_tag_raises_structured_error():
     assert err.field == "tags"
     assert err.invalid_tag == "frobnicate"
     assert err.allowed == sorted(CONTROLLED_TAG_VOCABULARY)
-    assert "params" not in captured  # no partial persist
+    assert "params" not in captured
 
 
 @pytest.mark.asyncio
 async def test_close_with_none_tags_persists_empty():
-    """tags=None defaults to an empty tag list (no auto-extraction)."""
     tenant_key = "test-tenant"
     _, db_manager, _, _, project_id = _build_session_mocks(tenant_key)
     captured: dict = {}
@@ -169,7 +156,6 @@ async def test_close_with_none_tags_persists_empty():
 
 @pytest.mark.asyncio
 async def test_close_with_empty_tags_persists_empty():
-    """Explicit tags=[] persists an empty tag list."""
     tenant_key = "test-tenant"
     _, db_manager, _, _, project_id = _build_session_mocks(tenant_key)
     captured: dict = {}
@@ -187,7 +173,6 @@ async def test_close_with_empty_tags_persists_empty():
 
 @pytest.mark.asyncio
 async def test_close_with_mixed_valid_invalid_rejects_all():
-    """One invalid tag in a mixed list rejects the entire write -- no partial persist."""
     tenant_key = "test-tenant"
     _, db_manager, _, _, project_id = _build_session_mocks(tenant_key)
     captured: dict = {}
@@ -206,7 +191,6 @@ async def test_close_with_mixed_valid_invalid_rejects_all():
 
 
 def test_extract_tags_function_is_deleted():
-    """Deletion guard: _extract_tags must no longer be importable from project_closeout."""
     import giljo_mcp.tools.project_closeout as mod
 
     assert not hasattr(mod, "_extract_tags"), (

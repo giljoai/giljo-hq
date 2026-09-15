@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Orchestrator protocol chapter builders for CH3-CH6 (reference chapters)."""
 
 from __future__ import annotations
 
@@ -11,40 +10,23 @@ from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.platform_registry import Platform, is_subagent_render
 from giljo_mcp.prompts.default_agent_ladder import MISSING_AGENT_TEMPLATES_NOTICE
 
-# BE-9292b: CH5's final-acceptance prose (closing a job; accepting a stalled agent)
-# lives in its own module for the 800-line file-size guardrail and _build_ch5_reference's
-# shrink-only length budget. Interpolated verbatim below.
 from giljo_mcp.services.protocol_sections.closing_jobs import _CLOSING_JOBS_REFERENCE
 
-# BE-9013: the generic_mcp CH3 rung prose lives beside the ladder renderer in
-# orchestrator_body (moved there for the 800-line file-size guardrail); the
-# triple BUILDER stays here beside its _CH3_GENERIC data source. BE-9035a: the
-# @-syntax triple/reactivation builders moved there for the same guardrail.
 from giljo_mcp.services.protocol_sections.orchestrator_body import (
     _CH3_GENERIC_MCP_FLOOR_LINE,
     _CH3_GENERIC_MCP_PREFERRED,
     _CH3_GENERIC_MCP_SELF_ADOPT,
     _CH3_GENERIC_MCP_SELF_ADOPT_CHAT,
-    _ch3_at_syntax_triple,
-    _reactivation_at_syntax_block,
     render_capability_ladder,
 )
 
 
-# ---------------------------------------------------------------------------
-# CH3 per-platform spawning prose (BE-6116). Each entry is the
-# (file_mapping, platform_note, execution_mode_block) triple for one tool_type.
-# Dispatched by a dict lookup keyed off the registry's canonical tool_type with
-# the HO1020 fail-safe to the generic block -- NOT an inline if/elif on bare
-# literals. Per-platform PROSE that genuinely differs stays here in the renderer;
-# only the dispatch is registry-keyed.
-# ---------------------------------------------------------------------------
 
 _CH3_CODEX = (
-    "agent_name → ~/.codex/agents/gil-{agent_name}.toml",
+    "agent_name → the agent_profile in that job's get_job_mission response",
     """Codex CLI Note:
   - spawn_agent(agent='gil-X') where X = agent_name (NOT display_name)
-  - agent_name binds the MCP DB record and the installed Codex agent template
+  - agent_name binds the MCP DB record to the job; the role arrives from the server
   - The server returns agent_name WITHOUT 'gil-' prefix — you MUST prepend it""",
     """── YOUR PLATFORM: CODEX CLI ────────────────────────────────────────────────
 spawn_agent syntax (IMPLEMENTATION PHASE ONLY - not during staging):
@@ -53,10 +35,12 @@ spawn_agent syntax (IMPLEMENTATION PHASE ONLY - not during staging):
 CRITICAL: ALL GiljoAI agents use the 'gil-' prefix in Codex CLI.
 The server returns agent_name WITHOUT the prefix. You MUST prepend 'gil-'.
 
-WHAT agent= DOES: Loads the INSTALLED agent template file at
-~/.codex/agents/gil-{agent_name}.toml which contains developer_instructions,
-model config, and sandbox settings. The agent ALREADY KNOWS its role from
-the template — you do NOT need to re-explain it in the instructions= parameter.
+WHERE THE ROLE COMES FROM: the server, not your disk. The thin prompt spawn_job
+returned already carries a HARNESS block naming this agent's harness and its
+model/effort hints, and get_job_mission returns its full agent_profile (role,
+description, instructions, behavioural rules, success criteria). There is no
+agent template file to install, look up, or keep in sync — so do NOT re-explain
+the role in instructions=, and do NOT hunt for a catalogue entry.
 
 Example:
   spawn_job(agent_name='implementer',
@@ -65,43 +49,40 @@ Example:
   Later in implementation:
   spawn_agent(agent='gil-implementer', instructions='...')  # gil- prefix!
 
-Built-in Codex roles shadow unprefixed names — always use gil- prefix.
-
-While the gil-* template EXISTS, always use it: never use agent='worker',
-agent='implementer', agent='tester', or any unprefixed built-in name, and never
-instruct a generic worker to "act as" a GiljoAI agent.
-If a gil-* template is MISSING or unavailable, do NOT stop. Spawn Codex's DEFAULT
-subagent for that job and state once:
+Built-in Codex roles shadow unprefixed names — always use gil- prefix. Never use
+agent='worker', agent='implementer', agent='tester', or any unprefixed built-in
+name, and never instruct a generic worker to "act as" a GiljoAI agent.
+If no gil-* agent resolves, do NOT stop: spawn Codex's DEFAULT subagent for that
+job and state once:
   """
     + MISSING_AGENT_TEMPLATES_NOTICE
     + """
 The instructions= parameter should contain ONLY:
   - The job_id
   - The MCP call: get_job_mission(job_id="...")
-The template handles everything else.
+The agent_profile in that response handles everything else.
 
 DO NOT invoke spawn_agent() during staging - this is planning reference only
 """,
 )
 
-# BE-9035a: Gemini and Antigravity share one @-syntax prose template
-# (_ch3_at_syntax_triple, imported from orchestrator_body -- moved there for the
-# 800-line file-size guardrail), parameterized by label + install dir instead of a
-# hand-copied duplicate.
-_CH3_GEMINI = _ch3_at_syntax_triple("Gemini", "~/.gemini/agents/")
-_CH3_ANTIGRAVITY = _ch3_at_syntax_triple("Antigravity", "~/.gemini/antigravity-cli/plugins/giljoai/agents/")
-
 _CH3_CLAUDE = (
-    "agent_name → .claude/agents/{agent_name}.md",
+    "agent_name → the agent_profile in that job's get_job_mission response",
     """Claude Code CLI Note:
   - Task(subagent_type=X) where X = agent_name (NOT display_name)
-  - agent_name binds DB record, Task tool, and template filename
+  - agent_name binds the DB record to the Task call; the role arrives from the server
   - Example: spawn with agent_name='implementer', Task uses 'implementer'""",
     """── YOUR PLATFORM: CLAUDE CODE CLI ─────────────────────────────────────────
 Task tool syntax (IMPLEMENTATION PHASE ONLY - not during staging):
   Task(subagent_type='{agent_name}', instructions='...')
 
 CRITICAL: Task() uses agent_name value, NOT agent_display_name
+
+WHERE THE ROLE COMES FROM: the server, not your disk. The thin prompt spawn_job
+returned already carries a HARNESS block naming this agent's harness and its
+model/effort hints, and get_job_mission returns its full agent_profile. There is
+no agent file to install or look up — hand the subagent the thin prompt and let
+it fetch its own mission.
 
 Example:
   spawn_job(agent_name='implementer',
@@ -114,21 +95,18 @@ DO NOT invoke Task() during staging - this is planning reference only
 """,
 )
 
-# Generic MCP mode — any MCP-connected coding agent. HO1020 (Wave 2 Item 2): the
-# fail-safe for an unknown/unmapped tool (reframed around "each terminal is a job
-# order").
 _CH3_GENERIC = (
-    "agent_name → fetched from MCP server via get_staging_instructions()",
+    "agent_name → the agent_profile in that job's get_job_mission response",
     """Generic MCP Note:
-  - Agent templates are served by the MCP server, not local files
-  - Any MCP-connected coding tool can consume these templates
-  - agent_name is the key used across DB records and template lookups""",
+  - Agent profiles are served by the MCP server, never installed as local files
+  - Any MCP-connected coding tool can consume them — no per-tool export exists
+  - agent_name is the key used across DB records and job orders""",
     """── YOUR PLATFORM: ANY MCP-CONNECTED AGENT ─────────────────────────────────
 Each session is one job order. The user (or you, on behalf of the user) opens
 a session, the operator pastes the thin prompt for that job_id, and the agent
 in that session calls get_job_mission() to load its work. One job per
 session — different sessions can run different CLI tools (Claude, Codex,
-Gemini) and still coordinate, because coordination is MCP-only.
+opencode) and still coordinate, because coordination is MCP-only.
 
 CROSS-AGENT COORDINATION (MCP-ONLY):
   - spawn_job(...)          — request a NEW job order (a new terminal/agent)
@@ -153,32 +131,14 @@ orchestrator job (CE-0026); a fresh execution is spawned when the user clicks
 """,
 )
 
-# tool_type -> CH3 prose triple. Unknown/None tools fall back to _CH3_GENERIC
-# (HO1020 fail-safe), never the Claude Code block.
 _CH3_SPAWN_BLOCKS: dict[str, tuple[str, str, str]] = {
     "codex": _CH3_CODEX,
-    "gemini": _CH3_GEMINI,
     "claude-code": _CH3_CLAUDE,
-    "antigravity": _CH3_ANTIGRAVITY,
 }
 
 
 def _ch3_generic_mcp_triple(preset: Platform | None) -> tuple[str, str, str]:
-    """BE-9013: build the generic_mcp CH3 spawn triple via the (f) capability ladder.
-
-    Reuses the MCP-served-template file_mapping + platform_note from ``_CH3_GENERIC``
-    (identical for any MCP-connected agent); only the execution-mode block differs —
-    it is the PREFERRED (spawn via harness mechanism) / FALLBACK (SELF-ADOPT, granted
-    permission) / FLOOR (re-stage on a CLI workstation) ladder.
-
-    ``preset`` (a resolved shell-less harness Platform, or None) tunes ONLY the
-    self-adopt rung: a chat harness (``has_shell`` False) self-adopts planning/PM jobs
-    but not code jobs; every capable session (preset None, or a shell-bearing preset)
-    self-adopts ALL jobs. The floor is thus reached only by a shell-less session facing
-    a code job — it never swallows the self-adopt rung for a capable-but-subagent-less
-    harness.
-    """
-    file_mapping, platform_note, _ = _CH3_GENERIC
+    role_source, platform_note, _ = _CH3_GENERIC
     shell_less = preset is not None and not preset.has_shell
     preset_display = preset.display_label if preset is not None else "Generic MCP"
     fallback = _CH3_GENERIC_MCP_SELF_ADOPT_CHAT if shell_less else _CH3_GENERIC_MCP_SELF_ADOPT
@@ -194,44 +154,17 @@ def _ch3_generic_mcp_triple(preset: Platform | None) -> tuple[str, str, str]:
         "MCP-only. Follow the rung that matches what your harness can do:\n\n"
         f"{ladder}\n"
     )
-    return file_mapping, platform_note, execution_mode_block
+    return role_source, platform_note, execution_mode_block
 
 
 def _build_ch3_spawning_rules(tool: str = "multi_terminal", preset: Platform | None = None) -> str:
-    """Build CH3: AGENT SPAWNING RULES section — fully tool-aware (Handover 0847).
-
-    Each platform gets its own native spawning language as the PRIMARY instruction.
-    No cross-platform references (Codex never sees Task(), Claude never sees spawn_agent()).
-
-    Args:
-        tool: Platform identifier — 'claude-code', 'codex', 'gemini', 'generic_mcp', or
-              'multi_terminal'. Defaults to 'multi_terminal' for fail-safe routing
-              (HO1020 / Wave 2 Item 2): an unknown tool produces the platform-neutral
-              generic block, not Claude Code Task() syntax that the agent may not be
-              able to execute.
-        preset: BE-9013 — a resolved shell-less harness Platform (or None). Consumed
-              ONLY by the generic_mcp block to tune its SELF-ADOPT fallback rung (a chat
-              harness self-adopts planning/PM jobs only). Ignored by every other tool, so
-              all existing call sites (preset defaulting to None) render byte-identically.
-    """
-    # BE-6116/9035c dispatch by canonical tool_type: (1) a DEDICATED block
-    # (claude-code/codex/gemini); (2) any OTHER subagent harness — the generic floor,
-    # opencode, antigravity, or a legacy generic_mcp — rides the UNIVERSAL ladder
-    # (_ch3_generic_mcp_triple, preset-tuned); (3) multi_terminal / unknown non-subagent
-    # -> _CH3_GENERIC (HO1020 fail-safe, byte-identical). is_subagent_render() is the
-    # single registry signal (True for every non-multi_terminal token).
     if tool in _CH3_SPAWN_BLOCKS:
-        file_mapping, platform_note, execution_mode_block = _CH3_SPAWN_BLOCKS[tool]
+        role_source, platform_note, execution_mode_block = _CH3_SPAWN_BLOCKS[tool]
     elif is_subagent_render(tool):
-        file_mapping, platform_note, execution_mode_block = _ch3_generic_mcp_triple(preset)
+        role_source, platform_note, execution_mode_block = _ch3_generic_mcp_triple(preset)
     else:
-        file_mapping, platform_note, execution_mode_block = _CH3_GENERIC
+        role_source, platform_note, execution_mode_block = _CH3_GENERIC
 
-    # BE-6209f: the SUBAGENT-MODE NOTE's trailing contrast sentence names the
-    # multi-terminal "dashboard Play buttons" gating mechanism. That is meaningless to a
-    # subagent orchestrator (it has no Play buttons), so strip the tail for any subagent
-    # render. multi_terminal keeps the EXACT today text (byte-identical). The canonical
-    # registry signal (is_subagent_render) is the single source of truth.
     note_mode_tail = (
         ""
         if is_subagent_render(tool)
@@ -250,7 +183,7 @@ PARAMETER REQUIREMENTS:
 Use an agent_name EXACTLY as it appears in the agent_templates list in this
 response — copy the agent_name field verbatim. It often equals the display_name
 (e.g. 'implementer'); some templates differ. NEVER invent a name that is not in
-the list. File mapping: {file_mapping}.
+the list. Role source: {role_source}.
 
 ── agent_display_name ──────────────────────────────────────────────────────
 UI label only — implementer | tester | analyzer | documenter | reviewer.
@@ -264,7 +197,7 @@ phases. Pair with predecessor_job_id when a successor needs prior output
 (server renders the preamble in multi_terminal mode; subagent modes splice
 inline).
 
-⚠ SUBAGENT-MODE NOTE: In Claude Code / Codex / Gemini subagent execution
+⚠ SUBAGENT-MODE NOTE: In Claude Code / Codex subagent execution
 modes the server does NOT block higher-phase jobs from starting before
 lower-phase jobs finish. The `phase` value is informational ordering
 metadata — the orchestrator is responsible for spawning agents in phase
@@ -290,7 +223,6 @@ correct, mission scoped to this agent. Recommended max 2-5 agents, 8 display_nam
 
 
 def _build_ch4_error_handling() -> str:
-    """Build CH4: ERROR HANDLING section (~400 tokens)."""
     return """════════════════════════════════════════════════════════════════════════════
                        CH4: ERROR HANDLING
 ════════════════════════════════════════════════════════════════════════════
@@ -315,8 +247,9 @@ Mission >10K tokens → condense, reference vision docs instead of embedding.
 Target <5K.
 
 ── Agent Templates Empty ──────────────────────────────────────────────────
-agent_templates list empty → tell the user to activate templates in
-My Settings → Agent Templates.
+agent_templates list empty → this product has no agents assigned. Work with
+your harness default; do not block. Tell the user they can assign agents to
+this product on the Agents screen.
 
 ── STATUS TRANSITIONS ──────────────────────────────────────────────────────
 
@@ -352,15 +285,10 @@ MEDIUM (mission size) → log and continue. LOW (context hints) → continue.
 """
 
 
-# BE-9035a: _reactivation_at_syntax_block (imported from orchestrator_body -- moved
-# there for the 800-line file-size guardrail) shares one @-syntax template between
-# Gemini and Antigravity instead of a hand-copied duplicate.
 _REACTIVATION_SPAWN_BLOCKS: dict[str, str] = {
     "codex": """Reactivation Spawn — Codex CLI:
   spawn_agent(agent='gil-{role}', instructions='You are resuming a reactivated Giljo job. Call get_job_mission(job_id="{job_id}") immediately to load your mission and prior context.')
   Do NOT call spawn_job again — the job already exists.""",
-    "gemini": _reactivation_at_syntax_block("Gemini"),
-    "antigravity": _reactivation_at_syntax_block("Antigravity"),
     "multi_terminal": """Reactivation Spawn — Multi-Terminal:
   Tell the user: "Open a new session with your AI and paste this prompt for the {role} agent"
   Include in the prompt: "You are resuming job_id={job_id}. Call get_job_mission(job_id='{job_id}') to load your full context."
@@ -370,11 +298,6 @@ _REACTIVATION_SPAWN_BLOCKS: dict[str, str] = {
   Do NOT call spawn_job again — the job already exists.""",
 }
 
-# BE-9035c: the universal reactivation block for the generic subagent floor (any
-# subagent harness without a dedicated block above). The pre-collapse fallback was the
-# multi_terminal "ask the human to open a session" block — wrong for a subagent harness
-# that can re-spawn itself (the BE-9033 bug). This directs a harness-native re-spawn,
-# SELF-ADOPT framed like the CH3 rung: if ANY spawn mechanism exists, using it is MANDATORY.
 _REACTIVATION_GENERIC = """Reactivation Spawn — your harness's own mechanism (subagent floor):
   Re-spawn the {role} agent using whatever spawn / delegate mechanism your harness provides
   (a Task tool, an agent spawner, an @-mention, a delegate command), seeded with:
@@ -387,14 +310,6 @@ _REACTIVATION_GENERIC = """Reactivation Spawn — your harness's own mechanism (
 
 
 def _build_reactivation_spawn_block(tool: str) -> str:
-    """Build reactivation spawn instructions (Handover 0435c / BE-9035c).
-
-    Three tiers: a DEDICATED block (claude-code/codex/gemini/antigravity/multi_terminal)
-    wins; any OTHER subagent harness gets :data:`_REACTIVATION_GENERIC` (harness-native
-    re-spawn, never "ask the human" — the BE-9033 fix generalized to the subagent floor);
-    a non-subagent unknown token falls back to the multi_terminal block (HO1020, MCP-only
-    so it always works).
-    """
     block = _REACTIVATION_SPAWN_BLOCKS.get(tool)
     if block is not None:
         return block
@@ -406,14 +321,6 @@ def _build_reactivation_spawn_block(tool: str) -> str:
 def _build_ch5_reference(
     project_id: str, orchestrator_id: str, tool: str = "multi_terminal", git_integration_enabled: bool = False
 ) -> str:
-    """Build CH5: REFERENCE section for implementation phase (~380 tokens).
-
-    Args:
-        project_id: Project UUID for parameter substitution.
-        orchestrator_id: Job ID for parameter substitution.
-        tool: Platform identifier for platform-native spawn syntax.
-        git_integration_enabled: Whether git integration is active.
-    """
     return f"""════════════════════════════════════════════════════════════════════════════
                 CH5: REFERENCE (Implementation Phase Only)
 ════════════════════════════════════════════════════════════════════════════
@@ -673,19 +580,6 @@ END OF IMPLEMENTATION PHASE REFERENCE
 
 
 def _build_ch6_auto_checkin(interval: int = 10, *, for_conductor: bool = False) -> str:
-    """Build CH6: CHECK-IN PROTOCOL for the multi-terminal orchestrator's wait loop.
-
-    FE-9296b: the per-project cadence slider is retired — the cadence is an
-    account-level Settings value (slider-era per-project values honoured as
-    overrides), and the chapter branches on harness wake capability (BE-9296a):
-    wake-capable harnesses park on ``get_my_turn(wait_seconds=)``; every other
-    harness (chat surfaces cannot hold the call open) sleeps for the cadence.
-    BE-6013's live-value rule survives: ``interval`` is only the caller-resolved
-    first-cycle SEED; the authoritative value each cycle comes from
-    ``get_workflow_status().checkin_cadence_minutes``. ``for_conductor`` selects
-    the project-less chain conductor variant (no project_id of its own to
-    re-read; the cadence applies to the chain-drive poll loop instead).
-    """
     if for_conductor:
         return f"""════════════════════════════════════════════════════════════════════════════
           CH6: CHECK-IN CADENCE — CHAIN CONDUCTOR

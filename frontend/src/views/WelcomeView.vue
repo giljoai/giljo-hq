@@ -3,7 +3,6 @@
     <div class="welcome-atmosphere"></div>
     <div class="welcome-page">
 
-      <!-- HERO -->
       <div class="hero">
         <div class="hero-mascot">
           <div class="hero-mascot-glow"></div>
@@ -18,23 +17,20 @@
         </p>
       </div>
 
-      <!-- QUICK LAUNCH -->
       <div class="section-label">Quick Launch</div>
       <WelcomeQuickGrid
         :cards="quickCards"
         @card-click="onCardClick"
       />
 
-      <!-- YOUR TEAM (hidden during onboarding) -->
       <WelcomeTeamSection
         v-if="onboardingComplete"
         :active-templates="activeTemplates"
         :empty-slots="emptySlots"
         :total-slots="totalSlots"
-        :has-stale-agents="hasStaleAgents"
+        :has-product="hasAnyProduct"
       />
 
-      <!-- CONDITIONAL SECTION: Setup or Recent Projects (hidden during onboarding) -->
       <div v-if="!setupComplete && onboardingComplete" class="setup-cta-section">
         <div class="setup-cta smooth-border" @click="openSetupWithCertGate">
           <v-icon size="24" color="var(--color-accent-primary)">mdi-rocket-launch</v-icon>
@@ -58,19 +54,16 @@
         </div>
       </div>
 
-      <!-- FOOTER -->
       <div class="page-footer">
         <span class="footer-item mono">{{ appVersion }}</span>
       </div>
     </div>
 
-    <!-- Certificate trust modal (shown before setup for remote HTTPS clients) -->
     <CertTrustModal
       v-model="showCertModal"
       @continue="handleCertContinue"
     />
 
-    <!-- Project Review Modal (same as Dashboard) -->
     <ProjectReviewModal
       :show="showReviewModal"
       :project-id="reviewProjectId"
@@ -78,8 +71,6 @@
       @close="showReviewModal = false; reviewProjectId = null; reviewProductId = null"
     />
 
-    <!-- FE-9200: wizard = setup mode; TutorialOverlay = the post-setup tour.
-         Both stay mounted and gate on modelValue (wizard timers unchanged). -->
     <SetupWizardOverlay
       :model-value="showSetupOverlay && setupOverlayMode === 'setup'"
       :current-step="setupStep"
@@ -106,6 +97,7 @@ import { useUserStore } from '@/stores/user'
 import { useProductStore } from '@/stores/products'
 import { useProjectStore } from '@/stores/projects'
 import { getAgentColor } from '@/config/agentColors'
+import { templateRowActive } from '@/components/templates/templateTableConfig'
 import api from '@/services/api'
 import { PRODUCT_NAME } from '@/branding'
 import GilMascot from '@/components/GilMascot.vue'
@@ -130,15 +122,12 @@ const productStore = useProductStore()
 const projectStore = useProjectStore()
 const { showToast } = useToast()
 
-// Step-4 template card state
 const busyTemplateId = ref(null)
 
-// Certificate trust modal state
 const showCertModal = ref(false)
 const certModalDismissed = ref(false)
 const pendingSetupOpen = ref(false)
 
-// Setup wizard state
 const showSetupOverlay = ref(false)
 const setupStep = ref(0)
 const forceSetupMode = ref(false)
@@ -241,15 +230,12 @@ function shouldShowCertModal() {
 
 defineExpose({ shouldShowCertModal, handleCertContinue })
 
-// Template data
 const templates = ref([])
-// Pre-load placeholder; overwritten by the active-count API's max_slots (the
-// server-enforced total: 15 user-managed + 1 reserved orchestrator = 16).
 const totalSlots = ref(16)
 
 const activeTemplates = computed(() =>
   templates.value
-    .filter(t => t.is_active)
+    .filter(t => templateRowActive(t))
     .map(t => {
       const color = getAgentColor(t.role || t.name)
       return {
@@ -263,15 +249,12 @@ const activeTemplates = computed(() =>
 )
 
 const emptySlots = computed(() => Math.max(0, totalSlots.value - activeTemplates.value.length - 1))
-const hasStaleAgents = computed(() => templates.value.some(t => t.is_active && t.may_be_stale))
 
-// Quick-launch cards — adapt to product state
 const hasActiveProduct = computed(() => !!productStore.activeProduct)
 const hasAnyProduct = computed(() => productStore.hasProducts)
 const activeProjectCount = computed(() => projectStore.activeProjects?.length ?? 0)
 const hasAnyProject = computed(() => (projectStore.projects?.length ?? 0) > 0)
 
-// Onboarding-aware quick launch card definitions
 const setupCard = {
   title: 'Quick Setup',
   description: `Connect your AI coding tools and configure ${PRODUCT_NAME}.`,
@@ -387,13 +370,6 @@ const templateCards = computed(() =>
 
 async function createFromTemplate(tmpl) {
   if (busyTemplateId.value) return
-  // FE-9524/D1 (project record finding 3): the VIEWED tab wins over the
-  // legacy singular slot -- several products may be shown at once, so
-  // `activeProduct` no longer means "the one product in play". Preferring it
-  // here would create the project under whichever product happens to be
-  // MOST RECENTLY shown rather than the one on screen. effectiveProductId
-  // already falls back to activeProduct when no tab is viewed, so this is
-  // the whole priority chain.
   const productId = productStore.effectiveProductId
   if (!productId) {
     showToast({
@@ -431,7 +407,6 @@ function onCardClick(card) {
   }
 }
 
-// Onboarding phase: true until user has at least one product AND one project
 const onboardingComplete = computed(() => hasActiveProduct.value && hasAnyProject.value)
 
 const quickCards = computed(() => {
@@ -456,7 +431,6 @@ const quickCards = computed(() => {
   return [dashboardCard, newProjectCard.value, taskBoardCard, lookupCard]
 })
 
-// Recent projects (from dashboard API)
 const recentProjects = ref([])
 
 function getUserDisplayName() {
@@ -464,15 +438,12 @@ function getUserDisplayName() {
   return user?.first_name || user?.full_name || user?.username || user?.email?.split('@')[0] || 'Friend'
 }
 
-// FE-6059: defer Home's Tools-domain reads (agent templates) off the cold first
-// paint — loaded lazily when the team section renders. FE-9202: the onboarding
-// nudges moved into the unified banner strip (SystemStatusBanner), so Home no
-// longer loads git/serena status or evaluates the reminder gates here.
 useDeferredHomeData({
   onboardingComplete,
   showIntegReminder: ref(false),
   templates,
   totalSlots,
+  productId: computed(() => productStore.effectiveProductId || null),
 })
 
 const showReviewModal = ref(false)
@@ -485,10 +456,8 @@ function handleReviewProject(project) {
   if (reviewProjectId.value) showReviewModal.value = true
 }
 
-// Version
 const appVersion = ref('')
 
-// Greeting via composable (FE-6006)
 const firstName = computed(() => {
   const name = getUserDisplayName()
   return String(name).split(' ')[0]
@@ -520,20 +489,11 @@ onMounted(async () => {
     }
   }
 
-  // FE-6058: fire independent reads in parallel instead of a 6-call serial
-  // waterfall. Each call still swallows its own error exactly as before; only
-  // the dashboard read depends on products (via effectiveProductId), so it
-  // chains off the products fetch. This cuts the home-view content delay from
-  // the SUM of every round-trip down to roughly the slowest single one.
   const productsLoaded = productStore.fetchProducts().catch(() => {})
 
-  // FE-6059: agent-template reads (api.templates.list / activeCount) are no
-  // longer fired here — they are deferred behind the onboardingComplete watcher
-  // so the "Your Team" section loads them only when it will actually render.
   await Promise.allSettled([
     productsLoaded,
     projectStore.fetchProjects().catch(() => {}),
-    // Dashboard read genuinely depends on products being loaded first.
     productsLoaded.then(() => {
       if (setupComplete.value && productStore.effectiveProductId) {
         return api.stats

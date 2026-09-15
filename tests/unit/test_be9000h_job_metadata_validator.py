@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression tests for BE-9000h — job_metadata write-boundary validation.
-
-The bug class: ``agent_jobs.job_metadata`` had a Pydantic validator that was
-NEVER called at any write site, and its fields were stale. An agent-supplied
-``current_step`` (via report_progress) flowed into the JSONB column with no
-length cap.
-
-These tests pin the fix at the layer the bug occurred (the ProgressService
-report_progress path) AND at the validator itself:
-- an oversize ``current_step`` is REJECTED (not stored raw) through the real
-  ``report_progress`` entrypoint;
-- a normal ``current_step`` still round-trips into ``job_metadata`` (the
-  load-bearing happy path — the validator must not break legitimate writes).
-"""
 
 import sys
 import types
@@ -28,8 +14,6 @@ import pytest
 from giljo_mcp.exceptions import ValidationError as GiljoValidationError
 
 
-# Stub the api package so that api/__init__.py is never executed during
-# collection (mirrors the sibling progress-service unit tests).
 if "api" not in sys.modules:
     _api_stub = types.ModuleType("api")
     _api_stub.__path__ = ["api"]
@@ -44,7 +28,6 @@ from giljo_mcp.schemas.jsonb_validators import (  # noqa: E402
 from giljo_mcp.services.progress_service import ProgressService  # noqa: E402
 
 
-# --- Validator unit tests (the schema boundary) ---------------------------
 
 
 class TestValidateAgentJobMetadata:
@@ -60,7 +43,6 @@ class TestValidateAgentJobMetadata:
             "created_via": "thin_client_spawn",
             "todo_steps": {"total_steps": 5, "completed_steps": 3, "skipped_steps": 0, "current_step": "step 3"},
         }
-        # Returned object is the SAME dict (no reshaping / null-padding).
         assert validate_agent_job_metadata(data) is data
 
     def test_extra_keys_allowed(self):
@@ -85,7 +67,6 @@ class TestValidateAgentJobMetadata:
             validate_agent_job_metadata({"tool": "x" * 201})
 
 
-# --- ProgressService report_progress path (the failing layer) -------------
 
 
 def _make_service() -> ProgressService:
@@ -95,7 +76,6 @@ def _make_service() -> ProgressService:
 
 
 class _FakeSessionCtx:
-    """Minimal async-context-manager wrapping a mock session."""
 
     def __init__(self, session):
         self._session = session
@@ -108,9 +88,8 @@ class _FakeSessionCtx:
 
 
 def _wire_session(service, monkeypatch, job):
-    """Patch report_progress's session + fetch helpers to in-memory mocks."""
     session = AsyncMock()
-    session.info = {}  # tenant_session_context save/restore target
+    session.info = {}
     execution = Mock()
     execution.status = "working"
     execution.progress = 0
@@ -126,7 +105,6 @@ def _wire_session(service, monkeypatch, job):
 
 @pytest.mark.asyncio
 async def test_report_progress_rejects_oversize_current_step(monkeypatch):
-    """An oversize current_step is rejected at the boundary and NOT stored raw."""
     service = _make_service()
     job = AgentJob(job_id=str(uuid.uuid4()), tenant_key="test-tenant", job_metadata={})
     job.project_id = uuid.uuid4()
@@ -140,17 +118,15 @@ async def test_report_progress_rejects_oversize_current_step(monkeypatch):
             tenant_key="test-tenant",
         )
 
-    # The raw oversize value never reached the column.
     assert job.job_metadata == {}
 
 
 @pytest.mark.asyncio
 async def test_process_todo_items_stores_valid_current_step(monkeypatch):
-    """A normal current_step still round-trips into job_metadata (happy path)."""
     service = _make_service()
     job = AgentJob(job_id=str(uuid.uuid4()), tenant_key="test-tenant", job_metadata={})
     session = AsyncMock()
-    session.info = {}  # tenant_session_context save/restore target
+    session.info = {}
 
     await service._process_todo_items(
         session=session,

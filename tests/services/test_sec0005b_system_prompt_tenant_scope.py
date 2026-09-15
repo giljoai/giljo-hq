@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-SEC-0005b: TDD tests for tenant-scoped SystemPromptService.
-
-Verifies that the orchestrator prompt override is stored and retrieved
-scoped by tenant_key -- not globally (tenant_key IS NULL).
-
-Invariants:
-- get/update/reset_orchestrator_prompt require tenant_key (ValueError if missing)
-- Override rows are written with tenant_key set (never NULL)
-- Tenant A's override is invisible to tenant B
-- Default is returned when no override exists for that tenant
-"""
 
 from __future__ import annotations
 
@@ -30,7 +18,6 @@ from giljo_mcp.system_prompts.service import (
 
 @pytest.mark.asyncio
 class TestSystemPromptServiceTenantScope:
-    """SEC-0005b: SystemPromptService must be tenant-scoped."""
 
     async def test_get_requires_tenant_key(self, db_manager, db_session):
         service = SystemPromptService(db_manager=db_manager)
@@ -66,7 +53,6 @@ class TestSystemPromptServiceTenantScope:
         assert result.is_override is True
         assert result.content == "Tenant A custom prompt"
 
-        # Verify DB row has tenant_key set -- not NULL
         stmt = select(Configuration).where(
             Configuration.key == DEFAULT_ORCHESTRATOR_CONFIG_KEY,
             Configuration.tenant_key == test_tenant_key,
@@ -75,7 +61,6 @@ class TestSystemPromptServiceTenantScope:
         assert row.tenant_key == test_tenant_key
         assert row.value["content"] == "Tenant A custom prompt"
 
-        # No NULL-tenant row should have been created
         null_stmt = select(Configuration).where(
             Configuration.key == DEFAULT_ORCHESTRATOR_CONFIG_KEY,
             Configuration.tenant_key.is_(None),
@@ -87,10 +72,9 @@ class TestSystemPromptServiceTenantScope:
         service = SystemPromptService(db_manager=db_manager)
         result = await service.get_orchestrator_prompt(tenant_key=test_tenant_key, session=db_session)
         assert result.is_override is False
-        assert result.content  # non-empty default
+        assert result.content
 
     async def test_tenant_isolation_between_a_and_b(self, db_manager, db_session):
-        """Tenant A's override must not be visible to tenant B."""
         service = SystemPromptService(db_manager=db_manager)
         tenant_a = "tk_tenant_a_sec5b"
         tenant_b = "tk_tenant_b_sec5b"

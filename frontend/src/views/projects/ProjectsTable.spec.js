@@ -1,17 +1,7 @@
-/**
- * ProjectsTable.spec.js — FE-6006 unit 3b / FE-6050 compact headers
- *
- * Tests the projects data table presentational component.
- * Edition scope: CE
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 
-// FE-6050: mock vuetify so useDisplay() doesn't throw when Vuetify plugin is absent.
-// smAndDownRef is a plain reactive-like object (plain {value} is what the component
-// checks via .value); vi.mock factories are hoisted before imports so Vue's ref()
-// cannot be used here — a plain object is sufficient.
 const smAndDownRef = { value: false }
 vi.mock('vuetify', () => ({
   useDisplay: () => ({ smAndDown: smAndDownRef }),
@@ -39,7 +29,6 @@ vi.mock('@/config/colorTokens', () => ({
 import ProjectsTable from './ProjectsTable.vue'
 
 const stubs = {
-  // BE-6076: server-mode table component.
   'v-data-table-server': {
     template: '<div class="v-data-table" data-table><slot /><slot name="no-data" /></div>',
     props: ['items', 'itemsLength', 'loading', 'headers', 'sortBy', 'page', 'itemsPerPage'],
@@ -54,8 +43,6 @@ const stubs = {
   'v-tooltip': { template: '<div class="v-tooltip"><slot name="activator" :props="{}" /><slot /></div>' },
   'v-progress-circular': { template: '<div class="v-progress-circular" />' },
   StatusBadge: { template: '<span class="status-badge">{{ status }}</span>', props: ['status'] },
-  // BE-9157: the Supersede dialog is a store/Vuetify-dependent child; stub it out
-  // of this presentational-table unit test (it has its own SupersedeProjectModal.spec.js).
   SupersedeProjectModal: true,
 }
 
@@ -91,7 +78,7 @@ function mountTable(props = {}) {
 describe('ProjectsTable', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    smAndDownRef.value = false // default: full view
+    smAndDownRef.value = false
   })
 
   afterEach(() => {
@@ -106,25 +93,21 @@ describe('ProjectsTable', () => {
 
   it('renders with projects data', () => {
     const wrapper = mountTable()
-    // data-table stub present; component mounted correctly
     expect(wrapper.find('[data-table]').exists()).toBe(true)
     expect(wrapper.exists()).toBe(true)
   })
 
   it('shows no-data slot when projects is empty', () => {
     const wrapper = mountTable({ projects: [] })
-    // no-data slot rendered
     expect(wrapper.html()).toContain('No projects found')
   })
 
   it('emits open-project when badge button clicked', async () => {
-    // badge click is on .project-id-badge but in stub environment just confirm component renders
     const wrapper = mountTable()
     expect(wrapper.exists()).toBe(true)
   })
 })
 
-// BE-6076: server-mode spec
 describe('ProjectsTable — server mode (BE-6076)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -155,11 +138,7 @@ describe('ProjectsTable — server mode (BE-6076)', () => {
   })
 })
 
-// FE-6165a: election fades + disables the per-row play button.
 describe('ProjectsTable — election fade (FE-6165a)', () => {
-  // Augmented stub that renders the item.quick_action scoped slot per project so
-  // the per-row play button is actually in the DOM (the shared stub renders only
-  // the default slot).
   const rowStubs = {
     ...stubs,
     'v-data-table-server': {
@@ -211,10 +190,6 @@ describe('ProjectsTable — election fade (FE-6165a)', () => {
     expect(wrapper.emitted('activate-launch')).toBeFalsy()
   })
 
-  // FE-9525d: BE-9525a/b retired the single-active-project-per-product
-  // invariant, so "another project is active" is no longer a reason to grey
-  // out this row's own Activate button -- only per-row reasons (an election
-  // in progress) still do. The `hasActiveProject` prop is gone entirely.
   it('play button is enabled with no election active (the cross-project grey-out is retired)', () => {
     const wrapper = mountWithRows({ electionActive: false })
     const btn = wrapper.find('.play-circle-btn')
@@ -229,10 +204,7 @@ describe('ProjectsTable — election fade (FE-6165a)', () => {
   })
 })
 
-// FE-6178: "Deactivate Chain" kebab item for in-chain projects.
 describe('ProjectsTable — Deactivate Chain (FE-6178)', () => {
-  // Render the item.menu scoped slot per project, and make v-list-item surface its
-  // title text + pass-through attrs (data-testid) so the item is findable/assertable.
   const menuStubs = {
     ...stubs,
     'v-list-item': {
@@ -294,11 +266,9 @@ describe('ProjectsTable — Deactivate Chain (FE-6178)', () => {
     expect(titles.some((t) => t.startsWith('Activate'))).toBe(true)
   })
 
-  // FE-6180: "Reset to original" for a SOLO staged/launched project (not in a chain).
   it('shows "Reset to original" for a solo staged project, not for a clean one', () => {
     const staged = [{ ...sampleProjects[0], id: 'p-staged', staging_status: 'staging_complete' }]
     expect(mountWithMenu({ projects: staged, inChainIds: [] }).find('[data-testid="reset-project-item"]').exists()).toBe(true)
-    // sampleProjects[0] has staging_status null -> no Reset item.
     expect(mountWithMenu({ inChainIds: [] }).find('[data-testid="reset-project-item"]').exists()).toBe(false)
   })
 
@@ -310,7 +280,6 @@ describe('ProjectsTable — Deactivate Chain (FE-6178)', () => {
   })
 })
 
-// FE-6180: the tickbox is a passive indicator — disabled for any active-chain member.
 describe('ProjectsTable — grey tickbox by membership (FE-6180)', () => {
   const selStubs = {
     ...stubs,
@@ -352,8 +321,6 @@ describe('ProjectsTable — grey tickbox by membership (FE-6180)', () => {
   })
 })
 
-// BE-2002: archived (hidden) rows carry a visible "Archived" badge so search
-// results that include archived projects are clearly tagged.
 describe('ProjectsTable — Archived badge (BE-2002)', () => {
   const nameStubs = {
     ...stubs,
@@ -392,9 +359,6 @@ describe('ProjectsTable — Archived badge (BE-2002)', () => {
   })
 })
 
-// IMP-9258: "Park"/"Unpark" kebab actions — Park sets an inactive/active project
-// aside (non-destructive, full parity with Cancel/Cancelled's menu wiring but no
-// confirm dialog); Unpark is offered on already-parked rows.
 describe('ProjectsTable — Park/Unpark (IMP-9258)', () => {
   const menuStubs = {
     ...stubs,
@@ -481,11 +445,6 @@ describe('ProjectsTable — Park/Unpark (IMP-9258)', () => {
   })
 })
 
-// FE-6050 / FE-6176: compact-headers spec.
-// FE-6176 split the header sets by link mode: NORMAL mode shows the play-button
-// `quick_action` column and NO `select` column; LINK mode swaps them — `select`
-// (the "Linked" checkbox) appears and `quick_action` is dropped. The select
-// column moved to AFTER `completed_at` (between Completed and the menu).
 describe('ProjectsTable — headers (FE-6050 / FE-6176)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -513,7 +472,6 @@ describe('ProjectsTable — headers (FE-6050 / FE-6176)', () => {
     const keys = wrapper.vm.headers.map((h) => h.key)
     expect(keys).toContain('select')
     expect(keys).not.toContain('quick_action')
-    // "Linked" column header label + placement (after completed_at, before menu)
     const selectHeader = wrapper.vm.headers.find((h) => h.key === 'select')
     expect(selectHeader.title).toBe('Linked')
     const order = keys

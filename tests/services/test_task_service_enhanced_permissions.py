@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Test suite for TaskService permission helpers - split from test_task_service_enhanced.py
-
-Covers:
-- can_delete_task (permission helper)
-"""
 
 import random
 from datetime import UTC, datetime
@@ -23,14 +17,10 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.models.tasks import Task
 
 
-# ============================================================================
-# LOCAL FIXTURES (override conftest test_project which lacks product_id)
-# ============================================================================
 
 
 @pytest_asyncio.fixture
 async def test_project(db_session, test_tenant_key, test_product):
-    """Create test project in database"""
     project = Project(
         id=str(uuid4()),
         name=f"Test Project {uuid4().hex[:6]}",
@@ -50,7 +40,6 @@ async def test_project(db_session, test_tenant_key, test_product):
 
 @pytest_asyncio.fixture
 async def test_task(db_session, test_tenant_key, test_product, test_project, test_user):
-    """Create test task in database"""
     task = Task(
         id=str(uuid4()),
         tenant_key=test_tenant_key,
@@ -69,28 +58,22 @@ async def test_task(db_session, test_tenant_key, test_product, test_project, tes
     return task
 
 
-# ============================================================================
-# TEST: Permission Helpers (unchanged - already return bool)
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_can_delete_task_as_creator(task_service, test_task, test_user):
-    """Test creator can delete their own task"""
     can_delete = task_service._conversion.can_delete_task(test_task, test_user)
     assert can_delete is True
 
 
 @pytest.mark.asyncio
 async def test_can_delete_task_as_admin(task_service, test_task, admin_user):
-    """Test admin can delete any task in tenant"""
     can_delete = task_service._conversion.can_delete_task(test_task, admin_user)
     assert can_delete is True
 
 
 @pytest.mark.asyncio
 async def test_can_delete_task_denied(task_service, test_task, db_session, test_tenant_key):
-    """Test other developer cannot delete task they didn't create"""
     other_user = User(
         id=str(uuid4()),
         username=f"otherdev_{uuid4().hex[:6]}",

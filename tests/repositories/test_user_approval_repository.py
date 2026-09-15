@@ -3,11 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tests for UserApprovalRepository (BE-5029 Phase A).
-
-Cross-tenant queries against a real DB must return empty -- this is a
-security-critical guarantee, not just a unit-test smoke check.
-"""
 
 import random
 from datetime import UTC, datetime
@@ -141,8 +136,6 @@ async def test_get_pending_for_agent(repo, db_session, test_tenant_key):
 
 @pytest.mark.asyncio
 async def test_cross_tenant_get_pending_for_agent_returns_none(repo, db_session, test_tenant_key):
-    """BE-5083: get_pending_for_agent must be tenant-scoped -- a foreign tenant
-    sees no pending approval even with the correct agent_execution_id."""
     project, job, execution = await _seed(db_session, test_tenant_key)
     await repo.create(
         db_session,

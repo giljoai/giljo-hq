@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-8000d item 7 — TokenManager.get_token_info / get_token_info_by_token dedupe.
-
-The two methods differ only in HOW they look up the row (tenant-scoped vs the
-public bypass-resolve path used by download validation); the result-dict they
-built from the found row was written out twice, identically. Consolidated to
-``TokenManager._serialize_token_info``. This pins that both callers still
-return the identical shape/values for the same row, and both still return
-``None`` on a miss.
-
-Parallel-safe: uses the db_session fixture (TransactionalTestContext, rollback
-at teardown); each test mints its own tenant_key; no module-level state.
-"""
 
 from __future__ import annotations
 

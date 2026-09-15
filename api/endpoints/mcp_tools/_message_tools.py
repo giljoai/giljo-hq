@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Message Communication Tools -- @mcp.tool wrappers (BE-6042d split of mcp_sdk_server.py).
-
-Mechanically extracted verbatim from the pre-split ``mcp_sdk_server.py``. Each
-wrapper registers against the shared ``mcp`` instance from ``_base`` as a decorator
-side effect at import time. Behavior, signatures, names, and descriptions unchanged.
-
-BE-9012d (bus retirement, phase d): send_message / receive_messages / get_messages
-(and their ``_drain_agent_threads`` shim support) were HARD-REMOVED — the Agent
-Message Hub (create_thread / post_to_thread / get_thread_history / ...) is the sole
-inter-agent messaging surface now. ``request_approval`` was never part of the bus
-and is unaffected.
-"""
 
 from typing import Annotated, Any
 
@@ -67,11 +54,6 @@ async def request_approval(
     ] = None,
     ctx: Context = None,
 ) -> dict[str, Any] | InputRequiredResult:
-    # BE-8003l ROUND 2 -- this MUST come before dispatch. A client answering an
-    # inline offer retries `tools/call` with BYTE-IDENTICAL arguments (the sealed
-    # requestState binds an args digest, so it cannot differ), so dispatching first
-    # would mint a SECOND parked approval row for one gate. Returns None on an
-    # ordinary first-round call.
     settled = await resolve_pending_inline_approval(ctx, options)
     if settled is not None:
         return settled
@@ -84,10 +66,6 @@ async def request_approval(
         "context": context,
     }
     result = await _call_tool(ctx, "request_approval", kwargs)
-    # BE-8003l ROUND 1: the row is now created and the agent parked -- today's
-    # behaviour, unconditionally. On a connection that can carry the round-trip
-    # (2026-07-28+ AND declared elicitation) we ADDITIONALLY offer the choice
-    # inline; every other client gets ``result`` unchanged. Never raises.
     return maybe_offer_approval_inline(ctx, result, reason=reason, options=options)
 
 

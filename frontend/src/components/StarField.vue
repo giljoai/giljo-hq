@@ -13,7 +13,6 @@ const layerSmall = ref(null)
 const layerMedium = ref(null)
 const layerLarge = ref(null)
 
-// Day/night cycle: stars hidden 6 AM – 7 PM, with 30-min fade transitions
 const visible = ref(true)
 const starOpacity = ref(1)
 let dayNightTimer = null
@@ -22,28 +21,23 @@ function updateDayNight() {
   const now = new Date()
   const h = now.getHours()
   const m = now.getMinutes()
-  const t = h + m / 60 // e.g. 6.5 = 6:30 AM
+  const t = h + m / 60
 
   if (t >= 6.5 && t < 18.5) {
-    // Full daylight — hidden
     visible.value = false
     starOpacity.value = 0
   } else if (t >= 6 && t < 6.5) {
-    // Dawn fade-out (6:00–6:30)
     visible.value = true
     starOpacity.value = 1 - (t - 6) / 0.5
   } else if (t >= 18.5 && t < 19) {
-    // Dusk fade-in (18:30–19:00)
     visible.value = true
     starOpacity.value = (t - 18.5) / 0.5
   } else {
-    // Night — full brightness
     visible.value = true
     starOpacity.value = 1
   }
 }
 
-// Parallax multipliers: large stars move more = depth illusion
 const PARALLAX_SMALL = 0.02
 const PARALLAX_MEDIUM = 0.05
 const PARALLAX_LARGE = 0.10
@@ -52,13 +46,10 @@ let scrollY = 0
 let targetY = 0
 let rafId = null
 
-// Capture scroll from ANY scrollable element (bubbles as wheel events)
 function onWheel(e) {
-  // Accumulate delta, clamped so it doesn't fly away
   targetY = Math.max(0, Math.min(targetY + e.deltaY, 5000))
 }
 
-// Smooth lerp loop — stars glide rather than jump
 function animate() {
   scrollY += (targetY - scrollY) * 0.06
 
@@ -77,7 +68,7 @@ function animate() {
 
 onMounted(() => {
   updateDayNight()
-  dayNightTimer = setInterval(updateDayNight, 60_000) // check every minute
+  dayNightTimer = setInterval(updateDayNight, 60_000)
   window.addEventListener('wheel', onWheel, { passive: true })
   rafId = requestAnimationFrame(animate)
 })

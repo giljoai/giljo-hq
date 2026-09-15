@@ -3,26 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6188: drive loop — wire the dead advance_index_if_committed + closeout signal.
-
-Covers the two critical safety invariants this unit moves off LLM prose:
-
-1/2. project_staging_service._advance_chain_on_launch now routes the chain advance
-     through sequence_chain_context.SequenceChainContextResolver.advance_index_if_committed:
-     current_index only bumps forward when the project being LEFT BEHIND has actually
-     closed out (closeout_executed_at set). The per-project status update applies either
-     way. test_advance_blocked_without_closeout / test_advance_succeeds_with_closeout
-     exercise this at the service layer (the layer the dead-code wiring lives in).
-
-3/4. orchestration.WorkflowStatus gains project_closeout_at (additive, defaults None)
-     so the chain conductor can poll the closeout signal via get_workflow_status.
-
-5.   workflow_status_service.get_workflow_status populates project_closeout_at from the
-     loaded project (DB-touching, at the service layer).
-
-Parallel-safe: DB-touching tests use db_session (TransactionalTestContext). No
-module-level mutable state. Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -42,8 +22,6 @@ from tests.helpers.taxonomy_seeds import next_series_number
 
 
 async def _seed_project(session: AsyncSession, tenant_key: str, *, closed_out: bool = False) -> str:
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -60,8 +38,6 @@ async def _seed_project(session: AsyncSession, tenant_key: str, *, closed_out: b
         status="active",
         tenant_key=tenant_key,
         product_id=_owning_product_project.id,
-        # BE-9429: uq_project_taxonomy_active is NULLS NOT DISTINCT, so these
-        # NULL-product/NULL-type rows collide unless the serial differs.
         series_number=next_series_number(),
         execution_mode="claude_code_cli",
         created_at=datetime.now(UTC),
@@ -85,9 +61,6 @@ def _workflow_svc(session: AsyncSession) -> WorkflowStatusService:
     return WorkflowStatusService(db_manager=None, tenant_manager=TenantManager(), test_session=session)
 
 
-# ---------------------------------------------------------------------------
-# 1. advance is BLOCKED when the prior project has no closeout
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -113,9 +86,6 @@ async def test_advance_blocked_without_closeout(db_session: AsyncSession) -> Non
     )
 
 
-# ---------------------------------------------------------------------------
-# 2. advance SUCCEEDS when the prior project has closed out
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -139,9 +109,6 @@ async def test_advance_succeeds_with_closeout(db_session: AsyncSession) -> None:
     assert refreshed["project_statuses"].get(p2) == "planning"
 
 
-# ---------------------------------------------------------------------------
-# 3. WorkflowStatus carries project_closeout_at when supplied
-# ---------------------------------------------------------------------------
 
 
 def test_workflow_status_includes_closeout_at() -> None:
@@ -151,9 +118,6 @@ def test_workflow_status_includes_closeout_at() -> None:
     assert ws.model_dump()["project_closeout_at"] == iso
 
 
-# ---------------------------------------------------------------------------
-# 4. WorkflowStatus defaults project_closeout_at to None for solo
-# ---------------------------------------------------------------------------
 
 
 def test_workflow_status_closeout_at_none_for_solo() -> None:
@@ -161,9 +125,6 @@ def test_workflow_status_closeout_at_none_for_solo() -> None:
     assert ws.project_closeout_at is None
 
 
-# ---------------------------------------------------------------------------
-# 5. get_workflow_status surfaces the project's closeout timestamp
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

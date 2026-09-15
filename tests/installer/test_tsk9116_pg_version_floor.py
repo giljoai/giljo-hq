@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression tests for TSK-9116: PostgreSQL version floor 14 -> 16.
-
-installer/shared/postgres.py declared MIN_VERSION=14 (bare honest minimum for
-NULLS NOT DISTINCT, which is PG15+) while the CI-enforced, continuously-tested
-floor is PG16 (postgres:16 container). A PG14 customer passed the prereq
-check, then died mid-migration -- the dishonest-late-failure pattern.
-
-Covers both version-floor constants:
-  * installer.shared.postgres.PostgreSQLDiscovery.MIN_VERSION == 16, and its
-    validate_version() boundary (15 rejected, 16 accepted).
-  * installer.core.database.DatabaseInstaller.MIN_PG_VERSION == 16 (the
-    constant setup() checks against during a live install).
-"""
 
 import sys
 from pathlib import Path
@@ -51,7 +38,7 @@ def test_validate_version_accepts_pg16() -> None:
 
     result = PostgreSQLDiscovery().validate_version(16)
     assert result["compatible"] is True
-    assert result["severity"] == "warning"  # below RECOMMENDED_VERSION (18)
+    assert result["severity"] == "warning"
 
 
 def test_validate_version_recommends_pg18() -> None:

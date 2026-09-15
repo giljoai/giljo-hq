@@ -3,26 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Deletion gate for the BE-5029 prose contract (FE-5017 Phase C).
-
-The deprecated ``user_approval_required`` boolean was the prose-only HITL
-contract that BE-5029 replaced with the structured ``user_approvals`` primitive
-plus the ``awaiting_user`` agent status. This test fails CI if any active
-source, API, test, or frontend file reintroduces the dead string outside the
-allowed survivors.
-
-Allowed survivors (audit / historical / migration):
-- private handover archives -- archived comms logs and historical session state
-- ``docs/`` -- audit snapshots and the BE-5029a deletion list itself
-- ``migrations/`` -- migration docstrings (historical record)
-- ``src/giljo_mcp/models/user_approval.py`` -- model docstring referencing
-  the prose contract being replaced (audit-of-why-this-model-exists)
-- ``api/endpoints/mcp_tools/_message_tools.py`` -- ``request_approval`` tool
-  description string ("Replaces the prose user_approval_required boolean.") --
-  accurate marketing text inside the structured tool that displaced the prose
-  (moved here from mcp_sdk_server.py in the BE-6042d wrapper split)
-- ``tests/unit/test_be5029_prose_deletion.py`` -- this file
-"""
 
 from __future__ import annotations
 
@@ -45,11 +25,8 @@ SCAN_DIRS = (
 
 ALLOWED_SURVIVORS = frozenset(
     {
-        # Model docstring records why the model exists
         Path("src/giljo_mcp/models/user_approval.py"),
-        # Tool description for request_approval references the displaced contract
         Path("api/endpoints/mcp_tools/_message_tools.py"),
-        # This deletion test itself
         Path("tests/unit/test_be5029_prose_deletion.py"),
     }
 )
@@ -75,7 +52,6 @@ def _iter_scan_files() -> list[Path]:
 
 
 def test_user_approval_required_prose_deleted():
-    """``user_approval_required`` must not appear in active code outside survivors."""
     offenders: list[str] = []
     for path in _iter_scan_files():
         rel = path.relative_to(REPO_ROOT)
@@ -97,7 +73,6 @@ def test_user_approval_required_prose_deleted():
 
 @pytest.mark.parametrize("survivor", sorted(ALLOWED_SURVIVORS))
 def test_allowed_survivors_still_exist(survivor: Path):
-    """Guard against drift: if a survivor file is moved/deleted, update the allowlist."""
     assert (REPO_ROOT / survivor).exists(), (
         f"Allowed-survivor {survivor} no longer exists. Update ALLOWED_SURVIVORS in this test."
     )

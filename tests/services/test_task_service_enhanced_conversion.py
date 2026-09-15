@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Test suite for TaskService conversion and status operations - split from test_task_service_enhanced.py
-
-Covers:
-- convert_to_project (task -> project conversion with subtask handling)
-- change_status (status change with automatic timestamp updates)
-- get_summary (task statistics aggregation)
-"""
 
 import random
 from datetime import UTC, datetime
@@ -28,14 +20,10 @@ from giljo_mcp.models.tasks import Task
 from giljo_mcp.schemas.service_responses import ConversionResult
 
 
-# ============================================================================
-# LOCAL FIXTURES (override conftest test_project which lacks product_id)
-# ============================================================================
 
 
 @pytest_asyncio.fixture
 async def test_project(db_session, test_tenant_key, test_product):
-    """Create test project in database"""
     project = Project(
         id=str(uuid4()),
         name=f"Test Project {uuid4().hex[:6]}",
@@ -55,7 +43,6 @@ async def test_project(db_session, test_tenant_key, test_product):
 
 @pytest_asyncio.fixture
 async def test_task(db_session, test_tenant_key, test_product, test_project, test_user):
-    """Create test task in database"""
     task = Task(
         id=str(uuid4()),
         tenant_key=test_tenant_key,
@@ -74,14 +61,10 @@ async def test_task(db_session, test_tenant_key, test_product, test_project, tes
     return task
 
 
-# ============================================================================
-# TEST: convert_to_project - Now returns ConversionResult (0731c)
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_convert_to_project_basic(task_service, test_task, test_user, db_session, test_product):
-    """Test basic task -> project conversion returns ConversionResult"""
     result = await task_service.convert_to_project(
         task_id=str(test_task.id),
         project_name="New Project from Task",
@@ -90,13 +73,11 @@ async def test_convert_to_project_basic(task_service, test_task, test_user, db_s
         user_id=str(test_user.id),
     )
 
-    # 0731c: convert_to_project now returns ConversionResult
     assert isinstance(result, ConversionResult)
     assert result.task_id == str(test_task.id)
     assert result.project_id is not None
     assert result.project_name == "New Project from Task"
 
-    # Verify project was created
     stmt = select(Project).where(Project.id == result.project_id)
     db_result = await db_session.execute(stmt)
     new_project = db_result.scalar_one_or_none()
@@ -110,8 +91,6 @@ async def test_convert_to_project_basic(task_service, test_task, test_user, db_s
 async def test_convert_to_project_with_subtasks(
     task_service, test_task, test_user, db_session, test_tenant_key, test_product, test_project
 ):
-    """Test task -> project conversion with subtask handling returns ConversionResult"""
-    # Create subtasks
     subtask1 = Task(
         id=str(uuid4()),
         tenant_key=test_tenant_key,
@@ -147,7 +126,6 @@ async def test_convert_to_project_with_subtasks(
         user_id=str(test_user.id),
     )
 
-    # 0731c: convert_to_project now returns ConversionResult
     assert isinstance(result, ConversionResult)
     assert result.project_id is not None
     assert result.project_name == "Project with Subtasks"
@@ -155,8 +133,6 @@ async def test_convert_to_project_with_subtasks(
 
 @pytest.mark.asyncio
 async def test_convert_to_project_permission_denied(task_service, test_task, db_session, test_tenant_key):
-    """Test convert_to_project raises AuthorizationError without permission"""
-    # Create another user who didn't create the task
     other_user = User(
         id=str(uuid4()),
         username=f"unauthorized_{uuid4().hex[:6]}",
@@ -181,80 +157,61 @@ async def test_convert_to_project_permission_denied(task_service, test_task, db_
     assert "permission" in str(exc_info.value).lower() or "not authorized" in str(exc_info.value).lower()
 
 
-# ============================================================================
-# TEST: change_status - Now returns Task ORM model directly (0731c)
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_change_status_to_in_progress(task_service, test_task, db_session):
-    """Test status change to 'in_progress' sets started_at - returns Task"""
-    assert test_task.started_at is None  # Initially None
+    assert test_task.started_at is None
 
     result = await task_service.change_status(task_id=str(test_task.id), new_status="in_progress")
 
-    # 0731c: change_status now returns Task ORM model directly
     assert isinstance(result, Task)
     assert result.status == "in_progress"
 
-    # Verify started_at was set
     await db_session.refresh(test_task)
     assert test_task.started_at is not None
 
 
 @pytest.mark.asyncio
 async def test_change_status_to_completed(task_service, test_task, db_session):
-    """Test status change to 'completed' sets completed_at - returns Task"""
-    assert test_task.completed_at is None  # Initially None
+    assert test_task.completed_at is None
 
     result = await task_service.change_status(task_id=str(test_task.id), new_status="completed")
 
-    # 0731c: change_status now returns Task ORM model directly
     assert isinstance(result, Task)
     assert result.status == "completed"
 
-    # Verify completed_at was set
     await db_session.refresh(test_task)
     assert test_task.completed_at is not None
 
 
 @pytest.mark.asyncio
 async def test_change_status_to_cancelled(task_service, test_task, db_session):
-    """Test status change to 'cancelled' sets completed_at - returns Task"""
     assert test_task.completed_at is None
 
     result = await task_service.change_status(task_id=str(test_task.id), new_status="cancelled")
 
-    # 0731c: change_status now returns Task ORM model directly
     assert isinstance(result, Task)
     assert result.status == "cancelled"
 
-    # Verify completed_at was set
     await db_session.refresh(test_task)
     assert test_task.completed_at is not None
 
 
 @pytest.mark.asyncio
 async def test_change_status_invalid(task_service, test_task):
-    """Test invalid status handling - returns Task with whatever status was set"""
     result = await task_service.change_status(task_id=str(test_task.id), new_status="invalid_status_xyz")
 
-    # 0731c: change_status now returns Task ORM model directly
     assert isinstance(result, Task)
     assert result.status == "invalid_status_xyz"
 
 
-# ============================================================================
-# TEST: get_summary - Now returns dict (summary structure unchanged)
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_get_summary_all_products(
     task_service, db_session, test_tenant_key, test_product, test_project, test_user
 ):
-    """Test task summary aggregation across all products"""
-    # Create tasks with different statuses
     tasks_data = [
         {"status": "pending", "priority": "high"},
         {"status": "in_progress", "priority": "medium"},
@@ -280,7 +237,6 @@ async def test_get_summary_all_products(
 
     summary = await task_service.get_summary(product_id=None)
 
-    # get_summary still returns dict with summary structure
     assert summary is not None
     assert "summary" in summary
     assert "total_products" in summary
@@ -291,8 +247,6 @@ async def test_get_summary_all_products(
 async def test_get_summary_filtered_by_product(
     task_service, db_session, test_tenant_key, test_product, test_project, test_user
 ):
-    """Test task summary filtered by specific product"""
-    # Create tasks
     task1 = Task(
         id=str(uuid4()),
         tenant_key=test_tenant_key,
@@ -309,6 +263,5 @@ async def test_get_summary_filtered_by_product(
 
     summary = await task_service.get_summary(product_id=str(test_product.id))
 
-    # Verify summary was returned
     assert summary is not None
     assert "summary" in summary

@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-OAuth 2.1 Authorization Code endpoints with PKCE.
-
-Provides REST API for the OAuth 2.1 authorization code flow:
-- POST /authorize: Process user consent and generate authorization code
-- POST /token: Exchange authorization code for JWT access token
-- GET /.well-known/oauth-authorization-server: OAuth server metadata
-
-The authorize endpoint requires authentication (user must be logged in).
-The token and metadata endpoints are public (no authentication required).
-
-Handover 0828 Phase 3.
-"""
 
 import base64
 import binascii
@@ -50,7 +37,6 @@ _EDITION_REGISTRATION_ENDPOINT_PATH: list[str] = []
 
 
 def register_edition_registration_endpoint(path: str) -> None:
-    """Allow private edition modules to advertise their DCR endpoint."""
     normalized = (path or "").strip()
     if normalized:
         _EDITION_REGISTRATION_ENDPOINT_PATH[:] = [normalized]
@@ -63,21 +49,6 @@ def _oauth_error(
     description: str | None = None,
     www_authenticate: str | None = None,
 ) -> JSONResponse:
-    """Build an RFC 6749 §5.2 token-endpoint error response.
-
-    BE-6040: the OAuth token/refresh/revoke error surface MUST carry the
-    machine-readable error in a top-level ``error`` member (RFC 6749 §5.2,
-    referenced by RFC 7009 §3) — spec-strict OAuth clients (claude.ai,
-    ChatGPT connector, MCP Inspector) parse ``error`` to drive retry/reauth.
-    Raising ``HTTPException(detail=...)`` instead routes through the global
-    handler and serialises the code under ``message``/``error_code`` —
-    interoperable enough by luck, but not conformant. Returning this response
-    directly keeps the envelope correct without disturbing the app-wide
-    exception handler.
-
-    ``error_description`` is OPTIONAL (RFC 6749 §5.2) and intentionally kept
-    terse — no PKCE/verifier/token internals leak through it.
-    """
     content: dict[str, str] = {"error": error}
     if description:
         content["error_description"] = description
@@ -86,51 +57,16 @@ def _oauth_error(
 
 
 def _detail_description(exc: HTTPException) -> str:
-    """Extract a terse ``error_description`` from a body-parse/cap HTTPException.
-
-    The shared parse/cap helpers raise ``HTTPException(detail="invalid_request:
-    <reason>")``. Strip the legacy code prefix so it becomes the RFC 6749 §5.2
-    ``error_description`` while the top-level ``error`` member carries the code.
-    """
     detail = exc.detail if isinstance(exc.detail, str) else "invalid request"
     return detail.split(": ", 1)[1] if ": " in detail else detail
 
 
-# BE-5088: the root-level well-known discovery documents (RFC 8414 AS-metadata
-# mirror, RFC 9728 protected-resource, OIDC 404, mcp-server-info) live in
-# api/endpoints/oauth_well_known.py to keep this module under the 800-line
-# guardrail. That module imports `oauth_metadata` + `OAuthMetadataResponse` +
-# `MCP_SPEC_VERSIONS_SUPPORTED` from here (one-way; no import cycle).
 
 
-# API-0021h — Declared MCP spec versions, single source of truth.
-# Advertised in two places, both reading this constant: the AS-metadata
-# `mcp_spec_versions_supported` custom claim (RFC 8414 §2 permits additional
-# claims) and the GET /.well-known/mcp-server-info conformance discovery
-# endpoint. Test file imports the same symbol so a drift between the constant,
-# the advertised list, and the documented set fails CI immediately.
-# Conformance verdicts and evidence are tracked in CONFORMANCE.md (see the
-# project's drift-tracking process). 2025-11-25 is declared even though CIMD
-# (OAuth Client ID Metadata Documents) is unimplemented. This is NOT an
-# over-claim: CIMD is a SHOULD, and the spec signals support for it with a
-# separate AS-metadata flag, `client_id_metadata_document_supported`, which we
-# deliberately do NOT emit — so a spec-aware client falls back to the
-# `registration_endpoint` (RFC 7591 DCR) we DO advertise and which is live,
-# exactly as the spec prescribes.
-# INF-9371: every revision here is proven served by tests/integration/test_inf9371_wire_revisions.py.
 MCP_SPEC_VERSIONS_SUPPORTED: list[str] = ["2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"]
 
 
 def _has_forbidden_log_chars(value: str) -> bool:
-    """True if ``value`` holds a char that could inject into a log line (CWE-117).
-
-    Rejects C0 controls + DEL (``< 0x20``, ``0x7F``), C1 controls
-    (``0x80-0x9F``), and the Unicode line/paragraph separators
-    (``U+2028``/``U+2029``) — all can smuggle a line break or terminal escape
-    into a log line. Shared by the two OAuth field guards
-    (``AuthorizeRequest._no_control_chars`` and ``_enforce_oauth_field_caps``)
-    so they cannot drift apart again (SEC-9227i L2).
-    """
     return any(ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F or ord(c) in (0x2028, 0x2029) for c in value)
 
 
@@ -155,10 +91,6 @@ class AuthorizeRequest(BaseModel):
     )
     state: str = Field(default="", max_length=512, description="Opaque state value for CSRF protection")
     response_type: str = Field(default="code", max_length=32, description="OAuth response type (must be code)")
-    # RFC 8707 — caps the URI length defensively at the route boundary; the
-    # service layer re-validates shape (scheme/host/no-fragment) before any DB
-    # write. Optional during the API-0021d transition window so older clients
-    # that don't yet forward `resource` still complete /authorize.
     resource: str | None = Field(
         default=None,
         max_length=2048,
@@ -210,29 +142,16 @@ class OAuthMetadataResponse(BaseModel):
     response_types_supported: list[str]
     code_challenge_methods_supported: list[str]
     grant_types_supported: list[str]
-    # API-0021i: RFC 8414 §3.2 RECOMMENDED. Mirrors the protected-resource
-    # document's scopes_supported so AS-metadata-first clients (claude.ai,
-    # MCP Inspector) discover grantable scopes without a second probe.
     scopes_supported: list[str] = Field(
         default_factory=list,
         description="OAuth scopes this authorization server grants (RFC 8414 §3.2).",
     )
-    # API-0021i: RFC 8414 §3.2. Declares the credential-presentation shapes
-    # accepted by /token after API-0021e Phase 1.1+1.2 (2026-05-10).
     token_endpoint_auth_methods_supported: list[str] = Field(
         default_factory=list,
         description="Client auth methods supported by /token (RFC 8414 §3.2).",
     )
     registration_endpoint: str | None = None
-    # BE-6040: RFC 8414 §2 + RFC 7009 §5 OPTIONAL — advertise the token
-    # revocation endpoint so spec-aware clients discover /revoke from metadata
-    # instead of guessing. The endpoint already exists (oauth_revoke.py); this
-    # only surfaces it. Always present (CE + SaaS both mount /revoke).
     revocation_endpoint: str | None = None
-    # API-0021h: custom claim advertising the MCP protocol versions this server
-    # implements. RFC 8414 §2 permits additional metadata claims; spec-aware MCP
-    # clients (claude.ai connector, Inspector) read this to negotiate version
-    # without a round-trip through `initialize`.
     mcp_spec_versions_supported: list[str] = Field(
         default_factory=list,
         description="MCP protocol versions implemented by this server (API-0021h).",
@@ -310,10 +229,6 @@ async def authorize(
     return {"redirect_uri": redirect_target}
 
 
-# Field length caps mirror the original FastAPI ``Form(max_length=...)`` on
-# /token + /refresh. Replicated here because Phase 1.2 replaces ``Form(...)``
-# parameters with manual body parsing — the validation must move with them
-# (agent input is untrusted; raise 400, not let the service produce a 500).
 _OAUTH_FIELD_MAX_LENGTHS = {
     "client_secret": 512,
     "resource": 2048,
@@ -323,16 +238,6 @@ _OAUTH_FIELD_MAX_LENGTHS = {
 
 
 async def _parse_oauth_body(request: Request) -> dict:
-    """Parse an OAuth /token or /refresh body.
-
-    Accepts ``application/x-www-form-urlencoded`` (RFC 6749 §3.2 canonical)
-    or ``application/json`` (de-facto modern client behavior — Google,
-    GitHub, Auth0, Okta all accept it; ChatGPT requires it). Defaults to
-    form-encoded when the content-type header is missing or unrecognized.
-
-    Raises HTTPException 400 (``invalid_request``) on malformed JSON or a
-    JSON body that is not an object.
-    """
     content_type = request.headers.get("content-type", "").lower()
     if "application/json" in content_type:
         try:
@@ -354,13 +259,6 @@ async def _parse_oauth_body(request: Request) -> dict:
 
 
 def _extract_basic_auth(request: Request) -> tuple[str | None, str | None]:
-    """Return ``(client_id, client_secret)`` from HTTP Basic Auth, or ``(None, None)``.
-
-    Implements RFC 6749 §2.3.1 (``client_secret_basic``). When the header is
-    absent or malformed, both values are ``None`` and the caller falls back
-    to body credentials. Empty fields after the colon are treated as
-    missing — a Basic header carrying no credentials is no header.
-    """
     auth = request.headers.get("authorization", "")
     if not auth.lower().startswith("basic "):
         return None, None
@@ -375,12 +273,6 @@ def _extract_basic_auth(request: Request) -> tuple[str | None, str | None]:
 
 
 def _enforce_oauth_field_caps(**fields: str | None) -> None:
-    """Reject oversized or control-char OAuth body fields with 400 ``invalid_request``.
-
-    Untrusted agent input must produce 422/400, never flow to the service layer
-    where a DB constraint would 500. Control chars are rejected to close the
-    log-injection surface (SEC-5109, CodeQL #758).
-    """
     for name, value in fields.items():
         if value is None:
             continue
@@ -400,17 +292,6 @@ def _enforce_oauth_field_caps(**fields: str | None) -> None:
 async def _refresh_token_grant_response(
     data: dict, basic_id: str | None, basic_secret: str | None, db
 ) -> TokenResponse | JSONResponse:
-    """Execute the RFC 6749 §6 ``refresh_token`` grant.
-
-    Shared by ``POST /refresh`` and ``POST /token`` (BE-9409): the metadata
-    advertises ``refresh_token`` against ``token_endpoint = /api/oauth/token``,
-    so both routes run this ONE body — a second copy of the client-auth and
-    validation rules would drift, and here a drift is a security defect.
-    Callers own their rate-limit check and body parse and pass the parsed values
-    in, so dispatching from /token neither double-consumes the shared per-IP
-    rate-limit slot nor re-reads an exhausted body stream. Serves confidential
-    and public PKCE clients alike (BE-6161).
-    """
     grant_type = data.get("grant_type")
     refresh_token = data.get("refresh_token")
     client_id = basic_id or data.get("client_id")
@@ -551,15 +432,9 @@ async def token(
             ``invalid_client`` (confidential auth failed).
         HTTPException 429: per-IP rate limit exceeded (SEC-9227d).
     """
-    # SEC-9227d (M3): per-IP rate limit, FIRST — before any parsing (reject
-    # cheap, parse later). Deliberately OUTSIDE the try blocks below: the 429
-    # is NOT an OAuth protocol error and must propagate as-is, never rewritten
-    # into the RFC 6749 §5.2 envelope.
     rate_limiter = get_rate_limiter()
     await rate_limiter.check_rate_limit(request, limit=limit_for("oauth_token"), window=60, raise_on_limit=True)
 
-    # BE-6040: parse + field-cap failures must also use the RFC 6749 §5.2
-    # envelope (they raise HTTPException with a string detail otherwise).
     try:
         data = await _parse_oauth_body(request)
         basic_id, basic_secret = _extract_basic_auth(request)
@@ -572,16 +447,9 @@ async def token(
 
     grant_type = data.get("grant_type")
 
-    # BE-9409: RFC 6749 §6 — the refresh grant belongs to the SAME token
-    # endpoint the metadata advertises. Dispatch BEFORE per-grant validation:
-    # the missing-field check below is the authorization_code contract, and
-    # running it first rejected valid refreshes for lacking `code`.
     if grant_type == "refresh_token":
         return await _refresh_token_grant_response(data, basic_id, basic_secret, db)
 
-    # A present-but-unknown grant_type is unsupported_grant_type. An ABSENT one
-    # deliberately falls through to the missing-field check below: RFC 6749
-    # §5.2 classes a missing required parameter as invalid_request.
     if grant_type and grant_type != "authorization_code":
         return _oauth_error(
             "unsupported_grant_type",
@@ -596,8 +464,6 @@ async def token(
     client_id = basic_id or data.get("client_id")
     client_secret = basic_secret or data.get("client_secret")
 
-    # Field caps stay AHEAD of the missing-field check: an oversized field
-    # reports as itself, not as whichever field is also absent.
     try:
         _enforce_oauth_field_caps(
             client_secret=client_secret,
@@ -643,14 +509,8 @@ async def token(
         )
     except ValueError as exc:
         message = str(exc)
-        # RFC 6749 §5.2: failed client authentication is invalid_client (401).
-        # RFC 8707 §2.2: a resource mismatch at /token is invalid_grant (401).
-        # All other validation failures (PKCE, code reuse, expired, missing
-        # resource when required) stay invalid_request (400).
         if "invalid_client" in message:
             logger.warning("OAuth token client authentication failed: %s", sanitize(str(exc)))
-            # RFC 6749 §5.2: a 401 invalid_client SHOULD carry WWW-Authenticate
-            # naming the auth schemes /token accepts (Basic + form/JSON post).
             return _oauth_error(
                 "invalid_client",
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -715,15 +575,9 @@ async def refresh(
             ``invalid_grant`` (token unknown / revoked / expired).
         HTTPException 429: per-IP rate limit exceeded (SEC-9227d).
     """
-    # SEC-9227d (M3): per-IP rate limit, FIRST — before any parsing (reject
-    # cheap, parse later). Deliberately OUTSIDE the try blocks below: the 429
-    # is NOT an OAuth protocol error and must propagate as-is, never rewritten
-    # into the RFC 6749 §5.2 envelope.
     rate_limiter = get_rate_limiter()
     await rate_limiter.check_rate_limit(request, limit=limit_for("oauth_refresh"), window=60, raise_on_limit=True)
 
-    # BE-6040: parse + field-cap failures must also use the RFC 6749 §5.2
-    # envelope (they raise HTTPException with a string detail otherwise).
     try:
         data = await _parse_oauth_body(request)
         basic_id, basic_secret = _extract_basic_auth(request)
@@ -734,14 +588,13 @@ async def refresh(
             description=_detail_description(exc),
         )
 
-    # BE-9409: body shared with /token. Behavior here is unchanged.
     return await _refresh_token_grant_response(data, basic_id, basic_secret, db)
 
 
 @router.get(
     "/.well-known/oauth-authorization-server",
     response_model=OAuthMetadataResponse,
-    response_model_exclude_none=True,  # CE omits registration_endpoint cleanly
+    response_model_exclude_none=True,
     tags=["oauth"],
 )
 async def oauth_metadata(request: Request):
@@ -758,16 +611,10 @@ async def oauth_metadata(request: Request):
     """
     base_url = get_public_base_url(request)
 
-    # RFC 8414 §2 — absolute endpoint URLs. Pre-fix returned bare paths
-    # ("/oauth/authorize"); some clients (claude.ai) coped via issuer-resolution
-    # but others fail or skip optional endpoints when paths aren't absolute.
     authorization_endpoint = f"{base_url}/oauth/authorize"
     token_endpoint = f"{base_url}/api/oauth/token"
-    # BE-6040: RFC 7009 revocation endpoint (mounted under /api/oauth).
     revocation_endpoint = f"{base_url}/api/oauth/revoke"
 
-    # RFC 7591 dynamic client registration endpoint. CE omits this field;
-    # private edition modules register it at startup when available.
     registration_endpoint: str | None = None
     if _EDITION_REGISTRATION_ENDPOINT_PATH:
         registration_endpoint = f"{base_url}{_EDITION_REGISTRATION_ENDPOINT_PATH[0]}"
@@ -778,14 +625,8 @@ async def oauth_metadata(request: Request):
         token_endpoint=token_endpoint,
         response_types_supported=["code"],
         code_challenge_methods_supported=["S256"],
-        # API-0021e Phase 3 + BE-6161: advertise refresh_token grant for both confidential DCR and public PKCE clients (public = rotating one-time tokens, RFC 8252 / OAuth 2.1 §4.3.1).
         grant_types_supported=["authorization_code", "refresh_token"],
-        # API-0021i: same source of truth as the protected-resource document
-        # at /.well-known/oauth-protected-resource (RFC 9728).
         scopes_supported=sorted(OAUTH_GRANTABLE_SCOPES),
-        # API-0021i: reflects /token's real client-auth surface after
-        # API-0021e Phase 1.1+1.2 — JSON/form body, HTTP Basic, and PKCE-only
-        # public clients with `none`.
         token_endpoint_auth_methods_supported=[
             "client_secret_post",
             "client_secret_basic",
@@ -793,8 +634,5 @@ async def oauth_metadata(request: Request):
         ],
         registration_endpoint=registration_endpoint,
         revocation_endpoint=revocation_endpoint,
-        # API-0021h: copy (not reference) the declared-versions list so any
-        # downstream mutation of the response payload cannot poison the
-        # module-level constant.
         mcp_spec_versions_supported=list(MCP_SPEC_VERSIONS_SUPPORTED),
     )

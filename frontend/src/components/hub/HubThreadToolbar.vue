@@ -1,34 +1,9 @@
-<!--
-  HubThreadToolbar.vue — FE-9439
-
-  The row above an open thread: back to the list, search within this thread, and the
-  persistent hand toggle that clears "waiting on you".
-
-  EXTRACTED FROM HubView.vue, and not only for tidiness. That file sat at 799 lines
-  against an 800-line cap, so it could not absorb a feature at all — the first control
-  added to it failed the guardrail. Lifting this row out is the fix at the layer the
-  problem lives on: the thread view's chrome is a coherent unit with its own state, and
-  HubView goes back to being the thing that chooses between the list and the thread.
-
-  The toggle is the PERSISTENT instance of the pair. The composer's copy is only reachable
-  at the bottom of the thread; this one is on screen the whole time one is open, so it
-  doubles as the answer to "is anything waiting on me here?" — a status indicator that is
-  also the action. It is deliberately smaller, so it sits inside this row's existing
-  design height rather than stretching it.
-
-  It calls useMarkHandled() directly rather than taking the state as props: the behaviour
-  is shared with the composer through that composable, and threading it down as props
-  would put HubView back in the business of owning something it does not use.
--->
 <template>
   <div class="hub-thread-toolbar">
     <button type="button" class="hub-thread-toolbar__back" data-testid="hub-back" @click="$emit('back')">
       <v-icon size="16">mdi-arrow-left</v-icon> All threads
     </button>
 
-    <!-- FE-9368 (D): search scoped to THIS thread. The list view's box searches across
-         threads on the server; this one filters the timeline already loaded, which is
-         why it needs no debounce and no request. -->
     <div class="hub-thread-toolbar__row">
       <v-text-field
         :model-value="modelValue"
@@ -44,6 +19,37 @@
         data-testid="thread-message-search"
         @update:model-value="$emit('update:modelValue', $event)"
       />
+      <div
+        class="hub-thread-toolbar__order"
+        role="group"
+        aria-label="Message order"
+        data-testid="message-order"
+      >
+        <button
+          type="button"
+          class="hub-thread-toolbar__order-btn"
+          :class="{ 'hub-thread-toolbar__order-btn--active': !newestFirst }"
+          :aria-pressed="!newestFirst ? 'true' : 'false'"
+          title="Oldest on top"
+          data-testid="message-order-oldest"
+          @click="setOrder(OLDEST_FIRST)"
+        >
+          <v-icon size="15">mdi-sort-clock-ascending-outline</v-icon>
+          <span class="hub-thread-toolbar__order-label">Oldest on top</span>
+        </button>
+        <button
+          type="button"
+          class="hub-thread-toolbar__order-btn"
+          :class="{ 'hub-thread-toolbar__order-btn--active': newestFirst }"
+          :aria-pressed="newestFirst ? 'true' : 'false'"
+          title="Newest on top"
+          data-testid="message-order-newest"
+          @click="setOrder(NEWEST_FIRST)"
+        >
+          <v-icon size="15">mdi-sort-clock-descending-outline</v-icon>
+          <span class="hub-thread-toolbar__order-label">Newest on top</span>
+        </button>
+      </div>
       <MarkHandledToggle
         :active="isYourTurn"
         :disabled="clearing"
@@ -58,16 +64,16 @@
 <script setup>
 import MarkHandledToggle from '@/components/hub/MarkHandledToggle.vue'
 import { useMarkHandled } from '@/components/hub/useMarkHandled'
+import { useHubMessageOrder, OLDEST_FIRST, NEWEST_FIRST } from '@/components/hub/useHubMessageOrder'
 
 defineProps({
-  // The in-thread filter text. `v-model` from HubView, which owns it because it clears
-  // the filter whenever the open thread changes.
   modelValue: { type: String, default: '' },
 })
 
 defineEmits(['update:modelValue', 'back'])
 
 const { isYourTurn, clearing, markHandled } = useMarkHandled()
+const { newestFirst, setOrder } = useHubMessageOrder()
 </script>
 
 <style scoped lang="scss">
@@ -95,6 +101,51 @@ const { isYourTurn, clearing, markHandled } = useMarkHandled()
     display: flex;
     align-items: center;
     gap: v.$spacing-sm;
+    // FE-9593: the row gained the order control. On a narrow viewport the search keeps
+    // its width and the controls wrap under it rather than anything clipping.
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+
+  // FE-9593: two-position segmented control, sized to its own labels. Same chrome as
+  // the filter fields (inset 1px border, default radius) so it reads as one toolbar.
+  &__order {
+    display: inline-flex;
+    flex: none;
+    padding: 3px;
+    gap: 2px;
+    border-radius: $border-radius-default; // 8
+    background: $elevation-raised;
+    box-shadow: inset 0 0 0 1px var(--smooth-border-color, rgba(255, 255, 255, 0.10));
+  }
+
+  &__order-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted, #{$color-text-secondary});
+    font-size: 0.75rem; // 12
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color $transition-fast, background $transition-fast;
+
+    &:hover { color: $color-text-primary; }
+
+    &--active {
+      color: $color-brand-yellow;
+      background: rgba($color-brand-yellow, 0.12);
+    }
+  }
+
+  // Tablet band and below: icons carry the control; the labels stay in the titles.
+  @media (max-width: $breakpoint-tablet) {
+    &__order-label { display: none; }
   }
 
   // FE-9368 (D): 560px per operator sizing decision (2026-08-06; 280px read as too small
@@ -105,7 +156,8 @@ const { isYourTurn, clearing, markHandled } = useMarkHandled()
   // its intrinsic width.
   &__search {
     width: 560px;
-    max-width: 560px;
+    // FE-9593: `min()` so the field never exceeds its row on a tablet-band viewport.
+    max-width: min(560px, 100%);
   }
 
   &__back {

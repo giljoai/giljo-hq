@@ -5,13 +5,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Post-update script: apply pending database migrations after git pull.
-
-Usage:
-    python update.py
-
-Does NOT touch config.yaml, agent templates, SSL certificates, or seed data.
-"""
 
 import contextlib
 import os
@@ -55,8 +48,6 @@ def err(msg: str) -> None:
 
 
 def _build_db_url() -> str | None:
-    """Return a DATABASE_URL, preferring the env var then falling back to config.yaml."""
-    # Load .env so DATABASE_URL is available even if not exported in the shell
     env_path = ROOT / ".env"
     if env_path.exists():
         try:
@@ -74,8 +65,6 @@ def _build_db_url() -> str | None:
     if not config_path.exists():
         return None
 
-    # Import here so we don't fail if src package isn't on the path yet
-    # TODO: Remove after editable install confirmed on all platforms
     sys.path.insert(0, str(ROOT))
     try:
         from giljo_mcp._config_io import read_config
@@ -99,7 +88,6 @@ def _build_db_url() -> str | None:
 
 
 def _load_revision_registry() -> set[str]:
-    """Load known revision IDs from the revision registry."""
     registry_path = ROOT / "migrations" / "revision_registry.json"
     if not registry_path.exists():
         return set()
@@ -114,7 +102,6 @@ def _load_revision_registry() -> set[str]:
 
 
 def _get_revisions(db_url: str) -> tuple[str | None, str | None]:
-    """Return (current_revision, head_revision). Either may be None on failure."""
     alembic_ini = ROOT / "alembic.ini"
     if not alembic_ini.exists():
         return None, None
@@ -131,12 +118,8 @@ def _get_revisions(db_url: str) -> tuple[str | None, str | None]:
 
         engine = create_engine(db_url, connect_args={"connect_timeout": 10})
         with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))  # Verify connectivity
+            conn.execute(text("SELECT 1"))
             ctx = MigrationContext.configure(conn)
-            # Plural API only (never get_current_revision(), which raises
-            # CommandError on a multi-head DB). CE is single-chain so there is
-            # normally exactly one head; tolerate a forked/dual-head DB by
-            # taking the first head instead of crashing the update check.
             heads = ctx.get_current_heads()
             current = heads[0] if heads else None
 
@@ -148,15 +131,6 @@ def _get_revisions(db_url: str) -> tuple[str | None, str | None]:
 
 
 def _stamp_bridge(db_url: str, current: str, head: str) -> bool:
-    """Stamp the DB to the current head if the current revision is a known old one.
-
-    After a baseline squash, old incremental revision IDs no longer exist in the
-    migration chain. Alembic would fail trying to find an upgrade path. Instead,
-    we stamp directly to the new head -- the schema is already correct because the
-    squash absorbed all incrementals.
-
-    Returns True if a stamp was applied, False otherwise.
-    """
     known = _load_revision_registry()
     if not known:
         return False
@@ -164,8 +138,6 @@ def _stamp_bridge(db_url: str, current: str, head: str) -> bool:
     if current not in known:
         return False
 
-    # Current revision is a known old one that's no longer in the active chain.
-    # Check if Alembic can find it -- if not, we need to stamp.
     try:
         from alembic.config import Config
         from alembic.script import ScriptDirectory
@@ -173,10 +145,9 @@ def _stamp_bridge(db_url: str, current: str, head: str) -> bool:
         alembic_cfg = Config(str(ROOT / "alembic.ini"))
         script = ScriptDirectory.from_config(alembic_cfg)
 
-        # Try to get the revision object -- if it exists in the chain, no stamp needed
         with contextlib.suppress(Exception):
             script.get_revision(current)
-            return False  # Revision exists in chain, normal upgrade will work
+            return False
 
         info(f"Revision {current} not in chain -- will stamp to head")
         info(f"Bridging old revision {current} -> {head} (baseline was squashed)")
@@ -203,7 +174,6 @@ def _stamp_bridge(db_url: str, current: str, head: str) -> bool:
 
 
 def _ensure_dependencies() -> bool:
-    """Check that key packages are installed; run pip install if not."""
     try:
         import alembic  # noqa: F401
         import sqlalchemy  # noqa: F401
@@ -218,8 +188,6 @@ def _ensure_dependencies() -> bool:
         return False
 
     info("Installing missing dependencies (first run after update)...")
-    # INF-9057: constrain to the shipped pinned tree when present, so an
-    # update cannot resolve a breaking upstream release from the >= floors.
     cmd = [sys.executable, "-m", "pip", "install", "-q", "-r", str(req_file)]
     lock_file = ROOT / "requirements.lock"
     if lock_file.exists():
@@ -237,17 +205,14 @@ def main() -> int:
     print(f"{Fore.YELLOW}  Giljo HQ — post-update{Style.RESET_ALL}")
     print()
 
-    # --- Ensure dependencies are installed ---
     if not _ensure_dependencies():
         return 1
 
-    # --- Locate alembic.ini ---
     alembic_ini = ROOT / "alembic.ini"
     if not alembic_ini.exists():
         err("alembic.ini not found. Run from the project root.")
         return 1
 
-    # --- Build database URL ---
     config_path = ROOT / "config.yaml"
     if not config_path.exists() and not os.environ.get("DATABASE_URL"):
         err("config.yaml not found and DATABASE_URL not set.")
@@ -260,7 +225,6 @@ def main() -> int:
         err("Check that config.yaml contains a [database] section with host/port/user/name.")
         return 1
 
-    # --- Check current vs head revision ---
     info("Checking database migration status...")
     current, head = _get_revisions(db_url)
 
@@ -278,18 +242,15 @@ def main() -> int:
         info(f"Current revision : {current or '(none)'}")
         info(f"Target revision  : {head}")
 
-    # --- Stamp bridge for squashed baselines ---
     if current:
         stamped = _stamp_bridge(db_url, current, head)
         if stamped:
-            # Re-check after stamp -- may already be at head
             current, head = _get_revisions(db_url)
             if current == head:
                 ok("Database is up to date (after stamp bridge).")
                 print()
                 return 0
 
-    # --- Run migrations ---
     info("Running database migrations...")
     proc = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],

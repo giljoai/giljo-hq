@@ -3,35 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9473 -- apply_context_tuning states its limits up front and fails loudly.
-
-A real-world agent using apply_context_tuning paid a 9-attempt tax (7 avoidable)
-because the tool taught its rules by rejecting rather than describing. Four
-findings, tested at the layer each one actually lives:
-
-* F1 (wire description) -- the ``force`` param's Field description must name the
-  overwrite rule, and a service-layer ValidationError must still reach the agent
-  unmangled (BE-3006d two-tier boundary, unchanged by this project -- pinned here
-  for apply_context_tuning specifically).
-* F2 (structure before size) -- a STRUCTURED section (tech_stack/architecture)
-  sent as a flat string must be rejected with the sub-key remedy REGARDLESS of
-  length, not gated behind a shrinking length error.
-* F3 (no silent no-op success) -- see
-  tests/services/test_product_tuning_service.py::TestApplyTuningUpdates::
-  test_all_drift_sections_unresolved_declines_instead_of_success (service-layer
-  fix, service-layer regression test per house rule).
-* F4 (wire caps) -- the proposals Field description states FLAT vs STRUCTURED
-  sections, the per-sub-key cap, and the sub-key addressing convention.
-
-CLAUDE.md mandates a regression test at the failing layer: F1/F2/F4 are wire
-(FastMCP @mcp.tool arg-validation) bugs, so every test here drives the REAL
-transport (``create_connected_server_and_client_session``), mirroring
-tests/integration/test_be3006d_mcp_boundary_validation.py and
-tests/integration/test_be9118_update_product_context_regroup.py.
-
-Parallel-safe: no DB, no module-level mutable state; tenant keys are freshly
-generated per test.
-"""
 
 from __future__ import annotations
 
@@ -73,50 +44,32 @@ def _apply_context_tuning_schema() -> dict:
     raise AssertionError("apply_context_tuning not found in the live tool registry")
 
 
-# ---------------------------------------------------------------------------
-# F1 + F4 -- wire delivery (schema pin, BE-9469 TestListProjectsSchemaDeclarations
-# template). A description that exists in source but never reaches the wire is
-# the exact defect BE-9470 shipped to fix elsewhere.
-# ---------------------------------------------------------------------------
 
 
 class TestApplyContextTuningSchemaDeclarations:
     def test_force_description_names_the_overwrite_rule(self):
-        """F1: force is the flag an agent almost always needs on a populated
-        product (the common case), and it was undocumented on the wire."""
         schema = _apply_context_tuning_schema()
         description = schema["properties"]["force"].get("description", "")
         assert "force" in description.lower()
         assert "populated" in description.lower()
 
     def test_proposals_description_names_flat_vs_structured_sections(self):
-        """F4: FLAT sections take a plain string; STRUCTURED sections
-        (tech_stack, architecture) must be addressed by sub-key or dict."""
         schema = _apply_context_tuning_schema()
         description = schema["properties"]["proposals"].get("description", "")
         for term in ("FLAT", "STRUCTURED", "tech_stack", "architecture", "sub-key"):
             assert term in description, f"proposals description does not name {term!r}"
 
     def test_proposals_description_states_the_per_subkey_char_cap(self):
-        """F4: the char limit is PER SUB-KEY, not per whole submission -- and
-        must not silently drift from the enforced value."""
         schema = _apply_context_tuning_schema()
         description = schema["properties"]["proposals"].get("description", "")
         assert str(TUNING_PROPOSED_VALUE_MAX) in description
         assert "PER STRING" in description or "per sub-key" in description
 
 
-# ---------------------------------------------------------------------------
-# Autospec transport (no DB) -- F1 unmangled passthrough + F2 structure-first.
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
 async def autospec_mcp(monkeypatch):
-    """Install an autospec ToolAccessor + tenant resolution on the in-memory
-    transport (mirrors BE-3006d / BE-9118). apply_context_tuning is an ADAPTER
-    tool (absent from TOOL_DISPATCH), so it resolves through the accessor's own
-    mixin method -- an autospec'd coroutine we can plant a side_effect on."""
     from api import app_state
     from api.endpoints.mcp_tools import _base
     from giljo_mcp.tools.tool_accessor import ToolAccessor
@@ -154,9 +107,6 @@ async def autospec_mcp(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_force_required_validation_error_reaches_agent_unmangled(autospec_mcp):
-    """F1: ProductService.update_product's 'Fields already populated ... Pass
-    force=True to overwrite' message (a curated ValidationError, 4xx) must
-    surface VERBATIM through the MCP boundary, not be sanitized away."""
     client, accessor = autospec_mcp
     accessor.apply_context_tuning.side_effect = GiljoValidationError(
         message=("Fields already populated: tech_stack: infrastructure. Pass force=True to overwrite."),
@@ -187,12 +137,6 @@ async def test_force_required_validation_error_reaches_agent_unmangled(autospec_
 
 @pytest.mark.asyncio
 async def test_structured_section_flat_string_rejected_regardless_of_length(autospec_mcp):
-    """F2 (RED before the fix / GREEN after): a STRUCTURED section sent as a
-    flat string must be rejected with the sub-key remedy on the FIRST call --
-    for a SHORT string too, proving this is a shape check, not a relabeled
-    length check. The agent's actual repro used an over-length string; a short
-    one isolates the shape defect from the (also present, separately capped)
-    length rule."""
     client, _accessor = autospec_mcp
     async with client() as session:
         result = await session.call_tool(
@@ -203,29 +147,23 @@ async def test_structured_section_flat_string_rejected_regardless_of_length(auto
                     {
                         "section": "tech_stack",
                         "drift_detected": True,
-                        "proposed_value": "FastAPI, Django",  # 15 chars -- well under any cap
+                        "proposed_value": "FastAPI, Django",
                     }
                 ],
             },
         )
-    assert result.is_error is True
+    assert result.is_error is False and "VALIDATION_ERROR" in _error_text(result)
     text = _error_text(result)
     _assert_no_leak(text)
     assert "sub-key" in text or "sub_key" in text
     assert "tech_stack.infrastructure" in text or "tech_stack." in text
-    # The RED-state failure mode this proves absent: a shape problem must not be
-    # reported as a length problem.
     assert "character limit" not in text
 
 
 @pytest.mark.asyncio
 async def test_structured_section_oversized_string_reports_shape_not_length(autospec_mcp):
-    """F2, the agent's exact repro shape: an OVER-LENGTH string for a
-    STRUCTURED section must still report the sub-key remedy first (structure
-    before size), not '13467/10000 chars exceeded' -- the six-attempt tax this
-    project exists to delete."""
     client, _accessor = autospec_mcp
-    oversized = "FastAPI, Django, " * 800  # > 10_000 chars
+    oversized = "FastAPI, Django, " * 800
     assert len(oversized) > TUNING_PROPOSED_VALUE_MAX
     async with client() as session:
         result = await session.call_tool(
@@ -235,7 +173,7 @@ async def test_structured_section_oversized_string_reports_shape_not_length(auto
                 "proposals": [{"section": "architecture", "drift_detected": True, "proposed_value": oversized}],
             },
         )
-    assert result.is_error is True
+    assert result.is_error is False and "VALIDATION_ERROR" in _error_text(result)
     text = _error_text(result)
     _assert_no_leak(text)
     assert "sub-key" in text
@@ -244,8 +182,6 @@ async def test_structured_section_oversized_string_reports_shape_not_length(auto
 
 @pytest.mark.asyncio
 async def test_unknown_dict_subkey_for_structured_section_is_clean_422(autospec_mcp):
-    """F2/pre-ruling #5: a dict value for a structured section must have its
-    keys membership-checked at the boundary, not trusted through to the DB."""
     client, _accessor = autospec_mcp
     async with client() as session:
         result = await session.call_tool(
@@ -261,7 +197,7 @@ async def test_unknown_dict_subkey_for_structured_section_is_clean_422(autospec_
                 ],
             },
         )
-    assert result.is_error is True
+    assert result.is_error is False and "VALIDATION_ERROR" in _error_text(result)
     text = _error_text(result)
     _assert_no_leak(text)
     assert "unknown sub-key" in text
@@ -269,8 +205,6 @@ async def test_unknown_dict_subkey_for_structured_section_is_clean_422(autospec_
 
 @pytest.mark.asyncio
 async def test_flat_section_valid_short_string_still_dispatches(autospec_mcp):
-    """Positive control: a FLAT section with a normal short string is untouched
-    by the F2 shape check and still dispatches."""
     client, _accessor = autospec_mcp
     async with client() as session:
         result = await session.call_tool(
@@ -287,8 +221,6 @@ async def test_flat_section_valid_short_string_still_dispatches(autospec_mcp):
 
 @pytest.mark.asyncio
 async def test_structured_section_valid_subkey_dotted_form_still_dispatches(autospec_mcp):
-    """Positive control: the documented remedy (dotted sub-key) must itself
-    dispatch cleanly."""
     client, _accessor = autospec_mcp
     async with client() as session:
         result = await session.call_tool(
@@ -309,8 +241,6 @@ async def test_structured_section_valid_subkey_dotted_form_still_dispatches(auto
 
 @pytest.mark.asyncio
 async def test_structured_section_valid_dict_form_still_dispatches(autospec_mcp):
-    """Positive control: the documented remedy (dict keyed by field name) must
-    itself dispatch cleanly."""
     client, _accessor = autospec_mcp
     async with client() as session:
         result = await session.call_tool(

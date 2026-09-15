@@ -1,13 +1,3 @@
-/**
- * useProjectDeletion.spec.js — FE-9466
- *
- * The five destructive-lifecycle methods here already showed a generic toast
- * on failure and swallowed the server's own reason. They now also push a
- * persistent notification carrying that reason (structured error) or a safe
- * generic message otherwise, via the shared notifyFailure helper.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { ref } from 'vue'

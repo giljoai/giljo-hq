@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Auth service response models."""
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -26,8 +25,6 @@ class AuthResult(BaseModel):
     email: str | None = None
     first_name: str | None = None
     last_name: str | None = None
-    # full_name retained for one release as a derived/legacy field; new
-    # callers should prefer first_name/last_name.
     full_name: str | None = None
     is_active: bool = True
     created_at: str | None = None
@@ -67,11 +64,6 @@ class CredentialStatusResult(BaseModel):
     has_valid_oauth: bool
     has_expired_oauth: bool
 
-    # FE-9500: harness token -> ISO timestamp of that tool's most recent connect,
-    # derived from mcp_sessions clientInfo. The three flags above are WORKSPACE-wide
-    # ("this tenant holds a credential") and must never be rendered as per-tool
-    # status -- doing so lit every tool card green the moment one tool connected.
-    # An empty map means no tool has completed an MCP handshake yet.
     connected_harnesses: dict[str, str] = {}
 
     model_config = ConfigDict(from_attributes=True)
@@ -135,5 +127,4 @@ class UserInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-# Legacy alias for backward compatibility
 SetupState = SetupStateInfo

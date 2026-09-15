@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6184: unit test for the extracted sequence-run serializer.
-
-``serialize_sequence_run`` was lifted out of SequenceRunService (800-line
-guardrail) without behaviour change. This pins its dict shape so the extraction
-stays a pure rename: every field the REST + FE layers read must survive, incl.
-the conductor identity columns (conductor_agent_id stamped at run-create;
-conductor_project_id NULL under the dedicated-conductor model).
-
-Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -51,7 +41,7 @@ def test_serialize_sequence_run_shape() -> None:
         "locked",
         "project_statuses",
         "reviewed_project_ids",
-        "reviewed_via",  # BE-9540: per-member review provenance ({project_id -> "ui" | "harness"})
+        "reviewed_via",
         "chain_mission",
         "conductor_agent_id",
         "conductor_project_id",
@@ -66,10 +56,7 @@ def test_serialize_sequence_run_shape() -> None:
     assert out["chain_mission"] == "cross-project chain plan"
     assert out["conductor_agent_id"] == "agent-conductor"
     assert out["conductor_project_id"] is None
-    # BE-9098: unset column (unsaved instance) serializes to [] via the `or []` guard.
     assert out["reviewed_project_ids"] == []
-    # BE-9540: unset column (unsaved instance) serializes to {} via the `or {}` guard.
     assert out["reviewed_via"] == {}
-    # created_at/updated_at are None on an unsaved instance (isoformat-guarded).
     assert out["created_at"] is None
     assert out["updated_at"] is None

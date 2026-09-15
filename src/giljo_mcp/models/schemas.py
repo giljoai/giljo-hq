@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Response schemas for Giljo HQ API endpoints.
-
-Professional, production-grade Pydantic models for API responses.
-Centralized location for all response schemas to ensure consistency
-and type safety across the API surface.
-
-Created: Handover 0501
-"""
 
 from datetime import datetime
 
@@ -31,21 +22,17 @@ class ProjectSummaryResponse(BaseModel):
     status: str = Field(..., description="Project status (staging/active/inactive/completed/cancelled)")
     mission: str | None = Field(None, description="Project mission statement")
 
-    # Job metrics
     total_jobs: int = Field(0, description="Total number of agent jobs")
     completed_jobs: int = Field(0, description="Number of completed jobs")
     blocked_jobs: int = Field(0, description="Number of blocked jobs")
     active_jobs: int = Field(0, description="Number of currently active jobs")
     pending_jobs: int = Field(0, description="Number of pending jobs")
 
-    # Progress tracking
     completion_percentage: float = Field(0.0, ge=0.0, le=100.0, description="Project completion percentage (0-100)")
 
-    # Timestamps
     created_at: datetime = Field(..., description="Project creation timestamp")
     last_activity_at: datetime | None = Field(None, description="Most recent activity timestamp")
 
-    # Product context
     product_id: str = Field(..., description="Parent product UUID")
     product_name: str = Field(..., description="Parent product name")
 
@@ -110,16 +97,13 @@ class ProjectResponse(BaseModel):
     mission: str | None = Field(None, description="Project mission")
     description: str | None = Field(None, description="Project description")
 
-    # Structured fields (Handover 0840e: replaced meta_data JSONB)
     cancellation_reason: str | None = Field(None, description="Reason for cancellation")
     early_termination: bool = Field(default=False, description="Whether project was terminated early")
 
-    # Timestamps
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     completed_at: datetime | None = Field(None, description="Completion timestamp")
 
-    # Product relation
     product_id: str = Field(..., description="Parent product UUID")
 
     model_config = ConfigDict(
@@ -142,6 +126,3 @@ class ProjectResponse(BaseModel):
     )
 
 
-# NOTE: Orchestrator Succession Schemas (SuccessionRequest, SuccessionResponse,
-# SuccessionStatusResponse, InitiateHandoverResponse) removed in Handover 0700d.
-# Use simple_handover.py endpoint instead for 360 Memory-based session continuity.

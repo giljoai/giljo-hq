@@ -140,12 +140,6 @@ const productName = PRODUCT_NAME
 
 const licenseName = LICENSE_NAME_FULL
 
-// FE-9374b: the hosted editions name their billing and infrastructure
-// vendors in these sections, but the CE export gate bans provider names in
-// CE-shipped source (comments and tests included). The vendor-naming copy
-// lives under saas/ (stripped from every CE export) and loads via the
-// ADR-004 import.meta.glob pattern; CE renders the vendor-neutral fallback
-// copy inline above.
 const saasDataHosting = shallowRef(null)
 const saasSubprocessorList = shallowRef(null)
 

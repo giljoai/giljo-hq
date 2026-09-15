@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression test for BE-5064: task→project conversion uniqueness collision.
-
-The partial unique index `uq_project_taxonomy_active` uses NULLS NOT DISTINCT,
-so two projects with all-NULL taxonomy under the same (tenant_key, product_id)
-collide on insert. Before the fix, TaskConversionService inserted projects with
-NULL series_number directly, so converting a second task to a project failed
-with IntegrityError until the first project was manually given a taxonomy.
-
-This test reproduces the original failure scenario (two sequential conversions
-under the same product, no manual taxonomy assignment between them) and asserts
-both succeed with distinct, auto-assigned series_numbers.
-"""
 
 from uuid import uuid4
 
@@ -83,8 +71,6 @@ async def _make_task(db_session, tenant_key: str, product_id: str, user_id: str,
 
 
 class TestTaskConversionUniqueness:
-    """Regression: two consecutive task→project conversions must not collide on
-    the NULLS-NOT-DISTINCT partial unique index `uq_project_taxonomy_active`."""
 
     @pytest.mark.asyncio
     async def test_two_sequential_conversions_under_same_product_succeed(
@@ -106,7 +92,6 @@ class TestTaskConversionUniqueness:
             user_id=user.id,
         )
 
-        # No manual taxonomy assignment on project A — this is the original repro.
         result_b = await task_conversion_service.convert_to_project(
             task_id=task_b.id,
             project_name=None,

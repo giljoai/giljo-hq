@@ -32,12 +32,6 @@ vi.mock('@/stores/notifications', () => ({
   useNotificationStore: () => ({ addNotification: mockAddNotification }),
 }))
 
-// A save can fail two ways: with our structured server error shape
-// ({error_code, message, context} under response.data), or without one
-// (a network error, a legacy 500, anything unstructured). Axios errors are
-// real Error instances with a `.response` property attached -- mirror that
-// shape rather than a bare object, since that's what the interceptor chain
-// (api.js normalizeRejection) actually hands the composable's catch block.
 function structuredServerError(message, errorCode = 'RESERVED_TAG_ERROR') {
   return Object.assign(new Error('Request failed with status code 400'), {
     response: {
@@ -144,7 +138,7 @@ describe('useTaskCrud', () => {
 
   it('updateTaskDueDate formats and routes through updateTask', async () => {
     const task = { id: 7, title: 'task' }
-    const localDate = new Date(2025, 5, 15) // June (months are 0-indexed)
+    const localDate = new Date(2025, 5, 15)
     await crud.updateTaskDueDate(task, localDate)
     expect(mockUpdateTask).toHaveBeenCalledWith(7, { due_date: '2025-06-15' })
   })

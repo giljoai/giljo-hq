@@ -3,32 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Windows Job Object wrapper for orphan-process containment.
-
-On Windows: creates a Job Object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE so
-every child assigned to the job is killed automatically when this process
-(the launcher) exits — even on crash or SIGKILL.
-
-On Linux/macOS: no-op class; the caller should use os.setsid() on the child
-and register a process-group kill at atexit.  This module provides a
-consistent interface across platforms so startup.py needs no conditional
-branches at call sites.
-
-Usage (Windows)::
-
-    job = WindowsJobObject()
-    proc = subprocess.Popen(...)
-    job.assign(proc.pid)
-    # Hold `job` for the launcher's lifetime; close() is called by atexit or
-    # via the context manager.
-
-    # — or —
-
-    with WindowsJobObject() as job:
-        proc = subprocess.Popen(...)
-        job.assign(proc.pid)
-"""
 
 from __future__ import annotations
 
@@ -46,16 +20,10 @@ if _IS_WINDOWS:
     import ctypes
     import ctypes.wintypes
 
-    # -----------------------------------------------------------------------
-    # Win32 constants
-    # -----------------------------------------------------------------------
     _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
-    _JobObjectBasicLimitInformation = 2  # unused — we use Extended
+    _JobObjectBasicLimitInformation = 2
     _JobObjectExtendedLimitInformation = 9
 
-    # -----------------------------------------------------------------------
-    # Win32 structures
-    # -----------------------------------------------------------------------
     class _JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):  # noqa: N801
         _fields_ = [
             ("PerProcessUserTimeLimit", ctypes.c_int64),
@@ -89,9 +57,6 @@ if _IS_WINDOWS:
             ("PeakJobMemoryUsed", ctypes.c_size_t),
         ]
 
-    # -----------------------------------------------------------------------
-    # Win32 API bindings
-    # -----------------------------------------------------------------------
     _kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
 
     _kernel32.CreateJobObjectW.restype = ctypes.wintypes.HANDLE
@@ -124,13 +89,6 @@ if _IS_WINDOWS:
     _PROCESS_ALL_ACCESS = 0x1F0FFF
 
     class WindowsJobObject:
-        """
-        Context-manager / explicit-handle wrapper around a Windows Job Object.
-
-        The job is created with ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`` so the
-        OS kills all assigned processes when the handle is closed (i.e. when
-        the launcher exits).
-        """
 
         def __init__(self) -> None:
             self._handle: int | None = None
@@ -158,10 +116,9 @@ if _IS_WINDOWS:
             self._handle = handle
 
         def assign(self, pid: int) -> None:
-            """Assign a process (by PID) to this job."""
             if self._handle is None:
                 return
-            _inherit_handle = ctypes.wintypes.BOOL(0)  # False: don't inherit handle
+            _inherit_handle = ctypes.wintypes.BOOL(0)
             proc_handle = _kernel32.OpenProcess(_PROCESS_ALL_ACCESS, _inherit_handle, pid)
             if not proc_handle:
                 raise OSError(f"OpenProcess({pid}) failed: {ctypes.GetLastError()}")
@@ -173,12 +130,10 @@ if _IS_WINDOWS:
                 _kernel32.CloseHandle(proc_handle)
 
         def close(self) -> None:
-            """Close the job handle.  All assigned processes are killed by the OS."""
             if self._handle is not None:
                 _kernel32.CloseHandle(self._handle)
                 self._handle = None
 
-        # Context-manager protocol
         def __enter__(self) -> Self:
             return self
 
@@ -186,18 +141,8 @@ if _IS_WINDOWS:
             self.close()
 
 else:
-    # ------------------------------------------------------------------
-    # Non-Windows stub — no-op implementation with identical interface
-    # ------------------------------------------------------------------
 
     class WindowsJobObject:  # type: ignore[no-redef]
-        """
-        No-op stub on non-Windows platforms.
-
-        On Linux/macOS the caller should use ``os.setsid()`` on the child
-        and register a process-group kill via ``atexit``.  This stub keeps
-        call-site code platform-neutral.
-        """
 
         def __init__(self) -> None:
             pass

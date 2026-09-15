@@ -1,12 +1,4 @@
 <template>
-  <!-- FE-6174c: the project tab strip — single-row card with non-clickable badge.
-       The Review badge is a display-only status indicator; the "Review project"
-       button lives in ProjectStatusBanner and routes through onReviewProjectClick
-       in ProjectTabs.vue. Active tab highlighted; completed tabs show "COMPLETED";
-       not-started tabs faded. Conditional layer only.
-       Badge state machine (FE-9239/FE-9493 addendum) — read-only reference for
-       P2/FE-9244: REVIEW > COMPLETED > WORKING > PLANNING > WAITING, see
-       badgeState() below. -->
   <div class="project-tab-strip" role="tablist" data-testid="project-tab-strip">
     <button
       v-for="tab in tabs"
@@ -40,22 +32,13 @@
 </template>
 
 <script setup>
-/**
- * ProjectTabStrip — FE-6174c
- * Presentational tab strip for the chain /jobs variant. Emits `select(pid)` to
- * switch the viewed project. Badge states (review/working/completed) are display-only;
- * the actual Review action lives in ProjectStatusBanner → onReviewProjectClick.
- * Colors come from the taxonomy token (no hardcoded hex).
- */
 import { resolveTaxonomyColor } from '@/utils/taxonomyBadge'
 
 defineProps({
-  // Ordered tab descriptors from useChainContext.
   tabs: {
     type: Array,
     required: true,
   },
-  // The currently viewed project (route param).
   activePid: {
     type: String,
     default: '',
@@ -73,19 +56,6 @@ function aliasStyle(tab) {
   return { backgroundColor: color }
 }
 
-/**
- * Returns the modifier key for the badge class.
- * Precedence: needsReview > isCompleted > isWorking (implementing) > isPlanning > waiting.
- * isWorking derives from the project's status field, NOT from chain position (isCurrent).
- * isPlanning / isWorking (FE-9493) are a PURE read of the backend's per-member run
- * status via useChainContext — WAITING means the conductor has not started this
- * member (status 'pending'/'staged'); PLANNING means its sub-orchestrator has
- * started working it but no worker agent has spawned yet (status 'planning');
- * WORKING means the first spawned worker has started (status 'implementing').
- * A card click NAVIGATES ONLY — it never writes status, so an unvisited member and
- * a visited-but-idle member read identically (see useChainContext.js's `tabs`).
- * Always returns a non-null string so every card always renders a badge.
- */
 function badgeState(tab) {
   if (tab.needsReview) return 'review'
   if (tab.isCompleted) return 'completed'
@@ -104,7 +74,6 @@ function badgeLabel(tab) {
   return ''
 }
 
-/** Returns true when the badge should pulse (working or review states). */
 function badgeIsPulsing(tab) {
   const state = badgeState(tab)
   return state === 'working' || state === 'review'

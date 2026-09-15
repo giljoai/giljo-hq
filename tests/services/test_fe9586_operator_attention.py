@@ -3,35 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-9586 — the operator's attention read: what is asking for you, right now.
-
-ONE READ, because the banner family needs ONE loaded state. A family assembled
-from two independent fetches has two hydration moments, and "not fetched yet"
-becomes indistinguishable from "nothing waiting" for whichever half is late --
-the exact shape of the FE-9553 near-miss, where an unhydrated store looked like a
-cleared banner and would have closed every popout on mount.
-
-WHY THE DISPLAY NAME IS RESOLVED HERE AND NOT PASSED IN. "Mention" must have ONE
-definition. The client's display-name match is deleted in this same change, so if
-this service accepted a name from its caller, the caller would become the second
-definition -- a REST shim, an MCP tool and a test could each hand it a different
-string and each get a different answer to "was I mentioned". It reads the name
-off the authenticated user's own row, through the same ``User.display_name``
-property the API already serves to the client.
-
-THE BROADCAST RULE IS PINNED HERE.
-``getSignal()`` treated a BROADCAST ``requires_action`` post as the operator's
-business ("all recipients must act"). The server never has: BE-9207's directed
-query excludes broadcasts, citing BE-9197 as a museum-rule decision -- a
-broadcast action-request is "whoever picks it up" and obligates nobody in
-particular. Those two disagreed, so the client's popout was quietly
-contradicting a ruled invariant. This read is the server's answer and the client
-is aligned to it: a broadcast keeps its durable bell row and stops claiming a
-specific person owes an answer.
-
-Parallel-safe: real DB via the rollback-isolated ``db_session`` fixture, no
-module-level mutable state, each test owns its setup, every query tenant-scoped.
-"""
 
 from __future__ import annotations
 
@@ -60,12 +31,6 @@ def _service(db_manager, db_session) -> CommThreadService:
 
 
 async def _seed_operator(db_session, tenant: str, *, first: str = "Patrik", last: str = "") -> str:
-    """An org + user whose ``display_name`` resolves to ``first last``.
-
-    A real row, not a stub: the whole point of this surface is that the server
-    reads the name off the user rather than being told it, so a test that supplied
-    the name would be testing nothing.
-    """
     suffix = uuid.uuid4().hex[:8]
     with tenant_session_context(db_session, tenant):
         await ensure_default_types_seeded(db_session, tenant)
@@ -93,7 +58,6 @@ async def _thread(svc: CommThreadService, tenant: str) -> str:
 
 
 async def test_a_post_naming_the_operator_lands_in_mentions(db_manager, db_session):
-    """And the caller passes NO name -- the server resolves it off the user row."""
     tenant = _tk("mention")
     user_id = await _seed_operator(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -106,7 +70,6 @@ async def test_a_post_naming_the_operator_lands_in_mentions(db_manager, db_sessi
 
 
 async def test_a_directed_action_request_lands_in_directed_action(db_manager, db_session):
-    """The BE-9207 projection, surfaced for the operator rather than an agent."""
     tenant = _tk("directed")
     user_id = await _seed_operator(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -127,12 +90,6 @@ async def test_a_directed_action_request_lands_in_directed_action(db_manager, db
 
 
 async def test_a_broadcast_action_request_obligates_nobody(db_manager, db_session):
-    """BE-9197, pinned: a broadcast requires_action post is
-    "whoever picks it up". It must appear in NEITHER list, so the client can stop
-    raising an actionable popout for it and keep only the durable bell row.
-
-    This is the assertion that fails first if anyone re-widens the recipient test
-    the way getSignal() had it."""
     tenant = _tk("broadcast")
     user_id = await _seed_operator(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -153,8 +110,6 @@ async def test_a_broadcast_action_request_obligates_nobody(db_manager, db_sessio
 
 
 async def test_reading_the_thread_clears_both_classes(db_manager, db_session):
-    """Acting in the Hub clears it. Both halves resolve on the same
-    gesture, which is what makes ONE banner family honest."""
     tenant = _tk("clear")
     user_id = await _seed_operator(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -179,8 +134,6 @@ async def test_reading_the_thread_clears_both_classes(db_manager, db_session):
 
 
 async def test_a_user_whose_name_appears_nowhere_gets_nothing(db_manager, db_session):
-    """The negative control. Without it, a read that returned every thread would
-    pass every test above."""
     tenant = _tk("quiet")
     user_id = await _seed_operator(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -196,10 +149,6 @@ async def test_a_user_whose_name_appears_nowhere_gets_nothing(db_manager, db_ses
 
 
 async def test_an_unknown_user_gets_nothing_rather_than_everything(db_manager, db_session):
-    """No user row means no resolvable name, and an unresolved name must collapse to
-    NO mentions -- never to the empty-pattern match that reports every thread. The
-    repository layer pins the same rule; this pins that the service cannot route
-    around it."""
     tenant = _tk("ghost")
     await _seed_operator(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -212,8 +161,6 @@ async def test_an_unknown_user_gets_nothing_rather_than_everything(db_manager, d
 
 
 async def test_mentions_name_every_post_grouped_by_thread(db_manager, db_session):
-    """One entry per thread for the banner, every naming post listed for the bell and
-    the deep-link. Two mentions on one thread are two facts on one row."""
     tenant = _tk("grouped")
     user_id = await _seed_operator(db_session, tenant)
     svc = _service(db_manager, db_session)

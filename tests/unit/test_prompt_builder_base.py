@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tests for prompt builder base class extraction (quality-sprint-002e).
-
-Verifies that:
-1. ExecutionPromptBuilderBase provides shared sections
-2. Claude/Codex/Gemini builders inherit from base and produce identical output
-3. Public interface (build_execution_prompt) is preserved
-4. Platform-specific sections are correctly overridden
-"""
 
 from types import SimpleNamespace
 
@@ -18,7 +10,6 @@ import pytest
 
 
 def _make_project(name="Test Project", project_id="proj-123", product_id="prod-456", taxonomy_alias="BE-0042"):
-    """Create a minimal project-like object for prompt builder tests."""
     return SimpleNamespace(
         name=name,
         id=project_id,
@@ -28,7 +19,6 @@ def _make_project(name="Test Project", project_id="proj-123", product_id="prod-4
 
 
 def _make_agent_job(agent_name="tdd-implementor", display_name="implementer", job_id="job-abc", status="waiting"):
-    """Create a minimal agent job-like object for prompt builder tests."""
     job = SimpleNamespace(mission="Implement the feature following TDD methodology")
     return SimpleNamespace(
         agent_name=agent_name,
@@ -40,7 +30,6 @@ def _make_agent_job(agent_name="tdd-implementor", display_name="implementer", jo
 
 
 class TestBaseClassExists:
-    """Verify the base class was created and builders inherit from it."""
 
     def test_base_class_importable(self):
         from giljo_mcp.prompts.execution_prompt_base import ExecutionPromptBuilderBase
@@ -59,14 +48,7 @@ class TestBaseClassExists:
 
         assert issubclass(CodexPromptBuilder, ExecutionPromptBuilderBase)
 
-    def test_gemini_inherits_from_base(self):
-        from giljo_mcp.prompts.execution_prompt_base import ExecutionPromptBuilderBase
-        from giljo_mcp.prompts.gemini_prompt_builder import GeminiPromptBuilder
-
-        assert issubclass(GeminiPromptBuilder, ExecutionPromptBuilderBase)
-
     def test_multi_terminal_unchanged(self):
-        """MultiTerminalPromptBuilder is too different to share base -- stays independent."""
         from giljo_mcp.prompts.execution_prompt_base import ExecutionPromptBuilderBase
         from giljo_mcp.prompts.multi_terminal_prompt_builder import MultiTerminalPromptBuilder
 
@@ -74,7 +56,6 @@ class TestBaseClassExists:
 
 
 class TestPublicInterfacePreserved:
-    """Verify all builders still produce valid prompts via build_execution_prompt."""
 
     @pytest.fixture
     def project(self):
@@ -102,15 +83,6 @@ class TestPublicInterfacePreserved:
         assert len(result) > 100
         assert "Codex" in result
 
-    def test_gemini_builds_prompt(self, project, agent_jobs):
-        from giljo_mcp.prompts.gemini_prompt_builder import GeminiPromptBuilder
-
-        builder = GeminiPromptBuilder()
-        result = builder.build_execution_prompt("orch-1", project, agent_jobs, git_enabled=True)
-        assert isinstance(result, str)
-        assert len(result) > 100
-        assert "Gemini" in result
-
     def test_multi_terminal_builds_prompt(self, project, agent_jobs):
         from giljo_mcp.prompts.multi_terminal_prompt_builder import MultiTerminalPromptBuilder
 
@@ -121,7 +93,6 @@ class TestPublicInterfacePreserved:
 
 
 class TestSharedSections:
-    """Verify shared sections produce consistent output across builders."""
 
     @pytest.fixture
     def project(self):
@@ -132,14 +103,10 @@ class TestSharedSections:
         return [_make_agent_job()]
 
     def test_all_builders_contain_health_check(self, project, agent_jobs):
-        """BE-9012d (F1): the shared startup section renders bare tool names now
-        (this prose reaches Codex/Gemini/Desktop clients too, where the Claude
-        Code mcp__giljo_mcp__ prefix is wrong)."""
         from giljo_mcp.prompts.claude_prompt_builder import ClaudePromptBuilder
         from giljo_mcp.prompts.codex_prompt_builder import CodexPromptBuilder
-        from giljo_mcp.prompts.gemini_prompt_builder import GeminiPromptBuilder
 
-        for builder_cls in [ClaudePromptBuilder, CodexPromptBuilder, GeminiPromptBuilder]:
+        for builder_cls in [ClaudePromptBuilder, CodexPromptBuilder]:
             result = builder_cls().build_execution_prompt("orch-1", project, agent_jobs)
             assert "health_check()" in result, f"{builder_cls.__name__} missing health_check"
             assert "mcp__giljo_mcp__health_check()" not in result, (
@@ -149,9 +116,8 @@ class TestSharedSections:
     def test_all_builders_contain_identity(self, project, agent_jobs):
         from giljo_mcp.prompts.claude_prompt_builder import ClaudePromptBuilder
         from giljo_mcp.prompts.codex_prompt_builder import CodexPromptBuilder
-        from giljo_mcp.prompts.gemini_prompt_builder import GeminiPromptBuilder
 
-        for builder_cls in [ClaudePromptBuilder, CodexPromptBuilder, GeminiPromptBuilder]:
+        for builder_cls in [ClaudePromptBuilder, CodexPromptBuilder]:
             result = builder_cls().build_execution_prompt("orch-1", project, agent_jobs)
             assert "## Who You Are" in result
             assert "orch-1" in result
@@ -160,9 +126,8 @@ class TestSharedSections:
     def test_all_builders_contain_monitoring(self, project, agent_jobs):
         from giljo_mcp.prompts.claude_prompt_builder import ClaudePromptBuilder
         from giljo_mcp.prompts.codex_prompt_builder import CodexPromptBuilder
-        from giljo_mcp.prompts.gemini_prompt_builder import GeminiPromptBuilder
 
-        for builder_cls in [ClaudePromptBuilder, CodexPromptBuilder, GeminiPromptBuilder]:
+        for builder_cls in [ClaudePromptBuilder, CodexPromptBuilder]:
             result = builder_cls().build_execution_prompt("orch-1", project, agent_jobs)
             assert "## Monitoring Agent Progress" in result
             assert "get_workflow_status" in result
@@ -170,18 +135,16 @@ class TestSharedSections:
     def test_all_builders_contain_context_refresh(self, project, agent_jobs):
         from giljo_mcp.prompts.claude_prompt_builder import ClaudePromptBuilder
         from giljo_mcp.prompts.codex_prompt_builder import CodexPromptBuilder
-        from giljo_mcp.prompts.gemini_prompt_builder import GeminiPromptBuilder
 
-        for builder_cls in [ClaudePromptBuilder, CodexPromptBuilder, GeminiPromptBuilder]:
+        for builder_cls in [ClaudePromptBuilder, CodexPromptBuilder]:
             result = builder_cls().build_execution_prompt("orch-1", project, agent_jobs)
             assert "## Refreshing Your Context" in result
 
     def test_all_builders_contain_completion(self, project, agent_jobs):
         from giljo_mcp.prompts.claude_prompt_builder import ClaudePromptBuilder
         from giljo_mcp.prompts.codex_prompt_builder import CodexPromptBuilder
-        from giljo_mcp.prompts.gemini_prompt_builder import GeminiPromptBuilder
 
-        for builder_cls in [ClaudePromptBuilder, CodexPromptBuilder, GeminiPromptBuilder]:
+        for builder_cls in [ClaudePromptBuilder, CodexPromptBuilder]:
             result = builder_cls().build_execution_prompt("orch-1", project, agent_jobs)
             assert "## When You're Done" in result
             assert "complete_job" in result
@@ -189,9 +152,8 @@ class TestSharedSections:
     def test_git_closeout_present_when_enabled(self, project, agent_jobs):
         from giljo_mcp.prompts.claude_prompt_builder import ClaudePromptBuilder
         from giljo_mcp.prompts.codex_prompt_builder import CodexPromptBuilder
-        from giljo_mcp.prompts.gemini_prompt_builder import GeminiPromptBuilder
 
-        for builder_cls in [ClaudePromptBuilder, CodexPromptBuilder, GeminiPromptBuilder]:
+        for builder_cls in [ClaudePromptBuilder, CodexPromptBuilder]:
             result = builder_cls().build_execution_prompt("orch-1", project, agent_jobs, git_enabled=True)
             assert "Git Closeout" in result, f"{builder_cls.__name__} missing git closeout"
 
@@ -203,7 +165,6 @@ class TestSharedSections:
 
 
 class TestPlatformSpecificSections:
-    """Verify platform-specific sections differ correctly."""
 
     @pytest.fixture
     def project(self):
@@ -227,12 +188,6 @@ class TestPlatformSpecificSections:
         assert "spawn_agent(" in result
         assert "gil-" in result
 
-    def test_gemini_uses_at_syntax(self, project, agent_jobs):
-        from giljo_mcp.prompts.gemini_prompt_builder import GeminiPromptBuilder
-
-        result = GeminiPromptBuilder().build_execution_prompt("orch-1", project, agent_jobs)
-        assert "@{agent_name}" in result or "@" in result
-
     def test_claude_has_cli_constraints(self, project, agent_jobs):
         from giljo_mcp.prompts.claude_prompt_builder import ClaudePromptBuilder
 
@@ -247,7 +202,6 @@ class TestPlatformSpecificSections:
 
 
 class TestEdgeCases:
-    """Verify edge cases are handled correctly."""
 
     def test_empty_agent_jobs(self):
         from giljo_mcp.prompts.claude_prompt_builder import ClaudePromptBuilder
@@ -282,20 +236,17 @@ class TestEdgeCases:
 
 
 class TestPackageExports:
-    """Verify __init__.py exports are preserved."""
 
     def test_all_builders_exported(self):
         from giljo_mcp.prompts import (
             ClaudePromptBuilder,
             CodexPromptBuilder,
-            GeminiPromptBuilder,
             MultiTerminalPromptBuilder,
             StagingPromptBuilder,
         )
 
         assert ClaudePromptBuilder is not None
         assert CodexPromptBuilder is not None
-        assert GeminiPromptBuilder is not None
         assert MultiTerminalPromptBuilder is not None
         assert StagingPromptBuilder is not None
 

@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Unit tests for version_service -- GitHub API, caching, version comparison."""
 
 import time
 from pathlib import Path
@@ -23,15 +22,11 @@ from giljo_mcp.services.version_service import (
 
 @pytest.fixture(autouse=True)
 def _reset_cache():
-    """Ensure each test starts with a clean cache."""
     clear_cache()
     yield
     clear_cache()
 
 
-# ---------------------------------------------------------------------------
-# get_installed_version
-# ---------------------------------------------------------------------------
 
 
 class TestGetInstalledVersion:
@@ -47,9 +42,6 @@ class TestGetInstalledVersion:
         assert get_installed_version(tmp_path) == "unknown"
 
 
-# ---------------------------------------------------------------------------
-# compare_versions
-# ---------------------------------------------------------------------------
 
 
 class TestCompareVersions:
@@ -78,9 +70,6 @@ class TestCompareVersions:
         assert compare_versions("1.9.9", "2.0.0") is True
 
 
-# ---------------------------------------------------------------------------
-# get_version_info -- GitHub fetch
-# ---------------------------------------------------------------------------
 
 
 def _github_release_payload(
@@ -89,7 +78,6 @@ def _github_release_payload(
     tarball_url: str = "https://example.com/giljoai-mcp-1.2.0.tar.gz",
     include_manifest: bool = False,
 ) -> dict:
-    """Build a minimal GitHub releases/latest response."""
     assets = [
         {"name": tarball_name, "browser_download_url": tarball_url},
     ]
@@ -104,7 +92,6 @@ def _github_release_payload(
 
 
 def _mock_response(status_code: int = 200, json_data: dict | None = None) -> MagicMock:
-    """Create a MagicMock mimicking an httpx.Response (sync methods)."""
     resp = MagicMock()
     resp.status_code = status_code
     resp.raise_for_status = MagicMock()
@@ -201,9 +188,6 @@ class TestGetVersionInfoFetch:
         assert info.update_available is False
 
 
-# ---------------------------------------------------------------------------
-# Caching behavior
-# ---------------------------------------------------------------------------
 
 
 class TestCaching:
@@ -216,15 +200,13 @@ class TestCaching:
 
         now = time.monotonic()
 
-        # First call -- fetches
         info1 = await get_version_info(root=tmp_path, client=mock_client, _now=now)
         assert info1.latest_version == "1.2.0"
         assert mock_client.get.call_count == 1
 
-        # Second call within TTL -- uses cache
         info2 = await get_version_info(root=tmp_path, client=mock_client, _now=now + 100)
         assert info2.latest_version == "1.2.0"
-        assert mock_client.get.call_count == 1  # No additional call
+        assert mock_client.get.call_count == 1
 
     @pytest.mark.asyncio
     async def test_cache_expiry_refetches(self, tmp_path: Path):
@@ -235,17 +217,14 @@ class TestCaching:
 
         now = time.monotonic()
 
-        # First call
         await get_version_info(root=tmp_path, client=mock_client, _now=now)
         assert mock_client.get.call_count == 1
 
-        # After TTL expires
         await get_version_info(root=tmp_path, client=mock_client, _now=now + CACHE_TTL_SECONDS + 1)
         assert mock_client.get.call_count == 2
 
     @pytest.mark.asyncio
     async def test_cache_returns_fresh_installed_version(self, tmp_path: Path):
-        """If the VERSION file changes, cached response should still reflect current installed."""
         (tmp_path / "VERSION").write_text("1.0.0\n")
 
         mock_client = AsyncMock(spec=httpx.AsyncClient)
@@ -256,7 +235,6 @@ class TestCaching:
         assert info1.installed_version == "1.0.0"
         assert info1.update_available is True
 
-        # Simulate upgrade -- VERSION file changes
         (tmp_path / "VERSION").write_text("1.2.0\n")
         info2 = await get_version_info(root=tmp_path, client=mock_client, _now=now + 10)
         assert info2.installed_version == "1.2.0"
@@ -264,7 +242,6 @@ class TestCaching:
 
     @pytest.mark.asyncio
     async def test_network_error_after_cache_expiry(self, tmp_path: Path):
-        """After cache expires, if GitHub fails, return null latest (no stale cache)."""
         (tmp_path / "VERSION").write_text("1.0.0\n")
 
         mock_client = AsyncMock(spec=httpx.AsyncClient)
@@ -273,7 +250,6 @@ class TestCaching:
         now = time.monotonic()
         await get_version_info(root=tmp_path, client=mock_client, _now=now)
 
-        # Expire cache and fail GitHub
         mock_client.get.side_effect = httpx.ConnectError("timeout")
         info = await get_version_info(root=tmp_path, client=mock_client, _now=now + CACHE_TTL_SECONDS + 1)
         assert info.latest_version is None

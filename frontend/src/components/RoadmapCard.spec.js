@@ -1,19 +1,3 @@
-/**
- * RoadmapCard.spec.js
- *
- * FE-9568 (2026-09-02, operator ruling — scope reversal, NOT a defect fix):
- * /roadmap became an ordering-only screen. This file used to assert that the
- * sequential-run selection checkbox, the Activate/Deactivate launch buttons,
- * and the "In chain" pill's click-through to /projects rendered and behaved
- * correctly (FE-6165a / FE-6176 / FE-6180). Those controls are now REMOVED, so
- * this file asserts their ABSENCE instead — a silently deleted assertion is
- * how a control creeps back in. The "In chain" pill itself STAYS as a
- * read-only membership badge (operator decision): see the second describe
- * block. The kept controls (Convert / Open / Demote / Remove) get minimal
- * emit coverage in the third block.
- *
- * Edition scope: CE.
- */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 

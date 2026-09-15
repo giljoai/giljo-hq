@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""MCP tool for fetching 360 memory (sequential project history) with depth control.
-
-Updated in Handover 0390b to read from product_memory_entries table instead of JSONB.
-
-Uses ProductMemoryRepository to fetch normalized memory entries from database.
-
-Token Budget by Depth:
-- 1: Last 1 project (~500 tokens)
-- 3: Last 3 projects (~1500 tokens)
-- 5: Last 5 projects (~2500 tokens)
-- 10: Last 10 projects (~5000 tokens)
-"""
-# Read-only tool -- uses direct session.execute() for SELECT queries (no writes)
 
 import logging
 from typing import Any
@@ -32,29 +19,16 @@ logger = logging.getLogger(__name__)
 
 
 def estimate_tokens(data: Any) -> int:
-    """Rough token estimation (1 token ≈ 4 chars)."""
     import json
 
     text = json.dumps(data) if not isinstance(data, str) else data
     return len(text) // 4
 
 
-# INF-WriteShape: depth modes for response shape (separate from last_n_projects).
-# - "headlines" (default): minimal fields (id, sequence, project_name, type,
-#   timestamp, full summary, tags) with has_full_body:true to signal that a
-#   shape="full" follow-up fetch will return additional rich fields.
-# - "full": all rich fields via to_dict() with has_full_body:false (no
-#   follow-up fetch needed -- this is the complete entry).
 DEPTH_HEADLINES = "headlines"
 DEPTH_FULL = "full"
 
-# Step C: legacy tag mapping (analyzer-ratified 2026-04-25). Junk legacy tags
-# get mapped to a canonical slug or dropped (mapped to None) on serialization.
-# Reads are tolerant; writes are strict (controlled vocabulary lives in
-# MemoryEntryWriteSchema). Unmapped legacy tags pass through unchanged so
-# pre-existing entries remain readable.
 LEGACY_TAG_MAPPING: dict[str, str | None] = {
-    # Domain -> canonical
     "frontend": "frontend",
     "backend": "backend",
     "service": "backend",
@@ -75,7 +49,6 @@ LEGACY_TAG_MAPPING: dict[str, str | None] = {
     "page": "frontend",
     "users": "backend",
     "flow": "feature",
-    # Change type -> canonical
     "added": "feature",
     "built": "feature",
     "shipped": "feature",
@@ -95,7 +68,6 @@ LEGACY_TAG_MAPPING: dict[str, str | None] = {
     "written": "docs",
     "entry": "docs",
     "project": "chore",
-    # Pure noise -> drop (None means filter out on read)
     "from": None,
     "across": None,
     "files": None,
@@ -106,7 +78,6 @@ LEGACY_TAG_MAPPING: dict[str, str | None] = {
     "write": None,
     "direct": None,
     "giljoai": None,
-    # Edition-specific (deliberately NOT in vocab) -> drop
     "saas": None,
     "demo/saas": None,
     "v1.1.6": None,
@@ -114,13 +85,6 @@ LEGACY_TAG_MAPPING: dict[str, str | None] = {
 
 
 def _apply_legacy_tag_mapping(raw_tags: list[str]) -> list[str]:
-    """Read-time legacy tag normalization (deduplicated, order-preserving).
-
-    Mapped legacy slugs collapse to the canonical 16-tag vocabulary; ``None``
-    entries are filtered out; unmapped tags pass through unchanged so legacy
-    entries stay readable. The mapping is read-only -- new writes go through
-    MemoryEntryWriteSchema and are rejected if outside the vocabulary.
-    """
     mapped: list[str] = []
     seen: set[str] = set()
     for t in raw_tags or []:
@@ -139,12 +103,6 @@ def _apply_legacy_tag_mapping(raw_tags: list[str]) -> list[str]:
 
 
 def _serialize_headline(entry) -> dict[str, Any]:
-    """INF-WriteShape: minimal entry shape for the headlines-only default.
-
-    Emits the full summary verbatim (no character cap, no ellipsis). The
-    has_full_body flag is True to signal that a shape="full" follow-up fetch
-    will return additional rich fields (key_outcomes, decisions_made, etc.).
-    """
     return {
         "id": str(entry.id),
         "sequence": entry.sequence,
@@ -158,7 +116,6 @@ def _serialize_headline(entry) -> dict[str, Any]:
 
 
 def _serialize_full(entry) -> dict[str, Any]:
-    """INF-WriteShape: full entry shape via to_dict() with has_full_body:false."""
     data = entry.to_dict()
     data["tags"] = _apply_legacy_tag_mapping(data.get("tags") or [])
     data["has_full_body"] = False
@@ -173,72 +130,8 @@ async def get_360_memory(
     limit: int = None,
     depth: str = DEPTH_HEADLINES,
     db_manager: DatabaseManager | None = None,
-    session: AsyncSession | None = None,  # For testing only
+    session: AsyncSession | None = None,
 ) -> dict[str, Any]:
-    """
-    Fetch 360 memory (sequential project history) for given product with depth control and pagination.
-
-    Updated in Handover 0390b to read from product_memory_entries table.
-    Uses ProductMemoryRepository to fetch normalized entries instead of JSONB field.
-
-    Args:
-        product_id: Product UUID
-        tenant_key: Tenant isolation key
-        last_n_projects: Total projects to consider (from table)
-        offset: Number of projects to skip (for pagination)
-        limit: Max projects to return (None = return all up to last_n_projects)
-        db_manager: Database manager instance
-
-    Returns:
-        Dict with sequential history and metadata:
-        {
-            "source": "360_memory",
-            "depth": 3,
-            "data": [
-                {
-                    "sequence": 3,
-                    "type": "project_closeout",
-                    "project_id": "uuid",
-                    "project_name": "Feature X",
-                    "summary": "...",
-                    "key_outcomes": [...],
-                    "decisions_made": [...],
-                    "git_commits": [...],
-                    "timestamp": "2025-11-16T10:00:00Z"
-                }
-            ],
-            "metadata": {
-                "product_id": "uuid",
-                "tenant_key": "...",
-                "total_projects": 12,
-                "last_n_projects": 3,
-                "offset": 0,
-                "limit": 3,
-                "returned_projects": 3,
-                "has_more": false,
-                "next_offset": null,
-                "estimated_tokens": 1500
-            }
-        }
-
-    Multi-Tenant Isolation:
-        All queries filter by tenant_key and product_id.
-
-    Pagination Example:
-        # Fetch projects 0-4
-        batch1 = await get_360_memory(last_n_projects=10, offset=0, limit=5)
-        # Fetch projects 5-9
-        batch2 = await get_360_memory(last_n_projects=10, offset=5, limit=5)
-
-    Example:
-        result = await get_360_memory(
-            product_id="123e4567-e89b-12d3-a456-426614174000",
-            tenant_key="tenant_abc",
-            last_n_projects=3,
-            offset=0,
-            limit=2
-        )
-    """
     logger.info(
         "fetching_360_memory_context product_id=%s tenant_key=%s depth=%s offset=%s limit=%s",
         product_id,
@@ -271,8 +164,6 @@ async def _get_360_memory_impl(
     limit: int | None,
     depth: str,
 ) -> dict[str, Any]:
-    """Inner implementation for get_360_memory using a provided session."""
-    # Verify product exists for tenant isolation
     stmt = select(Product).where(Product.id == product_id, Product.tenant_key == tenant_key)
     result = await session.execute(stmt)
     product = result.scalar_one_or_none()
@@ -297,9 +188,8 @@ async def _get_360_memory_impl(
             },
         }
 
-    # Use service to fetch entries grouped by distinct projects
     memory_service = ProductMemoryService(
-        db_manager=None,  # session provided directly
+        db_manager=None,
         tenant_key=tenant_key,
     )
 
@@ -329,21 +219,16 @@ async def _get_360_memory_impl(
             },
         }
 
-    # INF-WriteShape: serialize per depth mode (headlines default | full opt-in)
     serializer = _serialize_full if depth == DEPTH_FULL else _serialize_headline
     paginated_history = [serializer(entry) for entry in entries]
 
-    # Count distinct projects in this page
     returned_project_ids = {e.project_id for e in entries if e.project_id}
     returned_projects = len(returned_project_ids)
 
-    # Pagination is by distinct project count
     has_more = (offset + returned_projects) < total_projects
     next_offset = offset + returned_projects if has_more else None
 
-    # action_required tagged-extras fetch removed in INF-5025b
 
-    # Calculate token estimate
     total_tokens = estimate_tokens(paginated_history)
 
     logger.info(

@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Plural project tagging on a thread (FE-9530, ruling 3).
-
-Its own module for the same reason the chain-hub / directed-actions / list-
-enrichment / participants / tenant-refs mixins each got one: the repository
-sits under an 800-line cap, and this concern -- persisting the
-``comm_thread_project_tags`` many-to-many rows -- is data access that ``create_thread``
-and ``update_thread`` both need but that has nothing to do with thread CRUD itself.
-
-Inherited by ``CommThreadRepository`` on the same seam.
-
-Tenant-scoped on every query.
-Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -30,10 +17,8 @@ from giljo_mcp.models.projects import Project
 
 
 class CommThreadProjectTagsMixin:
-    """Read/replace the set of projects a thread is tagged with. Inherited by CommThreadRepository."""
 
     async def get_project_tags(self, session: AsyncSession, tenant_key: str, thread_id: str) -> list[str]:
-        """Return this thread's tagged project ids (tenant-scoped), oldest tag first."""
         result = await session.execute(
             select(CommThreadProjectTag.project_id)
             .where(
@@ -47,11 +32,6 @@ class CommThreadProjectTagsMixin:
     async def get_project_tags_for_threads(
         self, session: AsyncSession, tenant_key: str, thread_ids: list[str]
     ) -> dict[str, list[str]]:
-        """Batch form of ``get_project_tags`` -- one round trip for a whole list page.
-
-        Returns ``{thread_id: [project_id, ...]}``; a thread with no tags is simply
-        absent from the dict (callers treat a missing key as an empty list).
-        """
         if not thread_ids:
             return {}
         result = await session.execute(
@@ -70,16 +50,6 @@ class CommThreadProjectTagsMixin:
     async def set_project_tags(
         self, session: AsyncSession, tenant_key: str, thread_id: str, project_ids: list[str]
     ) -> list[str]:
-        """Full-replace this thread's project tags with ``project_ids`` (order-preserving,
-        de-duplicated). An empty list clears every tag -- that is how a caller says
-        "no additional projects," distinct from ``None`` ("leave the tags alone") one
-        layer up in ``update_thread``.
-
-        Every id is verified to name a project IN THIS TENANT before anything is
-        written -- mirrors ``CommThreadTenantRefsMixin._require_owned_reference``
-        (BE-9420): a supplied id is not a capability, so a cross-tenant or made-up id
-        is refused rather than silently accepted or silently dropped.
-        """
         deduped: list[str] = []
         seen: set[str] = set()
         for pid in project_ids:

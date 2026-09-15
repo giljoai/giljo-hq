@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression tests for FE-5073 / BE-5122 REST plumbing.
-
-The MCP tool path for ``create_project(project_type="CTX", bootstrap_template_vars=...)``
-was wired in BE-5122. The REST endpoint ``POST /api/v1/projects/`` was not — the
-frontend depends on REST, so this regression covers the cross-path parity:
-
-R1 -- REST POST with CTX project_type_id + bootstrap_template_vars renders the
-      mission server-side via the SAME helper the MCP path uses
-      (``ProjectService.render_ctx_bootstrap_mission``); round-trip-equal output.
-R2 -- REST POST with a non-CTX project_type silently ignores
-      ``bootstrap_template_vars`` (forgiving REST contract).
-R3 -- Field caps: >50 ``new_documents`` rejected with ``ValidationError`` (422-shaped).
-R4 -- Field caps: per-entry string field >200 chars rejected.
-
-All DB-touching tests use the ``db_session`` fixture (TransactionalTestContext)
-per CLAUDE.md test discipline.
-"""
 
 from __future__ import annotations
 
@@ -104,7 +87,6 @@ async def fe_vision_doc(db_session: AsyncSession, fe_tenant_key: str, fe_product
 
 
 def _make_service(db_session: AsyncSession, tenant_key: str) -> ProjectService:
-    """Build a ProjectService bound to the test session (mirrors BE-5122 fixture)."""
     import contextlib
 
     service = ProjectService.__new__(ProjectService)
@@ -113,10 +95,6 @@ def _make_service(db_session: AsyncSession, tenant_key: str) -> ProjectService:
     service._websocket_manager = None
     service._logger = __import__("logging").getLogger("test_fe_5073")
 
-    # Production ProjectService._get_session(tenant_key=None) takes a tenant_key
-    # (Slice-3); the mock must mirror that signature AND scope the shared test
-    # session to the caller's tenant so the fail-closed guard authorizes the
-    # service's tenant-scoped reads.
     @contextlib.asynccontextmanager
     async def _sess(tenant_key: str | None = None):
         with tenant_session_context(db_session, tenant_key or service.tenant_key):
@@ -126,9 +104,6 @@ def _make_service(db_session: AsyncSession, tenant_key: str) -> ProjectService:
     return service
 
 
-# --------------------------------------------------------------------------- #
-# R1: REST CTX path renders mission via the shared helper                     #
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.asyncio
@@ -139,8 +114,6 @@ async def test_r1_render_helper_is_callable_from_rest_via_public_name(
     fe_ctx_taxonomy: TaxonomyType,
     fe_vision_doc: VisionDocument,
 ) -> None:
-    """The REST handler reuses ``render_ctx_bootstrap_mission`` -- the same
-    public service method the MCP path calls -- with identical output."""
     service = _make_service(db_session, fe_tenant_key)
 
     rendered_rest = await service.render_ctx_bootstrap_mission(
@@ -171,9 +144,6 @@ async def test_r1_get_project_type_by_id_resolves_ctx_abbreviation(
     fe_tenant_key: str,
     fe_ctx_taxonomy: TaxonomyType,
 ) -> None:
-    """The REST handler needs to map project_type_id -> abbreviation to decide
-    on the CTX render branch. The new ``get_project_type_by_id`` lookup must
-    return the right tenant-scoped row."""
     service = _make_service(db_session, fe_tenant_key)
 
     resolved = await service.get_project_type_by_id(
@@ -190,7 +160,6 @@ async def test_r1_get_project_type_by_id_tenant_isolation(
     fe_tenant_key: str,
     fe_ctx_taxonomy: TaxonomyType,
 ) -> None:
-    """A taxonomy row owned by a different tenant must not leak through."""
     other_tenant = TenantManager.generate_tenant_key()
     service = _make_service(db_session, other_tenant)
 
@@ -201,9 +170,6 @@ async def test_r1_get_project_type_by_id_tenant_isolation(
     assert resolved is None
 
 
-# --------------------------------------------------------------------------- #
-# R2: Non-CTX project_type silently ignores bootstrap_template_vars            #
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.asyncio
@@ -212,10 +178,6 @@ async def test_r2_non_ctx_type_does_not_invoke_render_helper(
     fe_tenant_key: str,
     fe_non_ctx_taxonomy: TaxonomyType,
 ) -> None:
-    """Resolving a non-CTX abbreviation means the REST handler skips the CTX
-    branch entirely; bootstrap_template_vars is silently ignored. We assert
-    abbreviation-based branching at the service layer (the REST handler's
-    own conditional reads ``resolved_type.abbreviation``)."""
     service = _make_service(db_session, fe_tenant_key)
 
     resolved = await service.get_project_type_by_id(
@@ -226,9 +188,6 @@ async def test_r2_non_ctx_type_does_not_invoke_render_helper(
     assert (resolved.abbreviation or "").upper() != "CTX"
 
 
-# --------------------------------------------------------------------------- #
-# R3/R4: Field cap validation (mirrors BE-5122 D4 contract)                   #
-# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.asyncio
@@ -271,14 +230,9 @@ async def test_r4_per_field_length_cap_rejected(
     assert "200" in str(exc.value)
 
 
-# --------------------------------------------------------------------------- #
-# R5: REST ProjectCreate model accepts the new field cleanly                   #
-# --------------------------------------------------------------------------- #
 
 
 def test_r5_project_create_accepts_bootstrap_template_vars() -> None:
-    """The Pydantic model wire-shape must accept bootstrap_template_vars as
-    an optional dict and default to None for non-CTX payloads."""
     from api.endpoints.projects.models import ProjectCreate
 
     payload = ProjectCreate(

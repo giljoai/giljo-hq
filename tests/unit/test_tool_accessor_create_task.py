@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Unit tests for ``TaskService.create_task_for_mcp()`` (the owning service) after BE-6118.
-
-The legacy ``category`` parameter (free-form string with a 'general' default)
-was replaced by ``task_type`` (a taxonomy abbreviation validated against
-TaxonomyService). Tests in this file cover the new contract:
-
-- Returns a structured dict with task_id + product_id + task_type.
-- Title and description flow through to TaskService.log_task unchanged.
-- Tenant manager fallback when tenant_key is omitted.
-- Logging on successful creation.
-"""
 
 import logging
 from unittest.mock import AsyncMock, Mock, patch
@@ -54,13 +42,6 @@ def _make_tool_accessor(tenant_key="tenant-abc"):
 
 
 def _patch_active_product(product_id="prod-456"):
-    """Helper: patch ProductService so create_task binds to a product.
-
-    BE-9411: the create path now resolves through ``resolve_binding_product``
-    (which validates an explicitly supplied product_id against the tenant and
-    falls through to the active product when none is supplied), so that is the
-    method stubbed here.
-    """
     return patch(
         "giljo_mcp.services.product_service.ProductService",
         return_value=AsyncMock(resolve_binding_product=AsyncMock(return_value=_make_mock_product(product_id))),
@@ -68,13 +49,6 @@ def _patch_active_product(product_id="prod-456"):
 
 
 def _patch_taxonomy(resolved_abbr="BE"):
-    """Helper: patch TaxonomyService for the TSK-only task path (BE-6049c).
-
-    ``create_task_for_mcp`` now force-assigns the reserved TSK tag via
-    ``ensure_reserved_task_type`` (it no longer calls ``validate`` on the
-    create path). ``validate`` is still stubbed so any accidental call is
-    observable in tests that assert it is NOT used.
-    """
     instance = AsyncMock()
     instance.ensure_reserved_task_type = AsyncMock(return_value=_make_taxonomy_row("TSK"))
     instance.validate = AsyncMock(return_value=_make_taxonomy_row(resolved_abbr))
@@ -88,9 +62,6 @@ class TestToolAccessorCreateTaskValidation:
     @pytest.mark.asyncio
     async def test_raises_validation_error_when_no_active_product(self):
         tool_accessor = _make_tool_accessor()
-        # BE-9411: real resolver, nothing active to find -> the real 422 it raises.
-        # BE-9523b: write=True counts products first; zero products is the same
-        # "nothing to be ambiguous between" case as one, so it falls through.
         with (
             patch.object(ProductService, "get_default_product", new_callable=AsyncMock, return_value=None),
             patch.object(ProductService, "list_products", new_callable=AsyncMock, return_value=[]),
@@ -142,7 +113,7 @@ class TestToolAccessorCreateTaskReturnValue:
             assert result["task_id"] == "task-789"
             assert result["title"] == "Integration Task"
             assert result["priority"] == "high"
-            assert result["task_type"] == "TSK"  # BE-6049c: forced regardless of input
+            assert result["task_type"] == "TSK"
             assert "Integration Task" in result["message"]
 
     @pytest.mark.asyncio
@@ -203,13 +174,9 @@ class TestToolAccessorCreateTaskTitlePreservation:
 
 
 class TestToolAccessorCreateTaskTaskTypeResolution:
-    """BE-6049c: tasks are TSK-only. The create path no longer validates a
-    selectable task_type — it force-assigns the reserved TSK tag via
-    ``ensure_reserved_task_type`` and ignores the ``task_type`` argument."""
 
     @pytest.mark.asyncio
     async def test_omitted_task_type_forces_tsk_without_validate(self):
-        """task_type=None still yields a TSK task; validate is never called; no valid_types hint."""
         tool_accessor = _make_tool_accessor()
         with (
             _patch_active_product("prod-456"),
@@ -241,7 +208,7 @@ class TestToolAccessorCreateTaskTaskTypeResolution:
             result = await tool_accessor._task_service.create_task_for_mcp(
                 title="UI work",
                 description="Detail",
-                task_type="FE",  # ignored
+                task_type="FE",
                 tenant_key="tenant-abc",
             )
             tax_instance = tax_cls.return_value

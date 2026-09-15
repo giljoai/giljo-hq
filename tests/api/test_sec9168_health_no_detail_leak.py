@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-9168 — anonymous /health must not leak exception detail (CWE-209).
-
-Failing layer this regression-locks: the /health endpoint (api/wiring/events.py)
-returned ``f"unhealthy: {e!s}"`` for database and redis check failures, so an
-UNAUTHENTICATED caller could read internal hostnames/ports/driver detail from
-the raw exception text during an outage (CodeQL alert #4, py/stack-trace-exposure
-family). The fix: /health returns the generic ``"unhealthy: database"`` /
-``"unhealthy: redis"``, the full detail goes to ``logger.warning`` and to
-``state.health_detail``, which only the AUTHENTICATED ``/api/system/status``
-endpoint surfaces.
-
-Exercised at the ASGI-transport endpoint layer like the sibling INF-3009c
-tests in tests/api/test_inf3009c_redis_failloud.py.
-
-Edition Scope: Both (/health is CE-shipped; the redis branch is SaaS-only).
-
-Parallel-safe: monkeypatch-scoped state mutation only; no DB, no module-level
-mutable state, no ordering dependency.
-"""
 
 from __future__ import annotations
 
@@ -100,7 +81,6 @@ async def _get(app, path: str):
 
 @pytest.mark.asyncio
 async def test_anonymous_health_db_failure_carries_no_exception_text(monkeypatch):
-    """The regression target: raw exception text must never reach /health."""
     app = _build_app(monkeypatch, giljo_mode="ce", db_manager=_FailingDbManager())
 
     response = await _get(app, "/health")
@@ -131,26 +111,22 @@ async def test_anonymous_health_redis_failure_carries_no_exception_text(monkeypa
 
 @pytest.mark.asyncio
 async def test_authenticated_system_status_surfaces_the_detail(monkeypatch):
-    """The detail is not lost: /api/system/status (authenticated) exposes it."""
     from giljo_mcp.auth.dependencies import get_current_active_user
 
     app = _build_app(monkeypatch, giljo_mode="ce", db_manager=_FailingDbManager())
     app.dependency_overrides[get_current_active_user] = object
 
-    # Populate the detail exactly the way production does: via a /health poll.
     await _get(app, "/health")
     response = await _get(app, "/api/system/status")
     body = response.json()
 
     assert DB_SENTINEL in body["health_detail"]["database"]
-    # Pre-existing contract keys are still present.
     assert "pending_migration" in body
     assert "update_available" in body
 
 
 @pytest.mark.asyncio
 async def test_health_recovery_clears_the_stashed_detail(monkeypatch):
-    """A healthy check clears the stale detail so status reflects reality."""
     from api.app_state import state
     from giljo_mcp.auth.dependencies import get_current_active_user
 

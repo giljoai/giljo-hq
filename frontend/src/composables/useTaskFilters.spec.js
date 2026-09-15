@@ -232,8 +232,6 @@ describe('useTaskFilters', () => {
     })
   })
 
-  // FE-6049e: tasks are auto-TSK (BE-6049c) — there is no task-type filter.
-  // `taskTypeFilter` / `typeSelectOptions` were removed from the composable.
   describe('no task-type filter (FE-6049e)', () => {
     it('does not expose taskTypeFilter or typeSelectOptions', () => {
       const filters = useTaskFilters(tasks)
@@ -242,11 +240,6 @@ describe('useTaskFilters', () => {
     })
   })
 
-  // --- IMP-5038: Hidden task exclusion regression ---
-  // Mirrors the projects-side rule from useProjectFilters.js: an empty search
-  // hides rows with hidden:true; a non-empty search is "nuclear" and reveals
-  // them. TasksView does not have a `Hidden` pseudo-status, so there is no
-  // analog to the `filterStatus === 'hidden'` branch on the project side.
   describe('hidden task exclusion (IMP-5038)', () => {
     const makeHiddenTasks = () => [
       {
@@ -267,7 +260,6 @@ describe('useTaskFilters', () => {
         priority: 'medium',
         task_type_id: 'type-be',
         taxonomy_alias: 'BE-0101',
-        // hidden intentionally omitted — treated as falsy
       },
       {
         id: 102,
@@ -306,7 +298,6 @@ describe('useTaskFilters', () => {
       expect(visible.map((t) => t.id).sort()).toEqual([100, 101])
     })
 
-    // --- BE-2002: "Show archived" toggle (mirrors the projects action-bar badge) ---
     it('showHidden defaults to false (archived excluded by default)', () => {
       const hiddenTasks = ref(makeHiddenTasks())
       const { showHidden } = useTaskFilters(hiddenTasks)
@@ -316,9 +307,7 @@ describe('useTaskFilters', () => {
     it('showHidden=true reveals archived tasks in the default (no-search) view', () => {
       const hiddenTasks = ref(makeHiddenTasks())
       const { filteredTasks, showHidden } = useTaskFilters(hiddenTasks)
-      // default view excludes the archived row...
       expect(filteredTasks.value.map((t) => t.id)).not.toContain(102)
-      // ...flipping the toggle brings it back without any search term.
       showHidden.value = true
       expect(filteredTasks.value.map((t) => t.id)).toContain(102)
     })

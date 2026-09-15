@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Giljo HQ Production Uninstaller
-TRUE NUCLEAR OPTION - Removes EVERYTHING including all dependencies
-
-WARNING: Use this ONLY on production servers with no other Python projects!
-This will remove ALL Python packages installed by GiljoAI and PostgreSQL!
-
-For development/testing, use devuninstall.py instead.
-"""
 
 import contextlib
 import json
@@ -23,7 +14,6 @@ from pathlib import Path
 
 
 class GiljoProductionUninstaller:
-    """Production uninstaller - removes EVERYTHING"""
 
     def __init__(self):
         self.root_path = Path.cwd()
@@ -32,31 +22,25 @@ class GiljoProductionUninstaller:
         self.platform = sys.platform
 
     def load_manifest(self):
-        """Load installation manifest"""
         if self.manifest_path.exists():
             with contextlib.suppress(Exception), open(self.manifest_path) as f:
                 return json.load(f)
         return {}
 
     def log(self, message, level="INFO"):
-        """Log with ASCII-only characters for Windows compatibility"""
         print(f"[{level}] {message}")
 
     def remove_all_python_packages(self):
-        """Remove ALL Python packages installed by GiljoAI"""
         self.log("Removing ALL Python packages...")
 
         try:
-            # Get list of packages from manifest
             packages = self.manifest.get("dependencies", {}).get("python_packages", [])
 
             if packages:
-                # Extract package names (before ==)
                 pkg_names = [pkg.split("==")[0] for pkg in packages]
 
                 self.log(f"Uninstalling {len(pkg_names)} Python packages...", "INFO")
 
-                # Uninstall in batches
                 batch_size = 50
                 for i in range(0, len(pkg_names), batch_size):
                     batch = pkg_names[i : i + batch_size]
@@ -73,7 +57,6 @@ class GiljoProductionUninstaller:
                 self.log(f"Removed {len(pkg_names)} Python packages", "SUCCESS")
             else:
                 self.log("No package list found in manifest", "WARNING")
-                # Try requirements.txt as fallback
                 req_file = self.root_path / "requirements.txt"
                 if req_file.exists():
                     self.log("Attempting uninstall from requirements.txt...", "INFO")
@@ -87,10 +70,8 @@ class GiljoProductionUninstaller:
             self.log(f"Error removing packages: {e}", "ERROR")
 
     def remove_postgresql_completely(self):
-        """Remove PostgreSQL database AND server installation"""
         self.log("Removing PostgreSQL completely...")
 
-        # First, drop the database
         pg_info = self.manifest.get("postgresql", {})
         database = pg_info.get("database", "giljo_mcp")
         host = pg_info.get("host", "localhost")
@@ -98,7 +79,6 @@ class GiljoProductionUninstaller:
         user = pg_info.get("user", "postgres")
         password = pg_info.get("password") or os.getenv("POSTGRES_SUPERUSER_PASSWORD", "")
 
-        # Also check .env file for password if manifest doesn't have it
         env_file = self.root_path / ".env"
         if env_file.exists() and not pg_info.get("password"):
             with contextlib.suppress(Exception), open(env_file) as f:
@@ -107,13 +87,12 @@ class GiljoProductionUninstaller:
                         password = line.split("=", 1)[1].strip().strip("\"'")
                         break
 
-        # Find psql executable
         psql_paths = [
             r"C:\Program Files\PostgreSQL\18\bin\psql.exe",
             r"C:\Program Files\PostgreSQL\17\bin\psql.exe",
             r"C:\Program Files\PostgreSQL\16\bin\psql.exe",
             "/c/Program Files/PostgreSQL/18/bin/psql.exe",
-            "psql",  # Fallback to PATH
+            "psql",
         ]
 
         psql_cmd = None
@@ -127,7 +106,6 @@ class GiljoProductionUninstaller:
                 env = os.environ.copy()
                 env["PGPASSWORD"] = password
 
-                # Terminate connections
                 subprocess.run(
                     [
                         psql_cmd,
@@ -148,7 +126,6 @@ class GiljoProductionUninstaller:
                     timeout=5,
                 )
 
-                # Drop database
                 result = subprocess.run(
                     [psql_cmd, "-h", host, "-p", port, "-U", user, "-c", f"DROP DATABASE IF EXISTS {database};"],
                     check=False,
@@ -161,7 +138,6 @@ class GiljoProductionUninstaller:
                 if result.returncode == 0 or "does not exist" in result.stderr:
                     self.log(f"Database '{database}' dropped", "SUCCESS")
 
-                # Drop test database
                 subprocess.run(
                     [psql_cmd, "-h", host, "-p", port, "-U", user, "-c", f"DROP DATABASE IF EXISTS {database}_test;"],
                     check=False,
@@ -170,7 +146,6 @@ class GiljoProductionUninstaller:
                     timeout=10,
                 )
 
-                # Drop roles
                 for role in ["giljo_owner", "giljo_user"]:
                     subprocess.run(
                         [psql_cmd, "-h", host, "-p", port, "-U", user, "-c", f"DROP ROLE IF EXISTS {role};"],
@@ -184,7 +159,6 @@ class GiljoProductionUninstaller:
             except Exception as e:
                 self.log(f"Error dropping database: {e}", "WARNING")
 
-        # Then remove PostgreSQL server
         pg_deps = self.manifest.get("dependencies", {}).get("postgresql", {})
 
         if pg_deps.get("installed"):
@@ -214,13 +188,11 @@ class GiljoProductionUninstaller:
             self.log("Manual PostgreSQL uninstall required if desired", "WARNING")
 
     def remove_all_installation_files(self):
-        """Remove ALL files in installation directory except this script"""
         self.log("Removing ALL installation files...")
         script_name = Path(__file__).name
 
         removed = 0
         for item in self.root_path.iterdir():
-            # Skip this script and the log file
             if item.name in [script_name, "uninstall.log", "uninstall_complete.log"]:
                 continue
 
@@ -238,14 +210,10 @@ class GiljoProductionUninstaller:
         return removed
 
     def remove_mcp_registrations(self):
-        """Remove MCP server registrations from AI CLI tools"""
-        # MCP registration is now done via web-based configuration generator
-        # Manual cleanup: Users should use Claude desktop app to remove server if needed
         self.log("MCP cleanup note: Use Claude desktop app to remove server configuration", "INFO")
         return 0
 
     def remove_appdata_completely(self):
-        """Remove ALL files from APPDATA and user directories"""
         self.log("Removing ALL APPDATA and user directory files...")
 
         locations = []
@@ -282,7 +250,6 @@ class GiljoProductionUninstaller:
         return removed
 
     def run(self):
-        """Run the complete production uninstall"""
         print("\n" + "=" * 70)
         print("   Giljo HQ Production Uninstaller")
         print("   TRUE NUCLEAR OPTION - REMOVES EVERYTHING")
@@ -324,14 +291,12 @@ class GiljoProductionUninstaller:
         print("STARTING NUCLEAR UNINSTALL")
         print("=" * 70)
 
-        # Execute uninstall steps
         mcp_unregistered = self.remove_mcp_registrations()
         self.remove_all_python_packages()
         self.remove_postgresql_completely()
         appdata_removed = self.remove_appdata_completely()
         files_removed = self.remove_all_installation_files()
 
-        # Create completion log
         log_path = self.root_path / "uninstall_complete.log"
         with open(log_path, "w") as f:
             f.write("Giljo HQ Nuclear Uninstall Complete\n")

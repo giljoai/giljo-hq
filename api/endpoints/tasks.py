@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Task Management API endpoints for Phase 4: Task-Centric Multi-User Dashboard.
-
-Provides REST API for comprehensive task CRUD operations:
-- GET /tasks - List tasks with user filtering
-- POST /tasks - Create new task
-- PATCH /tasks/{id} - Update task (permission-based)
-- DELETE /tasks/{id} - Delete task (permission-based)
-- POST /tasks/{id}/convert - Convert task to project
-
-All endpoints enforce role-based access control and multi-tenant isolation.
-"""
 
 import logging
 from datetime import UTC, datetime
@@ -41,24 +29,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# Helper Functions
 
 
 def can_delete_task(task: Task, user: User) -> bool:
-    """
-    Check if user can delete a task.
-
-    Args:
-        task: Task to check
-        user: User attempting deletion
-
-    Returns:
-        True if user can delete task, False otherwise
-
-    Authorization rules:
-    - Admins can delete any task in their tenant
-    - Users can only delete tasks they created
-    """
     if user.role == "admin":
         return task.tenant_key == user.tenant_key
 
@@ -66,15 +39,6 @@ def can_delete_task(task: Task, user: User) -> bool:
 
 
 def task_to_response(task: Task) -> TaskResponse:
-    """
-    Convert Task model to TaskResponse schema.
-
-    Args:
-        task: Task model instance
-
-    Returns:
-        TaskResponse schema (Handover 0076: removed assignment fields)
-    """
     task_type_abbr = task.task_type.abbreviation if task.task_type else None
     task_type_color = task.task_type.color if task.task_type else None
     return TaskResponse(
@@ -105,7 +69,6 @@ def task_to_response(task: Task) -> TaskResponse:
     )
 
 
-# API Endpoints
 
 
 @router.get("/", response_model=list[TaskResponse])
@@ -161,10 +124,8 @@ async def list_tasks(
     """
     logger.debug("User %s listing tasks (filter_type: %s)", sanitize(current_user.username), sanitize(str(filter_type)))
 
-    # Build filters for service call
     created_by_user_id = str(current_user.id) if created_by_me else None
 
-    # Use TaskService.list_tasks() with enhanced filtering (Handover 0324)
     result = await task_service.list_tasks(
         filter_type=filter_type,
         product_id=product_id,
@@ -177,10 +138,8 @@ async def list_tasks(
         offset=offset,
     )
 
-    # Service returns list[Task] ORM objects directly (0731 typed returns)
     logger.info("Found %d tasks for user %s", len(result), sanitize(current_user.username))
 
-    # Convert Task ORM objects to TaskResponse using helper
     return [task_to_response(task) for task in result]
 
 
@@ -224,12 +183,8 @@ async def create_task(
             due_date=task_create.due_date,
         )
     except ResourceNotFoundError as e:
-        # Product (or project_id) not found / not in tenant -> 404, same detail
-        # the inline product check produced.
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=e.message) from e
     except ValidationError as e:
-        # Product not active (or missing tenant) -> 400, preserving the prior
-        # "No active product set..." response code + detail.
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=e.message) from e
 
     logger.info("Created task %s by user %s", task.id, sanitize(current_user.username))
@@ -331,26 +286,14 @@ async def update_task(
     """
     logger.debug("User %s updating task %s", sanitize(current_user.username), sanitize(task_id))
 
-    # First verify task exists and user has permission via get_task
     task = await task_service.get_task(task_id)
 
-    # Simple permission check: admin or creator (Task ORM attribute access)
     if current_user.role != "admin" and str(task.created_by_user_id) != str(current_user.id):
         logger.warning("User %s not authorized to update task %s", sanitize(current_user.username), sanitize(task_id))
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to update this task")
 
-    # Use TaskService.update_task() to perform the update.
-    # Translate task_type abbreviation -> task_type_id at this boundary so the
-    # service-layer field allowlist stays focused on FK ids only.
     update_data = task_update.dict(exclude_unset=True)
     completion_notes = update_data.pop("completion_notes", None)
-    # TSK-9458: the edit dialog seeds its form from the fetched task and sends
-    # the whole object back, so the ``task_type`` the API itself just emitted
-    # rides along unchanged. Every task is TSK (BE-6049c) and ``validate()``
-    # rejects TSK as reserved -- which killed the whole request and discarded
-    # the user's edited title/description. An unchanged type is nothing to do:
-    # drop it before resolution. A type the caller genuinely CHANGED still goes
-    # through validate() and is still rejected if bogus or reserved.
     current_type_abbr = task.task_type.abbreviation if task.task_type else None
     if "task_type" in update_data and update_data["task_type"] == current_type_abbr:
         update_data.pop("task_type")
@@ -367,17 +310,6 @@ async def update_task(
         else:
             update_data["task_type_id"] = None
 
-    # BE-9460: product_id is fixed at task creation and never reassignable --
-    # task.product_id anchors project-reassignment validation, series
-    # numbering, and convert_to_project's product binding, and no write path
-    # anywhere moves a task between products. It is deliberately
-    # absent from _ALLOWED_TASK_UPDATE_FIELDS, so passing it through used to
-    # be accepted with 200 and silently dropped -- the caller was told the
-    # write succeeded when it did not. Same mechanism as the task_type guard
-    # above (TSK-9458): the edit dialog seeds its form from the fetched task
-    # and echoes product_id back unchanged on every save, so an unchanged
-    # value is nothing to do and must not error; a genuinely changed value is
-    # rejected honestly instead of silently discarded.
     if "product_id" in update_data:
         if update_data["product_id"] == task.product_id:
             update_data.pop("product_id")
@@ -398,7 +330,6 @@ async def update_task(
 
     logger.info("Updated task %s by user %s", sanitize(task_id), sanitize(current_user.username))
 
-    # Fetch updated task for response
     task = await task_service.get_task(task_id)
     return task_to_response(task)
 

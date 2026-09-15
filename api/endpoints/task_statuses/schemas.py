@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Pydantic schemas for the Task Statuses metadata endpoint (FE-5041)."""
 
 from pydantic import BaseModel, Field
 

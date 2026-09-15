@@ -3,33 +3,12 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Pydantic validation models for ``Notification.payload`` and system banners.
-
-Extracted from ``jsonb_validators.py`` (INF-6132) to keep that module under the
-800-line file-size guardrail. These payload schemas are a cohesive unit: each is
-keyed by a ``Notification.type`` discriminator in
-``NOTIFICATION_PAYLOAD_VALIDATORS`` and validated at the
-``NotificationService.create`` write boundary. The registry is shared so the
-SaaS edition can register its own banner payloads via
-``register_notification_payload_validators`` without any CE module importing
-``saas/`` code.
-
-The names defined here are re-exported from ``jsonb_validators`` for backward
-compatibility, so existing imports keep working unchanged.
-"""
 
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-# --- Notification.payload (IMP-5037a) ---
-#
-# Registry keyed by Notification.type -> payload schema, called at the
-# NotificationService.create write boundary. Field names match the actual
-# payload keys the consumer (frontend bell) and emitters (e.g. the API-key
-# expiry scan) read/write. Unknown types raise — a notification type without a
-# registered payload schema is a programming error, not a runtime fallback.
 
 
 class ApiKeyExpiringSoonPayload(BaseModel):
@@ -46,7 +25,6 @@ class ApiKeyExpiringSoonPayload(BaseModel):
     expires_at: str = Field(..., min_length=1, max_length=64)
 
 
-# --- System banner payloads (IMP-5037b, CE) ---
 
 
 class PendingMigrationsPayload(BaseModel):
@@ -206,24 +184,10 @@ NOTIFICATION_PAYLOAD_VALIDATORS: dict[str, type[BaseModel]] = {
 
 
 def register_notification_payload_validators(validators: dict[str, type[BaseModel]]) -> None:
-    """Register additional Notification payload validators into the shared registry.
-
-    Used by the SaaS edition (imported only under ``GILJO_MODE=saas``) to add
-    its banner payload schemas without the CE module importing any ``saas/``
-    code. The registry itself is shared; the SaaS schema *definitions* stay
-    edition-isolated. Idempotent — re-registering the same type is a no-op
-    overwrite with the identical schema.
-    """
     NOTIFICATION_PAYLOAD_VALIDATORS.update(validators)
 
 
 def validate_notification_payload(notification_type: str, data: dict | None) -> dict:
-    """Validate a Notification.payload by its ``type`` discriminator.
-
-    Returns the validated payload as a dict. Raises KeyError if ``type`` has no
-    registered payload schema (caller passed an unknown notification type), or
-    pydantic.ValidationError on shape mismatch.
-    """
     if notification_type not in NOTIFICATION_PAYLOAD_VALIDATORS:
         raise KeyError(f"No payload validator registered for notification type: {notification_type}")
     schema = NOTIFICATION_PAYLOAD_VALIDATORS[notification_type]

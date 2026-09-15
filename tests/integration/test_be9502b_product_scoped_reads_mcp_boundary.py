@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9502b -- explicit-``product_id`` reads never leak the other product's rows.
-
-Ruling 15: two harness sessions on one tenant, each driving a different
-product. ``list_projects``, ``get_roadmap``, ``get_context``, and
-``search_memory`` all accept an explicit ``product_id`` (BE-9499a) that is
-validated tenant-owned and used WITHOUT falling back to "whichever product is
-currently active" -- see each tool's own docstring. This proves that contract
-at the MCP transport boundary, with two independent ``ClientSession``s issuing
-concurrent calls against two different products under one tenant.
-
-Real committed sessions, not ``TransactionalTestContext``: ``get_context``
-(``fetch_context`` -> ``get_product_context`` et al.) opens its own session via
-``db_manager`` and does not accept a test-session override, so seed data must
-be committed for it to see it at all -- see BE-9502a's own MCP-boundary
-fixtures (``test_be9502a_product_switch_mcp_boundary.py``) for the sibling
-pattern of wiring ``state.db_manager`` to the real manager. Parallel-safe via
-a fresh ``tenant_key`` per test; manual cleanup at teardown.
-"""
 
 from __future__ import annotations
 
@@ -51,8 +33,6 @@ def _payload(result) -> dict:
 
 @pytest_asyncio.fixture
 async def two_product_client(db_manager, monkeypatch):
-    """(client_factory, tenant_key) wired to the REAL db_manager -- every MCP
-    tool call in this file sees committed data, no shared test session."""
     from api import app_state
     from api.endpoints.mcp_tools import _base
     from giljo_mcp.tools.tool_accessor import ToolAccessor
@@ -79,8 +59,6 @@ async def two_product_client(db_manager, monkeypatch):
 
 
 async def _seed_product_with_data(db_manager, tenant_key: str, label: str, series_number: int) -> dict:
-    """One product + one active project + one 360 memory entry, all uniquely
-    named so a leak is unmistakable in the assertions."""
     product_id = str(uuid.uuid4())
     project_id = str(uuid.uuid4())
     async with db_manager.get_session_async(tenant_key=tenant_key) as session:
@@ -197,10 +175,6 @@ async def test_get_roadmap_explicit_product_id_never_leaks_the_other_product(two
 
 @pytest.mark.asyncio
 async def test_get_context_explicit_product_id_never_leaks_the_other_product(two_product_client, two_products):
-    """``get_context`` never had active-product fallback ambiguity at all --
-    ``product_id`` is a required positional param. Still worth pinning: this
-    is the one of the four tools without an implicit-fallback code path, so a
-    leak here would be a straight scoping bug in ``get_product_context``."""
     client_factory, tenant_key = two_product_client
 
     async def context_for(product_id: str):

@@ -4,14 +4,6 @@ import { useToast } from '@/composables/useToast'
 import { shouldShowLaunchAction } from '@/utils/actionConfig'
 import { isSubagentExecutionMode } from '@/composables/useExecutionMode'
 
-/**
- * usePlayButton — play button display logic and launch handlers extracted from JobsTab.
- *
- * @param {Object|Ref} project - project object (or reactive ref)
- * @param {Function} getProjectState - function(projectId) => project state with stagingComplete
- * @param {Function} clipboardCopy - async function(text) => boolean (from useClipboard)
- * @returns play button state, visibility helpers, and action handlers
- */
 export function usePlayButton(project, getProjectState, clipboardCopy) {
   const { showToast } = useToast()
 
@@ -27,12 +19,7 @@ export function usePlayButton(project, getProjectState, clipboardCopy) {
     const state = getProjectState(projectId)
     if (!state?.stagingComplete) return false
 
-    // FE-6019: read execution_mode from the WS-synced store state first;
-    // fall back to the prop snapshot only if the store hasn't been seeded yet.
     const executionMode = state?.execution_mode ?? proj?.execution_mode
-    // BE-9035c: fold rule lives once in useExecutionMode.js — anything that
-    // isn't multi_terminal is subagent-style (covers 'subagent' + tolerated
-    // legacy CLI tokens).
     const claudeCodeCliMode = isSubagentExecutionMode(executionMode)
 
     return shouldShowLaunchAction(agent, claudeCodeCliMode)
@@ -58,7 +45,6 @@ export function usePlayButton(project, getProjectState, clipboardCopy) {
     try {
       if (agent.agent_display_name === 'orchestrator') {
         const projectId = proj?.project_id || proj?.id
-        // FE-6019: store-first for execution_mode — same rule as shouldShowCopyButton
         const storeState = getProjectState(projectId)
         const executionMode = storeState?.execution_mode ?? proj?.execution_mode
         const isCliMode = isSubagentExecutionMode(executionMode)
@@ -99,7 +85,6 @@ export function usePlayButton(project, getProjectState, clipboardCopy) {
         return
       }
 
-      // Specialist agent
       const response = await api.prompts.agentPrompt(agent.agent_id || agent.job_id)
       const promptText = response.data?.prompt || ''
 
@@ -129,11 +114,6 @@ export function usePlayButton(project, getProjectState, clipboardCopy) {
     }
   }
 
-  /**
-   * Handle a non-2xx response from `api.prompts.implementation`.
-   * Surfaces an actionable toast (with HTTP status + hint) and logs the
-   * full response payload to console.warn for debug visibility.
-   */
   function _handleImplementationFetchError(error) {
     const status = error?.response?.status
     const payload = error?.response?.data

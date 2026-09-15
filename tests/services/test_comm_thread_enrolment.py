@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""TSK-9459 — ``services/comm_thread_enrolment.resolve_and_enrol`` contract.
-
-The observable regression (the orchestrator actually appearing in the participant
-list) is covered against a real DB in
-``tests/services/test_tsk9459_orchestrator_joins_own_thread.py``. This file pins
-the routing decisions that test cannot distinguish, because in it every path
-happens to end well:
-
-- a WORKER is not enrolled here (it is already handed a real ``join_thread`` call
-  in its Phase-1 body; enrolling it here too would be an unreproduced behaviour
-  change);
-- a project-less job resolves nothing and joins nothing;
-- a failed JOIN still returns the thread id, so a Hub problem can never cost the
-  agent its mission.
-"""
 
 from __future__ import annotations
 
@@ -65,7 +50,6 @@ def _mission_service(thread_id: str | None = _THREAD) -> MagicMock:
 
 
 async def _run(job: AgentJob, thread_id: str | None = _THREAD):
-    """Returns ``(result, join_mock)``."""
     with patch("giljo_mcp.services.comm_thread_service.CommThreadService") as cls:
         cls.return_value.join_thread = AsyncMock(return_value={})
         result = await resolve_and_enrol(_mission_service(thread_id), MagicMock(), job, _execution(), _TENANT)
@@ -80,7 +64,6 @@ class TestWhoGetsEnrolled:
         assert join.await_args.kwargs["thread_id"] == _THREAD
 
     async def test_a_worker_is_not_enrolled_here(self):
-        """It already gets a real join_thread call written into its Phase-1 body."""
         result, join = await _run(_job("implementer"))
         assert result == _THREAD, "the worker still gets its thread id for the render"
         join.assert_not_awaited()

@@ -1,10 +1,4 @@
 <template>
-  <!-- FE-6131e / FE-6165f: shell for the "select → run" flow, reused by
-       /projects and /roadmap. Renders the contextual bulk-action bar above the
-       slotted list/table and exposes the selection API (selectedIds + toggle)
-       to the slot so the host's checkboxes bind to it.
-       Keeping all the selection/run wiring here keeps both host views thin
-       (each near the 800-line guardrail). -->
   <div class="sequence-launcher">
     <SequenceBulkBar :count="selectedCount" @run="onRunClicked" @clear="clear" />
 
@@ -35,7 +29,6 @@ async function onRunClicked() {
   if (run) clear()
 }
 
-// Exposed for unit tests (assert the wired selection API).
 defineExpose({ selectedIds, selectedCount, electionActive, toggle, clear })
 </script>
 

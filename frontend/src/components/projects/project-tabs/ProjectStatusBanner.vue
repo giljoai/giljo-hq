@@ -1,5 +1,4 @@
 <template>
-  <!-- State A: Project is done -> status banner -->
   <div v-if="projectDoneStatus" class="action-buttons-row action-buttons-row--stacked">
     <v-chip
       :color="projectDoneStatus === 'completed' ? 'success' : projectDoneStatus === 'terminated' ? 'warning' : 'grey'"
@@ -12,10 +11,6 @@
          : projectDoneStatus === 'terminated' ? 'Project Terminated'
          : 'Project Cancelled' }}
     </v-chip>
-    <!-- FE-9191: review a completed project's closeout record from the pill.
-         Completed only — the closeout modal's Close is an acknowledge there
-         (skips the archive write); terminated/cancelled keep pill-only so the
-         archive path can never overwrite those statuses. -->
     <v-btn
       v-if="projectDoneStatus === 'completed' && !isChainMember"
       class="closeout-btn"
@@ -29,7 +24,6 @@
     </v-btn>
   </div>
 
-  <!-- State A2: Orchestrator awaiting_user — HITL decision required. -->
   <div
     v-else-if="orchestratorCloseoutBlocked"
     class="action-buttons-row"
@@ -52,7 +46,6 @@
     </button>
   </div>
 
-  <!-- State A3: Just-decided — orchestrator gate cleared, nudge prompt. -->
   <div
     v-else-if="showOrchUnlockedBanner"
     class="action-buttons-row"
@@ -84,7 +77,6 @@
     </div>
   </div>
 
-  <!-- State B: All agents terminal, project NOT done -> closeout button -->
   <div v-else-if="showCloseoutButton" class="action-buttons-row">
     <v-btn
       class="closeout-btn"
@@ -98,7 +90,6 @@
     </v-btn>
   </div>
 
-  <!-- State B2: All agents terminal, waiting for 360 memory -->
   <div v-else-if="showMemoryPending" class="action-buttons-row">
     <v-chip color="info" variant="tonal" size="large" data-testid="memory-pending-chip">
       <template #prepend>
@@ -108,7 +99,6 @@
     </v-chip>
   </div>
 
-  <!-- State B3: Memory poll timed out or errored -->
   <div
     v-else-if="allJobsTerminal && (memoryPollTimedOut || memoryPollError)"
     class="action-buttons-row"
@@ -183,10 +173,6 @@ defineProps({
     type: Boolean,
     default: false,
   },
-  // FE-9244: chain member context — hides the "Review project" button once a
-  // chain-completed project's pill is showing (buildChainAwareProjectDoneStatus
-  // in reviewDispatch.js already only returns 'completed' post-review, so the
-  // pill itself is correct; this just suppresses the redundant re-review CTA).
   isChainMember: {
     type: Boolean,
     default: false,

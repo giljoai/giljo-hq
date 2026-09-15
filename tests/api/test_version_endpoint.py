@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""API tests for GET /api/version/latest endpoint."""
 
 from unittest.mock import AsyncMock, patch
 
@@ -14,7 +13,6 @@ from giljo_mcp.services.version_service import VersionInfo, clear_cache
 
 @pytest.fixture(autouse=True)
 def _reset_version_cache():
-    """Ensure version cache is cleared between tests."""
     clear_cache()
     yield
     clear_cache()
@@ -49,7 +47,6 @@ class TestVersionEndpoint:
 
     @pytest.mark.asyncio
     async def test_no_auth_required(self, api_client):
-        """Endpoint must work without any auth headers."""
         mock_info = VersionInfo(installed_version="0.0.0")
         with patch(
             "api.endpoints.version.get_version_info",

@@ -3,10 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Repository for the user_approvals primitive (BE-5029 Phase A).
-
-Every query MUST filter by ``tenant_key``. No exceptions.
-"""
 
 from __future__ import annotations
 
@@ -20,7 +16,6 @@ from giljo_mcp.models.user_approval import UserApproval
 
 
 class UserApprovalRepository:
-    """CRUD for user_approvals with mandatory tenant isolation."""
 
     def __init__(self, db_manager):
         self.db = db_manager
@@ -76,13 +71,6 @@ class UserApprovalRepository:
         offset: int,
         status: str = "pending",
     ) -> list[UserApproval]:
-        """List approvals for a tenant by status, newest first.
-
-        Backed by ``ix_user_approvals_tenant_status`` (tenant_key, status).
-        ``status`` defaults to ``"pending"`` (the original/only caller shape);
-        BE-9514 widened this to any status so a decided row's ``decided_via``
-        can be read back for verification.
-        """
         with tenant_session_context(session, tenant_key):
             result = await session.execute(
                 select(UserApproval)

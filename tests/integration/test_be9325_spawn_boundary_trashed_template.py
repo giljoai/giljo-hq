@@ -3,33 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9325 MCP-boundary regression: spawn_job must not hand back a trashed
-template's identity through the real transport.
-
-``AgentCompletionRepository.get_template_by_name`` (called by
-``JobLifecycleService._resolve_spawn_template``) now filters
-``deleted_at IS NULL`` -- fixed and unit-tested at the repository layer in
-``tests/services/test_be9325_trashed_template_lifecycle.py``. Per CLAUDE.md's
-regression-test rule (BE-5042 lesson), a repository test alone is
-insufficient: the agent-facing surface is the @mcp.tool ``spawn_job`` wrapper,
-so this exercises the SAME code path through the real FastMCP transport
-(boundary -> ToolAccessor -> OrchestrationService -> JobLifecycleService).
-
-Only one template row exists for the spawned agent name, and it is trashed
-(``deleted_at`` set, ``is_active`` still True -- exactly what soft-delete
-leaves behind). The pre-BE-9325 query matched the trashed row and stamped ITS
-id onto the job -- binding a deleted agent's identity to a live spawn.
-
-BE-9337 then fixed the spawn ALLOWLIST (``get_active_template_names``) in the
-same repository file, which had still been offering trashed names. With the
-allowlist and the lookup finally agreeing, the trashed name is rejected at
-validation and no job is created at all -- so the assertion below is now
-"rejected", not "succeeded with a NULL template". See the test docstring.
-
-Pattern: tests/integration/test_be6008_spawn_boundary.py.
-
-Projects: BE-9325, BE-9337.
-"""
 
 from __future__ import annotations
 
@@ -54,8 +27,6 @@ pytestmark = pytest.mark.asyncio
 
 async def _seed_project_and_trashed_template(session: AsyncSession, tenant_key: str, agent_name: str) -> str:
     suffix = uuid.uuid4().hex[:8]
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -84,7 +55,7 @@ async def _seed_project_and_trashed_template(session: AsyncSession, tenant_key: 
             name=agent_name,
             category="custom",
             system_instructions="sys",
-            is_active=True,  # BE-9325: soft-delete leaves is_active True -- the whole bug.
+            is_active=True,
             deleted_at=datetime.now(UTC),
         )
     )
@@ -95,7 +66,6 @@ async def _seed_project_and_trashed_template(session: AsyncSession, tenant_key: 
 
 @pytest_asyncio.fixture
 async def spawn_boundary_client(monkeypatch, db_manager, db_session):
-    """In-memory FastMCP client wired to a REAL ToolAccessor on the test session."""
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from giljo_mcp.tools.tool_accessor import ToolAccessor
@@ -148,29 +118,6 @@ def _error_text(call_tool_result) -> str:
 
 
 async def test_spawn_job_does_not_bind_trashed_template_identity(spawn_boundary_client) -> None:
-    """spawn_job through the FastMCP transport must not stamp a trashed
-    template's id onto the new job -- the user deleted that agent.
-
-    BE-9337 STRENGTHENED THIS CONTRACT. This test previously asserted that the
-    spawn SUCCEEDS with ``template_id`` NULL, and carried a comment noting that
-    "succeeds with no template" is not the same as "the user is fine": a
-    non-orchestrator job with ``template_id`` NULL gets no identity section from
-    ``get_job_mission`` at all (MissionService's fallback is gated to
-    orchestrators, ``mission_service.py:583``), so the user asked for agent X
-    and silently got a generic one. That was BE-9333, and it was reachable here
-    for exactly one reason: the spawn ALLOWLIST
-    (``get_active_template_names``) and the spawn LOOKUP
-    (``get_template_by_name``) disagreed about trashed rows. BE-9325 fixed the
-    lookup; the allowlist still offered the trashed name, so validation passed
-    and resolution then found nothing.
-
-    BE-9337 fixed the allowlist, so the two queries are now predicate-identical
-    and the disagreement is gone. The trashed name no longer passes validation
-    at all: the spawn is REJECTED with a message naming the agents that do
-    exist, instead of succeeding into a silent identity-less agent. The
-    original intent of this test is preserved and made stronger -- no trashed
-    identity is bound, because no job is created.
-    """
     new_client, tenant_key, db_session = spawn_boundary_client
     agent_name = f"be9325-boundary-{uuid.uuid4().hex[:8]}"
     project_id = await _seed_project_and_trashed_template(db_session, tenant_key, agent_name)

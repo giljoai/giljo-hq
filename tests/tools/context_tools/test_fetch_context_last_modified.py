@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""CE-0031 Task 4: fetch_context surfaces last_modified per category.
-
-The orchestrator's get_staging_instructions response threads Modified
-timestamps into the protocol's per-category framing text. Once fetch_context
-runs, those dates were lost — callers had no way to detect whether a cached
-fetch was stale short of re-pulling the catalog. CE-0031 Task 4 attaches a
-``last_modified`` map to the response, scoped to categories that have a
-server-side authoritative timestamp (product-level data + memory_360).
-"""
 
 from __future__ import annotations
 
@@ -54,12 +45,10 @@ def _stub_results() -> dict[str, dict[str, Any]]:
 
 @pytest.mark.asyncio
 async def test_last_modified_returned_for_product_level_categories():
-    """Product-level categories (tech_stack here) carry product.updated_at."""
     stubs = _stub_results()
     expected_map = {
         "tech_stack": "2026-05-17T10:00",
         "memory_360": "2026-05-16T08:30",
-        # git_history intentionally omitted — no server-side authority.
     }
 
     async def fake_fetch(category: str, **_kwargs):
@@ -88,22 +77,17 @@ async def test_last_modified_returned_for_product_level_categories():
 
     assert "last_modified" in response, "fetch_context response must include a last_modified map per CE-0031 Task 4"
     last_modified = response["last_modified"]
-    # Only categories that actually returned should appear in the map (we filter
-    # the map down to categories_returned to avoid surfacing ghost entries).
     assert last_modified["tech_stack"] == "2026-05-17T10:00"
     assert last_modified["memory_360"] == "2026-05-16T08:30"
-    # git_history has no server-side authority → not present in expected_map.
     assert "git_history" not in last_modified
 
 
 @pytest.mark.asyncio
 async def test_last_modified_filtered_to_returned_categories():
-    """A timestamp for a NOT-requested category must never leak into the response."""
     stubs = _stub_results()
-    # Map contains a stale category the caller didn't ask for.
     bigger_map = {
         "tech_stack": "2026-05-17T10:00",
-        "architecture": "2026-05-15T09:00",  # not in categories_returned
+        "architecture": "2026-05-15T09:00",
     }
 
     async def fake_fetch(category: str, **_kwargs):

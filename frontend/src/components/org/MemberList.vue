@@ -39,7 +39,6 @@
           </v-list>
         </v-menu>
 
-        <!-- Transfer ownership (owner only, to admins) -->
         <v-btn
           v-if="isOwner && member.role === 'admin'"
           color="warning"
@@ -63,28 +62,10 @@ import { useFormatDate } from '@/composables/useFormatDate'
 
 const { formatDate } = useFormatDate()
 
-/**
- * MemberList - Displays and manages organization members.
- * Handover 0424d: Member list with role management.
- *
- * @component
- * @example
- * <MemberList
- *   :members="members"
- *   :can-manage="true"
- *   :is-owner="false"
- *   @change-role="handleRoleChange"
- *   @remove="handleRemove"
- *   @transfer="handleTransfer"
- * />
- */
 
 defineProps({
-  /** Array of member objects */
   members: { type: Array, required: true },
-  /** Whether the current user can manage members (owner/admin) */
   canManage: { type: Boolean, default: false },
-  /** Whether the current user is the owner */
   isOwner: { type: Boolean, default: false },
 })
 
@@ -104,7 +85,6 @@ function roleColor(role) {
 
 
 function getInitials(member) {
-  // Try to get initials from username or email, fall back to user_id
   if (member.username) {
     return member.username.slice(0, 2).toUpperCase()
   }

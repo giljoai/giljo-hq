@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-MessageRepository - Data access layer for message counter operations
-
-Handover 0387f: Repository for counter-based message persistence.
-Provides atomic counter updates for message tracking without JSONB.
-
-Responsibilities:
-- Increment/decrement message counters on AgentExecution
-- Atomic operations for message statistics
-- Multi-tenant isolation
-
-Design Principles:
-- Single Responsibility: Only counter operations
-- Atomic Updates: Use SQL UPDATE with arithmetic
-- Testability: Can be unit tested independently
-"""
 
 import logging
 from typing import Any
@@ -34,14 +18,8 @@ logger = logging.getLogger(__name__)
 
 
 class MessageRepository:
-    """
-    Repository for message counter operations.
-
-    Provides atomic counter updates for message tracking without JSONB persistence.
-    """
 
     def __init__(self):
-        """Initialize MessageRepository."""
         self._logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     async def batch_update_counters(
@@ -51,31 +29,6 @@ class MessageRepository:
         sent_increments: dict[str, int] | None = None,
         waiting_increments: dict[str, int] | None = None,
     ) -> int:
-        """
-        Batch-update sent and waiting counters in a single SQL statement.
-
-        Uses a single UPDATE with CASE expressions to touch all affected rows
-        atomically. PostgreSQL acquires row locks within one statement, which
-        eliminates the cross-statement circular-wait deadlock that occurs with
-        N+1 individual UPDATEs.
-
-        Args:
-            session: Active database session
-            tenant_key: Tenant key for multi-tenant isolation
-            sent_increments: {agent_id: increment} for messages_sent_count
-            waiting_increments: {agent_id: increment} for messages_waiting_count
-
-        Returns:
-            Number of rows affected
-
-        Example:
-            >>> await repo.batch_update_counters(
-            ...     session=session,
-            ...     tenant_key="tenant-abc",
-            ...     sent_increments={"agent-1": 1},
-            ...     waiting_increments={"agent-2": 1, "agent-3": 1},
-            ... )
-        """
         sent_increments = sent_increments or {}
         waiting_increments = waiting_increments or {}
 
@@ -121,9 +74,6 @@ class MessageRepository:
         )
         return result.rowcount
 
-    # ============================================================================
-    # Routing / Write Operations (BE-5022c)
-    # ============================================================================
 
     async def get_project(
         self,
@@ -131,17 +81,6 @@ class MessageRepository:
         tenant_key: str,
         project_id: str,
     ) -> Project | None:
-        """
-        Get a project by ID with tenant isolation.
-
-        Args:
-            session: Active database session
-            tenant_key: Tenant key for isolation
-            project_id: Project UUID
-
-        Returns:
-            Project instance or None
-        """
         result = await session.execute(
             select(Project).where(
                 and_(
@@ -158,19 +97,6 @@ class MessageRepository:
         tenant_key: str,
         message_id: str,
     ) -> Message | None:
-        """Fetch a persisted message row by id (BE-9012b, D5; widened BE-9247).
-
-        A thread post persists ``messages.project_id = thread.project_id`` (NULL for
-        a town-square thread). The relocated auto-block / forward-on-send redirect
-        reads this back off the message it is reacting to — reusing this repo's own
-        ``messages`` table rather than touching the locked ``CommThreadService`` —
-        to decide project-bound vs. town-square, AND (BE-9247) to get the same row's
-        ``content``/``thread_id``/``from_agent_id``/``from_display_name`` for a
-        send-time redirect to the live orchestrator, all off ONE query instead of a
-        project-id-only lookup plus a second round-trip. Returns None if the message
-        does not exist (or is in another tenant); a NULL ``project_id`` on the
-        returned row is a town-square post, which callers treat as side-effect-free.
-        """
         result = await session.execute(
             select(Message).where(
                 and_(
@@ -188,18 +114,6 @@ class MessageRepository:
         project_id: str,
         from_agent: str,
     ) -> str | None:
-        """
-        Resolve sender agent reference to display name.
-
-        Args:
-            session: Active database session
-            tenant_key: Tenant key for isolation
-            project_id: Project UUID
-            from_agent: Sender agent reference (display name or agent_id)
-
-        Returns:
-            Display name string or None
-        """
         result = await session.execute(
             select(AgentExecution.agent_display_name)
             .join(AgentJob)
@@ -216,7 +130,6 @@ class MessageRepository:
         return result.scalar_one_or_none()
 
     async def flush(self, session: AsyncSession) -> None:
-        """Flush pending changes."""
         await session.flush()
 
     async def get_execution_by_agent_id(
@@ -225,17 +138,6 @@ class MessageRepository:
         tenant_key: str,
         agent_id: str,
     ) -> AgentExecution | None:
-        """
-        Get latest execution by agent_id.
-
-        Args:
-            session: Active database session
-            tenant_key: Tenant key for isolation
-            agent_id: Agent UUID
-
-        Returns:
-            AgentExecution instance or None
-        """
         result = await session.execute(
             select(AgentExecution)
             .where(
@@ -253,17 +155,6 @@ class MessageRepository:
         tenant_key: str,
         job_id: str,
     ) -> AgentJob | None:
-        """
-        Get agent job by job_id with tenant isolation.
-
-        Args:
-            session: Active database session
-            tenant_key: Tenant key for isolation
-            job_id: AgentJob ID
-
-        Returns:
-            AgentJob instance or None
-        """
         result = await session.execute(
             select(AgentJob).where(
                 AgentJob.job_id == job_id,
@@ -278,21 +169,6 @@ class MessageRepository:
         tenant_key: str,
         job_id: str,
     ) -> Any:
-        """
-        Get job_id and project_id for a given job.
-
-        Args:
-            session: Active database session
-            tenant_key: Tenant key for isolation
-            job_id: AgentJob ID
-
-        Returns:
-            Row with job_id, project_id, product_id or None. ``product_id`` is
-            None both when the job carries no project (e.g. a project-less
-            conductor) and when the project itself has none -- the join is a
-            LEFT OUTER JOIN precisely so a null project_id never drops the row
-            (BE-9518).
-        """
         result = await session.execute(
             select(AgentJob.job_id, AgentJob.project_id, Project.product_id)
             .outerjoin(

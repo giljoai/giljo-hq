@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""INF-9446: the MCP registry manifest must track the shipped version.
-
-server.json drifted from VERSION once already (2.0.1.1 vs 2.0.2) while it
-lived outside the repo. Now that it has a home, this test fails the suite the
-moment the two disagree, and pins the two fields that must never change
-silently: the permanent registry name and the plain remote URL.
-
-The remote URL must stay the plain form. A URL carrying a query string does not
-match the resource identifier published in our protected-resource metadata, so
-RFC 9728 clients correctly decline to register.
-"""
 
 import json
 from pathlib import Path

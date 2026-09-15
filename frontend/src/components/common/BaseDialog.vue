@@ -8,10 +8,7 @@
     @update:model-value="handleDialogChange"
   >
     <v-card v-draggable class="base-dialog-card smooth-border" elevation="24">
-      <!-- Header -->
       <div :class="headerClasses">
-        <!-- Header icon area: the default type icon, or a custom slot
-             (e.g. a dynamically-tinted agent badge). Slot replaces the icon. -->
         <slot name="headerIcon">
           <v-icon v-if="showIcon" class="dlg-icon" :icon="iconName" />
         </slot>
@@ -32,9 +29,7 @@
 
       <v-divider />
 
-      <!-- Content -->
       <v-card-text class="pa-4">
-        <!-- Default alert for simple messages -->
         <v-alert
           v-if="message && !$slots.default"
           :type="type"
@@ -45,10 +40,8 @@
           {{ message }}
         </v-alert>
 
-        <!-- Custom content slot -->
         <slot />
 
-        <!-- Text confirmation input -->
         <v-text-field
           v-if="confirmText"
           v-model="confirmInput"
@@ -60,7 +53,6 @@
           class="mt-4"
         />
 
-        <!-- Checkbox confirmation -->
         <v-checkbox
           v-if="confirmCheckbox"
           v-model="checkboxConfirmed"
@@ -76,7 +68,6 @@
 
       <v-divider />
 
-      <!-- Footer -->
       <div class="dlg-footer">
         <slot name="actions" :can-confirm="canConfirm" :loading="loading">
           <v-spacer />
@@ -105,45 +96,6 @@
 </template>
 
 <script setup>
-/**
- * BaseDialog.vue - Standardized Dialog Component
- *
- * Provides consistent styling and behavior for all application dialogs.
- * Uses the harmonized dialog anatomy: .dlg-header / .dlg-footer classes.
- *
- * Header types:
- * - info: Plain header (no colored band)
- * - warning: Amber band (.dlg-header--warning)
- * - danger: Magenta band (.dlg-header--danger)
- * - success: Plain header (no colored band, green icon)
- * - primary: Yellow band (.dlg-header--primary) — major workflow actions
- *   (tune context, closeout, plan upgrade). Adopters set their own `icon`.
- *
- * Confirmation Patterns:
- * - None: Simple confirm/cancel
- * - confirmText: Requires typing specific text (e.g., "DELETE")
- * - confirmCheckbox: Requires checking acknowledgment box
- *
- * @example Basic usage
- * <BaseDialog
- *   v-model="showDialog"
- *   type="warning"
- *   title="Switch Product?"
- *   message="This will change the active context."
- *   @confirm="handleSwitch"
- * />
- *
- * @example With text confirmation
- * <BaseDialog
- *   v-model="showDialog"
- *   type="danger"
- *   title="Delete Item?"
- *   confirm-text="DELETE"
- *   @confirm="handleDelete"
- * >
- *   <p>This action cannot be undone.</p>
- * </BaseDialog>
- */
 
 import { ref, computed, watch } from 'vue'
 
@@ -226,7 +178,6 @@ const maxWidth = computed(() => {
   return typeof props.size === 'number' ? props.size : sizeMap[props.size] || 500
 })
 
-// Type-based configuration: maps type to header variant + icon + color
 const typeConfig = computed(() => {
   const configs = {
     info: {
@@ -258,7 +209,6 @@ const typeConfig = computed(() => {
   return configs[props.type] || configs.info
 })
 
-// Header classes: base + optional variant band
 const headerClasses = computed(() => {
   const classes = ['dlg-header']
   if (typeConfig.value.headerVariant) {

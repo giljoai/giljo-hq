@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Protocol Builder - Compositor for orchestrator protocol chapters.
-
-Handover 0750e2: Extracted from orchestration_service.py.
-Handover 0950j: Section builders moved to protocol_sections/ subpackage.
-This module retains the compositor function and re-exports for backward compatibility.
-"""
 
 from __future__ import annotations
 
@@ -59,7 +52,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Re-export all section functions for backward compatibility
 __all__ = [
     "DEFAULT_DEPTH_CONFIG",
     "DEFAULT_FIELD_PRIORITIES",
@@ -100,43 +92,6 @@ def _build_orchestrator_protocol(
     preset: Platform | None = None,
     detected_harness: str | None = None,
 ) -> dict:
-    """
-    Build chapter-based orchestrator protocol.
-
-    Creates 5-6 navigable chapters with clear visual boundaries.
-    Solves the "rotation problem" where content gets buried.
-
-    Args:
-        cli_mode: True if execution_mode is any CLI subagent mode
-        project_id: Project UUID for parameter substitution
-        orchestrator_id: Job ID for parameter substitution
-        tenant_key: Tenant key for parameter substitution
-        include_implementation_reference: Include CH5 (default True)
-        field_toggles: Category toggles for inline fetch injection (Handover 0823)
-        depth_config: Depth settings per category (Handover 0823)
-        product_id: Product UUID for fetch calls (Handover 0823)
-        tool: Platform identifier for platform-specific spawning rules (Handover 0838)
-        auto_checkin_enabled: Retained for signature stability (FE-9296b) — no
-            longer gates CH6; the chapter renders for every non-CLI orchestrator.
-        auto_checkin_interval: First-cycle seed cadence in minutes. The caller
-            resolves it (project override -> tenant override -> account default);
-            the live value each cycle comes from get_workflow_status (FE-9296b).
-        conductor_agent_id: When set, the orchestrator is the conductor of a
-            sequential multi-project run (BE-6131c). BE-6215: the addressability +
-            user-directive-relay protocol it used to gate (CH_CONDUCTOR) is now folded
-            into CH_CHAIN_DRIVE, which derives conductor-ness from chain_ctx.role and
-            renders the relay inline; this param is retained for signature stability.
-            Omit for single-project orchestrators.
-        chain_ctx: BE-6165d -- resolved ChainContext from the sequence driver.
-            When non-None AND role=="conductor", injects CH_CAPABILITY (always),
-            CH_CHAIN_STAGING (staging phase) or CH_CHAIN_DRIVE (implementation
-            phase). chain_ctx=None → byte-identical solo render (Deletion Test
-            holds). Sub-orchestrators (role=="sub_orchestrator") also produce no
-            chain chapters.
-
-    Returns:
-        Dict with chapter keys and navigation_hint
-    """
     effective_tool = tool if cli_mode else "multi_terminal"
     ch1 = _build_ch1_mission(effective_tool)
     ch2 = _build_ch2_startup(
@@ -148,57 +103,25 @@ def _build_orchestrator_protocol(
         tenant_key=tenant_key,
         category_metadata=category_metadata,
     )
-    # BE-9013: thread the resolved harness preset so the generic_mcp CH3 block can
-    # tune its SELF-ADOPT fallback rung (chat harness → planning/PM jobs only). preset
-    # is None on every non-generic path → byte-identical render for the other tools.
     ch3 = _build_ch3_spawning_rules(effective_tool, preset=preset)
-    # BE-6008: orchestrator authority rule + mode-specific staging mechanics
-    # (multi_terminal: create all agents then write jobs; CLI: drain inbox at
-    # mission-write time). cli_mode already distinguishes the two flows.
     ch_authority = _build_ch_orchestrator_authority(cli_mode)
     ch4 = _build_ch4_error_handling()
-    # CE-0033 Task 7: omit ch5/ch6 entirely when not applicable instead of
-    # emitting empty strings. Empty string keys read as "WIP / forgotten" to
-    # the orchestrator; omitting them makes the response shape match the
-    # active flow.
     ch5 = (
         _build_ch5_reference(project_id, orchestrator_id, effective_tool, git_integration_enabled)
         if include_implementation_reference
         else None
     )
-    # FE-9296b: the auto_checkin_enabled gate is retired — CH6 renders for every
-    # non-CLI orchestrator (the flag now only influences the caller-resolved
-    # seed), matching the get_job_mission path. Phase-gated with CH5: the
-    # check-in loop only exists once agents are dispatched, and the staging
-    # response has a payload budget CH6 would breach for no benefit (the
-    # orchestrator refetches with the reference chapters at implementation).
     ch6 = (
         _build_ch6_auto_checkin(auto_checkin_interval) if (include_implementation_reference and not cli_mode) else None
     )
 
-    # BE-6215: CH_CONDUCTOR (addressability + directive relay) is FOLDED into
-    # CH_CHAIN_DRIVE — both were already phase-gated to the IMPLEMENTATION phase and
-    # only ever co-rendered, so the separate chapter was pure overhead. The drive
-    # chapter (built below, drive phase only) now renders the relay protocol inline
-    # from the conductor_agent_id + job_id it already receives.
 
-    # BE-6165d: chain chapters — only when this orchestrator is the conductor of a
-    # sequential multi-project run (chain_ctx non-None AND role=="conductor").
-    # chain_ctx=None (solo) or role=="sub_orchestrator" → no chain chapters rendered,
-    # preserving byte-identical solo output (Deletion Test holds; all CE).
     is_conductor_chain = chain_ctx is not None and chain_ctx.role == "conductor"
     ch_capability: str | None = None
     ch_chain_staging: str | None = None
     ch_chain_drive: str | None = None
     ch_sub_orchestrator: str | None = None
 
-    # BE-6187: a sub_orchestrator chain member (every project's own orchestrator
-    # after BE-6184) gets CH_SUB_ORCHESTRATOR — its chain position, the Hub thread
-    # discovery path (get_context(categories=["chain"]) -> hub_thread_id), and the
-    # close-out advance signal.
-    # Rendered for both staging and runtime; the runtime injector mirrors this for
-    # the chain-blind runtime mission path. Solo (chain_ctx=None) renders nothing
-    # (Deletion Test holds).
     if chain_ctx is not None and chain_ctx.role == "sub_orchestrator":
         order = chain_ctx.resolved_order or []
         if project_id in order:
@@ -207,21 +130,13 @@ def _build_orchestrator_protocol(
                 position=order.index(project_id) + 1,
                 n_projects=len(order),
                 execution_mode=chain_ctx.execution_mode,
-                chain_mission=chain_ctx.chain_mission,  # BE-6196: inline the live contract
+                chain_mission=chain_ctx.chain_mission,
             )
 
     if is_conductor_chain:
-        # BE-6177: drive the chain chapters off the RUN's execution_mode
-        # (claude_code_cli...), NOT effective_tool (claude-code). get_platform is
-        # keyed by execution_mode, so the tool form returned None → can_spawn
-        # defaulted wrong; and the chapters need the execution_mode to emit the
-        # correct stage_project short `mode` token.
         chain_mode = chain_ctx.execution_mode
         platform = get_platform(chain_mode)
         can_spawn = platform.can_spawn_terminals if platform is not None else True
-        # BE-8003f (D2 activation): a resolved harness ``preset`` (shell-less
-        # web_sandbox/desktop_app/chat) switches CH_CAPABILITY + CH_CHAIN_DRIVE to their
-        # inline-conducting ladder; preset=None keeps today's fresh-terminal bytes (D1).
         ch_capability = _build_ch_capability(
             execution_mode=chain_mode,
             can_spawn_terminals=can_spawn,
@@ -243,14 +158,12 @@ def _build_orchestrator_protocol(
                 conductor_agent_id=chain_ctx.conductor_agent_id,
                 job_id=orchestrator_id,
                 preset=preset,
-                detected_harness=detected_harness,  # BE-9092: narrow the multi_terminal spawn matrix
+                detected_harness=detected_harness,
             )
 
     chapters: dict[str, Any] = {}
-    # CH_CAPABILITY first — the "who am I" preamble before any other chain chapters.
     if ch_capability:
         chapters["ch_capability"] = ch_capability
-    # CH_CHAIN_STAGING above CH1 per spec.
     if ch_chain_staging:
         chapters["ch_chain_staging"] = ch_chain_staging
     if ch_sub_orchestrator:

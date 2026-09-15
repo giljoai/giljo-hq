@@ -1,14 +1,3 @@
-/**
- * CloseoutModal.chainReview.spec.js
- *
- * Tests the chain review confirm behaviour: when projectStatus='completed' (member
- * already closed by the conductor), the modal MUST skip api.projects.archive and
- * still emit 'closeout' so the parent can call markReviewed + advance.
- *
- * SOLO path (projectStatus != 'completed'): archive is still called — unchanged.
- *
- * Edition scope: CE.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -43,7 +32,6 @@ vi.mock('@/composables/useFormatDate', () => ({
   useFormatDate: () => ({ formatDateTime: (v) => String(v) }),
 }))
 
-// Import AFTER mocks
 import CloseoutModal from './CloseoutModal.vue'
 
 const globalConfig = {

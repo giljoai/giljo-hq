@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9035d -- harness CAPTURE at initialize + STAMP onto scope state, at the real transport.
-
-The render fallback (``_detected_harness`` -> ``_persisted_harness``) is only useful if two
-transport-layer halves actually work in the real stateless-HTTP path:
-
-  (2) CAPTURE -- a fresh claude-code ``initialize`` persists ``resolved_harness='claude-code'``
-      into ``MCPSession.session_data`` (load-bearing: DB evidence had shown a claude-code row
-      reading 'generic', so this proves the real streamable-HTTP connect stamps correctly),
-      and a subsequent no-clientInfo tools/call PRESERVES it.
-  (1a) STAMP -- on a non-initialize tools/call ``_stamp_resolved_harness`` surfaces the
-      persisted token onto ``scope['state']['resolved_harness']`` so the tool render can read
-      it after ``stateless_http`` has dropped the live ``client_params``.
-
-Both are exercised end-to-end by driving real JSON-RPC payloads through ``MCPAuthMiddleware``
-(the same boundary a real MCP client hits) -- NOT a unit test of an inner helper. Reuses the
-seed + middleware drivers from ``tests/api/test_mcp_session.py``. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -53,7 +36,6 @@ async def _read_session_data(db_manager, tenant_key: str, session_id: str) -> di
 
 
 class _StateCapturingApp:
-    """Inner ASGI app that records what the middleware stamped onto ``scope['state']``."""
 
     def __init__(self) -> None:
         self.called = False
@@ -107,13 +89,9 @@ async def _tools_call(db_manager, raw_key: str, session_id: str) -> _StateCaptur
     return inner
 
 
-# ---------------------------------------------------------------------------
-# (2) CAPTURE — the real initialize persists resolved_harness
-# ---------------------------------------------------------------------------
 
 
 async def test_initialize_persists_resolved_harness_for_claude_code(db_manager, jwt_env):
-    """A fresh claude-code initialize stamps session_data['resolved_harness']='claude-code'."""
     from api.app_state import state
 
     raw_key, tenant_key = await _seed_api_key(db_manager)
@@ -128,7 +106,6 @@ async def test_initialize_persists_resolved_harness_for_claude_code(db_manager, 
 
 
 async def test_unrecognized_client_persists_generic(db_manager, jwt_env):
-    """An unrecognized clientInfo name resolves to the generic floor (never a guessed token)."""
     from api.app_state import state
 
     raw_key, tenant_key = await _seed_api_key(db_manager)
@@ -143,7 +120,6 @@ async def test_unrecognized_client_persists_generic(db_manager, jwt_env):
 
 
 async def test_tools_call_preserves_persisted_resolved_harness(db_manager, jwt_env):
-    """A no-clientInfo tools/call after a claude-code initialize preserves the stamped token."""
     from api.app_state import state
 
     raw_key, tenant_key = await _seed_api_key(db_manager)
@@ -158,14 +134,9 @@ async def test_tools_call_preserves_persisted_resolved_harness(db_manager, jwt_e
         state.db_manager = prior_db
 
 
-# ---------------------------------------------------------------------------
-# (1a) STAMP — the tools/call surfaces the persisted harness onto scope state
-# ---------------------------------------------------------------------------
 
 
 async def test_tools_call_stamps_claude_code_onto_scope_state(db_manager, jwt_env):
-    """The stateless-drop recovery vehicle: a non-initialize tools/call stamps the persisted
-    claude-code token onto scope['state']['resolved_harness'] for the tool render to read."""
     from api.app_state import state
 
     raw_key, _tenant_key = await _seed_api_key(db_manager)
@@ -183,8 +154,6 @@ async def test_tools_call_stamps_claude_code_onto_scope_state(db_manager, jwt_en
 
 
 async def test_tools_call_does_not_stamp_generic(db_manager, jwt_env):
-    """A generic session leaves scope state UNSTAMPED so the declared CLI hint still governs
-    (only a concrete detected harness is surfaced)."""
     from api.app_state import state
 
     raw_key, _tenant_key = await _seed_api_key(db_manager)
@@ -199,17 +168,9 @@ async def test_tools_call_does_not_stamp_generic(db_manager, jwt_env):
         state.db_manager = prior_db
 
 
-# ---------------------------------------------------------------------------
-# BE-9327 — the PRESET axis rides the same two halves, and must be proven on the
-# same real-transport seam. The unit tests cover the capture function and the
-# stamp function in isolation; only this proves the middleware actually CALLS the
-# stamp, which is precisely the "green units, dead seam" gap that left the preset
-# key unproduced for the whole of BE-8003g's life.
-# ---------------------------------------------------------------------------
 
 
 async def test_initialize_persists_resolved_preset_for_hosted_chat_client(db_manager, jwt_env):
-    """A real openai-mcp initialize persists session_data['resolved_preset']='chat'."""
     from api.app_state import state
 
     raw_key, tenant_key = await _seed_api_key(db_manager)
@@ -225,12 +186,6 @@ async def test_initialize_persists_resolved_preset_for_hosted_chat_client(db_man
 
 
 async def test_tools_call_stamps_resolved_preset_onto_scope_state(db_manager, jwt_env):
-    """THE SEAM: a non-initialize tools/call surfaces the persisted preset onto scope state.
-
-    ``giljo_setup`` is always a tools/call, and ``stateless_http`` has dropped the
-    live clientInfo by then, so this stamp is the ONLY way the inline branch can see
-    that the session has no filesystem.
-    """
     from api.app_state import state
 
     raw_key, _tenant_key = await _seed_api_key(db_manager)
@@ -248,7 +203,6 @@ async def test_tools_call_stamps_resolved_preset_onto_scope_state(db_manager, jw
 
 
 async def test_tools_call_does_not_stamp_a_preset_for_a_terminal_cli(db_manager, jwt_env):
-    """A claude-code session has a real home directory — nothing to stamp, nothing changes."""
     from api.app_state import state
 
     raw_key, _tenant_key = await _seed_api_key(db_manager)

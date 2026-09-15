@@ -1,6 +1,5 @@
 <template>
   <div class="mem-row" :class="{ 'mem-row--open': expanded }" :data-test="`memory-row-${entry.id}`">
-    <!-- Clickable header -->
     <div
       class="mem-row-head"
       role="button"
@@ -24,9 +23,6 @@
         </div>
       </div>
 
-      <!-- Entry-type: canonical square tinted badge (8px / 0.15 via
-           getAgentBadgeStyle). Tags: canonical tinted pill chips (0.15).
-           Colors come from the agent palette (getAgentColor), no hex literals. -->
       <div class="mem-row-tags">
         <span
           v-if="entry.entry_type"
@@ -47,12 +43,7 @@
       </div>
     </div>
 
-    <!-- Expand-on-click body: full summary as sanitized markdown + structured lists -->
     <div v-if="expanded" class="mem-row-body" :data-test="`memory-body-${entry.id}`">
-      <!-- SEC-0003: renderedSummary is produced by useSanitizeMarkdown (marked +
-           hardened DOMPurify) in the parent view before it reaches this prop, so
-           the bound HTML is already sanitized. v-html sanctioned via
-           eslint.config.js file override (plugin-vue v9.20 ignores inline directives). -->
       <div class="mem-markdown" v-html="renderedSummary"></div>
 
       <div v-if="(entry.key_outcomes || []).length" class="mem-section">
@@ -88,11 +79,6 @@ import { hexToRgba, getAgentBadgeStyle } from '@/utils/colorUtils'
 import { getAgentColor } from '@/config/agentColors'
 import { commitTitle } from '@/utils/gitCommitDisplay'
 
-// BE-9256: the sha (when present) is already shown via the separate .mem-sha
-// prefix span, so the trailing text only needs the shared floor (short sha)
-// for the rare "no sha at all" combination — otherwise it would duplicate
-// the sha that's already visible in the prefix. commitTitle() is the single
-// source of truth for the fallback rule shared with the other 3 surfaces.
 function commitTrailingText(commit) {
   if (commit.message) return commit.message
   return commit.sha ? '' : commitTitle(commit)
@@ -118,9 +104,6 @@ const formattedDate = computed(() => {
   return d.toLocaleDateString('en-US', { dateStyle: 'medium' })
 })
 
-// ── Entry-type badge: map each type to a stable agent-palette role, then render
-// via the canonical tinted square badge (getAgentBadgeStyle → rgba(hex,0.15) bg +
-// bright text + 8px radius). Mirrors the Projects serial/status badge geometry. ──
 const typeRoleMap = {
   project_completion: 'documenter',
   project_closeout: 'implementer',
@@ -140,9 +123,6 @@ function typeLabel(entryType) {
   return entryType ? entryType.replace(/_/g, ' ') : ''
 }
 
-// ── Tag chips: colored by category. Known categories map to a stable agent
-// color; unknown tags hash deterministically onto the same palette so the
-// same tag always renders the same color (no hardcoded hex). ──
 const tagCategoryMap = {
   security: 'reviewer',
   'bug-fix': 'analyzer',
@@ -162,13 +142,10 @@ const tagCategoryMap = {
 }
 const PALETTE = ['orchestrator', 'analyzer', 'implementer', 'documenter', 'reviewer', 'tester']
 
-// Canonical tinted pill chip: rgba(hex, 0.15) bg + bright text (§3). Pill radius
-// applied in CSS via $border-radius-pill.
 function tagChipStyle(tag) {
   const key = String(tag).toLowerCase()
   let role = tagCategoryMap[key]
   if (!role) {
-    // Deterministic hash → palette index (stable per tag, no hex literals).
     let h = 0
     for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0
     role = PALETTE[h % PALETTE.length]

@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-5065 + BE-6049c: Task series_number auto-assignment in create_task_for_mcp.
-
-Every task created via the MCP surface is force-assigned the reserved ``TSK``
-tag (BE-6049c — task_type is decoupled from the project taxonomy and ignored)
-and a monotonically-increasing ``series_number`` drawn from the SHARED global
-task+project counter for the (tenant_key, product_id) bucket (BE-6049b). The
-``taxonomy_alias`` column_property then materializes as ``TSK-NNNN``.
-"""
 
 from uuid import uuid4
 
@@ -65,12 +57,10 @@ class TestTaskSeriesAssignment:
         active_product: Product,
         be_taxonomy: TaxonomyType,
     ):
-        """BE-6049c: tasks are TSK-only — a supplied task_type is ignored and the
-        task is force-assigned TSK + a global serial (TSK-0001)."""
         result = await task_service.create_task_for_mcp(
             title="First task",
             description="should receive series 1",
-            task_type="BE",  # ignored
+            task_type="BE",
             tenant_key=test_tenant_key,
         )
 
@@ -78,7 +68,7 @@ class TestTaskSeriesAssignment:
         assert result["task_type"] == "TSK"
         task = (await db_session.execute(select(Task).where(Task.id == result["task_id"]))).scalar_one()
         assert task.task_type_id is not None
-        assert task.task_type_id != be_taxonomy.id  # NOT the supplied BE type
+        assert task.task_type_id != be_taxonomy.id
         assert task.series_number == 1
         assert task.taxonomy_alias == "TSK-0001"
         assert result["taxonomy_alias"] == "TSK-0001"
@@ -91,8 +81,6 @@ class TestTaskSeriesAssignment:
         test_tenant_key: str,
         active_product: Product,
     ):
-        """BE-6049c: omitting task_type still yields a TSK task with a serial —
-        the create-task MCP path no longer mints untyped (NULL) tasks."""
         result = await task_service.create_task_for_mcp(
             title="Untyped task",
             description="no task_type supplied",

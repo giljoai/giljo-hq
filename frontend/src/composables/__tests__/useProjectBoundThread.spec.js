@@ -1,15 +1,3 @@
-/**
- * useProjectBoundThread.spec.js — BE-9012d Phase 5 / D1(a)
- *
- * The bound-thread resolution must be DETERMINISTIC (step (d) canonicalizes one
- * bound thread per project via the ce_0072 fold; the FE mirrors that precedence).
- * These tests pin the read-only, no-create resolver `resolveExistingProjectThread`:
- *   0 candidates -> null (and NEVER creates a thread as a side effect)
- *   1 candidate  -> that one
- *   several      -> the `(project comms)`-marker thread, else the OLDEST by created_at
- *
- * Edition scope: CE
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
@@ -24,8 +12,6 @@ describe('useProjectBoundThread.resolveExistingProjectThread (deterministic, no-
   beforeEach(() => {
     setActivePinia(createPinia())
     store = useCommHubStore()
-    // loadThreads() is a network fetch; stub it to a no-op so the threads we seed
-    // directly via _testSeedThread are what the resolver reads.
     vi.spyOn(store, 'loadThreads').mockResolvedValue(undefined)
     vi.spyOn(store, 'createThread').mockResolvedValue(undefined)
   })

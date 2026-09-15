@@ -3,40 +3,22 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Claude Code CLI execution prompt builder.
-
-Extracted from ThinClientPromptGenerator (Handover 0950g).
-Refactored to inherit from ExecutionPromptBuilderBase (quality-sprint-002e).
-"""
 
 from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
 from giljo_mcp.prompts.execution_prompt_base import ExecutionPromptBuilderBase
 
 
-# BE-9275b: single module-level constant derived from MCP_ALIAS, reused across
-# the many f-strings below instead of a fresh hardcoded tool-prefix literal.
 _PREFIX = f"mcp__{MCP_ALIAS}__"
 
 
 class ClaudePromptBuilder(ExecutionPromptBuilderBase):
-    """Builds Claude Code CLI execution prompts for the implementation phase."""
 
     @property
     def platform_name(self) -> str:
         return "Claude Code CLI Mode"
 
     def _build_context_recap(self, orchestrator_id: str, project, agent_jobs: list) -> list[str]:
-        """Claude Code variant prepends a ToolSearch bootstrap step.
-
-        CE-0033 Task 5: Claude Code defers MCP tool schemas behind ToolSearch.
-        Without this step, the orchestrator pays multi-round-trip bootstrap
-        cost loading each tool schema piecemeal mid-protocol. One ToolSearch
-        call with the canonical orchestrator tool list collapses that to a
-        single round-trip — and it has to fire BEFORE health_check, so the
-        hint must live in the spawn prompt, not in get_staging_instructions
-        (which is unreachable until ToolSearch loads its schema).
-        """
         base = super()._build_context_recap(orchestrator_id, project, agent_jobs)
         bootstrap = [
             "## STEP 0: TOOLSEARCH BOOTSTRAP (Claude Code only — first action)",
@@ -56,8 +38,6 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
             "---",
             "",
         ]
-        # Insert bootstrap immediately after the header (first 3 lines: title, blank, "## Who You Are" etc.)
-        # The header is line 0; we splice bootstrap between header and "## Who You Are" so it reads as Step 0.
         header_end = 0
         for idx, line in enumerate(base):
             if line.startswith("## Who You Are"):
@@ -66,7 +46,6 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
         return base[:header_end] + bootstrap + base[header_end:]
 
     def _build_execution_plan_details(self) -> list[str]:
-        """Claude includes extra detail about what the plan contains."""
         return [
             "This returns your plan with:",
             "- Agent execution order (sequential/parallel/hybrid)",
@@ -103,7 +82,6 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
         ]
 
     def _build_spawning_section(self, agent_jobs: list) -> list[str]:
-        """Build Task tool spawning template section."""
         lines = [
             "## How to Spawn Agents via Task Tool",
             "",
@@ -165,11 +143,9 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
         return lines
 
     def _build_extra_sections(self, orchestrator_id: str, project, agent_jobs: list) -> list[list[str]]:
-        """Claude has CLI constraints section."""
         return [self._build_cli_constraints_section()]
 
     def _build_cli_constraints_section(self) -> list[str]:
-        """Build the CLI mode constraints section (Claude-only)."""
         return [
             "## CLI Mode Constraints",
             "",
@@ -193,7 +169,6 @@ class ClaudePromptBuilder(ExecutionPromptBuilderBase):
     def _build_completion_section(
         self, orchestrator_id: str, project, agent_jobs: list, git_enabled: bool
     ) -> list[str]:
-        """Build extended completion section with CLOSEOUT_BLOCKED recovery (Claude-specific)."""
         git_closeout_lines = self._build_git_closeout_lines(project, git_enabled)
 
         return [

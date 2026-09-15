@@ -3,35 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9152 -- the admin Settings cookie-domain whitelist must actually drive
-cookie-scoping enforcement.
-
-Bug (BE-6263b audit finding #2): the admin Settings UI writes
-``cookie_domain_whitelist`` to the DB-backed tenant settings store
-(``SettingsService`` -> ``Settings.settings_data['security']``), but the
-enforcement in ``api/endpoints/auth/session.py`` (``_build_cookie_params``, run by
-login/logout/refresh) read a *separate* file-based ``config.yaml`` store that was
-never synced. A self-hoster who whitelisted a domain via the panel saw success on
-the GET round-trip, but the value never reached ``_build_cookie_params`` -- so
-cross-domain cookie auth silently did nothing.
-
-Failing layer = the session auth endpoints. This test drives the real HTTP
-``/api/auth/refresh`` endpoint (the simplest of the three cookie-setting seams: it
-sources ``tenant_key`` from the signed JWT and mints a fresh access_token cookie
-via the same ``_build_cookie_params`` path as login). Before the fix, a domain in
-the DB store has NO effect on the Set-Cookie ``Domain`` attribute; after the fix,
-the DB-store domain is honored.
-
-Two-sided:
-- honored: a domain written to the DB store IS applied as the cookie Domain.
-- default unchanged: with an untouched panel (empty DB store), a domain-name host
-  still gets NO cookie Domain (fail-secure origin-matching), exactly as before.
-
-Parallel-safe: each test seeds its own unique tenant + org + user; no
-module-level mutable state; ``db_manager`` sessions are the test-scoped DB.
-
-Project: BE-9152.
-"""
 
 from __future__ import annotations
 
@@ -52,7 +23,6 @@ _WHITELISTED_HOST = "myapp.example.com"
 
 
 async def _seed_user(db_manager) -> dict:
-    """Create a fresh active user (+ org) in a unique tenant. Returns ids + valid token."""
     suffix = uuid.uuid4().hex[:8]
     tenant_key = TenantManager.generate_tenant_key()
     password_hash = bcrypt.hashpw(b"test_password", bcrypt.gensalt()).decode("utf-8")
@@ -89,14 +59,12 @@ async def _seed_user(db_manager) -> dict:
 
 
 async def _write_whitelist(db_manager, tenant_key: str, domains: list[str]) -> None:
-    """Write the cookie-domain whitelist through the SAME store the admin UI writes."""
     async with db_manager.get_session_async() as session:
         service = SettingsService(session, tenant_key)
         await service.update_settings("security", {"cookie_domain_whitelist": domains})
 
 
 def _domain_in_set_cookie(set_cookie: str) -> str | None:
-    """Extract the Domain attribute value from a Set-Cookie header, or None."""
     for part in set_cookie.split(";"):
         key, _, value = part.strip().partition("=")
         if key.lower() == "domain":
@@ -106,11 +74,6 @@ def _domain_in_set_cookie(set_cookie: str) -> str | None:
 
 @pytest.mark.asyncio
 async def test_db_whitelisted_domain_is_honored_by_enforcement(api_client, db_manager) -> None:
-    """A domain written via the admin Settings store IS applied as the cookie Domain.
-
-    RED before the fix: enforcement read only the file-based config, so the
-    DB-written domain never reached ``_build_cookie_params`` and no Domain was set.
-    """
     seeded = await _seed_user(db_manager)
     await _write_whitelist(db_manager, seeded["tenant_key"], [_WHITELISTED_HOST])
 
@@ -127,9 +90,7 @@ async def test_db_whitelisted_domain_is_honored_by_enforcement(api_client, db_ma
 
 @pytest.mark.asyncio
 async def test_untouched_panel_leaves_default_behavior_unchanged(api_client, db_manager) -> None:
-    """With an empty (never-touched) whitelist store, a domain-name host still gets
-    NO cookie Domain -- fail-secure origin-matching, exactly as before the fix."""
-    seeded = await _seed_user(db_manager)  # no whitelist written
+    seeded = await _seed_user(db_manager)
 
     api_client.cookies.set("access_token", seeded["token"])
     resp = await api_client.post(_REFRESH_URL, headers={"host": _WHITELISTED_HOST})

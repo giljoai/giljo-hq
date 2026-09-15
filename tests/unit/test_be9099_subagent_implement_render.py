@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9099 — subagent election must NOT render the multi-terminal seed at Implement.
-
-Regression coverage for the BE-9035c regression: a project with the canonical UI
-election ``execution_mode='subagent'`` received the multi_terminal orchestrator prompt
-(``## PER-SESSION AGENT SEED`` / ``Open a NEW SESSION``) for EVERY harness, because
-implement() resolved ``subagent -> generic`` and ``_TOOL_TYPE_TO_PROMPT_TYPE`` had no
-``generic`` key, so ``.get()`` fell through to ``multi_terminal_orchestrator``.
-
-Tested at the failing layer:
-  (a) prompt-type SELECTION — the pure resolver ``select_implementation_prompt_type``
-      (the exact expression implement() uses) across every harness case;
-  (b) the static maps (``_TOOL_TYPE_TO_PROMPT_TYPE`` / ``_IMPLEMENTATION_PROMPT_TYPE_MAP``);
-  (c) rendered CONTENT — for ``subagent`` the output NEVER contains the multi_terminal
-      seed for ANY harness, and multi_terminal renders are byte-identical regardless of
-      the detected harness (no behavior change for multi_terminal-elected projects).
-
-Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -32,10 +14,8 @@ import pytest
 from giljo_mcp.platform_registry import (
     GENERIC_HARNESS,
     GENERIC_SUBAGENT_SPAWN_SYNTAX,
-    HARNESS_ANTIGRAVITY,
     HARNESS_CLAUDE_CODE,
     HARNESS_CODEX,
-    HARNESS_GEMINI,
     HARNESS_OPENCODE,
     get_harness,
 )
@@ -48,18 +28,14 @@ from giljo_mcp.thin_prompt_lifecycle import (
 )
 
 
-# The multi_terminal per-session seed strings that must NEVER appear in a subagent render.
 _MULTI_TERMINAL_SEED_MARKERS = ("PER-SESSION AGENT SEED", "Open a NEW SESSION")
 
-# Every harness a session can resolve to, plus the undetected floor (None).
 _ALL_HARNESS_CASES = [
     HARNESS_CLAUDE_CODE,
     HARNESS_CODEX,
-    HARNESS_GEMINI,
-    HARNESS_ANTIGRAVITY,
     HARNESS_OPENCODE,
     GENERIC_HARNESS,
-    None,  # undetected clientInfo -> generic floor
+    None,
 ]
 
 
@@ -87,8 +63,6 @@ def _mock_agent_jobs(n: int = 1) -> list:
 
 
 def _render(execution_mode: str, detected_harness: str | None) -> str:
-    """Render exactly as implement() does: resolve prompt_type + resolved_harness via
-    the production selector, then render through the production engine (no re-impl)."""
     prompt_type, resolved_harness = select_implementation_prompt_type(execution_mode, detected_harness)
     gen = ThinClientPromptGenerator(db=MagicMock(), tenant_key="tenant-test")
     return gen.generate_implementation_prompt(
@@ -101,9 +75,6 @@ def _render(execution_mode: str, detected_harness: str | None) -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# (a) prompt-type SELECTION — the pure resolver implement() uses
-# ---------------------------------------------------------------------------
 
 
 class TestSelectImplementationPromptType:
@@ -112,8 +83,6 @@ class TestSelectImplementationPromptType:
         [
             (HARNESS_CLAUDE_CODE, "claude_code_execution", HARNESS_CLAUDE_CODE),
             (HARNESS_CODEX, "codex_execution", HARNESS_CODEX),
-            (HARNESS_GEMINI, "gemini_execution", HARNESS_GEMINI),
-            (HARNESS_ANTIGRAVITY, "gemini_execution", HARNESS_ANTIGRAVITY),
             (HARNESS_OPENCODE, SUBAGENT_EXECUTION_PROMPT_TYPE, HARNESS_OPENCODE),
             (GENERIC_HARNESS, SUBAGENT_EXECUTION_PROMPT_TYPE, GENERIC_HARNESS),
             (None, SUBAGENT_EXECUTION_PROMPT_TYPE, GENERIC_HARNESS),
@@ -126,39 +95,31 @@ class TestSelectImplementationPromptType:
 
     @pytest.mark.parametrize("detected", _ALL_HARNESS_CASES)
     def test_multi_terminal_is_mode_fixed_and_harness_agnostic(self, detected):
-        # The hard byte-parity contract: multi_terminal ALWAYS resolves to the
-        # multi_terminal builder with no harness, regardless of what is detected.
         prompt_type, resolved = select_implementation_prompt_type("multi_terminal", detected)
         assert prompt_type == "multi_terminal_orchestrator"
         assert resolved is None
 
     @pytest.mark.parametrize("detected", _ALL_HARNESS_CASES)
     def test_multi_terminal_orchestrator_unreachable_from_subagent(self, detected):
-        # The core BE-9099 invariant.
         prompt_type, _ = select_implementation_prompt_type("subagent", detected)
         assert prompt_type != "multi_terminal_orchestrator"
 
     @pytest.mark.parametrize(
         ("legacy_mode", "expected_prompt_type"),
         [
-            ("generic_mcp", SUBAGENT_EXECUTION_PROMPT_TYPE),  # BE-9099: neutral, never multi_terminal
-            ("claude_code_cli", "claude_code_execution"),  # legacy hint honored (byte-parity)
+            ("generic_mcp", SUBAGENT_EXECUTION_PROMPT_TYPE),
+            ("claude_code_cli", "claude_code_execution"),
             ("codex_cli", "codex_execution"),
-            ("gemini_cli", "gemini_execution"),
-            ("antigravity_cli", "gemini_execution"),
+            ("gemini_cli", SUBAGENT_EXECUTION_PROMPT_TYPE),
+            ("antigravity_cli", SUBAGENT_EXECUTION_PROMPT_TYPE),
         ],
     )
     def test_legacy_declared_modes_undetected(self, legacy_mode, expected_prompt_type):
-        # No session detection -> the declared legacy token supplies its historical
-        # harness hint; generic_mcp floors to the harness-neutral subagent builder.
         prompt_type, _ = select_implementation_prompt_type(legacy_mode, None)
         assert prompt_type == expected_prompt_type
         assert prompt_type != "multi_terminal_orchestrator"
 
 
-# ---------------------------------------------------------------------------
-# (b) the static maps
-# ---------------------------------------------------------------------------
 
 
 class TestPromptTypeMaps:
@@ -171,7 +132,6 @@ class TestPromptTypeMaps:
         assert multi_terminal_keys == ["multi_terminal"]
 
     def test_canonical_subagent_mode_is_covered_and_neutral(self):
-        # The mode the live bug shipped on — previously fell through to the seed.
         assert _IMPLEMENTATION_PROMPT_TYPE_MAP["subagent"] == SUBAGENT_EXECUTION_PROMPT_TYPE
 
     def test_no_subagent_family_mode_maps_to_multi_terminal(self):
@@ -181,9 +141,6 @@ class TestPromptTypeMaps:
             assert _IMPLEMENTATION_PROMPT_TYPE_MAP[mode] != "multi_terminal_orchestrator", mode
 
 
-# ---------------------------------------------------------------------------
-# (c) rendered CONTENT — the hard invariant across every harness
-# ---------------------------------------------------------------------------
 
 
 class TestRenderedSubagentContent:
@@ -192,17 +149,14 @@ class TestRenderedSubagentContent:
         prompt = _render("subagent", detected)
         for marker in _MULTI_TERMINAL_SEED_MARKERS:
             assert marker not in prompt, f"harness={detected!r} leaked multi_terminal seed marker {marker!r}"
-        # sanity: it is still a real orchestrator implementation prompt
         assert "get_job_mission" in prompt
 
     def test_neutral_builder_renders_registry_generic_spawn_prose(self):
-        # generic / undetected -> the universal registry prose (single source of truth).
         prompt = _render("subagent", None)
         assert GENERIC_SUBAGENT_SPAWN_SYNTAX in prompt
         assert "Subagent Mode" in prompt
 
     def test_neutral_builder_renders_opencode_registry_spawn_syntax(self):
-        # opencode -> its own registry Harness.spawn_syntax (not hand-written prose).
         opencode = get_harness(HARNESS_OPENCODE)
         assert opencode is not None
         prompt = _render("subagent", HARNESS_OPENCODE)
@@ -211,15 +165,11 @@ class TestRenderedSubagentContent:
             assert marker not in prompt
 
 
-# ---------------------------------------------------------------------------
-# (d) multi_terminal byte-parity — no behavior change for multi_terminal projects
-# ---------------------------------------------------------------------------
 
 
 class TestMultiTerminalByteParity:
     @pytest.mark.parametrize("detected", _ALL_HARNESS_CASES)
     def test_multi_terminal_render_is_identical_regardless_of_harness(self, detected):
-        # Fixed project/agents so any drift is attributable to the harness input alone.
         project = _mock_project()
         agents = _mock_agent_jobs(2)
         orch_id = str(uuid4())
@@ -239,6 +189,5 @@ class TestMultiTerminalByteParity:
         assert render(detected) == render(None)
 
     def test_multi_terminal_still_carries_the_per_session_seed(self):
-        # The multi_terminal builder itself is unchanged — it MUST still emit the seed.
         prompt = _render("multi_terminal", None)
         assert "PER-SESSION AGENT SEED" in prompt

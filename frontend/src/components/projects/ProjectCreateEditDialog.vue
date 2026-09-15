@@ -10,7 +10,6 @@
       </div>
 
       <v-card-text>
-        <!-- Save Error Alert (Handover 0440d) -->
         <v-alert
           v-if="saveError"
           type="error"
@@ -23,7 +22,6 @@
           {{ saveError }}
         </v-alert>
 
-        <!-- Success Alert -->
         <v-alert
           v-if="createdProjectId"
           type="success"
@@ -39,7 +37,6 @@
           </div>
         </v-alert>
 
-        <!-- Project metadata (plain text, no alert box) -->
         <div v-if="editingProject" class="text-body-small text-muted-a11y mb-4">
           <div>Project ID: <span class="font-mono">{{ editingProject.id }}</span></div>
           <div>
@@ -49,11 +46,8 @@
           </div>
         </div>
 
-        <!-- Form -->
         <v-form ref="projectFormRef" v-model="formValid">
-          <!-- Taxonomy Row: Type | Serial # | Suffix (Handover 0440c) -->
           <v-row density="comfortable" class="mb-1 align-start">
-            <!-- Type Dropdown -->
             <v-col cols="5">
               <v-select
                 v-model="localData.project_type_id"
@@ -89,7 +83,6 @@
               </v-select>
             </v-col>
 
-            <!-- Serial Number Text Input -->
             <v-col cols="4">
               <v-text-field
                 v-model="seriesNumberInput"
@@ -112,7 +105,6 @@
               </v-text-field>
             </v-col>
 
-            <!-- Suffix Dropdown (only shows available letters) -->
             <v-col cols="3">
               <v-select
                 v-model="localData.subseries"
@@ -131,7 +123,6 @@
             </v-col>
           </v-row>
 
-          <!-- Project Name -->
           <v-text-field
             v-model="localData.name"
             label="Project Name"
@@ -196,7 +187,6 @@
           </v-textarea>
         </v-form>
 
-        <!-- Add Type Modal (Handover 0440c) -->
         <AddTypeModal v-model="showAddTypeModal" @type-created="handleTypeCreated" />
       </v-card-text>
 
@@ -210,7 +200,6 @@
     </v-card>
   </v-dialog>
 
-  <!-- Mission Viewer Dialog -->
   <v-dialog v-model="showMissionDialog" max-width="800" persistent retain-focus scrollable>
     <v-card v-draggable class="smooth-border">
       <div class="dlg-header">
@@ -293,14 +282,8 @@ const localData = ref({
 
 const projectTypesRef = computed(() => props.projectTypes)
 const editingProjectRef = computed(() => props.editingProject)
-// FE-9502c: scope series-number lookups to the caller-supplied product (the
-// viewed tab, per ProjectsView.vue), not whichever product happens to be
-// server-active.
 const productIdRef = computed(() => props.activeProduct?.id || null)
 
-// The Description hint persists only while the field has content. When the field
-// is empty — the only state where the "Description is required" error fires — the
-// hint stops persisting so it can't overlap the error text in the details row.
 const descriptionHintPersistent = computed(() => !!localData.value.description)
 
 const {
@@ -376,7 +359,6 @@ watch(
   },
 )
 
-// Expose clearMission so parent can call it after confirming the clear-mission dialog
 function clearMissionData() {
   localData.value.mission = ''
 }
@@ -405,12 +387,6 @@ function cancel() {
 }
 
 async function save() {
-  // Validate ON CLICK rather than silently disabling the button. A disabled
-  // "Create" gave the user NO feedback about what was wrong: Vuetify only shows
-  // a required-field error once the field is touched, so an untouched-but-empty
-  // Description left Create greyed out with zero indication why (perf-findings
-  // 2026-06-11 UX bug — same felt-failure class as task-create). validate()
-  // surfaces "Description is required" on the field so the blocker is visible.
   const { valid } = await projectFormRef.value.validate()
   if (!valid) return
 

@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6181 — SequenceChainContextResolver.resolve determinism on write failure.
-
-Regression at the FAILING layer. The alpha observed: the FIRST get_job_mission of
-a fresh impl session returned the generic SOLO protocol (no CH_CHAIN_DRIVE); a
-second read moments later (same job) carried the chain chapters. Root cause: the
-conductor self-registration WRITE inside resolve() can transiently fail/conflict
-on the first concurrent touch; conductor_chain_injector wraps the WHOLE resolve in
-try/except and falls back to SOLO on ANY error -> read #1 misses.
-
-Fix: the self-registration write is non-fatal to CLASSIFICATION. The conductor
-role is decided deterministically from resolved_order[0] BEFORE the write, so a
-write failure must NOT propagate — resolve() STILL returns role="conductor", and
-the injector injects CH_CHAIN_DRIVE on read #1.
-
-DB-touching: db_session fixture (TransactionalTestContext). Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -41,11 +25,8 @@ pytestmark = pytest.mark.asyncio
 
 
 async def _seed_head_run(session: AsyncSession, tenant: str) -> tuple[str, str]:
-    """Seed a head project + an active run with conductor_agent_id NULL (first touch)."""
     head_pid = str(uuid.uuid4())
     p2 = str(uuid.uuid4())
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant,
@@ -92,7 +73,6 @@ async def test_resolve_returns_conductor_when_self_registration_write_fails(
     db_session: AsyncSession,
     monkeypatch,
 ) -> None:
-    """A transient self-registration write failure does NOT demote resolve() to solo."""
     tenant = TenantManager.generate_tenant_key()
     head_pid, _run_id = await _seed_head_run(db_session, tenant)
 
@@ -102,8 +82,6 @@ async def test_resolve_returns_conductor_when_self_registration_write_fails(
         test_session=db_session,
     )
 
-    # Force the self-registration WRITE to blow up (the transient conflict the
-    # alpha hit). Only the write is patched; classification is upstream.
     from giljo_mcp.services.sequence_run_service import SequenceRunService
 
     async def _boom(*_args, **_kwargs):
@@ -127,8 +105,6 @@ async def test_injector_yields_chain_drive_on_first_read_despite_write_failure(
     db_session: AsyncSession,
     monkeypatch,
 ) -> None:
-    """End-to-end: the injector still appends CH_CHAIN_DRIVE on read #1 when the
-    self-registration write fails (the determinism the alpha needed)."""
     tenant = TenantManager.generate_tenant_key()
     head_pid, _run_id = await _seed_head_run(db_session, tenant)
 

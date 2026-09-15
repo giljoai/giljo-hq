@@ -1,27 +1,3 @@
-/**
- * useChainContext — FE-6174b
- *
- * The conditional multi-project layer's data source for the `/jobs` views.
- * HARVESTED from useChainCockpit (MissionControlView's data orchestration): the
- * "filter a sequence run to its <=5 projects, one active at a time" logic, lifted
- * into a new home so the `/jobs` staging + implementation variant can consume it
- * WITHOUT depending on the Mission Control surface (retired in FE-6174c).
- *
- * Reads `?run=<id>` from the route:
- *   - absent  -> `chainCtx` is null; the `/jobs` views render the BYTE-IDENTICAL
- *                solo path (the deletion test).
- *   - present -> loads the durable run record + its ordered projects and derives
- *                the tab-strip / N-M counter / conductor / per-project-status state
- *                the conditional layer needs.
- *
- * Reuse-only: consumes the existing sequenceRunStore (BE-6131a run record) +
- * api.projects + projectStateStore (live WS mission). NO new endpoint / store /
- * schema. Read-only over the run (writes flow through sequenceRunStore /
- * useChainLifecycle from the host), and it stays in sync with the store's open
- * run so WS `sequence:updated` advances the counter + tab states live.
- *
- * Edition scope: CE.
- */
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useSequenceRunStore } from '@/stores/sequenceRunStore'
@@ -31,21 +7,8 @@ import { useProjectStore } from '@/stores/projects'
 import { useAgentJobs } from '@/composables/useAgentJobs'
 import { registerReconnectResync } from '@/stores/websocketEventRouter'
 
-/**
- * Statuses that indicate a project's sub-orchestrator is actively running.
- * Only 'implementing' is written by the backend today; the synonyms guard against
- * a future rename without requiring a simultaneous FE change.
- */
 const WORKING_STATUSES = new Set(['implementing', 'working', 'running', 'in_progress'])
 
-/**
- * FE-9493: 'planning' — the member's sub-orchestrator has started working the
- * project, but no worker agent has spawned yet. Written server-side by
- * advance_chain_member_to_implementing (launch / staging-end); promoted to
- * 'implementing' separately once the first spawned worker actually starts
- * (mission_service.get_agent_mission's atomic-start promotion). A pure read of
- * run.project_statuses[pid] — see the isPlanning derivation in `tabs` below.
- */
 const PLANNING_STATUSES = new Set(['planning'])
 
 export function useChainContext() {
@@ -55,11 +18,7 @@ export function useChainContext() {
   const projectStore = useProjectStore()
   const { sortedJobs } = useAgentJobs()
 
-  // The run currently in scope (null outside a chain). Hydrated from the store's
-  // open run so WS updates flow through without a re-fetch.
   const run = ref(null)
-  // Ordered project records resolved from resolved_order ({id,name,taxonomy_alias,
-  // mission,product_id,_order}). Names are stable, so resolved once per load.
   const projects = ref([])
 
   const runId = computed(() => {
@@ -67,8 +26,6 @@ export function useChainContext() {
     return typeof r === 'string' && r ? r : null
   })
 
-  // Returns the number of member ids the run REFERENCED (so the caller can detect
-  // an all-orphaned run). projects.value is set to the live, resolvable subset.
   async function resolveProjects(runObj) {
     const ids = runObj?.resolved_order?.length
       ? runObj.resolved_order
@@ -77,11 +34,6 @@ export function useChainContext() {
       projects.value = []
       return 0
     }
-    // Warm the project store (NOT a raw axios GET): this populates projectStore so
-    // that switching to a sibling chain tab finds the project already resident —
-    // ProjectLaunchView can then refetch quietly without the full-screen spinner
-    // unmount/remount + a cold double-fetch. Per-id failures degrade gracefully:
-    // a member that 404s (hard-deleted, FE-6175 RC2) is simply skipped.
     const settled = await Promise.allSettled(ids.map((id) => projectStore.fetchProject(id)))
     projects.value = ids
       .map((id, i) => {
@@ -103,25 +55,18 @@ export function useChainContext() {
       const fetched = await sequenceRunStore.fetchRun(id)
       run.value = fetched
       const requested = await resolveProjects(fetched)
-      // FE-6175 RC2: an orphaned run whose members were ALL hard-deleted resolves
-      // to zero live projects. Degrade to the byte-identical solo path instead of
-      // rendering an empty chain that storms 404s for the dead members.
       if (requested > 0 && projects.value.length === 0) {
         console.warn('[useChainContext] sequence run has no resolvable members; falling back to solo', id)
         run.value = null
         projects.value = []
       }
     } catch (err) {
-      // Unknown / foreign run — fall back to the solo path rather than erroring.
       console.warn('[useChainContext] could not load sequence run', err)
       run.value = null
       projects.value = []
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Derived state
-  // ---------------------------------------------------------------------------
   const orderedIds = computed(() =>
     run.value?.resolved_order?.length ? run.value.resolved_order : run.value?.project_ids || [],
   )
@@ -131,15 +76,11 @@ export function useChainContext() {
   )
   const currentPid = computed(() => orderedIds.value[currentIndex.value] ?? null)
 
-  // N/M counter: N = the 1-based position of the in-flight project, M = total.
-  // The driver advances current_index on each completion, so N climbs 1/3 -> 2/3.
   const counter = computed(() => ({
     n: total.value ? Math.min(currentIndex.value + 1, total.value) : 0,
     m: total.value,
   }))
 
-  // Overarching mission = the head project's mission (OD-4 — no new schema). Live
-  // WS value wins over the loaded record.
   const headMission = computed(() => {
     const headId = orderedIds.value[0]
     if (!headId) return ''
@@ -148,12 +89,6 @@ export function useChainContext() {
     return projects.value.find((p) => p.id === headId)?.mission || ''
   })
 
-  // FE-6199 (Unit C): the live project-less conductor agent (project_id IS NULL +
-  // chain_conductor flag), for the dedicated ChainConductorCard. Null outside a chain.
-  // BE-6200 (#6 follow-up): key on the FLAT `chain_conductor` field the API now
-  // serializes. The old predicate (project_id IS NULL + job_metadata flag) never
-  // matched: the project-scoped /jobs query excludes project_id-NULL rows, and
-  // job_metadata is not serialized (and is clobbered by the WS progress handler).
   const conductorAgent = computed(
     () => (sortedJobs.value || []).find((j) => j.chain_conductor === true) || null,
   )
@@ -168,23 +103,12 @@ export function useChainContext() {
     return run.value?.project_statuses?.[pid] || ''
   }
 
-  // Ordered tab descriptors for ProjectTabStrip (active highlighted / completed /
-  // faded + the pulsing Review badge on a freshly-completed-awaiting-review tab).
   const tabs = computed(() =>
     orderedIds.value.map((pid, i) => {
       const proj = projects.value.find((p) => p.id === pid)
       const status = statusFor(pid)
       const isCompleted = status === 'completed'
       const isWorking = WORKING_STATUSES.has(status)
-      // isPlanning (FE-9239, re-derived FE-9493): a PURE read of the run's own
-      // per-member status, refreshed live by the sequence:updated WS event — so
-      // the badge moves only when the BACKEND moves, identically for a visited and
-      // an unvisited member. The prior derivation preferred the SOLO staging flags
-      // (projectStateStore.isStaging/isStaged), which populate the instant a member
-      // is merely fetched (e.g. by clicking its tab to view it) — so a click alone
-      // could flip a WAITING member to PLANNING while its sub-orchestrator was still
-      // idle. 'staged' now correctly reads WAITING; only a real 'planning' status
-      // from the backend reads PLANNING.
       const isPlanning = PLANNING_STATUSES.has(status) && !isCompleted && !isWorking
       return {
         projectId: pid,
@@ -196,8 +120,6 @@ export function useChainContext() {
         status,
         isCurrent: pid === currentPid.value,
         isCompleted,
-        // needsReview: completed by the conductor AND not yet reviewed client-side.
-        // 'awaiting_review' is a dead state (no BE code ever writes it) — ignore it.
         needsReview: isCompleted && !sequenceRunStore.isReviewed(run.value?.id, pid),
         isStarted: status !== '' && status !== 'pending',
         isWorking,
@@ -206,7 +128,6 @@ export function useChainContext() {
     }),
   )
 
-  // The single bundle handed to the /jobs views. NULL outside a chain -> solo path.
   const chainCtx = computed(() => {
     if (!run.value) return null
     return {
@@ -216,15 +137,13 @@ export function useChainContext() {
       counter: counter.value,
       currentPid: currentPid.value,
       headMission: headMission.value,
-      chainMission: run.value?.chain_mission ?? '',  // FE-6199 B2: canonical field from run
+      chainMission: run.value?.chain_mission ?? '',
       conductor: conductor.value,
       conductorAgent: conductorAgent.value,
       locked: run.value.locked === true,
     }
   })
 
-  // Stay in sync with the store's open run so WS `sequence:updated` (which the
-  // store re-hydrates) advances counter/tab states without us re-fetching.
   watch(
     () => sequenceRunStore.activeRun,
     (ar) => {
@@ -232,29 +151,12 @@ export function useChainContext() {
     },
   )
 
-  // BE-9540: the run was PURGED out from under this open view (conductor-finale
-  // deletion, not merely a status flip) -- the store detected its own fetchRun
-  // 404 after the sequence:updated broadcast and raised this notice rather than
-  // leaving a stale activeRun in place. Meet it with the SAME graceful terminal
-  // state the FE-6175 RC2 orphaned-run path already uses (degrade to solo,
-  // console.warn already covers that path -- here the run is confirmed gone via
-  // a live event, so a user-visible toast is warranted too, since a Review card
-  // may have been on screen). Only reacts if the retired run is the one THIS
-  // view actually has open, so a notice about a different open tab is a no-op.
   watch(
     () => sequenceRunStore.retiredRunNotice,
     (notice) => {
-      // Compared against the loaded run's OWN id, not the route's `?run=` query:
-      // loadRun() can be driven directly (bypassing the route), so run.value is
-      // the only reliable answer to "is this the run THIS view has open."
       if (!notice || notice.runId !== run.value?.id) return
       run.value = null
       projects.value = []
-      // FE-9553: was a toast. This fires from a WATCH on a store notice fed by
-      // a live event -- the chain finished on its own, nobody clicked -- so by
-      // ruling 6 it is not the toast's to carry. It is informational rather
-      // than actionable, which puts it in the bell. Deterministic
-      // id so the same retirement noticed twice collapses to one row.
       useNotificationStore().addNotification({
         id: `chain-retired:${notice.runId}`,
         type: 'lifecycle',

@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9144 — roadmap_service.upsert_metadata N+1 batching (equivalence + query count).
-
-``upsert_metadata`` issued ONE ``INSERT ... ON CONFLICT`` per item and ONE DELETE
-per removed ref. The fix batches both into a single multi-row upsert and a single
-``WHERE ... IN`` delete. This suite locks, against a real Postgres session:
-
-- **query count**: N items -> exactly ONE INSERT INTO roadmap_items; M removals
-  -> exactly ONE DELETE FROM roadmap_items (fail-first guard — was N and M);
-- **result-equivalence**: items_upserted / items_removed and the persisted rows
-  (values + count) are unchanged, including the last-write-wins de-dup the
-  per-item loop got for free from ON CONFLICT DO UPDATE.
-
-Edition Scope: CE. Real DB via the transactional db_session; parallel-safe.
-"""
 
 from __future__ import annotations
 
@@ -38,7 +24,6 @@ pytestmark = pytest.mark.asyncio
 
 
 class _StatementCounter:
-    """Count cursor executions, split by a substring of interest."""
 
     def __init__(self, engine):
         self._engine = engine
@@ -61,7 +46,6 @@ class _StatementCounter:
 
 @pytest_asyncio.fixture
 async def seeded(db_session, test_tenant_key):
-    """Active product + N projects to reference from roadmap items."""
     product = Product(
         id=str(uuid4()),
         name=f"RM {uuid4().hex[:6]}",
@@ -79,8 +63,6 @@ async def seeded(db_session, test_tenant_key):
             name=f"P{idx}",
             description="d",
             mission="m",
-            # BE-9429: five untyped projects in ONE product -- under the NULLS
-            # NOT DISTINCT index they need distinct serials to coexist.
             series_number=next_series_number(),
             status="inactive",
         )
@@ -95,7 +77,6 @@ def _service(db_session):
 
 
 async def test_upsert_many_items_issues_one_insert(db_session, db_manager, test_tenant_key, seeded):
-    """5 items -> exactly ONE INSERT INTO roadmap_items (was 5)."""
     svc = _service(db_session)
     items = [
         {"item_type": "project", "project_id": pid, "sort_order": i, "risk": "low"}
@@ -118,7 +99,6 @@ async def test_upsert_many_items_issues_one_insert(db_session, db_manager, test_
 
 
 async def test_remove_refs_issues_one_delete(db_session, db_manager, test_tenant_key, seeded):
-    """Removing 3 refs -> exactly ONE DELETE FROM roadmap_items, count preserved."""
     svc = _service(db_session)
     items = [
         {"item_type": "project", "project_id": pid, "sort_order": i} for i, pid in enumerate(seeded["project_ids"])
@@ -140,13 +120,6 @@ async def test_remove_refs_issues_one_delete(db_session, db_manager, test_tenant
 
 
 async def test_duplicate_items_last_write_wins(db_session, db_manager, test_tenant_key, seeded):
-    """Two items with the SAME conflict key collapse to one row with the LAST values.
-
-    Equivalence guard for the batched upsert: the per-item loop tolerated an
-    intra-call duplicate (insert then ON CONFLICT UPDATE); the batched statement
-    would raise a cardinality violation without the de-dup, so this proves the
-    de-dup reproduces last-write-wins AND items_upserted still reports raw length.
-    """
     svc = _service(db_session)
     pid = seeded["project_ids"][0]
     items = [
@@ -156,15 +129,14 @@ async def test_duplicate_items_last_write_wins(db_session, db_manager, test_tena
 
     result = await svc.upsert_metadata(items=items, tenant_key=test_tenant_key)
 
-    assert result["items_upserted"] == 2  # raw request length, unchanged
+    assert result["items_upserted"] == 2
     rows = (await db_session.execute(select(RoadmapItem).where(RoadmapItem.project_id == pid))).scalars().all()
-    assert len(rows) == 1  # collapsed to one row on the uq_roadmap_item key
-    assert rows[0].sort_order == 9  # last write wins
+    assert len(rows) == 1
+    assert rows[0].sort_order == 9
     assert rows[0].risk == "high"
 
 
 async def test_empty_items_and_removes_issue_no_row_statements(db_session, db_manager, test_tenant_key, seeded):
-    """No items and no removes -> zero roadmap_items INSERT/DELETE statements."""
     svc = _service(db_session)
 
     engine = db_manager.async_engine.sync_engine

@@ -12,7 +12,6 @@
 
       <v-card-text>
         <v-expansion-panels v-model="panels" variant="accordion">
-          <!-- Connection Status -->
           <v-expansion-panel value="status">
             <v-expansion-panel-title>
               <v-icon start :color="chipColor">{{ icon }}</v-icon>
@@ -48,7 +47,6 @@
             </v-expansion-panel-text>
           </v-expansion-panel>
 
-          <!-- Recent Events -->
           <v-expansion-panel value="events">
             <v-expansion-panel-title>
               <v-icon start>mdi-history</v-icon>
@@ -76,7 +74,6 @@
             </v-expansion-panel-text>
           </v-expansion-panel>
 
-          <!-- Last Error -->
           <v-expansion-panel v-if="debugInfo?.stats?.lastError" value="error">
             <v-expansion-panel-title color="error">
               <v-icon start color="error">mdi-alert-circle</v-icon>
@@ -161,10 +158,6 @@ const updateDebugInfo = () => {
 }
 
 const forceReconnect = async () => {
-  // FE-3007b: use the store's reconnect() so the resulting 'connected' event is
-  // flagged isReconnect=true and the reconnect-resync registry refetches every
-  // registered store — disconnect()+connect() flagged it false, so a manual
-  // reconnect never resynced.
   await wsStore.reconnect()
   updateDebugInfo()
 }

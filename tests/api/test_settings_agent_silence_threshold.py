@@ -124,15 +124,10 @@ async def test_put_agent_silence_threshold_writes_system_setting(api_client, db_
     await _cleanup_threshold(db_manager)
 
 
-# ---------------------------------------------------------------------------
-# FE-9241: SaaS-configurable agent-silence timer (per-tenant override)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_saas_get_agent_silence_threshold_falls_back_to_deployment_default(api_client, db_manager):
-    """SaaS, no per-tenant override set: GET returns the deployment-wide default,
-    exactly like the CE endpoint would -- the first link in the fallback chain."""
     await _cleanup_threshold(db_manager)
     await _set_threshold(db_manager, "23")
     headers, tenant_key = await _admin_headers_and_tenant(db_manager)
@@ -148,8 +143,6 @@ async def test_saas_get_agent_silence_threshold_falls_back_to_deployment_default
 
 @pytest.mark.asyncio
 async def test_saas_put_then_get_persists_tenant_override(api_client, db_manager):
-    """SaaS PUT writes a per-tenant override in `configurations` (not system_settings);
-    a subsequent GET for the SAME tenant returns that override, not the deployment default."""
     await _cleanup_threshold(db_manager)
     await _set_threshold(db_manager, "23")
     headers, tenant_key = await _admin_headers_and_tenant(db_manager)
@@ -167,7 +160,6 @@ async def test_saas_put_then_get_persists_tenant_override(api_client, db_manager
     assert get_response.status_code == 200
     assert get_response.json() == {"agent_silence_threshold_minutes": 60}
 
-    # The deployment-wide system_settings row must be untouched by the SaaS write.
     async with db_manager.get_session_async() as session:
         result = await session.execute(select(SystemSetting.value).where(SystemSetting.key == SILENCE_THRESHOLD_KEY))
         assert result.scalar_one() == "23"
@@ -178,7 +170,6 @@ async def test_saas_put_then_get_persists_tenant_override(api_client, db_manager
 
 @pytest.mark.asyncio
 async def test_saas_agent_silence_threshold_is_tenant_isolated(api_client, db_manager):
-    """ADR-009: tenant A's override is invisible to and unaffected by tenant B."""
     await _cleanup_threshold(db_manager)
     await _set_threshold(db_manager, "23")
     headers_a, tenant_a = await _admin_headers_and_tenant(db_manager)
@@ -189,7 +180,6 @@ async def test_saas_agent_silence_threshold_is_tenant_isolated(api_client, db_ma
         get_b = await api_client.get(ENDPOINT, headers=headers_b)
 
     assert put_a.status_code == 200
-    # Tenant B never set an override -> still sees the deployment default, NOT A's 99.
     assert get_b.status_code == 200
     assert get_b.json() == {"agent_silence_threshold_minutes": 23}
 
@@ -200,8 +190,6 @@ async def test_saas_agent_silence_threshold_is_tenant_isolated(api_client, db_ma
 
 @pytest.mark.asyncio
 async def test_saas_put_agent_silence_threshold_rejects_out_of_range(api_client, db_manager):
-    """Boundary validation (1-1440): an out-of-range value is a clean 4xx client
-    rejection (ValidationError), never a raw DB 500."""
     headers, tenant_key = await _admin_headers_and_tenant(db_manager)
 
     with patch("api.app_state.GILJO_MODE", "saas"):

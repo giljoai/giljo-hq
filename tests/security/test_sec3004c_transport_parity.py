@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-3004c — transport parity at the REAL layer (WebSocket + MCP middleware).
-
-After the consolidation every transport routes through ``validate_principal``,
-so the contract matrix must hold when exercised through the ACTUAL transport
-entry points — not a helper (the BE-5042 lesson). This file drives:
-
-- the real WebSocket handshake ``authenticate_websocket`` (the ``/ws`` upgrade
-  auth), and
-- the real ``MCPAuthMiddleware`` ASGI app (driven exactly like a production
-  POST /mcp client).
-
-Two-sided throughout, and it deliberately asserts the DRIFT that step c closes:
-WebSocket auth previously enforced NEITHER jti-revocation NOR is_active (for
-both JWT and API-key); it now rejects revoked tokens, deactivated users, and
-API keys whose owner was deactivated — while valid credentials still connect.
-
-Parallel-safe: unique tenant/user per test, revocation + verdict caches cleared
-around mutate steps, commit-capable ``db_manager``. No module-level state.
-"""
 
 from __future__ import annotations
 
@@ -49,7 +30,7 @@ _CANONICAL_AUD = "http://test/mcp"
 
 @pytest.fixture
 def jwt_secret(monkeypatch):
-    monkeypatch.setenv("JWT_SECRET", "sec3004c_" + "parity_secret")  # concat: public gitleaks defang
+    monkeypatch.setenv("JWT_SECRET", "sec3004c_" + "parity_secret")
     return "sec3004c_parity_secret"
 
 
@@ -126,18 +107,6 @@ async def _seed_api_key(db_manager, *, user_active: bool = True) -> tuple[str, s
 
 
 class _FakeWebSocket:
-    """Minimal WebSocket stand-in: credentials via query params only.
-
-    ``client``/``base_url`` are needed since BE-8000h: a failed API-key
-    validation now runs the shared per-IP auth-failure throttle
-    (``enforce_api_key_auth_failure``), which reads both off the request-like
-    object. The WS parity tests here authenticate valid/one-shot credentials
-    and are not meant to be throttled — the global ``_auth_rate_limit_test_bypass``
-    fixture (SEC-9227 H4) keeps the limiter's explicit test bypass ON for them.
-    (``base_url`` is now inert for that decision — it used to carry the
-    ``http://test`` sentinel; the throttle behavior itself is covered in
-    BE-6060b/BE-8000h's dedicated regression tests, not here.)
-    """
 
     def __init__(self, *, token: str | None = None, api_key: str | None = None) -> None:
         self.query_params: dict[str, str] = {}
@@ -150,9 +119,6 @@ class _FakeWebSocket:
         self.base_url = "http://test/ws"
 
 
-# ---------------------------------------------------------------------------
-# WebSocket handshake (transport #3) — real authenticate_websocket
-# ---------------------------------------------------------------------------
 
 
 class TestWebSocketParity:
@@ -171,7 +137,6 @@ class TestWebSocketParity:
 
     @pytest.mark.asyncio
     async def test_revoked_jwt_rejected(self, db_manager, jwt_secret):
-        # DRIFT CLOSED: the WS handshake now enforces jti-revocation.
         from api.auth_utils import authenticate_websocket
 
         clear_revocation_cache()
@@ -188,7 +153,6 @@ class TestWebSocketParity:
 
     @pytest.mark.asyncio
     async def test_deactivated_user_jwt_rejected(self, db_manager, jwt_secret):
-        # DRIFT CLOSED: the WS handshake now enforces is_active for JWTs.
         from api.auth_utils import authenticate_websocket
 
         clear_revocation_cache()
@@ -213,8 +177,6 @@ class TestWebSocketParity:
 
     @pytest.mark.asyncio
     async def test_api_key_with_deactivated_user_rejected(self, db_manager):
-        # DRIFT CLOSED: WS API-key auth previously never checked the owner's
-        # is_active; it now rejects a key whose user was deactivated.
         from api.auth_utils import authenticate_websocket
 
         clear_api_key_verify_cache()
@@ -225,13 +187,9 @@ class TestWebSocketParity:
         clear_api_key_verify_cache()
 
 
-# ---------------------------------------------------------------------------
-# MCP middleware (transport #4) — real MCPAuthMiddleware ASGI drive
-# ---------------------------------------------------------------------------
 
 
 async def _drive_mcp(middleware_cls, *, token: str, db_manager) -> tuple[int, bool]:
-    """POST /mcp tools/list through the real MCPAuthMiddleware; return (status, inner_called)."""
     inner_called = {"flag": False}
 
     async def inner_app(scope, receive, send) -> None:
@@ -277,16 +235,10 @@ async def _drive_mcp(middleware_cls, *, token: str, db_manager) -> tuple[int, bo
 
 
 def _unique_ip() -> str:
-    """An RFC 3849 (2001:db8::/32) documentation IPv6 -- non-loopback, unique
-    per call so the per-IP auth-failure limiter buckets never collide across
-    xdist workers/tests."""
     return f"2001:db8::{uuid4().hex[:4]}:{uuid4().hex[:4]}"
 
 
 def _freeze_rate_limit_clock(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin the limiter's fixed-window clock to the START of the current 60s
-    bucket (BE-6087; see ``test_be6060b_api_key_sha256.py`` for the full
-    boundary-flake rationale). ``monkeypatch`` auto-reverts at teardown."""
     from api.middleware import auth_rate_limiter as _arl
 
     frozen = float((int(_arl.time.time()) // 60) * 60)
@@ -294,16 +246,6 @@ def _freeze_rate_limit_clock(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class _FakeRestRequest:
-    """Minimal Request stand-in for driving ``get_current_user`` directly.
-
-    TSK-9021 (REST parity with BE-8000h/BE-6060b): a failed X-API-Key auth now
-    runs the shared per-IP auth-failure throttle (``enforce_api_key_auth_failure``),
-    which reads ``client``/``headers``/``base_url`` off the request-like object,
-    same as the WS handshake stand-in above. This class drives the REAL throttle,
-    so it opts out of the global test bypass via ``real_auth_rate_limiter``
-    (SEC-9227 H4). (``base_url`` is now inert for that decision — it used to
-    carry the ``http://test`` sentinel.)
-    """
 
     def __init__(self, *, ip: str) -> None:
         self.client = SimpleNamespace(host=ip)
@@ -312,23 +254,15 @@ class _FakeRestRequest:
         self.url = SimpleNamespace(path="/api/products")
 
 
-# ---------------------------------------------------------------------------
-# REST dependency (transport #1) — real get_current_user, TSK-9021
-# ---------------------------------------------------------------------------
 
 
 class TestRestParity:
     @pytest.fixture(autouse=True)
     def _real_limiter(self, real_auth_rate_limiter):
-        """SEC-9227 (H4): this class asserts the REST failed-auth throttle fires,
-        so keep the global test-bypass OFF for its tests."""
         return
 
     @pytest.mark.asyncio
     async def test_repeated_bad_api_key_over_rest_trips_lockout(self, db_session, monkeypatch):
-        """``limit`` bad X-API-Keys over REST are plain 401 rejections; the
-        (limit+1)th must be the THROTTLED 429 -- proving the REST dependency
-        now throttles failed API-key auth same as WS/MCP (BE-8000h/BE-6060b)."""
         from giljo_mcp.auth.dependencies import get_current_user
 
         _freeze_rate_limit_clock(monkeypatch)
@@ -358,9 +292,6 @@ class TestRestParity:
 
     @pytest.mark.asyncio
     async def test_valid_api_key_from_throttled_ip_still_authenticates(self, db_manager, monkeypatch):
-        """Two-sided (WO mandate): a VALID key from the SAME (now-throttled) IP
-        must still authenticate over REST -- only failures count against the
-        budget, never the happy path."""
         from giljo_mcp.auth.dependencies import get_current_user
 
         _freeze_rate_limit_clock(monkeypatch)
@@ -369,7 +300,6 @@ class TestRestParity:
         raw_key, tk = await _seed_api_key(db_manager)
 
         async with db_manager.get_session_async() as db:
-            # Exhaust the budget with bad keys from this IP first (401s, then a 429).
             for _ in range(limit + 1):
                 with pytest.raises(HTTPException):
                     await get_current_user(
@@ -380,7 +310,6 @@ class TestRestParity:
                         db=db,
                     )
 
-            # The IP is now throttled -- but the VALID key still authenticates.
             user = await get_current_user(
                 request=_FakeRestRequest(ip=ip),
                 access_token=None,
@@ -411,20 +340,15 @@ class TestMcpParity:
         prior = state.db_manager
         state.db_manager = db_manager
         try:
-            # Happy: active, non-revoked JWT reaches the inner SDK app.
             status, inner = await _drive_mcp(MCPAuthMiddleware, token=token, db_manager=db_manager)
             assert status == 200, f"valid JWT must authenticate on /mcp, got {status}"
             assert inner is True
 
-            # Revoke via the RFC 7009 path (verify_aud=False), the correct
-            # revoker for an aud-bound MCP token; the dashboard-logout revoker
-            # is for aud-less cookie tokens.
             async with db_manager.get_session_async() as db:
                 await revoke_token(db, token=token)
                 await db.commit()
             clear_revocation_cache()
 
-            # Reject: the SAME token is now revoked — 401, inner never reached.
             status2, inner2 = await _drive_mcp(MCPAuthMiddleware, token=token, db_manager=db_manager)
             assert status2 == 401, f"revoked JWT must 401 on /mcp, got {status2}"
             assert inner2 is False

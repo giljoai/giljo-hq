@@ -3,25 +3,10 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Response-size ceiling for the unified context fetcher.
-
-BE-9322: moved verbatim out of fetch_context.py, which sat at 799 lines
-against the flat 800-line CI cap with no shrink-only budget entry. The block
-is a pure post-processing pass over an already-assembled response -- it has
-no coupling to category dispatch, the database, or tenancy -- so it is a
-genuine module boundary rather than a split made to satisfy a number.
-"""
 
 from typing import Any
 
 
-# INF-WriteShape: 30K-char ceiling -- single safety net when the assembled
-# response would otherwise blow an agent's context budget. Strategy:
-#   1. Iterate categories largest -> smallest by serialized size.
-#   2. Within each, drop the largest droppable field of the largest entry.
-#   3. Mark the affected entry with truncated:true.
-#   4. Loop until under cap or only protected fields remain.
-# Hard floor: NEVER drop required identity fields.
 RESPONSE_CHAR_CEILING = 30_000
 PROTECTED_ENTRY_FIELDS = frozenset({"id", "sequence", "project_name", "type", "timestamp"})
 
@@ -33,7 +18,6 @@ def _serialized_size(obj: Any) -> int:
 
 
 def _apply_response_ceiling(response: dict[str, Any]) -> dict[str, Any]:
-    """Iteratively drop the largest droppable field until response <= cap."""
     if _serialized_size(response) <= RESPONSE_CHAR_CEILING:
         return response
 
@@ -42,12 +26,10 @@ def _apply_response_ceiling(response: dict[str, Any]) -> dict[str, Any]:
         return response
 
     truncation_applied = False
-    # Bound the loop so a degenerate payload can't spin forever.
     for _ in range(2000):
         if _serialized_size(response) <= RESPONSE_CHAR_CEILING:
             break
 
-        # Find largest category by serialized size
         target_category = None
         target_size = -1
         for cat, cat_data in data.items():
@@ -61,18 +43,13 @@ def _apply_response_ceiling(response: dict[str, Any]) -> dict[str, Any]:
 
         cat_data = data[target_category]
         if not (isinstance(cat_data, list) and cat_data):
-            # Cannot drop fields out of a non-list category structure safely
             break
 
-        # Find largest entry in that category
         largest_idx = max(range(len(cat_data)), key=lambda i: _serialized_size(cat_data[i]))
         entry = cat_data[largest_idx]
         if not isinstance(entry, dict):
             break
 
-        # Find largest droppable field in that entry
-        # Skip 'truncated' (legacy field-drop signal we set ourselves below) and
-        # 'has_full_body' (BE-5031 headlines-shape flag that survives ceiling).
         droppable = [
             (k, _serialized_size(v))
             for k, v in entry.items()

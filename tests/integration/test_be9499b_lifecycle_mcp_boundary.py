@@ -3,34 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9499b -- Headless S1b: full lifecycle control via MCP transport.
-
-Reproduces, then closes, three MCP-transport gaps:
-
-1. THE ACTIVATE BYPASS BUG: ``update_project(status='active')`` used to write
-   the ``status`` column directly (``_mutation_mixin.update_project``),
-   bypassing ``ProjectLifecycleService.activate_project`` -- skipping the
-   orchestrator fixture mint (and, before BE-9525b retired it, the
-   per-product single-active-project sibling auto-deactivate too).
-   ``test_activate_bypass_*`` reproduces this as a failing-first scenario (an
-   INACTIVE-source activation used to mint no fixture) and pins the fix.
-
-2. THE STAGING REVERSE GEAR: headless had no way to unstage / restage /
-   cancel_staging -- those ``ProjectStagingService`` methods were REST-only.
-   ``test_reverse_gear_*`` drives each through ``stage_project(action=...)``.
-
-3. REVIVING A COMPLETED PROJECT: ``update_project`` on a COMPLETED project hit
-   the blanket immutable-status guard with no escape hatch -- there was no MCP
-   door to ``ProjectLifecycleService.continue_working`` at all.
-   ``test_revive_completed_project_*`` drives it via ``update_project``.
-
-All three drive the REAL ``@mcp.tool`` transport via
-``create_connected_server_and_client_session`` (mirrors
-``test_be9016_another_project_active_mcp_boundary.py``) against the real
-Postgres test DB, so the actual DB constraints and lifecycle side effects fire.
-
-Parallel-safe: each test generates a fresh tenant_key + cleans up its own rows.
-"""
 
 from __future__ import annotations
 
@@ -62,9 +34,6 @@ def _payload(call_tool_result) -> dict:
 
 @pytest_asyncio.fixture
 async def be9499b_client(db_manager, monkeypatch):
-    """Wire a real ToolAccessor (real db_manager, no injected test session) into
-    the in-memory MCP transport. Yields (client_factory, tenant_key).
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -135,15 +104,10 @@ async def _cleanup(db_manager, tenant_key: str) -> None:
 
 
 class TestActivateBypassMcpBoundary:
-    """Part 1: the activate bypass bug."""
 
     async def test_activating_inactive_project_leaves_sibling_active_and_mints_fixture(
         self, be9499b_client, db_manager
     ):
-        """BE-9525b (ruling 5 amended) retired the sibling auto-deactivate this
-        test used to pin: activating the second project now leaves the first
-        ACTIVE too -- N active projects per product is legal. The orchestrator
-        fixture mint is unaffected and still pinned here."""
         client, tenant_key = be9499b_client
         active_id, inactive_id = str(uuid4()), str(uuid4())
 
@@ -168,20 +132,13 @@ class TestActivateBypassMcpBoundary:
                     (await verify.execute(select(AgentJob).where(AgentJob.project_id == inactive_id))).scalars().all()
                 )
 
-            # Ruling 5 amended: the sibling is left untouched, not auto-deactivated.
             assert active.status == "active", "ruling 5 amended: the sibling must stay active, not be deactivated"
             assert target.status == "active"
-            # The orchestrator fixture mint: activation must have created one.
             assert len(fixtures) == 1, "activation via update_project must mint the orchestrator fixture"
         finally:
             await _cleanup(db_manager, tenant_key)
 
     async def test_activating_already_active_project_is_a_harmless_noop(self, be9499b_client, db_manager):
-        """Guardrail: the redirect must only fire for an INACTIVE source -- an
-        idempotent re-write of an already-active project must not raise
-        ProjectStateError (activate_project refuses a non-INACTIVE source
-        without force=True).
-        """
         client, tenant_key = be9499b_client
         project_id = str(uuid4())
 
@@ -199,7 +156,6 @@ class TestActivateBypassMcpBoundary:
 
 
 class TestReverseGearMcpBoundary:
-    """Part 2: the staging reverse gear via stage_project(action=...)."""
 
     async def test_unstage_reverts_staged_to_ready(self, be9499b_client, db_manager):
         client, tenant_key = be9499b_client
@@ -311,14 +267,12 @@ class TestReverseGearMcpBoundary:
         try:
             async with client() as mcp_session:
                 result = await mcp_session.call_tool("stage_project", {"project_id": project_id, "action": "purge"})
-            # A garbage-input rejection is a clean client error, not a server 500.
-            assert result.is_error
+            assert not result.is_error and "VALIDATION_ERROR" in _payload(result).get("error", "")
         finally:
             await _cleanup(db_manager, tenant_key)
 
 
 class TestReviveCompletedProjectMcpBoundary:
-    """Part 2 (continue-working): reviving a completed project via update_project."""
 
     async def test_reviving_completed_project_via_update_project(self, be9499b_client, db_manager):
         client, tenant_key = be9499b_client
@@ -352,10 +306,6 @@ class TestReviveCompletedProjectMcpBoundary:
             await _cleanup(db_manager, tenant_key)
 
     async def test_reviving_completed_project_directly_to_active(self, be9499b_client, db_manager):
-        """status='active' on a completed project chains revive -> activate in
-        one call: continue_working lands INACTIVE, then the activation redirect
-        finishes the transition (sibling rule + fixture mint still apply).
-        """
         client, tenant_key = be9499b_client
         project_id = str(uuid4())
 
@@ -388,10 +338,6 @@ class TestReviveCompletedProjectMcpBoundary:
             await _cleanup(db_manager, tenant_key)
 
     async def test_update_project_on_cancelled_project_still_refused(self, be9499b_client, db_manager):
-        """Museum-rule pin: revival is COMPLETED-only. A cancelled project must
-        still hit the plain immutable-status guard -- this redirect must not
-        widen the door to every terminal status.
-        """
         client, tenant_key = be9499b_client
         project_id = str(uuid4())
 

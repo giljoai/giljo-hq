@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-ProjectSummaryService - Project summary and metrics aggregation
-
-Handover 0950n: Extracted from ProjectService to bring it under 1000 lines.
-
-Responsibilities:
-- Aggregate job counts and completion metrics for a project
-- Resolve product context (name lookup)
-- Return a fully typed ProjectSummaryResult
-
-Design Principles:
-- Single Responsibility: Only summary/metrics aggregation
-- All DB queries filter by tenant_key
-- No imports from ProjectService (avoids circular dependency)
-"""
 
 import logging
 from typing import Any
@@ -37,15 +22,6 @@ logger = logging.getLogger(__name__)
 
 
 class ProjectSummaryService:
-    """
-    Service for generating project summary reports with aggregated metrics.
-
-    Produces a ProjectSummaryResult containing job statistics, completion
-    percentage, activity timestamps, and product context suitable for
-    dashboard display.
-
-    Thread Safety: Each instance is session-scoped. Do not share across requests.
-    """
 
     def __init__(
         self,
@@ -54,15 +30,6 @@ class ProjectSummaryService:
         test_session: AsyncSession | None = None,
         websocket_manager: Any | None = None,
     ):
-        """
-        Initialize ProjectSummaryService.
-
-        Args:
-            db_manager: Database manager for async database operations
-            tenant_manager: Tenant manager for multi-tenancy support
-            test_session: Optional AsyncSession for tests to share the same transaction
-            websocket_manager: Optional WebSocket manager (unused; accepted for API uniformity)
-        """
         self.db_manager = db_manager
         self.tenant_manager = tenant_manager
         self._test_session = test_session
@@ -71,35 +38,9 @@ class ProjectSummaryService:
         self._repo = ProjectRepository()
 
     def _get_session(self, tenant_key: str | None = None):
-        """Yield a tenant-scoped DB session, honoring an injected test session (shared helper, BE-8000d)."""
         return optional_tenant_session(self.db_manager, tenant_key, self._test_session)
 
     async def get_project_summary(self, project_id: str, tenant_key: str | None = None) -> ProjectSummaryResult:
-        """
-        Generate project summary with metrics and status.
-
-        Returns comprehensive project overview including job statistics,
-        completion metrics, and activity timestamps for dashboard display.
-
-        Args:
-            project_id: Project UUID
-            tenant_key: Explicit tenant key (BE6004C-3 / RC-2). When omitted,
-                falls back to the ambient tenant context for backward
-                compatibility. Callers in the request path MUST pass it
-                explicitly (e.g. ``current_user.tenant_key``) so the read is
-                ContextVar-independent.
-
-        Returns:
-            ProjectSummaryResult with:
-            - Basic project info (id, name, status, mission)
-            - Agent job counts (pending/active/completed/blocked)
-            - Mission completion percentage
-            - Timestamps (created, activated, last activity)
-            - Product context (id, name)
-
-        Raises:
-            ResourceNotFoundError: Project not found
-        """
         effective_tenant_key = tenant_key or self.tenant_manager.get_current_tenant()
 
         async with self._get_session(effective_tenant_key) as session:
@@ -116,9 +57,6 @@ class ProjectSummaryService:
             active_jobs = job_counts.get("working", 0)
             pending_jobs = job_counts.get("waiting", 0)
 
-            # BE-9000k: single shared computation; denominator excludes
-            # decommissioned agents (so a project with retired agents can reach
-            # 100%). total_jobs is kept as the full agent count for display.
             completion_percentage = compute_completion_percent(
                 completed_jobs, total_jobs, job_counts.get("decommissioned", 0)
             )

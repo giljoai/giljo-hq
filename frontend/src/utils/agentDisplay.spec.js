@@ -1,13 +1,3 @@
-/**
- * agentDisplay.spec.js — FE-9548
- *
- * Pure unit tests for the shared agent display helpers. isOrchestrator
- * predates this file's test coverage (only exercised indirectly via
- * AgentRow.spec.js); getPrimaryAgentLabel/getAgentRoleLabel are new
- * extractions this project introduces, so they get direct tests here.
- *
- * Edition scope: CE.
- */
 import { describe, it, expect } from 'vitest'
 import { isOrchestrator, getPrimaryAgentLabel, getAgentRoleLabel } from './agentDisplay'
 

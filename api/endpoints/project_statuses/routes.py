@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Project Statuses API endpoint (BE-5039 Phase 2b).
-
-Routes
-------
-- ``GET /`` -- return the canonical :class:`ProjectStatus` metadata in
-  declaration order.
-
-The endpoint is read-only (no DB query -- the metadata is produced from
-the in-memory :data:`PROJECT_STATUS_META` dict). Tenant isolation still
-applies via the standard auth dependency: only authenticated users can
-fetch the metadata. The payload is identical for every tenant.
-"""
 
 import logging
 
@@ -42,9 +30,6 @@ async def list_project_statuses(
     additional sorting.
     """
 
-    # Authentication-only gate: ``current_user`` is bound for that
-    # purpose. The metadata payload is the same for every tenant, so we
-    # don't filter by tenant_key here.
     del current_user
 
     return [

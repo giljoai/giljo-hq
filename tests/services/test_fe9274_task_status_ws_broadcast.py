@@ -3,42 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-9274 Workstream B -- task-list live WebSocket refresh (same class as BE-9246).
-
-Diagnosis: task status changes landed in the DB but no connected dashboard tab
-was ever told to refresh, for THREE independent reasons on the REST surface:
-
-1. ``api/endpoints/dependencies.py::get_task_service`` -- the FastAPI DI
-   factory the REST ``tasks`` router uses -- never passed ``websocket_manager``
-   to ``TaskService(...)`` (its sibling factories -- SequenceRunService,
-   MessageRoutingService, ProductService -- all do). So on every REST-driven
-   TaskService instance ``self._websocket_manager`` was always ``None``, and
-   any broadcast gated on ``if ws:`` silently no-op'd.
-2. ``TaskService.change_status`` / ``_change_status_impl`` (the FE dashboard's
-   "change status" dropdown calls exactly this, via
-   ``PATCH /tasks/{id}/status/`` -- see ``frontend/src/services/api.js``
-   ``tasks.changeStatus``) had **zero** broadcast code at all -- unlike
-   ``update_task``, which already emitted ``task:updated`` (FE-5046) but was
-   neutered by bug #1 above.
-3. ``TaskService.create_task_for_rest`` (the REST ``POST /tasks`` path) also
-   had zero broadcast code, unlike its MCP twin ``create_task_for_mcp``, which
-   already emits ``task:created``.
-
-The MCP surface (``create_task`` / ``update_task`` tools) was NOT broken --
-``ToolAccessor.__init__`` always wires a real ``websocket_manager`` into its
-``TaskService`` instance.
-
-Fix: (1) wire ``websocket_manager`` into ``get_task_service`` -- fixes
-``update_task`` REST for free; (2) add a post-commit ``task:updated`` broadcast
-to ``change_status`` (reusing update_task's exact event shape so the frontend
-event router needs only one handler for both mutation paths); (3) add a
-post-commit ``task:created`` broadcast to ``create_task_for_rest`` mirroring
-the MCP twin.
-
-DB-touching tests use ``db_session`` (TransactionalTestContext, rolled back).
-No module-level mutable state, random per-test tenant/user/task ids --
-parallel-safe under pytest-xdist -n auto. Edition Scope: Both.
-"""
 
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -61,9 +25,6 @@ def _mock_ws() -> MagicMock:
 
 @pytest_asyncio.fixture
 async def task_service_with_ws(db_manager, db_session, test_tenant_key):
-    """TaskService wired with a mock websocket_manager (mirrors the `task_service`
-    fixture in conftest.py, which deliberately omits one -- most tests there
-    don't care about broadcasts)."""
     mock_tenant_manager = MagicMock()
     mock_tenant_manager.get_current_tenant.return_value = test_tenant_key
     mock_ws = _mock_ws()
@@ -96,7 +57,6 @@ async def test_task(db_session, test_tenant_key, test_product, test_user):
 
 
 class TestChangeStatusBroadcast:
-    """The primary bug: FE's changeStatus() -> PATCH /tasks/{id}/status/ -> change_status."""
 
     async def test_change_status_broadcasts_task_updated(self, task_service_with_ws, test_task):
         service, mock_ws = task_service_with_ws
@@ -111,15 +71,11 @@ class TestChangeStatusBroadcast:
         assert data["task_id"] == str(test_task.id)
         assert data["status"] == "in_progress"
         assert data["updated_fields"] == ["status"]
-        # BE-9518: task:updated must carry product_id like task:created already does.
         assert data["product_id"] == test_task.product_id
 
     async def test_change_status_without_websocket_manager_does_not_raise(
         self, db_manager, db_session, test_tenant_key, test_task
     ):
-        """Regression guard: a TaskService with no ws manager (e.g. a background
-        script) must still complete the status change -- the broadcast is
-        best-effort, never load-bearing for the write itself."""
         mock_tenant_manager = MagicMock()
         mock_tenant_manager.get_current_tenant.return_value = test_tenant_key
         service = TaskService(db_manager=db_manager, tenant_manager=mock_tenant_manager, session=db_session)
@@ -153,9 +109,6 @@ class TestCreateTaskForRestBroadcast:
 
 
 class TestGetTaskServiceDependencyWiring:
-    """Boundary test through the actual FastAPI DI factory the REST tasks
-    router depends on (api/endpoints/dependencies.py::get_task_service) --
-    this is the exact seam bug #1 lived in."""
 
     async def test_get_task_service_wires_websocket_manager(self, db_manager):
         from api.endpoints.dependencies import get_task_service

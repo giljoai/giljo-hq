@@ -3,23 +3,12 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Pydantic schemas for Organization endpoints - Handover 0424c.
-
-Request/response models for:
-- Organization CRUD operations
-- Membership management
-- Permission enforcement
-"""
 
 from datetime import datetime
 
 from pydantic import BaseModel, Field
 
 
-# ============================================================================
-# Organization Schemas
-# ============================================================================
 
 
 class OrganizationCreate(BaseModel):
@@ -60,7 +49,7 @@ class OrganizationResponse(BaseModel):
     slug: str = Field(..., description="URL-friendly identifier")
     is_active: bool = Field(..., description="Whether organization is active")
     created_at: datetime = Field(..., description="Organization creation timestamp")
-    updated_at: datetime | None = Field(None, description="Last update timestamp")  # 0424m: nullable
+    updated_at: datetime | None = Field(None, description="Last update timestamp")
     settings: dict = Field(..., description="Organization-level settings")
     members: list[MemberResponse] = Field(default_factory=list, description="Organization members")
 
@@ -68,9 +57,6 @@ class OrganizationResponse(BaseModel):
         from_attributes = True
 
 
-# ============================================================================
-# Membership Schemas
-# ============================================================================
 
 
 class MemberInvite(BaseModel):

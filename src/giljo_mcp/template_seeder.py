@@ -3,50 +3,16 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Template seeding for Giljo HQ - Seeds default agent templates into database.
-
-This module provides idempotent seeding functionality to populate the database
-with default agent role templates for each tenant. Templates are sourced from
-the default definitions in ``_get_default_templates_v103`` below.
-
-Key Features:
-- Idempotent: Safe to run multiple times (skips if templates already exist)
-- Multi-tenant: Each tenant gets isolated template set
-- Production-grade: Comprehensive error handling and logging
-- Cross-platform: Uses proper path handling
-
-Usage:
-    from giljo_mcp.template_seeder import seed_tenant_templates
-
-    async with db_session() as session:
-        count = await seed_tenant_templates(session, tenant_key)
-        print(f"Seeded {count} templates")
-"""
 
 import logging
-from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
-
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.branding import MCP_ALIAS, PRODUCT_NAME
-from giljo_mcp.database import tenant_session_context
-from giljo_mcp.models import AgentTemplate
 from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
-from giljo_mcp.system_roles import SYSTEM_MANAGED_ROLES
 
 
 logger = logging.getLogger(__name__)
 
-# BE-9275b: derived from the branding constant instead of a fresh literal. A
-# module-level constant (rather than an inline f-string beside a large
-# triple-quoted block) also sidesteps a ruff S608 false-positive.
-# BE-9361: the identity sentence that follows the heading is folded in here for
-# the same reason -- it named the product too, and a literal left it stranded on
-# the old name through the BE-9275 rebrand.
 _ORCHESTRATOR_IDENTITY_HEAD = (
     f"# {PRODUCT_NAME} Agent\n"
     "\n"
@@ -58,143 +24,13 @@ _ORCHESTRATOR_IDENTITY_HEAD = (
 
 
 def _seeded_user_instructions(template_def: dict[str, Any]) -> str:
-    """The user_instructions a fresh seed writes for this default definition.
-
-    Mirrors ``_seed_tenant_templates`` exactly (the orchestrator gets the
-    context-response section appended). Used both by seeding and by the refresh
-    path's provably-unedited check, so the two can never drift (BE-9019).
-    """
     user_instructions = template_def["user_instructions"]
     if template_def["role"] == "orchestrator":
         user_instructions = f"{user_instructions}\n\n{_get_orchestrator_context_response_section()}"
     return user_instructions
 
 
-async def seed_tenant_templates(session: AsyncSession, tenant_key: str) -> int:
-    """
-    Seed default agent templates for a tenant.
-
-    This function is idempotent - it checks if the tenant already has templates
-    and skips seeding if any exist. This prevents duplicate seeding during
-    repeated installation runs or database migrations.
-
-    Handover 0813: system_instructions is now a slim bootstrap (~10 lines).
-    Protocol content is delivered server-side via full_protocol in get_job_mission().
-    user_instructions contains rich role-specific identity prose.
-
-    Args:
-        session: AsyncSession - Database session for operations
-        tenant_key: str - Tenant key to seed templates for (must be non-empty)
-
-    Returns:
-        int - Number of templates seeded (0 if skipped; 5 on a fresh tenant — the
-            6 default definitions minus "orchestrator", which is in
-            SYSTEM_MANAGED_ROLES and skipped below)
-
-    Raises:
-        ValueError: If tenant_key is None or empty
-        Exception: If database operations fail (propagates SQLAlchemy exceptions)
-    """
-    # Input validation
-    if not tenant_key:
-        logger.error("Cannot seed templates: tenant_key is empty or None")
-        raise ValueError("tenant_key must be non-empty string")
-
-    with tenant_session_context(session, tenant_key):
-        return await _seed_tenant_templates(session, tenant_key)
-
-
-async def _seed_tenant_templates(session: AsyncSession, tenant_key: str) -> int:
-    try:
-        # Idempotency check - skip if tenant already has templates
-        existing_count_result = await session.execute(
-            select(func.count(AgentTemplate.id)).where(AgentTemplate.tenant_key == tenant_key)
-        )
-        existing_count = existing_count_result.scalar()
-
-        if existing_count > 0:
-            logger.info(f"Tenant '{tenant_key}' already has {existing_count} templates, skipping seed")
-            return 0
-
-        # Handover 0813: Slim bootstrap for all templates
-        bootstrap = _get_mcp_bootstrap_section()
-
-        # Use new comprehensive templates (Handover 0103)
-        default_templates = _get_default_templates_v103()
-
-        # Seed each template
-        seeded_count = 0
-        current_time = datetime.now(UTC)
-
-        for template_def in default_templates:
-            if template_def["role"] in SYSTEM_MANAGED_ROLES:
-                logger.debug(
-                    "Skipping system-managed template '%s' during seeding (tenant=%s)",
-                    template_def["role"],
-                    tenant_key,
-                )
-                continue
-
-            # Handover 0813: All roles get the same slim bootstrap as system_instructions
-            system_instructions = bootstrap
-
-            # Get role-specific user instructions (orchestrator gets the context-response
-            # section appended — shared helper keeps seed + refresh byte-identical, BE-9019)
-            user_instructions = _seeded_user_instructions(template_def)
-
-            # Create template instance with Handover 0106 dual-field format
-            template = AgentTemplate(
-                id=str(uuid4()),
-                tenant_key=tenant_key,
-                product_id=None,  # Tenant-level template (not product-specific)
-                name=template_def["name"],
-                category="role",
-                role=template_def["role"],
-                cli_tool=template_def["cli_tool"],
-                background_color=template_def["background_color"],
-                description=template_def["description"],
-                # Handover 0813: Slim bootstrap + rich role prose
-                system_instructions=system_instructions,
-                user_instructions=user_instructions,
-                model=template_def.get("model", "sonnet"),
-                tools=template_def.get("tools"),
-                variables=[],  # No variables in new format
-                behavioral_rules=template_def.get("behavioral_rules", []),
-                success_criteria=template_def.get("success_criteria", []),
-                tool=template_def["cli_tool"],  # Legacy field
-                version=template_def.get("version", "1.0.0"),
-                is_active=template_def.get("is_active", True),
-                is_default=template_def.get("is_default", True),
-                tags=["default", "tenant"],
-                created_at=current_time,
-            )
-
-            session.add(template)
-            seeded_count += 1
-            logger.debug(f"Added template for role '{template_def['role']}' (tenant: {tenant_key})")
-
-        # Commit all templates in single transaction
-        await session.commit()
-
-        logger.info(f"Successfully seeded {seeded_count} templates for tenant '{tenant_key}'")
-        return seeded_count
-
-    except Exception as e:  # Broad catch: seeder boundary, logs and re-raises
-        # Log and re-raise database/unexpected errors
-        logger.error(f"Failed to seed templates for tenant '{tenant_key}': {e}", exc_info=True)
-        raise
-
-
 def _get_default_templates_v103() -> list[dict[str, Any]]:
-    """
-    Get default agent templates in Handover 0103 format.
-
-    Returns comprehensive, production-ready templates with AI coding agent support,
-    background colors, and full system prompts.
-
-    Returns:
-        List of template dictionaries with all required fields
-    """
     return [
         {
             "name": "orchestrator",
@@ -315,6 +151,8 @@ something here looks wrong, the docstring wins.
 - `spawn_job`: `phase` (informational ordering tag; subagent mode does NOT
   enforce — see CH3), `predecessor_job_id` is REQUIRED when `phase > 1` and
   the successor consumes a predecessor's output.
+  Workers receive their full profile (role, instructions, model, effort) from
+  `get_job_mission`; do not look for, or point them at, installed agent files.
 - `report_progress`: `todo_items` REPLACES the list each call; use
   `todo_append` to add without overwriting.
 - `get_workflow_status`: `exclude_job_id` skips your own row when you're
@@ -586,22 +424,6 @@ Success criteria:
 
 
 def _get_template_metadata() -> dict[str, dict[str, Any]]:
-    """
-    Get metadata for each agent role template.
-
-    Returns a dict mapping role names to metadata dictionaries containing
-    category and variables. Behavioral rules and success criteria are now
-    embedded directly in the user_instructions text of v103 templates, so
-    the structured fields are kept empty for consistency.
-
-    Returns:
-        Dict mapping role names to metadata dictionaries
-
-    Note:
-        This is a private function used by devpanel and layer-separation tests.
-        Previously contained populated behavioral_rules/success_criteria,
-        cleared in 0815 to match v103 template design.
-    """
     return {
         "orchestrator": {
             "category": "role",
@@ -643,19 +465,6 @@ def _get_template_metadata() -> dict[str, dict[str, Any]]:
 
 
 def _get_mcp_coordination_section() -> str:
-    """
-    Generate the MCP coordination section to append to all templates.
-
-    This section contains ONLY the critical "MCP tools are native calls" warning.
-    All lifecycle behavior (tools, bootstrap, phases) is in server-side `full_protocol`
-    returned by get_job_mission().
-
-    Added in Phase 7 (Handover 0045).
-    Trimmed in Handover 0431 to remove redundant content covered by full_protocol.
-
-    Returns:
-        str - MCP coordination section in markdown format
-    """
     return """## MCP Tool Usage
 
 MCP tools appear as **native tool calls** in your tool list (like Read, Write, Bash, Glob).
@@ -674,18 +483,6 @@ get_job_mission(job_id="...")
 
 
 def _get_mcp_bootstrap_section() -> str:
-    """
-    Generate the slim MCP bootstrap section for agent templates (Handover 0813).
-
-    This replaces the previous protocol-heavy system_instructions with a minimal
-    bootstrap that directs agents to fetch their full protocols via get_job_mission().
-
-    The full protocol content (5-phase lifecycle, messaging, check-ins, etc.) is
-    delivered server-side via full_protocol in the get_job_mission() response.
-
-    Returns:
-        str - Slim MCP bootstrap section (~10 lines) in markdown format
-    """
     return f"""## {PRODUCT_NAME} Agent
 
 You are part of a {PRODUCT_NAME} orchestration system. MCP tools are native tool calls,
@@ -707,53 +504,12 @@ Do not begin work until you have received and read your mission and protocols.""
 
 
 def _get_check_in_protocol_section(tool: str = "multi_terminal") -> str:
-    """
-    Generate the Check-In Protocol section for agent monitoring (Handover 0107).
-
-    This section provides brief reminder about contextual check-ins.
-    Detailed behavior lives in full_protocol returned by get_job_mission().
-
-    Args:
-        tool: Platform identifier ('claude-code', 'codex', 'gemini', or
-            'multi_terminal'). HO1025: when tool=='claude-code' the section
-            appends a harness-reminder override telling the orchestrator to
-            ignore the local TaskCreate `<system-reminder>` and use
-            the prefixed report_progress tool instead. Other tools omit this
-            block (the reminder doesn't fire in their harnesses).
-
-    Returns:
-        str - Brief Check-In Protocol section in markdown format
-
-    Note:
-        Slimmed in Handover 0353 - detailed behavior moved to full_protocol.
-        Updated in Handover 0392 - simplified report_progress format.
-        HO1025: tool-aware to gate the Claude-Code-specific harness override.
-    """
     base = """## CHECK-IN PROTOCOL
 
 Report progress at natural workflow breaks (after todos, after phases, before long tasks).
 NOT timer-based. Full protocol in `full_protocol` from `get_job_mission()`.
 """
-    # HO1025: TaskCreate override is Claude-Code-specific. Codex / Gemini / non-CLI
-    # multi_terminal agents don't see the harness reminder so the override would be
-    # noise for them. Append only when tool == "claude-code".
-    # BE-6084 spike (2026-06-17): we deliberately KEEP this as a suppress-override and
-    # do NOT mirror todos into the harness task tools. Reason proven live: the Claude
-    # Code nudge is RECENCY-keyed, not existence-keyed — it re-fires after a handful of
-    # tool calls that don't touch TaskCreate/TaskUpdate, EVEN when a populated, in_progress
-    # harness task list exists. So an "active mirrored list" does NOT silence it; only
-    # constantly re-touching the task tools would, at a cadence far higher than
-    # report_progress fires. Mirroring would buy a second todo source + a double-write on
-    # every progress update + still-incomplete suppression — net negative. The crisp
-    # "ignore it" line below is the robust, low-cost answer.
     if tool == "claude-code":
-        # BE-9275b: a plain string with __PLACEHOLDER__ tokens (not an inline
-        # f-string) -- an f-string's {MCP_ALIAS} interpolations split this
-        # block into separate ast.Constant nodes at each brace, which broke
-        # the neutrality guard's +/-3-line "keep_nearby" locality window (the
-        # "Claude Code" header landed in a different node than the later
-        # ToolSearch mention it's meant to gate). Same placeholder pattern
-        # already used for __TOOLSEARCH_CALL__ below.
         base += """
 **HARNESS REMINDER OVERRIDE (Claude Code only — load-bearing):** Claude Code
 periodically injects a `<system-reminder>` nudging `TaskCreate`/`TaskUpdate` for
@@ -782,18 +538,6 @@ you'll spend extra round-trips pulling schemas piecemeal mid-protocol.
 
 
 def _get_orchestrator_context_response_section() -> str:
-    """
-    Generate orchestrator-specific context response section (Handover 0109).
-
-    This section provides reciprocal instructions for orchestrators on how
-    to respond to context requests from other agents.
-
-    Returns:
-        str - Orchestrator context response section in markdown format
-
-    Note:
-        Added to user_instructions only for orchestrator template.
-    """
     return """### RESPONDING TO CONTEXT REQUESTS
 
 When agents request broader context via post_to_thread() on your coordination thread:
@@ -818,18 +562,6 @@ post_to_thread(
 
 
 def _get_orchestrator_messaging_protocol_section() -> str:
-    """
-    Generate orchestrator-specific messaging behavioral guidance.
-
-    Handover 0431: Trimmed — detailed examples moved to full_protocol.
-    Handover 0966: Deduplicated — procedural coordination loop, message prefixes,
-    and priority levels removed (now authoritative in full_protocol from
-    agent_lifecycle.py). This section retains only behavioral guidance (WHO),
-    not operational mechanics (HOW).
-
-    Returns:
-        str - Orchestrator messaging behavioral guidance in markdown format
-    """
     return """## ORCHESTRATOR COORDINATION PRINCIPLES
 
 As orchestrator, you are the team's single coordination point:
@@ -844,24 +576,6 @@ Detailed coordination mechanics, message prefixes, priority levels, and tool sig
 
 
 def _get_user_facing_orchestrator_seed() -> str:
-    """
-    Generate the Layer B "user seed" — the admin-editable, tool-agnostic
-    orchestrator identity content.
-
-    HO1027 (three-layer identity refactor): This is the content shown in the
-    admin "Restore to default" textarea. It contains identity preamble,
-    behavioral principles, success criteria, "If Requirements Are Unclear",
-    "Before Closeout", "Responding to Context Requests", and the
-    ORCHESTRATOR COORDINATION PRINCIPLES — but no harness mechanics.
-
-    Tool gating, MCP tool-call syntax, CHECK-IN PROTOCOL, and the Claude Code
-    HARNESS REMINDER OVERRIDE all live in `_get_orchestrator_system_harness`
-    instead, and are appended at runtime regardless of override state.
-
-    Returns:
-        str - Layer B seed content (orchestrator template + context-response
-            section + coordination principles).
-    """
     base_template = ""
     for template_def in _get_default_templates_v103():
         if template_def.get("role") == "orchestrator":
@@ -883,26 +597,6 @@ def _get_user_facing_orchestrator_seed() -> str:
 
 
 def _get_orchestrator_system_harness(tool: str = "multi_terminal") -> str:
-    """
-    Generate the Layer A "system harness" — hidden, immutable, tool-aware
-    orchestrator scaffolding that is always appended to the active identity.
-
-    HO1027 (three-layer identity refactor): Contains the MCP Tool Usage
-    section and the CHECK-IN PROTOCOL (which itself appends the Claude-Code-
-    only HARNESS REMINDER OVERRIDE when ``tool == 'claude-code'``).
-
-    The harness is appended after either the user override or the seed so
-    orchestrators always receive harness mechanics even when an admin has
-    replaced the seed with custom identity content.
-
-    Args:
-        tool: Platform identifier ('claude-code', 'codex', 'gemini', or
-            'multi_terminal'). Threaded into `_get_check_in_protocol_section`
-            so the HARNESS REMINDER OVERRIDE only renders for Claude Code.
-
-    Returns:
-        str - Layer A harness content.
-    """
     mcp_section = _get_mcp_coordination_section().strip()
     check_in = _get_check_in_protocol_section(tool=tool).strip()
 
@@ -912,56 +606,19 @@ def _get_orchestrator_system_harness(tool: str = "multi_terminal") -> str:
 """
 
 
-# BE-6211g (move c): conductor role-trim anchors. The project-less CHAIN CONDUCTOR
-# drives sub-orchestrators and never fields peer-agent context requests, never runs a
-# per-project verify-all-agents closeout, and never spawn_job-s workers — so those
-# three seed blocks are sliced out of its identity (gated on role == "conductor").
-# Each slice fresh-finds its anchors and no-ops if an anchor is absent (graceful for
-# admin override seeds that lack the default headings), mirroring the BE-6208g
-# recompute-after-splice idiom in orchestrator_body.py.
 def _trim_conductor_identity_body(body: str) -> str:
-    """Remove the conductor-irrelevant blocks from the seed body (BE-6211g + BE-6215).
-
-    The project-less chain conductor never stages/closes out a single project of its
-    own and never spawns workers, so the solo-orchestration prose for those flows is
-    noise it must not act on. FIVE sections are excised as FOUR anchored spans; each
-    END anchor is KEPT so the reverse-splice guard can prove the trim removed EXACTLY
-    these spans and nothing else (test_be6211g_role_scoped_identity.py).
-
-    - SLICE C (BE-6215): ``## Three-Phase Workflow`` .. ``## Behavioral Principles`` —
-      the solo staging->implementation->closeout phases AND ``## Core Responsibilities``
-      (contiguous), which describe driving ONE project. The conductor runs
-      CH_CHAIN_STAGING / CH_CHAIN_DRIVE instead.
-    - SLICE D (BE-6215): ``## If Requirements Are Unclear`` .. ``## Right-Sizing Your
-      Work`` — the solo staging-lock / request_approval escalation flow. The conductor
-      escalates chain-level decisions to the user via the Hub per CH_CHAIN_DRIVE.
-    - SLICE A (BE-6211g): ``## Before Closeout`` .. ``## ORCHESTRATOR COORDINATION
-      PRINCIPLES`` — the verify-all-agents finale AND ``### RESPONDING TO CONTEXT
-      REQUESTS`` (the seed concatenates them contiguously); COORDINATION PRINCIPLES is
-      the kept END anchor.
-    - SLICE B (BE-6211g): ``- `spawn_job`:`` .. ``- `report_progress`:`` — the
-      worker-spawn tool-index bullet (report_progress END kept).
-
-    Each slice is existence-guarded so a custom admin override lacking the anchors
-    no-ops cleanly. The harness is appended by the caller AFTER this and is never
-    trimmed.
-    """
-    # SLICE C (BE-6215): "## Three-Phase Workflow" .. "## Behavioral Principles" (END kept).
     start = body.find("## Three-Phase Workflow")
     end = body.find("## Behavioral Principles")
     if start != -1 and end != -1 and start < end:
         body = body[:start] + body[end:]
-    # SLICE D (BE-6215): "## If Requirements Are Unclear" .. "## Right-Sizing Your Work" (END kept).
     start = body.find("## If Requirements Are Unclear")
     end = body.find("## Right-Sizing Your Work")
     if start != -1 and end != -1 and start < end:
         body = body[:start] + body[end:]
-    # SLICE A (BE-6211g): "## Before Closeout" .. "## ORCHESTRATOR COORDINATION PRINCIPLES" (END kept).
     start = body.find("## Before Closeout")
     end = body.find("## ORCHESTRATOR COORDINATION PRINCIPLES")
     if start != -1 and end != -1 and start < end:
         body = body[:start] + body[end:]
-    # SLICE B (BE-6211g): "- `spawn_job`:" .. "- `report_progress`:" (END kept).
     start = body.find("- `spawn_job`:")
     end = body.find("- `report_progress`:")
     if start != -1 and end != -1 and start < end:
@@ -974,33 +631,6 @@ def compose_orchestrator_identity(
     tool: str = "multi_terminal",
     role: str | None = None,
 ) -> str:
-    """
-    Compose the runtime orchestrator identity from override-or-seed + harness.
-
-    HO1027 (three-layer identity refactor): This is the canonical entry point
-    for runtime orchestrator identity assembly. It guarantees that the system
-    harness (MCP Tool Usage, CHECK-IN PROTOCOL, HARNESS REMINDER OVERRIDE) is
-    ALWAYS present regardless of whether the tenant has saved an admin
-    override of the user-facing seed.
-
-    Args:
-        override_content: Tenant admin override of the Layer B seed, or None
-            to use the default seed.
-        tool: Platform identifier passed through to the harness for
-            tool-aware gating (HARNESS REMINDER OVERRIDE for claude-code).
-        role: BE-6211g / BE-6215 — OPTIONAL chain role. ``None`` (the default,
-            and the value for solo / sub_orchestrator) reproduces today's seed
-            byte-for-byte. ``"conductor"`` trims the project-less chain
-            conductor of the solo-orchestration blocks it must not act on:
-            the single-project Three-Phase Workflow + Core Responsibilities,
-            the If-Requirements-Are-Unclear staging-lock/request_approval flow,
-            the verify-all-agents Before Closeout finale + RESPONDING TO CONTEXT
-            REQUESTS, and the worker-spawn spawn_job bullet. The coordination
-            principles, right-sizing, tool index, and harness are never trimmed.
-
-    Returns:
-        str - ``(override OR seed[, conductor-trimmed]) + "\\n\\n---\\n\\n" + harness(tool)``
-    """
     body = override_content if override_content else _get_user_facing_orchestrator_seed()
     if role == "conductor":
         body = _trim_conductor_identity_body(body)
@@ -1009,26 +639,4 @@ def compose_orchestrator_identity(
 
 
 def get_orchestrator_identity_content(tool: str = "multi_terminal") -> str:
-    """
-    Back-compat shim — returns the default (no-override) composed identity.
-
-    Handover 0431: This content is injected into the MCP tool response so
-    orchestrators get their identity/behavioral guidance without needing an
-    AgentTemplate record. Orchestrators stay OUT of the template table,
-    exports, and available_agents list.
-
-    HO1025: ``tool`` is threaded so the Claude-Code-specific HARNESS REMINDER
-    OVERRIDE only renders for Claude Code orchestrators, not Codex/Gemini/
-    multi_terminal ones.
-
-    HO1027: Now delegates to ``compose_orchestrator_identity(None, tool)``
-    so the seed-vs-harness split is honored even on legacy callers.
-
-    Args:
-        tool: Platform identifier ('claude-code', 'codex', 'gemini', or
-            'multi_terminal'). Defaults to 'multi_terminal'.
-
-    Returns:
-        str - Full orchestrator identity and behavioral guidance.
-    """
     return compose_orchestrator_identity(None, tool=tool)

@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tests for the CE admin system-banner emitters (IMP-5037b Phase 1, item D).
-
-Covers emit_system_banners end-to-end against the DB:
-- pending-migrations banner upsert + resolve
-- update-available banner upsert + resolve
-- skills-drift banner upsert
-- admin-only visibility (role_filter='admin')
-- tenants without admins are skipped
-
-Parallel-safe: TransactionalTestContext (db_session) + no module globals.
-"""
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -63,12 +52,6 @@ async def _make_user(db_session, tenant_key: str, role: str) -> str:
 
 
 def _fake_state(db_manager, db_session, *, update_available=None):
-    """A minimal APIState-like object whose db_manager shares the test session.
-
-    background_tasks.emit_system_banners builds its own NotificationService from
-    state.db_manager. To keep everything inside the test transaction, we patch
-    NotificationService to always use the shared db_session (below).
-    """
     return SimpleNamespace(
         db_manager=db_manager,
         websocket_manager=None,
@@ -79,9 +62,6 @@ def _fake_state(db_manager, db_session, *, update_available=None):
 
 @pytest_asyncio.fixture
 def patched_service(monkeypatch, db_manager, db_session):
-    """Force every NotificationService built inside emit_system_banners to share
-    the test transaction's session, and stub the cross-tenant admin scan to the
-    test session as well."""
     real_init = NotificationService.__init__
 
     def _init(self, *, db_manager=db_manager, websocket_manager=None, session=db_session):
@@ -125,7 +105,6 @@ class TestPendingMigrationsBanner:
         assert migration_rows[0].cta_route == "Tools"
         assert migration_rows[0].payload["pending"] == 2
 
-        # Now migrations applied -> resolve
         monkeypatch.setattr(background_tasks, "get_pending_migration_info", lambda state: None)
         await background_tasks.emit_system_banners(state)
         rows_after = await service.list_for_user(tenant_key, admin_id, surface="banner")
@@ -170,12 +149,8 @@ class TestUpdateAvailableBanner:
         assert len(update_rows) == 1
         assert update_rows[0].payload["commits_behind"] == 4
 
-        # FE-6020: the update-available banner links OUT to GitHub releases, not an
-        # in-app route. It must carry no cta_route and a usable release_url in the
-        # payload (git-mode installs supply no URL → fall back to the releases page).
         assert update_rows[0].cta_route is None
         assert update_rows[0].payload["release_url"] == "https://github.com/giljoai/giljo-hq/releases"
-        # FE-6020: copy no longer tells users to run the (migration-only) update.py.
         assert "update.py" not in update_rows[0].title
 
         state.update_available = None
@@ -215,8 +190,6 @@ async def _drift_async(_db_manager, _tenant_key=None):
 
 
 class TestSaaSBannerSuppression:
-    """BE-6031c: under GILJO_MODE=saas, suppress update_available + pending_migrations
-    banners, but KEEP skills_drift. CE (mode unset / 'ce') emits all three."""
 
     @pytest.mark.asyncio
     async def test_saas_suppresses_update_and_migrations_keeps_drift(
@@ -299,17 +272,9 @@ class TestSaaSBannerSuppression:
 
 
 class TestContextTuningDueBanner:
-    """FE-9202: the 14-day context-tuning-due reminder emitted via emit_system_banners.
-
-    The compute gate (product age + activity + preference) is unit-tested against
-    context_tuning_banner directly in test_fe9202_context_tuning_banner.py; here we
-    lock the emit/resolve wiring and the banner's distinguishing shape (per-user,
-    NOT admin-only).
-    """
 
     @staticmethod
     def _patch_quiet(monkeypatch):
-        """Silence the other banner families so only the tuning banner is under test."""
         monkeypatch.setattr(background_tasks, "get_pending_migration_info", lambda state: None)
         monkeypatch.setattr(background_tasks, "_compute_skills_drift", _none_async)
 
@@ -331,14 +296,13 @@ class TestContextTuningDueBanner:
         rows = await service.list_for_user(tenant_key, user_id, surface="banner")
         tuning = [r for r in rows if r.type == "system.context_tuning_due"]
         assert len(tuning) == 1
-        assert tuning[0].role_filter is None  # per-user, NOT admin-gated
+        assert tuning[0].role_filter is None
         assert tuning[0].dismissible is True
         assert tuning[0].cta_route == "Tools"
         assert tuning[0].dedupe_key == "system.context_tuning_due"
         assert tuning[0].payload["projects_since_tune"] == 3
         assert "Acme" in tuning[0].body
 
-        # No longer due -> the open row resolves (auto-clear).
         async def _not_due(_db_manager, _tenant_key):
             return None
 
@@ -349,7 +313,6 @@ class TestContextTuningDueBanner:
 
     @pytest.mark.asyncio
     async def test_visible_to_non_admin(self, monkeypatch, db_manager, db_session, tenant_key, patched_service):
-        # role_filter=None -> a non-admin user sees it (unlike the admin system banners).
         dev_id = await _make_user(db_session, tenant_key, "developer")
         await _make_user(db_session, tenant_key, "admin")
         await _admins_via_session(db_session, monkeypatch)
@@ -364,23 +327,19 @@ class TestContextTuningDueBanner:
 
         service = NotificationService()
         dev_rows = await service.list_for_user(tenant_key, dev_id, surface="banner")
-        assert [r for r in dev_rows if r.type == "system.context_tuning_due"]  # present for the developer
+        assert [r for r in dev_rows if r.type == "system.context_tuning_due"]
 
 
 class TestPerTenantIsolation:
-    """FE-9202 F1: one tenant raising must not abort the emit for the others."""
 
     @pytest.mark.asyncio
     async def test_one_tenant_raises_others_still_emit(
         self, monkeypatch, db_manager, db_session, tenant_key, patched_service
     ):
-        # Two tenants: the FIRST one's tuning compute raises; the SECOND must
-        # still receive its skills-drift banner.
         good_key = tenant_key
         bad_key = f"{tenant_key}_bad"
         good_admin = await _make_user(db_session, good_key, "admin")
 
-        # Enumerate both tenants in a stable order, the failing one FIRST.
         monkeypatch.setattr(background_tasks, "_tenant_keys_with_admins", lambda _dbm: _ordered_keys(bad_key, good_key))
         monkeypatch.setattr(background_tasks, "get_pending_migration_info", lambda state: None)
 
@@ -403,12 +362,10 @@ class TestPerTenantIsolation:
 
 
 async def _ordered_keys(*keys):
-    """Deterministic ordered tenant list (failing tenant first) for the isolation test."""
     return list(keys)
 
 
 class TestSaaSUpdateCheckerSuppression:
-    """BE-6031c: start_update_checker is a no-op under saas, before any git/network work."""
 
     @pytest.mark.asyncio
     async def test_saas_returns_none_without_touching_git(self, monkeypatch):
@@ -452,11 +409,8 @@ class TestSaaSUpdateCheckerSuppression:
 
 
 class TestToolRenameNoticeBanner:
-    """INF-6049a: the first-3-boots CE tool-rename migration notice."""
 
     async def _emit_with_count(self, monkeypatch, db_manager, db_session, count):
-        """Drive emit_system_banners with the boot count pinned and the other CE
-        banners quiet."""
         monkeypatch.setattr(background_tasks, "get_pending_migration_info", lambda state: None)
         monkeypatch.setattr(background_tasks, "_compute_skills_drift", _none_async)
 
@@ -480,7 +434,6 @@ class TestToolRenameNoticeBanner:
         assert notice[0].role_filter == "admin"
         assert notice[0].dismissible is True
         assert notice[0].cta_route == "Tools"
-        # INF-6052c: banner body now lists all 8 renames; spot-check two representative pairs
         assert "get_agent_mission" in notice[0].body
         assert "get_job_mission" in notice[0].body
         assert "get_context" in notice[0].body
@@ -509,7 +462,6 @@ class TestToolRenameNoticeBanner:
         monkeypatch.setattr(background_tasks, "get_pending_migration_info", lambda state: None)
         monkeypatch.setattr(background_tasks, "_compute_skills_drift", _none_async)
 
-        # Even with the counter in-window, SaaS must never show the CE notice.
         async def _count(_db_manager):
             return 1
 
@@ -522,16 +474,8 @@ class TestToolRenameNoticeBanner:
 
 
 class TestToolRenameBootCounter:
-    """INF-6049a: the global boot counter is bumped once per startup, not per tick."""
 
     async def _reset_counter(self, db_session) -> None:
-        """Delete any pre-existing counter row so each test starts from zero.
-
-        system_settings is a non-tenant global table; its rows persist across
-        test runs when a previous test committed (or when the DB was seeded).
-        The TransactionalTestContext rolls back writes made IN this test, but
-        cannot un-see rows already committed before the transaction opened.
-        """
         from sqlalchemy import delete
 
         from giljo_mcp.models.system_setting import SystemSetting
@@ -546,12 +490,11 @@ class TestToolRenameBootCounter:
 
         await self._reset_counter(db_session)
         svc = SystemSettingsService(db_session)
-        assert await svc.get_tool_rename_boot_count() == 0  # unset
+        assert await svc.get_tool_rename_boot_count() == 0
         assert await svc.increment_tool_rename_boot_count() == 1
         assert await svc.increment_tool_rename_boot_count() == 2
         assert await svc.increment_tool_rename_boot_count() == 3
-        assert await svc.increment_tool_rename_boot_count() == 4  # one past the window
-        # Saturates — further startups do not grow it unbounded.
+        assert await svc.increment_tool_rename_boot_count() == 4
         assert await svc.increment_tool_rename_boot_count() == 4
         assert await svc.get_tool_rename_boot_count() == 4
 
@@ -559,8 +502,6 @@ class TestToolRenameBootCounter:
     async def test_emit_cycles_do_not_advance_the_counter(
         self, monkeypatch, db_manager, db_session, tenant_key, patched_service
     ):
-        """An update-checker tick re-runs emit_system_banners; that must NOT bump
-        the boot counter (else 'first 3 boots' silently becomes 'first 3 ticks')."""
         from giljo_mcp.services.settings_service import SystemSettingsService
 
         await self._reset_counter(db_session)
@@ -571,15 +512,13 @@ class TestToolRenameBootCounter:
 
         svc = SystemSettingsService(db_session)
         await svc.increment_tool_rename_boot_count()
-        await svc.increment_tool_rename_boot_count()  # count = 2 (two process boots)
+        await svc.increment_tool_rename_boot_count()
 
-        # Make emit read the SHARED test session's counter (real persistence).
         async def _count(_db_manager):
             return await SystemSettingsService(db_session).get_tool_rename_boot_count()
 
         monkeypatch.setattr(background_tasks, "_get_tool_rename_boot_count", _count)
 
-        # Three emit cycles = a startup plus two update-checker ticks.
         for _ in range(3):
             await background_tasks.emit_system_banners(_fake_state(db_manager, db_session))
 

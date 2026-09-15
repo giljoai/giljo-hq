@@ -3,25 +3,24 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Agent template validation functions for 0103."""
 
 import re
 
 
+MAX_NAME_SUFFIX = 20
+
+
+def crew_suffixed_names(base_names: list[str], taken_names: set[str]) -> tuple[list[str], int] | None:
+    for n in range(1, MAX_NAME_SUFFIX + 1):
+        candidates = [base if n == 1 else f"{base}-{n}" for base in base_names]
+        if not any(c in taken_names for c in candidates):
+            return candidates, n
+    return None
+
+
 def slugify_name(role: str, suffix: str | None = None) -> str:
-    """Generate agent name from role and optional suffix.
-
-    Args:
-        role: Agent role (e.g., 'orchestrator')
-        suffix: Optional custom suffix (e.g., 'AmazingGuy')
-
-    Returns:
-        Slugified name (e.g., 'orchestrator-amazing-guy')
-    """
     if suffix:
-        # Convert to lowercase, replace spaces/underscores with hyphens, strip leading/trailing hyphens
         suffix_clean = re.sub(r"[^a-z0-9-]", "", suffix.lower().replace("_", "-").replace(" ", "-")).strip("-")
-        # Collapse consecutive hyphens
         suffix_clean = re.sub(r"-{2,}", "-", suffix_clean)
         if suffix_clean:
             return f"{role}-{suffix_clean}"
@@ -29,14 +28,6 @@ def slugify_name(role: str, suffix: str | None = None) -> str:
 
 
 def get_role_color(role: str) -> str:
-    """Get background color for a role.
-
-    Args:
-        role: Agent role
-
-    Returns:
-        Hex color code
-    """
     color_map = {
         "orchestrator": "#D4A574",
         "analyzer": "#E74C3C",

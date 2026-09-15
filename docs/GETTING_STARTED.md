@@ -12,16 +12,16 @@ The **Setup Wizard** opens automatically the first time you sign in (rerun it an
 
 | Step | What happens |
 |---|---|
-| **Choose Tools** | Pick one or more AI coding tools: Claude Code, Codex CLI, Gemini CLI, Antigravity CLI, OpenCode, or a generic MCP client. You can add the rest later. |
+| **Choose Tools** | Pick one or more AI coding tools: Claude Code, Codex CLI, OpenCode, or a generic MCP client. You can add the rest later. |
 | **Connect** | The wizard walks through your chosen tools one at a time, showing a one-command setup for each. The status card flips green by itself the moment a tool connects — there is nothing to click. Already set a tool up? Choose **"I already configured this"** to move on. |
-| **Install** | Ask your tool to run `giljo_setup`. This installs the `/giljo` skill and your agent templates. |
+| **Install** | Ask your tool to run `giljo_setup`. This installs the `/giljo` skill and writes the Giljo HQ marker block into your project's `CLAUDE.md` / `AGENTS.md`. |
 | **Launch** | You're all set. Four cards let you create your first product, open the dashboard, read this guide, or drive from your terminal instead. |
 
 Each tool's status turns green on its own once it connects. If you'd rather check by hand, run `/mcp` in your CLI tool and confirm `giljo_hq` is listed as Connected.
 
 To add or reconnect tools later, open **Tools → Connect** — it is a single directory of your connected tools with live status, and **+ Add a tool** starts the same one-at-a-time flow.
 
-> **About `giljo_setup`.** Run it from inside your AI tool, not the dashboard. It installs the `/giljo` skill and, when you have no agent templates yet, your agents too. Later runs refresh your skills and ask before replacing any agent templates you have customized.
+> **About `giljo_setup`.** Run it from inside your AI tool, not the dashboard. It installs the `/giljo` skill and writes the Giljo HQ marker block into your project file; later runs refresh them. It does not install agents — every agent you launch is handed its own profile by the server when it starts, so there is nothing to keep in sync.
 
 ---
 
@@ -107,7 +107,7 @@ Your next project starts with this accumulated 360 Memory automatically.
 
 **Tune your product context.** If the context drifts from the real codebase, use the **Tune Context** button on a product card. Pick the sections to refresh, generate a prompt, and paste it into your AI coding tool; the agent researches the drift and, with your approval, applies the changes.
 
-**Customize your agents.** Go to **Tools → Agents**. Edit each agent's **Role & Expertise**, or use **Add Default Agents** to re-add the starter set (your edits are kept). Sync your templates to your tool by running `giljo_setup` and choosing "Agents only". You have 16 active slots — 15 custom agents plus the reserved orchestrator.
+**Customize your agents.** Go to **Tools → Agents**. Edit each agent's **Role & Expertise**, or use **Add Default Agents** to re-add the starter set (your edits are kept). There is nothing to sync: an agent is handed its full profile — role, instructions, rules, success criteria — the moment it starts work, so an edit applies to the very next agent you launch. You have 16 active slots — 15 custom agents plus the reserved orchestrator.
 
 **Plan with the Roadmap.** Open **Roadmap** to see your product's projects and tasks ranked for risk and effort by your agent. Click **Refresh Roadmap** to copy a prompt into your agent, then drag items to reorder.
 
@@ -125,7 +125,7 @@ Your next project starts with this accumulated 360 Memory automatically.
 ## Troubleshooting
 
 **A "Skills out of date" banner appears:**
-- Run `giljo_setup` in your AI coding tool to refresh your skills and agent templates. If a setup download reports itself stale, re-run `giljo_setup` for a fresh copy.
+- Run `giljo_setup` in your AI coding tool to refresh your skills. If a setup download reports itself stale, re-run `giljo_setup` for a fresh copy.
 
 **An agent shows "Silent" status:**
 - Raise the **Agent Check-in Cadence** in **Tools → Notifications** so waiting agents check in more often; agents on a harness with live wake support respond instantly instead of waiting for the next cycle.

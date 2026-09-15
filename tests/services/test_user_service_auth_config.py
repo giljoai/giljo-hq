@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Test suite for UserService authentication, validation, and configuration.
-
-Split from test_user_service.py during test reorganization.
-Covers: change_password, reset_password, check_username_exists, check_email_exists,
-verify_password, field_priority_config, depth_config, execution_mode, edge cases.
-
-Shared fixtures (test_tenant_key, user_service, test_user, admin_user) are
-provided by tests/services/conftest.py.
-"""
 
 from uuid import uuid4
 
@@ -28,31 +18,24 @@ from giljo_mcp.exceptions import (
 from giljo_mcp.models.auth import User
 
 
-# ============================================================================
-# TEST: change_password
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_change_password_success(user_service, test_user, db_session):
-    """Test successful password change"""
     new_password = "NewPassword456"
 
     result = await user_service.auth.change_password(
         user_id=test_user.id, old_password="TestPassword123", new_password=new_password
     )
 
-    # Verify method completes without error (void return)
     assert result is None
 
-    # Verify new password works
     await db_session.refresh(test_user)
     assert bcrypt.checkpw(new_password.encode("utf-8"), test_user.password_hash.encode("utf-8"))
 
 
 @pytest.mark.asyncio
 async def test_change_password_incorrect_old_password(user_service, test_user):
-    """Test that change_password rejects incorrect old password"""
     with pytest.raises(AuthenticationError) as exc_info:
         await user_service.auth.change_password(
             user_id=test_user.id, old_password="WrongPassword", new_password="NewPassword456"
@@ -63,32 +46,25 @@ async def test_change_password_incorrect_old_password(user_service, test_user):
 
 @pytest.mark.asyncio
 async def test_change_password_admin_bypass(user_service, test_user, db_session):
-    """Test that admin can change password without old password"""
     new_password = "AdminSetPassword789"
 
     result = await user_service.auth.change_password(
         user_id=test_user.id,
-        old_password=None,  # Admin bypass
+        old_password=None,
         new_password=new_password,
         is_admin=True,
     )
 
-    # Verify method completes without error (void return)
     assert result is None
 
     await db_session.refresh(test_user)
     assert bcrypt.checkpw(new_password.encode("utf-8"), test_user.password_hash.encode("utf-8"))
 
 
-# ============================================================================
-# TEST: set_initial_password (BE-9032)
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_set_initial_password_success_for_passwordless_user(user_service, db_session, test_tenant_key):
-    """A social-only user (password_hash IS NULL) can set an initial password
-    via this path, then log in with it (bcrypt round-trip)."""
     user = User(
         id=str(uuid4()),
         username=f"social_{uuid4().hex[:8]}",
@@ -104,28 +80,22 @@ async def test_set_initial_password_success_for_passwordless_user(user_service, 
     new_password = "InitialPass123!"
     result = await user_service.auth.set_initial_password(user_id=user.id, new_password=new_password)
 
-    assert result is None  # void return, matches change_password's contract
+    assert result is None
     await db_session.refresh(user)
     assert user.password_hash is not None
     assert bcrypt.checkpw(new_password.encode("utf-8"), user.password_hash.encode("utf-8"))
-    # Nudge state cleared on success (BE-1004/1005 banner no longer applies).
     assert user.password_nudge_dismissed_at is not None
 
 
 @pytest.mark.asyncio
 async def test_set_initial_password_rejects_user_with_existing_password(user_service, test_user):
-    """SECURITY (critical assertion): a user who already has a password_hash
-    MUST be refused. This method takes no old_password parameter at all, so
-    it must never serve as an old-password bypass -- change_password (which
-    requires old_password for a non-admin) is the only path for those users."""
     original_hash = test_user.password_hash
-    assert original_hash is not None  # test_user fixture always has a password
+    assert original_hash is not None
 
     with pytest.raises(AuthorizationError) as exc_info:
         await user_service.auth.set_initial_password(user_id=test_user.id, new_password="SomeNewPass123!")
 
     assert "already" in str(exc_info.value).lower()
-    # The guard must fire BEFORE any write -- the existing hash is untouched.
     assert test_user.password_hash == original_hash
 
 
@@ -135,14 +105,10 @@ async def test_set_initial_password_user_not_found(user_service):
         await user_service.auth.set_initial_password(user_id=str(uuid4()), new_password="SomeNewPass123!")
 
 
-# ============================================================================
-# TEST: check_username_exists
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_check_username_exists_true(user_service, test_user):
-    """Test that check_username_exists detects existing username"""
     exists = await user_service.auth.check_username_exists(test_user.username)
 
     assert exists is True
@@ -150,20 +116,15 @@ async def test_check_username_exists_true(user_service, test_user):
 
 @pytest.mark.asyncio
 async def test_check_username_exists_false(user_service):
-    """Test that check_username_exists returns false for non-existent username"""
     exists = await user_service.auth.check_username_exists(f"nonexistent_{uuid4().hex}")
 
     assert exists is False
 
 
-# ============================================================================
-# TEST: check_email_exists
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_check_email_exists_true(user_service, test_user):
-    """Test that check_email_exists detects existing email"""
     exists = await user_service.auth.check_email_exists(test_user.email)
 
     assert exists is True
@@ -171,20 +132,15 @@ async def test_check_email_exists_true(user_service, test_user):
 
 @pytest.mark.asyncio
 async def test_check_email_exists_false(user_service):
-    """Test that check_email_exists returns false for non-existent email"""
     exists = await user_service.auth.check_email_exists(f"nonexistent_{uuid4().hex}@example.com")
 
     assert exists is False
 
 
-# ============================================================================
-# TEST: verify_password
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_verify_password_correct(user_service, test_user):
-    """Test that verify_password returns true for correct password"""
     verified = await user_service.auth.verify_password(user_id=test_user.id, password="TestPassword123")
 
     assert verified is True
@@ -192,23 +148,17 @@ async def test_verify_password_correct(user_service, test_user):
 
 @pytest.mark.asyncio
 async def test_verify_password_incorrect(user_service, test_user):
-    """Test that verify_password returns false for incorrect password"""
     verified = await user_service.auth.verify_password(user_id=test_user.id, password="WrongPassword")
 
     assert verified is False
 
 
-# ============================================================================
-# TEST: get_field_priority_config
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_get_field_priority_config_custom(user_service, test_user, db_session):
-    """Test that get_field_priority_config returns custom toggles from user_field_priorities table"""
     from giljo_mcp.models.auth import UserFieldPriority
 
-    # Insert custom toggle rows
     for cat, enabled in [("tech_stack", True), ("git_history", True), ("testing", False)]:
         db_session.add(
             UserFieldPriority(
@@ -227,31 +177,24 @@ async def test_get_field_priority_config_custom(user_service, test_user, db_sess
     assert config["priorities"]["tech_stack"]["toggle"] is True
     assert config["priorities"]["git_history"]["toggle"] is True
     assert config["priorities"]["testing"]["toggle"] is False
-    # Always-on categories
     assert config["priorities"]["product_core"]["toggle"] is True
     assert config["priorities"]["project_description"]["toggle"] is True
 
 
 @pytest.mark.asyncio
 async def test_get_field_priority_config_defaults(user_service, test_user):
-    """Test that get_field_priority_config returns defaults when no custom rows"""
     config = await user_service.get_field_priority_config(test_user.id)
 
     assert isinstance(config, dict)
     assert config["version"] in ["3.0", "4.0"]
     assert "priorities" in config
-    # git_history should be False by default
     assert config["priorities"]["git_history"]["toggle"] is False
 
 
-# ============================================================================
-# TEST: update_field_priority_config
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_update_field_priority_config_success(user_service, test_user, db_session):
-    """Test successful field priority config update via user_field_priorities table"""
     new_config = {
         "version": "4.0",
         "priorities": {
@@ -264,7 +207,6 @@ async def test_update_field_priority_config_success(user_service, test_user, db_
     result = await user_service.update_field_priority_config(user_id=test_user.id, config=new_config)
     assert result is None
 
-    # Verify rows created in DB
     config = await user_service.get_field_priority_config(test_user.id)
     assert config["priorities"]["vision_documents"]["toggle"] is True
     assert config["priorities"]["agent_templates"]["toggle"] is False
@@ -273,11 +215,10 @@ async def test_update_field_priority_config_success(user_service, test_user, db_
 
 @pytest.mark.asyncio
 async def test_update_field_priority_config_validation(user_service, test_user):
-    """Test that update_field_priority_config validates toggle values"""
     invalid_config = {
         "version": "4.0",
         "priorities": {
-            "tech_stack": 5  # Invalid: not bool or dict with toggle
+            "tech_stack": 5
         },
     }
 
@@ -287,15 +228,10 @@ async def test_update_field_priority_config_validation(user_service, test_user):
     assert "invalid" in str(exc_info.value).lower()
 
 
-# ============================================================================
-# TEST: reset_field_priority_config
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_reset_field_priority_config_clears_custom(user_service, test_user, db_session):
-    """Test that reset_field_priority_config deletes all toggle rows"""
-    # First set some custom toggles
     await user_service.update_field_priority_config(
         test_user.id,
         {
@@ -307,19 +243,14 @@ async def test_reset_field_priority_config_clears_custom(user_service, test_user
     result = await user_service.reset_field_priority_config(test_user.id)
     assert result is None
 
-    # After reset, should get defaults (git_history False)
     config = await user_service.get_field_priority_config(test_user.id)
     assert config["priorities"]["git_history"]["toggle"] is False
 
 
-# ============================================================================
-# TEST: get_depth_config
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_get_depth_config_custom(user_service, test_user, db_session):
-    """Test that get_depth_config returns values from user columns"""
     test_user.depth_vision_documents = "full"
     test_user.depth_memory_last_n = 5
     test_user.depth_git_commits = 50
@@ -335,7 +266,6 @@ async def test_get_depth_config_custom(user_service, test_user, db_session):
 
 @pytest.mark.asyncio
 async def test_get_depth_config_defaults(user_service, test_user):
-    """Test that get_depth_config returns column defaults"""
     config = await user_service.get_depth_config(test_user.id)
 
     assert isinstance(config, dict)
@@ -345,14 +275,10 @@ async def test_get_depth_config_defaults(user_service, test_user):
     assert config["agent_templates"] == "basic"
 
 
-# ============================================================================
-# TEST: update_depth_config
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_update_depth_config_success(user_service, test_user, db_session):
-    """Test successful depth config update via columns"""
     new_depth = {"vision_documents": "full", "memory_last_n_projects": 10, "git_commits": 100}
 
     result = await user_service.update_depth_config(user_id=test_user.id, config=new_depth)
@@ -366,9 +292,8 @@ async def test_update_depth_config_success(user_service, test_user, db_session):
 
 @pytest.mark.asyncio
 async def test_update_depth_config_validation(user_service, test_user):
-    """Test that update_depth_config validates config"""
     invalid_depth = {
-        "vision_documents": "invalid_level"  # Invalid
+        "vision_documents": "invalid_level"
     }
 
     with pytest.raises(ValidationError) as exc_info:
@@ -377,14 +302,10 @@ async def test_update_depth_config_validation(user_service, test_user):
     assert "invalid" in str(exc_info.value).lower()
 
 
-# ============================================================================
-# TEST: Exception Handling & Edge Cases
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_user_service_logging(user_service, test_user, caplog):
-    """Test that UserService logs operations"""
     import logging
 
     caplog.set_level(logging.INFO)

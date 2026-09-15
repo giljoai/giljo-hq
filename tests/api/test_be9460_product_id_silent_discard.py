@@ -3,37 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9460 regression -- PUT /tasks/{id} no longer silently discards product_id.
-
-``product_id`` is declared on the ``TaskUpdate`` REST schema
-(``api/schemas/task.py``), so a client may send it. It is deliberately absent
-from ``_ALLOWED_TASK_UPDATE_FIELDS``
-(``src/giljo_mcp/services/task_service/_mutation_mixin.py``) because a task's
-product is fixed at creation -- project-reassignment validation, series
-numbering, and ``convert_to_project`` all anchor on ``task.product_id`` as
-the CURRENT value, and no write path anywhere reassigns it (verified by
-sweeping the whole ``task_service`` package). Before this fix the service
-silently dropped the field regardless, so the caller was told 200 for a
-write that never applied.
-
-An always-rejecting validator (TSK-9265's template) is wrong here because
-the task edit dialog seeds its form from the fetched task and echoes
-``product_id`` back UNCHANGED on every ordinary save
-(``useTaskCrud.js:45-47,160-162`` -- ``editTask`` spreads the fetched task
-into ``currentTask``, ``saveTask`` sends it straight back). Confirmed on the
-wire before writing this fix. An always-reject would turn every ordinary
-edit into a 422 -- a worse version of TSK-9458, which this file's sibling
-guards against for ``task_type``.
-
-So the fix mirrors TSK-9458's own idiom, in the same function: an unchanged
-``product_id`` is tolerated (dropped before it ever reaches the service --
-nothing to do), a genuinely changed one is rejected honestly instead of
-silently discarded. Either the write persists or the caller is told it did
-not -- never both silent and successful.
-
-Tests live at the REST boundary (``api_client``) because that is the layer
-the defect lived at, mirroring ``tests/api/test_tsk9458_task_edit_persists.py``.
-"""
 
 from __future__ import annotations
 
@@ -55,7 +24,6 @@ _TEST_CSRF_TOKEN = secrets.token_urlsafe(32)
 
 
 async def _seed_user_with_two_products(db_manager) -> dict:
-    """Create org + user + TWO products (one active, one not) in a fresh tenant."""
     async with db_manager.get_session_async() as session:
         suffix = uuid.uuid4().hex[:8]
         tenant_key = TenantManager.generate_tenant_key()
@@ -88,9 +56,6 @@ async def _seed_user_with_two_products(db_manager) -> dict:
             name=f"Product B {suffix}",
             description="Test product B",
             tenant_key=tenant_key,
-            # Only one product may be is_active=True per tenant
-            # (idx_product_single_active_per_tenant) -- product_id FK
-            # validity does not require the target product to be active.
             is_active=False,
         )
         session.add(product_a)
@@ -139,12 +104,6 @@ async def _create_task(api_client: AsyncClient, seeded: dict) -> dict:
 async def test_changed_product_id_is_rejected_not_silently_dropped(
     api_client: AsyncClient, db_manager, seeded_two_products: dict
 ) -> None:
-    """The BE-9460 regression: a genuine product_id change is now a visible 4xx.
-
-    Before the fix this returned 200 and silently no-op'd. Now the caller is
-    told honestly that the write did not apply -- never both silent and
-    "successful".
-    """
     created = await _create_task(api_client, seeded_two_products)
     task_id = created["id"]
     assert created["product_id"] == seeded_two_products["product_a_id"], created
@@ -170,16 +129,6 @@ async def test_changed_product_id_is_rejected_not_silently_dropped(
 async def test_unchanged_echoed_product_id_is_tolerated(
     api_client: AsyncClient, db_manager, seeded_two_products: dict
 ) -> None:
-    """Control, mirrors TSK-9458: the edit dialog's normal echo must not break.
-
-    The edit dialog seeds its form from the fetched task and PUTs the whole
-    object back, so ``product_id`` rides along unchanged on every ordinary
-    save. Tolerating that must not reject the request or discard the user's
-    other edits (title here). This passes on BOTH sides of the fix -- the
-    pre-fix code already silently dropped product_id regardless of whether it
-    changed, so an unchanged echo was never itself the trigger; this test
-    exists to prove the reject-on-change branch above does not spill over.
-    """
     created = await _create_task(api_client, seeded_two_products)
     task_id = created["id"]
 
@@ -188,7 +137,7 @@ async def test_unchanged_echoed_product_id_is_tolerated(
         headers=seeded_two_products["headers"],
         json={
             "title": "EDITED title",
-            "product_id": seeded_two_products["product_a_id"],  # echoed, unchanged
+            "product_id": seeded_two_products["product_a_id"],
         },
     )
     assert resp.status_code == 200, resp.text

@@ -1,9 +1,3 @@
-/**
- * NavLogMenu.spec.js — FE-6006 unit 3a
- *
- * Tests log download menu orb rendering and archive list display.
- * Edition scope: CE (component is CE-only, rendered under giljoMode='ce' guard in parent)
- */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -57,8 +51,6 @@ describe('NavLogMenu', () => {
     expect(wrapper.find('.v-list-item-title').exists()).toBe(true)
   })
 
-  // BE-9347: size-rotated archives all carry the same mtime date, so the date
-  // alone cannot tell them apart. The rotation index is what distinguishes them.
   it('shows the rotation index for size-rotated archives', () => {
     const wrapper = mountMenu({
       logArchives: [
@@ -89,16 +81,12 @@ describe('NavLogMenu', () => {
   it('emits download-current when Download Current Log is clicked', async () => {
     const wrapper = mountMenu()
     const items = wrapper.findAll('.v-list-item')
-    // First list-item is "Download Current Log"
     await items[0].trigger('click')
     expect(wrapper.emitted('download-current')).toBeTruthy()
   })
 
   it('emits menu-toggle with open=true when menu opens', async () => {
-    // The menu stub renders activator slot, which opens on click
     const wrapper = mountMenu()
-    // The v-menu stub just renders both slots inline — emitWrapper triggers menu-toggle
-    // indirectly via onLogMenuToggle. We verify the emit is wired.
     expect(wrapper.emitted('menu-toggle')).toBeUndefined()
   })
 })

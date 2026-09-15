@@ -3,37 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""``ce_0087``'s backfill links AT MOST ONE thread to a run (BE-9291).
-
-The backfill recovers ``comm_threads.sequence_run_id`` from the old subject
-convention. Its original guard, ``HAVING count(*) = 1``, bounds RUNS PER THREAD --
-an ambiguous subject naming two runs is left NULL rather than guessed at. Nothing
-bounded THREADS PER RUN: ``idx_comm_thread_sequence_run`` is a plain index rather
-than a unique one, and the run-id validation on the write path checks that the run
-EXISTS, not that it is unhubbed.
-
-Two threads whose subjects both name the same run therefore both got stamped, and
-both then landed in the FK branch of the resolver's CASE -- so the authoritative
-branch stopped discriminating and the only tiebreak left was ``created_at ASC``.
-Oldest wins, and the oldest thread mentioning a run id is not necessarily its hub.
-
-What that costs, concretely: a conductor runs chain staging step 0, ``create_thread``
-succeeds, and the conductor dies or is restaged before it records the thread id. It
-re-runs step 0 and creates a SECOND hub which it hands to its sub-orchestrators.
-Both get stamped. From then on the chain context answers every sub-orchestrator with
-the FIRST, ABANDONED thread while the conductor polls the second -- split-brain
-coordination, nothing raised, everyone quiet. That is the exact failure mode this
-project exists to remove, and it needs no misbehaviour, only a retry.
-
-The guard is symmetric with the one already there: a run claimed by more than one
-candidate thread is SKIPPED rather than double-written. Skipping is not a loss --
-resolution still finds those threads down the legacy subject branch, which is
-precisely today's pre-``ce_0087`` behaviour. The migration declines to assert an
-authoritative link it cannot determine.
-
-Real database, real ``alembic upgrade`` -- these assertions are about what Postgres
-actually did to seeded rows, not about what the SQL reads like.
-"""
 
 from __future__ import annotations
 
@@ -66,8 +35,6 @@ _REV = "ce_0087_comm_threads_sequence_run_fk"
 TK = "tk_ce0087"
 TK_OTHER = "tk_ce0087_other"
 
-# Realistic run ids. Every subject below is about whether one of these strings
-# appears in it, so they are spelled once and never interpolated by accident.
 RUN_SOLO = "0f7c1d2e-9a41-4b8e-8c33-5a6b7c8d9e01"
 RUN_SHARED = "2b3c4d5e-6f70-4182-99aa-bbccddeeff01"
 RUN_SECOND = "3c4d5e6f-7081-4293-aabb-ccddeeff0102"
@@ -167,7 +134,6 @@ def scratch_engine():
 
 @pytest.fixture
 def scratch_at_pre(scratch_engine: sa.Engine):
-    """Fresh schema built up to ce_0086 -- the revision before the column exists."""
     _drop_all_objects(scratch_engine)
     up = _run_alembic("upgrade", _PRE)
     assert up.returncode == 0, f"upgrade to {_PRE} failed:\n{up.stdout}\n{up.stderr}"
@@ -175,9 +141,6 @@ def scratch_at_pre(scratch_engine: sa.Engine):
     _drop_all_objects(scratch_engine)
 
 
-# --------------------------------------------------------------------------- #
-# Seeds -- raw SQL, because a migration test must not depend on the ORM models #
-# --------------------------------------------------------------------------- #
 
 
 def _seed_run(engine: sa.Engine, run_id: str, tenant: str = TK) -> None:
@@ -224,7 +187,6 @@ def _link_of(engine: sa.Engine, thread_id: str) -> str | None:
 
 
 def _runs_linked_more_than_once(engine: sa.Engine) -> list[tuple[str, int]]:
-    """The invariant this whole file exists for, asked of the database directly."""
     with engine.connect() as conn:
         return [
             (row[0], row[1])
@@ -240,17 +202,8 @@ def _runs_linked_more_than_once(engine: sa.Engine) -> list[tuple[str, int]]:
 
 @pytest.mark.integration
 class TestCe0087ChainHubBackfill:
-    """One run, at most one link -- proven against a real upgrade."""
 
     def test_a_run_named_by_two_threads_is_skipped_rather_than_double_written(self, scratch_at_pre: sa.Engine) -> None:
-        """THE regression. Both threads name the same run; neither may be stamped.
-
-        Seeded exactly as the defect was measured: an OLDER thread that merely
-        mentions the run and a NEWER thread that is the real hub. Before the guard
-        both were stamped, and the resolver -- with both in the authoritative CASE
-        branch and only ``created_at ASC`` left to decide -- answered with the older
-        chatter thread.
-        """
         _seed_run(scratch_at_pre, RUN_SHARED)
         _seed_thread(
             scratch_at_pre,
@@ -278,11 +231,6 @@ class TestCe0087ChainHubBackfill:
         assert _link_of(scratch_at_pre, "t_real_hub_newer") is None
 
     def test_an_unambiguous_hub_is_still_backfilled(self, scratch_at_pre: sa.Engine) -> None:
-        """The other side of the guard: it must not refuse the case it was built for.
-
-        A guard that skipped everything would pass the test above and destroy the
-        migration's entire purpose, so this is asserted in the same run.
-        """
         _seed_run(scratch_at_pre, RUN_SOLO)
         _seed_thread(scratch_at_pre, "t_solo_hub", 1, f"Chain run {RUN_SOLO} coordination hub")
 
@@ -292,18 +240,10 @@ class TestCe0087ChainHubBackfill:
         assert _link_of(scratch_at_pre, "t_solo_hub") == RUN_SOLO
 
     def test_a_run_already_linked_does_not_gain_a_second_thread(self, scratch_at_pre: sa.Engine) -> None:
-        """The idempotency-shaped variant of the same defect.
-
-        The CE installer reruns the chain on every boot, so the backfill meets
-        databases that already carry conductor-stamped links. A legacy thread naming
-        an already-hubbed run must not become its second hub.
-        """
         _seed_run(scratch_at_pre, RUN_CLAIMED)
         _seed_thread(scratch_at_pre, "t_existing_hub", 1, "Chain: ship the widget")
         _seed_thread(scratch_at_pre, "t_legacy_mention", 2, f"Chain run {RUN_CLAIMED} coordination hub")
 
-        # Land the column/FK/index, then stamp the first thread the way a conductor
-        # would, then force the backfill to run again against that state.
         up = _run_alembic("upgrade", _REV)
         assert up.returncode == 0, f"upgrade {_REV} failed:\n{up.stdout}\n{up.stderr}"
         with scratch_at_pre.connect() as conn:
@@ -325,7 +265,6 @@ class TestCe0087ChainHubBackfill:
         assert _link_of(scratch_at_pre, "t_legacy_mention") is None
 
     def test_a_subject_naming_two_runs_is_still_left_null(self, scratch_at_pre: sa.Engine) -> None:
-        """The original guard, unchanged. Runs-per-thread stays bounded too."""
         _seed_run(scratch_at_pre, RUN_SHARED)
         _seed_run(scratch_at_pre, RUN_SECOND)
         _seed_thread(
@@ -341,12 +280,6 @@ class TestCe0087ChainHubBackfill:
         assert _link_of(scratch_at_pre, "t_ambiguous") is None
 
     def test_another_tenants_thread_is_never_linked(self, scratch_at_pre: sa.Engine) -> None:
-        """Tenant scoping on the backfill join, re-asserted around the new guard.
-
-        The guard only ever PREVENTS a write, so it cannot widen this — but the
-        join it wraps is the one that keeps a globally-unique run id from reaching
-        across tenants, and that stays pinned.
-        """
         _seed_run(scratch_at_pre, RUN_CROSS, tenant=TK)
         _seed_thread(
             scratch_at_pre,

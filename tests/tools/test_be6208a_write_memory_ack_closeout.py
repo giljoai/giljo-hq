@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6208a — write_memory_entry honors acknowledge_closeout_todo.
-
-The conductor's own series-summary TODO is a chicken-and-egg: it blocks the
-very write_memory_entry that satisfies it. acknowledge_closeout_todo=True
-auto-completes the author's self-referential closeout TODO (CLOSEOUT_TODO_PATTERN)
-before the closeout-readiness gate evaluates -- the SAME bypass complete_job
-uses. Non-closeout TODOs still block.
-"""
 
 from __future__ import annotations
 
@@ -30,7 +22,6 @@ from giljo_mcp.tools.write_memory_entry import write_360_memory
 
 @pytest.fixture(autouse=True)
 def _stub_staleness():
-    """Staleness check needs a real db_manager; not under test here."""
 
     async def _noop(*args, **kwargs):
         return {"is_stale": False, "projects_since_tune": 0, "threshold": 3, "enabled": True}
@@ -109,9 +100,6 @@ async def test_ack_closeout_todo_unblocks_series_summary_write(
         entry_type="project_completion",
         author_job_id=job_id,
         acknowledge_closeout_todo=True,
-        # user_id supplied so the staleness check (faked by _stub_staleness
-        # above) skips its db_manager-backed tenant-user lookup -- db_manager
-        # is otherwise unused by this test.
         user_id=str(uuid.uuid4()),
         db_manager=MagicMock(),
         session=db_session,
@@ -145,9 +133,6 @@ async def test_without_flag_closeout_todo_still_blocks(db_session, test_tenant_k
         decisions_made=["decision"],
         entry_type="project_completion",
         author_job_id=job_id,
-        # user_id supplied so the staleness check (faked by _stub_staleness
-        # above) skips its db_manager-backed tenant-user lookup -- db_manager
-        # is otherwise unused by this test.
         user_id=str(uuid.uuid4()),
         db_manager=MagicMock(),
         session=db_session,
@@ -170,9 +155,6 @@ async def test_ack_does_not_bypass_non_closeout_todo(db_session, test_tenant_key
         entry_type="project_completion",
         author_job_id=job_id,
         acknowledge_closeout_todo=True,
-        # user_id supplied so the staleness check (faked by _stub_staleness
-        # above) skips its db_manager-backed tenant-user lookup -- db_manager
-        # is otherwise unused by this test.
         user_id=str(uuid.uuid4()),
         db_manager=MagicMock(),
         session=db_session,

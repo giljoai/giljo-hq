@@ -3,39 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9165 — closeout deadlock for projects executed outside the dashboard flow.
-
-Three walls, one root cause: the lifecycle assumed work always happens inside a
-staged implementation session with live specialist agents.
-
-  Wall 1 — no execution mode selected: write_project_closeout force=true could
-    never decommission the auto-created 'waiting' orchestrator. The @mcp.tool
-    boundary hardcoded force=False (the hint "pass force=true" was unwired at
-    the transport), and _handle_force_close refused ANY active orchestrator.
-  Wall 2 — retroactive staging finale: complete_job routed the orchestrator's
-    final call to staging_end and re-parked it at status='waiting'; closeout
-    then blocked on that row.
-  Wall 3 — GET /prompts/implementation 400'd "No agent jobs spawned yet" when
-    every specialist was already complete (both queries filter
-    status IN ('waiting','working')), a misleading dead end.
-
-Regression tests at the failing layer (MCP transport via
-``create_connected_server_and_client_session``; wall 3 at the REST endpoint
-where the production 400s occurred). The five mandatory cases from the project
-record are covered, plus the complete_job staging-finale reroute (fix b):
-
-  1. execution_mode NULL + force=true  → closes + decommissions orchestrator
-  2. staged, all specialists complete, orchestrator 'waiting' + force=true → closes
-  3. non-forced closeout still blocks in BOTH states (gate kept)
-  4. in-flight specialist blocks even with force=true (gate kept, two-sided)
-  5. GET /prompts/implementation with all specialists complete → ready-to-close
-     response, not 400
-  6. staging finale with all deliverables recorded → orchestrator 'complete',
-     not 'waiting'
-
-Parallel-safe: fresh tenant_key per test, rolled-back db_session, no
-module-level mutable state, no ordering dependencies.
-"""
 
 from __future__ import annotations
 
@@ -62,9 +29,6 @@ from giljo_mcp.tools.tool_accessor import ToolAccessor
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
-# ---------------------------------------------------------------------------
-# Wire helpers (mirrors test_be6081_mcp_boundary_contract.py)
-# ---------------------------------------------------------------------------
 
 
 def _content_text(result) -> str:
@@ -80,24 +44,10 @@ def _parse_content_dict(result) -> dict[str, Any]:
     return json.loads(_content_text(result))
 
 
-# ---------------------------------------------------------------------------
-# Fixture: DB-backed MCP client wiring write_project_closeout AND complete_job
-# to the rolled-back test session (memory_tool_client + complete_job_client
-# patterns combined).
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
 async def lifecycle_mcp_client(db_manager, db_session, monkeypatch):
-    """Yield (client_factory, tenant_key, db_session) with the real ToolAccessor
-    bound to the rolled-back test session for both tools under test.
-
-    write_project_closeout is wrapped to inject the test session (the tool
-    accepts a ``session`` kwarg); complete_job routes through a
-    JobCompletionService constructed with ``test_session``. The wrapper MUST
-    declare ``tenant_key`` as an explicit named parameter — _call_tool inspects
-    the signature to decide whether to inject it.
-    """
     from api import app_state
     from api.endpoints.mcp_tools import _base
     from giljo_mcp.services.job_completion_service import JobCompletionService
@@ -145,14 +95,9 @@ async def lifecycle_mcp_client(db_manager, db_session, monkeypatch):
         state.db_manager = prior_db_manager
 
 
-# ---------------------------------------------------------------------------
-# Seed helpers
-# ---------------------------------------------------------------------------
 
 
 async def _seed_org_product(db_session, tenant_key: str, *, product_active: bool = True):
-    """One active product per tenant (idx_product_single_active_per_tenant) —
-    a second product in the same tenant must pass product_active=False."""
     suffix = uuid4().hex[:8]
     org = Organization(
         name=f"BE9165 Org {suffix}",
@@ -210,7 +155,6 @@ async def _seed_orchestrator(
     *,
     status: str = "waiting",
 ):
-    """The auto-created / staging-parked orchestrator row (job + execution)."""
     job = AgentJob(
         job_id=str(uuid4()),
         tenant_key=tenant_key,
@@ -290,24 +234,13 @@ async def _call_closeout(mcp_session, project_id: str, *, force: bool | None) ->
     return await mcp_session.call_tool("write_project_closeout", args)
 
 
-# ---------------------------------------------------------------------------
-# Case 1 — Wall 1: execution_mode NULL + force=true closes and decommissions
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_force_closeout_decommissions_unstaged_waiting_orchestrator(lifecycle_mcp_client):
-    """execution_mode never selected, only the auto-created 'waiting' orchestrator
-    exists (zero specialists): write_project_closeout(force=true) must close the
-    project and decommission the orchestrator — the exact hint text the
-    CLOSEOUT_BLOCKED rejection advertises.
-
-    RED before fix: the @mcp.tool boundary had no force parameter (hardcoded
-    force=False), so the call returned the identical CLOSEOUT_BLOCKED rejection.
-    """
     client, tenant_key, session = lifecycle_mcp_client
     _org, product = await _seed_org_product(session, tenant_key)
-    project = await _seed_project(session, tenant_key, product.id)  # execution_mode NULL, not staged
+    project = await _seed_project(session, tenant_key, product.id)
     _orch_job, orch_exec = await _seed_orchestrator(session, tenant_key, project.id, status="waiting")
     await session.commit()
 
@@ -325,20 +258,10 @@ async def test_force_closeout_decommissions_unstaged_waiting_orchestrator(lifecy
     )
 
 
-# ---------------------------------------------------------------------------
-# Case 2 — Wall 2: staged, all specialists complete, orchestrator 'waiting'
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_force_closeout_closes_staged_project_with_all_specialists_complete(lifecycle_mcp_client):
-    """Staging ran, every specialist job is complete, the staging finale parked
-    the orchestrator at 'waiting': force=true must close and decommission.
-
-    RED before fix: identical CLOSEOUT_BLOCKED (force unwired at the boundary;
-    the force path refused any active orchestrator even with zero in-flight
-    specialists).
-    """
     client, tenant_key, session = lifecycle_mcp_client
     _org, product = await _seed_org_product(session, tenant_key)
     project = await _seed_project(
@@ -367,26 +290,17 @@ async def test_force_closeout_closes_staged_project_with_all_specialists_complet
     )
 
 
-# ---------------------------------------------------------------------------
-# Case 3 — gate kept: non-forced closeout still blocks in BOTH states
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_non_forced_closeout_still_blocks_both_states(lifecycle_mcp_client):
-    """Without force, both wall states keep the CLOSEOUT_BLOCKED rejection —
-    the fix must not weaken the default gate."""
     client, tenant_key, session = lifecycle_mcp_client
     _org, product = await _seed_org_product(session, tenant_key)
-    # One active project per product (idx_project_single_active_per_product) —
-    # state B gets its own (inactive) product.
     _org_b, product_b = await _seed_org_product(session, tenant_key, product_active=False)
 
-    # State A: unstaged, execution_mode NULL, waiting orchestrator only.
     project_a = await _seed_project(session, tenant_key, product.id)
     _job_a, orch_a = await _seed_orchestrator(session, tenant_key, project_a.id, status="waiting")
 
-    # State B: staged, all specialists complete, waiting orchestrator.
     project_b = await _seed_project(
         session,
         tenant_key,
@@ -415,16 +329,10 @@ async def test_non_forced_closeout_still_blocks_both_states(lifecycle_mcp_client
             )
 
 
-# ---------------------------------------------------------------------------
-# Case 4 — gate kept: in-flight specialist blocks even with force=true
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_force_closeout_still_blocked_while_specialist_in_flight(lifecycle_mcp_client):
-    """A genuinely in-flight project (a specialist still 'working') must stay
-    blocked even with force=true — the two-sided proof that the fix only opens
-    the phantom-orchestrator case."""
     client, tenant_key, session = lifecycle_mcp_client
     _org, product = await _seed_org_product(session, tenant_key)
     project = await _seed_project(
@@ -441,8 +349,6 @@ async def test_force_closeout_still_blocked_while_specialist_in_flight(lifecycle
     async with client() as mcp_session:
         result = await _call_closeout(mcp_session, project.id, force=True)
 
-    # Blocked in either contract shape: a Tier-2 content rejection or the
-    # ORCHESTRATOR_SELF_DECOMMISSION_BLOCKED domain error surfaced as isError.
     if result.is_error:
         text = _content_text(result)
         assert "force-close" in text.lower() or "decommission" in text.lower(), (
@@ -462,21 +368,10 @@ async def test_force_closeout_still_blocked_while_specialist_in_flight(lifecycle
     )
 
 
-# ---------------------------------------------------------------------------
-# Case 6 (fix b) — staging finale with all deliverables recorded completes the
-# orchestrator instead of parking it at 'waiting'
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_staging_finale_with_all_deliverables_recorded_completes_orchestrator(lifecycle_mcp_client):
-    """complete_job on the staging orchestrator when every specialist already
-    recorded its deliverables must route to closeout (orchestrator 'complete',
-    job 'completed'), not re-park the orchestrator at 'waiting'.
-
-    RED before fix: the call was classified as a staging end and
-    _apply_completion_status left the orchestrator at status='waiting' — wall 2's
-    root. Through the MCP transport (the failing layer)."""
     client, tenant_key, session = lifecycle_mcp_client
     _org, product = await _seed_org_product(session, tenant_key)
     project = await _seed_project(
@@ -484,7 +379,7 @@ async def test_staging_finale_with_all_deliverables_recorded_completes_orchestra
         tenant_key,
         product.id,
         execution_mode="subagent",
-        staging_status="staged",  # finale not yet run; implementation_launched_at NULL
+        staging_status="staged",
     )
     orch_job, orch_exec = await _seed_orchestrator(session, tenant_key, project.id, status="working")
     await _seed_specialist(session, tenant_key, project.id, orch_exec.agent_id, status="complete")
@@ -514,9 +409,6 @@ async def test_staging_finale_with_all_deliverables_recorded_completes_orchestra
 
 @pytest.mark.asyncio
 async def test_genuine_staging_end_with_waiting_specialists_still_parks_orchestrator(lifecycle_mcp_client):
-    """Two-sided proof for fix b: a GENUINE staging end (specialists spawned,
-    still 'waiting' for implementation) keeps the existing behavior — the
-    orchestrator parks at 'waiting' for the human Implement gate."""
     client, tenant_key, session = lifecycle_mcp_client
     _org, product = await _seed_org_product(session, tenant_key)
     project = await _seed_project(
@@ -552,10 +444,6 @@ async def test_genuine_staging_end_with_waiting_specialists_still_parks_orchestr
     )
 
 
-# ---------------------------------------------------------------------------
-# Case 5 — Wall 3: GET /prompts/implementation with all specialists complete
-# returns the ready-to-close response, not 400 "No agent jobs spawned yet"
-# ---------------------------------------------------------------------------
 
 
 def _build_prompts_app(db_session, user: User) -> FastAPI:
@@ -577,8 +465,6 @@ def _build_prompts_app(db_session, user: User) -> FastAPI:
 
 @pytest_asyncio.fixture
 async def prompts_rest_client(db_session):
-    """Authenticated REST client over the prompts router bound to the
-    rolled-back test session. Yields (client_factory, tenant_key, db_session)."""
     tenant_key = TenantManager.generate_tenant_key()
     suffix = uuid4().hex[:6]
 
@@ -612,12 +498,6 @@ async def prompts_rest_client(db_session):
 
 @pytest.mark.asyncio
 async def test_implementation_prompt_all_specialists_complete_is_ready_to_close(prompts_rest_client):
-    """Implement was pressed (implementation_launched_at stamped), every
-    specialist is already complete: the endpoint must return the ready-to-close
-    response, NEVER 400 "No agent jobs spawned yet".
-
-    RED before fix: 400 (production hits at 2026-07-14 04:37:51 / 04:38:24 UTC,
-    project fc7b6024)."""
     client, tenant_key, session = prompts_rest_client
     _org2, product = await _seed_org_product(session, tenant_key)
     project = await _seed_project(
@@ -649,9 +529,6 @@ async def test_implementation_prompt_all_specialists_complete_is_ready_to_close(
 
 @pytest.mark.asyncio
 async def test_implementation_prompt_zero_spawned_still_400s(prompts_rest_client):
-    """Two-sided proof for fix c: with NO specialists ever spawned the endpoint
-    keeps the existing 400 — the ready-to-close path only opens when completed
-    specialist work exists."""
     client, tenant_key, session = prompts_rest_client
     _org2, product = await _seed_org_product(session, tenant_key)
     project = await _seed_project(

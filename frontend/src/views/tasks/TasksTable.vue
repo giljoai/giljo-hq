@@ -9,7 +9,6 @@
       data-table
       item-value="id"
     >
-        <!-- Loading State -->
         <template #loading>
           <div class="text-center pa-4">
             <v-progress-circular indeterminate color="primary" size="48" />
@@ -17,7 +16,6 @@
           </div>
         </template>
 
-        <!-- Status Column - Inline Dropdown rendering TaskStatusBadge -->
         <template #item.status="{ item }">
           <div class="d-flex justify-center">
             <v-select
@@ -45,7 +43,6 @@
           </div>
         </template>
 
-        <!-- Priority Column - Inline Dropdown (0870h: tinted pills) -->
         <template #item.priority="{ item }">
           <div class="d-flex justify-center">
           <v-select
@@ -81,7 +78,6 @@
           </div>
         </template>
 
-        <!-- Title Column (0870h: brand-colored title, muted description) -->
         <template #item.title="{ item }">
           <div
             class="task-row-content"
@@ -91,9 +87,6 @@
             <div class="task-content flex-grow-1">
               <div class="task-title">
                 {{ item.title }}
-                <!-- BE-2002: "Archived" badge on archived (hidden) rows so search
-                     results that include archived tasks are visibly tagged.
-                     Backend field is `hidden`; UI calls it "archived". -->
                 <v-chip
                   v-if="item.hidden"
                   size="x-small"
@@ -111,12 +104,10 @@
           </div>
         </template>
 
-        <!-- Created Column -->
         <template #item.created_at="{ item }">
           <span class="date-cell">{{ formatDateWithTime(item.created_at) }}</span>
         </template>
 
-        <!-- Serial Column (FE-5046: tinted taxonomy_alias badge) -->
         <template #item.taxonomy_alias="{ item }">
           <div class="d-flex justify-center">
             <span
@@ -134,7 +125,6 @@
           </div>
         </template>
 
-        <!-- Due Date Column - Inline Calendar Picker -->
         <template #item.due_date="{ item }">
           <v-menu
             :close-on-content-click="false"
@@ -171,7 +161,6 @@
           </v-menu>
         </template>
 
-        <!-- Convert Column (0870h: styled convert action) -->
         <template #item.convert="{ item }">
           <div class="d-flex justify-center">
             <button
@@ -187,7 +176,6 @@
           </div>
         </template>
 
-        <!-- Actions Column -->
         <template #item.actions="{ item }">
           <v-menu>
             <template #activator="{ props }">
@@ -215,8 +203,6 @@
                 <v-list-item-title>Mark Complete</v-list-item-title>
               </v-list-item>
 
-              <!-- FE-5046 / BE-2002: Archive/Unarchive toggle (mirrors ProjectsView).
-                   Backend field is `hidden`; UI copy says "archived". -->
               <v-list-item data-test="task-hide-action" @click="$emit('toggle-hidden', item)">
                 <template #prepend>
                   <v-icon>{{ item.hidden ? 'mdi-archive-arrow-up' : 'mdi-archive' }}</v-icon>
@@ -236,7 +222,6 @@
           </v-menu>
         </template>
 
-        <!-- No Data -->
         <template #no-data>
           <EmptyState
             icon="mdi-clipboard-text-outline"
@@ -286,7 +271,6 @@ defineEmits(['edit-task', 'convert-task', 'complete-task', 'toggle-hidden', 'del
 
 const { formatDateWithTime } = useFormatDate()
 
-// Table headers (FE-5046: Serial column folds in the old Type column)
 const headers = [
   { title: 'Status', key: 'status', width: '110', align: 'center' },
   { title: 'Priority', key: 'priority', width: '80', align: 'center' },

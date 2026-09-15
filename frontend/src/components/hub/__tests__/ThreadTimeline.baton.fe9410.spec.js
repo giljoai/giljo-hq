@@ -1,18 +1,3 @@
-/**
- * ThreadTimeline.baton.fe9410.spec.js — FE-9410
- *
- * The last step of "navigate to the message": once the Hub has resolved WHICH post a
- * baton notification pointed at, the timeline has to actually take the operator there
- * and say so. HubView's spec pins that the id is resolved and handed over; this pins
- * what the timeline does with it.
- *
- * The scroll assertions matter because the timeline already had a scroll rule — jump to
- * the bottom whenever messages arrive. Two scrolls competing in one frame is how a view
- * lands somewhere neither rule intended, so the focused post has to WIN, and the plain
- * arrival has to keep the old behaviour untouched.
- *
- * Edition scope: Both
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
@@ -49,9 +34,6 @@ describe('ThreadTimeline baton focus (FE-9410)', () => {
     store.handleThreadMessage(message('msg-old', 'earlier chatter'))
     store.handleThreadMessage(message('msg-baton', 'over to you'))
 
-    // jsdom does not implement scrollIntoView, so it has to be installed rather than
-    // spied on — an absent method would otherwise read as "the component chose not to
-    // scroll" when it in fact could not.
     scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView
   })
@@ -81,8 +63,6 @@ describe('ThreadTimeline baton focus (FE-9410)', () => {
   })
 
   it('scrolls the focused post into view when the focus lands after the messages', async () => {
-    // The operator clicks the banner while already inside the Hub: the thread is
-    // loaded, the message count never changes, and only the target is new.
     const wrapper = mountTimeline(null)
     await flushPromises()
     scrollIntoView.mockClear()

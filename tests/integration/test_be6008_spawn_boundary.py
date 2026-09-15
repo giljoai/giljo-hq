@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6008 MCP-boundary regression: spawn_job WITHOUT a mission yields a staged agent.
-
-CLAUDE.md (BE-5042 lesson): the @mcp.tool wrapper layer needs its OWN test —
-the service-layer two-phase-spawn test can pass while the FastMCP boundary
-(parameter defaults, kwargs assembly, _call_tool dispatch) is broken. This test
-exercises spawn_job through the in-memory FastMCP transport, omitting the mission
-argument entirely, and asserts the created execution is 'staged' with a NULL job
-mission.
-
-The whole spawn chain (boundary -> ToolAccessor -> OrchestrationService ->
-JobLifecycleService) runs against the test session, so the staged write is rolled
-back at teardown. Parallel-safe: unique tenant per test, no module globals, no
-ordering dependency.
-
-Pattern: tests/integration/test_imp6038_giljo_setup_ack_mcp_boundary.py.
-
-Project: BE-6008.
-"""
 
 from __future__ import annotations
 
@@ -38,6 +20,7 @@ from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.models.templates import AgentTemplate
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.product_crew_helper import adopt_all_templates
 
 
 pytestmark = pytest.mark.asyncio
@@ -45,8 +28,6 @@ pytestmark = pytest.mark.asyncio
 
 async def _seed_project_and_template(session: AsyncSession, tenant_key: str) -> str:
     suffix = uuid.uuid4().hex[:8]
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_project = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -78,12 +59,12 @@ async def _seed_project_and_template(session: AsyncSession, tenant_key: str) -> 
     )
     session.info["tenant_key"] = tenant_key
     await session.flush()
+    await adopt_all_templates(session, tenant_key, _owning_product_project.id)
     return project.id
 
 
 @pytest_asyncio.fixture
 async def spawn_boundary_client(monkeypatch, db_manager, db_session):
-    """In-memory FastMCP client wired to a REAL ToolAccessor on the test session."""
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from giljo_mcp.tools.tool_accessor import ToolAccessor
@@ -103,8 +84,6 @@ async def spawn_boundary_client(monkeypatch, db_manager, db_session):
     )
 
     tenant_key = TenantManager.generate_tenant_key()
-    # BE-6042d: _resolve_tenant/_resolve_user_id moved to mcp_tools._base (the
-    # _call_tool call site reads them there). Patch _base, not mcp_sdk_server.
     from api.endpoints.mcp_tools import _base
 
     monkeypatch.setattr(_base, "_resolve_tenant", lambda ctx: tenant_key)
@@ -138,7 +117,6 @@ def _error_text(call_tool_result) -> str:
 
 
 async def test_spawn_job_without_mission_through_mcp_boundary_is_staged(spawn_boundary_client) -> None:
-    """spawn_job called WITHOUT mission through the FastMCP transport creates a 'staged' execution."""
     new_client, tenant_key, db_session = spawn_boundary_client
     project_id = await _seed_project_and_template(db_session, tenant_key)
 
@@ -149,7 +127,6 @@ async def test_spawn_job_without_mission_through_mcp_boundary_is_staged(spawn_bo
                 "agent_display_name": "implementer",
                 "agent_name": "implementer",
                 "project_id": project_id,
-                # mission intentionally omitted -> two-phase spawn
             },
         )
 

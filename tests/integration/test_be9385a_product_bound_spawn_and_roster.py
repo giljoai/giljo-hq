@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9385a -- the CALLING path must follow the product too, not just the export.
-
-Companion to ``test_be9385a_product_bound_agent_selection_mcp_boundary.py``,
-which covers the export side (the reported incident). This file covers the three
-remaining consumers of "which agents are active" and the two lifecycle guarantees
-that keep the junction honest over time:
-
-* the spawn allowlist -- asserted through the real MCP transport, because that is
-  where an orchestrator actually meets it;
-* the orchestrator roster, including the 8 -> 16 cap unification;
-* "deactivated stays deactivated" across a CE boot re-seed and a product
-  re-activation (EM ruling R2);
-* the first toggle on a row-less product must not blank it (EM ruling D1).
-
-Parallel-safe: fresh tenant_key per test, rolled-back ``db_session``, no
-module-level mutable state.
-"""
 
 from __future__ import annotations
 
@@ -92,18 +75,10 @@ def _project(tenant_key: str, product_id: str | None, name: str) -> Project:
     )
 
 
-# ---------------------------------------------------------------------------
-# Spawn allowlist -- through the real MCP transport
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
 async def spawn_client(monkeypatch, db_manager, db_session):
-    """FastMCP client wired to a REAL ToolAccessor on the rolled-back test session.
-
-    Pattern lifted from ``tests/integration/test_be6008_spawn_boundary.py`` rather
-    than re-invented, so the spawn chain under test is the shipped one.
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -155,13 +130,6 @@ def _payload(result) -> dict:
 
 
 async def test_spawn_allowlist_is_scoped_to_the_projects_product(spawn_client):
-    """An agent the active product disabled must not be spawnable into that product.
-
-    Tenant-wide both templates are active, so pre-fix BOTH spawns succeeded: the
-    orchestrator could spawn an agent the product had switched off, and the export
-    for that product would not even have shipped it. Two views of "what is active",
-    disagreeing.
-    """
     new_client, tenant_key, session = spawn_client
 
     suffix = uuid.uuid4().hex[:8]
@@ -173,8 +141,6 @@ async def test_spawn_allowlist_is_scoped_to_the_projects_product(spawn_client):
 
     project = _project(tenant_key, product.id, f"BE-9385a spawn {suffix}")
     session.add(project)
-    # Junction is explicit for BOTH templates -- this is a curated product, not a
-    # tolerance case: one agent enabled, one deliberately disabled.
     session.add_all(
         [
             _assignment(tenant_key, product.id, enabled.id, is_active=True),
@@ -222,12 +188,7 @@ async def test_spawn_allowlist_is_scoped_to_the_projects_product(spawn_client):
     assert _payload(accepted).get("job_id")
 
 
-async def test_spawn_allowlist_tolerates_a_product_with_no_junction_rows(spawn_client):
-    """Tolerance on the spawn path: a row-less product must keep the tenant-wide allowlist.
-
-    Without this a pre-junction install upgrades into an orchestrator that can
-    spawn nothing at all.
-    """
+async def test_spawn_allowlist_is_empty_for_a_product_that_enabled_nothing(spawn_client):
     new_client, tenant_key, session = spawn_client
 
     suffix = uuid.uuid4().hex[:8]
@@ -240,7 +201,6 @@ async def test_spawn_allowlist_tolerates_a_product_with_no_junction_rows(spawn_c
     session.add(project)
     session.info["tenant_key"] = tenant_key
     await session.flush()
-    # Deliberately NO junction rows.
 
     async with new_client() as client:
         result = await client.call_tool(
@@ -253,18 +213,16 @@ async def test_spawn_allowlist_tolerates_a_product_with_no_junction_rows(spawn_c
             },
         )
 
-    assert result.is_error is False, (
-        f"A product with no junction rows must fall back to the tenant-active allowlist. Got: {_error_text(result)}"
+    assert result.is_error is True, "a product that has enabled nothing must not spawn an agent"
+    assert "no agents assigned for this product" in _error_text(result).lower(), (
+        "ruling 4: the refusal names the harness default instead of reading as a server "
+        f"fault. got={_error_text(result)!r}"
     )
 
 
-# ---------------------------------------------------------------------------
-# Orchestrator roster
-# ---------------------------------------------------------------------------
 
 
 async def test_roster_follows_the_product(db_session, test_tenant_key):
-    """Two products, disjoint junctions -> two different spawnable rosters."""
     suffix = uuid.uuid4().hex[:8]
     t_a = _template(test_tenant_key, f"be9385a-roster-a-{suffix}")
     t_b = _template(test_tenant_key, f"be9385a-roster-b-{suffix}")
@@ -289,8 +247,7 @@ async def test_roster_follows_the_product(db_session, test_tenant_key):
     assert t_b.name in roster_b and t_a.name not in roster_b, f"Product B roster wrong: {sorted(roster_b)}"
 
 
-async def test_roster_tolerates_a_product_with_no_junction_rows(db_session, test_tenant_key):
-    """A row-less product keeps the tenant-wide roster -- the orchestrator is never blanked."""
+async def test_roster_is_empty_for_a_product_that_enabled_nothing(db_session, test_tenant_key):
     suffix = uuid.uuid4().hex[:8]
     template = _template(test_tenant_key, f"be9385a-roster-tol-{suffix}")
     product = _product(test_tenant_key, f"Roster tolerance {suffix}")
@@ -302,20 +259,13 @@ async def test_roster_tolerates_a_product_with_no_junction_rows(db_session, test
         for t in await MissionRepository().get_active_templates(db_session, test_tenant_key, product_id=product.id)
     }
 
-    assert template.name in roster, (
-        "A product with no junction rows must keep the tenant-wide roster; an empty "
-        "roster here means the orchestrator can spawn nothing."
+    assert roster == set(), (
+        "a product that has enabled nothing must have an empty roster; serving it another "
+        f"product's agents is the sharing BE-9610a removes. got={sorted(roster)}"
     )
 
 
 async def test_roster_cap_matches_the_export_cap(db_session, test_tenant_key):
-    """R1: one number for "what is active".
-
-    The roster cap was a local literal 8 while the export cap was 16 (raised
-    deliberately in BE-9208). With 9-16 active agents the orchestrator was offered
-    a strictly smaller set than the export had already written to disk, so an
-    installed agent could be unspawnable. Both now read MAX_PACKAGED_TEMPLATES.
-    """
     assert MAX_PACKAGED_TEMPLATES == 16, "R1 unified both caps on the operator-chosen 16."
 
     suffix = uuid.uuid4().hex[:8]
@@ -331,22 +281,12 @@ async def test_roster_cap_matches_the_export_cap(db_session, test_tenant_key):
     )
 
 
-# ---------------------------------------------------------------------------
-# Lifecycle guarantees
-# ---------------------------------------------------------------------------
 
 
-async def test_deactivated_stays_deactivated_across_reseed_and_reactivation(db_session, test_tenant_key):
-    """R2's guard. A CE boot re-seed plus a product re-activation must not resurrect an agent.
-
-    CE reruns the seeder on every boot and re-activating a product bulk-assigns
-    templates, so a self-hoster with no operator would otherwise find deliberately
-    disabled agents switched back on after an upgrade.
-    """
+async def test_switched_off_stays_switched_off_across_a_reseed(db_session, test_tenant_key):
     from giljo_mcp.repositories.product_agent_assignment_repository import (
         ProductAgentAssignmentRepository,
     )
-    from giljo_mcp.template_seeder import seed_tenant_templates
 
     suffix = uuid.uuid4().hex[:8]
     keep = _template(test_tenant_key, f"be9385a-keep-{suffix}")
@@ -358,20 +298,14 @@ async def test_deactivated_stays_deactivated_across_reseed_and_reactivation(db_s
     db_session.add_all(
         [
             _assignment(test_tenant_key, product.id, keep.id, is_active=True),
-            # The user deliberately switched this one OFF for this product.
             _assignment(test_tenant_key, product.id, retired.id, is_active=False),
         ]
     )
     await db_session.flush()
 
-    # 1. CE boot re-seed. The seeder must never touch the junction -- if it did,
-    #    every upgrade would re-enable what the user turned off.
-    await seed_tenant_templates(db_session, test_tenant_key)
-    await db_session.flush()
-
-    # 2. Product re-activation (the user toggling back to this product), which
-    #    bulk-assigns missing templates. Skip-existing is what protects the OFF row.
-    await ProductAgentAssignmentRepository().bulk_assign_all_templates(db_session, product.id, test_tenant_key)
+    await ProductAgentAssignmentRepository().enable_templates_for_product(
+        db_session, product.id, test_tenant_key, [keep.id, retired.id]
+    )
     await db_session.flush()
 
     row = (
@@ -385,9 +319,8 @@ async def test_deactivated_stays_deactivated_across_reseed_and_reactivation(db_s
     ).scalar_one()
 
     assert row.is_active is False, (
-        "A deliberately deactivated agent came back after a boot re-seed plus product "
-        "re-activation. On CE this happens on every upgrade, and the self-hoster has no "
-        "operator to clean it up."
+        "An agent the user deliberately switched off came back after a bulk enable. On CE "
+        "an upgrade runs unattended, and the self-hoster has no operator to clean it up."
     )
 
     names = await AgentCompletionRepository().get_active_template_names(
@@ -398,13 +331,6 @@ async def test_deactivated_stays_deactivated_across_reseed_and_reactivation(db_s
 
 
 async def test_orchestrator_roster_is_product_scoped_at_the_mcp_boundary(spawn_client):
-    """DoD 1's third surface, asserted on the wire rather than at the repository.
-
-    ``get_staging_instructions`` is where an orchestrator is TOLD which agents it may
-    spawn (``agent_templates``). The repository-level roster tests above pin the
-    query; this pins what actually reaches the agent, which is the layer the house
-    bug-fix rule cares about.
-    """
     new_client, tenant_key, session = spawn_client
 
     suffix = uuid.uuid4().hex[:8]
@@ -453,27 +379,10 @@ async def test_orchestrator_roster_is_product_scoped_at_the_mcp_boundary(spawn_c
 
 
 async def test_multi_terminal_agent_still_receives_its_full_profile(spawn_client):
-    """Scope item 4: server-delivered identity needed NO change -- pinned, not assumed.
-
-    ``spawn_job`` stores ``template_id`` and ``get_job_mission`` renders the profile
-    from it at read time, so a multi_terminal agent gets its identity from the
-    server rather than from an installed file. That path is product-bound for free
-    once selection is, because the job's project already belongs to a product --
-    but "for free" is a claim, and this is the test that makes it evidence.
-
-    The regression it guards is specific: product-scoping ``get_template_by_name``
-    (which this project also did) sits directly upstream of the ``template_id``
-    that identity resolution reads. Get that wrong and the agent spawns with
-    ``template_id=None`` and silently behaves generically -- no error, no clue.
-    """
     new_client, tenant_key, session = spawn_client
 
     suffix = uuid.uuid4().hex[:8]
     template = _template(tenant_key, f"be9385a-profile-{suffix}")
-    # The rendered identity is role + user_instructions (+ rules/criteria) --
-    # compose_template_identity does not emit the template NAME -- so the marker
-    # has to be profile CONTENT. That is the stronger assertion anyway: it proves
-    # the agent received its instructions, not merely that something resolved.
     template.user_instructions = f"PROFILE-MARKER-{suffix}: you analyse things."
     template.behavioral_rules = [f"RULE-MARKER-{suffix}"]
     product = _product(tenant_key, f"Profile product {suffix}")
@@ -481,10 +390,6 @@ async def test_multi_terminal_agent_still_receives_its_full_profile(spawn_client
     await session.flush()
 
     project = _project(tenant_key, product.id, f"BE-9385a profile {suffix}")
-    # Handover 0709's implementation gate short-circuits get_job_mission for a
-    # project that has not been launched, returning the gate response instead of a
-    # profile. That is correct behaviour, not a defect -- but it means an unlaunched
-    # project cannot answer the question this test asks.
     project.implementation_launched_at = datetime.now(UTC)
     session.add(project)
     session.add(_assignment(tenant_key, product.id, template.id, is_active=True))
@@ -525,18 +430,7 @@ async def test_multi_terminal_agent_still_receives_its_full_profile(spawn_client
     assert f"RULE-MARKER-{suffix}" in rendered, "The behavioural rules half of the profile did not reach the agent."
 
 
-async def test_first_toggle_on_a_rowless_product_does_not_blank_it(db_manager, db_session, test_tenant_key):
-    """D1's second half. Materialise-before-flip, proven at the service.
-
-    Two failure modes are pinned here at once, and they pull in opposite directions:
-
-    * Without materialisation the first toggle leaves ONE row, tolerance switches
-      off (it keys on row existence), and every other agent silently vanishes from
-      the product.
-    * Under the old "fall back when the ACTIVE set is empty" rule, toggling the
-      only-listed agent OFF would leave an empty active set, re-engage the
-      fallback, and the agent would stay enabled -- a control that does nothing.
-    """
+async def test_a_toggle_moves_exactly_one_agent(db_manager, db_session, test_tenant_key):
     from giljo_mcp.services.product_agent_assignment_service import ProductAgentAssignmentService
 
     suffix = uuid.uuid4().hex[:8]
@@ -546,7 +440,16 @@ async def test_first_toggle_on_a_rowless_product_does_not_blank_it(db_manager, d
     product = _product(test_tenant_key, f"Fresh {suffix}")
     db_session.add_all([first, second, third, product])
     await db_session.flush()
-    # No junction rows: this product is in the tolerance state.
+    for template in (first, second, third):
+        template.product_id = product.id
+    db_session.add_all(
+        [
+            _assignment(test_tenant_key, product.id, first.id, is_active=True),
+            _assignment(test_tenant_key, product.id, second.id, is_active=True),
+            _assignment(test_tenant_key, product.id, third.id, is_active=True),
+        ]
+    )
+    await db_session.flush()
 
     service = ProductAgentAssignmentService(db_manager=db_manager, tenant_key=test_tenant_key, test_session=db_session)
     await service.toggle_assignment(product.id, first.id, False)
@@ -556,10 +459,8 @@ async def test_first_toggle_on_a_rowless_product_does_not_blank_it(db_manager, d
     )
 
     assert first.name not in names, (
-        "The toggle did nothing. Turning an agent OFF on a product that had no junction "
-        "rows must actually disable it -- the UI showed the switch move."
+        "The toggle did nothing. Turning an agent OFF must actually disable it -- the UI showed the switch move."
     )
-    assert {second.name, third.name} <= set(names), (
-        "The first toggle blanked the product: the other agents disappeared because the "
-        f"junction was left holding a single row. Remaining: {sorted(names)}"
+    assert {second.name, third.name} == set(names), (
+        f"Toggling one agent moved another: the switch must change exactly what it names. Remaining: {sorted(names)}"
     )

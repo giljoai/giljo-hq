@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Migration regression for BE-6054a — Agent Message Hub data foundation.
-
-Real scratch PostgreSQL DB, real alembic. Covers:
-
-- ce_0053: comm_threads / comm_participants created; messages.thread_id added;
-  messages.project_id flipped to NULLABLE (and a standalone NULL-project_id chat
-  message actually lands).
-- ce_0054: the CHT taxonomy backfill seeds CHT for a tenant that ALREADY has the
-  default types but lacks CHT (the empty-table-guarded seeder would never give
-  it to them) — exercised by seeding a pre-CHT tenant at ce_0053, then upgrading.
-- Idempotency: the existence-guarded ce_0053 + the NOT-EXISTS-guarded ce_0054 are
-  clean no-ops when re-run against a DB that already has the objects/rows (the
-  "CE reruns upgrade head on every boot" + healed-but-behind-stamp scenarios).
-- Downgrade: ce_0054 removes CHT; ce_0053 drops the tables + restores NOT NULL.
-
-Mirrors tests/integration/migrations/test_ce_0043_execution_mode_nullable.py.
-"""
 
 from __future__ import annotations
 
@@ -50,7 +33,6 @@ _PRE = "ce_0052_pme_fts_be6082"
 _TABLES = "ce_0053_comm_hub_tables"
 _BACKFILL = "ce_0054_cht_taxonomy_backfill"
 
-# The 9 ORIGINAL default types (pre-CHT) — what an already-seeded legacy tenant has.
 _LEGACY_DEFAULT_ABBRS = ["BE", "FE", "DB", "UI", "API", "INF", "DOC", "SEC", "CTX"]
 
 
@@ -173,8 +155,6 @@ def _col_nullable(engine: sa.Engine, table: str, column: str) -> str:
 
 
 def _seed_legacy_tenant_types(engine: sa.Engine, tenant_key: str) -> None:
-    """Insert the 9 ORIGINAL default taxonomy types (no CHT) for a tenant —
-    simulating a legacy tenant seeded before CHT existed."""
     with engine.connect() as conn:
         for i, abbr in enumerate(_LEGACY_DEFAULT_ABBRS):
             conn.execute(
@@ -207,9 +187,6 @@ class TestCe0053CommHubTables:
         assert _col_nullable(empty_scratch_db, "messages", "thread_id") == "YES"
 
     def test_reupgrade_is_idempotent(self, empty_scratch_db: sa.Engine) -> None:
-        """Stamp back to _PRE while objects already exist, then re-run upgrade —
-        the information_schema guards must make ce_0053 a clean no-op (the
-        healed-but-behind-stamp / boot-rerun scenario)."""
         assert _run_alembic("upgrade", _TABLES).returncode == 0
         assert _run_alembic("stamp", _PRE).returncode == 0
         reup = _run_alembic("upgrade", _TABLES)
@@ -221,27 +198,22 @@ class TestCe0053CommHubTables:
 @pytest.mark.integration
 class TestCe0054ChtBackfill:
     def test_backfill_seeds_pre_seeded_tenant(self, empty_scratch_db: sa.Engine) -> None:
-        """A tenant with the 9 legacy default types but NO CHT receives exactly
-        one CHT row when ce_0054 runs."""
         assert _run_alembic("upgrade", _TABLES).returncode == 0
         tenant = "tk_legacy_pre_cht"
         _seed_legacy_tenant_types(empty_scratch_db, tenant)
-        assert _cht_count(empty_scratch_db, tenant) == 0  # pre-backfill
+        assert _cht_count(empty_scratch_db, tenant) == 0
 
         up = _run_alembic("upgrade", _BACKFILL)
         assert up.returncode == 0, f"backfill failed:\n{up.stdout}\n{up.stderr}"
-        assert _cht_count(empty_scratch_db, tenant) == 1  # exactly one CHT row
+        assert _cht_count(empty_scratch_db, tenant) == 1
 
     def test_backfill_is_idempotent(self, empty_scratch_db: sa.Engine) -> None:
-        """Re-running ce_0054 against a tenant that already has CHT does not
-        create a duplicate (NOT EXISTS guard + uq_taxonomy_type_abbr)."""
         assert _run_alembic("upgrade", _TABLES).returncode == 0
         tenant = "tk_legacy_idem"
         _seed_legacy_tenant_types(empty_scratch_db, tenant)
         assert _run_alembic("upgrade", _BACKFILL).returncode == 0
         assert _cht_count(empty_scratch_db, tenant) == 1
 
-        # Stamp back + re-run: still exactly one CHT.
         assert _run_alembic("stamp", _TABLES).returncode == 0
         assert _run_alembic("upgrade", _BACKFILL).returncode == 0
         assert _cht_count(empty_scratch_db, tenant) == 1
@@ -249,10 +221,7 @@ class TestCe0054ChtBackfill:
     def test_downgrade_removes_cht_and_tables(self, empty_scratch_db: sa.Engine) -> None:
         assert _run_alembic("upgrade", _BACKFILL).returncode == 0
         tenant = "tk_legacy_down"
-        # Backfill already ran on an empty taxonomy table (no tenants) -> seed +
-        # re-stamp to confirm downgrade removes CHT rows it owns.
         _seed_legacy_tenant_types(empty_scratch_db, tenant)
-        # Give this tenant a CHT row to delete (mirror what backfill would add).
         with empty_scratch_db.connect() as conn:
             conn.execute(
                 text(
@@ -266,11 +235,10 @@ class TestCe0054ChtBackfill:
 
         down = _run_alembic("downgrade", _TABLES)
         assert down.returncode == 0, f"downgrade {_TABLES} failed:\n{down.stdout}\n{down.stderr}"
-        assert _cht_count(empty_scratch_db, tenant) == 0  # CHT removed
+        assert _cht_count(empty_scratch_db, tenant) == 0
 
         down2 = _run_alembic("downgrade", _PRE)
         assert down2.returncode == 0, f"downgrade {_PRE} failed:\n{down2.stdout}\n{down2.stderr}"
         assert not _has_table(empty_scratch_db, "comm_threads")
         assert not _has_table(empty_scratch_db, "comm_participants")
-        # project_id restored to NOT NULL (no NULL rows present).
         assert _col_nullable(empty_scratch_db, "messages", "project_id") == "NO"

@@ -3,26 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""``ce_0088`` backfills ``projects.completed_at`` for already-terminal rows (BE-9343).
-
-BE-9343 made the service layer stamp ``completed_at`` on a terminal transition. This
-migration repairs the rows the old write path already produced: a project closed
-through agent tooling landed as ``status=completed, completed_at=NULL``, so the
-dashboard fell back to ``updated_at`` under a column headed COMPLETED and
-``completed_after`` / ``completed_before`` matched nothing.
-
-What is actually asserted here is the part that is easy to get wrong and impossible
-to see by reading the SQL: WHICH source each row takes.
-``COALESCE(closeout_executed_at, updated_at)`` must prefer the EXACT signal --
-``closeout_executed_at``, stamped once at closeout and never touched again -- over
-``updated_at``, which drifts on every later write including the archive/hide toggle.
-A row that has both must NOT end up wearing its drifted ``updated_at``; that would
-reproduce the very defect this migration exists to repair, while looking backfilled.
-
-Real database, real ``alembic upgrade`` -- these assertions are about what Postgres
-did to seeded rows, not about what the SQL reads like. Mirrors
-``test_ce_0087_chain_hub_backfill.py``.
-"""
 
 from __future__ import annotations
 
@@ -53,10 +33,8 @@ _PRE = "ce_0087_comm_threads_sequence_run_fk"
 _REV = "ce_0088_backfill_project_completed_at"
 
 TK = "tk_ce0088"
-PRODUCT_ID = "ce008800-0000-4000-8000-000000000001"  # id columns are varchar(36)
+PRODUCT_ID = "ce008800-0000-4000-8000-000000000001"
 
-# The exact closeout instant, and a much later "last touched" instant that stands in
-# for a drifting updated_at (an archive/hide toggle weeks after the work finished).
 CLOSEOUT_TS = "2026-07-01 10:00:00+00"
 DRIFTED_UPDATED_TS = "2026-07-20 23:59:00+00"
 NO_CLOSEOUT_UPDATED_TS = "2026-07-02 11:30:00+00"
@@ -155,7 +133,6 @@ def scratch_engine():
 
 @pytest.fixture
 def scratch_at_pre(scratch_engine: sa.Engine):
-    """Fresh schema built up to ce_0087 -- the revision before the backfill runs."""
     _drop_all_objects(scratch_engine)
     up = _run_alembic("upgrade", _PRE)
     assert up.returncode == 0, f"upgrade to {_PRE} failed:\n{up.stdout}\n{up.stderr}"
@@ -164,9 +141,6 @@ def scratch_at_pre(scratch_engine: sa.Engine):
     _drop_all_objects(scratch_engine)
 
 
-# --------------------------------------------------------------------------- #
-# Seeds -- raw SQL, because a migration test must not depend on the ORM models #
-# --------------------------------------------------------------------------- #
 
 
 def _seed_product(engine: sa.Engine) -> None:
@@ -225,7 +199,6 @@ def _completed_at(engine: sa.Engine, project_id: str):
 
 
 def _as_utc_text(engine: sa.Engine, project_id: str) -> str | None:
-    """Read the value back normalized to UTC so the assertion is timezone-stable."""
     with engine.connect() as conn:
         return conn.execute(
             text(
@@ -237,16 +210,8 @@ def _as_utc_text(engine: sa.Engine, project_id: str) -> str | None:
 
 @pytest.mark.integration
 class TestCe0088CompletedAtBackfill:
-    """Terminal rows get a date; the date comes from the most trustworthy source."""
 
     def test_a_closed_out_project_takes_its_exact_closeout_timestamp(self, scratch_at_pre: sa.Engine) -> None:
-        """THE regression. ``closeout_executed_at`` must beat a drifted ``updated_at``.
-
-        Seeded as the defect was measured: the work finished on Jul 1 and the row was
-        touched again on Jul 20 (an archive/hide toggle). Taking ``updated_at`` here
-        would hand the project a completion date nineteen days after it completed --
-        exactly the wrong date the dashboard was already showing.
-        """
         _seed_project(
             scratch_at_pre,
             "p_closed_out",
@@ -264,12 +229,6 @@ class TestCe0088CompletedAtBackfill:
         )
 
     def test_a_project_with_no_closeout_falls_back_to_updated_at(self, scratch_at_pre: sa.Engine) -> None:
-        """The approximate branch, asserted as approximate on purpose.
-
-        No closeout ran, so there is no exact signal to recover. ``updated_at`` may
-        have drifted; it is still strictly better than NULL, which matches no date
-        range at all.
-        """
         _seed_project(
             scratch_at_pre,
             "p_no_closeout",
@@ -290,7 +249,6 @@ class TestCe0088CompletedAtBackfill:
     def test_every_terminal_status_is_backfilled_not_just_completed(
         self, scratch_at_pre: sa.Engine, status: str, series: int
     ) -> None:
-        """The status list must match the lifecycle-finished set, not just 'completed'."""
         _seed_project(
             scratch_at_pre,
             f"p_{status}",
@@ -311,7 +269,6 @@ class TestCe0088CompletedAtBackfill:
         [("active", 7), ("inactive", 8), ("parked", 9)],
     )
     def test_a_non_terminal_project_is_never_stamped(self, scratch_at_pre: sa.Engine, status: str, series: int) -> None:
-        """A running project has not completed. ``parked`` is a two-way door, not an end."""
         _seed_project(
             scratch_at_pre,
             f"p_{status}",
@@ -328,7 +285,6 @@ class TestCe0088CompletedAtBackfill:
         )
 
     def test_an_existing_completed_at_is_never_rewritten(self, scratch_at_pre: sa.Engine) -> None:
-        """Rows the archive path already dated correctly must survive untouched."""
         _seed_project(
             scratch_at_pre,
             "p_already_dated",
@@ -344,12 +300,6 @@ class TestCe0088CompletedAtBackfill:
         assert _as_utc_text(scratch_at_pre, "p_already_dated") == "2026-06-01 09:09:09"
 
     def test_a_replay_of_the_revision_moves_nothing(self, scratch_at_pre: sa.Engine) -> None:
-        """Idempotency, the way the CE installer actually meets it.
-
-        The installer reruns ``alembic upgrade head`` on every boot. Rewinding the
-        version and replaying is what proves the WHERE clause -- not the version
-        table -- is doing the guarding.
-        """
         _seed_project(
             scratch_at_pre,
             "p_replay",

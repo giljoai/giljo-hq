@@ -1,25 +1,7 @@
-/**
- * HubView.toolbar.fe9368.spec.js — FE-9368 (A, B, C, D wiring)
- *
- * DeletedCountButton has its own spec; this one covers the half that spec cannot see —
- * that the Hub actually WIRES the new chrome up. Two prior acceptance rounds on this
- * screen were failed by the operator's eyes on things every unit test passed through,
- * so the view-level assertions here are deliberately about what is on the page:
- *
- *  - the list view sits in ONE column, which is what makes the toolbar and the cards
- *    line up (A);
- *  - the toolbar is icon buttons and the deleted COUNT rides the trash icon (B);
- *  - the "What the indicators mean" trigger is gone from BOTH surfaces (C);
- *  - an open thread has its own search box, and it feeds the timeline (D).
- *
- * Edition scope: Both
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
-// FE-9410: HubView now pushes routes as well as reading them (the attention strip
-// navigates instead of selecting in place), so the mock has to answer useRouter too.
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@/stores/websocketEventRouter', () => ({ registerReconnectResync: () => () => {} }))
 
@@ -67,8 +49,6 @@ describe('HubView toolbar and layout (FE-9368)', () => {
     const wrapper = await mountHub()
     const column = wrapper.find('.hub-view__column')
     expect(column.exists()).toBe(true)
-    // The header, the toolbar and the cards all have to be INSIDE it; a bar left
-    // outside would keep the exact misalignment this item exists to fix.
     expect(column.find('.filter-bar').exists()).toBe(true)
     expect(column.find('.stub-thread-list').exists()).toBe(true)
   })
@@ -86,8 +66,6 @@ describe('HubView toolbar and layout (FE-9368)', () => {
     const trash = wrapper.find('[data-testid="deleted-threads-btn"]')
     expect(trash.exists()).toBe(true)
     expect(trash.attributes('data-entity')).toBe('threads')
-    // Zero here: the global api mock returns no deleted threads. The count is bound,
-    // which is the wiring under test; the badge itself is DeletedCountButton's spec.
     expect(trash.attributes('data-count')).toBe('0')
     expect(wrapper.text()).not.toContain('Deleted (')
   })
@@ -116,8 +94,6 @@ describe('HubView toolbar and layout (FE-9368)', () => {
   })
 
   it('drops the query when a different thread is opened', async () => {
-    // A filter left over from the last conversation would silently hide messages in
-    // the next one, and the operator would have no idea why.
     const wrapper = await mountHub({ openThread: true })
     wrapper.vm.messageSearch = 'migration'
     await flushPromises()
@@ -128,5 +104,16 @@ describe('HubView toolbar and layout (FE-9368)', () => {
     await flushPromises()
 
     expect(wrapper.vm.messageSearch).toBe('')
+  })
+
+  it('sizes each filter select to its longest option and gives the width to search', async () => {
+    const wrapper = await mountHub()
+    const sort = wrapper.find('[data-testid="hub-sort"]')
+    const scope = wrapper.find('[data-testid="hub-product-scope"]')
+    expect(sort.attributes('style')).toContain('width: calc(13ch + 84px)')
+    expect(scope.attributes('style')).toContain('width: calc(12ch + 84px)')
+    expect(sort.classes()).toContain('hub-view__select')
+    expect(scope.classes()).toContain('hub-view__select')
+    expect(wrapper.find('[data-testid="hub-search"]').classes()).toContain('filter-search')
   })
 })

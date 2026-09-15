@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tests for WorkflowStatusService (Sprint 002e extraction).
-
-Expanded from 1-function smoke test to meaningful coverage:
-- Project not found (error path)
-- Empty project (no executions)
-- Mixed execution statuses and stage derivation
-- exclude_job_id filtering
-- caller_note text variants
-- Progress percent calculation
-"""
 
 import uuid
 from unittest.mock import MagicMock
@@ -24,12 +14,6 @@ from giljo_mcp.services.workflow_status_service import WorkflowStatusService
 
 
 async def _seed_product(session, tenant_key):
-    """A product for a seeded project to belong to (BE-9437: product_id is NOT NULL).
-
-    ONE PRODUCT PER PROJECT, deliberately. ``idx_project_single_active_per_product``
-    permits a single ACTIVE project per product, and these tests seed active
-    projects; a shared product would make the second seed a unique violation.
-    """
     from giljo_mcp.models import Product
 
     product = Product(
@@ -46,7 +30,6 @@ async def _seed_product(session, tenant_key):
 
 @pytest.fixture
 def wf_service(db_session, test_tenant_key):
-    """Create a WorkflowStatusService with a test session."""
     db_manager = MagicMock()
     tenant_manager = MagicMock()
     tenant_manager.get_current_tenant.return_value = test_tenant_key
@@ -59,22 +42,12 @@ def wf_service(db_session, test_tenant_key):
 
 @pytest.mark.asyncio
 async def test_get_workflow_status_raises_for_missing_project(wf_service, test_tenant_key):
-    """get_workflow_status raises ResourceNotFoundError for non-existent project."""
     with pytest.raises(ResourceNotFoundError):
         await wf_service.get_workflow_status("00000000-0000-0000-0000-000000000000", test_tenant_key)
 
 
 @pytest.mark.asyncio
 async def test_get_workflow_status_todo_counts_are_fresh_after_direct_write(db_session, db_manager, test_tenant_key):
-    """Seq 124 regression: get_workflow_status TODO counts must NOT be stale.
-
-    Concern: dashboard reports observed in audit suggested TODO counts could
-    lag behind direct DB writes. The read path uses fresh sessions and a live
-    SQL aggregate (AgentOperationsRepository.get_todo_counts_by_job), so this
-    test pins the contract that two consecutive calls across a direct insert
-    reflect the new count immediately — no caching layer may be introduced
-    without invalidation.
-    """
     import uuid
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
@@ -166,13 +139,6 @@ async def test_get_workflow_status_todo_counts_are_fresh_after_direct_write(db_s
 
 @pytest.mark.asyncio
 async def test_get_workflow_status_surfaces_live_auto_checkin(db_session, db_manager, test_tenant_key):
-    """BE-6013: get_workflow_status returns the live auto_checkin_enabled / interval.
-
-    A running multi-terminal orchestrator re-reads these every cycle. This pins
-    that the values come straight from the project row and reflect a change made
-    after the orchestrator booted (write new interval / toggle → re-query → see
-    the new value, proving it is NOT a boot-time snapshot).
-    """
     import uuid
 
     from giljo_mcp.models import Project
@@ -203,7 +169,6 @@ async def test_get_workflow_status_surfaces_live_auto_checkin(db_session, db_man
     assert first.auto_checkin_enabled is True
     assert first.auto_checkin_interval == 10
 
-    # Simulate the slider being moved AFTER the orchestrator booted.
     project.auto_checkin_interval = 30
     project.auto_checkin_enabled = False
     await db_session.commit()
@@ -215,7 +180,6 @@ async def test_get_workflow_status_surfaces_live_auto_checkin(db_session, db_man
 
 @pytest.mark.asyncio
 async def test_get_workflow_status_empty_project(db_session, db_manager, test_tenant_key):
-    """A project with zero executions returns 'Not started' stage and 0 progress."""
     import uuid
 
     from giljo_mcp.models import Project
@@ -253,7 +217,6 @@ async def test_get_workflow_status_empty_project(db_session, db_manager, test_te
 
 @pytest.mark.asyncio
 async def test_get_workflow_status_with_working_agents(db_session, db_manager, test_tenant_key):
-    """Working agents produce 'In Progress' stage and 0% progress."""
     import uuid
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
@@ -311,7 +274,6 @@ async def test_get_workflow_status_with_working_agents(db_session, db_manager, t
 
 @pytest.mark.asyncio
 async def test_get_workflow_status_all_complete(db_session, db_manager, test_tenant_key):
-    """All agents complete produces 'Completed' stage and 100% progress."""
     import uuid
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
@@ -368,7 +330,6 @@ async def test_get_workflow_status_all_complete(db_session, db_manager, test_ten
 
 @pytest.mark.asyncio
 async def test_get_workflow_status_blocked_stage(db_session, db_manager, test_tenant_key):
-    """A blocked agent produces an 'In Progress (N blocked)' stage."""
     import uuid
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
@@ -423,7 +384,6 @@ async def test_get_workflow_status_blocked_stage(db_session, db_manager, test_te
 
 @pytest.mark.asyncio
 async def test_get_workflow_status_exclude_job_id(db_session, db_manager, test_tenant_key):
-    """exclude_job_id omits the specified job and changes caller_note."""
     import uuid
 
     from giljo_mcp.models import AgentExecution, AgentJob, Project
@@ -480,7 +440,6 @@ async def test_get_workflow_status_exclude_job_id(db_session, db_manager, test_t
 
 @pytest.mark.asyncio
 async def test_get_workflow_status_tenant_isolation(db_session, db_manager, test_tenant_key):
-    """A project created under one tenant_key is not visible to another."""
     import uuid
 
     from giljo_mcp.models import Project

@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Test suite for TaskService Exception Handling - Lifecycle operations.
-
-Split from test_task_service_exceptions.py during test reorganization.
-Covers exception paths for: delete_task, convert_to_project, change_status, get_summary.
-"""
 
 import random
 from datetime import UTC, datetime
@@ -31,16 +25,10 @@ from giljo_mcp.models.tasks import Task
 from giljo_mcp.services.task_service import TaskService
 
 
-# ============================================================================
-# LOCAL FIXTURES
-# These override conftest.py versions because the exception tests need
-# a simpler test_project (with product_id, without test_agent_templates).
-# ============================================================================
 
 
 @pytest_asyncio.fixture
 async def test_project(db_session, test_tenant_key, test_product):
-    """Create test project in database"""
     project = Project(
         id=str(uuid4()),
         name=f"Test Project {uuid4().hex[:6]}",
@@ -60,7 +48,6 @@ async def test_project(db_session, test_tenant_key, test_product):
 
 @pytest_asyncio.fixture
 async def test_task(db_session, test_tenant_key, test_product, test_project, test_user):
-    """Create test task in database"""
     task = Task(
         id=str(uuid4()),
         tenant_key=test_tenant_key,
@@ -79,14 +66,10 @@ async def test_task(db_session, test_tenant_key, test_product, test_project, tes
     return task
 
 
-# ============================================================================
-# EXCEPTION TESTS - delete_task & _delete_task_impl
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_delete_task_raises_validation_error_no_tenant_context(db_manager, db_session):
-    """Test delete_task raises ValidationError when no tenant context"""
     tenant_manager = MagicMock()
     tenant_manager.get_current_tenant.return_value = None
 
@@ -101,7 +84,6 @@ async def test_delete_task_raises_validation_error_no_tenant_context(db_manager,
 
 @pytest.mark.asyncio
 async def test_delete_task_raises_not_found_on_nonexistent_task(task_service, test_user):
-    """Test delete_task raises ResourceNotFoundError when task not found"""
     nonexistent_task_id = str(uuid4())
 
     with pytest.raises(ResourceNotFoundError) as exc_info:
@@ -112,7 +94,6 @@ async def test_delete_task_raises_not_found_on_nonexistent_task(task_service, te
 
 @pytest.mark.asyncio
 async def test_delete_task_raises_not_found_on_nonexistent_user(task_service, test_task):
-    """Test delete_task raises ResourceNotFoundError when user not found"""
     nonexistent_user_id = str(uuid4())
 
     with pytest.raises(ResourceNotFoundError) as exc_info:
@@ -125,8 +106,6 @@ async def test_delete_task_raises_not_found_on_nonexistent_user(task_service, te
 async def test_delete_task_raises_authorization_error_insufficient_permissions(
     task_service, test_task, db_session, test_tenant_key
 ):
-    """Test delete_task raises AuthorizationError when user lacks permission"""
-    # Create another user who didn't create the task
     other_user = User(
         id=str(uuid4()),
         username=f"otheruser_{uuid4().hex[:6]}",
@@ -150,7 +129,6 @@ async def test_delete_task_raises_authorization_error_insufficient_permissions(
 
 @pytest.mark.asyncio
 async def test_delete_task_raises_exception_on_database_error(task_service):
-    """Test delete_task raises BaseGiljoError on database errors"""
     with patch.object(task_service, "_delete_task_impl", side_effect=Exception("DB error")):
         with pytest.raises(BaseGiljoError) as exc_info:
             await task_service.delete_task(task_id=str(uuid4()), user_id=str(uuid4()))
@@ -158,14 +136,10 @@ async def test_delete_task_raises_exception_on_database_error(task_service):
         assert "DB error" in str(exc_info.value)
 
 
-# ============================================================================
-# EXCEPTION TESTS - convert_to_project & _convert_to_project_impl
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_convert_to_project_raises_validation_error_no_tenant_context(db_manager, db_session):
-    """Test convert_to_project raises ValidationError when no tenant context"""
     tenant_manager = MagicMock()
     tenant_manager.get_current_tenant.return_value = None
 
@@ -186,7 +160,6 @@ async def test_convert_to_project_raises_validation_error_no_tenant_context(db_m
 
 @pytest.mark.asyncio
 async def test_convert_to_project_raises_not_found_on_nonexistent_task(task_service, test_user):
-    """Test convert_to_project raises ResourceNotFoundError when task not found"""
     nonexistent_task_id = str(uuid4())
 
     with pytest.raises(ResourceNotFoundError) as exc_info:
@@ -205,8 +178,6 @@ async def test_convert_to_project_raises_not_found_on_nonexistent_task(task_serv
 async def test_convert_to_project_raises_validation_error_already_converted(
     task_service, test_task, test_user, db_session, test_product, test_tenant_key
 ):
-    """Test convert_to_project raises ValidationError when task already converted"""
-    # Create a project to reference (to satisfy foreign key constraint)
     converted_project = Project(
         id=str(uuid4()),
         name=f"Converted Project {uuid4().hex[:6]}",
@@ -221,7 +192,6 @@ async def test_convert_to_project_raises_validation_error_already_converted(
     db_session.add(converted_project)
     await db_session.flush()
 
-    # Mark task as already converted
     test_task.converted_to_project_id = converted_project.id
     await db_session.flush()
 
@@ -239,7 +209,6 @@ async def test_convert_to_project_raises_validation_error_already_converted(
 
 @pytest.mark.asyncio
 async def test_convert_to_project_raises_not_found_on_nonexistent_user(task_service, test_task):
-    """Test convert_to_project raises ResourceNotFoundError when user not found"""
     nonexistent_user_id = str(uuid4())
 
     with pytest.raises(ResourceNotFoundError) as exc_info:
@@ -258,8 +227,6 @@ async def test_convert_to_project_raises_not_found_on_nonexistent_user(task_serv
 async def test_convert_to_project_raises_authorization_error_insufficient_permissions(
     task_service, test_task, db_session, test_tenant_key
 ):
-    """Test convert_to_project raises AuthorizationError when user lacks permission"""
-    # Create another user who didn't create the task
     other_user = User(
         id=str(uuid4()),
         username=f"otheruser_{uuid4().hex[:6]}",
@@ -291,21 +258,6 @@ async def test_convert_to_project_raises_authorization_error_insufficient_permis
 async def test_convert_to_project_succeeds_onto_an_inactive_product(
     task_service, test_task, test_user, test_product, db_session
 ):
-    """BE-9415: an INACTIVE product is a valid destination -- that is the point.
-
-    This test's meaning was changed deliberately, not rebaselined. It previously
-    asserted ``ValidationError`` / "No active product" when the product was
-    deactivated, because conversion resolved its destination from
-    ``get_default_product`` and an inactive product meant "nothing to file
-    against". Conversion now binds to the task's OWN ``product_id``, so whether
-    that product happens to be the active one is irrelevant -- and requiring it
-    to be active is exactly the defect BE-9415 removes.
-
-    Converted to assert the new contract for the same scenario rather than
-    deleted, so the inactive-product path stays covered. The loud-rejection case
-    that DOES still raise (a product that no longer resolves at all) is pinned in
-    ``tests/services/test_be9415_convert_binds_task_product.py``.
-    """
     test_product.is_active = False
     await db_session.commit()
 
@@ -323,7 +275,6 @@ async def test_convert_to_project_succeeds_onto_an_inactive_product(
 
 @pytest.mark.asyncio
 async def test_convert_to_project_raises_exception_on_database_error(task_service):
-    """Test convert_to_project raises BaseGiljoError on database errors"""
     with patch.object(task_service._conversion, "_convert_to_project_impl", side_effect=Exception("DB error")):
         with pytest.raises(BaseGiljoError) as exc_info:
             await task_service.convert_to_project(
@@ -337,14 +288,10 @@ async def test_convert_to_project_raises_exception_on_database_error(task_servic
         assert "DB error" in str(exc_info.value)
 
 
-# ============================================================================
-# EXCEPTION TESTS - change_status & _change_status_impl
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_change_status_raises_validation_error_no_tenant_context(db_manager, db_session):
-    """Test change_status raises ValidationError when no tenant context"""
     tenant_manager = MagicMock()
     tenant_manager.get_current_tenant.return_value = None
 
@@ -359,7 +306,6 @@ async def test_change_status_raises_validation_error_no_tenant_context(db_manage
 
 @pytest.mark.asyncio
 async def test_change_status_raises_not_found_on_nonexistent_task(task_service):
-    """Test change_status raises ResourceNotFoundError when task not found"""
     nonexistent_task_id = str(uuid4())
 
     with pytest.raises(ResourceNotFoundError) as exc_info:
@@ -371,7 +317,6 @@ async def test_change_status_raises_not_found_on_nonexistent_task(task_service):
 
 @pytest.mark.asyncio
 async def test_change_status_raises_exception_on_database_error(task_service):
-    """Test change_status raises BaseGiljoError on database errors"""
     with patch.object(task_service, "_change_status_impl", side_effect=Exception("DB error")):
         with pytest.raises(BaseGiljoError) as exc_info:
             await task_service.change_status(task_id=str(uuid4()), new_status="completed")
@@ -379,14 +324,10 @@ async def test_change_status_raises_exception_on_database_error(task_service):
         assert "DB error" in str(exc_info.value)
 
 
-# ============================================================================
-# EXCEPTION TESTS - get_summary & _get_summary_impl
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_get_summary_raises_validation_error_no_tenant_context(db_manager, db_session):
-    """Test get_summary raises ValidationError when no tenant context"""
     tenant_manager = MagicMock()
     tenant_manager.get_current_tenant.return_value = None
 
@@ -401,7 +342,6 @@ async def test_get_summary_raises_validation_error_no_tenant_context(db_manager,
 
 @pytest.mark.asyncio
 async def test_get_summary_raises_exception_on_database_error(task_service):
-    """Test get_summary raises BaseGiljoError on database errors"""
     with patch.object(task_service._conversion, "_get_summary_impl", side_effect=Exception("DB error")):
         with pytest.raises(BaseGiljoError) as exc_info:
             await task_service.get_summary()

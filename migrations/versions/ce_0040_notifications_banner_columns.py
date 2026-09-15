@@ -3,31 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Add banner-consolidation columns to notifications.
-
-Revision ID: ce_0040_notifications_banner_columns
-Revises: ce_0039_create_notifications
-Create Date: 2026-06-03
-
-IMP-5037b Phase 1: consolidate the legacy standalone dashboard banners onto the
-notifications table so a single row is the authority for both the bell and the
-page-banner surface.
-
-Adds columns to ``notifications``:
-- ``surface``     Text NOT NULL DEFAULT 'bell' + CHECK IN ('bell','banner','both')
-- ``role_filter`` Text NULL  — server-enforced role gate (e.g. 'admin')
-- ``cta_label``   Text NULL  — call-to-action label
-- ``cta_route``   Text NULL  — NAMED Vue route string (NOT a URL)
-- ``dismissible`` Boolean NOT NULL DEFAULT true
-
-Idempotent: every ADD COLUMN / ADD CONSTRAINT is guarded by an
-information_schema existence check. The CE installer reruns ``alembic upgrade
-head`` on every boot. Existing rows are backfilled to ``surface='bell'`` /
-``dismissible=true`` by the column server defaults; an explicit UPDATE also
-normalizes any NULL ``surface`` left by a partial prior run.
-
-Edition Scope: CE -- ``notifications`` is a CE model.
-"""
 
 import sqlalchemy as sa
 from alembic import op
@@ -86,7 +61,6 @@ def upgrade() -> None:
             sa.Column("dismissible", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         )
 
-    # Backfill any row that a partial prior run may have left without a surface.
     op.execute("UPDATE notifications SET surface = 'bell' WHERE surface IS NULL")
 
     if not _has_constraint(conn, NOTIFICATIONS_TABLE, SURFACE_CHECK):

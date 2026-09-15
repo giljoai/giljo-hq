@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tests for JSONB validation models and convenience functions.
-
-Validates Pydantic models enforce schema consistency for remaining JSONB columns.
-Pure unit tests — no database access required.
-
-Created: Handover 0840
-"""
 
 import pytest
 from pydantic import ValidationError
@@ -28,13 +21,9 @@ from giljo_mcp.schemas.jsonb_validators import (
 )
 
 
-# ============================================================================
-# AgentJobMetadata
-# ============================================================================
 
 
 class TestAgentJobMetadata:
-    """Tests for AgentJobMetadata model (BE-9000h real key inventory)."""
 
     def test_valid_full_data(self):
         data = {
@@ -69,13 +58,9 @@ class TestAgentJobMetadata:
             AgentJobMetadata(todo_steps={"current_step": "x" * 5000})
 
 
-# ============================================================================
-# GitCommitEntry
-# ============================================================================
 
 
 class TestGitCommitEntry:
-    """Tests for GitCommitEntry model."""
 
     def test_valid_entry(self):
         entry = GitCommitEntry(sha="abc123", message="fix bug")
@@ -100,13 +85,9 @@ class TestGitCommitEntry:
             GitCommitEntry()
 
 
-# ============================================================================
-# SettingsData & OrganizationSettings (flexible containers)
-# ============================================================================
 
 
 class TestSettingsData:
-    """Tests for SettingsData model."""
 
     def test_accepts_any_keys(self):
         data = {"general": {"theme": "dark"}, "network": {"port": 8080}}
@@ -119,7 +100,6 @@ class TestSettingsData:
 
 
 class TestOrganizationSettings:
-    """Tests for OrganizationSettings model."""
 
     def test_accepts_any_keys(self):
         model = OrganizationSettings(max_users=50, plan="enterprise")
@@ -130,17 +110,11 @@ class TestOrganizationSettings:
         assert model.model_dump() == {}
 
 
-# ============================================================================
-# ProductMemoryConfig
-# ============================================================================
 
 
 class TestProductMemoryConfig:
-    """Tests for ProductMemoryConfig model."""
 
     def test_legacy_github_key_still_loads(self):
-        # BE-9261: "github" is the pre-rename seed key. Rows written before the
-        # rename must still validate and load their data.
         data = {
             "github": {"enabled": True, "commit_limit": 25},
             "context": {"last_updated": "2026-03-25"},
@@ -149,7 +123,6 @@ class TestProductMemoryConfig:
         assert model.github["enabled"] is True
 
     def test_git_integration_key_accepted(self):
-        # BE-9261: "git_integration" is the current seed key.
         data = {
             "git_integration": {"enabled": True, "commit_limit": 25},
             "context": {"last_updated": "2026-03-25"},
@@ -170,13 +143,9 @@ class TestProductMemoryConfig:
         assert model.github == {}
 
 
-# ============================================================================
-# ProductTuningState
-# ============================================================================
 
 
 class TestProductTuningState:
-    """Tests for ProductTuningState model."""
 
     def test_valid_data(self):
         data = {
@@ -196,13 +165,9 @@ class TestProductTuningState:
         assert model.custom_flag is True
 
 
-# ============================================================================
-# Convenience validator functions
-# ============================================================================
 
 
 class TestValidateGitCommits:
-    """Tests for validate_git_commits convenience function."""
 
     def test_none_returns_none(self):
         assert validate_git_commits(None) is None
@@ -218,13 +183,10 @@ class TestValidateGitCommits:
         assert result[1]["author"] == "dev"
 
     def test_missing_required_field_raises(self):
-        # BE-9256: a missing message (no commit title) raises the dedicated
-        # fail-closed error, not a generic pydantic ValidationError.
         with pytest.raises(GitCommitTitleRequiredError):
             validate_git_commits([{"sha": "abc123"}])
 
     def test_bare_sha_string_rejected(self):
-        # BE-9256 (flips BE-6208a): a bare SHA has no title and is rejected.
         with pytest.raises(GitCommitTitleRequiredError):
             validate_git_commits(["abc123"])
 
@@ -234,7 +196,6 @@ class TestValidateGitCommits:
 
 
 class TestValidateProductMemory:
-    """Tests for validate_product_memory convenience function."""
 
     def test_none_returns_none(self):
         assert validate_product_memory(None) is None
@@ -244,15 +205,11 @@ class TestValidateProductMemory:
         assert result["git_integration"]["enabled"] is True
 
     def test_legacy_github_key_tolerated(self):
-        # BE-9261: "github" is a declared field kept for read-tolerance, not
-        # folded into extra="allow" -- a legacy-shaped row must still validate
-        # and round-trip its data.
         result = validate_product_memory({"github": {"enabled": True}, "context": {}})
         assert result["github"] == {"enabled": True}
 
 
 class TestValidateTuningState:
-    """Tests for validate_tuning_state convenience function."""
 
     def test_none_returns_none(self):
         assert validate_tuning_state(None) is None
@@ -268,7 +225,6 @@ class TestValidateTuningState:
 
 
 class TestNotificationPayloadValidators:
-    """IMP-5037b: system banner payload schemas + registry dispatch."""
 
     def test_pending_migrations_valid(self):
         from giljo_mcp.schemas.jsonb_validators import validate_notification_payload

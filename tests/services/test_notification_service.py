@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tests for NotificationService (IMP-5037a Phase 1).
-
-Covers the service write/read boundary directly (the layer the bell consumes):
-- emit-time de-dupe against the open partial-unique index
-- severity enum + payload JSONB validation
-- per-user vs tenant-scoped visibility and include flags
-- mark_read / mark_dismissed ownership + tenant scoping
-- resolve_by_dedupe_key auto-clear and re-emit-after-resolve
-
-Parallel-safe: TransactionalTestContext (db_session) + no module globals.
-"""
 
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -44,7 +33,6 @@ async def service(db_manager, db_session):
 
 @pytest_asyncio.fixture
 async def tenant_key(db_session):
-    """Create an organization and return its tenant_key."""
     unique_id = str(uuid4())[:8]
     org = Organization(
         id=str(uuid4()),
@@ -59,7 +47,6 @@ async def tenant_key(db_session):
 
 
 async def _make_user(db_session, tenant_key: str) -> str:
-    """Create a real user in the tenant (FK target for Notification.user_id)."""
     unique_id = str(uuid4())[:8]
     user = User(
         id=str(uuid4()),
@@ -79,7 +66,6 @@ async def _make_user(db_session, tenant_key: str) -> str:
 
 @pytest_asyncio.fixture
 async def user_id(db_session, tenant_key):
-    """A real user id in the tenant."""
     return await _make_user(db_session, tenant_key)
 
 
@@ -196,7 +182,6 @@ class TestNotificationListAndLifecycle:
         resolved = await service.resolve_by_dedupe_key(tenant_key, "api_key.expiring_soon:key-123")
         assert resolved == 1
 
-        # A new create for the same dedupe_key is now a fresh row (prior resolved).
         second = await service.create(tenant_key=tenant_key, **_create_kwargs())
         assert second.id != first.id
 
@@ -208,7 +193,6 @@ class TestNotificationListAndLifecycle:
 
 
 async def _make_user_with_role(db_session, tenant_key: str, role: str) -> str:
-    """Create a real user with a specific role in the tenant."""
     unique_id = str(uuid4())[:8]
     user = User(
         id=str(uuid4()),
@@ -227,7 +211,6 @@ async def _make_user_with_role(db_session, tenant_key: str, role: str) -> str:
 
 
 class TestNotificationBannerColumns:
-    """IMP-5037b: surface / role_filter / cta_* / dismissible behavior."""
 
     @pytest.mark.asyncio
     async def test_create_persists_banner_columns(self, service, tenant_key):
@@ -282,7 +265,6 @@ class TestNotificationBannerColumns:
         banners = await service.list_for_user(tenant_key, user_id, surface="banner")
         banner_ids = {r.id for r in banners}
         assert both.id in banner_ids
-        # bell-only row must be excluded from the banner surface view
         assert all(r.surface in ("banner", "both") for r in banners)
         assert len(banner_ids) == 2
 
@@ -306,7 +288,6 @@ class TestNotificationBannerColumns:
 
 
 class TestUpsertByDedupeKey:
-    """IMP-5037b: present-or-not idempotent upsert path for scanners."""
 
     @pytest.mark.asyncio
     async def test_upsert_creates_when_absent(self, service, tenant_key):
@@ -364,7 +345,6 @@ class TestUpsertByDedupeKey:
 
     @pytest.mark.asyncio
     async def test_create_does_not_update_payload_but_upsert_does(self, service, tenant_key):
-        """Regression: create() returns the existing row unchanged; upsert mutates it."""
         await service.create(
             tenant_key=tenant_key,
             notification_type="system.pending_migrations",
@@ -383,7 +363,7 @@ class TestUpsertByDedupeKey:
             surface="banner",
             payload={"pending": 9, "head": "ce_0099"},
         )
-        assert after_create.payload["pending"] == 2  # create did NOT update
+        assert after_create.payload["pending"] == 2
 
         after_upsert = await service.upsert_by_dedupe_key(
             tenant_key=tenant_key,
@@ -394,7 +374,7 @@ class TestUpsertByDedupeKey:
             surface="banner",
             payload={"pending": 9, "head": "ce_0099"},
         )
-        assert after_upsert.payload["pending"] == 9  # upsert DID update
+        assert after_upsert.payload["pending"] == 9
 
     @pytest.mark.asyncio
     async def test_upsert_rejects_unknown_type(self, service, tenant_key):

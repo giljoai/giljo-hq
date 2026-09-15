@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Simplified Serena MCP toggle endpoint (Handover 0277).
-
-Provides single toggle for Serena MCP integration.
-Stores settings in the database via SettingsService (category='integrations')
-instead of config.yaml.
-"""
 
 import logging
 

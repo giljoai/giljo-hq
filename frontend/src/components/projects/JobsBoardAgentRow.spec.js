@@ -1,19 +1,7 @@
-/**
- * JobsBoardAgentRow.spec.js — FE-9548
- *
- * The Jobs board's compact per-agent row: badge + steps + duration + status
- * + messages, no name text on the card face (mock: badges only to save real
- * estate) with identity revealed on badge hover.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import JobsBoardAgentRow from './JobsBoardAgentRow.vue'
 
-// Mirrors the v-tooltip stub AgentRow.spec.js/JobsTab.spec.js already use --
-// renders both the activator AND the tooltip body so DOM assertions can see
-// the (normally hover-only) identity tooltip without simulating a hover.
 const tooltipStub = {
   template: `<div class="v-tooltip"><slot name="activator" :props="{}" /><slot /></div>`,
 }
@@ -43,8 +31,6 @@ describe('JobsBoardAgentRow', () => {
     expect(wrapper.find('[data-testid="jb-agent-steps"]').text()).toContain('/4')
     expect(wrapper.find('[data-testid="jb-agent-status"]').text()).toBe('Working')
     expect(wrapper.find('[data-testid="jb-agent-messages"]').text()).toBe('1')
-    // The card face itself carries no readable agent name -- only the badge
-    // initials and the hidden (hover-only) tooltip do.
     expect(wrapper.find('[data-testid="jb-agent-row"]').text()).not.toContain('implementer-backend')
   })
 
@@ -53,9 +39,6 @@ describe('JobsBoardAgentRow', () => {
     expect(wrapper.find('[data-testid="jb-agent-steps"]').text()).toBe('—')
   })
 
-  // FE-9551: promoted onto the SHARED .msg-badge class (main.scss) that
-  // AgentRow.vue's own message pill already uses, with the same
-  // 'zero'/'has-msgs' modifiers -- not the board's bespoke .jb-msg/.jb-msg--zero.
   it('tints the messages pill using the shared .msg-badge classes, zero vs has-msgs', () => {
     const zero = mountRow({ agent_display_name: 'tester', status: 'complete', messages_waiting_count: 0 })
     expect(zero.find('[data-testid="jb-agent-messages"]').classes()).toContain('msg-badge')
@@ -82,9 +65,6 @@ describe('JobsBoardAgentRow', () => {
     expect(tooltip.text()).toContain('69760e9d-2b11-4a03-9c5e-1f2d3a4b5c6d')
   })
 
-  // FE-9551: reuses the shared .agent-badge-sq square (main.scss) instead of
-  // reinventing a bespoke .jb-badge -- --sm is the closest existing size
-  // modifier to the row's original 26px/8px-radius badge (20x20/5px).
   it('uses the shared .agent-badge-sq--sm class instead of a bespoke badge', () => {
     const wrapper = mountRow({ agent_display_name: 'implementer', status: 'working' })
     const badge = wrapper.find('[data-testid="jb-agent-badge"]')
@@ -95,7 +75,6 @@ describe('JobsBoardAgentRow', () => {
   it('never hardcodes a hex color -- badge and status styling resolve through getAgentBadgeStyle/getStatusColor', () => {
     const wrapper = mountRow({ agent_display_name: 'reviewer', status: 'blocked' })
     const badgeStyle = wrapper.find('[data-testid="jb-agent-badge"]').attributes('style')
-    // rgba(...) tint from hexToRgba, not a bare hardcoded hex literal on the element.
     expect(badgeStyle).toMatch(/rgba\(/)
   })
 })

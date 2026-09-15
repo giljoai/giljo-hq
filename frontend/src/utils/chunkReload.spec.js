@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { isChunkLoadError, maybeReloadForChunkError, __testing } from './chunkReload'
 
-// FE-6120 regression tests — the bug (stale lazy-chunk after deploy) lives in the
-// frontend, so the regression test lives at the frontend layer per CLAUDE.md.
 
 describe('isChunkLoadError', () => {
   it('matches failed dynamic-import / preload / MIME-refusal messages', () => {

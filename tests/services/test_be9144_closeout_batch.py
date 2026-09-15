@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9144 — evaluate_closeout_readiness N+1 batching (equivalence + query count).
-
-The readiness gathering fetched incomplete TODOs one query per non-skipped agent
-(plus one approval query per awaiting_user agent). The fix batches both into a
-single ``WHERE ... IN`` query each, grouped in Python. This suite locks, against a
-real Postgres session:
-
-- **query count**: TODOs are read in ONE agent_todo_items query regardless of the
-  agent count; pending approvals in ONE user_approvals query (fail-first guard —
-  was one-per-agent);
-- **result-equivalence**: the CloseoutReadinessReport (per-agent incomplete todo
-  content/counts, agents_checked, orchestrator TODOs, resolved approval_id) is
-  unchanged, including skip-status and orchestrator-exclusion handling.
-
-Edition Scope: CE. Real DB via the transactional db_session; parallel-safe.
-"""
 
 from __future__ import annotations
 
@@ -62,7 +46,6 @@ class _StatementCounter:
 
 
 async def _add_agent(db_session, tenant_key, project_id, status, *, todos=(), job_id=None):
-    """Seed one agent_job + execution and its TODO rows. Returns (job_id, exec_id)."""
     job_id = job_id or str(uuid4())
     db_session.add(
         AgentJob(
@@ -129,8 +112,6 @@ def _service():
 
 
 async def test_todos_read_in_one_query_and_report_matches(db_session, db_manager, test_tenant_key, seeded_project):
-    """Two working agents + one decommissioned (skipped) + an orchestrator:
-    one agent_todo_items query, and the report content is unchanged."""
     project_id = seeded_project
     await _add_agent(
         db_session,
@@ -148,11 +129,9 @@ async def test_todos_read_in_one_query_and_report_matches(db_session, db_manager
         todos=[("B pending", "pending")],
         job_id="job-b",
     )
-    # Decommissioned agent must be skipped (no todo lookup, not counted).
     await _add_agent(
         db_session, test_tenant_key, project_id, "decommissioned", todos=[("C x", "pending")], job_id="job-c"
     )
-    # Orchestrator: excluded from the agent scan, its own TODOs gathered separately.
     await _add_agent(
         db_session, test_tenant_key, project_id, "working", todos=[("orch todo", "pending")], job_id="job-orch"
     )
@@ -164,16 +143,14 @@ async def test_todos_read_in_one_query_and_report_matches(db_session, db_manager
             db_session, project_id, test_tenant_key, orchestrator_job_id="job-orch"
         )
 
-    # Batching guard: one TODO query total (was 3 — job-a, job-b, job-orch).
     assert counter.count("FROM agent_todo_items") == 1, counter.statements
 
-    # Equivalence: only the two working non-orchestrator agents are checked.
     assert report.agents_checked == 2
     by_job = {f.job_id: f for f in report.findings}
     assert set(by_job) == {"job-a", "job-b"}
 
     a = by_job["job-a"]
-    assert sorted(a.incomplete_todos) == ["A pending", "A running"]  # completed excluded
+    assert sorted(a.incomplete_todos) == ["A pending", "A running"]
     assert a.incomplete_pending == 1
     assert a.incomplete_in_progress == 1
 
@@ -181,14 +158,12 @@ async def test_todos_read_in_one_query_and_report_matches(db_session, db_manager
     assert b.incomplete_todos == ["B pending"]
     assert b.incomplete_pending == 1
 
-    # Orchestrator TODOs gathered from the same batched map.
     assert report.orchestrator_incomplete == ["orch todo"]
     assert report.orchestrator_pending == 1
     assert report.orchestrator_in_progress == 0
 
 
 async def test_pending_approvals_read_in_one_query(db_session, db_manager, test_tenant_key, seeded_project):
-    """Two awaiting_user agents -> one user_approvals query; each finding resolves its approval id."""
     project_id = seeded_project
     _, exec_d = await _add_agent(db_session, test_tenant_key, project_id, "awaiting_user", job_id="job-d")
     _, exec_e = await _add_agent(db_session, test_tenant_key, project_id, "awaiting_user", job_id="job-e")
@@ -215,7 +190,6 @@ async def test_pending_approvals_read_in_one_query(db_session, db_manager, test_
     with _StatementCounter(engine) as counter, tenant_session_context(db_session, test_tenant_key):
         report = await svc.evaluate_closeout_readiness(db_session, project_id, test_tenant_key)
 
-    # Batching guard: one approvals query total (was one per awaiting_user agent).
     assert counter.count("FROM user_approvals") == 1, counter.statements
 
     resolved = {f.job_id: f.approval_id for f in report.findings}

@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Product Memory Entries Endpoint - Handover 0490
-
-Handles fetching 360 memory entries from the normalized product_memory_entries table.
-BE-5022a: All DB access routed through ProductMemoryService.
-"""
 
 import logging
 from uuid import UUID
@@ -62,10 +56,10 @@ async def get_memory_entries(
         422: Invalid UUID format, or search term over the length cap
     """
     try:
-        UUID(product_id)  # Validate product_id format
+        UUID(product_id)
         project_uuid_str = None
         if project_id:
-            UUID(project_id)  # Validate project_id format
+            UUID(project_id)
             project_uuid_str = project_id
     except ValueError as e:
         raise HTTPException(
@@ -73,7 +67,6 @@ async def get_memory_entries(
             detail="Invalid UUID format.",
         ) from e
 
-    # Normalize search: treat blank/whitespace-only as "no search".
     search_query = search.strip() if search else None
     if not search_query:
         search_query = None
@@ -94,7 +87,6 @@ async def get_memory_entries(
     entries = result["entries"]
     total_count = result["total_count"]
 
-    # Convert entries to response format
     entry_responses = []
     for entry in entries:
         entry_dict = entry.to_dict()

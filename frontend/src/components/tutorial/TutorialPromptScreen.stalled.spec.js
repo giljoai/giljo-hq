@@ -1,15 +1,3 @@
-/**
- * TutorialPromptScreen.stalled.spec.js — FE-9320
- *
- * Both agent-driven doors spin forever when no MCP-connected agent ever runs the
- * prompt — and the setup wizard lets the Connect and Install steps be skipped,
- * so that is a state real users reach. The document door at least showed a hint
- * after 60s; the existing-codebase door showed nothing at all, forever.
- *
- * It now says what the step actually needs, and offers a way out.
- *
- * Edition scope: Both (shared frontend/src).
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
@@ -52,7 +40,6 @@ const STALLED = '[data-testid="tutorial-prompt-stalled"]'
 
 describe('TutorialPromptScreen — the existing-codebase door is honest when nothing comes back (FE-9320)', () => {
   beforeEach(() => {
-    // An un-populated card: the agent never reported done.
     h.row = { id: 'prod-1', consolidated_vision_light: '' }
     vi.useFakeTimers()
   })

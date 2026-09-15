@@ -1,7 +1,4 @@
 <template>
-  <!-- FE-6199: Dedicated chain conductor card. Shown only when a chain run is
-       active AND a project-less conductor agent exists. Solo: parent gates with
-       v-if so this component never renders in non-chain views. -->
   <div class="chain-conductor-card smooth-border" data-testid="chain-conductor-card">
     <div class="chain-conductor-card__header">
       <span
@@ -29,26 +26,14 @@
 </template>
 
 <script setup>
-/**
- * ChainConductorCard — FE-6199
- *
- * Minimal fixture showing the chain conductor's identity + current status.
- * Not a full agent-lane — no step counts, no play button, no handover.
- * Placed beside ChainMissionWindow in the Staging tab (chain mode only).
- * Gated in parent with v-if="chainCtx && conductorAgent".
- *
- * Edition scope: CE.
- */
 import { computed } from 'vue'
 import { getAgentColor } from '@/config/agentColors'
 
 const props = defineProps({
-  /** conductor agent object from the jobs store (project_id IS NULL, chain_conductor=true) */
   conductor: {
     type: Object,
     required: true,
   },
-  /** conductor label from chain context (e.g. "Conductor (orchestrator A)") */
   label: {
     type: String,
     default: 'Conductor',

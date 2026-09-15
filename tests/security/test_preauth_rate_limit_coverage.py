@@ -3,27 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6063f — pre-auth IP rate-limit hardening coverage.
-
-Covers the three gaps closed in BE-6063f at the layer the behavior lives
-(``api/middleware/auth_rate_limiter.RateLimiter`` + the ``auth_rate_limits``
-policy module):
-
-* Configurable per-path limits (``limit_for`` + ``GILJO_RL_<NAME>`` override).
-* CE-only loopback exemption (``is_exempt_ip``) — exempt in CE, NEVER in SaaS.
-* The limiter short-circuits to allow for an exempt IP.
-
-Clock discipline (BE-1000a): the sliding-window limiter keys off wall-clock
-``time.time()``. A test that crosses a real minute boundary can see the window
-reset mid-test and flap 429->200. We FREEZE ``arl.time.time`` to a fixed value
-so the window never advances within a test.
-
-Test style: direct-call against ``RateLimiter`` with duck-typed request stubs
-(mirrors ``tests/security/test_auth_rate_limiter.py``). Parallel-safe: every
-test resets the cache-backend registry and the limiter singleton in an autouse
-fixture; no module-level mutable state; GILJO_MODE and GILJO_RL_* env are
-monkeypatched per test.
-"""
 
 from __future__ import annotations
 
@@ -47,16 +26,6 @@ _FROZEN_NOW = 1_000_000.0
 
 @pytest.fixture(autouse=True)
 def _reset_state(monkeypatch, real_auth_rate_limiter):
-    """Clean registry + fresh singleton + no trusted proxies + frozen clock.
-
-    ``real_auth_rate_limiter`` (SEC-9227 H4) keeps the global test-bypass OFF —
-    this suite's whole purpose is to prove the real limiter fires.
-
-    Freezing ``arl.time.time`` to a constant pins the fixed-window bucket
-    inside a single test, eliminating the BE-1000a minute-boundary flake.
-    Default mode is CE with the loopback exemption ON (the env keys are
-    deleted so the production defaults apply unless a test overrides them).
-    """
     monkeypatch.delenv(arl._TRUSTED_PROXIES_ENV, raising=False)
     monkeypatch.delenv("GILJO_RL_EXEMPT_LOCALHOST", raising=False)
     for name in arlimits.DEFAULTS:
@@ -88,9 +57,6 @@ def _make_request(
     )
 
 
-# ---------------------------------------------------------------------------
-# limit_for — configurable per-path limits
-# ---------------------------------------------------------------------------
 
 
 class TestLimitFor:
@@ -123,9 +89,6 @@ class TestLimitFor:
             arlimits.limit_for("not_a_real_path")
 
 
-# ---------------------------------------------------------------------------
-# is_exempt_ip — CE loopback exemption, NEVER in SaaS
-# ---------------------------------------------------------------------------
 
 
 class TestIsExemptIp:
@@ -156,9 +119,6 @@ class TestIsExemptIp:
         assert arlimits.is_exempt_ip("unknown") is False
 
 
-# ---------------------------------------------------------------------------
-# Limiter behavior — limit enforcement, independence, exemption short-circuit
-# ---------------------------------------------------------------------------
 
 
 class TestLimiterEnforcement:
@@ -178,13 +138,10 @@ class TestLimiterEnforcement:
         req_b = _make_request(client_host="198.51.100.2")
         assert await limiter.check_rate_limit(req_a, limit=1, window=60) is True
         assert await limiter.check_rate_limit(req_a, limit=1, window=60) is False
-        # IP B is unaffected by IP A's exhaustion.
         assert await limiter.check_rate_limit(req_b, limit=1, window=60) is True
 
     @pytest.mark.asyncio
     async def test_env_override_raises_the_effective_limit(self, monkeypatch):
-        """An operator override flows end-to-end: the limiter honors the bumped
-        number, so what was rejected at the default is now allowed."""
         monkeypatch.setenv("GILJO_RL_LOGIN", "3")
         limiter = arl.RateLimiter()
         req = _make_request(client_host="198.51.100.40")
@@ -192,14 +149,12 @@ class TestLimiterEnforcement:
         assert bumped == 3
         for _ in range(bumped):
             assert await limiter.check_rate_limit(req, limit=bumped, window=60) is True
-        # The (bumped+1)-th is blocked.
         assert await limiter.check_rate_limit(req, limit=bumped, window=60) is False
 
 
 class TestLocalhostExemptionInLimiter:
     @pytest.mark.asyncio
     async def test_ce_localhost_exempt_allows_far_past_the_limit(self, monkeypatch):
-        """CE + loopback peer: 50 calls at limit=1 are ALL allowed (exempt)."""
         monkeypatch.setattr("api.app_state.GILJO_MODE", "ce")
         limiter = arl.RateLimiter()
         req = _make_request(client_host="127.0.0.1")
@@ -208,7 +163,6 @@ class TestLocalhostExemptionInLimiter:
 
     @pytest.mark.asyncio
     async def test_saas_localhost_not_exempt_blocks_at_limit(self, monkeypatch):
-        """SaaS + loopback peer: the exemption is OFF, so limit=1 blocks the 2nd call."""
         monkeypatch.setattr("api.app_state.GILJO_MODE", "saas")
         limiter = arl.RateLimiter()
         req = _make_request(client_host="127.0.0.1")
@@ -225,23 +179,9 @@ class TestLocalhostExemptionInLimiter:
         assert await limiter.check_rate_limit(req, limit=1, window=60) is False
 
 
-# ---------------------------------------------------------------------------
-# GAP 2 — create-first-admin 429 boundary, exercised through the ASGI app
-# ---------------------------------------------------------------------------
 
 
 class TestCreateFirstAdmin429Boundary:
-    """The unauthenticated create-first-admin POST now has a per-IP limiter.
-
-    Mirrors ``tests/saas/test_saas_rate_limits_429.py``: a real (un-mocked)
-    RateLimiter, pre-filled to the limit with the SAME frozen clock value, behind
-    a non-``http://test`` base_url so the test-bypass does not short-circuit.
-
-    create-first-admin is CE-only (it 403s in SaaS). The ASGI transport resolves
-    ``request.client.host`` as ``127.0.0.1``, which CE exempts by default — so we
-    turn the localhost exemption OFF for this boundary test, otherwise no 429
-    could ever fire from a loopback client.
-    """
 
     @pytest.mark.asyncio
     async def test_create_first_admin_returns_429_after_limit(self, monkeypatch):
@@ -253,18 +193,12 @@ class TestCreateFirstAdmin429Boundary:
 
         limit = arlimits.limit_for("create_first_admin")
         rl = arl.RateLimiter()
-        # Pre-fill the limiter's window for the ASGI peer IP at the frozen clock
-        # value so the very next request is the (limit+1)-th and trips 429.
-        # BE-6006: seed via the same atomic incr the limiter uses, against this
-        # IP's frozen-clock window bucket.
         bucket = rl._bucket_key("127.0.0.1", 60)
         for _ in range(limit):
             await rl._backend.incr(arl._RATE_LIMIT_TENANT_SENTINEL, bucket, ttl_seconds=60)
 
         app = FastAPI()
         app.include_router(registration.router, prefix="/api/auth")
-        # The 429 raises before the auth service is touched; a sentinel override
-        # is enough to satisfy the dependency wiring (object() is a valid factory).
         app.dependency_overrides[get_auth_service] = object
 
         with patch.object(registration, "get_rate_limiter", return_value=rl):

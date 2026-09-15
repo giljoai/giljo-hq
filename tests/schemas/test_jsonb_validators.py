@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tests for JSONB validator functions and Pydantic models.
-
-Covers: new validators added in Handover 0962c, fixes to ProductMemoryConfig
-field names, and the BE-9000h rewrite of AgentJobMetadata to the real key
-inventory (declared todo_steps nested cache + agent-string length caps).
-Updated: settings category validators added for config.yaml -> DB migration.
-
-Created: Handover 0962c
-"""
 
 import pytest
 from pydantic import ValidationError
@@ -34,9 +25,6 @@ from giljo_mcp.schemas.jsonb_validators import (
 )
 
 
-# ---------------------------------------------------------------------------
-# AgentJobMetadata — rewritten to the real key inventory (BE-9000h)
-# ---------------------------------------------------------------------------
 
 
 class TestAgentJobMetadata:
@@ -69,9 +57,6 @@ class TestAgentJobMetadata:
             AgentJobMetadata(tool="x" * 500)
 
 
-# ---------------------------------------------------------------------------
-# ProductMemoryConfig — seed key renamed github -> git_integration (BE-9261)
-# ---------------------------------------------------------------------------
 
 
 class TestProductMemoryConfig:
@@ -85,9 +70,6 @@ class TestProductMemoryConfig:
         assert cfg.git_integration == {}
 
     def test_legacy_github_key_still_accepted(self):
-        # BE-9261: "github" is the pre-rename seed key -- kept as a declared
-        # field (not folded into extra) purely for read tolerance so rows
-        # written before the rename keep loading.
         cfg = ProductMemoryConfig(github={"repo_url": "https://github.com/x/y"})
         dumped = cfg.model_dump()
         assert dumped.get("github") == {"repo_url": "https://github.com/x/y"}
@@ -100,14 +82,8 @@ class TestProductMemoryConfig:
         assert "context_metadata" not in fields
 
 
-# ---------------------------------------------------------------------------
-# AgentExecutionResult — new validator
-# ---------------------------------------------------------------------------
 
 
-# ---------------------------------------------------------------------------
-# AgentExecutionResult — model tests (validator function removed, model kept)
-# ---------------------------------------------------------------------------
 
 
 class TestAgentExecutionResult:
@@ -131,7 +107,6 @@ class TestAgentExecutionResult:
         result = AgentExecutionResult(summary="Done", extra_field="extra_value")
         assert result.model_dump()["extra_field"] == "extra_value"
 
-    # BE-8003j: branch / pr_url are first-class web-coding hand-off fields.
     def test_branch_and_pr_url_are_first_class(self):
         result = AgentExecutionResult(branch="feat/x", pr_url="https://git.example/pr/1")
         assert result.branch == "feat/x"
@@ -144,7 +119,6 @@ class TestAgentExecutionResult:
 
     def test_validate_execution_result_preserves_branch_and_pr_url(self):
         payload = {"summary": "Done", "branch": "feat/x", "pr_url": "https://git.example/pr/1"}
-        # returns the ORIGINAL payload unchanged on success (no reshaping/dropping)
         assert validate_agent_execution_result(payload) == payload
 
     def test_branch_over_cap_rejected(self):
@@ -160,9 +134,6 @@ class TestAgentExecutionResult:
             validate_agent_execution_result({"branch": 123})
 
 
-# ---------------------------------------------------------------------------
-# validate_behavioral_rules
-# ---------------------------------------------------------------------------
 
 
 class TestValidateBehavioralRules:
@@ -185,9 +156,6 @@ class TestValidateBehavioralRules:
             validate_behavioral_rules([{"rule": "something"}])
 
 
-# ---------------------------------------------------------------------------
-# validate_success_criteria
-# ---------------------------------------------------------------------------
 
 
 class TestValidateSuccessCriteria:
@@ -210,20 +178,9 @@ class TestValidateSuccessCriteria:
             validate_success_criteria([100])
 
 
-# ---------------------------------------------------------------------------
-# validate_git_commits — wired-up validator (existing; verify still works)
-# ---------------------------------------------------------------------------
 
 
 class TestValidateGitCommits:
-    """BE-9256: fail-closed on a missing commit title.
-
-    BE-6208a's bare-SHA acceptance is FLIPPED here (contract change, not test
-    weakening): a bare SHA silently normalized to an empty-titled entry, and
-    every UI surface rendered that as a blank commit title. The validator now
-    rejects bare SHAs and requires either a titled dict or a tab-delimited
-    porcelain string.
-    """
 
     def test_none_returns_none(self):
         assert validate_git_commits(None) is None
@@ -238,13 +195,10 @@ class TestValidateGitCommits:
             validate_git_commits([{"message": "no sha"}])
 
     def test_rejects_missing_message(self):
-        # Missing message key entirely is treated the same as an empty title.
         with pytest.raises(GitCommitTitleRequiredError):
             validate_git_commits([{"sha": "abc123"}])
 
     def test_rejects_bare_sha_strings(self):
-        # BE-9256 (flips BE-6208a): a bare SHA has no title and is rejected,
-        # not silently normalized to {"message": ""}.
         with pytest.raises(GitCommitTitleRequiredError):
             validate_git_commits(["abc123def456"])
 
@@ -254,7 +208,6 @@ class TestValidateGitCommits:
         assert "git log --format=" in exc_info.value.hint
 
     def test_rejects_mixed_dicts_and_bare_shas(self):
-        # The one bad entry (bare SHA) fails the whole batch closed.
         with pytest.raises(GitCommitTitleRequiredError):
             validate_git_commits([{"sha": "a1", "message": "m"}, "b2"])
 
@@ -271,7 +224,6 @@ class TestValidateGitCommits:
             validate_git_commits([123])
 
     def test_accepts_titled_porcelain_string(self):
-        # The output of: git log --format='%H%x09%s%x09%an' -1
         out = validate_git_commits(["abc123\tFix the widget\tAlice"])
         assert out == [
             {
@@ -296,23 +248,14 @@ class TestValidateGitCommits:
             validate_git_commits(["abc123\t\tAlice"])
 
     def test_rejects_leading_tab_empty_sha_segment(self):
-        """BE-9256 audit Finding #2: a leading tab (empty sha segment) must be
-        REJECTED, not misparsed. Pre-fix, ``.strip()`` ran before the tab-split and
-        ate the leading tab, shifting every field left: 'Fix the widget' landed in
-        sha and 'Alice' landed in message -- accepted with swapped/wrong data."""
         with pytest.raises(GitCommitTitleRequiredError):
             validate_git_commits(["\tFix the widget\tAlice"])
 
     def test_rejects_whitespace_only_sha_segment(self):
-        """A sha segment that is present but whitespace-only is still empty after
-        trim -- must reject, not treat the whitespace as a valid sha."""
         with pytest.raises(GitCommitTitleRequiredError):
             validate_git_commits(["   \tFix the widget\tAlice"])
 
     def test_accepts_crlf_terminated_porcelain_line(self):
-        """A porcelain line terminated with \\r\\n (as raw git log output may be,
-        depending on platform/pipe) must still parse correctly -- only the
-        trailing newline/CR is stripped, not leading whitespace/tabs."""
         out = validate_git_commits(["abc123\tFix the widget\tAlice\r\n"])
         assert out[0]["sha"] == "abc123"
         assert out[0]["message"] == "Fix the widget"
@@ -329,17 +272,10 @@ class TestValidateGitCommits:
         assert out[0]["pr_url"] is None
 
     def test_empty_list_stays_valid(self):
-        # Non-git-repo escape hatch: empty list / omission is untouched by BE-9256.
         assert validate_git_commits([]) == []
 
 
 class TestValidateGitCommitsLengthCaps:
-    """BE-9256 audit Finding #3 (advisory): the old bare-SHA path capped sha at
-    64 chars; the titled-dict/porcelain shapes introduced by BE-9256 accepted
-    unbounded sha/message/author/pr_url. Caps restored: sha<=64, message<=500,
-    author<=200, pr_url<=500. Applied once on ``GitCommitEntry`` so BOTH the
-    dict shape and the porcelain shape (which also constructs a
-    ``GitCommitEntry``) are covered by a single enforcement point."""
 
     def test_accepts_sha_at_64_chars(self):
         sha = "a" * 64
@@ -382,9 +318,6 @@ class TestValidateGitCommitsLengthCaps:
             )
 
 
-# ---------------------------------------------------------------------------
-# GitIntegrationSettings — config.yaml -> DB migration validator
-# ---------------------------------------------------------------------------
 
 
 class TestGitIntegrationSettings:
@@ -402,15 +335,10 @@ class TestGitIntegrationSettings:
         assert s.use_in_prompts is True
 
     def test_string_for_enabled_is_coerced_by_pydantic(self):
-        # Pydantic v2 coerces "true"/"false" strings to bool; that is acceptable behavior.
-        # The validator still rejects non-boolean-like strings such as arbitrary words.
         with pytest.raises(ValidationError):
             GitIntegrationSettings(enabled="not_a_bool_at_all_xyz")
 
     def test_stale_retired_keys_are_tolerated_and_dropped(self):
-        # BE-9103/BE-9148: max_commits, include_commit_history and branch_strategy were
-        # removed from the schema. Stale keys on an existing row must NOT raise
-        # (tolerance) and must be dropped on validation (never read).
         s = GitIntegrationSettings(
             enabled=True, max_commits=50, include_commit_history=False, branch_strategy="develop"
         )
@@ -421,9 +349,6 @@ class TestGitIntegrationSettings:
         assert "branch_strategy" not in dumped
 
 
-# ---------------------------------------------------------------------------
-# SerenaMcpSettings
-# ---------------------------------------------------------------------------
 
 
 class TestSerenaMcpSettings:
@@ -436,14 +361,10 @@ class TestSerenaMcpSettings:
         assert s.use_in_prompts is True
 
     def test_non_bool_string_for_use_in_prompts_raises(self):
-        # Pydantic v2 coerces "true"/"false" but rejects arbitrary strings.
         with pytest.raises(ValidationError):
             SerenaMcpSettings(use_in_prompts="not_a_boolean_xyz")
 
 
-# ---------------------------------------------------------------------------
-# IntegrationsSettingsData
-# ---------------------------------------------------------------------------
 
 
 class TestIntegrationsSettingsData:
@@ -467,8 +388,6 @@ class TestIntegrationsSettingsData:
             IntegrationsSettingsData(git_integration="not_a_dict")
 
     def test_stale_nested_retired_keys_are_tolerated(self):
-        # BE-9103/BE-9148: stale nested max_commits/include_commit_history/branch_strategy
-        # are tolerated (dropped), never rejected.
         data = IntegrationsSettingsData(
             git_integration={"enabled": True, "max_commits": 25, "branch_strategy": "develop"}
         )
@@ -485,9 +404,6 @@ class TestIntegrationsSettingsData:
         assert dumped["git_integration"]["enabled"] is False
 
 
-# ---------------------------------------------------------------------------
-# SecuritySettingsData
-# ---------------------------------------------------------------------------
 
 
 class TestSecuritySettingsData:
@@ -514,9 +430,6 @@ class TestSecuritySettingsData:
         assert data.cookie_domain_whitelist == domains
 
     def test_stale_retired_security_keys_are_tolerated_and_dropped(self):
-        # BE-9148: ssl_*/rate_limiting were retired. A legacy security row carrying
-        # them must NOT raise (tolerance) and must be dropped on validation (never
-        # read); the live cookie_domain_whitelist/allow_headless_launch keys survive.
         data = SecuritySettingsData(
             ssl_enabled=True,
             ssl_cert_path="/etc/certs/cert.pem",
@@ -532,16 +445,12 @@ class TestSecuritySettingsData:
             assert retired not in dumped
 
 
-# ---------------------------------------------------------------------------
-# SETTINGS_CATEGORY_VALIDATORS map
-# ---------------------------------------------------------------------------
 
 
 class TestSettingsCategoryValidatorsMap:
     def test_map_contains_expected_categories(self):
         assert "integrations" in SETTINGS_CATEGORY_VALIDATORS
         assert "security" in SETTINGS_CATEGORY_VALIDATORS
-        # BE-9148: "runtime" retired.
         assert "runtime" not in SETTINGS_CATEGORY_VALIDATORS
 
     def test_map_points_to_correct_validators(self):
@@ -549,9 +458,6 @@ class TestSettingsCategoryValidatorsMap:
         assert SETTINGS_CATEGORY_VALIDATORS["security"] is SecuritySettingsData
 
 
-# ---------------------------------------------------------------------------
-# validate_settings_by_category — routing function
-# ---------------------------------------------------------------------------
 
 
 class TestValidateSettingsByCategory:
@@ -575,7 +481,6 @@ class TestValidateSettingsByCategory:
         assert result["allow_headless_launch"] is True
 
     def test_security_category_tolerates_retired_ssl_fields(self):
-        # BE-9148: legacy ssl_*/rate_limiting keys are tolerated (dropped), never rejected.
         result = validate_settings_by_category(
             "security",
             {"ssl_enabled": True, "ssl_cert_path": "/cert.pem", "cookie_domain_whitelist": ["x.com"]},
@@ -585,8 +490,6 @@ class TestValidateSettingsByCategory:
         assert "ssl_cert_path" not in result
 
     def test_retired_runtime_category_falls_back_to_generic_passthrough(self):
-        # BE-9148: "runtime" has no dedicated validator anymore, so it routes through the
-        # generic SettingsData (extra="allow") — a stray runtime write is tolerated, not rejected.
         result = validate_settings_by_category(
             "runtime",
             {"agent": {"max_agents": 5}, "session": {"timeout_seconds": 7200}},

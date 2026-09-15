@@ -38,7 +38,6 @@ describe('useJobActions', () => {
   it('handleMessages deep-links to the project bound thread on the Project comms tab', async () => {
     const { handleMessages, selectedJobId } = useJobActions(getJob)
     const commHub = useCommHubStore()
-    // Seed a bound thread for the agent's project (threadList non-empty => no API load).
     commHub._testSeedThread({ thread_id: 'thr-1', project_id: 'proj-1' })
 
     await handleMessages({ job_id: 'job-1', project_id: 'proj-1' })
@@ -53,7 +52,6 @@ describe('useJobActions', () => {
   it('handleMessages with no bound thread lands on the Project comms tab and informs the user', async () => {
     const { handleMessages, selectedJobId } = useJobActions(getJob)
     const commHub = useCommHubStore()
-    // A thread exists, but for a DIFFERENT project — no bound thread to open.
     commHub._testSeedThread({ thread_id: 'thr-x', project_id: 'other-proj' })
 
     await handleMessages({ job_id: 'job-2', agent_id: 'agent-2', project_id: 'proj-none' })

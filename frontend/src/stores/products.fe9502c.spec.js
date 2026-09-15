@@ -1,22 +1,3 @@
-/**
- * products.fe9502c.spec.js — FE-9502c, server-backed since FE-9524/D1
- *
- * The tabbed product shell's store-level state: open (shown) tabs
- * (openTab/switchTab/closeTab) and a fixed bug in initializeFromStorage
- * discovered while extending it (product ids are UUID strings; the old
- * `parseInt(...)` comparison could never match one, so a persisted selection
- * was silently discarded on every reload). Reproduced as a failing test below
- * (museum rule) before the fix.
- *
- * FE-9524/D1: `openProductIds` is no longer a UI-local ref backed by
- * localStorage -- it is derived from `products[].is_active`, and
- * openTab/closeTab are server writes (api.products.activate/deactivate).
- *
- * Two real tabs, both open at once, is the condition this file exists to
- * prove -- a strip that only ever renders one tab proves nothing.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 
@@ -57,7 +38,6 @@ import { useProductStore } from './products'
 const PRODUCT_A = { id: 'a1111111-0000-0000-0000-000000000001', name: 'Product A', is_active: false }
 const PRODUCT_B = { id: 'b2222222-0000-0000-0000-000000000002', name: 'Product B', is_active: false }
 
-/** Mutates the shared fixtures' is_active so the next fetchProducts()/list() reflects it -- mirrors the server persisting an activate/deactivate write. */
 function showOnServer(id) {
   ;[PRODUCT_A, PRODUCT_B].forEach((p) => {
     if (p.id === id) p.is_active = true
@@ -109,7 +89,6 @@ describe('products store — FE-9502c/FE-9524 open (shown) tabs', () => {
     expect(mockActivate).toHaveBeenCalledWith(PRODUCT_B.id)
     expect(store.openProductIds).toEqual([PRODUCT_A.id, PRODUCT_B.id])
     expect(store.openProductTabs.map((p) => p.id)).toEqual([PRODUCT_A.id, PRODUCT_B.id])
-    // The viewed tab followed the most recent open.
     expect(store.currentProductId).toBe(PRODUCT_B.id)
   })
 
@@ -124,9 +103,6 @@ describe('products store — FE-9502c/FE-9524 open (shown) tabs', () => {
     expect(store.openProductIds).toEqual([PRODUCT_A.id, PRODUCT_B.id])
   })
 
-  // FE-9528: the Hub ignored the viewed product tab because switchTab
-  // re-scoped projects and tasks but never the Hub. Same reload contract as
-  // fetchProjects()/fetchTasks() above.
   it('switchTab re-scopes the Hub to the newly viewed product', async () => {
     const store = useProductStore()
     await store.openTab(PRODUCT_A.id)
@@ -152,7 +128,6 @@ describe('products store — FE-9502c/FE-9524 open (shown) tabs', () => {
     const store = useProductStore()
     await store.openTab(PRODUCT_A.id)
     await store.openTab(PRODUCT_B.id)
-    // Viewed tab is B (opened last). Close it.
     await store.closeTab(PRODUCT_B.id)
 
     expect(store.currentProductId).toBe(PRODUCT_A.id)
@@ -216,9 +191,6 @@ describe('products store — FE-9502c initializeFromStorage restores a UUID sele
   })
 
   it('restores the exact persisted product, not products[0] (regression: parseInt on a UUID)', async () => {
-    // Product B is NOT first in the list -- if the bug's parseInt(uuid)=>NaN
-    // mismatch fires, initializeFromStorage silently falls back to
-    // products[0] (Product A) instead.
     window.localStorage.setItem('currentProductId', PRODUCT_B.id)
 
     const store = useProductStore()
@@ -244,11 +216,8 @@ describe('products store — FE-9502c initializeFromStorage restores a UUID sele
   })
 
   it('FE-9524: a second browser with no local migration key just sees the server-shown set', async () => {
-    // Simulates: product A was already shown server-side (e.g. shown from
-    // another machine, or by a prior migration run in THIS browser).
     PRODUCT_A.is_active = true
     window.localStorage.setItem('currentProductId', PRODUCT_A.id)
-    // No 'openProductTabIds' key at all.
 
     const store = useProductStore()
     await store.initializeFromStorage()
@@ -269,22 +238,3 @@ describe('products store — FE-9502c initializeFromStorage restores a UUID sele
   })
 })
 
-/**
- * FE-9529 hole: ProductRepository.get_default_product's
- * sole-shown-product fallback fires ONLY when exactly one shown product
- * exists and nothing has is_default persisted. Showing a SECOND product
- * silently erases that fallback -- the tenant had a working default a moment
- * ago and now has none, with nothing telling them.
- *
- * The fix (promoting the implicit default before it is lost) lives in
- * ProductLifecycleService.activate_product -- the ONE owning writer for "a
- * product becomes shown" (dual-door rule: REST and any future MCP tool both
- * land there). It does NOT belong in this store: a client-side-only fix
- * would leave every other caller of POST /products/{id}/activate exposed to
- * the exact hole this exists to close. See
- * tests/services/test_fe9529_activate_promotes_implicit_default.py and
- * tests/integration/test_fe9529_activate_endpoint_promotes_default.py for
- * the real (backend) coverage. This store's contract is unchanged: openTab
- * calls activate() and nothing else, proven by the pre-existing "opens a
- * second real tab" test above.
- */

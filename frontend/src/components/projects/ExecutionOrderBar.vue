@@ -22,10 +22,6 @@
 </template>
 
 <script setup>
-/**
- * ExecutionOrderBar — phase badge row for multi-terminal mode extracted from JobsTab.
- * Purely presentational: renders the computed executionOrderPhases array.
- */
 
 defineProps({
   phases: {

@@ -1,7 +1,4 @@
 <template>
-  <!-- FE-6174b: the conditional /jobs chain header strip — N/M counter +
-       "Multi project mode" indicator (OD-2). Rendered only when chain_ctx
-       is present; the solo header is untouched. -->
   <div class="chain-mode-bar" data-testid="chain-mode-bar">
     <span class="chain-mode-bar__counter" data-testid="chain-counter">
       {{ counter.n }}/{{ counter.m }}
@@ -14,11 +11,6 @@
 </template>
 
 <script setup>
-/**
- * ChainModeBar — FE-6174b
- * Pure display: the chain N/M counter (advances as projects complete) and the
- * "Multi project mode" indicator. Design-token only.
- */
 defineProps({
   counter: {
     type: Object,

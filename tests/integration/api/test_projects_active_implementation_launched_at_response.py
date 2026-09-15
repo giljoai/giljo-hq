@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression: GET /api/v1/projects/active must not 500 on implementation_launched_at.
-
-The execution_mode-lock-on-launch change (5ec00ec99 / 6a3400c57) added
-``Project.implementation_launched_at`` and the crud.py::get_active_project handler
-reads ``proj.implementation_launched_at`` (crud.py:348) — but ``ActiveProjectDetail``
-(the model ProjectQueryService.get_active_projects returns) never carried the field,
-so the route 500'd with ``AttributeError: 'ActiveProjectDetail' object has no
-attribute 'implementation_launched_at'``.
-
-The sibling CE-0037 test only covered ``GET /{project_id}`` (ProjectDetail), NOT
-``/active`` (ActiveProjectDetail) — which is exactly why this slipped to prod-bound
-code. This test drives the REAL FastAPI route over HTTP (BE-5042 failing-layer
-discipline) and asserts 200 + the field present.
-"""
 
 from __future__ import annotations
 
@@ -39,7 +25,6 @@ _TENANT = "tenant-active-impl-ts-test"
 
 
 class _FakeUser:
-    """Duck-typed User — the /active route only reads ``tenant_key``/``username``."""
 
     id = "user-active-test"
     username = "active_tester"
@@ -47,8 +32,6 @@ class _FakeUser:
 
 
 class _FakeQuery:
-    """Stands in for ProjectService.query — the /active handler calls
-    ``project_service.query.get_active_projects(product_id=...)`` (crud.py)."""
 
     def __init__(self, detail: ActiveProjectDetail | None) -> None:
         self._detail = detail
@@ -80,7 +63,6 @@ def _build_app(stub: _StubProjectService) -> FastAPI:
 
 
 def _active_detail(launch_ts: datetime | None) -> ActiveProjectDetail:
-    """Mirror the field set ProjectQueryService.get_active_projects() constructs."""
     return ActiveProjectDetail(
         id="proj-active-impl",
         alias="ACT",
@@ -107,7 +89,6 @@ async def test_active_endpoint_includes_implementation_launched_at_when_set():
 
     assert resp.status_code == 200, f"expected 200, got {resp.status_code}: {resp.text}"
     body = resp.json()
-    # BE-9525a: list-shaped from day one (length <= 1 until BE-9525b).
     assert isinstance(body, list) and len(body) == 1
     assert "implementation_launched_at" in body[0], (
         "GET /active dropped implementation_launched_at — the ActiveProjectDetail "
@@ -140,11 +121,6 @@ async def test_active_endpoint_returns_empty_list_when_no_active_project():
 
 
 async def test_active_endpoint_forwards_product_id_query_param():
-    """BE-9525a: the live cross-product bug — product_id must reach the query service.
-
-    Before this fix the handler never read a product_id param at all, so a
-    project active in product A was reported as active for every product.
-    """
     stub = _StubProjectService(None)
     app = _build_app(stub)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -155,7 +131,6 @@ async def test_active_endpoint_forwards_product_id_query_param():
 
 
 async def test_active_endpoint_omits_product_id_when_not_given():
-    """No product_id in the query string -> the service receives None (tenant-wide fallback)."""
     stub = _StubProjectService(None)
     app = _build_app(stub)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

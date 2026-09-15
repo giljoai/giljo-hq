@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Transport-layer tests for the ``save_roadmap`` MCP tool (FE-6022a).
-
-Honors the BE-5042 lesson: the FastMCP ``@mcp.tool`` wrapper must be exercised
-through the in-memory transport, not just the service layer. This drives the
-wrapper's kwarg-unpacking + ``_call_tool`` dispatch + tenant_key propagation +
-the ValidationError → isError surfacing.
-
-Pattern reference: ``tests/integration/test_task_tools_mcp_transport.py`` — same
-in-memory ``create_connected_server_and_client_session`` transport and the same
-``_resolve_tenant`` monkeypatch + ``_<domain>_service`` session-swap.
-"""
 
 from __future__ import annotations
 
@@ -53,7 +41,6 @@ def _error_text(call_tool_result) -> str:
 
 
 async def _seed_active_product(db_session, tenant_key: str) -> dict:
-    """Seed org + active product + one project + one task for a tenant."""
     suffix = uuid.uuid4().hex[:8]
     org = Organization(name=f"Org {suffix}", slug=f"org-{suffix}", tenant_key=tenant_key, is_active=True)
     db_session.add(org)
@@ -98,12 +85,6 @@ class _TenantSwitch:
 
 @pytest_asyncio.fixture
 async def roadmap_mcp_client(db_manager, db_session, monkeypatch):
-    """Yield ``(new_client, tenant_switch)`` against the live FastMCP server.
-
-    Rebinds ``ToolAccessor._roadmap_service`` to a RoadmapService bound to the
-    test ``db_session`` so reads/writes happen inside the rolled-back
-    transaction, and monkeypatches ``_resolve_tenant`` to a mutable closure.
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -187,8 +168,6 @@ async def test_update_roadmap_metadata_bad_enum_surfaces_error(roadmap_mcp_clien
 
 
 async def test_update_roadmap_metadata_cross_tenant_project_rejected(roadmap_mcp_client, db_session):
-    """Tenant B cannot add tenant A's project to B's roadmap (proves tenant_key
-    propagates through the wrapper: B's active product != A's project's product)."""
     new_client, switch = roadmap_mcp_client
 
     tenant_a = switch.value
@@ -208,14 +187,10 @@ async def test_update_roadmap_metadata_cross_tenant_project_rejected(roadmap_mcp
 
 
 async def test_get_roadmap_reads_back_through_transport(roadmap_mcp_client, db_session):
-    """FE-6022c: get_roadmap READ tool returns the active product's roadmap
-    through the in-memory transport (BE-5042 — exercise the @mcp.tool wrapper,
-    not just the service)."""
     new_client, switch = roadmap_mcp_client
     seed = await _seed_active_product(db_session, switch.value)
 
     async with new_client() as session:
-        # Write one item, then read it back through the read tool.
         await session.call_tool(
             "save_roadmap",
             {
@@ -247,11 +222,6 @@ async def test_get_roadmap_reads_back_through_transport(roadmap_mcp_client, db_s
 
 
 async def test_update_roadmap_metadata_blocked_and_sort_order_round_trip(roadmap_mcp_client, db_session):
-    """BE-6052e: the renamed ``sort_order`` and the explicit ``blocked`` /
-    ``blocked_reason`` params persist + read back THROUGH the MCP transport — the
-    layer Fix 1 hardened (the tool contract previously didn't expose blocked, so
-    an agent following the schema literally couldn't set it). Boundary test, not
-    just the service (CLAUDE.md: MCP-boundary fix -> transport test)."""
     new_client, switch = roadmap_mcp_client
     seed = await _seed_active_product(db_session, switch.value)
 
@@ -274,15 +244,12 @@ async def test_update_roadmap_metadata_blocked_and_sort_order_round_trip(roadmap
 
     assert write.is_error is False, _error_text(write)
     item = _payload(read)["items"][0]
-    assert item["sort_order"] == 7  # renamed column round-trips through the boundary
+    assert item["sort_order"] == 7
     assert item["blocked"] is True
     assert item["blocked_reason"] == "waiting on the auth gate in BE-6077"
 
 
 async def test_update_roadmap_metadata_bad_blocked_type_surfaces_error(roadmap_mcp_client, db_session):
-    """BE-6052e Fix 1: a non-bool ``blocked`` surfaces a ValidationError (isError)
-    through the transport — a 422-class rejection, never an unvalidated value
-    reaching the DB as a 500."""
     new_client, switch = roadmap_mcp_client
     seed = await _seed_active_product(db_session, switch.value)
 
@@ -297,9 +264,6 @@ async def test_update_roadmap_metadata_bad_blocked_type_surfaces_error(roadmap_m
 
 
 async def test_update_roadmap_metadata_remove_param_evicts_through_transport(roadmap_mcp_client, db_session):
-    """0006: the `remove` param drops a roadmap item through the @mcp.tool wrapper
-    (BE-5042 — exercise the boundary, not just the service). Upsert two items,
-    then a remove-only call evicts one and reports items_removed=1."""
     new_client, switch = roadmap_mcp_client
     seed = await _seed_active_product(db_session, switch.value)
 
@@ -332,8 +296,6 @@ async def test_update_roadmap_metadata_remove_param_evicts_through_transport(roa
 
 
 async def test_update_roadmap_metadata_remove_bad_shape_surfaces_error(roadmap_mcp_client, db_session):
-    """0006: a malformed remove ref surfaces a ValidationError (isError) through
-    the transport rather than a DB 500 — no unvalidated agent input to the DB."""
     new_client, switch = roadmap_mcp_client
     seed = await _seed_active_product(db_session, switch.value)
 
@@ -349,10 +311,7 @@ async def test_update_roadmap_metadata_remove_bad_shape_surfaces_error(roadmap_m
 
 
 async def test_get_roadmap_no_active_product_surfaces_error(roadmap_mcp_client, db_session):
-    """get_roadmap with no active product surfaces a ResourceNotFoundError
-    (→ isError) rather than an empty 200 — proves tenant context propagates."""
     new_client, _switch = roadmap_mcp_client
-    # Deliberately seed NOTHING for this fresh tenant (no active product).
     async with new_client() as session:
         result = await session.call_tool("get_roadmap", {})
 

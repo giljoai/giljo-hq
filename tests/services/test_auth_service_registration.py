@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tests for AuthService - User registration and first admin creation.
-
-Split from test_auth_service.py. Contains:
-- TestRegisterUser: User registration (admin + first admin flows)
-- TestCreateFirstAdmin: First admin account creation
-
-Handover 0731c: Updated for typed service returns (AuthResult, UserInfo).
-"""
 
 import bcrypt
 import pytest
@@ -22,15 +13,12 @@ from giljo_mcp.models.auth import User
 from giljo_mcp.schemas.service_responses import UserInfo
 
 
-# Test Cases
 
 
 class TestRegisterUser:
-    """Tests for register_user method - returns UserInfo"""
 
     @pytest.mark.asyncio
     async def test_register_user_success(self, auth_service, auth_user_with_password, db_session):
-        """Test registering new user returns UserInfo"""
         admin_user, _ = auth_user_with_password
 
         result = await auth_service.register_user(
@@ -41,14 +29,12 @@ class TestRegisterUser:
             requesting_admin_id=admin_user.id,
         )
 
-        # Typed return: UserInfo with attribute access
         assert isinstance(result, UserInfo)
         assert result.username == "newuser"
         assert result.email == "new@example.com"
         assert result.role == "developer"
-        assert result.tenant_key is not None  # Auto-generated per-user tenant
+        assert result.tenant_key is not None
 
-        # Verify password was hashed
         stmt = select(User).where(User.username == "newuser")
         result_db = await db_session.execute(stmt)
         new_user = result_db.scalar_one()
@@ -57,7 +43,6 @@ class TestRegisterUser:
 
     @pytest.mark.asyncio
     async def test_register_user_persists_registration_ip(self, auth_service, auth_user_with_password, db_session):
-        """BE-6109: a supplied registration_ip is persisted on the new user row."""
         admin_user, _ = auth_user_with_password
 
         await auth_service.register_user(
@@ -75,7 +60,6 @@ class TestRegisterUser:
 
     @pytest.mark.asyncio
     async def test_register_user_registration_ip_nullable(self, auth_service, auth_user_with_password, db_session):
-        """BE-6109: registration_ip defaults to NULL when not supplied (legacy-tolerant)."""
         admin_user, _ = auth_user_with_password
 
         await auth_service.register_user(
@@ -92,12 +76,11 @@ class TestRegisterUser:
 
     @pytest.mark.asyncio
     async def test_register_user_duplicate_username(self, auth_service, auth_user_with_password):
-        """Test registering user with existing username raises ValidationError"""
         admin_user, _ = auth_user_with_password
 
         with pytest.raises(ValidationError) as exc_info:
             await auth_service.register_user(
-                username=admin_user.username,  # Duplicate
+                username=admin_user.username,
                 email="different@example.com",
                 password="Password123!",
                 role="developer",
@@ -108,11 +91,9 @@ class TestRegisterUser:
 
 
 class TestCreateFirstAdmin:
-    """Tests for create_first_admin method - returns AuthResult"""
 
     @pytest.mark.asyncio
     async def test_create_first_admin_fails_when_users_exist(self, auth_service, auth_user_with_password):
-        """Test creating first admin fails when users already exist"""
 
         with pytest.raises(ValidationError) as exc_info:
             await auth_service.create_first_admin(

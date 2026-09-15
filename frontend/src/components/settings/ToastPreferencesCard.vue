@@ -1,23 +1,3 @@
-<!--
-  ToastPreferencesCard.vue — FE-9553
-
-  The toast card: position and duration, UNCHANGED. The record says "EXISTS,
-  keep" and this is a move, not a redesign — same two controls, same six
-  positions, same 2-10 second range, same batched Reset/Save. The data-test
-  hooks are kept verbatim so the specs that already cover them keep covering
-  them.
-
-  Extracted from ToolsView.vue because that file is at the 800-line guardrail
-  and the four-card restructure cannot fit inside it. The batched Save stays
-  batched here, deliberately unlike the save-on-change used by the preference
-  cards: these two write to localStorage rather than the server, they are read
-  together by one consumer, and there was never a reason to change what already
-  worked.
-
-  What the toast is FOR, since the card no longer sits alone under a header
-  that explained it: feedback for the user's own action, past tense, gone in
-  seconds. Since FE-9553 nothing an agent does can raise one.
--->
 <template>
   <v-card variant="flat" class="smooth-border settings-card" data-test="notification-settings">
     <v-card-text>
@@ -85,9 +65,6 @@ function reset() {
 }
 
 async function save() {
-  // Sends only the notifications slice: updateSettings merges, and passing the
-  // whole settings object back would hand the store its own state to
-  // re-normalize for no reason.
   await settings.updateSettings({ notifications: { ...local } })
 }
 </script>

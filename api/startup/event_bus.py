@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Event bus initialization module
-
-Handles EventBus and WebSocketEventListener setup with verbose logging for debugging.
-Extracted from api/app.py lifespan function (lines ~295-332).
-Preserves Handover 0111 verbose logging for debugging.
-"""
 
 import logging
 
@@ -19,15 +13,6 @@ logger = logging.getLogger(__name__)
 
 
 async def init_event_bus(state: APIState) -> None:
-    """Initialize event bus and WebSocket listener
-
-    Args:
-        state: APIState instance to populate with event_bus
-
-    Raises:
-        Exception: If event bus initialization or listener registration fails
-    """
-    # Initialize event bus and WebSocket listener (Handover 0111 Issue #1)
     logger.info("=" * 70)
     logger.info("STARTING EVENT BUS INITIALIZATION")
     logger.info("=" * 70)
@@ -48,7 +33,6 @@ async def init_event_bus(state: APIState) -> None:
         logger.info(f"Step 3: EventBus type: {type(state.event_bus)}")
         logger.info("Event bus initialized successfully")
 
-        # Register WebSocket event listener
         logger.info("Step 4: Creating WebSocketEventListener instance...")
         ws_listener = WebSocketEventListener(state.event_bus, state.websocket_manager)
         logger.info(f"Step 4: WebSocketEventListener created: {ws_listener}")
@@ -60,7 +44,7 @@ async def init_event_bus(state: APIState) -> None:
         logger.info("=" * 70)
         logger.info("EVENT BUS INITIALIZATION COMPLETE")
         logger.info("=" * 70)
-    except Exception as e:  # Broad catch: startup resilience, non-fatal initialization
+    except Exception as e:
         logger.exception("=" * 70)
         logger.exception("FAILED TO INITIALIZE EVENT BUS")
         logger.exception("=" * 70)

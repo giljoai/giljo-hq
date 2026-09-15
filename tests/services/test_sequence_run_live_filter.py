@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6200 (Unit E) — direct unit tests for filter_runs_with_live_members.
-
-The list_active integration is covered in test_be6200_list_active_live_members;
-this exercises the pure filter in isolation (terminality keyed on real Project
-rows, NOT run.project_statuses). Run objects are lightweight stand-ins — the
-filter only reads .resolved_order / .project_ids / .id.
-
-Parallel-safe: db_session (TransactionalTestContext); each test owns its setup.
-"""
 
 from __future__ import annotations
 
@@ -33,8 +24,6 @@ pytestmark = pytest.mark.asyncio
 
 
 async def _project(session: AsyncSession, tenant: str, pid: str, *, status: str, deleted_at=None) -> None:
-    # BE-9437: a project belongs to a product. Its own, so an active seed cannot
-    # collide under idx_project_single_active_per_product.
     _product_id = str(uuid.uuid4())
     session.add(
         Product(
@@ -71,7 +60,6 @@ async def test_keeps_run_with_a_live_member_drops_all_terminal(db_session: Async
     live, done, gone = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
     await _project(db_session, tenant, live, status="active")
     await _project(db_session, tenant, done, status="completed")
-    # `gone` never inserted -> missing == terminal.
 
     kept = _run([live, done])
     dropped_terminal = _run([done])

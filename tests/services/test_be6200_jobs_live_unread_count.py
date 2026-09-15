@@ -3,30 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6200 (#3) — list_jobs "Messages Waiting" must EXCLUDE completion_reports.
-
-The bug: JobQueryService.list_jobs surfaced the denormalized
-``AgentExecution.messages_waiting_count`` column, which is incremented for the
-auto-sent ``completion_report`` notifications agents fire on completion. A
-completed sub-orchestrator whose ONLY waiting messages were completion_reports
-therefore showed a phantom "N msgs" badge in the /jobs view (and, via
-ProjectTabs orchMessagesWaiting, mis-timed the solo orch-unlocked banner
-auto-clear).
-
-Fix (failing layer = JobQueryService.list_jobs): read the LIVE pending count
-(``get_live_unread_counts_by_project_agent``), which excludes completion_report
-system notifications — the SAME "counts as unread work" definition the closeout
-gate and receive_messages use.
-
-SOLO IMPACT (validated here, not assumed inert): ProjectTabs derives
-orchMessagesWaiting from this count; a completion_report-only orchestrator must
-return 0 so the solo orch-unlocked banner auto-clears correctly — that timing
-shift is the INTENDED behavior (completion_reports must not count as unread
-anywhere).
-
-DB-touching: db_session (TransactionalTestContext). No module-level mutable
-state. Parallel-safe (pytest-xdist -n auto). Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -56,8 +32,6 @@ def _jobs_svc(session: AsyncSession) -> JobQueryService:
 async def _seed_project_with_two_agents(
     session: AsyncSession, tenant_key: str, *, orchestrator_status: str = "complete"
 ) -> tuple[str, AgentExecution, AgentExecution]:
-    # BE-9437: a project belongs to a product. Its own, so an active
-    # seed cannot collide under idx_project_single_active_per_product.
     _owning_product_proj = Product(
         id=str(uuid.uuid4()),
         tenant_key=tenant_key,
@@ -142,12 +116,9 @@ def _waiting_for(jobs: list[dict], agent_id: str) -> int:
 
 
 async def test_list_jobs_excludes_completion_reports_from_waiting_count(db_session: AsyncSession) -> None:
-    """A completion_report-only orchestrator returns 0 (the SOLO regression assertion)."""
     tenant = TenantManager.generate_tenant_key()
     pid, orchestrator, analyzer = await _seed_project_with_two_agents(db_session, tenant)
 
-    # 3 completion_reports addressed to the orchestrator, and the denormalized column
-    # deliberately drifted to a wrong, inflated value (what the OLD code surfaced).
     await _send(db_session, tenant, pid, analyzer, orchestrator, 3, message_type="completion_report")
     orchestrator.messages_waiting_count = 99
     await db_session.flush()
@@ -160,15 +131,6 @@ async def test_list_jobs_excludes_completion_reports_from_waiting_count(db_sessi
 
 
 async def test_list_jobs_counts_real_directives_not_completion_reports(db_session: AsyncSession) -> None:
-    """Real directives still count; completion_reports mixed in are excluded.
-
-    BE-9491: the orchestrator here is seeded LIVE ('blocked'), not 'complete' --
-    this test's concern is message TYPE filtering (directive vs completion_report),
-    which is orthogonal to recipient liveness. A 'complete' recipient's real
-    directives are now EXCLUDED too (see
-    test_terminal_orchestrator_real_broadcast_now_shows_zero_unread below) --
-    that is the intended BE-9491 fix, not a regression of this test.
-    """
     tenant = TenantManager.generate_tenant_key()
     pid, orchestrator, analyzer = await _seed_project_with_two_agents(db_session, tenant, orchestrator_status="blocked")
 
@@ -184,12 +146,8 @@ async def test_list_jobs_counts_real_directives_not_completion_reports(db_sessio
 
 
 async def test_terminal_orchestrator_real_broadcast_now_shows_zero_unread(db_session: AsyncSession) -> None:
-    """BE-9491: a COMPLETE orchestrator's genuinely-unread broadcast (not a
-    completion_report -- this is the exact 3,503-shape bug) must now show 0,
-    WITHOUT deleting or touching the seeded ``message_recipients`` row
-    (forward-only, no backfill, no migration)."""
     tenant = TenantManager.generate_tenant_key()
-    pid, orchestrator, analyzer = await _seed_project_with_two_agents(db_session, tenant)  # orchestrator: 'complete'
+    pid, orchestrator, analyzer = await _seed_project_with_two_agents(db_session, tenant)
 
     await _send(db_session, tenant, pid, analyzer, orchestrator, 1, message_type="broadcast")
     await db_session.flush()
@@ -199,7 +157,7 @@ async def test_terminal_orchestrator_real_broadcast_now_shows_zero_unread(db_ses
             select(func.count(MessageRecipient.id)).where(MessageRecipient.agent_id == orchestrator.agent_id)
         )
     ).scalar_one()
-    assert row_count_before == 1  # the phantom row exists, exactly like the 3,503
+    assert row_count_before == 1
 
     result = await _jobs_svc(db_session).list_jobs(tenant_key=tenant, project_id=pid)
     assert _waiting_for(result.jobs, orchestrator.agent_id) == 0, (
@@ -215,11 +173,6 @@ async def test_terminal_orchestrator_real_broadcast_now_shows_zero_unread(db_ses
 
 
 async def test_human_user_recipient_unread_count_unaffected_by_terminal_clause(db_session: AsyncSession) -> None:
-    """Two-EXISTS regression guard (Risk #1 in the BE-9491 project description):
-    ``MessageRecipient.agent_id`` also holds a directed post's HUMAN user_id. A
-    naive single-EXISTS liveness clause would be vacuously "terminal" for a
-    human (zero AgentExecution rows) and silently zero the operator's own
-    unread badge -- this must never happen."""
     tenant = TenantManager.generate_tenant_key()
     pid, orchestrator, _analyzer = await _seed_project_with_two_agents(db_session, tenant)
     user = User(id=str(uuid.uuid4()), tenant_key=tenant, username=f"operator_{uuid.uuid4().hex[:6]}")

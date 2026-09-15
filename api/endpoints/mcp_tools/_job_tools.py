@@ -3,13 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Job Lifecycle & Orchestration Tools -- @mcp.tool wrappers (BE-6042d split of mcp_sdk_server.py).
-
-Mechanically extracted verbatim from the pre-split ``mcp_sdk_server.py``. Each
-wrapper registers against the shared ``mcp`` instance from ``_base`` as a decorator
-side effect at import time. Behavior, signatures, names, and descriptions unchanged.
-"""
 
 from typing import Annotated, Any, Literal
 
@@ -40,9 +33,7 @@ from giljo_mcp.exceptions import ValidationError
         "requirements), prioritized context fields, and agent_templates for discovering "
         "specialists. Orchestrator-only; analyzes this INPUT, does NOT execute work."
     ),
-    meta=MCP_HEAVY_TOOL_META,  # BE-9083c: raise Claude Code's inline-truncation ceiling
-    # BE-9251: the BE-5122 CTX self-close path writes project.status=COMPLETED
-    # (terminal) -- see TOOL_SCOPES's get_staging_instructions comment + _tool_hints docstring.
+    meta=MCP_HEAVY_TOOL_META,
     annotations=_tool_hints("get_staging_instructions", destructive=True),
 )
 async def get_staging_instructions(
@@ -51,10 +42,6 @@ async def get_staging_instructions(
     ctx: Context = None,
 ) -> dict[str, Any]:
     preset_name = _resolve_preset_name(harness, ctx)
-    # BE-9035b: resolve the DETECTED harness from the session clientInfo and thread it
-    # alongside the preset. The orchestrator-protocol builder applies the
-    # DETECTED-beats-declared render precedence (effective_harness). "generic" (no
-    # clientInfo / no session) leaves the declared render key untouched → byte-identical.
     detected_harness = _detected_harness(ctx)
     return await _call_tool(
         ctx,
@@ -123,10 +110,6 @@ async def report_progress(
     if todo_append is not None:
         kwargs["todo_append"] = todo_append
     result = await _call_tool(ctx, "report_progress", kwargs)
-    # CE-0033 Task 10: drop `warnings` when empty so the field shape signals
-    # presence-means-something. The field IS sometimes populated (e.g.,
-    # missing-todo_items reactive warning, throttled to once per 5 min per
-    # job) — we keep emitting it when non-empty.
     if isinstance(result, dict) and not result.get("warnings"):
         result.pop("warnings", None)
     return result
@@ -140,7 +123,6 @@ async def report_progress(
         "bypass. See get_giljo_guide for the three-phase completion contract "
         "(staging_end / closeout / deliverable)."
     ),
-    # BE-9251: terminal job-lifecycle transition -- see _tool_hints docstring.
     annotations=_tool_hints("complete_job", destructive=True),
 )
 async def complete_job(
@@ -197,7 +179,6 @@ async def complete_job(
         "report_progress(job_id, todo_items=[...], replace=true) and drain its "
         "action-required messages, then retry."
     ),
-    # BE-9251: terminal job-lifecycle transition -- see _tool_hints docstring.
     annotations=_tool_hints("finalize_job", destructive=True),
 )
 async def finalize_job(
@@ -227,9 +208,6 @@ async def resume_or_dismiss_job(
     reason: Annotated[str, Field(max_length=MCP_SHORT_TEXT_MAX)] = "",
     ctx: Context = None,
 ) -> dict[str, Any]:
-    # BE-9012b (BE-6225e): the two reactivation exits are merged into ONE tool surface.
-    # The two service methods (reactivate_job / dismiss_reactivation) are kept — the
-    # internal caller (project_helpers) still uses them — and are dispatched by action.
     kwargs: dict[str, Any] = {"job_id": job_id}
     if reason:
         kwargs["reason"] = reason
@@ -296,12 +274,14 @@ _PLACEHOLDER_JOB_IDS = {"unknown", "none", "null", "", "undefined", "placeholder
     title="Get Job Mission",
     description=(
         "Fetch agent-specific mission and context. Call immediately after receiving the thin "
-        "prompt from spawn_job -- your first action. Idempotent. Pass protocol_etag from a prior "
+        "prompt from spawn_job -- your first action. The response carries your full agent_profile "
+        "(role, instructions, model and effort hints) -- act from it; do not look for installed "
+        "agent files. Idempotent. Pass protocol_etag from a prior "
         "fetch to skip the unchanged identity+protocol block (response sets protocol_unchanged=true). "
         "Truncation recovery: pass section=<name from protocol_toc> to refetch ONE small section "
         "of full_protocol."
     ),
-    meta=MCP_HEAVY_TOOL_META,  # BE-9083c: raise Claude Code's inline-truncation ceiling
+    meta=MCP_HEAVY_TOOL_META,
     annotations=_tool_hints("get_job_mission"),
 )
 async def get_job_mission(
@@ -341,13 +321,6 @@ async def get_job_mission(
             "role instructions — just skip the GiljoAI protocol steps."
         )
     preset_name = _resolve_preset_name(harness, ctx)
-    # BE-9079: resolve the DETECTED harness from the session clientInfo and thread it
-    # alongside the preset (mirrors get_staging_instructions above). The worker/orchestrator
-    # protocol builder applies the DETECTED-beats-declared render precedence
-    # (effective_harness) so an orchestrator refetching its mission from a detected
-    # claude-code/codex session renders native spawn prose. "generic"/None → byte-identical.
-    # NOTE: get_agent_mission (the _call_tool dispatch target) MUST accept detected_harness
-    # or _call_tool's tool_func(**kwargs) spread raises TypeError — widened in mission_service.
     detected_harness = _detected_harness(ctx)
     return await _call_tool(
         ctx,
@@ -411,7 +384,7 @@ async def spawn_job(
                 "Optional ordering metadata. Same phase = parallel siblings; "
                 "higher phase = depends on lower phases completing. "
                 "In multi_terminal execution mode the dashboard groups Play buttons by phase. "
-                "In subagent modes (Claude/Codex/Gemini CLI) the orchestrator manages ordering "
+                "In subagent modes the orchestrator manages ordering "
                 "via Task() / spawn_agent() / @-syntax invocation order; phase is informational. "
                 "Must be an integer."
             )

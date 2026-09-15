@@ -3,40 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Collapse vision_documents.storage_type to 'inline' only (BE-5115).
-
-Revision ID: ce_0032_vision_docs_inline_only
-Revises: ce_0031_user_split_name
-Create Date: 2026-05-27
-
-Eliminates the file-based vision-document storage path that broke every
-Railway redeploy (ephemeral disk wipe between releases). The DB column
-``vision_document`` has been populated unconditionally since Handover 0246b
-(see ``vision_document_repository.py:107``); the on-disk file has been
-pure redundancy. This migration is dead-code cleanup, not a data move.
-
-Schema changes:
-- Backfill any existing 'file' / 'hybrid' rows to 'inline'. ``vision_path``
-  is cleared. Any row with NULL ``vision_document`` (expected zero rows
-  given the unconditional populate at repo:107) is set to '' so the new
-  CHECK does not reject the row.
-- Drop the legacy ``ck_vision_doc_storage_consistency`` constraint
-  (which allowed 'file', 'inline', or 'hybrid' shapes).
-- Add ``ck_vision_doc_inline_only`` enforcing the single inline shape:
-  storage_type='inline' AND vision_document IS NOT NULL AND vision_path IS NULL.
-- Replace the storage_type enum CHECK so only 'inline' is accepted going
-  forward.
-
-Idempotency: every DDL operation existence-checks before mutating.
-The CE installer reruns migrations on every boot.
-
-Downgrade: NOT A FULL ROLLBACK -- schema only; any disk files lost during
-inline adoption are permanent. Restores the legacy CHECK constraints but
-does not (and cannot) repopulate ``vision_path`` from a vanished disk.
-
-Edition Scope: Both -- the ``vision_documents`` table is a CE model
-shared by SaaS via the CE chain.
-"""
 
 import logging
 
@@ -74,10 +40,6 @@ def _has_check_constraint(conn, table: str, constraint: str) -> bool:
 def upgrade() -> None:
     conn = op.get_bind()
 
-    # Defensive backfill: any row where storage_type required vision_document
-    # but it is NULL would be rejected by the new CHECK. Repo:107 has populated
-    # vision_document on every insert since Handover 0246b, so this should
-    # match zero rows -- we emit a WARNING per row caught.
     orphan_rows = conn.execute(
         sa.text("SELECT id FROM vision_documents WHERE storage_type IN ('file', 'hybrid') AND vision_document IS NULL")
     ).all()
@@ -96,7 +58,6 @@ def upgrade() -> None:
             )
         )
 
-    # Collapse all rows to the inline shape.
     conn.execute(
         sa.text(
             "UPDATE vision_documents "
@@ -105,22 +66,18 @@ def upgrade() -> None:
         )
     )
 
-    # Drop the legacy storage consistency CHECK (allowed file / hybrid).
     if _has_check_constraint(conn, TABLE, OLD_CONSISTENCY_CHECK):
         op.drop_constraint(OLD_CONSISTENCY_CHECK, TABLE, type_="check")
 
-    # Drop the legacy 3-value enum CHECK; we will re-add it scoped to 'inline'.
     if _has_check_constraint(conn, TABLE, OLD_STORAGE_CHECK):
         op.drop_constraint(OLD_STORAGE_CHECK, TABLE, type_="check")
 
-    # Re-add the storage_type CHECK with the single-value enum.
     op.create_check_constraint(
         OLD_STORAGE_CHECK,
         TABLE,
         "storage_type = 'inline'",
     )
 
-    # Add the new inline-only consistency CHECK.
     if not _has_check_constraint(conn, TABLE, NEW_INLINE_CHECK):
         op.create_check_constraint(
             NEW_INLINE_CHECK,
@@ -130,12 +87,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Restore the legacy storage CHECK constraints.
-
-    NOT A FULL ROLLBACK -- schema only; any disk files lost during inline
-    adoption are permanent. Existing rows remain inline because there is no
-    surviving disk path to point them back at.
-    """
     conn = op.get_bind()
 
     if _has_check_constraint(conn, TABLE, NEW_INLINE_CHECK):

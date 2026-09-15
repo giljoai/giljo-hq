@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6054c — thread loop/sleep coordination regression at the failing layer.
-
-The mechanism: a user arms a loop on a comm thread (post_to_thread
-loop_directive=True). An addressed agent then gets the "loop/sleep until this
-thread is resolved/closed" directive composed into its NEXT get_agent_mission.
-The loop provably TERMINATES because the directive disappears once the thread
-reaches a terminal status.
-
-Covered here:
-- has_active_loop_directive: True when armed on a non-terminal thread, False
-  when the thread is closed, False when nothing is armed (the termination proof
-  at the service/query layer).
-- mission composition: the directive text appears in full_protocol when armed +
-  non-terminal, and is ABSENT when not armed and after the thread is closed.
-
-Real DB (rollback-isolated db_session). Reuses BE-6008's spawn/seed helpers.
-"""
 
 from __future__ import annotations
 
@@ -32,7 +15,6 @@ from giljo_mcp.services.mission_service import MissionService
 from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded
 from giljo_mcp.tenant import TenantManager
 
-# Reuse the proven spawn/seed machinery from the BE-6008 mission tests.
 from tests.unit.test_be6008_staged_agent_mailboxes import (
     _get_execution,
     _seed_project,
@@ -57,7 +39,6 @@ async def _seed_cht(db_session, tenant_key: str) -> None:
 
 
 async def _spawn_agent(db_session: AsyncSession, tenant_key: str) -> tuple[str, str]:
-    """Spawn a multi_terminal specialist; return (job_id, agent_id)."""
     project_id = await _seed_project(
         db_session, tenant_key, execution_mode="multi_terminal", implementation_launched=True
     )
@@ -88,9 +69,6 @@ async def _fetch_protocol(db_session: AsyncSession, tenant_key: str, job_id: str
     return response.full_protocol or ""
 
 
-# ---------------------------------------------------------------------------
-# Query layer: the termination proof
-# ---------------------------------------------------------------------------
 
 
 async def test_has_active_loop_directive_true_when_armed(db_session):
@@ -125,7 +103,6 @@ async def test_has_active_loop_directive_false_after_thread_closed(db_session):
     )
     assert await comm.has_active_loop_directive(agent_id="agent-x", tenant_key=tenant) is True
 
-    # Close the thread -> the loop must terminate (directive goes silent).
     await comm.post_to_thread(
         thread_id=thread["thread_id"],
         content="done",
@@ -141,7 +118,6 @@ async def test_has_active_loop_directive_false_when_not_armed(db_session):
     await _seed_cht(db_session, tenant)
     comm = _comm(db_session)
     thread = await comm.create_thread(subject="quiet", creator_id="agent-x", tenant_key=tenant)
-    # A normal (non-loop) post must NOT arm the directive.
     await comm.post_to_thread(
         thread_id=thread["thread_id"],
         content="hi",
@@ -152,9 +128,6 @@ async def test_has_active_loop_directive_false_when_not_armed(db_session):
     assert await comm.has_active_loop_directive(agent_id="agent-x", tenant_key=tenant) is False
 
 
-# ---------------------------------------------------------------------------
-# Mission composition: directive injected ONLY when armed + non-terminal
-# ---------------------------------------------------------------------------
 
 
 async def test_directive_injected_into_mission_when_armed(db_session):
@@ -198,7 +171,6 @@ async def test_directive_absent_after_thread_closed(db_session):
     )
     assert _DIRECTIVE_MARKER in await _fetch_protocol(db_session, tenant, job_id)
 
-    # Close the thread -> the directive must disappear from the next mission.
     await comm.post_to_thread(
         thread_id=thread["thread_id"],
         content="resolved",

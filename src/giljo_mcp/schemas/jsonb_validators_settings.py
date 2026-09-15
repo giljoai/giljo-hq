@@ -3,29 +3,12 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Pydantic validation models for ``Settings.settings_data`` category schemas.
-
-Extracted from ``jsonb_validators.py`` (BE-9040 cleanup) to keep that module
-under the 800-line file-size guardrail. These models are a cohesive unit: each
-category-specific schema (``integrations``, ``security``) is
-registered in ``SETTINGS_CATEGORY_VALIDATORS`` and validated at the
-``SettingsService.update_settings`` write boundary via
-``validate_settings_by_category``. Categories without a dedicated schema
-(``general``, ``network``, ``database``) fall back to the generic
-``SettingsData`` wrapper.
-
-The names defined here are re-exported from ``jsonb_validators`` for backward
-compatibility, so existing imports keep working unchanged.
-"""
 
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-# --- Settings.settings_data ---
-# This is a per-category dict — categories are dynamic (general, network, database, etc.)
-# We validate the wrapper structure, not internal category schemas
 
 
 class SettingsData(BaseModel):
@@ -34,7 +17,6 @@ class SettingsData(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-# --- Settings category-specific validators (config.yaml -> DB migration) ---
 
 
 class GitIntegrationSettings(BaseModel):
@@ -83,27 +65,13 @@ class SecuritySettingsData(BaseModel):
     """
 
     cookie_domain_whitelist: list[str] = Field(default_factory=list)
-    # Headless vs human-gated toggle. This model field's own default is NOT the
-    # effective tenant default: that is resolved at the single read site in
-    # SettingsService, not by this field. Read at the MCP launch gate.
-    # Account/tenant-scoped (ADR-009).
     allow_headless_launch: bool = False
-    # Marks whether this category's headless setting was set deliberately rather
-    # than persisted incidentally by a full-model write. Does not affect how the
-    # value above is read.
     allow_headless_launch_explicit: bool = False
 
 
-# BE-9148: the ``runtime`` category (AgentRuntimeSettings/SessionRuntimeSettings/
-# RuntimeSettingsData) was retired — it was seeded at boot and validated but had
-# zero backend readers, no REST endpoint, and no frontend. A legacy ``runtime``
-# settings row on an existing install is tolerated (never read; not enumerated by
-# any category-listing path) and simply persists unused.
 
 
-# --- Category-specific settings validators ---
 
-# Map of category name -> validator model for SettingsService to use at write boundary
 SETTINGS_CATEGORY_VALIDATORS: dict[str, type[BaseModel]] = {
     "integrations": IntegrationsSettingsData,
     "security": SecuritySettingsData,
@@ -111,21 +79,6 @@ SETTINGS_CATEGORY_VALIDATORS: dict[str, type[BaseModel]] = {
 
 
 def validate_settings_by_category(category: str, data: dict) -> dict:
-    """Validate settings_data dict against category-specific Pydantic model.
-
-    For categories without a specific validator (general, network, database),
-    returns data as-is (validated by the generic SettingsData model).
-
-    Args:
-        category: Settings category name
-        data: Raw settings data dict
-
-    Returns:
-        Validated and normalized dict
-
-    Raises:
-        pydantic.ValidationError: if data fails schema validation
-    """
     validator_cls = SETTINGS_CATEGORY_VALIDATORS.get(category)
     if validator_cls is None:
         return SettingsData(**data).model_dump(exclude_none=False)

@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Migration status checker for startup validation.
-
-Read-only check: compares the current database revision against the Alembic
-head revision. Does NOT run any migrations. If they differ, the caller should
-surface a warning and prompt the user to run update.py.
-"""
 
 import logging
 import os
@@ -19,31 +13,6 @@ logger = logging.getLogger(__name__)
 
 
 async def check_pending_migrations(state) -> bool:
-    """Check whether the database has unapplied Alembic migrations.
-
-    Uses a synchronous SQLAlchemy engine for the one-time MigrationContext
-    check because Alembic's runtime migration API does not support async
-    connections.
-
-    Handles both single-chain (CE) and multi-chain (SaaS) Alembic setups by
-    using the plural ``get_heads()`` / ``get_current_heads()`` APIs and
-    comparing as sets. The SaaS chain is included dynamically when
-    ``GILJO_MODE == "saas"`` and ``migrations/saas_versions/`` exists, matching
-    the logic in ``migrations/env.py``.
-
-    Args:
-        state: APIState instance. Must have db_manager initialised with a
-               valid database_url before this function is called.
-
-    Returns:
-        True if the database is missing any head revisions, False if all
-        heads are present in ``alembic_version`` or if the check cannot be
-        performed (e.g. alembic.ini is missing).
-
-    Raises:
-        Does not raise — all exceptions are caught and logged so that a
-        check failure never blocks startup.
-    """
     try:
         from alembic.config import Config
         from alembic.runtime.migration import MigrationContext
@@ -64,16 +33,10 @@ async def check_pending_migrations(state) -> bool:
 
     try:
         alembic_cfg = Config(str(alembic_ini))
-        # Mirror migrations/env.py: when running in SaaS/Demo mode, also include
-        # the SaaS migration chain so multi-head deployments are recognised here
-        # (the bare alembic CLI only sees alembic.ini's static version_locations,
-        # which is the CE chain only).
         giljo_mode = os.environ.get("GILJO_MODE", "ce").lower()
         migrations_dir = Path.cwd() / "migrations"
         version_locations = [str(migrations_dir / "versions")]
         saas_versions_dir = migrations_dir / "saas_versions"
-        # BE-3002a: gate on the explicit SaaS value, never `!= "ce"` (banned
-        # CE-guard pattern); mirrors migrations/env.py.
         if saas_versions_dir.is_dir() and giljo_mode == "saas":
             version_locations.append(str(saas_versions_dir))
         alembic_cfg.set_main_option("version_locations", os.pathsep.join(version_locations))
@@ -88,9 +51,6 @@ async def check_pending_migrations(state) -> bool:
         logger.warning("Alembic script directory has no heads — skipping migration check")
         return False
 
-    # The async engine uses the asyncpg driver. Alembic's MigrationContext
-    # requires a synchronous connection, so we derive a sync URL from the
-    # stored database_url (which already contains the psycopg2 sync driver).
     try:
         raw_url = state.db_manager.database_url
         if not raw_url:
@@ -123,13 +83,6 @@ async def check_pending_migrations(state) -> bool:
 
 
 def get_pending_migration_info(state) -> dict | None:
-    """Return ``{"pending": int, "head": str}`` when migrations are pending, else None.
-
-    Synchronous (mirrors ``check_pending_migrations``' use of a sync engine for
-    the MigrationContext check). Used by the system-banner emitter to populate
-    the ``system.pending_migrations`` notification payload. Never raises — a
-    check failure returns None so banner emission degrades to "no banner".
-    """
     try:
         from alembic.config import Config
         from alembic.runtime.migration import MigrationContext
@@ -148,8 +101,6 @@ def get_pending_migration_info(state) -> dict | None:
         migrations_dir = Path.cwd() / "migrations"
         version_locations = [str(migrations_dir / "versions")]
         saas_versions_dir = migrations_dir / "saas_versions"
-        # BE-3002a: gate on the explicit SaaS value, never `!= "ce"` (banned
-        # CE-guard pattern); mirrors migrations/env.py.
         if saas_versions_dir.is_dir() and giljo_mode == "saas":
             version_locations.append(str(saas_versions_dir))
         alembic_cfg.set_main_option("version_locations", os.pathsep.join(version_locations))

@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Migration regression for ce_0043_projects_execution_mode_nullable.
-
-Verifies the execution-mode NULL-state migration against a real scratch
-PostgreSQL DB:
-
-1. Before ce_0043 (at ce_0042): ``projects.execution_mode`` is NOT NULL with a
-   server default of ``'multi_terminal'``.
-2. After ce_0043: the column is NULLABLE with NO server default, and a project
-   inserted WITHOUT an execution_mode lands a real NULL (the "not yet selected"
-   state) instead of a fabricated 'multi_terminal'.
-3. Downgrade to ce_0042: any NULL row is backfilled to 'multi_terminal' BEFORE
-   the NOT NULL constraint is re-imposed, and the server default is restored.
-4. Re-upgrade is idempotent (column nullable + default-less again).
-
-This is the failing-layer regression for the NULL-state redesign at the schema
-layer (CLAUDE.md mandate). Mirrors tests/integration/migrations/
-test_ce_0033_vision_analysis_complete.py.
-"""
 
 from __future__ import annotations
 
@@ -149,7 +131,6 @@ def empty_scratch_db(scratch_engine: sa.Engine):
 
 
 def _column_meta(engine: sa.Engine) -> tuple[str, str | None]:
-    """Return (is_nullable, column_default) for projects.execution_mode."""
     with engine.connect() as conn:
         row = conn.execute(
             text(
@@ -162,9 +143,6 @@ def _column_meta(engine: sa.Engine) -> tuple[str, str | None]:
 
 
 def _insert_project(engine: sa.Engine, *, pid: str, execution_mode: str | None, set_mode: bool) -> None:
-    """Insert a minimal project (plus its required parent product). When set_mode
-    is False, execution_mode is omitted entirely so the column default
-    (post-ce_0043: none -> NULL) decides what lands."""
     product_id = pid + "-prod"
     cols = ["id", "tenant_key", "product_id", "name", "alias", "description", "mission"]
     placeholders = [":id", ":tenant_key", ":product_id", ":name", ":alias", ":description", ":mission"]
@@ -173,8 +151,6 @@ def _insert_project(engine: sa.Engine, *, pid: str, execution_mode: str | None, 
         "tenant_key": "tk_" + pid,
         "product_id": product_id,
         "name": "ce0043 " + pid,
-        # alias is varchar(6); each test inserts ONE project into its own reset
-        # scratch DB, so a constant short alias is collision-free.
         "alias": "proj01",
         "description": "x",
         "mission": "x",
@@ -208,12 +184,6 @@ def _mode_value(engine: sa.Engine, pid: str) -> str | None:
 @pytest.mark.integration
 class TestCe0043ExecutionModeNullable:
     def test_fresh_chain_head_is_nullable_no_default(self, empty_scratch_db: sa.Engine) -> None:
-        """A fresh chain (baseline parity) lands at nullable + no default, and a
-        default-less insert produces a real NULL (the 'not yet selected' state).
-
-        Note: the baseline already creates the column nullable (baseline parity
-        with ce_0043), so on a fresh chain ce_0043 is an idempotent no-op — that
-        no-op is itself part of the contract under test (it must not error)."""
         up = _run_alembic("upgrade", _TARGET)
         assert up.returncode == 0, f"upgrade {_TARGET} failed:\n{up.stdout}\n{up.stderr}"
 
@@ -221,22 +191,12 @@ class TestCe0043ExecutionModeNullable:
         assert is_nullable == "YES", "post-ce_0043 execution_mode must be NULLABLE"
         assert default is None, f"post-ce_0043 execution_mode must have NO default, got {default!r}"
 
-        # A project inserted without a mode lands a real NULL (not 'multi_terminal').
         _insert_project(empty_scratch_db, pid="ce0043-nomode", execution_mode=None, set_mode=False)
         assert _mode_value(empty_scratch_db, "ce0043-nomode") is None
 
     def test_downgrade_restores_not_null_and_reupgrade_alters_back(self, empty_scratch_db: sa.Engine) -> None:
-        """Exercises the REAL legacy-DB ALTER path that existing prod DBs hit.
-
-        downgrade() forces the column back to NOT NULL + default 'multi_terminal'
-        (backfilling any NULL rows first); the subsequent re-upgrade then runs the
-        genuine NOT NULL -> nullable ALTER (the path an existing prod DB created
-        from the old baseline takes), proving ce_0043's upgrade() converts a
-        legacy column, not just no-ops a fresh one."""
         assert _run_alembic("upgrade", _TARGET).returncode == 0
 
-        # A NULL-mode row (only possible post-ce_0043) must survive downgrade by
-        # being backfilled to the legacy default before NOT NULL is re-imposed.
         _insert_project(empty_scratch_db, pid="ce0043-null", execution_mode=None, set_mode=True)
         assert _mode_value(empty_scratch_db, "ce0043-null") is None
 
@@ -250,7 +210,6 @@ class TestCe0043ExecutionModeNullable:
             "downgrade must backfill NULL rows to 'multi_terminal' before re-imposing NOT NULL"
         )
 
-        # Re-upgrade now runs the genuine NOT NULL+default -> nullable ALTER.
         reup = _run_alembic("upgrade", _TARGET)
         assert reup.returncode == 0, f"re-upgrade failed:\n{reup.stdout}\n{reup.stderr}"
         is_nullable, default = _column_meta(empty_scratch_db)

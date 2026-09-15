@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Who wrote a Hub post, and making sure they are in the directory (BE-9289a).
-
-Cohesive unit extracted from ``CommThreadService.post_to_thread`` to keep that module
-within its size budget. It answers one question completely — *who is this author, and
-is the thread's participant directory aware of them?* — because the two are inseparable:
-the same three branches that decide the author's KIND also decide the name and the row.
-
-Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -24,19 +15,12 @@ from giljo_mcp.harness_resolver import GENERIC_HARNESS
 from giljo_mcp.utils.identity import validate_from_agent
 
 
-# BE-9379: an anonymous post (neither from_agent nor as_user) NEVER attributes to the
-# human principal anymore — that was the impersonation surface (an agent forgets one
-# field and its post renders as the operator, CHT-0483). It lands on the neutral
-# 'orchestrator' identity with an advisory instead. The MCP boundary refuses the
-# omission outright (FROM_AGENT_REQUIRED); this fallback exists for internal callers.
 _NO_AUTHOR_WARNING = (
     "no author declared (neither from_agent nor as_user); attributed to 'orchestrator'. "
     "An agent post must pass from_agent (its role/lane id); a post in the human user's "
     "voice must pass as_user=true (BE-9379)."
 )
 
-# BE-9292a: the label-shaped identity that made an undeliverable baton available to
-# pass in the first place.
 _LABEL_COLLISION_WARNING = (
     "from_agent '{label}' is not a registered id on this thread — '{registered}' is registered under "
     "that display name. Post and hand the baton under the registered ID: get_my_turn matches the id, "
@@ -45,24 +29,6 @@ _LABEL_COLLISION_WARNING = (
 
 
 def validate_post_author_input(from_agent: str | None, as_user: bool, max_len: int) -> str | None:
-    """(A) Author attribution (FE-6122 / BE-9037 / BE-9379), extracted from
-    ``post_to_thread`` to keep that method within its size budget. An agent
-    self-declares its identity (its role/lane id) via ``from_agent`` (WINS when
-    present); a USER post claims the human's voice EXPLICITLY via ``as_user`` —
-    an omitted ``from_agent`` no longer falls back to the authenticated principal
-    (that implicit fallback let a forgetful agent impersonate the operator,
-    CHT-0483). The value feeds the FUNCTIONAL identity field (from_agent_id:
-    recipient self-exclusion, baton/get_my_turn matching, read cursors), so it is
-    hardened here (``validate_from_agent``: type-check + length-cap + control/
-    zero-width strip + reject-empty -> clean 422). The Hub keys on the SLUG —
-    from_agent_id is never rewritten to a UUID (breaks self-exclusion/baton);
-    unknown-but-sane slugs OK.
-
-    RESIDUAL LIMITATION (not fixed here): identity is self-declared; a caller
-    can still claim any slug because the session carries only tenant_key +
-    user_id. Impersonation-proofing needs auth-bound agent identity, a separate
-    effort. This guard stops garbage/corruption, not role impersonation.
-    """
     from_agent = validate_from_agent(from_agent, max_len=max_len)
     if as_user and from_agent:
         raise ValidationError(
@@ -74,21 +40,6 @@ def validate_post_author_input(from_agent: str | None, as_user: bool, max_len: i
 
 
 def registered_id_for_label(participants, label: str | None) -> str | None:
-    """The participant_id registered under display name ``label``, if one is.
-
-    THE detection this incident class turns on, kept pure and shared: "is this string a
-    display NAME held by a DIFFERENT registered id?" A string that IS its own holder's
-    id is no collision (``participant_id != label``) — that is the ordinary case where
-    an agent's name and id are the same, and treating it as ambiguous would refuse
-    every normal hand-off.
-
-    BE-9292a-F1: the answer is needed in two places with opposite consequences. For a
-    post's AUTHOR it is advice (``comm_author_identity``) — the author reaches whoever
-    it likes and only mis-attributes itself. For a post's ADDRESSEE and BATON TARGET
-    (``comm_baton_targets``) it is a refusal, because those are the two strings that
-    decide where a message and a turn get DELIVERED, and a label there routes both to
-    an identity nobody polls under.
-    """
     if not label:
         return None
     for participant in participants:
@@ -98,21 +49,6 @@ def registered_id_for_label(participants, label: str | None) -> str | None:
 
 
 async def _label_collision_warning(repo, session, tenant_key, thread_id, from_agent) -> str | None:
-    """Warn when ``from_agent`` is a display LABEL already held by a registered id.
-
-    The shape of the 2026-07-25 incident: a conductor registered under a UUID posted
-    under its friendly label, the label was minted as a second identity beside it, and
-    the hand-off addressed to that label could never reach the UUID the conductor was
-    actually polling under. Nothing errored. This names the id that works.
-
-    IT WARNS AND DOES NOT REWRITE. Substituting the registered id for the declared slug
-    is precisely what the BE-9037 identity contract forbids — ``from_agent_id`` is the
-    functional key behind recipient self-exclusion, baton matching and read cursors,
-    and silently swapping it is how agent posts once rendered as the human operator. An
-    unknown-but-sane slug is legitimate (ad-hoc lane ids are real), so it cannot be a
-    rejection either. Only called when the author holds no row yet, so the directory
-    read costs nothing on the common path.
-    """
     registered = registered_id_for_label(
         await repo.get_participants(session, tenant_key, thread_id),
         from_agent,
@@ -122,11 +58,6 @@ async def _label_collision_warning(repo, session, tenant_key, thread_id, from_ag
 
 @dataclass(frozen=True)
 class AuthorIdentity:
-    """The server's answer for one post's author.
-
-    ``kind`` doubles as the participant_type ('agent' | 'user') — the two vocabularies
-    are deliberately the same, so a poster's row and their messages can never disagree.
-    """
 
     agent_id: str
     kind: str
@@ -147,44 +78,12 @@ async def resolve_and_register_author(
     as_user: bool = False,
     self_reported_status: str | None = None,
 ) -> AuthorIdentity:
-    """Resolve the author, then guarantee they hold a participant row on this thread.
-
-    THE KIND IS RECORDED, NOT INFERRED. These three branches are the only place the
-    server knows whether a post came from an agent or the human operator; downstream
-    readers must never re-derive it from the shape of ``from_agent_id``, which is a
-    self-declared functional key (recipient self-exclusion, baton matching, read
-    cursors). An agent posting under a UUID slug is legitimate, and guessing from that
-    shape is what once rendered agents as the human user.
-
-    USER ATTRIBUTION IS EXPLICIT (BE-9379). A post lands on the authenticated
-    principal ONLY when the caller deliberately claims the human's voice with
-    ``as_user=True`` — a present ``user_id`` alone no longer implies it, because
-    the MCP wrapper injects the principal on every call and the implicit fallback
-    is how an agent that forgot ``from_agent`` impersonated the operator.
-
-    REGISTRATION IS UNCONDITIONAL. It used to happen only inside the broadcast branch
-    and only when the thread was project-anchored, so a direct message registered
-    nobody and a standalone or chain thread registered no one at all — leaving the
-    poster with no row and the UI with nothing authoritative to resolve against.
-    ``display_name`` is never NULL here (it falls back to the slug), so the directory
-    always has something to render, and the upsert lets a later explicit ``join_thread``
-    replace it with a real name.
-
-    BE-9475: ``self_reported_status`` rides the same upsert. It is already validated
-    against the locked vocabulary at the MCP boundary before it reaches this far -- this
-    function forwards it, it does not police it.
-    """
     if from_agent:
-        # Prefer the STORED display name from the poster's own row (set at join_thread)
-        # so every reader sees the friendly role; no row, or no name, falls back to the
-        # slug — never a crash, never worse than pre-fix.
         participant = await repo.get_participant(session, tenant_key, thread_id, from_agent)
         identity = AuthorIdentity(
             agent_id=from_agent,
             kind="agent",
             display_name=(participant.display_name if participant else None) or from_agent,
-            # BE-9292a: an author with no row of its own may be a display label
-            # shadowing a registered id — say so rather than mint a silent twin.
             warning=(
                 None
                 if participant
@@ -202,7 +101,7 @@ async def resolve_and_register_author(
             agent_id=user_id,
             kind="user",
             display_name=user.display_name if user else "user",
-            warning=None,  # deliberate, not a forgotten field — nothing to advise
+            warning=None,
         )
     else:
         identity = AuthorIdentity(
@@ -220,11 +119,7 @@ async def resolve_and_register_author(
         participant_type=identity.kind,
         display_name=identity.display_name,
         harness=detected_harness or GENERIC_HARNESS,
-        touch_last_seen=True,  # posting is activity
-        # BE-9475: the author's own status report, when it made one. It lands on the SAME
-        # upsert that registers the poster, so a headless agent's first post both creates
-        # its row and says what it is doing -- there is no window where it is registered
-        # but statusless. NULL when omitted, which preserves any previous declaration.
+        touch_last_seen=True,
         self_reported_status=self_reported_status,
     )
     return identity

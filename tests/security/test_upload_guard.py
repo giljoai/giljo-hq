@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-SEC-0001 Phase 2 -- unit tests for the upload guard helper module.
-
-Covers the two pure helpers that back both upload endpoints:
-
-- ``sanitize_upload_filename(raw)`` -- strict filename sanitizer that rejects
-  directory separators, absolute paths, null bytes, C0/DEL control chars,
-  Unicode bidi/RTL overrides, leading dots, Windows-reserved chars and
-  device names, and anything whose UTF-8 byte length exceeds 255 bytes after
-  NFC normalization.
-- ``enforce_text_content(content)`` -- byte-sniff that rejects any payload
-  containing C0 binary bytes (everything in ``[0x00, 0x20)`` except ``\\t``,
-  ``\\n``, ``\\r``) within the first 8 KB, then requires a strict UTF-8
-  decode of the whole payload.
-
-These tests are the authoritative behavior spec in combination with the
-analyzer handover for SEC-0001 upload analysis, sections 2 and 3.
-Integration tests live in ``tests/api/test_sec_0001_upload_endpoints.py``.
-"""
 
 from __future__ import annotations
 
@@ -37,9 +18,6 @@ from giljo_mcp.security.upload_guard import (
 )
 
 
-# ---------------------------------------------------------------------------
-# sanitize_upload_filename -- reject cases
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -65,7 +43,7 @@ def test_sanitize_rejects_empty_or_whitespace(raw):
         "foo\\bar.txt",
         "file\x00.txt",
         "..",
-        "file..name.txt",  # contains traversal substring
+        "file..name.txt",
     ],
 )
 def test_sanitize_rejects_path_traversal_and_separators(raw):
@@ -104,10 +82,10 @@ def test_sanitize_rejects_control_chars(raw):
 @pytest.mark.parametrize(
     "raw",
     [
-        "report\u202emoofdp.txt",  # U+202E RIGHT-TO-LEFT OVERRIDE
-        "spoof\u202atxt.exe",  # U+202A LEFT-TO-RIGHT EMBEDDING
-        "\u200espoof.txt",  # U+200E LEFT-TO-RIGHT MARK
-        "\u2066bad.txt",  # U+2066 LEFT-TO-RIGHT ISOLATE
+        "report\u202emoofdp.txt",
+        "spoof\u202atxt.exe",
+        "\u200espoof.txt",
+        "\u2066bad.txt",
     ],
 )
 def test_sanitize_rejects_bidi_overrides(raw):
@@ -132,7 +110,6 @@ def test_sanitize_rejects_overlength_bytes():
 
 
 def test_sanitize_rejects_overlength_bytes_multibyte():
-    # Each CJK char is 3 bytes UTF-8; 100 chars = 300 bytes > 255
     raw = ("文" * 100) + ".txt"
     with pytest.raises(UploadFilenameError):
         sanitize_upload_filename(raw)
@@ -174,9 +151,6 @@ def test_sanitize_rejects_windows_forbidden_chars(raw):
         sanitize_upload_filename(raw)
 
 
-# ---------------------------------------------------------------------------
-# sanitize_upload_filename -- accept cases
-# ---------------------------------------------------------------------------
 
 
 def test_sanitize_accepts_plain_txt():
@@ -188,7 +162,6 @@ def test_sanitize_accepts_dashes_and_digits():
 
 
 def test_sanitize_accepts_umlauts_via_nfc():
-    # NFC normalization: both composed and decomposed "ü" produce the same result
     composed = "über.md"
     decomposed = "über.md"
     result_composed = sanitize_upload_filename(composed)
@@ -206,21 +179,13 @@ def test_sanitize_strips_outer_whitespace():
 
 
 def test_sanitize_returns_basename_when_dir_like_input_is_safe():
-    # Any input with "/" or "\\" is rejected by the traversal rule before
-    # reaching the defense-in-depth basename step. Verify a no-sep name stays
-    # equal to itself.
     assert sanitize_upload_filename("filename.txt") == "filename.txt"
 
 
 def test_sanitize_markdown_extension_allowed_by_sanitizer():
-    # Sanitizer itself does NOT enforce extension allowlist; that is a separate
-    # guard in the endpoint. It should NOT reject valid .markdown names.
     assert sanitize_upload_filename("notes.markdown") == "notes.markdown"
 
 
-# ---------------------------------------------------------------------------
-# TEXT_EXTENSIONS contract
-# ---------------------------------------------------------------------------
 
 
 def test_text_extensions_set_values():
@@ -228,22 +193,14 @@ def test_text_extensions_set_values():
 
 
 def test_text_extensions_is_immutable():
-    # frozenset guards the allowlist against accidental mutation at runtime
     assert isinstance(TEXT_EXTENSIONS, frozenset)
 
 
-# ---------------------------------------------------------------------------
-# is_text_content / enforce_text_content -- reject binary magic
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     ("payload", "label"),
     [
-        # Real PDFs always have a binary-byte comment on line 2 (per ISO 32000
-        # convention) plus non-UTF-8 byte runs in xref/stream bodies. Model
-        # both here so the sniff triggers on either the binary window or the
-        # strict UTF-8 decode step.
         (b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n1 0 obj\n<<\n/Type /Catalog\n>>", "PDF"),
         (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR", "PNG"),
         (b"PK\x03\x04\x14\x00\x08", "ZIP/DOCX"),
@@ -259,29 +216,22 @@ def test_is_text_content_rejects_binary_magic(payload, label):
 
 
 def test_enforce_text_content_raises_on_binary():
-    # NUL byte in the sniff window triggers the binary-byte guard.
     with pytest.raises(UploadContentError):
         enforce_text_content(b"%PDF-1.4\n\x00binary")
 
 
 def test_enforce_text_content_raises_on_pdf_header():
-    # Real PDF header with binary marker + non-UTF-8 bytes.
     payload = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\nbody"
     with pytest.raises(UploadContentError):
         enforce_text_content(payload)
 
 
 def test_enforce_text_content_raises_on_invalid_utf8():
-    # Valid ASCII-range bytes only, but one invalid UTF-8 continuation
-    # Use a byte that passes the binary-byte sniff but fails strict UTF-8
     payload = b"hello " + b"\xff" + b" world"
     with pytest.raises(UploadContentError):
         enforce_text_content(payload)
 
 
-# ---------------------------------------------------------------------------
-# is_text_content / enforce_text_content -- accept plain text
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -300,16 +250,12 @@ def test_is_text_content_accepts_plain_text(payload, label):
 
 
 def test_enforce_text_content_noop_on_valid_text():
-    # Should not raise
     enforce_text_content(b"# SEC-0001\n\nClean text.\n")
 
 
 def test_is_text_content_inspects_only_sniff_window():
-    # A 16 KB payload whose first 8 KB is clean ASCII, followed by binary.
-    # Strict UTF-8 decode covers the whole payload so this is still rejected,
-    # but the reason should be UTF-8 failure, not the sniff window.
     head = b"a" * 8192
-    tail = b"\xff\xfe" * 4096  # Invalid UTF-8 tail
+    tail = b"\xff\xfe" * 4096
     assert is_text_content(head + tail) is False
 
 

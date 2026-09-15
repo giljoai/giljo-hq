@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9499b -- diagnose_project_state names the new staging reverse-gear paths.
-
-DoD #4: "diagnose_project_state's suggested_actions updated to name the new
-recovery paths." Before this project, a project stuck at staging_status
-'staged' or 'staging' with zero agents got the bare `no_agents_spawned` stuck
-condition and NO suggested_actions entry -- there was nothing an MCP agent
-could DO about it. Now that stage_project(action=...) exists, the diagnostic
-should point at it.
-
-Mirrors the fixture in test_be6111c_diagnose_project_state.py.
-"""
 
 from __future__ import annotations
 
@@ -101,9 +90,6 @@ def _payload(result):
 
 
 async def test_staged_with_no_agents_suggests_unstage_not_cancel(diagnose_client):
-    """BE-9512: cancel_staging requires staging_status='staging', not 'staged'
-    (ProjectStagingService.cancel_staging) -- from 'staged' it would always be
-    rejected, so it must never be suggested here."""
     new_client, make_project = diagnose_client
     project_id = await make_project(staging_status="staged")
 
@@ -134,9 +120,6 @@ async def test_staging_with_no_agents_suggests_restage_or_cancel(diagnose_client
 
 
 async def test_staging_but_not_inactive_omits_cancel_staging(diagnose_client):
-    """BE-9512: cancel_staging also requires status == INACTIVE
-    (ProjectStagingService.cancel_staging) -- staging_status='staging' alone
-    is not enough, or the call would be rejected."""
     new_client, make_project = diagnose_client
     project_id = await make_project(staging_status="staging", status=ProjectStatus.ACTIVE)
 

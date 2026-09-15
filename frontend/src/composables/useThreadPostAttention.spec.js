@@ -1,18 +1,3 @@
-/**
- * useThreadPostAttention.spec.js — FE-9586
- *
- * The projection behind the thread-post banner family, and the contract that
- * matters most is NULL MEANS NOT LOADED.
- *
- * FE-9553's reconcile closes every popout absent from the live set. If this
- * composable handed out [] before its first read landed, a cold page load would
- * be indistinguishable from "nothing is waiting" and every popout would close on
- * mount — silently, and only on a real OS where popouts exist. That is the
- * near-miss the sibling lane caught by reading the store instead of trusting its
- * own green, so it is pinned here rather than left to a comment.
- *
- * Edition Scope: Both
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { nextTick } from 'vue'
 
@@ -39,12 +24,6 @@ describe('useThreadPostAttention (FE-9586)', () => {
   })
 
   it('THE CONTRACT: a FRESH module starts null, never as an empty array', async () => {
-    // Imported fresh on purpose. The first version of this test read the state after
-    // __resetThreadPostAttention() had set it to null, so it asserted what the RESET
-    // HELPER does and passed happily with the module declaring ref([]) instead — a
-    // mutation run proved it: changing the declaration killed zero tests. A test of
-    // the fixture wearing the module's name is exactly the shape this lane has been
-    // deleting elsewhere, so it is fixed here rather than trusted.
     vi.resetModules()
     const fresh = await import('./useThreadPostAttention')
     const { mentions, directedAsks, loaded } = fresh.useThreadPostAttention()
@@ -75,9 +54,6 @@ describe('useThreadPostAttention (FE-9586)', () => {
   })
 
   it('KEEPS the last known state when a read fails -- a failed poll is not evidence of quiet', async () => {
-    // The dangerous alternative is clearing to []: the banner would vanish and the
-    // reconcile would close popouts for signals still owed an answer, because the
-    // network blipped.
     attentionMock.mockResolvedValue(ONE_MENTION)
     const { mentions, refresh } = useThreadPostAttention()
     await refresh()
@@ -98,8 +74,6 @@ describe('useThreadPostAttention (FE-9586)', () => {
   })
 
   it('collapses concurrent callers onto one request', async () => {
-    // A burst of thread events is the normal case when an orchestrator fans out
-    // directives, and one read answers all of them.
     const { refresh } = useThreadPostAttention()
 
     await Promise.all([refresh(), refresh(), refresh()])
@@ -129,8 +103,6 @@ describe('useThreadPostAttention (FE-9586)', () => {
   })
 
   it('shares ONE answer across callers -- a per-caller copy would leave the reconcile blind', async () => {
-    // The lifecycle, the banner and the announcer all have to see the same verdict.
-    // Per-caller refs would give the reconcile its own permanently-unloaded copy.
     attentionMock.mockResolvedValue(ONE_MENTION)
     const first = useThreadPostAttention()
     const second = useThreadPostAttention()

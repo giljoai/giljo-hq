@@ -3,29 +3,15 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Template CRUD Endpoints - Handover 0126
-
-Handles template CRUD operations using TemplateService.
-
-BE-8000j: the create/update write paths now route fully through the owning
-service (``TemplateService.create_template_from_request`` /
-``update_template_from_request``) — all validation, materialization, and the DB
-write live there. These endpoints stay thin: request in, service call, translate
-the service's domain exceptions to their existing HTTP status codes, and (for
-update) fire the real-time WebSocket event.
-"""
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
 from giljo_mcp.exceptions import AuthorizationError, ProjectStateError, TemplateNotFoundError, ValidationError
 from giljo_mcp.models import AgentTemplate, User
-from giljo_mcp.models.templates import effective_last_exported_at
-from giljo_mcp.repositories.product_agent_selection import active_product_export_timestamps
 from giljo_mcp.services.template_service import USER_MANAGED_AGENT_LIMIT, TemplateService
 from giljo_mcp.system_roles import SYSTEM_MANAGED_ROLES
 from giljo_mcp.utils.log_sanitizer import sanitize
@@ -40,31 +26,13 @@ router = APIRouter()
 
 
 def _is_system_managed_role(role: str | None) -> bool:
-    """Check if role is system-managed"""
     return bool(role and role in SYSTEM_MANAGED_ROLES)
 
 
-def _convert_to_response(template: AgentTemplate, product_export_times: dict | None = None) -> TemplateResponse:
-    """Convert ORM model to response schema.
-
-    BE-9385e: ``product_export_times`` carries the ACTIVE product's own export
-    times, keyed by template id. Passing it is what makes the "last exported"
-    fields describe the product the user is actually in; omitting it keeps the
-    tenant-wide answer, which is still correct where no product is in context.
-
-    Args:
-        template: The ORM template.
-        product_export_times: The active product's export times by template id
-            (see :func:`effective_last_exported_at`), or None for no product
-            context.
-    """
-    # Merge system and user instructions for backward compatibility
+def _convert_to_response(template: AgentTemplate) -> TemplateResponse:
     merged_content = template.system_instructions or ""
     if template.user_instructions:
         merged_content = f"{merged_content}\n\n{template.user_instructions}"
-
-    last_exported_at = effective_last_exported_at(template, product_export_times)
-    may_be_stale = template.may_be_stale_against(last_exported_at)
 
     return TemplateResponse(
         id=template.id,
@@ -77,7 +45,8 @@ def _convert_to_response(template: AgentTemplate, product_export_times: dict | N
         description=template.description,
         system_instructions=template.system_instructions or "",
         user_instructions=template.user_instructions,
-        model=template.model,
+        model=template.model or "inherit",
+        effort=template.effort or "inherit",
         tools=template.tools,
         behavioral_rules=template.behavioral_rules or [],
         success_criteria=template.success_criteria or [],
@@ -86,10 +55,6 @@ def _convert_to_response(template: AgentTemplate, product_export_times: dict | N
         is_active=template.is_active,
         created_at=template.created_at,
         updated_at=template.updated_at,
-        # Handover 0335: Export tracking fields
-        last_exported_at=last_exported_at,
-        may_be_stale=may_be_stale,
-        user_managed_export=template.user_managed_export or False,
         category=template.category,
         variables=template.variables or [],
         version=template.version or "1.0.0",
@@ -99,17 +64,35 @@ def _convert_to_response(template: AgentTemplate, product_export_times: dict | N
     )
 
 
-async def _convert_in_product_context(
-    session: AsyncSession, tenant_key: str, template: AgentTemplate
-) -> TemplateResponse:
-    """Convert one template, with the active product's export time applied (BE-9385e).
-
-    Single-template responses go through here so a row the user just edited does
-    not come back carrying another product's export time and re-displaying the
-    lie the list view no longer tells.
+@router.get("/{template_id}/profile.md", response_class=Response)
+async def download_template_profile(
+    template_id: str,
+    current_user: User = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_db_session),
+    template_service: TemplateService = Depends(get_template_service),
+) -> Response:
     """
-    export_times = await active_product_export_timestamps(session, tenant_key)
-    return _convert_to_response(template, export_times)
+    Download one agent's profile as a plain Markdown file.
+
+    The document carries the agent's name, description, model / effort hints and
+    profile instructions -- the same profile a spawned agent receives from
+    ``get_job_mission`` -- with no harness-specific formatting, so you can hand it
+    to any coding agent yourself. Returned as an attachment.
+    """
+    from giljo_mcp.services.mission_assembly import compose_agent_profile
+    from giljo_mcp.template_renderer import profile_markdown_filename, render_profile_markdown
+
+    template = await template_service.get_template_by_id(session, template_id, current_user.tenant_key)
+    if not template:
+        raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+
+    body = render_profile_markdown(compose_agent_profile(template))
+    filename = profile_markdown_filename(template.name)
+    return Response(
+        content=body,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{template_id}", response_model=TemplateResponse)
@@ -131,7 +114,7 @@ async def get_template(
     if not template:
         raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
 
-    return await _convert_in_product_context(session, current_user.tenant_key, template)
+    return _convert_to_response(template)
 
 
 @router.get("/", response_model=list[TemplateResponse])
@@ -141,18 +124,20 @@ async def list_templates(
     template_service: TemplateService = Depends(get_template_service),
     role: str | None = Query(None, description="Filter by role"),
     is_active: bool | None = Query(None, description="Filter by active status"),
+    product_id: str | None = Query(None, description="Show only the agents this product owns"),
 ) -> list[TemplateResponse]:
     """
-    List templates for the current tenant with optional filters.
+    List agents for the current tenant.
+
+    Pass ``product_id`` to list the agents that product owns -- the normal case,
+    since each product has its own agents. Omit it to list every agent on the
+    account.
     """
     templates = await template_service.list_templates_with_filters(
-        session, current_user.tenant_key, role=role, is_active=is_active
+        session, current_user.tenant_key, role=role, is_active=is_active, product_id=product_id
     )
 
-    # BE-9385e: resolved ONCE for the whole list, not per row.
-    export_times = await active_product_export_timestamps(session, current_user.tenant_key)
-
-    return [_convert_to_response(t, export_times) for t in templates]
+    return [_convert_to_response(t) for t in templates]
 
 
 @router.post("/", response_model=TemplateResponse, status_code=status.HTTP_201_CREATED)
@@ -185,7 +170,7 @@ async def create_template(
     except ProjectStateError as exc:
         raise HTTPException(status_code=409, detail=exc.message) from exc
 
-    return await _convert_in_product_context(session, current_user.tenant_key, new_template)
+    return _convert_to_response(new_template)
 
 
 @router.put("/{template_id}", response_model=TemplateResponse)
@@ -223,9 +208,8 @@ async def update_template(
 
     logger.info("Updated template %s", sanitize(template_id))
 
-    response = await _convert_in_product_context(session, tenant_key, template)
+    response = _convert_to_response(template)
 
-    # Broadcast template update via EventBus for real-time UI refresh
     try:
         from api.app_state import state
 
@@ -236,12 +220,6 @@ async def update_template(
                     "tenant_key": tenant_key,
                     "template_id": template.id,
                     "is_active": template.is_active,
-                    # BE-9385e: the PRODUCT-AWARE value the response carries, not the
-                    # tenant-wide property. The UI updates the row's staleness badge
-                    # from this event, so broadcasting the tenant-wide answer here
-                    # would flip the badge straight back to another product's export
-                    # the moment the user edits an agent.
-                    "may_be_stale": response.may_be_stale,
                     "updated_fields": updated_fields,
                 },
             )
@@ -293,8 +271,8 @@ async def delete_template(
         return {"message": f"Template '{template_name}' moved to trash", "template_id": template_id}
 
     except HTTPException:
-        raise  # Re-raise HTTP exceptions (403, 404, 500, etc.) without modification
-    except Exception as e:  # Broad catch: API boundary, converts to HTTP error
+        raise
+    except Exception as e:
         logger.exception("Failed to delete template")
         await session.rollback()
         raise HTTPException(status_code=500, detail="Failed to delete template. Check server logs.") from e
@@ -335,28 +313,29 @@ async def recover_template(
 
 @router.post("/import-defaults", response_model=dict)
 async def import_default_agent_templates(
+    product_id: str = Query(..., description="Product that will own the imported agents"),
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Import the seeded default agent templates — additive only (FE-9203).
+    """Add the default agents to a product — additive only (FE-9203).
 
-    Delegates to ``giljo_mcp.template_import.import_default_templates`` (the
-    seeder-content sibling module routing writes through the owning
-    ``TemplateService``). Existing templates are NEVER modified: a free default
-    name is created as seeded, a pristine copy already present is skipped, and
-    a user-edited default name gets the pristine copy added under the existing
-    suffix machinery (e.g. ``implementer-duplicate``). Takes no request body.
+    Agents belong to a product, so this names the product that will own them.
+    Existing agents are NEVER modified: a free default name is created as seeded,
+    a pristine copy this product already has is skipped, and a name taken
+    elsewhere on the account gets the pristine copy added under a suffix (e.g.
+    ``implementer-duplicate``). Imported agents arrive switched on.
     """
     from giljo_mcp.template_import import import_default_templates
 
     try:
-        report = await import_default_templates(session, current_user.tenant_key)
+        report = await import_default_templates(session, current_user.tenant_key, product_id)
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=exc.message) from exc
 
     logger.info(
-        "User %s imported default templates: %d added, %d duplicate, %d skipped",
+        "User %s imported default agents into product %s: %d added, %d duplicate, %d skipped",
         sanitize(current_user.username),
+        sanitize(product_id),
         len(report.added),
         len(report.added_as_duplicate),
         len(report.skipped_identical),
@@ -370,21 +349,24 @@ async def import_default_agent_templates(
 
 @router.get("/stats/active-count", response_model=dict)
 async def get_active_count(
+    product_id: str = Query(..., description="Product whose roster is being measured"),
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_db_session),
     template_service: TemplateService = Depends(get_template_service),
 ) -> dict:
     """
-    Get count of active user-managed templates for the current tenant.
+    How many of this product's agent-role slots are in use.
+
+    BE-9610a: per product, because the budget exists so one orchestrator's roster
+    fits one context window, and a roster is assembled for one product. Counts
+    distinct ROLES -- three copies of the same role share one slot, which is what
+    the cap has always enforced.
     """
-    count = await template_service.get_active_user_managed_count(session, current_user.tenant_key)
+    count = await template_service.get_enabled_role_count(session, current_user.tenant_key, product_id)
 
     return {
         "active_count": count,
         "limit": USER_MANAGED_AGENT_LIMIT,
         "available": max(0, USER_MANAGED_AGENT_LIMIT - count),
-        # max_slots = total active slots (user-managed limit + 1 reserved
-        # orchestrator). The "N / max_slots" home badge reads this so it always
-        # tracks the server-enforced cap instead of a hardcoded frontend default.
         "max_slots": USER_MANAGED_AGENT_LIMIT + 1,
     }

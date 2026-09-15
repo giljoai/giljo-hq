@@ -1,17 +1,3 @@
-/**
- * MemoryEntryRow.spec.js — BE-9256 (frontend layer 4).
- *
- * Edition Scope: Both.
- *
- * Stored 360 memory rows can carry a git_commits entry with an empty
- * `message` (legacy bare-SHA normalization, pre-validator). Before this fix
- * the Commits list rendered `{{ commit.message || commit }}`, which fell
- * through to stringifying the raw commit OBJECT for a legacy row (worse
- * than blank — an "[object Object]"-shaped render). The floor: an empty
- * message must render the short SHA as the title text; a titled row is
- * unchanged; a row with no sha keeps today's placeholder (no text after
- * the sha prefix, since there's nothing to show).
- */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import MemoryEntryRow from '@/components/memory/MemoryEntryRow.vue'
@@ -27,17 +13,12 @@ describe('MemoryEntryRow.vue — Commits section legacy-title floor (BE-9256)', 
     const wrapper = mountRow({
       id: 'm1',
       summary: 'x',
-      // Legacy row: empty message (pre-validator bare-SHA normalization)
       git_commits: [{ sha: '569905bd0abcdef1234567890', message: '' }],
     })
 
     const items = wrapper.findAll('.mem-list--mono li')
     expect(items.length).toBe(1)
     const text = items[0].text()
-    // The pre-fix template rendered `commit.message || commit`, which for a
-    // falsy message fell through to the raw commit OBJECT — toDisplayString
-    // JSON-stringifies it, so the buggy render looks like '{"sha":"...",...}'.
-    // A correct floor renders exactly the short SHA, nothing else.
     expect(text).not.toContain('{')
     expect(text).not.toContain('"message"')
     expect(text).toBe('569905bd')

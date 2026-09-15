@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Transport-layer tests for the ``decide_approval`` MCP tool (BE-9499d).
-
-The gap this closes: ``awaiting_user`` used to clear ONLY via
-``POST /api/approvals/{id}/decide`` (JWT cookie, dashboard button) --
-``decide_approval`` is the harness-side door, routed through the SAME
-``UserApprovalService.mark_decided`` write. These tests exercise the real
-``@mcp.tool`` wrapper (api/endpoints/mcp_tools/_message_tools.py) through the
-in-memory FastMCP transport -- the failing layer for an MCP-boundary change
-(CLAUDE.md: MCP-boundary fix -> boundary test through the MCP transport) -- plus
-the BE-9084 fence extension (``_HITL_FENCED_TOOLS``) and a parity check proving
-the REST door and this door produce byte-identical audit rows.
-
-Pattern reference: tests/integration/test_request_approval_mcp_transport.py
-(shared-session transport + tenant-switch fixture) and
-tests/integration/test_be9084_headless_hitl_gate.py (the fence fixture shape).
-"""
 
 from __future__ import annotations
 
@@ -43,9 +27,6 @@ from tests.helpers.mcp_session_fixture import create_connected_server_and_client
 pytestmark = pytest.mark.asyncio
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _payload(call_tool_result) -> dict:
@@ -138,12 +119,6 @@ async def _create_pending(service, seed, tenant_key, options=None):
     )
 
 
-# ---------------------------------------------------------------------------
-# Fixture: shared-session ToolAccessor + tenant-aware MCP client (unfenced --
-# monkeypatches _request_from_context away so the BE-9084 fence's "request is
-# None" carve-out applies, matching approval_mcp_client's transport in
-# test_request_approval_mcp_transport.py)
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
@@ -163,7 +138,6 @@ class _TenantSwitch:
 
 @pytest_asyncio.fixture
 async def decide_mcp_client(db_manager, db_session, primary_tenant_key, monkeypatch):
-    """In-memory FastMCP client wired for decide_approval, unfenced (request is None)."""
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from giljo_mcp.services.user_approval_service import UserApprovalService
@@ -205,14 +179,9 @@ async def decide_mcp_client(db_manager, db_session, primary_tenant_key, monkeypa
         state.db_manager = prior_db_manager
 
 
-# ---------------------------------------------------------------------------
-# decide_approval wrapper -- happy path, tenant scoping, structured rejections
-# ---------------------------------------------------------------------------
 
 
 async def test_decide_approval_happy_path_through_wrapper(decide_mcp_client, db_session, primary_tenant_key):
-    """Calling decide_approval via the FastMCP client clears awaiting_user through
-    the SAME write UserApprovalService.mark_decided performs for the REST door."""
     new_client, _switch, service = decide_mcp_client
     seed = await _seed_approval_context(db_session, primary_tenant_key)
     pending = await _create_pending(service, seed, primary_tenant_key)
@@ -245,8 +214,6 @@ async def test_decide_approval_happy_path_through_wrapper(decide_mcp_client, db_
 async def test_decide_approval_is_tenant_scoped_at_transport_boundary(
     decide_mcp_client, db_session, primary_tenant_key, secondary_tenant_key
 ):
-    """Tenant B cannot decide tenant A's approval through the transport -- a
-    structured BE-6081 Tier-2 rejection (not raised, not a tenant-existence leak)."""
     new_client, switch, service = decide_mcp_client
     a_seed = await _seed_approval_context(db_session, primary_tenant_key)
     a_pending = await _create_pending(service, a_seed, primary_tenant_key)
@@ -308,17 +275,11 @@ async def test_decide_approval_invalid_option_returns_structured_rejection(
     assert row.status == "pending"
 
 
-# ---------------------------------------------------------------------------
-# Parity: the REST door and the MCP door must leave byte-identical audit shape.
-# ---------------------------------------------------------------------------
 
 
 async def test_rest_and_mcp_decide_doors_produce_identical_audit_shape(
     decide_mcp_client, db_manager, db_session, primary_tenant_key
 ):
-    """Regression that the UI (REST) door stays byte-identical after adding the
-    MCP door: decide one approval via each and compare the resulting row shape
-    (every field except the id-like columns that are naturally distinct)."""
     from unittest.mock import AsyncMock, MagicMock
 
     from giljo_mcp.services.user_approval_service import UserApprovalService
@@ -329,8 +290,6 @@ async def test_rest_and_mcp_decide_doors_produce_identical_audit_shape(
     pending_a = await _create_pending(mcp_service, seed_a, primary_tenant_key)
     pending_b = await _create_pending(mcp_service, seed_b, primary_tenant_key)
 
-    # REST door: same service class, same db_session, direct call (mirrors
-    # api/endpoints/approvals.py's decide_approval() dependency-injected service).
     ws = MagicMock()
     ws.broadcast_to_tenant = AsyncMock()
     rest_service = UserApprovalService(
@@ -362,12 +321,8 @@ async def test_rest_and_mcp_decide_doors_produce_identical_audit_shape(
     assert rest_row.decided_option_id == mcp_row.decided_option_id == "approve"
     assert rest_decided.status == mcp_payload["status"] == "decided"
     assert rest_decided.decided_option_id == mcp_payload["decided_option_id"] == "approve"
-    # BE-9514: decided_via is the ONE field this parity check deliberately does
-    # NOT expect identical -- it exists precisely to record which door decided,
-    # so the REST/UI row and the MCP row must differ here on purpose.
     assert rest_row.decided_via == "ui"
     assert mcp_row.decided_via == "mcp"
-    # Same shape of side effect: both resume their agent from awaiting_user.
     exec_a = (
         await db_session.execute(select(AgentExecution).where(AgentExecution.id == seed_a["execution"].id))
     ).scalar_one()
@@ -377,11 +332,6 @@ async def test_rest_and_mcp_decide_doors_produce_identical_audit_shape(
     assert exec_a.status == exec_b.status == "working"
 
 
-# ---------------------------------------------------------------------------
-# BE-9084 fence: decide_approval is fenced identically to launch_implementation,
-# EXCEPT it stays in the orchestrator profile's static allow-set (see
-# _HITL_FENCED_TOOLS's docstring in _scopes.py).
-# ---------------------------------------------------------------------------
 
 
 class _FakeRequest:
@@ -398,8 +348,6 @@ async def _seed_headless_setting(db_manager, tenant_key: str, allow: bool) -> No
 
 
 def _jwt_orchestrator_state(tenant_key: str) -> dict:
-    """An ordinary mcp:agent jwt session with NO declared profile -- resolves to
-    the orchestrator profile default (BE-9017), which INCLUDES decide_approval."""
     return {
         "auth_method": "jwt",
         "scopes": ["mcp:read", "mcp:write", "mcp:agent"],
@@ -409,9 +357,6 @@ def _jwt_orchestrator_state(tenant_key: str) -> dict:
 
 @pytest_asyncio.fixture
 async def fenced_gate_client(db_manager, db_session, monkeypatch):
-    """Like decide_mcp_client, but ALSO wires the real request-state fence
-    (mirrors test_be9084_headless_hitl_gate.gate_client) so tools/list + dispatch
-    run the genuine BE-9084 predicate against a configurable session shape."""
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -460,8 +405,6 @@ async def fenced_gate_client(db_manager, db_session, monkeypatch):
 
 class TestDecideApprovalDefaultHeadlessFence:
     async def test_no_row_advertises_decide_approval_in_tools_list(self, fenced_gate_client):
-        """Under the platform default an ordinary orchestrator-profile jwt session
-        MUST be advertised decide_approval."""
         new_client, holder, _service = fenced_gate_client
         holder.state = _jwt_orchestrator_state(holder.tenant_key)
 
@@ -472,9 +415,6 @@ class TestDecideApprovalDefaultHeadlessFence:
         assert "decide_approval" in advertised, "platform default must advertise decide_approval"
         assert "request_approval" in advertised
         assert "spawn_job" in advertised
-        # NOTE: launch_implementation is also admitted whenever the toggle
-        # admits -- the toggle mechanism working as designed; see
-        # TestToggleAdmitsWithNoDeclaration in test_be9084_headless_hitl_gate.py.
 
     async def test_no_row_allows_decide_approval_call(self, fenced_gate_client, db_session):
         new_client, holder, service = fenced_gate_client
@@ -489,7 +429,6 @@ class TestDecideApprovalDefaultHeadlessFence:
         assert "HITL mode" not in joined, f"platform default must not be HITL-fenced, got: {joined!r}"
 
     async def test_explicit_false_still_hides_decide_approval_from_tools_list(self, fenced_gate_client, db_manager):
-        """The opt-out still fences identically to the pre-BE-9542 default."""
         new_client, holder, _service = fenced_gate_client
         await _seed_headless_setting(db_manager, holder.tenant_key, allow=False)
         holder.state = _jwt_orchestrator_state(holder.tenant_key)

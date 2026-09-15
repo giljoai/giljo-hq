@@ -169,7 +169,7 @@ prompt (orchestrator/agent ids, prompt, token estimate) for the chosen execution
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | project_id | str | Yes | ID of the project to stage. |
-| mode | str | No | Execution mode (ADR-010). 2 canonical values: `multi_terminal` (default, one terminal per agent) / `subagent` (one orchestrator session drives the workers). Plus 4 short per-CLI hint aliases — `claude`, `codex`, `gemini`, `antigravity` — each collapsing to `subagent` plus a harness hint for the staging prose flavor. |
+| mode | str | No | Execution mode (ADR-010). 2 canonical values: `multi_terminal` (default, one terminal per agent) / `subagent` (one orchestrator session drives the workers). Plus 2 short per-CLI hint aliases — `claude`, `codex` — each collapsing to `subagent` plus a harness hint for the staging prose flavor. |
 
 ---
 
@@ -372,6 +372,13 @@ any earlier entry for the same project or task. Defaults to your default product
 `job_id` and a thin prompt (~10 lines); the agent then calls `get_job_mission()` to
 fetch the full mission.
 
+The thin prompt ends with a **`## HARNESS` block** for the harness assigned to that
+agent's template (Claude Code, Codex, OpenCode, or a generic fallback): the launch line
+to start the agent in a fresh session, plus a model hint and an effort hint when the
+template sets them to anything other than `inherit`. Hints are prose for the harness --
+`inherit` means "the same as the orchestrator", and a harness that cannot honour a value
+ignores it. There is no agent file to install or look up.
+
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | agent_display_name | str | Yes | Human-readable agent name shown in the dashboard. |
@@ -387,6 +394,12 @@ fetch the full mission.
 
 **Purpose:** Fetch the agent-specific mission and context. The agent's first action
 after `spawn_job`. Returns the targeted mission, not the full project vision. Idempotent.
+
+The response carries an **`agent_profile`** block in every execution mode: the agent's
+name, role, description, assigned harness, model and effort hints, instructions,
+behavioural rules, and success criteria. That block is the agent's role -- read it and
+start. Nothing needs to be installed on your machine, and there is no agent template file
+to look for.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -891,20 +904,29 @@ applies, it does not propose.
 
 ### giljo_setup `mcp:write`
 
-**Purpose:** First-time setup. Downloads the combined ZIP with the `/giljo`
-command/skill and agent templates, installs them, and records acknowledgement of the
-bundled `SKILLS_VERSION`. Run once after connecting.
+**Purpose:** First-time setup. Installs the `/giljo` command/skill, writes the Giljo HQ
+marker block (primer plus product binding) into your harness file (`CLAUDE.md` /
+`AGENTS.md`), and records acknowledgement of the bundled `SKILLS_VERSION`. Run once after
+connecting, and again whenever your skills are outdated.
+
+It does **not** install agent templates. Every spawned agent receives its full profile
+from the server in `get_job_mission`'s `agent_profile`, so nothing has to live in your
+agents directory.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| platform | str | No | `claude_code`, `codex_cli`, `gemini_cli`, `antigravity_cli`, `generic`. Default auto-detects. |
+| platform | str | No | `claude_code`, `codex_cli`, `opencode`, `generic`. Default auto-detects. |
 | harness | str | No | Optional session harness preset: `web_sandbox`\|`desktop_app`\|`chat` (omit for a terminal-capable CLI). |
 | product_id | str | No | Product UUID to bind this repository to. The returned instructions then include writing a marker block into `CLAUDE.md` and `AGENTS.md`, so later calls from this repo never hit a product-ambiguity rejection. Omit on a tenant with zero or several products; the response says what to do next. |
+| scope | str | No | **Retired.** There is no install scope any more; passing any value is refused with a structured rejection that names the replacement. Omit it. |
 
-> **Agent templates:** install them via `giljo_setup` ("Agents only" scope) and read
-> their content via `get_context(categories=['agent_templates'])`. (The standalone
-> `list_agent_templates` MCP tool was retired in BE-6225a; the REST download path
-> remains for non-tool callers.)
+> **Agent templates:** read their content via
+> `get_context(categories=['agent_templates'])`. Spawned agents do not need them --
+> each one receives its own profile from `get_job_mission`. To hand a profile to an
+> agent you run yourself, use the Template Manager's per-agent menu and choose
+> **Download profile (.md)**, which serves
+> `GET /api/v1/templates/{template_id}/profile.md` as plain Markdown. (The standalone
+> `list_agent_templates` MCP tool was retired in BE-6225a.)
 
 ---
 

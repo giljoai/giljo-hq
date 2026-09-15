@@ -6,8 +6,6 @@ import {
   makeKeyName,
 } from '../useMcpConfig'
 
-// Byte-for-byte expected JSON (must match backend api/endpoints/ai_tools.py
-// → get_claude_desktop_config for the same inputs).
 const SERVER_HTTPS = 'https://192.0.2.10:7272'
 const SERVER_PROXIED = 'https://giljo.example.com'
 const SERVER_HTTP = 'http://localhost:7272'
@@ -59,7 +57,6 @@ describe('generateClaudeDesktopConfig', () => {
 
   it('output is pretty-printed JSON with 2-space indent (matches backend byte-for-byte)', () => {
     const raw = generateClaudeDesktopConfig(SERVER_HTTPS, API_KEY, { selfSigned: true })
-    // Round-trip with 2-space indent must equal raw (proves indent + key order).
     const expected = JSON.stringify(
       {
         mcpServers: {

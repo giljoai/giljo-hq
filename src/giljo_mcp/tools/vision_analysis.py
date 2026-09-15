@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""MCP Tools: get_vision_doc and update_product_context (Handover 0842c)
-
-Provides vision document retrieval with extraction prompt and structured product
-field writing from AI analysis results. Called by the user's AI coding agent
-during vision document analysis workflow.
-"""
 
 import logging
 from contextlib import asynccontextmanager
@@ -48,9 +42,6 @@ from giljo_mcp.tools.vision_extraction_prompt import VISION_EXTRACTION_PROMPT
 logger = logging.getLogger(__name__)
 
 
-# VISION_EXTRACTION_PROMPT is imported above from tools/vision_extraction_prompt.py (see
-# that module for why); get_vision_doc returns it as extraction_instructions, and the
-# import keeps `from ...vision_analysis import VISION_EXTRACTION_PROMPT` resolving.
 
 
 VALID_TESTING_STRATEGIES = {"TDD", "BDD", "Integration-First", "E2E-First", "Manual", "Hybrid"}
@@ -80,10 +71,6 @@ FIELD_MAP = {
     "test_coverage_target": ("test_config", "coverage_target"),
 }
 
-# Reverse of FIELD_MAP: (block, column) -> extraction field name. Used by the
-# overwrite-protection rollback below to name the exact extraction field behind a
-# skipped COLUMN. (The column->block grouping itself lives in the shared
-# product-field translator, services/product_field_map.py.)
 _FIELD_FOR_COLUMN = {target: field_name for field_name, target in FIELD_MAP.items()}
 
 
@@ -92,7 +79,6 @@ async def _session_scope(
     db_manager: DatabaseManager | None,
     test_session: AsyncSession | None,
 ):
-    """Yield the test session directly or open a new managed session."""
     if test_session is not None:
         yield test_session
     else:
@@ -108,28 +94,6 @@ async def get_vision_doc(
     websocket_manager: Any = None,
     _test_session: AsyncSession | None = None,
 ) -> dict[str, Any]:
-    """
-    Retrieve vision document content as paginated chunks with extraction instructions.
-
-    Call with no chunk parameter to get metadata (total_chunks, extraction_instructions).
-    Then fetch chunk=1..total_chunks. Chunk reads are independent and side-effect free,
-    so they can be requested in PARALLEL -- there is no ordering requirement (FE-9320:
-    the old "chunk=1, chunk=2, etc." phrasing read as sequential and cost a real run six
-    round trips for one document).
-
-    Args:
-        product_id: Target product UUID
-        tenant_key: Tenant isolation key
-        chunk: 1-based chunk number to retrieve. Omit for metadata only.
-        db_manager: Injected by ToolAccessor
-
-    Returns:
-        Without chunk param: metadata (total_chunks, total_tokens, extraction_instructions, etc.)
-        With chunk param: single chunk content + metadata
-
-    Raises:
-        ResourceNotFoundError: If product not found or has no vision documents
-    """
     if not db_manager and _test_session is None:
         raise ValueError("db_manager is required")
 
@@ -148,8 +112,6 @@ async def get_vision_doc(
                 context={"product_id": product_id},
             )
 
-        # BE-6130b: the vision_documents relationship loads trashed rows too;
-        # exclude soft-deleted docs (deleted_at) alongside the is_active filter.
         active_docs = [doc for doc in product.vision_documents if doc.is_active and doc.deleted_at is None]
 
         if not active_docs:
@@ -158,10 +120,8 @@ async def get_vision_doc(
                 context={"product_id": product_id},
             )
 
-        # Collect vision_document_ids for chunk lookup
         doc_ids = [str(doc.id) for doc in active_docs]
 
-        # Query pre-chunked content from mcp_context_index, ordered by chunk_order
         chunk_stmt = (
             select(MCPContextIndex)
             .where(
@@ -175,22 +135,17 @@ async def get_vision_doc(
         all_chunks = chunk_result.scalars().all()
 
         if not all_chunks:
-            # Fallback: document exists but hasn't been chunked yet — use raw content.
-            # BE-5117b: preserve per-doc identity so the agent can map chunks back
-            # to vision_summaries[].doc_id when writing summaries.
             logger.warning("No chunks found for product %s, falling back to raw document", product_id)
             raw_pairs = [(str(doc.id), doc.vision_document) for doc in active_docs if doc.vision_document]
         else:
             raw_pairs = [(str(c.vision_document_id), c.content) for c in all_chunks]
 
-        # Sub-split any chunks >25K chars so each fits within MCP tool output limits.
         max_chars = 25000
         split_pairs: list[tuple[str, str]] = []
         for doc_id_value, raw in raw_pairs:
             if len(raw) <= max_chars:
                 split_pairs.append((doc_id_value, raw))
             else:
-                # Split on paragraph boundaries where possible
                 split_pairs.extend((doc_id_value, raw[i : i + max_chars]) for i in range(0, len(raw), max_chars))
 
         chunk_list = [
@@ -209,10 +164,6 @@ async def get_vision_doc(
         active_doc_ids = [str(doc.id) for doc in active_docs]
 
         if chunk is not None:
-            # -- Single-chunk retrieval: minimal routing payload. The extraction
-            #    instructions are NOT re-sent on chunk responses (BE-9164): they
-            #    ride only on the metadata call to avoid resending the prompt on
-            #    every chunk. --
             if chunk < 1 or chunk > total_chunks:
                 raise ResourceNotFoundError(
                     f"Chunk {chunk} not found (valid range: 1-{total_chunks})",
@@ -229,7 +180,6 @@ async def get_vision_doc(
                 "write_tool": "update_product_context",
             }
 
-        # -- Metadata call (chunk is None): carries the extraction_instructions. --
         custom_instructions = product.extraction_custom_instructions or ""
         extraction_instructions = VISION_EXTRACTION_PROMPT.replace("{custom_instructions}", custom_instructions)
         base = {
@@ -243,8 +193,6 @@ async def get_vision_doc(
         }
 
         if total_chunks == 1:
-            # BE-9164: single-chunk docs need no follow-up call. Inline the only
-            # chunk's content directly in the metadata response.
             only = chunk_list[0]
             base["chunk"] = 1
             base["doc_id"] = only["doc_id"]
@@ -252,13 +200,11 @@ async def get_vision_doc(
             base["chunk_token_count"] = only["token_count"]
             base["usage"] = "All content is included above; no further get_vision_document calls are needed."
         else:
-            # Metadata only — no content, agent should request the chunks.
             base["usage"] = (
                 f"Fetch chunk=1 through chunk={total_chunks} to retrieve content. These reads are "
                 "independent and side-effect free -- request them in PARALLEL, in any order."
             )
 
-        # Notify frontend that the agent has connected and started analysis
         if websocket_manager and chunk is None:
             from giljo_mcp.events.schemas import EventFactory
 
@@ -272,7 +218,6 @@ async def get_vision_doc(
         return base
 
 
-# BE-9201: default name for an agent-authored vision document (prompt D/B).
 DEFAULT_AGENT_VISION_DOC_NAME = "Agent Vision.md"
 
 
@@ -284,21 +229,6 @@ async def create_vision_document(
     db_manager: DatabaseManager | None = None,
     _test_session: AsyncSession | None = None,
 ) -> dict[str, Any]:
-    """Create a vision document from agent-authored markdown (BE-9201).
-
-    Agent-side twin of the REST upload endpoints: routes through
-    ProductVisionService.upload_vision_document (the owning service both REST
-    endpoints use), so the doc gets the identical ingest — inline storage,
-    auto-chunking, auto-consolidation (refreshing consolidated_vision_hash, the
-    staleness fingerprint in services/vision_hash.py) — and appears in the UI
-    exactly like an uploaded file. Boundary validation mirrors the SEC-0001
-    REST guards (minus the byte-sniff — ``content`` is a typed str): non-empty
-    content, the SAME ``get_config().upload.max_upload_bytes`` cap, filename
-    sanitization + ``.md`` appended when the extension is missing.
-
-    Raises ValidationError (empty/oversize content, bad or duplicate
-    document_name) or ResourceNotFoundError (product not found for tenant).
-    """
     if not db_manager and _test_session is None:
         raise ValueError("db_manager is required")
 
@@ -330,9 +260,6 @@ async def create_vision_document(
 
     vision_service = ProductVisionService(db_manager=db_manager, tenant_key=tenant_key, test_session=_test_session)
 
-    # Duplicate-name pre-check mirroring the uq_vision_doc_product_name unique
-    # constraint (covers trashed rows too) so the agent gets an actionable
-    # rejection, not a sanitized constraint 500 (REST maps the same to a 409).
     async with tenant_scoped_session(db_manager, tenant_key, _test_session) as session:
         clash = await session.execute(
             select(VisionDocument.id).where(
@@ -350,10 +277,6 @@ async def create_vision_document(
 
     result = await vision_service.upload_vision_document(product_id=product_id, content=content, filename=safe_name)
 
-    # Parity with the REST upload (BE-5118): a fresh doc has no summaries, so
-    # the completion flag must drop to FALSE until the agent writes summaries.
-    # tenant_scoped_session (not bare _session_scope): the evaluator's
-    # tenant-predicated select needs service-sourced tenant context.
     async with tenant_scoped_session(db_manager, tenant_key, _test_session) as session:
         await vision_service.evaluate_vision_analysis_complete(session, product_id)
         await session.commit()
@@ -374,16 +297,6 @@ def _build_update_kwargs(
     fields: dict[str, Any],
     fields_written: list[str],
 ) -> dict[str, Any]:
-    """Build kwargs dict for ProductService.update_product() from extracted fields.
-
-    Translates each extracted vision field to its canonical product column via
-    FIELD_MAP, then groups the columns into update_product blocks through the shared
-    product-field translator (services/product_field_map.py) -- the same translator the
-    context-tuning writer uses. Mutates fields_written in place to track which extraction
-    fields will be written. Relation blocks are written as partial dicts;
-    ProductRepository.update_config_relations merges them per-field, so only the provided
-    columns are overwritten.
-    """
     column_values: dict[str, Any] = {}
     for field_name, (_table, column_name) in FIELD_MAP.items():
         if field_name in fields:
@@ -402,19 +315,6 @@ async def _apply_overwrite_protection(
     *,
     force: bool,
 ) -> None:
-    """Handle ProductService overwrite-protection as structured skips.
-
-    ProductService raises ValidationError carrying
-    ``context={"populated_columns": {block: [column, ...]}}`` when specific config
-    COLUMNS already hold a value and force=False. Roll exactly those columns'
-    extraction fields out of ``fields_written`` into ``fields_skipped``, then
-    re-attempt the write with only the conflicting columns stripped. Re-raise any
-    other ValidationError.
-
-    FE-9320: this used to strip the whole BLOCK, so a repair call discarded every
-    column of tech_stack / architecture / test_config -- including the ones that
-    were still empty. Only the colliding columns are dropped now.
-    """
     populated_columns = (exc.context or {}).get("populated_columns") if hasattr(exc, "context") else None
     if not populated_columns:
         raise exc
@@ -450,14 +350,6 @@ def _skip_user_owned_field(
     *,
     label: str,
 ) -> None:
-    """Drop a user-owned extraction field when it is already set (unless force).
-
-    product_name (the product's name) and project_path (the user's local codebase
-    folder) are both user-owned. When the product already carries a non-empty value
-    the incoming extracted value is dropped from the write and recorded in
-    ``fields_skipped`` so the agent sees what didn't land and why. Callers gate this
-    on ``force is False``; when the existing value is empty the field writes normally.
-    """
     if field_key not in fields:
         return
     if (existing_value or "").strip():
@@ -475,18 +367,6 @@ def _validate_extraction_input(
     product_id: str,
     fields: dict[str, Any],
 ) -> tuple[list[dict] | None, dict | None]:
-    """Validate agent input at the MCP boundary, BEFORE any DB access.
-
-    Rejects the removed legacy summary fields, the enum-like extraction fields, and
-    the two JSONB summary payloads, so bad agent input becomes a clean 422-style
-    ValidationError instead of a DB-constraint 500. Pops ``vision_summaries`` /
-    ``consolidated_vision`` out of ``fields`` (they are written through their own
-    paths, not the column mapper) and returns them validated.
-    """
-    # BE-5117b: legacy summary fields were the parallel write path into
-    # vision_document_summaries. That table is gone and only the column
-    # path (vision_summaries / consolidated_vision) is valid. Silent no-op
-    # would mask agent-prompt drift -- raise loudly so the caller sees it.
     legacy_passed = {"summary_33", "summary_66"}.intersection(fields)
     if legacy_passed:
         raise ValidationError(
@@ -517,7 +397,6 @@ def _validate_extraction_input(
                 context={"test_coverage_target": target},
             )
 
-    # BE-5117: type, shape, length caps, and doc_id UUID format are enforced here.
     vision_summaries_payload: list[dict] | None = None
     consolidated_vision_payload: dict | None = None
     if "vision_summaries" in fields:
@@ -550,31 +429,6 @@ async def update_product_fields(
     is_active: bool | None = None,
     **fields: Any,
 ) -> dict[str, Any]:
-    """Write product fields extracted from vision document analysis.
-
-    Performs merge-write: only updates fields that are explicitly provided.
-    Creates child table rows (tech_stack, architecture, test_config) on first write.
-    Safe to call in STAGES (FE-9320): each call writes what it carries, and every
-    response reports the live completion state so the agent never has to infer
-    whether the analysis finished.
-
-    Args:
-        product_id: Target product UUID
-        tenant_key: Tenant isolation key
-        db_manager: Injected by ToolAccessor
-        websocket_manager: Injected by ToolAccessor for event emission
-        emit_completion: Marks this as the FINAL staged call. Re-evaluates the
-            completion flag and signals the dashboard even when this call writes no
-            fields (the emit is otherwise gated on something having been written).
-        is_active: BE-9502a activate/deactivate -- see product_activation.apply_activation_state.
-        **fields: Extracted field key-value pairs
-
-    Returns:
-        Dict with success, fields_written count, fields list, fields_skipped,
-        vision_analysis_complete and missing_for_completion.
-    Raises:
-        ResourceNotFoundError: If product not found for tenant
-    """
     if not db_manager and _test_session is None:
         raise ValueError("db_manager is required")
 
@@ -589,9 +443,6 @@ async def update_product_fields(
     fields_written: list[str] = []
     fields_skipped: list[dict[str, str]] = []
 
-    # BE-9322: name back any field this tool cannot map (_build_update_kwargs iterates
-    # FIELD_MAP, not `fields`). DEFENSIVE ONLY -- unreachable in production (the grouped
-    # MCP models declare extra="forbid", so FastMCP drops unknown top-level args first).
     _mappable, unmappable_fields = split_known(fields, FIELD_MAP)
     _unmappable_hint = f"Valid fields: {', '.join(sorted(FIELD_MAP))}."
     fields_skipped.extend(
@@ -619,9 +470,6 @@ async def update_product_fields(
                 context={"product_id": product_id},
             )
 
-        # BE-9164 / BE-9167: product_name and project_path (the codebase folder) are user-owned.
-        # Skip each incoming value when the product already has a non-empty one, unless force=True.
-        # When the existing value is empty the extracted value writes normally.
         if not force:
             _skip_user_owned_field("product_name", product.name, fields, fields_skipped, label="product name")
             _skip_user_owned_field(
@@ -630,9 +478,6 @@ async def update_product_fields(
 
         kwargs = _build_update_kwargs(fields, fields_written)
 
-        # -- Route writes through ProductService (the validated single write path) --
-        # Track skipped fields explicitly so the agent can see what didn't write
-        # and why (instead of having to diff fields_written against their input).
         if kwargs:
             from giljo_mcp.services.product_service import ProductService
 
@@ -655,11 +500,6 @@ async def update_product_fields(
                     force=force,
                 )
 
-        # -- BE-5117: per-doc vision_summaries + aggregate consolidated_vision --
-        # Both payloads are persisted via owning services (VisionDocumentRepository
-        # for per-doc, ProductService.update_product for aggregate) so the post-0962
-        # owning-service routing rule holds. The completion flag is then re-evaluated
-        # inside the same session/transaction.
         if vision_summaries_payload is not None:
             await _write_vision_summaries(
                 vision_summaries_payload,
@@ -680,9 +520,6 @@ async def update_product_fields(
                 fields_written,
                 force=force,
             )
-        # FE-9320: evaluate on EVERY call, not only when summaries were in the
-        # payload. Staged writes need each response to carry the true completion
-        # state -- a real run had to guess whether the flag had flipped, and guessed.
         vision_service = ProductVisionService(
             db_manager=db_manager,
             tenant_key=tenant_key,
@@ -690,10 +527,6 @@ async def update_product_fields(
         )
         analysis_complete, missing_for_completion = await vision_service.evaluate_vision_completion(session, product_id)
 
-    # WebSocket emission (after commit via context manager). The per-write emit is
-    # load-bearing for the tutorial's progressive-fill contract (each event is a
-    # refresh tick, not a completion signal), so it stays; emit_completion only ADDS
-    # the case where the final staged call wrote nothing of its own.
     if websocket_manager and (fields_written or emit_completion):
         from giljo_mcp.events.schemas import EventFactory
 
@@ -729,16 +562,6 @@ async def _write_vision_summaries(
     fields_written: list[str],
     fields_skipped: list[dict[str, str]],
 ) -> None:
-    """Persist agent-supplied per-document light/medium summaries (BE-5117).
-
-    Routes through VisionDocumentRepository (the owning repo for vision
-    documents). Per-doc tenant scoping is enforced inside ``update_summaries``.
-
-    FE-9320: a doc_id that matched nothing used to be dropped with only a log line
-    while the response still reported ``vision_summaries`` written -- the one place
-    in this ingest that lost agent data silently. Every miss is now reported to the
-    caller with its doc_id and the reason it did not land.
-    """
     repo = VisionDocumentRepository(db_manager=db_manager)
     landed: list[str] = []
     for entry in payload:
@@ -779,7 +602,6 @@ async def _write_consolidated_vision(
     *,
     force: bool,
 ) -> None:
-    """Persist agent-supplied aggregate consolidated_vision via ProductService."""
     from giljo_mcp.services.product_service import ProductService
 
     product_service = ProductService(

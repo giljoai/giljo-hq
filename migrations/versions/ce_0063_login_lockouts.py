@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-3001a Wave 2 item 6: per-(identifier, IP) login-lockout table.
-
-Creates ``login_lockouts`` — a pre-auth, system-level (NO tenant_key) table that
-backs per-account login lockout (10 failed password attempts from one
-(identifier, IP) pair → 15-minute auto-unlock; instant unlock on password
-reset). Keyed on (identifier, ip_address) so an attacker cannot lock a victim
-out of their own (email, IP) pair from a different IP — see the model docstring
-(``giljo_mcp/models/auth.py::LoginLockout``).
-
-CE chain. Idempotent (existence-guarded) and reversible — CE reruns migrations
-on every boot.
-
-Revision ID: ce_0063_login_lockouts
-Revises: ce_0062_sequence_run_conductor_columns
-Edition Scope: Both (CE core lockout; SaaS adds the email notice via EventBus).
-"""
 
 from __future__ import annotations
 

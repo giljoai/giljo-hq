@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Product Context Tool - Handover 0316, updated 0840c
-
-Fetch general product information for context generation.
-Returns Product Core fields: name, description, core_features, path, status.
-
-Handover 0840c: core_features now read from Product.core_features column
-(normalized from config_data->'features'->>'core').
-"""
-# Read-only tool -- uses direct session.execute() for SELECT queries (no writes)
 
 import logging
 from typing import Any
@@ -27,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 def estimate_tokens(data: Any) -> int:
-    """Estimate token count for data (simple heuristic: 1 token ~ 4 chars)"""
     import json
 
     text = json.dumps(data)
@@ -37,22 +26,6 @@ def estimate_tokens(data: Any) -> int:
 async def get_product_context(
     product_id: str, tenant_key: str, db_manager: DatabaseManager | None = None
 ) -> dict[str, Any]:
-    """
-    Fetch general product information (Product Core).
-
-    Handover 0840c: core_features from Product.core_features column.
-
-    Args:
-        product_id: Product UUID
-        tenant_key: Tenant isolation key
-        db_manager: Database manager instance
-
-    Returns:
-        Dict with product info including core_features.
-
-    Multi-Tenant Isolation:
-        All queries filter by tenant_key and product_id.
-    """
     logger.info("fetching_product_context product_id=%s tenant_key=%s", product_id, tenant_key)
 
     if db_manager is None:

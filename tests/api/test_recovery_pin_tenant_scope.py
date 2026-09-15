@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression: first-admin recovery-PIN persistence must be tenant-scoped.
-
-Bug (comms thread TENANT-CTX-CREATE-FIRST-ADMIN-RECOVERY-PIN-20260605): inside
-``create_first_admin_user`` the optional recovery-PIN block opened a NEW ad-hoc
-session and ran ``select(User).where(User.username == ...)`` WITHOUT setting
-tenant context. Under the fail-closed guard (``GILJO_TENANT_GUARD_MODE=enforce``)
-``_enforce_tenant_scope`` raised ``TenantIsolationError`` -> unhandled -> HTTP 500.
-The admin row was already committed by ``auth_service.create_first_admin`` first,
-so login worked on refresh, but the recovery PIN was SILENTLY never saved.
-
-Fix: wrap the lookup/update in ``tenant_session_context(db, tenant_key)`` using
-the just-created admin's tenant_key (same pattern as the refresh handler).
-
-This exercises the FAILING layer directly -- the tenant-isolation guard against
-the exact ORM statement shape the endpoint uses -- because the full endpoint path
-only reaches the recovery-PIN block on a true fresh install (zero users), which is
-not reproducible in the shared per-worker test DB. Parallel-safe: unique tenant
-per test, guard mode via monkeypatch.setenv, no module-level state.
-"""
 
 from __future__ import annotations
 
@@ -39,7 +20,6 @@ from giljo_mcp.tenant import TenantManager
 
 
 async def _seed_admin(db_manager) -> dict:
-    """Create a fresh admin (+ org) in a unique tenant (no enforce during seed)."""
     suffix = uuid.uuid4().hex[:8]
     tenant_key = TenantManager.generate_tenant_key()
     password_hash = bcrypt.hashpw(b"test_password", bcrypt.gensalt()).decode("utf-8")
@@ -75,7 +55,6 @@ async def seeded_admin(db_manager) -> dict:
 
 @pytest.mark.asyncio
 async def test_unscoped_user_lookup_raises_under_enforce(db_manager, seeded_admin, monkeypatch) -> None:
-    """Reproduces the bug: the recovery-PIN block's un-scoped User query raises."""
     monkeypatch.setenv("GILJO_TENANT_GUARD_MODE", "enforce")
 
     async with db_manager.get_session_async() as db:
@@ -85,7 +64,6 @@ async def test_unscoped_user_lookup_raises_under_enforce(db_manager, seeded_admi
 
 @pytest.mark.asyncio
 async def test_recovery_pin_persists_with_tenant_context_under_enforce(db_manager, seeded_admin, monkeypatch) -> None:
-    """The fix: the same lookup+update succeeds when tenant-scoped, and the PIN is saved."""
     monkeypatch.setenv("GILJO_TENANT_GUARD_MODE", "enforce")
     tenant_key = seeded_admin["tenant_key"]
     username = seeded_admin["username"]
@@ -99,7 +77,6 @@ async def test_recovery_pin_persists_with_tenant_context_under_enforce(db_manage
             user.recovery_pin_hash = bcrypt.hashpw(pin, bcrypt.gensalt()).decode("utf-8")
             await db.commit()
 
-    # Persisted and verifiable on a fresh tenant-scoped session.
     async with db_manager.get_session_async() as db:
         with tenant_session_context(db, tenant_key):
             result = await db.execute(select(User).where(User.username == username))

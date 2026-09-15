@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Repository layer for Giljo HQ database operations.
-
-Handover 0017: Provides clean abstractions for new agentic models with tenant filtering.
-Handover 0043 Phase 2: Added VisionDocumentRepository for multi-vision document support.
-Handover 1011 Phase 3: Added ConfigurationRepository for migration from endpoints.
-
-All repositories enforce multi-tenant isolation at the database level.
-"""
 
 from .agent_completion_repository import AgentCompletionRepository
 from .agent_job_repository import AgentJobRepository

@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SequenceRunQueryMixin — the read/query methods extracted from SequenceRunService.
-
-BE-6203 split the four read methods (``find_active_run_for_project``,
-``find_active_run_for_conductor``, ``list_active``, ``get``) into
-``SequenceRunQueryMixin`` to keep ``sequence_run_service.py`` under the 800-line
-file-size guardrail. This is a PURE MOVE. This test pins that the extracted
-methods still RESOLVE on ``SequenceRunService`` via inheritance and read correctly:
-``get`` returns a run by id and is tenant-scoped (a wrong-tenant read raises).
-The active-run filters (``list_active`` / ``find_active_run_for_project`` /
-``find_active_run_for_conductor``) keep their own dedicated coverage in
-test_be6200_list_active_live_members.py and test_be6184_dedicated_conductor.py.
-
-Parallel-safety: DB-touching; uses the db_session fixture (TransactionalTestContext).
-SequenceRunService.create COMMITs through the injected session, so a function-scoped
-collector wipes only the tenant_keys this test created — no module-level mutable state.
-"""
 
 from __future__ import annotations
 
@@ -46,8 +30,6 @@ _MODE = "claude_code_cli"
 
 @pytest_asyncio.fixture
 async def cleanup_tenants(db_manager):
-    """Collect tenant_keys created by a test; delete their rows at teardown
-    (create COMMITs through the injected session, so rows outlive the txn)."""
     tenants: list[str] = []
     yield tenants
     for tk in tenants:
@@ -104,9 +86,6 @@ async def _create_run(session: AsyncSession, tenant_key: str, project_ids: list[
 async def test_get_resolves_via_mixin_and_is_tenant_scoped(
     db_session: AsyncSession, cleanup_tenants: list[str]
 ) -> None:
-    """get() (extracted to SequenceRunQueryMixin) still resolves on SequenceRunService
-    via inheritance, returns the run by id, and is tenant-scoped: a wrong-tenant read
-    raises ResourceNotFoundError."""
     tenant = TenantManager.generate_tenant_key()
     cleanup_tenants.append(tenant)
 
@@ -117,18 +96,15 @@ async def test_get_resolves_via_mixin_and_is_tenant_scoped(
     run_id = run["id"]
     svc = _seq_svc(db_session)
 
-    # Resolves for the owning tenant (the extracted method is reachable on the service).
     got = await svc.get(run_id=run_id, tenant_key=tenant)
     assert got["id"] == run_id
 
-    # Tenant-scoped: another tenant cannot read the same run.
     other_tenant = TenantManager.generate_tenant_key()
     with pytest.raises(ResourceNotFoundError):
         await svc.get(run_id=run_id, tenant_key=other_tenant)
 
 
 async def _set_run(session: AsyncSession, run_id: str, **values) -> None:
-    """Directly patch a run row (test setup for terminal-status / review states)."""
     await session.execute(update(SequenceRun).where(SequenceRun.id == run_id).values(**values))
     await session.commit()
 
@@ -136,8 +112,6 @@ async def _set_run(session: AsyncSession, run_id: str, **values) -> None:
 async def test_list_review_pending_surfaces_terminal_unreviewed_and_excludes_active(
     db_session: AsyncSession, cleanup_tenants: list[str]
 ) -> None:
-    """FE-9104: list_review_pending returns TERMINAL runs with a completed-but-unreviewed
-    member, excludes still-active runs, and is tenant-scoped."""
     tenant = TenantManager.generate_tenant_key()
     cleanup_tenants.append(tenant)
 
@@ -145,7 +119,6 @@ async def test_list_review_pending_surfaces_terminal_unreviewed_and_excludes_act
     p1 = await _create_project(db_session, tenant, product_id)
     p2 = await _create_project(db_session, tenant, product_id)
 
-    # An active (running) run — must NOT appear in the review-pending listing.
     active = await _seq_svc(db_session).create(
         project_ids=[p1],
         resolved_order=[p1],
@@ -154,7 +127,6 @@ async def test_list_review_pending_surfaces_terminal_unreviewed_and_excludes_act
         project_statuses={p1: "completed"},
         tenant_key=tenant,
     )
-    # A terminal run whose members completed but were never reviewed.
     term = await _create_run(db_session, tenant, [p1, p2])
     await _set_run(db_session, term["id"], status="completed")
 
@@ -162,10 +134,9 @@ async def test_list_review_pending_surfaces_terminal_unreviewed_and_excludes_act
     pending = await svc.list_review_pending(tenant_key=tenant)
     ids = [r["id"] for r in pending]
 
-    assert term["id"] in ids  # terminal + unreviewed → reachable
-    assert active["id"] not in ids  # active runs are excluded (terminal-only source)
+    assert term["id"] in ids
+    assert active["id"] not in ids
 
-    # Tenant-scoped: another tenant sees none of these runs.
     other_tenant = TenantManager.generate_tenant_key()
     assert await svc.list_review_pending(tenant_key=other_tenant) == []
 
@@ -173,8 +144,6 @@ async def test_list_review_pending_surfaces_terminal_unreviewed_and_excludes_act
 async def test_list_review_pending_drops_fully_reviewed_run(
     db_session: AsyncSession, cleanup_tenants: list[str]
 ) -> None:
-    """FE-9104 release semantics: once every completed member is reviewed, the run no
-    longer surfaces — the Jobs review link releases with no infinite bounce."""
     tenant = TenantManager.generate_tenant_key()
     cleanup_tenants.append(tenant)
 
@@ -185,10 +154,8 @@ async def test_list_review_pending_drops_fully_reviewed_run(
     term = await _create_run(db_session, tenant, [p1, p2])
     svc = _seq_svc(db_session)
 
-    # Terminal, no reviews yet → surfaces.
     await _set_run(db_session, term["id"], status="completed")
     assert [r["id"] for r in await svc.list_review_pending(tenant_key=tenant)] == [term["id"]]
 
-    # All completed members reviewed → drops out (released).
     await _set_run(db_session, term["id"], reviewed_project_ids=[p1, p2])
     assert await svc.list_review_pending(tenant_key=tenant) == []

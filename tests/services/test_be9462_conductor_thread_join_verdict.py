@@ -3,36 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9462 — the conductor's Hub-join is now structural, not prose.
-
-MEASUREMENT (posted to the coordination thread before any code): the two-step
-prose (``create_thread`` then ``join_thread``), followed literally, always
-landed the conductor on its own thread — there was no point where a careful
-agent did everything right and still failed. That is NOT TSK-9459's defect
-class (an unresolvable placeholder for a thread the server already knew and
-withheld). That verdict was accepted.
-
-RULING: build it anyway. ``create_thread`` already has a ``creator_id`` param
-that structurally registers + batons the caller (``CommThreadService.create_thread``),
-and the conductor's own ``agent_id`` is already in scope two lines above the
-call that renders CH_CHAIN_STAGING (``conductor_staging_builder.build_conductor_staging_response``)
-— it was just never threaded through. Collapsing the two calls into one is
-the mechanism-over-prose rule pointing at a lever the server already owns,
-not a reproduced-incident behavior change: same end state, one fewer step,
-no prose dependency.
-
-These tests pin the shipped fix:
-
-1. ``build_conductor_staging_response`` (the REAL call shape) now renders
-   ``creator_id`` into the ``create_thread`` call and drops the ``join_thread``
-   line — a pure prose-contract check, no DB.
-2. Executing that ONE call for real (real DB, real CommThreadService) lands
-   the conductor on its own thread's participant directory, by name.
-3. The rare legacy caller (``protocol_builder.py``'s self-registration
-   fallback, which has no clean ``agent_id`` in scope) that never passes
-   ``agent_id`` renders the PRIOR two-step script byte-identically — additive,
-   not a behavior change for that path.
-"""
 
 from __future__ import annotations
 
@@ -86,8 +56,6 @@ async def _seed_project(session: AsyncSession, tenant_key: str, product_id: str 
 
 
 def test_conductor_staging_response_folds_creator_id_into_create_thread() -> None:
-    """Prose-contract check: the REAL call shape now carries creator_id and
-    drops join_thread, matching the shipped ruling."""
     chain_ctx = ChainContext(
         run_id="run-be9462",
         role="conductor",
@@ -108,17 +76,12 @@ def test_conductor_staging_response_folds_creator_id_into_create_thread() -> Non
     assert "join_thread" not in chapter, (
         "the join_thread line is now redundant (create_thread's creator_id already enrols) and must be gone"
     )
-    # Existing prose contracts (BE-6187/BE-9291) still hold.
     assert "sequence_run_id" in chapter
     assert "hub_thread_id" in chapter
 
 
 @pytest.mark.asyncio
 async def test_one_call_create_thread_enrols_conductor_by_name(db_session: AsyncSession) -> None:
-    """GREEN, real DB: executing the ONE call the new prose renders — create_thread
-    with creator_id=<conductor's agent_id> and nothing else — lands the conductor
-    on its own thread's participant directory. Real services, real participant
-    row read back by name, not a mock."""
     tenant = TenantManager.generate_tenant_key()
     with tenant_session_context(db_session, tenant):
         await ensure_default_types_seeded(db_session, tenant)
@@ -133,7 +96,6 @@ async def test_one_call_create_thread_enrols_conductor_by_name(db_session: Async
     conductor_agent_id = run["conductor_agent_id"]
     run_id = run["id"]
 
-    # Confirm the rendered chapter for THIS run/agent is the one-call shape.
     chapter = _build_ch_chain_staging(
         run_id=run_id,
         resolved_order=[p1],
@@ -163,11 +125,6 @@ async def test_one_call_create_thread_enrols_conductor_by_name(db_session: Async
 
 @pytest.mark.asyncio
 async def test_legacy_no_agent_id_caller_keeps_the_prior_two_step_script(db_session: AsyncSession) -> None:
-    """The rare legacy caller (protocol_builder.py's chain_ctx self-registration
-    fallback for an out-of-band run) never resolves a clean conductor agent_id in
-    scope and does not pass one. That path must render BYTE-IDENTICALLY to the
-    prior two-step script -- additive change, not a behavior change there -- and
-    the two-step script must still work end to end."""
     tenant = TenantManager.generate_tenant_key()
     with tenant_session_context(db_session, tenant):
         await ensure_default_types_seeded(db_session, tenant)

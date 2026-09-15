@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""IMP-9132 test 1 — product field-map completeness.
-
-``PRODUCT_DIRECT_FIELDS`` (the ``products``-row columns the vision-extraction and
-context-tuning writers both target) must each ALSO be in
-``ProductService``'s ``_ALLOWED_PRODUCT_FIELDS`` write allowlist — otherwise
-``update_product()``'s ``if field in _ALLOWED_PRODUCT_FIELDS`` gate silently drops
-the field at write time and the value never persists. The rule is stated only as a
-comment at ``product_field_map.py:31-32`` ("each must also be in
-ProductService._ALLOWED_PRODUCT_FIELDS to actually persist"); existing tests pin the
-allowlist CONTENTS but not this subset relation. This makes the comment a test.
-"""
 
 from __future__ import annotations
 

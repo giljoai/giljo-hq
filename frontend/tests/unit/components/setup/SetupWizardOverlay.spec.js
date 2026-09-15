@@ -73,11 +73,11 @@ describe('SetupWizardOverlay', () => {
       expect(labels[3].text()).toBe('Launch')
     })
 
-    it('renders 6 tool cards on step 0 (FE-9204: adds OpenCode + generic client)', () => {
+    it('renders 4 tool cards on step 0 (FE-9204 / INF-9605a)', () => {
       const wrapper = mountOverlay({ currentStep: 0 })
       const toolCards = wrapper.findAll('.tool-card')
 
-      expect(toolCards).toHaveLength(6)
+      expect(toolCards).toHaveLength(4)
     })
 
     it('displays tool names and a method tag per card (providers replaced by method tags)', () => {
@@ -86,10 +86,8 @@ describe('SetupWizardOverlay', () => {
 
       expect(names[0].text()).toBe('Claude Code')
       expect(names[1].text()).toBe('Codex CLI')
-      expect(names[2].text()).toBe('Gemini CLI')
-      expect(names[3].text()).toBe('Antigravity CLI')
-      expect(names[4].text()).toBe('OpenCode')
-      expect(names[5].text()).toBe('Generic MCP client')
+      expect(names[2].text()).toBe('OpenCode')
+      expect(names[3].text()).toBe('Generic MCP client')
 
       // Each card carries a method tag (SaaS default when edition is unresolved).
       expect(wrapper.find('[data-testid="tool-method-generic"]').text()).toBe('MANUAL CONFIG')
@@ -391,7 +389,7 @@ describe('SetupWizardOverlay', () => {
   describe('Playwright hooks — Choose-Tools screen (INF-6246)', () => {
     it('each tool card renders data-testid=tool-select-{id}', () => {
       const wrapper = mountOverlay({ currentStep: 0 })
-      const expectedIds = ['claude_code', 'codex_cli', 'gemini_cli', 'antigravity_cli', 'opencode', 'generic']
+      const expectedIds = ['claude_code', 'codex_cli', 'opencode', 'generic']
       for (const id of expectedIds) {
         expect(wrapper.find(`[data-testid="tool-select-${id}"]`).exists()).toBe(true)
       }
@@ -400,7 +398,7 @@ describe('SetupWizardOverlay', () => {
     it('tool-select-{id} hooks match the tool card count', () => {
       const wrapper = mountOverlay({ currentStep: 0 })
       const hooks = wrapper.findAll('[data-testid^="tool-select-"]')
-      expect(hooks).toHaveLength(6)
+      expect(hooks).toHaveLength(4)
     })
 
     it('renders data-testid=setup-next-btn on the Next button', () => {
@@ -446,7 +444,7 @@ describe('SetupWizardOverlay', () => {
 
       expect(toolCards[0].attributes('aria-label')).toBe('Claude Code')
       expect(toolCards[1].attributes('aria-label')).toBe('Codex CLI')
-      expect(toolCards[2].attributes('aria-label')).toBe('Gemini CLI')
+      expect(toolCards[2].attributes('aria-label')).toBe('OpenCode')
     })
 
     it('the active rail-node carries aria-current="step" (Gradient Rail replaces the progressbar role)', () => {

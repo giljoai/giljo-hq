@@ -3,35 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9242: resolve a terminal agent's dead message cursors.
-
-Root cause: no lifecycle hook ever resolved a closed/decommissioned agent's
-outstanding message cursors, so an unread badge could linger forever on an
-agent nobody will ever reactivate to drain it -- and, far worse, a genuinely
-action-required post addressed to that agent had no path forward at all
-(silently invisible work).
-
-Two layers, deliberately split so the SAME primitives cover both a
-close-time cleanup (this project, P1/BE-9242) and a send-time redirect (the
-sibling project, P2/BE-9247, which reuses ``forward_action_required_to_orchestrator``
-and ``build_forwarded_annotation`` VERBATIM at the moment a NEW post is about
-to be addressed to an already-terminal recipient):
-
-- ``build_forwarded_annotation`` / ``forward_action_required_to_orchestrator``:
-  the reusable primitives. Resolve "who is the live orchestrator right now"
-  (``AgentCompletionRepository.find_active_orchestrator_in_project``) and
-  re-post content to them via the SAME side-effect-free thread-message persist
-  ``post_to_thread`` uses (``CommThreadRepository.persist_thread_message``), so
-  a forwarded post behaves exactly like any other thread post (gates
-  completion, shows up in get_thread_history, etc).
-- ``resolve_terminal_agent_cursors``: the BE-9242-specific orchestration that
-  walks every live (unacked) cursor a newly-terminal agent still holds and
-  calls the primitives above for each one.
-
-Caller owns the session/transaction (same "session-in" pattern as
-``ProjectCloseoutService.decommission_project_agents``); every function here
-only flushes, never commits.
-"""
 
 from __future__ import annotations
 
@@ -57,13 +28,6 @@ def build_forwarded_annotation(
     dead_agent_id: str,
     terminal_status: str,
 ) -> str:
-    """The single canonical wrapper for a message re-routed off a terminal agent.
-
-    BE-9242 / BE-9247 shared format: both the close-time cleanup here and the
-    P2 send-time redirect render a forwarded post with this SAME text shape,
-    so a recipient sees one consistent "why am I getting this" explanation
-    regardless of which seam did the redirecting.
-    """
     return (
         f"[FORWARDED: originally addressed to '{dead_agent_label}' ({dead_agent_id}), "
         f"now {terminal_status} and no longer reachable. Redirecting to you as the "
@@ -85,16 +49,6 @@ async def forward_action_required_to_orchestrator(
     original_content: str,
     original_from_display_name: str,
 ) -> Message | None:
-    """Resolve the live orchestrator for `project_id` and re-post `original_content`
-    to them, wrapped in the canonical forwarded annotation.
-
-    Returns the newly created Message, or None if no live orchestrator
-    execution exists right now. A None return means "could not forward" --
-    the caller MUST NOT treat that as success and must NOT silently drop
-    whatever cursor/post prompted the forward (see
-    ``resolve_terminal_agent_cursors``, which leaves the source message
-    un-acked in that case).
-    """
     completion_repo = AgentCompletionRepository()
     orchestrator_execution = await completion_repo.find_active_orchestrator_in_project(session, tenant_key, project_id)
     if orchestrator_execution is None:
@@ -118,12 +72,6 @@ async def forward_action_required_to_orchestrator(
         from_display_name=f"{dead_agent_label} (forwarded, no longer active)",
         message_type="direct",
         priority="high",
-        # Deliberately requires_action=True, auto_generated left at the model
-        # default (False): this forwarded post must actually gate the live
-        # orchestrator's own completion, exactly like the work it replaces --
-        # auto_generated=True would exempt it from the closeout gate
-        # (agent_completion_repository.get_unread_messages_for_agent) and
-        # silently defeat the whole point of forwarding it.
         requires_action=True,
         recipient_ids=[orchestrator_execution.agent_id],
     )
@@ -131,7 +79,6 @@ async def forward_action_required_to_orchestrator(
 
 @dataclass
 class TerminalCursorResolution:
-    """Outcome of resolving one terminal agent's live cursors (BE-9242)."""
 
     auto_acked_count: int = 0
     forwarded_count: int = 0
@@ -147,29 +94,6 @@ async def resolve_terminal_agent_cursors(
     agent_label: str,
     terminal_status: str,
 ) -> TerminalCursorResolution:
-    """Auto-resolve every live (unacked) message cursor a now-TERMINAL agent
-    still holds (BE-9242 deliverable #1).
-
-    - Informational / auto-generated posts: auto-acknowledged for the dead
-      agent. They will never be read and nothing depends on them for action,
-      so clearing them is exactly what a live agent's own mark_read would
-      have done.
-    - Genuine action-required, non-auto-generated posts: NEVER just acked --
-      forwarded to the live orchestrator first (see
-      ``forward_action_required_to_orchestrator``), THEN acked for the dead
-      agent. The dead agent's cursor is legitimately resolved because the
-      work now has a new, live owner -- not because it was discarded.
-    - If no live orchestrator exists to forward to, the action-required
-      message is left un-acked (fails open and visibly, via a warning log)
-      instead of being silently swallowed.
-
-    Call this from a terminal lifecycle transition (job close, project
-    closeout decommission/close) -- NOT from ``complete_job``, since
-    'complete' stays reactivatable and an agent that may still come back
-    should keep its live cursors.
-
-    Caller owns the session/transaction; this only flushes.
-    """
     completion_repo = AgentCompletionRepository()
     thread_repo = CommThreadRepository()
 

@@ -8,10 +8,21 @@
     item-key="id"
     :items-per-page="10"
     :sort-by="TEMPLATE_TABLE_DEFAULT_SORT"
-    :item-class="(item) => (item.is_active ? '' : 'inactive-template')"
+    :item-class="(item) => (rowActive(item) ? '' : 'inactive-template')"
   >
     <template #item.name="{ item }">
       <div class="font-weight-medium">{{ item.name }}</div>
+    </template>
+
+    <template #item.product_id="{ item }">
+      <v-chip
+        size="x-small"
+        variant="tonal"
+        class="product-chip"
+        :data-testid="`product-chip-${item.id}`"
+      >
+        {{ productNameFor(item) }}
+      </v-chip>
     </template>
 
     <template #item.role="{ item }">
@@ -20,7 +31,7 @@
         :style="{
           backgroundColor: hexToRgba(getCategoryColor(item.role), 0.15),
           color: getCategoryColor(item.role),
-          opacity: item.is_active ? 1 : 0.4,
+          opacity: rowActive(item) ? 1 : 0.4,
         }"
       >
         {{ item.role }}
@@ -52,91 +63,46 @@
       </v-tooltip>
     </template>
 
-    <template #item.export_status="{ item }">
-      <div class="d-flex flex-column align-center">
-        <template v-if="item._system">
-          <span class="text-body-small text-muted-a11y">System managed</span>
-        </template>
-        <template v-else-if="item.user_managed_export">
-          <v-chip size="small" color="info" variant="tonal" prepend-icon="mdi-account-check">
-            User Managed
-          </v-chip>
-        </template>
-        <template v-else>
-          <v-chip
-            v-if="item.may_be_stale && item.is_active"
-            size="small"
-            color="warning"
-            prepend-icon="mdi-alert"
-            class="mb-1"
-            aria-label="Template may be outdated"
-          >
-            May be outdated
-          </v-chip>
-          <v-tooltip location="top" max-width="300">
-            <template #activator="{ props }">
-              <span
-                v-bind="props"
-                class="text-body-small text-muted-a11y"
-                :class="{ 'text-warning': item.may_be_stale }"
-              >
-                {{ item.last_exported_at ? formatDate(item.last_exported_at) : 'Never exported' }}
-              </span>
-            </template>
-            <span v-if="item.may_be_stale">
-              This template was modified after the last export. Run the giljo_setup tool ("Agents only") in your CLI tool to update.
-            </span>
-            <span v-else-if="item.last_exported_at">
-              Last exported: {{ formatDate(item.last_exported_at) }}
-            </span>
-            <span v-else>
-              This template has never been exported. Run the giljo_setup tool ("Agents only") in your CLI tool to install it.
-            </span>
-          </v-tooltip>
-        </template>
-      </div>
-    </template>
-
     <template #item.is_active="{ item }">
       <div class="d-flex align-center justify-center">
         <template v-if="item._system">
           <v-icon color="grey" size="small">mdi-lock</v-icon>
         </template>
+        <template v-else-if="isForeignRow(item)">
+          <v-tooltip location="top">
+            <template #activator="{ props: tipProps }">
+              <span
+                v-bind="tipProps"
+                class="foreign-row-dash"
+                :data-testid="`foreign-agent-${item.id}`"
+                >&mdash;</span
+              >
+            </template>
+            <span>Switch this agent on from the {{ productNameFor(item) }} tab.</span>
+          </v-tooltip>
+        </template>
         <template v-else>
-          <!-- BE-9385a: this switch is the PER-PRODUCT enable, written to the
-               product_agent_assignments junction. ``product_active`` is undefined
-               until the parent has loaded the active product's assignments, and
-               until then it falls back to the tenant flag -- the same tolerance
-               the server applies to a product with no junction rows. The
-               tenant-wide switch is a SEPARATE control -- the edit dialog's
-               "Available in all products" (BE-9394); this one never writes it. -->
           <v-switch
-            :model-value="item.product_active ?? item.is_active"
-            :disabled="!item.is_active"
+            :model-value="rowActive(item)"
+            :disabled="assignmentsLoading"
             color="primary"
             hide-details
             density="compact"
             :aria-label="
-              (item.product_active ?? item.is_active)
-                ? 'Disable agent for this product'
-                : 'Enable agent for this product'
+              rowActive(item) ? 'Disable agent for this product' : 'Enable agent for this product'
             "
             :data-testid="`template-toggle-${item.role}`"
             @update:model-value="$emit('toggle-active', item, $event)"
           />
-          <v-tooltip v-if="!item.is_active" location="top">
+          <v-tooltip v-if="remainingUserSlots === 0 && !rowActive(item)" location="top">
             <template #activator="{ props }">
               <v-icon v-bind="props" size="small" class="ml-1">
                 mdi-help-circle-outline
               </v-icon>
             </template>
-            <span v-if="remainingUserSlots === 0">
+            <span>
               Maximum {{ userAgentLimit }} user-managed agents allowed (context budget limit).
               Deactivate another agent first.
-            </span>
-            <span v-else>
-              This agent is switched off for your whole account, so it cannot be enabled for
-              a single product. Turn on &ldquo;Available in all products&rdquo; under Edit first.
             </span>
           </v-tooltip>
         </template>
@@ -144,7 +110,7 @@
     </template>
 
     <template #item.actions="{ item }">
-      <div v-if="item._system" />
+      <div v-if="item._system || isForeignRow(item)" />
       <div v-else class="d-flex align-center justify-center">
         <v-menu>
           <template #activator="{ props }">
@@ -176,10 +142,10 @@
               @click="$emit('reset', item)"
             ></v-list-item>
             <v-list-item
-              v-if="item.may_be_stale && !item.user_managed_export"
-              prepend-icon="mdi-account-check"
-              title="Mark as User Managed"
-              @click="$emit('mark-user-managed', item)"
+              prepend-icon="mdi-file-download-outline"
+              title="Download profile (.md)"
+              data-testid="action-download-profile"
+              @click="$emit('download-profile', item)"
             ></v-list-item>
             <v-divider class="my-1" />
             <v-list-item
@@ -191,64 +157,73 @@
         </v-menu>
       </div>
     </template>
+
+    <template #no-data>
+      <div class="table-no-data" data-testid="templates-no-match">
+        <div class="table-no-data__title">No agents match these filters</div>
+        <v-btn size="small" variant="text" data-testid="clear-filters" @click="$emit('clear-filters')">
+          Clear filters
+        </v-btn>
+      </div>
+    </template>
   </v-data-table>
 </template>
 
 <script setup>
-/**
- * TemplatesTable.vue — FE-6042b
- *
- * Presentational child: renders the v-data-table with all 6 item.* slots.
- * No API calls. No composables. All data flows in via props, all interactions
- * out via emits.
- *
- * Edition scope: CE
- */
 import { format } from 'date-fns'
 import { getAgentColor as getAgentColorConfig } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
-import { templateUpdatedState, TEMPLATE_TABLE_DEFAULT_SORT } from './templateTableConfig'
+import {
+  templateUpdatedState,
+  templateRowActive,
+  TEMPLATE_TABLE_DEFAULT_SORT,
+} from './templateTableConfig'
 
-/**
- * @type {Object} props
- * @property {Array}  templates         - Filtered template rows (from filteredTemplates)
- * @property {boolean} loading          - Whether data is being loaded
- * @property {Array}  headers           - Table column definitions
- * @property {number} remainingUserSlots - Remaining activatable user slots
- * @property {number} userAgentLimit    - Max user-managed agents allowed
- */
 const props = defineProps({
-  /** Filtered template rows to display */
   templates: {
     type: Array,
     default: () => [],
   },
-  /** Whether the table is in loading state */
   loading: {
     type: Boolean,
     default: false,
   },
-  /** Column header definitions for v-data-table */
+  assignmentsLoading: {
+    type: Boolean,
+    default: false,
+  },
   headers: {
     type: Array,
     default: () => [],
   },
-  /** Search term forwarded to v-data-table for text filtering */
   search: {
     type: String,
     default: '',
   },
-  /** Number of remaining activatable user slots */
   remainingUserSlots: {
     type: Number,
     default: 0,
   },
-  /** Maximum number of user-managed agents allowed */
   userAgentLimit: {
     type: Number,
     default: 7,
   },
+  showAllProducts: {
+    type: Boolean,
+    default: false,
+  },
+  viewedProductId: {
+    type: String,
+    default: null,
+  },
+  productNameFor: {
+    type: Function,
+    default: () => 'Unknown product',
+  },
 })
+
+const isForeignRow = (item) =>
+  !item?._system && !!item?.product_id && item.product_id !== props.viewedProductId
 
 defineEmits([
   'toggle-active',
@@ -256,12 +231,10 @@ defineEmits([
   'duplicate',
   'reset',
   'delete',
-  'mark-user-managed',
+  'download-profile',
+  'clear-filters',
 ])
 
-// ---------------------------------------------------------------------------
-// Display helpers (owned by this component — used in item.* slots)
-// ---------------------------------------------------------------------------
 
 const getCategoryColor = (role) => getAgentColorConfig(role).hex
 
@@ -271,6 +244,8 @@ const formatDate = (date) => {
 }
 
 const updatedState = (item) => templateUpdatedState(item)
+
+const rowActive = (item) => templateRowActive(item)
 </script>
 
 <style scoped lang="scss">
@@ -282,6 +257,29 @@ const updatedState = (item) => templateUpdatedState(item)
 .updated-new {
   color: $color-brand-yellow;
   font-weight: 600;
+}
+
+.product-chip {
+  font-weight: 600;
+}
+
+.foreign-row-dash {
+  color: $color-text-muted;
+  cursor: default;
+}
+
+.table-no-data {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.table-no-data__title {
+  font-size: 0.9rem;
+  color: $color-text-secondary;
 }
 
 .template-role-badge {

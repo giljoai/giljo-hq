@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tests for the orchestrator check-in protocol (Handover 0904/0960, BE-6013, FE-9296b).
-
-FE-9296b retired the per-project cadence slider and rewrote CH6 around the
-BE-9296a wake mechanism. The contract these tests pin:
-
-1. CH6 branches on harness wake capability: PATH A parks on get_my_turn
-   (wake-capable, verified Claude Code CLI), PATH B is the timed sleep loop
-   (everything else; chat surfaces can never hold the wake call open).
-2. The live-value discipline survives the slider: the cadence is re-read each
-   cycle from get_workflow_status().checkin_cadence_minutes; the interval arg
-   is a first-cycle seed only, never baked as an authoritative sleep number.
-3. Status honesty: PATH A sets wake_on_signal, PATH B sets wake_in_minutes.
-4. The gate is ONE behaviour: CH6 renders for every non-CLI orchestrator
-   regardless of the (retired) auto_checkin_enabled flag, matching the
-   get_job_mission path; CLI modes never receive it.
-5. The project-less chain conductor gets its own CH6 variant (account-level
-   cadence applied to the chain-drive wait).
-"""
 
 import re
 
@@ -32,21 +13,14 @@ from giljo_mcp.services.protocol_builder import (
 
 
 class TestCh6WakeCapabilityBranch:
-    """CH6 must branch exactly on harness wake capability (FE-9296b / BE-9296a)."""
 
     def test_ch6_carries_both_paths(self):
         ch6 = _build_ch6_auto_checkin(interval=10)
         assert "PATH A" in ch6
         assert "PATH B" in ch6
-        # BE-9554: get_my_turn merged into get_my_turn(wait_seconds=). The guarantee
-        # is unchanged -- ch6 must teach the BLOCKING wake path. Asserted as both
-        # tokens rather than one literal: the rendered call carries agent_id between
-        # them, so a literal substring would pin formatting instead of behaviour.
         assert "get_my_turn" in ch6 and "wait_seconds" in ch6
 
     def test_ch6_names_the_verified_wake_harness(self):
-        # BE-9296a DoD item 10: the wake was OBSERVED on Claude Code CLI only —
-        # the prose must anchor capability to that record, not guess per harness.
         ch6 = _build_ch6_auto_checkin(interval=10)
         assert "Claude Code CLI" in ch6
 
@@ -62,15 +36,12 @@ class TestCh6WakeCapabilityBranch:
         assert "waiter_limit" in ch6
 
     def test_ch6_wake_path_keeps_the_cadence_as_a_heartbeat(self):
-        # Status changes don't fire the wake signal, so PATH A must still run a
-        # full coordination pass every M minutes.
         ch6 = _build_ch6_auto_checkin(interval=10)
         lowered = ch6.lower()
         assert "do not" in lowered and "fire the wake signal" in lowered
 
 
 class TestCh6LiveReadContract:
-    """The live-value rule (BE-6013) survives the slider's retirement."""
 
     def test_ch6_reads_the_resolved_cadence_from_get_workflow_status(self):
         ch6 = _build_ch6_auto_checkin(interval=10)
@@ -84,7 +55,6 @@ class TestCh6LiveReadContract:
         assert "remember" in lowered
 
     def test_ch6_does_not_bake_a_single_authoritative_sleep_number(self):
-        """Regression guard: the OLD pattern baked `sleep 600` / `Start-Sleep -Seconds 600`."""
         for interval in (5, 10, 30, 60):
             ch6 = _build_ch6_auto_checkin(interval=interval)
             baked_seconds = interval * 60
@@ -109,7 +79,6 @@ class TestCh6LiveReadContract:
 
 
 class TestCh6StatusHonesty:
-    """The dashboard indicator derives from the markers CH6 mandates."""
 
     def test_wake_path_sets_wake_on_signal(self):
         ch6 = _build_ch6_auto_checkin(interval=10)
@@ -141,7 +110,6 @@ class TestCh6StatusHonesty:
 
 
 class TestCh6ConductorVariant:
-    """FE-9296b: the project-less conductor gets a cadence at all (TSK-9324 dec. 5)."""
 
     def test_conductor_variant_renders_its_own_chapter(self):
         ch6 = _build_ch6_auto_checkin(interval=10, for_conductor=True)
@@ -154,32 +122,22 @@ class TestCh6ConductorVariant:
 
     def test_conductor_variant_branches_on_wake_capability_too(self):
         ch6 = _build_ch6_auto_checkin(interval=10, for_conductor=True)
-        # BE-9554: get_my_turn merged into get_my_turn(wait_seconds=). The guarantee
-        # is unchanged -- ch6 must teach the BLOCKING wake path. Asserted as both
-        # tokens rather than one literal: the rendered call carries agent_id between
-        # them, so a literal substring would pin formatting instead of behaviour.
         assert "get_my_turn" in ch6 and "wait_seconds" in ch6
         assert "Claude Code CLI" in ch6
 
     def test_conductor_variant_keeps_the_advance_gate_poll(self):
-        # The wake signal cannot report ready_to_advance (it flips without a Hub
-        # post), so the conductor must keep polling get_workflow_status.
         ch6 = _build_ch6_auto_checkin(interval=10, for_conductor=True)
         assert "ready_to_advance" in ch6
         assert "get_workflow_status" in ch6
 
     def test_both_variants_share_the_marker_prefix(self):
-        # test suites detect CH6 presence by this prefix — both variants carry it.
         assert "CH6: CHECK-IN" in _build_ch6_auto_checkin(interval=10)
         assert "CH6: CHECK-IN" in _build_ch6_auto_checkin(interval=10, for_conductor=True)
 
 
 class TestProtocolCh6Integration:
-    """FE-9296b: ONE gate — CH6 renders for every non-CLI orchestrator."""
 
     def test_protocol_includes_ch6_for_multi_terminal_regardless_of_enabled_flag(self):
-        # The enabled flag is retired as a gate: staging and runtime paths must
-        # agree (the old split shipped CH6 on one path and not the other).
         for enabled in (True, False):
             protocol = _build_orchestrator_protocol(
                 cli_mode=False,
@@ -194,9 +152,6 @@ class TestProtocolCh6Integration:
             assert "get_workflow_status" in protocol["ch6_auto_checkin"]
 
     def test_protocol_excludes_ch6_in_staging_response(self):
-        # Phase-gated with CH5: the check-in loop only exists once agents are
-        # dispatched, and the staging response has a payload budget (CE-0033)
-        # CH6 would breach for no benefit.
         protocol = _build_orchestrator_protocol(
             cli_mode=False,
             project_id="test-proj",
@@ -234,7 +189,6 @@ class TestProtocolCh6Integration:
         assert "Start-Sleep -Seconds 1800" not in ch6
 
     def test_protocol_defaults_include_ch6_for_non_cli(self):
-        """Params omitted → CH6 still renders (the account default seeds it)."""
         protocol = _build_orchestrator_protocol(
             cli_mode=False,
             project_id="test-proj",

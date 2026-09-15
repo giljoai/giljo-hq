@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-5029 Phase A: ce_0018 user_approvals migration idempotency tests."""
 
 from unittest.mock import MagicMock, patch
 
@@ -16,7 +15,6 @@ def _build_fake_conn(*, has_table: bool, has_index: bool, has_check: bool = Fals
     def execute(stmt, params=None):
         text = str(stmt).lower()
         result = MagicMock()
-        # table_constraints must be checked before tables (more specific match)
         if "information_schema.table_constraints" in text:
             result.first.return_value = (1,) if has_check else None
         elif "information_schema.tables" in text:
@@ -32,7 +30,6 @@ def _build_fake_conn(*, has_table: bool, has_index: bool, has_check: bool = Fals
 
 
 def _patch_op(mig):
-    """Patch every op.* call the migration uses so it runs without an Alembic context."""
     return [
         patch.object(mig.op, "create_table"),
         patch.object(mig.op, "create_index"),
@@ -62,8 +59,6 @@ def test_upgrade_creates_table_and_indexes_on_fresh_db():
     assert create_table.call_args.args[0] == "user_approvals"
     assert create_index.call_count == 3
     assert create_check.call_count == 1
-    # BE-5083: the recreated agent-status CHECK must actually whitelist the new
-    # awaiting_user status, not merely be created. args = (name, table, condition).
     assert create_check.call_args.args[0] == "ck_agent_execution_status"
     assert "awaiting_user" in create_check.call_args.args[2]
 
@@ -105,8 +100,6 @@ def test_downgrade_drops_indexes_and_table_when_present():
     assert drop_index.call_count == 3
     assert drop_table.call_count == 1
     assert drop_table.call_args.args[0] == "user_approvals"
-    # BE-5083: downgrade must restore the pre-ce_0018 agent-status CHECK -- drop
-    # the awaiting_user-aware constraint, then recreate the OLD one verbatim.
     assert drop_constraint.call_count == 1
     assert drop_constraint.call_args.args[0] == "ck_agent_execution_status"
     assert create_check.call_count == 1

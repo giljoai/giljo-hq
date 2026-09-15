@@ -3,4 +3,4 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Live black-box E2E suite (gated; see conftest.py + README.md)."""
+pass

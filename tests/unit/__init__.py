@@ -3,4 +3,3 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-# Unit tests package

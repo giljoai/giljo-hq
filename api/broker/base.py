@@ -17,11 +17,6 @@ class WebSocketBrokerMessage:
     event: dict[str, Any]
     exclude_client: str | None = None
     origin: str | None = None
-    # TSK-9006: control-plane discriminator carried on the SAME giljo_ws_events
-    # channel (no new channel per ADR-009 tenant-scoping). None => a normal event
-    # broadcast; "disconnect_tenant" => close every live socket in ``tenant_key``
-    # (user deactivation must bite live sockets across workers). ``event`` is an
-    # empty envelope for control messages.
     control: str | None = None
 
 
@@ -29,7 +24,6 @@ BrokerHandler = Callable[[WebSocketBrokerMessage], Awaitable[None]]
 
 
 class WebSocketEventBroker(ABC):
-    """Cross-worker broker for tenant-scoped WebSocket events."""
 
     async def start(self) -> None:  # pragma: no cover
         return None

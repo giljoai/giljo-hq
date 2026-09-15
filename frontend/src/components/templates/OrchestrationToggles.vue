@@ -1,6 +1,5 @@
 <template>
   <div>
-    <!-- HITL Closeout Toggle -->
     <div class="hitl-toggle-bar">
       <v-switch
         v-model="closeoutModeHitl"
@@ -20,7 +19,6 @@
       </v-tooltip>
     </div>
 
-    <!-- BE-9084 / BE-9542: Headless vs HITL launch toggle (account-wide, default Headless) -->
     <div class="hitl-toggle-bar">
       <v-switch
         v-model="allowHeadless"
@@ -43,64 +41,26 @@
 </template>
 
 <script setup>
-/**
- * OrchestrationToggles.vue — FE-9385c
- *
- * The two ACCOUNT-WIDE orchestration policy switches: HITL-vs-autonomous
- * closeout, and headless-vs-HITL launch (BE-9084). Extracted from
- * TemplateManager.vue, where they only ever lived because that tab had room —
- * neither has anything to do with the agent-template roster around them.
- *
- * Self-contained by design: it owns its own state, reads and writes its own
- * api.settings calls, and loads on its own mount. The parent passes nothing in
- * and gets nothing out, which is what makes it liftable to any settings surface.
- *
- * Both toggles update optimistically and revert on error.
- *
- * NOTE: the .v-switch thumb/track colour rules below came with the markup and
- * must stay with it. Scoped CSS does not cross a component boundary, so leaving
- * them in TemplateManager.vue would silently drop the green/blue switch styling
- * — the same boundary TemplatesTable.vue already documents for its row toggles.
- *
- * Edition scope: CE
- */
 import { ref, onMounted } from 'vue'
 import api from '@/services/api'
 import { useToast } from '@/composables/useToast'
 
 const { showToast } = useToast()
 
-// HITL closeout mode
 const closeoutModeHitl = ref(true)
 
-// BE-9084 / BE-9542: account-wide Headless-vs-HITL launch toggle (default true =
-// Headless, since BE-9542; the server is the source of truth, this is only the
-// pre-load display value).
 const allowHeadless = ref(true)
 
-// HITL closeout mode toggle
 async function toggleCloseoutMode(enabled) {
   const newMode = enabled ? 'hitl' : 'autonomous'
   const previousValue = closeoutModeHitl.value
   closeoutModeHitl.value = enabled
   try {
-    // FE-9555: send the MERGED category, never just this one key. `PUT
-    // /api/v1/settings/general` REPLACES the whole category
-    // (update_settings("general", request.settings) -- no merge), so a partial
-    // payload here destroyed every sibling key on each flip. Found live: saving
-    // the execution-mode default and then flipping this toggle left the mode gone
-    // from the database while both requests returned 200. The bug predates the
-    // new setting; that setting is just the first sibling visible enough to
-    // notice. Fixed here rather than by making the endpoint merge -- it is the
-    // general-purpose "write the settings dict" verb and other callers may rely
-    // on replacement (museum rule: do not change its observable behaviour).
     let general = {}
     try {
       const currentRes = await api.settings.getGeneral()
       general = currentRes.data?.settings || {}
     } catch (readErr) {
-      // A failed read must not drop the change the user just made: write the one
-      // key rather than abandoning it. Worst case is the pre-existing behaviour.
       console.warn('[OrchestrationToggles] could not read general settings to merge', readErr)
     }
     await api.settings.updateGeneral({ ...general, closeout_mode: newMode })
@@ -128,8 +88,6 @@ async function loadCloseoutMode() {
   }
 }
 
-// BE-9084: Headless-vs-HITL launch toggle (account-wide). Optimistic update with
-// revert-on-error, mirroring the closeout toggle above.
 async function toggleHeadless(enabled) {
   const previousValue = allowHeadless.value
   allowHeadless.value = enabled

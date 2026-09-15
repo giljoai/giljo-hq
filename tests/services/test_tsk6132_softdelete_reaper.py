@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""TSK-6132 regression: generalized soft-delete reaper.
-
-BE-6130b/BE-6137 added soft-delete + a 30-day RECOVER boundary to the
-self-service trash/recover entities (CommThread, Task, VisionDocument,
-AgentTemplate) but DEFERRED the permanent purge of expired rows. TSK-6132 adds
-that reaper: a per-owning-service ``purge_expired_deleted_*`` method that
-hard-deletes only the rows trashed longer than ``RECOVER_WINDOW_DAYS`` ago,
-driven at startup by ``purge_expired_soft_deleted_entities``.
-
-The load-bearing assertion for every entity is three-way:
-  * an EXPIRED soft-deleted row (deleted_at past the window) is hard-deleted;
-  * a WITHIN-WINDOW soft-deleted row is LEFT (still recoverable);
-  * a LIVE row is LEFT untouched.
-Plus FK-safety (children cascade / re-parent correctly) and tenant isolation.
-
-Real DB (rollback-isolated ``db_session``), no mocks — parallel-safe: each test
-mints its own tenant key / product, no module-level mutable state.
-"""
 
 from __future__ import annotations
 
@@ -53,20 +35,13 @@ from giljo_mcp.tenant import TenantManager
 
 pytestmark = pytest.mark.asyncio
 
-# A deleted_at safely past the recovery window, and one safely inside it.
 _EXPIRED = datetime.now(UTC) - timedelta(days=RECOVER_WINDOW_DAYS + 1)
 _WITHIN = datetime.now(UTC) - timedelta(days=1)
 
 
-# ===========================================================================
-# Shared policy helper
-# ===========================================================================
 
 
 async def test_recover_window_cutoff_matches_per_row_gate():
-    """The reaper's discovery cutoff and the per-row recover gate are driven by
-    the SAME ``RECOVER_WINDOW_DAYS`` — a row is "expired" iff it is before the
-    cutoff, by construction (no drift between purge-eligibility and recover-deny)."""
     now = datetime(2026, 6, 19, 12, 0, 0, tzinfo=UTC)
     cutoff = recover_window_cutoff(now=now)
     assert cutoff == now - timedelta(days=RECOVER_WINDOW_DAYS)
@@ -77,9 +52,6 @@ async def test_recover_window_cutoff_matches_per_row_gate():
     assert recover_window_expired(still_recoverable, now=now) is False
 
 
-# ===========================================================================
-# CommThread reaper
-# ===========================================================================
 
 
 def _cht_service(db_manager, db_session) -> CommThreadService:
@@ -118,16 +90,14 @@ async def test_thread_reaper_purges_expired_leaves_within_and_live(db_manager, d
         remaining = {
             r for (r,) in (await db_session.execute(select(CommThread.id).where(CommThread.tenant_key == tenant)))
         }
-    assert expired not in remaining  # expired row reaped
-    assert within in remaining  # still-recoverable row left
-    assert live in remaining  # live row left
+    assert expired not in remaining
+    assert within in remaining
+    assert live in remaining
 
-    # Idempotent: a second sweep finds nothing.
     assert await svc.purge_expired_deleted_threads(tenant_key=tenant) == 0
 
 
 async def test_thread_reaper_cascades_messages(db_manager, db_session):
-    """Hard-deleting a trashed thread removes its messages via DB ON DELETE CASCADE."""
     tenant = f"tk_tsk6132_cht_{uuid4().hex[:6]}"
     await _seed_taxonomy(db_session, tenant)
     svc = _cht_service(db_manager, db_session)
@@ -142,7 +112,7 @@ async def test_thread_reaper_cascades_messages(db_manager, db_session):
 
     with tenant_session_context(db_session, tenant):
         msg = (await db_session.execute(select(Message).where(Message.id == msg_id))).scalar_one_or_none()
-    assert msg is None  # message cascaded with its trashed thread
+    assert msg is None
 
 
 async def test_thread_reaper_is_tenant_isolated(db_manager, db_session):
@@ -154,15 +124,11 @@ async def test_thread_reaper_is_tenant_isolated(db_manager, db_session):
 
     owner_tid = await _trash_thread(svc, db_session, owner, subject="owners-expired", deleted_at=_EXPIRED)
 
-    # The intruder's sweep must not touch the owner's expired thread.
     assert await svc.purge_expired_deleted_threads(tenant_key=intruder) == 0
     owner_trash = await svc.list_deleted_threads(tenant_key=owner)
     assert owner_tid in {t["thread_id"] for t in owner_trash["threads"]}
 
 
-# ===========================================================================
-# Task reaper
-# ===========================================================================
 
 
 @pytest_asyncio.fixture
@@ -220,8 +186,6 @@ async def test_task_reaper_purges_expired_leaves_within_and_live(
 
 
 async def test_task_reaper_reparents_live_subtask(task_service, db_session, test_tenant_key, task_product, task_admin):
-    """A live child subtask of an expired-trashed parent is re-parented to NULL
-    (the self-FK has no cascade) — FK-safe and the child survives."""
     parent = await _trash_task(task_service, db_session, test_tenant_key, task_admin, deleted_at=_EXPIRED)
     child = await _trash_task(task_service, db_session, test_tenant_key, task_admin, deleted_at=None)
     await db_session.execute(update(Task).where(Task.id == child).values(parent_task_id=parent))
@@ -230,8 +194,8 @@ async def test_task_reaper_reparents_live_subtask(task_service, db_session, test
     await task_service.purge_expired_deleted_tasks(test_tenant_key)
 
     surviving = (await db_session.execute(select(Task).where(Task.id == child))).scalar_one_or_none()
-    assert surviving is not None  # child survived
-    assert surviving.parent_task_id is None  # re-parented off the reaped parent
+    assert surviving is not None
+    assert surviving.parent_task_id is None
     gone = (await db_session.execute(select(Task).where(Task.id == parent))).scalar_one_or_none()
     assert gone is None
 
@@ -251,9 +215,6 @@ async def test_task_reaper_is_tenant_isolated(
     assert still_there == expired
 
 
-# ===========================================================================
-# VisionDocument reaper
-# ===========================================================================
 
 
 async def _make_product(db_session, tenant: str) -> Product:
@@ -318,7 +279,6 @@ async def test_vision_reaper_purges_expired_leaves_within_and_live(db_manager, d
             r
             for (r,) in (await db_session.execute(select(VisionDocument.id).where(VisionDocument.tenant_key == tenant)))
         }
-        # Chunk of the reaped doc cascades at the DB level.
         chunk_count = (
             await db_session.execute(
                 select(func.count()).select_from(MCPContextIndex).where(MCPContextIndex.vision_document_id == expired)
@@ -327,7 +287,7 @@ async def test_vision_reaper_purges_expired_leaves_within_and_live(db_manager, d
     assert expired not in remaining
     assert within in remaining
     assert live in remaining
-    assert chunk_count == 0  # RAG chunks cascaded with the reaped doc
+    assert chunk_count == 0
 
     assert await svc.purge_expired_deleted_documents() == 0
 
@@ -349,9 +309,6 @@ async def test_vision_reaper_is_tenant_isolated(db_manager, db_session):
     assert still_there == owner_doc
 
 
-# ===========================================================================
-# AgentTemplate reaper
-# ===========================================================================
 
 
 def _tpl_service(db_manager, tenant_key, db_session) -> TemplateService:
@@ -415,8 +372,6 @@ async def test_template_reaper_purges_expired_leaves_within_and_live(db_manager,
 
 
 async def test_template_reaper_deletes_archives(db_manager, db_session, test_tenant_key):
-    """Reaping a trashed template removes its TemplateArchive version history
-    (mirrors hard_delete_template; archives have no DB cascade)."""
     svc = _tpl_service(db_manager, test_tenant_key, db_session)
     tpl_id = await _make_trashed_template(db_session, test_tenant_key, deleted_at=_EXPIRED, with_archive=True)
 
@@ -443,13 +398,6 @@ async def test_template_reaper_is_tenant_isolated(db_manager, db_session, test_t
     assert still_there == expired
 
 
-# ---------------------------------------------------------------------------
-# BE-9289b: the soft-delete lifecycle moved to CommThreadSoftDeleteMixin. The move was
-# a pure relocation, so the behavioural coverage above is unchanged — this pins the
-# COMPOSITION, which is the one thing a relocation can silently break: if the mixin is
-# ever dropped from the service's bases, every test above would fail with an obscure
-# AttributeError instead of naming the cause.
-# ---------------------------------------------------------------------------
 
 
 def test_soft_delete_lifecycle_is_served_by_the_mixin():
@@ -459,6 +407,4 @@ def test_soft_delete_lifecycle_is_served_by_the_mixin():
     assert issubclass(CommThreadService, CommThreadSoftDeleteMixin)
     for name in ("delete_thread", "restore_thread", "list_deleted_threads", "purge_expired_deleted_threads"):
         assert hasattr(CommThreadService, name), f"{name} vanished from the service API"
-        # Served BY the mixin, not redefined on the service — that is what makes the
-        # extraction a single source of truth rather than a copy.
         assert getattr(CommThreadService, name) is getattr(CommThreadSoftDeleteMixin, name)

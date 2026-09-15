@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Orchestration Endpoints - Handover 0124
-
-Handles project orchestration operations:
-- POST /api/agent-jobs/launch-project - Launch staged project
-- PATCH /api/agent-jobs/projects/{project_id}/launch-implementation - Launch implementation phase
-
-All operations use OrchestrationService (no direct DB access).
-
-Note: regenerate-mission endpoint removed in Handover 0729 (never integrated with frontend).
-BE-9143: the registered-but-dead GET /workflow/{project_id} route was retired
-(no remaining caller — workflow status is read via the get_workflow_status MCP tool).
-"""
 
 import logging
 from datetime import UTC, datetime
@@ -42,9 +29,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# ============================================================================
-# Orchestration Models (from old orchestration.py)
-# ============================================================================
 
 
 class LaunchProjectRequest(BaseModel):
@@ -77,11 +61,6 @@ class LaunchProjectResponse(BaseModel):
     message: str | None = None
 
 
-# ============================================================================
-# Launch Endpoints
-# ============================================================================
-# Note: orchestrate_project endpoint removed - use manual orchestration workflow.
-# Note: GET /workflow/{project_id} retired in BE-9143 (registered-but-dead).
 
 
 @router.post("/launch-project", response_model=LaunchProjectResponse)
@@ -115,7 +94,6 @@ async def launch_project(
     project_id_str = str(request.project_id)
     logger.info("Launch project requested for %s by %s", sanitize(project_id_str), sanitize(current_user.username))
 
-    # Fetch project with multi-tenant isolation
     stmt = select(Project).where(
         Project.id == project_id_str,
         Project.tenant_key == current_user.tenant_key,
@@ -129,7 +107,6 @@ async def launch_project(
         )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
-    # Validate mission exists
     if not project.mission or project.mission.strip() == "":
         logger.error("Project %s has no mission", sanitize(project_id_str))
         raise HTTPException(
@@ -137,7 +114,6 @@ async def launch_project(
             detail="Project mission has not been created. Please complete staging first.",
         )
 
-    # Fetch spawned agents (executions with job data)
     agent_stmt = (
         select(AgentExecution)
         .options(joinedload(AgentExecution.job))
@@ -157,21 +133,19 @@ async def launch_project(
             detail="No agents have been spawned for this project. Please complete staging first.",
         )
 
-    # Update project timestamp (staging_status stays "staged" — implementation tracked by implementation_launched_at)
     project.updated_at = datetime.now(UTC)
 
     try:
         await db.commit()
         await db.refresh(project)
         logger.info("Project %s launching implementation (%d agents)", sanitize(project_id_str), len(agents))
-    except Exception as e:  # Broad catch: API boundary, converts to HTTP error
+    except Exception as e:
         await db.rollback()
         logger.exception("Failed to update project status")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to launch project due to database error"
         ) from e
 
-    # Build agent info response
     agent_info_list = [
         AgentInfo(
             agent_id=str(agent.agent_id),
@@ -179,14 +153,13 @@ async def launch_project(
             agent_display_name=agent.agent_display_name,
             agent_name=agent.agent_name,
             status=agent.status,
-            mission=agent.job.mission,  # Mission is on the job, not execution
+            mission=agent.job.mission,
             tool_type=agent.tool_type,
             progress=agent.progress,
         )
         for agent in agents
     ]
 
-    # Broadcast WebSocket event
     try:
         await ws_dep.broadcast_to_tenant(
             tenant_key=current_user.tenant_key,
@@ -200,7 +173,7 @@ async def launch_project(
             },
         )
         logger.info("WebSocket event 'project:launched' broadcasted for %s", sanitize(project_id_str))
-    except Exception as _exc:  # Broad catch: API boundary, converts to HTTP error
+    except Exception as _exc:
         logger.exception("Failed to broadcast WebSocket event")
 
     return LaunchProjectResponse(
@@ -213,9 +186,6 @@ async def launch_project(
     )
 
 
-# ============================================================================
-# Implementation Phase Gate (Handover 0709)
-# ============================================================================
 
 
 class LaunchImplementationResponse(BaseModel):
@@ -275,7 +245,6 @@ async def launch_implementation(
             project_id=project_id,
             tenant_key=current_user.tenant_key,
             launched_by=current_user.username,
-            # TSK-6219: the dashboard Implement button is the UI door.
             origin="ui",
         )
     except ResourceNotFoundError as exc:
@@ -292,8 +261,6 @@ async def launch_implementation(
     logger.info(
         "Implementation launched for project %s at %s", sanitize(project_id), result["implementation_launched_at"]
     )
-    # BE-9541: both keys are populated by the shared service now -- carry both
-    # through so a REST caller checking either field sees the same timestamp.
     return LaunchImplementationResponse(
         success=True,
         implementation_launched_at=result["implementation_launched_at"],

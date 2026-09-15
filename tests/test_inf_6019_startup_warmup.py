@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""INF-6019 regression: startup warm-up (cold-start mitigation).
-
-The warm-up runs in the FastAPI lifespan before the app reports ready. It must:
-  * configure ORM mappers and issue a ``SELECT 1`` to warm the DB pool, and
-  * NEVER propagate an error (a warm-up hiccup must not block or crash boot).
-
-These are the load-bearing guarantees, so the guard exercises the function
-directly with stubbed state.
-"""
 
 from __future__ import annotations
 
@@ -26,7 +17,6 @@ from api.app import _warm_up
 
 
 class _FakeAsyncSession:
-    """Minimal async-context-manager session whose execute is awaitable."""
 
     def __init__(self) -> None:
         self.execute = AsyncMock()
@@ -53,16 +43,12 @@ async def test_warm_up_pings_db_and_configures_mappers(monkeypatch):
 
     assert called["configure_mappers"] == 1
     session.execute.assert_awaited_once()
-    # The warm-up query must be a raw SELECT 1 (tenant-guard-safe).
     sent_sql = str(session.execute.await_args.args[0])
     assert "SELECT 1" in sent_sql
 
 
 @pytest.mark.asyncio
 async def test_warm_up_opens_multiple_pooled_connections(monkeypatch):
-    # BE-6029: warm several pooled connections concurrently, not just one, so
-    # the first post-deploy query burst does not pay per-connection handshakes
-    # (the latency spike that let Railway reap the idle WebSocket).
     monkeypatch.setenv("GILJO_WARM_DB_CONNECTIONS", "4")
     monkeypatch.setattr("sqlalchemy.orm.configure_mappers", lambda: None)
 
@@ -77,7 +63,6 @@ async def test_warm_up_opens_multiple_pooled_connections(monkeypatch):
 
     await _warm_up(state)
 
-    # Four distinct connections opened, each issuing the warm-up SELECT 1.
     assert len(opened) == 4
     for session in opened:
         session.execute.assert_awaited_once()
@@ -86,13 +71,11 @@ async def test_warm_up_opens_multiple_pooled_connections(monkeypatch):
 @pytest.mark.asyncio
 async def test_warm_up_never_raises_on_db_failure_and_logs_error(monkeypatch, caplog):
     monkeypatch.setattr("sqlalchemy.orm.configure_mappers", lambda: None)
-    # AsyncSessionLocal() itself blows up — warm-up must swallow it.
     state = SimpleNamespace(
         db_manager=SimpleNamespace(AsyncSessionLocal=MagicMock(side_effect=RuntimeError("db down")))
     )
     with caplog.at_level(logging.ERROR):
-        await _warm_up(state)  # must not raise
-    # INF-6020: failure must log at ERROR so Sentry's LoggingIntegration alerts.
+        await _warm_up(state)
     assert any(r.levelno == logging.ERROR for r in caplog.records), "warm-up failure must log at ERROR"
 
 
@@ -101,6 +84,5 @@ async def test_warm_up_tolerates_missing_db_manager(monkeypatch):
     calls = {"n": 0}
     monkeypatch.setattr("sqlalchemy.orm.configure_mappers", lambda: calls.__setitem__("n", calls["n"] + 1))
     state = SimpleNamespace(db_manager=None)
-    await _warm_up(state)  # must not raise
-    # Mappers are still configured even when there is no DB to ping.
+    await _warm_up(state)
     assert calls["n"] == 1

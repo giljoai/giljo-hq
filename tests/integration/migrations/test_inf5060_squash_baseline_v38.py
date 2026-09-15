@@ -3,34 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""INF-5060 regression: squash to baseline_v38 (guarded-tip topology).
-
-baseline_v38 sits at the TIP of the chain (down_revision = ce_0077), not as
-a second root. Fresh databases are stamped at the squash boundary by the
-installer/boot seams so `alembic upgrade head` executes ONLY the guarded
-baseline; existing databases keep upgrading through the real chain; at-head
-databases (including SaaS prod's `upgrade heads`) run the tip as a pure
-no-op.
-
-Pinned invariants (real scratch PostgreSQL, per-worker DB):
-
-  (a) Fresh install via the REAL installer Phase B takes the fast path:
-      exactly ONE migration executes (baseline_v38), never a chain replay.
-  (b) Fresh boot via the REAL startup.py path takes the same fast path.
-  (c) PARITY (the load-bearing acceptance): the schema built by the fast
-      path is IDENTICAL to the schema built by replaying the full chain --
-      columns (order, type, nullability, default), indexes, constraints.
-  (d) A database at ce_0077 (pre-squash head, the SaaS-prod shape) upgrades
-      to baseline_v38 as a pure no-op: schema untouched.
-  (e) ADR-009: the org scaffolding (organizations, org_memberships,
-      users.org_id, products.org_id) survives the squash.
-  (f) The three copies of the squash-boundary revision (both seams +
-      baseline_v38.down_revision) stay in sync.
-
-SAFETY: scratch DB only (giljo_test_bootstrap{worker}); the live DBs
-giljo_mcp / giljo_mcp_ce are NEVER touched. Parallel-safe: per-worker
-scratch DB, monkeypatch owns env/cwd mutations.
-"""
 
 from __future__ import annotations
 
@@ -63,16 +35,6 @@ NEW_BASELINE = "baseline_v38"
 
 
 def _head_revision() -> str:
-    """The live CE-chain head revision (derived, never hardcoded).
-
-    baseline_v38 is the guarded squash TIP, but incremental migrations land
-    AFTER it (ce_0078+), so ``upgrade head`` no longer stops at baseline_v38.
-    Deriving the head from the Alembic script directory keeps the fast-path and
-    parity assertions correct as the chain grows -- alembic.ini's static
-    ``version_locations`` is the CE ``migrations/versions`` dir only (saas_versions
-    is added dynamically in env.py under GILJO_MODE=saas), so this is a single
-    linear head.
-    """
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
@@ -159,16 +121,7 @@ def _column_exists(engine: sa.Engine, table: str, column: str) -> bool:
 
 
 def _schema_snapshot(engine: sa.Engine) -> dict:
-    """Full structural snapshot: columns (order/type/nullability/default),
-    indexes, constraints, and column comments -- everything the parity
-    invariant covers, without needing pg_dump on the CI runner."""
     with engine.connect() as conn:
-        # Logical column order via ROW_NUMBER, not raw ordinal_position:
-        # ordinal_position is attnum, and a chain-built DB carries attnum
-        # gaps where history dropped + re-added columns (e.g. ce_0029/
-        # ce_0030 working_started_at). Those gaps are physically
-        # unreproducible in a fresh install and invisible to pg_dump; the
-        # parity invariant covers the ORDER of live columns.
         columns = conn.execute(
             text(
                 "SELECT table_name, "
@@ -186,15 +139,6 @@ def _schema_snapshot(engine: sa.Engine) -> dict:
                 "AND tablename <> 'alembic_version' ORDER BY indexdef"
             )
         ).all()
-        # Exclude named NOT-NULL constraints (contype='n'): PG18 materializes
-        # every NOT NULL as a pg_constraint object that PG17-and-earlier (CI
-        # runs postgres:16) never creates -- so their names are a PG-version detail,
-        # not schema shape, and differ between fast-path and chain-replay on PG18
-        # (the chain renamed roadmap_items.priority->sort_order in ce_0050 and the
-        # project_types->taxonomy_types table in ce_0014, keeping the legacy
-        # not-null names). Nullability itself is still asserted via the columns
-        # snapshot's is_nullable above, so no coverage is lost. This keeps parity
-        # comparing PK/FK/UNIQUE/CHECK -- portable, identical on PG16 and PG18.
         constraints = conn.execute(
             text(
                 "SELECT cl.relname, con.conname, pg_get_constraintdef(con.oid) "
@@ -225,8 +169,6 @@ def _schema_snapshot(engine: sa.Engine) -> dict:
 
 
 def _fast_path_build(engine: sa.Engine) -> None:
-    """Reproduce the seams' fresh fast path: widened version table + stamp
-    at the squash boundary, then upgrade head (runs ONLY baseline_v38)."""
     with engine.connect() as conn:
         conn.execute(
             text(
@@ -241,8 +183,6 @@ def _fast_path_build(engine: sa.Engine) -> None:
 
 
 def _run_installer_phase_b(monkeypatch: pytest.MonkeyPatch) -> dict:
-    """Run the REAL installer migration phase (run_database_migrations)
-    in-process against the scratch DB (INF-9113 pattern)."""
     import install
 
     monkeypatch.chdir(PROJECT_ROOT)
@@ -255,8 +195,6 @@ def _run_installer_phase_b(monkeypatch: pytest.MonkeyPatch) -> dict:
 
 
 def _run_startup_migrations() -> subprocess.CompletedProcess[str]:
-    """Invoke startup.run_database_migrations in a fresh subprocess (the CE
-    boot path)."""
     code = (
         "import sys, os; "
         "sys.path.insert(0, os.getcwd()); "
@@ -282,35 +220,21 @@ def scratch_engine():
     engine.dispose()
 
 
-# ---------------------------------------------------------------------------
-# (a) Fresh install via the REAL installer: fast path, no chain replay
-# ---------------------------------------------------------------------------
 
 
 def test_fresh_installer_fast_path_runs_only_baseline(scratch_engine, monkeypatch, capsys):
-    """Empty DB through the real installer Phase B: the seam stamps the
-    squash boundary so ONLY baseline_v38 executes -- the 77-migration
-    replay disease is dead."""
     _drop_all_objects(scratch_engine)
 
     result = _run_installer_phase_b(monkeypatch)
 
     assert result["success"] is True, f"installer failed: {result.get('error')}"
     assert _current_version(scratch_engine) == _head_revision()
-    # THE fast-path assertion: the seam announced the boundary stamp, which
-    # makes `upgrade head` start AT ce_0077 -- alembic can then only run the
-    # single tip revision, never the chain. (migrations_applied parses the
-    # subprocess's stdout, but alembic logs to stderr, so it can't be the
-    # signal here.)
     out = capsys.readouterr().out
     assert "baseline_v38 fast path" in out, f"installer did not take the fast path:\n{out}"
     for table in ("setup_state", "users", "tasks", "projects", "sequence_runs"):
         assert _table_exists(scratch_engine, table), f"essential table missing: {table}"
 
 
-# ---------------------------------------------------------------------------
-# (b) Fresh boot via the REAL startup.py path: same fast path
-# ---------------------------------------------------------------------------
 
 
 def test_fresh_boot_takes_fast_path(scratch_engine):
@@ -324,16 +248,9 @@ def test_fresh_boot_takes_fast_path(scratch_engine):
     assert "fast path" in combined, f"fresh boot did not report the fast path:\n{combined}"
 
 
-# ---------------------------------------------------------------------------
-# (c) PARITY: fast-path schema == full-chain-replay schema (load-bearing)
-# ---------------------------------------------------------------------------
 
 
 def test_parity_fast_path_vs_chain_replay(scratch_engine):
-    """The squash acceptance invariant: a fresh fast-path install and a
-    database upgraded through the whole incremental chain converge to an
-    IDENTICAL schema -- column order, types, nullability, defaults,
-    indexes, constraints, and comments."""
     head = _head_revision()
     _drop_all_objects(scratch_engine)
     _fast_path_build(scratch_engine)
@@ -341,9 +258,6 @@ def test_parity_fast_path_vs_chain_replay(scratch_engine):
     fast = _schema_snapshot(scratch_engine)
 
     _drop_all_objects(scratch_engine)
-    # Plain `upgrade head` on an empty DB replays the full chain
-    # (baseline_v37 -> ce_0001..ce_0077), the guarded tip, then any post-squash
-    # increments (ce_0078+).
     replay = _run_alembic("upgrade", "head")
     assert replay.returncode == 0, f"chain replay failed:\n{replay.stdout}\n{replay.stderr}"
     assert _current_version(scratch_engine) == head
@@ -357,20 +271,9 @@ def test_parity_fast_path_vs_chain_replay(scratch_engine):
         )
 
 
-# ---------------------------------------------------------------------------
-# (d) At-head DB (ce_0077, the SaaS-prod shape): tip is a pure no-op
-# ---------------------------------------------------------------------------
 
 
 def test_at_head_ce0077_db_upgrades_as_pure_noop(scratch_engine):
-    """A DB whose pointer is ce_0077 (pre-squash head -- exactly what SaaS
-    prod's `alembic upgrade heads` sees at deploy time) must upgrade to
-    baseline_v38 with ZERO schema change.
-
-    Targets baseline_v38 explicitly, NOT ``head``: this pins the guarded-TIP
-    no-op invariant. Post-squash increments (ce_0078+) are real schema changes
-    by design and are deliberately outside this no-op guarantee.
-    """
     _drop_all_objects(scratch_engine)
     build = _run_alembic("upgrade", SQUASH_BOUNDARY)
     assert build.returncode == 0, f"chain build to ce_0077 failed:\n{build.stderr}"
@@ -385,9 +288,6 @@ def test_at_head_ce0077_db_upgrades_as_pure_noop(scratch_engine):
     assert before == after, "guarded tip modified an at-head schema (must be a pure no-op)"
 
 
-# ---------------------------------------------------------------------------
-# (e) ADR-009: org scaffolding survives the squash
-# ---------------------------------------------------------------------------
 
 
 def test_adr009_org_scaffolding_survives_squash(scratch_engine):
@@ -401,15 +301,9 @@ def test_adr009_org_scaffolding_survives_squash(scratch_engine):
     assert _column_exists(scratch_engine, "organizations", "tenant_key")
 
 
-# ---------------------------------------------------------------------------
-# (f) The squash-boundary constant stays in sync across its three copies
-# ---------------------------------------------------------------------------
 
 
 def test_squash_boundary_revision_in_sync():
-    """baseline_v38.down_revision, the boot seam constant, and the installer
-    seam literal must all name the same revision -- drift here silently
-    breaks the fresh fast path."""
     from startup_support.migration_stamp import FRESH_INSTALL_STAMP_REVISION
 
     assert FRESH_INSTALL_STAMP_REVISION == SQUASH_BOUNDARY

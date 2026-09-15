@@ -3,36 +3,11 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9118 (Option B) — update_product_context regroup + apply_context_tuning typed
-proposals, tested at the layer the change lives (the FastMCP @mcp.tool wrapper).
-
-CLAUDE.md + the BE-5042 lesson mandate MCP-BOUNDARY tests: the regroup is a
-wrapper-only change (17 flat prose params -> 4 typed grouped dicts, unpacked to the
-SAME flat ProductService kwargs), so every behavioral test here drives the REAL
-transport (``create_connected_server_and_client_session``), not the service in
-isolation. Sections map to the product's 4 hard invariants:
-
-* Section A (autospec transport, no DB) — invariant 4 (input validation preserved):
-  a valid grouped call dispatches; an over-cap grouped field and an unknown grouped
-  sub-key are each a clean 422-style ToolError with no SQL/leak; the apply_context_
-  tuning typed-proposal boundary (SCOPE 2) accepts a well-formed item and rejects a
-  structurally malformed one at the boundary (the NEW Pydantic rejection shape).
-* Section B (DB-backed transport) — invariant 3 (single-atomic-call preserved): one
-  grouped-dict call carrying vision_summaries + consolidated_vision writes the
-  grouped field AND flips vision_analysis_complete in one transaction.
-* Section C (unit) — invariant 2 (onboarding drift) + invariant 1 (UI-toggle
-  isolation): the copy-to-clipboard onboarding prompt references only params that
-  exist on the live tool schema, and the regrouped wrapper has zero linkage to the
-  UI context-depth toggle machinery.
-
-Parallel-safe: Section A/C need no DB; Section B uses the rolled-back ``db_session``
-threaded through the tool via a monkeypatched ``update_product_fields``. No
-module-level mutable state; tenant keys are freshly generated per test.
-"""
 
 from __future__ import annotations
 
 import inspect
+import json
 import uuid
 from pathlib import Path
 
@@ -48,9 +23,6 @@ from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
 
 
-# The 17 flat prose params BE-9118 regrouped into the tech_stack/architecture/
-# quality/testing dicts. None may survive as a top-level update_product_context
-# param, nor be advertised as a call param by the onboarding prompt.
 _REMOVED_FLAT_PARAMS: frozenset[str] = frozenset(
     {
         "programming_languages",
@@ -86,6 +58,14 @@ def _error_text(result) -> str:
     return "\n".join(parts)
 
 
+def _assert_structured_validation_rejection(result) -> None:
+    assert result.is_error is False, _error_text(result)
+    payload = json.loads(result.content[0].text)
+    assert payload.get("success") is False, payload
+    assert payload.get("error") == "VALIDATION_ERROR", payload
+    assert payload.get("field"), payload
+
+
 def _assert_no_leak(text: str) -> None:
     for marker in _LEAK_MARKERS:
         assert marker not in text, f"agent-facing error leaked {marker!r}: {text!r}"
@@ -98,13 +78,8 @@ def _live_update_product_context_params() -> set[str]:
     raise AssertionError("update_product_context not registered on the live FastMCP surface")
 
 
-# ---------------------------------------------------------------------------
-# Section A — autospec transport (no DB): grouped-dict arg validation + the
-# apply_context_tuning typed-proposal boundary.
-# ---------------------------------------------------------------------------
 @pytest_asyncio.fixture
 async def autospec_mcp(monkeypatch):
-    """Autospec ToolAccessor on the in-memory transport (mirrors BE-3006d)."""
     from unittest.mock import create_autospec
 
     from api import app_state
@@ -146,8 +121,6 @@ async def autospec_mcp(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_grouped_call_dispatches(autospec_mcp):
-    """INVARIANT 4 (positive): a valid grouped-dict call passes arg validation and
-    dispatches (isError False)."""
     async with autospec_mcp() as session:
         result = await session.call_tool(
             "update_product_context",
@@ -164,8 +137,6 @@ async def test_grouped_call_dispatches(autospec_mcp):
 
 @pytest.mark.asyncio
 async def test_grouped_over_cap_field_is_clean_422(autospec_mcp):
-    """INVARIANT 4: an over-cap prose field INSIDE a group is rejected at the
-    FastMCP boundary as a clean 422, never a service 500 / DB leak."""
     async with autospec_mcp() as session:
         result = await session.call_tool(
             "update_product_context",
@@ -174,27 +145,23 @@ async def test_grouped_over_cap_field_is_clean_422(autospec_mcp):
                 "tech_stack": {"programming_languages": "x" * (MCP_DESCRIPTION_MAX + 1)},
             },
         )
-    assert result.is_error is True
+    _assert_structured_validation_rejection(result)
     _assert_no_leak(_error_text(result))
 
 
 @pytest.mark.asyncio
 async def test_unknown_group_subkey_is_clean_422(autospec_mcp):
-    """INVARIANT 4: extra='forbid' on each grouped model rejects an unknown sub-key
-    (e.g. a flat field placed in the wrong group) as a clean 422, no leak."""
     async with autospec_mcp() as session:
         result = await session.call_tool(
             "update_product_context",
             {"product_id": str(uuid.uuid4()), "tech_stack": {"quality_standards": "wrong group"}},
         )
-    assert result.is_error is True
+    _assert_structured_validation_rejection(result)
     _assert_no_leak(_error_text(result))
 
 
 @pytest.mark.asyncio
 async def test_apply_context_tuning_valid_typed_proposal_dispatches(autospec_mcp):
-    """SCOPE 2 (positive): a well-formed typed proposal passes the Pydantic boundary
-    and dispatches."""
     async with autospec_mcp() as session:
         result = await session.call_tool(
             "apply_context_tuning",
@@ -215,26 +182,19 @@ async def test_apply_context_tuning_valid_typed_proposal_dispatches(autospec_mcp
 
 @pytest.mark.asyncio
 async def test_apply_context_tuning_malformed_proposal_is_clean_422(autospec_mcp):
-    """SCOPE 2 (new rejection shape): a structurally malformed proposal (missing the
-    required drift_detected) is rejected at the FastMCP/Pydantic boundary as a clean
-    422 — the typed-model rejection replaces the service's aggregated ValueError for
-    this class of error. No SQL/leak."""
     async with autospec_mcp() as session:
         result = await session.call_tool(
             "apply_context_tuning",
             {"product_id": str(uuid.uuid4()), "proposals": [{"section": "description"}]},
         )
-    assert result.is_error is True
+    _assert_structured_validation_rejection(result)
     text = _error_text(result)
     _assert_no_leak(text)
-    # The Pydantic boundary names the missing required field (the new shape).
     assert "drift_detected" in text
 
 
 @pytest.mark.asyncio
 async def test_apply_context_tuning_over_cap_proposed_value_is_clean_422(autospec_mcp):
-    """SCOPE 2: the pre-typed 10000-char proposed_value cap is preserved on the
-    typed model — an over-cap string is a clean 422 at the boundary."""
     async with autospec_mcp() as session:
         result = await session.call_tool(
             "apply_context_tuning",
@@ -243,19 +203,12 @@ async def test_apply_context_tuning_over_cap_proposed_value_is_clean_422(autospe
                 "proposals": [{"section": "description", "drift_detected": True, "proposed_value": "x" * 10_001}],
             },
         )
-    assert result.is_error is True
+    _assert_structured_validation_rejection(result)
     _assert_no_leak(_error_text(result))
 
 
-# ---------------------------------------------------------------------------
-# Section B — DB-backed transport: the single-atomic-call invariant.
-# ---------------------------------------------------------------------------
 @pytest_asyncio.fixture
 async def product_context_client(db_manager, db_session, monkeypatch):
-    """A REAL ToolAccessor on the transport, with update_product_fields threaded
-    onto the rolled-back test session (the accessor mixin does not forward
-    _test_session, so inject it via a module-level monkeypatch — the mixin imports
-    the symbol at call time)."""
     from api import app_state
     from api.endpoints.mcp_tools import _base
     from giljo_mcp.tools import vision_analysis
@@ -296,9 +249,6 @@ async def product_context_client(db_manager, db_session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_single_grouped_call_flips_vision_complete_atomically(product_context_client):
-    """INVARIANT 3: ONE grouped-dict update_product_context call carrying a grouped
-    field + per-doc vision_summaries + consolidated_vision writes the grouped field
-    AND flips vision_analysis_complete (the wizard-unlock) in one transaction."""
     new_client, tenant_key, session = product_context_client
     product = Product(
         id=str(uuid.uuid4()),
@@ -340,7 +290,6 @@ async def test_single_grouped_call_flips_vision_complete_atomically(product_cont
         )
     assert result.is_error is False, f"atomic grouped call must dispatch: {_error_text(result)}"
 
-    # The grouped field unpacked and wrote to the tech_stack child row...
     ts = (
         await session.execute(
             select(ProductTechStack).where(
@@ -351,20 +300,15 @@ async def test_single_grouped_call_flips_vision_complete_atomically(product_cont
     ).scalar_one_or_none()
     assert ts is not None and ts.programming_languages == "Python"
 
-    # ...and the same single call flipped vision_analysis_complete (the wizard unlock).
     await session.refresh(product)
     assert product.vision_analysis_complete is True
 
 
-# ---------------------------------------------------------------------------
-# Section C — unit: onboarding drift (invariant 2) + UI-toggle isolation (invariant 1).
-# ---------------------------------------------------------------------------
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ONBOARDING_JS = _REPO_ROOT / "frontend" / "src" / "composables" / "useVisionAnalysis.js"
 
 
 def _onboarding_prompt_region() -> str:
-    """The copy-to-clipboard discovery prompt text built in stageAnalysis()."""
     text = _ONBOARDING_JS.read_text(encoding="utf-8")
     start = text.index("let prompt =")
     end = text.index("promptFallbackText.value = null", start)
@@ -372,34 +316,11 @@ def _onboarding_prompt_region() -> str:
 
 
 def test_onboarding_prompt_only_references_live_update_product_context_params():
-    """INVARIANT 2 (drift): the instruction authority for update_product_context's
-    param shape may only name params that exist on the live tool schema. Because
-    FastMCP silently DROPS an unknown top-level arg, an instruction that still named
-    a removed flat param would cause silent data loss.
-
-    BE-9164 superseded the BE-5118-era wizard prompt as that authority: the wizard
-    prompt (useVisionAnalysis.js) is now a slim pointer at get_vision_document's
-    extraction_instructions, and VISION_EXTRACTION_PROMPT (server-side, in
-    giljo_mcp.tools.vision_analysis) is the single source of truth for the param
-    shape. So the guard splits in two:
-    - the wizard prompt must still never leak a removed flat param (it could
-      resurrect the drift even without naming grouped params), and must defer to
-      the server instructions instead of naming params itself;
-    - VISION_EXTRACTION_PROMPT must name all 4 grouped params and never leak a
-      removed flat param as a top-level kwarg.
-
-    Fail-first: re-insert e.g. 'programming_languages=' into either prompt, or
-    delete 'tech_stack'/'architecture'/'quality'/'testing' from
-    VISION_EXTRACTION_PROMPT, and this trips.
-    """
     from giljo_mcp.tools.vision_analysis import VISION_EXTRACTION_PROMPT
 
     live = _live_update_product_context_params()
-    # The regroup actually happened: no removed flat name survives as a live param.
     assert not (_REMOVED_FLAT_PARAMS & live), f"flat params still on the live schema: {_REMOVED_FLAT_PARAMS & live}"
 
-    # -- Wizard prompt (useVisionAnalysis.js): no longer the instruction authority.
-    # It must never leak a removed flat param, and must defer to the server prompt.
     region = _onboarding_prompt_region()
     leaked = sorted(name for name in _REMOVED_FLAT_PARAMS if name in region)
     assert not leaked, f"wizard prompt references removed flat param(s) (regrouped in BE-9118): {leaked}"
@@ -407,19 +328,10 @@ def test_onboarding_prompt_only_references_live_update_product_context_params():
         "wizard prompt must defer to get_vision_document's extraction_instructions (BE-9164) instead of naming params itself"
     )
 
-    # -- Server prompt (VISION_EXTRACTION_PROMPT): the real instruction authority.
-    # Must name all 4 grouped params...
     missing = sorted(name for name in _GROUPED_PARAMS if name not in VISION_EXTRACTION_PROMPT)
     assert not missing, f"VISION_EXTRACTION_PROMPT must name the grouped params it instructs: missing {missing}"
-    # Every grouped name the prompt uses is a real live param.
     assert live >= _GROUPED_PARAMS
 
-    # ...and must never leak a removed flat name as a TOP-LEVEL kwarg. The grouped
-    # call example legitimately contains these names as dict sub-keys, e.g.
-    # tech_stack={"programming_languages": "..."} -- that renders as
-    # '"programming_languages":' in the prompt text, never 'programming_languages='.
-    # So checking for the '=' call-site form (not bare substring containment)
-    # correctly allows the sub-key usage while still catching a real top-level leak.
     leaked_server = sorted(name for name in _REMOVED_FLAT_PARAMS if f"{name}=" in VISION_EXTRACTION_PROMPT)
     assert not leaked_server, (
         f"VISION_EXTRACTION_PROMPT references removed flat param(s) as a top-level "
@@ -428,13 +340,6 @@ def test_onboarding_prompt_only_references_live_update_product_context_params():
 
 
 def test_update_product_context_wrapper_has_zero_toggle_linkage():
-    """INVARIANT 1 (UI context-depth toggles untouched): the regrouped
-    update_product_context wrapper + its 4 grouped models + the unpack helper carry
-    ZERO linkage to the read-side toggle/depth machinery (UserFieldPriority,
-    depth_config, tuning toggle map). Scoped to exactly the BE-9118 surface via
-    getsource (the sibling get_context tool in the same module legitimately uses
-    depth_config for READS and is untouched). A future edit wiring toggles into the
-    write path trips this guard."""
     import api.endpoints.mcp_tools._context_tools as ct
 
     fn = next(t.fn for t in mcp._tool_manager.list_tools() if t.name == "update_product_context")
@@ -463,9 +368,6 @@ def test_update_product_context_wrapper_has_zero_toggle_linkage():
 
 
 def test_toggle_gate_still_excludes_a_toggled_off_category():
-    """INVARIANT 1 (supporting): the read-side toggle gate is unperturbed — a
-    category toggled OFF is excluded from tuning-eligible sections exactly as
-    before (the SCOPE-2 typed-proposals change did not touch this path)."""
     from unittest.mock import MagicMock
 
     from giljo_mcp.services.product_tuning_service import ProductTuningService

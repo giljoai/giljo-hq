@@ -3,28 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Regression tests for API-0021a — OAuth spec discovery + JWT audience binding.
-
-Tests the failing-layer surface for the audience-binding fix: the MCP Bearer
-auth middleware (transport-layer wrapper around JWT verification) and the
-two new RFC 8414/9728 well-known endpoints.
-
-Test cases:
-- R1: existing API-key auth on /mcp still authenticates after JWT changes
-- R2: legacy aud-less JWT is HARD-REJECTED at /mcp (API-0022 closed the window)
-- R3: new aud-bound JWT authenticates on /mcp
-- R4: JWT with wrong aud returns 401 + WWW-Authenticate header
-- R5: unauthenticated request to /mcp returns 401 + WWW-Authenticate header
-- R6: /.well-known/oauth-protected-resource returns 200 with spec-correct JSON
-- R7: root /.well-known/oauth-authorization-server mirrors /api/oauth/... body
-- R8 (API-0021b): protected-resource metadata scopes_supported correctness
-- R9 (API-0022): full FastAPI route layer rejects aud-less JWT at POST /mcp
-
-R1-R5 + R9 drive the MCP auth boundary. R1-R5 use the ASGI middleware directly
-in isolation; R9 uses the full FastAPI app client to prove the rejection
-surfaces correctly at the actual /mcp route. R6-R8 use the full FastAPI client.
-"""
 
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -41,7 +19,6 @@ JWT_ALG = "HS256"
 
 
 def _make_jwt(*, aud: str | None, tenant_key: str, sub: str | None = None) -> str:
-    """Build a signed access JWT, optionally with an aud claim."""
     sub_value = sub or str(uuid4())
     payload: dict = {
         "sub": sub_value,
@@ -58,7 +35,6 @@ def _make_jwt(*, aud: str | None, tenant_key: str, sub: str | None = None) -> st
 
 
 class _CapturingInnerApp:
-    """Minimal ASGI app that records whether the middleware invoked it."""
 
     def __init__(self) -> None:
         self.called: bool = False
@@ -72,7 +48,6 @@ class _CapturingInnerApp:
 
 
 async def _drive_middleware(middleware, headers: list[tuple[bytes, bytes]]) -> tuple[int, dict[str, str], bytes]:
-    """Run a single ASGI request through the middleware, return (status, headers, body)."""
     scope = {
         "type": "http",
         "asgi": {"version": "3.0", "spec_version": "2.3"},
@@ -110,18 +85,13 @@ async def _drive_middleware(middleware, headers: list[tuple[bytes, bytes]]) -> t
 
 @pytest_asyncio.fixture
 async def jwt_env(monkeypatch):
-    """Ensure JWTManager reads our test secret."""
     monkeypatch.setenv("JWT_SECRET", JWT_SECRET)
     yield JWT_SECRET
 
 
-# ---------------------------------------------------------------------------
-# R1: existing API-key auth on /mcp still authenticates after JWT changes
-# ---------------------------------------------------------------------------
 
 
 class TestR1ApiKeyStillAuthenticates:
-    """API-key path through MCPAuthMiddleware must keep working unchanged."""
 
     @pytest.mark.asyncio
     async def test_api_key_via_x_api_key_header_authenticates(
@@ -190,13 +160,9 @@ class TestR1ApiKeyStillAuthenticates:
             state.db_manager = prior_db_manager
 
 
-# ---------------------------------------------------------------------------
-# R2: legacy aud-less JWT now hard-rejected (API-0022 closed the transition window)
-# ---------------------------------------------------------------------------
 
 
 class TestR2LegacyAudlessJwtRejected:
-    """JWT without aud claim is hard-rejected at the /mcp boundary (API-0022)."""
 
     @pytest.mark.asyncio
     async def test_audless_jwt_returns_401_with_www_authenticate(
@@ -224,13 +190,9 @@ class TestR2LegacyAudlessJwtRejected:
         )
 
 
-# ---------------------------------------------------------------------------
-# R3: new aud-bound JWT authenticates
-# ---------------------------------------------------------------------------
 
 
 class TestR3AudBoundJwtAccepted:
-    """JWT with aud == canonical MCP URI must authenticate."""
 
     @pytest.mark.asyncio
     async def test_aud_bound_jwt_authenticates(self, db_manager, jwt_env):
@@ -243,9 +205,6 @@ class TestR3AudBoundJwtAccepted:
         tenant_key = TenantManager.generate_tenant_key()
         unique = uuid4().hex[:8]
 
-        # SEC-3001a item 1: the /mcp JWT path now re-checks is_active against the
-        # DB, so an aud-bound JWT authenticates only for a real, ACTIVE user.
-        # Seed one whose id matches the JWT `sub`.
         async with db_manager.get_session_async(tenant_key=tenant_key) as session:
             org = Organization(name=f"R3 Org {unique}", slug=f"r3-org-{unique}", tenant_key=tenant_key, is_active=True)
             session.add(org)
@@ -281,13 +240,9 @@ class TestR3AudBoundJwtAccepted:
             state.db_manager = prior_db
 
 
-# ---------------------------------------------------------------------------
-# R4: wrong-aud JWT returns 401 + WWW-Authenticate header
-# ---------------------------------------------------------------------------
 
 
 class TestR4WrongAudRejected:
-    """JWT with aud != canonical MCP URI must be rejected with WWW-Authenticate."""
 
     @pytest.mark.asyncio
     async def test_wrong_aud_returns_401_with_www_authenticate(self, jwt_env):
@@ -311,13 +266,9 @@ class TestR4WrongAudRejected:
         )
 
 
-# ---------------------------------------------------------------------------
-# R5: unauthenticated request returns 401 + WWW-Authenticate header
-# ---------------------------------------------------------------------------
 
 
 class TestR5UnauthenticatedReturns401WithHeader:
-    """A request with no Authorization or X-API-Key returns 401 with WWW-Authenticate."""
 
     @pytest.mark.asyncio
     async def test_unauthenticated_returns_401_with_www_authenticate(self, jwt_env):
@@ -335,13 +286,9 @@ class TestR5UnauthenticatedReturns401WithHeader:
         assert "/.well-known/oauth-protected-resource" in www_auth
 
 
-# ---------------------------------------------------------------------------
-# R6: /.well-known/oauth-protected-resource (RFC 9728)
-# ---------------------------------------------------------------------------
 
 
 class TestR6ProtectedResourceMetadata:
-    """The new RFC 9728 resource metadata endpoint must return spec-correct JSON."""
 
     @pytest.mark.asyncio
     async def test_returns_200_with_required_fields(self, api_client):
@@ -360,13 +307,9 @@ class TestR6ProtectedResourceMetadata:
         assert isinstance(body["scopes_supported"], list)
 
 
-# ---------------------------------------------------------------------------
-# R7: root /.well-known/oauth-authorization-server mirrors /api/oauth/... body
-# ---------------------------------------------------------------------------
 
 
 class TestR7AuthorizationServerRootMirror:
-    """RFC 8414 root probe must return the same body as /api/oauth/.well-known/..."""
 
     @pytest.mark.asyncio
     async def test_root_mirror_matches_api_oauth_body(self, api_client):
@@ -381,12 +324,6 @@ class TestR7AuthorizationServerRootMirror:
         )
 
 
-# ---------------------------------------------------------------------------
-# R8 (API-0021b; widened by BE-6168): protected-resource metadata advertises
-# mcp:read + mcp:write + mcp:agent. mcp:agent is now grantable via OAuth so an
-# OAuth client reaches API-key parity; metadata must advertise it so spec-aware
-# clients know to request it.
-# ---------------------------------------------------------------------------
 
 
 class TestR8ProtectedResourceScopesSupported:
@@ -404,13 +341,6 @@ class TestR8ProtectedResourceScopesSupported:
         assert "mcp:agent" in scopes, "BE-6168: mcp:agent must be advertised as grantable"
 
 
-# ---------------------------------------------------------------------------
-# R9 (API-0022): full /mcp route hard-rejects aud-less JWT.
-# Mirrors R2 but goes through the real FastAPI app stack (TestClient) to
-# guarantee the rejection surfaces at the actual route boundary, not just
-# the unit-mounted middleware. Per BE-5042: test at the layer where the
-# bug would occur.
-# ---------------------------------------------------------------------------
 
 
 class TestR9AudlessJwtHardRejectedAtMcpRoute:

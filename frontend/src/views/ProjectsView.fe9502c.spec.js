@@ -1,21 +1,3 @@
-/**
- * ProjectsView.fe9502c.spec.js — FE-9502c
- *
- * Regression test for a cross-tab data-leak bug found while building the
- * tabbed product shell: ProjectsView scoped project creation/browsing by
- * `productStore.activeProduct` (the server's SINGLE "active" product), not
- * by the viewed tab. With two tabs open — Product A viewed, Product B
- * server-active — creating a "new project" while looking at A's tab would
- * silently have created it under B. Fixed to scope by
- * `productStore.currentProduct` (the viewed tab), matching how
- * useProductTaxonomy/effectiveProductId already prioritize it elsewhere.
- *
- * This is the "create/edit/browse each without touching the other" DoD
- * proof for PR1: two REAL, DIFFERENT products (viewed vs. server-active),
- * and the view must resolve to the viewed one.
- *
- * Edition scope: CE.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
@@ -59,8 +41,6 @@ vi.mock('@/stores/projects', () => ({
     clearListQuery: vi.fn(),
   }),
 }))
-// Deliberately DIFFERENT products for currentProduct vs activeProduct -- the
-// bug only shows up when they diverge, which is exactly the two-tab case.
 vi.mock('@/stores/products', () => ({
   useProductStore: () => ({
     currentProduct: VIEWED_PRODUCT,

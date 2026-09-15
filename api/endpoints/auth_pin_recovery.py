@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Password Reset via Recovery PIN endpoints (Handover 0023).
-
-Provides secure PIN-based password recovery:
-- verify-pin-and-reset-password: Reset password using 4-digit PIN
-- check-first-login: Check if user needs to change password/set PIN
-- complete-first-login: Complete first login setup (password + PIN)
-
-All endpoints include rate limiting, timing-safe comparisons, and audit logging.
-"""
 
 import asyncio
 import logging
@@ -46,7 +36,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# API Endpoints
 
 
 @router.post("/verify-pin-and-reset-password", response_model=PinPasswordResetResponse, tags=["auth"])
@@ -84,38 +73,25 @@ async def verify_pin_and_reset_password(
         HTTPException: 400 if username/PIN invalid
         HTTPException: 429 if rate limit exceeded or user is locked out
     """
-    # PIN recovery is a CE-only feature (self-hosted users have no email channel).
-    # SaaS use email-based password reset and must not expose this surface.
-    # CE is "" (default/unset) OR "ce" — canonical idiom (downloads.py:852).
     if GILJO_MODE not in ("", "ce"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    # IP-based rate limiting: 3 attempts per minute (Handover 1009)
-    # This is in ADDITION to per-user account lockout (5 failed → 15 min)
     rate_limiter = get_rate_limiter()
     await rate_limiter.check_rate_limit(http_request, limit=3, window=60, raise_on_limit=True)
 
-    # Validate password confirmation match
     if request_data.new_password != request_data.confirm_password:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Passwords do not match")
 
-    # Dual-lookup: wire field is `username` but accepts either username OR email
-    # (AUTH-EMAIL Phase 4, handover af53e62b). Same login-boundary semantics
-    # as AuthService.authenticate_user — no tenant filter because tenant is
-    # unknown pre-auth and both columns carry global UNIQUE constraints.
     user = await AuthRepository().get_user_by_username_or_email(db, request_data.username)
 
-    # SECURITY: Generic error message - don't reveal if username exists
     if not user:
         logger.warning("PIN reset attempt for non-existent identifier")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid username or PIN")
 
-    # Check if user has recovery PIN set
     if not user.recovery_pin_hash:
         logger.warning(f"PIN reset attempt for user without PIN: {user.username}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid username or PIN")
 
-    # Check if user is locked out
     if user.pin_lockout_until and datetime.now(UTC) < user.pin_lockout_until:
         lockout_remaining = user.pin_lockout_until - datetime.now(UTC)
         minutes_remaining = int(lockout_remaining.total_seconds() / 60)
@@ -127,15 +103,11 @@ async def verify_pin_and_reset_password(
             detail=f"Account locked out due to too many failed attempts. Try again in {minutes_remaining} minutes.",
         )
 
-    # Verify PIN with bcrypt (timing-safe comparison). BE-6068 F1: bcrypt off the
-    # event loop so a PIN reset does not freeze the worker.
     if not await asyncio.to_thread(
         bcrypt.checkpw, request_data.recovery_pin.encode("utf-8"), user.recovery_pin_hash.encode("utf-8")
     ):
-        # Increment failed attempts
         user.failed_pin_attempts += 1
 
-        # Trigger lockout after 5 failed attempts
         if user.failed_pin_attempts >= 5:
             user.pin_lockout_until = datetime.now(UTC) + timedelta(minutes=15)
             await db.commit()
@@ -158,29 +130,18 @@ async def verify_pin_and_reset_password(
             f"attempts: {user.failed_pin_attempts}, remaining: {attempts_remaining}"
         )
 
-        # SECURITY: Generic error message
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid username or PIN")
 
-    # PIN verified successfully - reset password (bcrypt hash off the event loop).
     user.password_hash = (
         await asyncio.to_thread(bcrypt.hashpw, request_data.new_password.encode("utf-8"), bcrypt.gensalt())
     ).decode("utf-8")
     user.failed_pin_attempts = 0
     user.pin_lockout_until = None
 
-    # SEC-9047: a password reset is the standard remediation for a stolen
-    # session — it must evict every live session. Bumping the revocation epoch
-    # invalidates all outstanding access tokens (the `rev` claim check in
-    # principal.py); revoking the user's OAuth refresh tokens stops them
-    # minting fresh access tokens afterwards. Tenant comes from the user row
-    # (resolved via globally-unique username/email above).
     user.token_revocation_epoch = (user.token_revocation_epoch or 0) + 1
     with tenant_session_context(db, user.tenant_key):
         revoked_count = await revoke_all_refresh_tokens_for_user(db, user_id=str(user.id), tenant_key=user.tenant_key)
 
-    # SEC-3001a Wave 2 item 6: a successful password reset instantly unlocks the
-    # account from every IP (clears login_lockouts for the user's username+email).
-    # Best-effort: a lockout-table hiccup must NEVER block a real password reset.
     from giljo_mcp.services.login_lockout_service import LoginLockoutService
 
     try:
@@ -218,8 +179,6 @@ async def verify_pin(request_data: VerifyPinRequest = Body(...), db: AsyncSessio
 
     AUTH-EMAIL Phase 4: wire field `username` accepts either username OR email.
     """
-    # PIN recovery is CE-only — see verify_pin_and_reset_password. CE is ""
-    # (default/unset) OR "ce" — canonical idiom (downloads.py:852).
     if GILJO_MODE not in ("", "ce"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
@@ -233,7 +192,6 @@ async def verify_pin(request_data: VerifyPinRequest = Body(...), db: AsyncSessio
         minutes_remaining = int(lockout_remaining.total_seconds() / 60)
         return VerifyPinResponse(valid=False, message=f"Account locked. Try again in {minutes_remaining} minutes.")
 
-    # BE-6068 F1: bcrypt verify off the event loop.
     if not await asyncio.to_thread(
         bcrypt.checkpw, request_data.recovery_pin.encode("utf-8"), user.recovery_pin_hash.encode("utf-8")
     ):
@@ -264,16 +222,11 @@ async def check_first_login(
     Returns:
         must_change_password and must_set_pin flags (safe defaults for unknown users)
     """
-    # Dual-lookup: wire field `username` accepts either username OR email
-    # (AUTH-EMAIL Phase 4). Same login-boundary semantics as above.
     user = await AuthRepository().get_user_by_username_or_email(db, request_data.username)
 
     if not user:
-        # Return safe defaults for non-existent users to prevent username enumeration
         return CheckFirstLoginResponse(must_change_password=False, must_set_pin=False)
 
-    # SaaS never require PIN setup — email-based recovery is used instead.
-    # CE is "" (default/unset) OR "ce" — canonical idiom (downloads.py:852).
     must_set_pin = bool(user.must_set_pin) if GILJO_MODE in ("", "ce") else False
 
     return CheckFirstLoginResponse(must_change_password=user.must_change_password or False, must_set_pin=must_set_pin)
@@ -309,26 +262,19 @@ async def complete_first_login(
     Raises:
         HTTPException: 400 if validation fails
     """
-    # Validate current password. BE-6068 F1: bcrypt verify off the event loop.
     if not await asyncio.to_thread(
         bcrypt.checkpw, request_data.current_password.encode("utf-8"), current_user.password_hash.encode("utf-8")
     ):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
 
-    # Validate new password != current password
     if request_data.new_password == request_data.current_password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="New password must be different from current password"
         )
 
-    # Validate password confirmation match
     if request_data.new_password != request_data.confirm_password:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Passwords do not match")
 
-    # PIN is required in CE (only recovery channel) and optional in SaaS
-    # (email reset replaces it). Reject missing PIN in CE; ignore PIN entirely
-    # in hosted editions even if a client sends one. CE is "" (default/unset)
-    # OR "ce" — canonical idiom (downloads.py:852).
     pin_required = GILJO_MODE in ("", "ce")
     if pin_required:
         if not request_data.recovery_pin or not request_data.confirm_pin:
@@ -336,28 +282,18 @@ async def complete_first_login(
         if request_data.recovery_pin != request_data.confirm_pin:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PINs do not match")
 
-    # Update password (BE-6068 F1: bcrypt hash off the event loop).
     current_user.password_hash = (
         await asyncio.to_thread(bcrypt.hashpw, request_data.new_password.encode("utf-8"), bcrypt.gensalt())
     ).decode("utf-8")
 
-    # Set recovery PIN (CE only)
     if pin_required:
         current_user.recovery_pin_hash = (
             await asyncio.to_thread(bcrypt.hashpw, request_data.recovery_pin.encode("utf-8"), bcrypt.gensalt())
         ).decode("utf-8")
 
-    # Clear first login flags
     current_user.must_change_password = False
     current_user.must_set_pin = False
 
-    # SEC-9084: completing first login sets a new password after verifying the
-    # current one — a genuine credential change that must evict every live
-    # session, exactly like the other password-write paths (SEC-9047/9071).
-    # Bumping the revocation epoch invalidates all outstanding access tokens (the
-    # `rev` claim check in principal.py); revoking the user's OAuth refresh tokens
-    # stops them minting fresh access tokens afterwards. Same transaction as the
-    # hash write above so the eviction and the new password land atomically.
     current_user.token_revocation_epoch = (current_user.token_revocation_epoch or 0) + 1
     with tenant_session_context(db, current_user.tenant_key):
         revoked_count = await revoke_all_refresh_tokens_for_user(

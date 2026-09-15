@@ -3,28 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""The agent-facing vision-extraction brief (single source of truth).
-
-``get_vision_doc`` returns this text as ``extraction_instructions``; it is the
-authority for the ``update_product_context`` call shape, so the wizard prompt in
-``useVisionAnalysis.js`` deliberately points at it rather than restating params.
-
-It lives beside the tool rather than inside it for the same reason
-``setup_instructions.py`` / ``slash_command_templates.py`` / ``giljo_guide.py`` do:
-a long block of agent-facing prose is content, not control flow, and mixing the two
-pushed ``vision_analysis.py`` over the 800-line cap. ``vision_analysis`` re-exports
-the name, so ``from giljo_mcp.tools.vision_analysis import VISION_EXTRACTION_PROMPT``
-keeps working.
-
-FE-9320 rewrote two things here that had each cost a real run:
-* the per-document/consolidated summary sizes are CHARACTER budgets, not percentages
-  of the source. "light = 33% of the document" is unsatisfiable on a large document
-  (a 15.4k-token source asked for ~30k tokens of summary) and inverts against exactly
-  the documents chunking exists to serve.
-* the ONE-call mandate is replaced by staged writes plus an explicit
-  ``emit_completion``. The single call died at 62,420 bytes client-side, and there is
-  no server-side payload ceiling it was ever protecting.
-"""
 
 VISION_EXTRACTION_PROMPT = """You are analyzing the vision documents for a software product.
 Work in TWO roles, then commit the results with update_product_context (in as many staged

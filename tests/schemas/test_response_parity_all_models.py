@@ -3,36 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""CE-0037 — Schema-parity tests for entity response shapes.
-
-**The bug class:** when a single DB entity has multiple Pydantic response
-schemas (one for REST, one for MCP, sometimes more), adding a column to the
-model can silently drop from any of them. CE-0036 was the canonical example —
-``implementation_launched_at`` was added to MCP ``ProjectDetail`` but missed
-the REST ``ProjectResponse`` they share the same entity.
-
-**The defense:** for every (SQLAlchemy model, response-schema) pair, every
-model column must either appear in the schema OR live in the schema's
-explicit allowlist with a documented reason. New model columns fail the test
-until classified — forcing the next developer to make a deliberate exposure
-decision rather than a silent drop.
-
-Allowlists encode current intent. They are intentionally verbose. When a
-column is added in the future, the failure message tells the developer to
-either (a) add the column to the schema, or (b) add it to the allowlist with
-a rationale.
-
-**Coverage status (as of CE-0037):**
-- Project: REST ``ProjectResponse``, MCP ``ProjectDetail``, MCP ``ProjectData`` — full audit
-- Product: REST ``ProductResponse`` only (MCP has no full ProductDetail/ProductData;
-  ``ProductStatistics`` is a metrics-projection, not a full entity shape — gap
-  documented in CE-0037 cascading_impacts for CE-0038 review)
-- AgentJob: REST ``JobResponse`` only (MCP returns ``list[dict]`` via
-  ``PendingJobsResult.jobs`` / ``JobListResult.jobs`` — untyped, parity-test
-  not applicable until those are typed; gap noted for CE-0038)
-- AgentExecution: REST ``AgentExecutionResponse`` only (same situation as
-  AgentJob — no MCP typed schema)
-"""
 
 from __future__ import annotations
 
@@ -56,19 +26,9 @@ from giljo_mcp.schemas.responses.project import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Helper — list every persisted/computed attribute on a SQLAlchemy model.
-# ---------------------------------------------------------------------------
 
 
 def _model_attribute_names(model_cls: type) -> set[str]:
-    """Return every Python attribute the model exposes as a column or
-    column_property. Covers Column(...) and column_property(...) — both are
-    fields a developer might intuitively expect on the response schema.
-
-    Relationships and pure Python @properties are excluded — those are
-    derived/joined data, not raw columns, and live by different rules.
-    """
     names: set[str] = set()
     mapper = class_mapper(model_cls)
     for prop in mapper.iterate_properties:
@@ -88,11 +48,6 @@ def _assert_parity(
     model_label: str,
     schema_label: str,
 ) -> None:
-    """Every model column is in the schema OR the allowlist.
-
-    Allowlist values are human-readable reasons. They are not asserted on;
-    they exist for the next developer to read when they hit a parity failure.
-    """
     model_cols = _model_attribute_names(model_cls)
     schema_fields = _schema_field_names(schema_cls)
     missing = model_cols - schema_fields - set(allowlist.keys())
@@ -112,11 +67,7 @@ def _assert_parity(
     )
 
 
-# ---------------------------------------------------------------------------
-# Project — three schemas audited
-# ---------------------------------------------------------------------------
 
-# REST ProjectResponse: consumed by the frontend project page.
 PROJECT_REST_ALLOWLIST: dict[str, str] = {
     "tenant_key": "Multi-tenant isolation — never exposed via REST (server-side filter)",
     "deleted_at": "Soft-delete timestamp surfaced via ProjectListResponse's /deleted listing, not main project shape",
@@ -138,7 +89,6 @@ PROJECT_REST_ALLOWLIST: dict[str, str] = {
     ),
 }
 
-# MCP ProjectDetail: returned by ProjectService.get_project() — full detail.
 PROJECT_MCP_DETAIL_ALLOWLIST: dict[str, str] = {
     "deleted_at": "Soft-delete timestamp; full-detail shape is for active projects",
     "orchestrator_summary": "Internal closeout workflow state",
@@ -148,7 +98,6 @@ PROJECT_MCP_DETAIL_ALLOWLIST: dict[str, str] = {
     "ever_launched_at": "BE-9085b internal durable launch signal — detector-only, not exposed via API",
 }
 
-# MCP ProjectData: returned by cancel_staging / update_project — compact shape.
 PROJECT_MCP_DATA_ALLOWLIST: dict[str, str] = {
     "alias": "Compact update/cancel response — alias not relevant to caller",
     "staging_status": "Compact update/cancel response — caller already knows staging context",
@@ -196,9 +145,6 @@ def test_project_mcp_data_parity():
     )
 
 
-# ---------------------------------------------------------------------------
-# Product — REST only; no MCP full-entity schema exists yet.
-# ---------------------------------------------------------------------------
 
 PRODUCT_REST_ALLOWLIST: dict[str, str] = {
     "tenant_key": "Multi-tenant isolation — never exposed via REST",
@@ -228,10 +174,6 @@ def test_product_rest_response_parity():
     )
 
 
-# ---------------------------------------------------------------------------
-# AgentJob — REST only; MCP returns list[dict] via PendingJobsResult.jobs
-# and JobListResult.jobs (untyped). Gap documented in CE-0037 cascading_impacts.
-# ---------------------------------------------------------------------------
 
 AGENT_JOB_REST_ALLOWLIST: dict[str, str] = {
     "template_id": ("Template FK is internal provenance — frontend renders agent_display_name, not template lineage"),
@@ -248,8 +190,6 @@ AGENT_JOB_REST_ALLOWLIST: dict[str, str] = {
 
 
 def test_agent_job_rest_response_parity():
-    # JobResponse explicitly includes tenant_key, so the allowlist entry above is
-    # informational — the actual missing-set after subtraction is what fails.
     _assert_parity(
         AgentJob,
         JobResponse,
@@ -259,11 +199,6 @@ def test_agent_job_rest_response_parity():
     )
 
 
-# ---------------------------------------------------------------------------
-# AgentExecution — REST AgentExecutionResponse is a compact shape.
-# JobResponse fuses AgentJob + AgentExecution columns and is the richer
-# project-level view; AgentExecutionResponse is the execution-only projection.
-# ---------------------------------------------------------------------------
 
 AGENT_EXECUTION_REST_ALLOWLIST: dict[str, str] = {
     "id": (
@@ -309,11 +244,6 @@ def test_agent_execution_rest_response_parity():
     )
 
 
-# ---------------------------------------------------------------------------
-# Allowlist hygiene — make sure every allowlist entry actually corresponds
-# to a real column on the model. Catches typos/drift (e.g., column renamed
-# but allowlist entry left behind, masking a new gap silently).
-# ---------------------------------------------------------------------------
 
 ALLOWLIST_FIXTURES: list[tuple[str, type, dict[str, Any]]] = [
     ("Project / REST ProjectResponse", Project, PROJECT_REST_ALLOWLIST),
@@ -343,32 +273,15 @@ def test_allowlist_entries_reference_real_columns(
     )
 
 
-# ---------------------------------------------------------------------------
-# CE-0038 — Structural inheritance assertions
-#
-# The CE-0036 bug class (silent drift between REST + MCP Project response
-# schemas) is now structurally prevented for fields declared on ``ProjectBase``:
-# changes to the base ripple to every subclass. These tests enforce that
-# inheritance contract going forward, so the consolidation can't be quietly
-# undone by a future refactor that drops the base and re-introduces three
-# parallel field lists.
-# ---------------------------------------------------------------------------
 
 
 def test_project_response_inherits_project_base() -> None:
-    """REST ``ProjectResponse`` must derive from the shared ``ProjectBase``.
-
-    If a refactor breaks this inheritance, the CE-0036 bug class re-opens:
-    adding a Project column to MCP ``ProjectDetail`` would no longer
-    automatically surface on REST ``ProjectResponse``.
-    """
     assert issubclass(ProjectResponse, ProjectBase), (
         "REST ProjectResponse must inherit ProjectBase (CE-0038 consolidation). Check api/endpoints/projects/models.py."
     )
 
 
 def test_project_detail_inherits_project_base() -> None:
-    """MCP ``ProjectDetail`` must derive from the shared ``ProjectBase``."""
     assert issubclass(ProjectDetail, ProjectBase), (
         "MCP ProjectDetail must inherit ProjectBase (CE-0038 consolidation). "
         "Check src/giljo_mcp/schemas/responses/project.py."
@@ -376,7 +289,6 @@ def test_project_detail_inherits_project_base() -> None:
 
 
 def test_project_data_inherits_project_base() -> None:
-    """MCP ``ProjectData`` must derive from the shared ``ProjectBase``."""
     assert issubclass(ProjectData, ProjectBase), (
         "MCP ProjectData must inherit ProjectBase (CE-0038 consolidation). "
         "Check src/giljo_mcp/schemas/responses/project.py."
@@ -384,11 +296,6 @@ def test_project_data_inherits_project_base() -> None:
 
 
 def test_active_project_detail_inherits_project_base() -> None:
-    """``ActiveProjectDetail`` must derive from the shared ``ProjectBase``.
-
-    CE-0038 included this so the active-project shape can't silently drift
-    away from the rest of the Project response family.
-    """
     assert issubclass(ActiveProjectDetail, ProjectBase), (
         "ActiveProjectDetail must inherit ProjectBase (CE-0038 consolidation). "
         "Check src/giljo_mcp/schemas/responses/project.py."
@@ -396,16 +303,6 @@ def test_active_project_detail_inherits_project_base() -> None:
 
 
 def test_project_base_fields_are_intersection_of_subclasses() -> None:
-    """Every field on ``ProjectBase`` MUST appear (by name) on each of REST
-    ``ProjectResponse``, MCP ``ProjectDetail``, and MCP ``ProjectData``.
-
-    A field that's on the base but missing from a subclass would mean the
-    base is the wrong abstraction — the field shouldn't be universal.
-    Inheritance gives this property automatically, but the assertion
-    documents the invariant and catches accidental field removal from a
-    subclass that intentionally shadowed the base (e.g. dropped an
-    inherited annotation by overriding without re-declaring).
-    """
     base_fields = set(ProjectBase.model_fields.keys())
     rest_fields = set(ProjectResponse.model_fields.keys())
     detail_fields = set(ProjectDetail.model_fields.keys())

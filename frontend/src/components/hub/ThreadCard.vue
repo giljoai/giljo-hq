@@ -1,16 +1,3 @@
-<!--
-  ThreadCard.vue — FE-9289c
-
-  One Quiet Card. Renders a single thread's three facts — name, who registered, the
-  last thing said — plus an inline rename and three hover actions. It owns only its own
-  view state (the rename draft); it reaches into no store. List-level state (selection,
-  filter, scope, the delete dialog) stays in ThreadList, and every action leaves this
-  component as an event. That boundary is what keeps list logic in one place.
-
-  Packet corrections held: NO host on the pill (role badge + agent name + harness + live
-  dot only); radii from the $border-radius scale; hover shadow via the named
-  $shadow-card-hover token; nothing below 11px.
--->
 <template>
   <div
     class="thread-card smooth-border"
@@ -22,7 +9,6 @@
     data-testid="thread-card"
     @click="$emit('open', thread.thread_id)"
   >
-    <!-- Title row: title + (relative time, replaced by actions on hover) -->
     <div class="thread-card__head">
       <template v-if="renaming">
         <input
@@ -39,12 +25,8 @@
       </template>
 
       <template v-else>
-        <!-- The serial leads: it is the handle the operator quotes to an agent. -->
         <span class="thread-card__serial" data-testid="thread-card-serial">{{ serial }}</span>
 
-        <!-- FE-9365g: the raised hand — agents are waiting on YOU. Rendered only from
-             the baton (same source as the gold frame); a hand that could appear for any
-             other reason would un-teach what the gold frame means. -->
         <v-icon
           v-if="thread._yourTurn"
           size="15"
@@ -59,10 +41,6 @@
           data-testid="thread-card-title"
         >
           {{ displayTitle }}
-        </span>
-
-        <span class="thread-card__time" data-testid="thread-card-time">
-          {{ relativeTime }}
         </span>
 
         <div class="thread-card__actions" data-testid="thread-card-actions">
@@ -102,7 +80,6 @@
       </template>
     </div>
 
-    <!-- Registered agents -->
     <div class="thread-card__pills" data-testid="thread-card-pills">
       <span v-if="!agents.length" class="thread-card__empty-pills" data-testid="thread-card-empty-pills">
         No one has checked in yet — share the id so an agent can join.
@@ -123,11 +100,6 @@
         {{ overflowLabel }}
       </span>
 
-      <!-- FE-9530: one Hub space now shows threads from every product, so each card
-           states which product (or "No product", for what ruling 2's "no migration"
-           left untagged) and how many additional projects it tags. Reuses the neutral
-           overflow-pill style -- a tag is metadata, not a status, so it earns no color
-           of its own. -->
       <span
         class="thread-card__pill thread-card__pill--more smooth-border"
         :title="productChipTitle"
@@ -146,9 +118,6 @@
         {{ projectTagCount === 1 ? '1 project' : `${projectTagCount} projects` }}
       </span>
 
-      <!-- Terminal chip rides the pill row (prototype), not the footer. -->
-      <!-- FE-9368: the chip explains itself now that the legend is gone. Only the two
-           terminal states ever render one; `open` is the default and needs no chip. -->
       <span
         v-if="isTerminal"
         class="thread-card__status smooth-border"
@@ -160,16 +129,12 @@
       </span>
     </div>
 
-    <!-- Last message -->
     <div v-if="thread.last_message" class="thread-card__last" data-testid="thread-card-last">
       <span class="thread-card__last-author">{{ thread.last_message.author }}:</span>
       {{ excerpt }}
     </div>
 
-    <!-- Footer: the join command (+ project memory note) and the terminal-only chip -->
     <div class="thread-card__foot">
-      <!-- The card's most-used action after opening it: copy this so another agent can
-           join. The FULL uuid, never truncated — a partial id is useless to paste. -->
       <button
         type="button"
         class="thread-card__join"
@@ -182,6 +147,8 @@
         <v-icon size="13">mdi-content-copy</v-icon>
       </button>
       <span v-if="locked" class="thread-card__lock-note">· kept with the project's 360 memory</span>
+
+      <ThreadDates :thread="thread" size="sm" class="thread-card__dates" data-testid="thread-card-dates" />
     </div>
   </div>
 </template>
@@ -192,6 +159,7 @@ import { getAgentColor } from '@/config/agentColors'
 import { hexToRgba } from '@/utils/colorUtils'
 import { useProductStore } from '@/stores/products'
 import AgentPill from '@/components/hub/AgentPill.vue'
+import ThreadDates from '@/components/hub/ThreadDates.vue'
 
 const props = defineProps({
   thread: { type: Object, required: true },
@@ -200,15 +168,8 @@ const props = defineProps({
 
 const emit = defineEmits(['open', 'rename', 'copy', 'delete', 'lock-info'])
 
-// A project-bound thread is named after its project and kept with its 360 memory — it
-// cannot be renamed or deleted here (BE-9289b enforces this server-side too).
 const locked = computed(() => props.thread.project_id != null)
 
-// ---- FE-9530: which product / how many projects this thread tags ----
-// One Hub space shows every product's threads together, so each card names its own
-// -- "No product" is not an error state, it's ruling 1's stated exception (a
-// genuinely product-less thread, or one that predates mandatory tagging and has
-// not been retagged yet).
 const productStore = useProductStore()
 const productChipLabel = computed(() => {
   const pid = props.thread.product_id
@@ -221,7 +182,6 @@ const productChipTitle = computed(() =>
 const projectTagCount = computed(() => (props.thread.project_ids || []).length)
 const projectTagTitle = computed(() => `Tagged to ${projectTagCount.value} project(s)`)
 
-// ---- title ----
 const MARKERS = new Set(['(project comms)'])
 const displayTitle = computed(() => {
   const t = props.thread.title || props.thread.subject
@@ -232,54 +192,32 @@ const isUnnamed = computed(() => {
   return !t || MARKERS.has(t) || /^chain run\s/i.test(t)
 })
 
-// ---- registered agents (pills) ----
-// AGENT participants only — the user is not a "registered agent" on the card.
 const agents = computed(() => (props.thread.participants || []).filter((p) => p.participant_type !== 'user'))
 
-// FE-9365c: at most five pills, the rest collapse into one "+N more" chip.
-//
-// The card answers "which harnesses are in this room, and are they alive". It does not
-// need to answer "what is each agent called" — that is the thread's job, one click away.
-// Real names are `LANE_A — installer + harness fixes` and `acer-worker (ACER20206 hands,
-// Phase 0)`; rendered on the card they wrapped to three lines each, so a five-agent
-// thread became a stack taller than everything else on screen.
 const MAX_PILLS = 5
 const visibleAgents = computed(() => agents.value.slice(0, MAX_PILLS))
 const overflowAgents = computed(() => agents.value.slice(MAX_PILLS))
 
-// Computed ONLY when there is an overflow. A naive `agents.length - MAX_PILLS` leaves
-// "+0 more" and "+-1 more" strings in the DOM for every normal thread.
 const overflowLabel = computed(() =>
   overflowAgents.value.length > 0 ? `+${overflowAgents.value.length} more` : '',
 )
 
-// The names the pills dropped, one per line, so the information is recoverable on hover
-// rather than lost.
 const overflowTitle = computed(() =>
   overflowAgents.value
     .map((a) => `${a.display_name || a.participant_id} · ${harnessLabel(a.harness)}`)
     .join('\n'),
 )
 
-// The harness token `generic` is the resolver's fail-safe floor — render it as a proper
-// label, not the bare token.
-//
-// FE-9365c: the model suffix is normalised out — `OpenCode · Qwen` renders as
-// `OpenCode`. At 11.5px in a 220px pill the family is the useful fact; the model is
-// noise, and it changes per session so it makes the same agent look different between
-// two polls.
 function harnessLabel(harness) {
   if (!harness || harness === 'generic') return 'Generic Harness'
   return String(harness).split(' · ')[0]
 }
 
-// ---- last message ----
 const excerpt = computed(() => {
   const raw = props.thread.last_message?.excerpt || ''
   return raw.length > 160 ? `${raw.slice(0, 160)}…` : raw
 })
 
-// ---- footer / status ----
 const serial = computed(() => props.thread.chat_id || '')
 const TERMINAL = new Set(['resolved', 'closed'])
 const isTerminal = computed(() => TERMINAL.has(String(props.thread.status || '').toLowerCase()))
@@ -288,38 +226,16 @@ const statusStyle = computed(() => {
   return { backgroundColor: hexToRgba(hex, 0.15), color: hex }
 })
 
-// FE-9368: what the chip means, in the operator's words. Carried over from the legend
-// panel that used to be the only place these two states were explained.
 const STATUS_MEANINGS = {
   resolved: "resolved: the agents agreed it's done; still readable",
   closed: 'closed: accepted by the orchestrator, final',
 }
 const statusTitle = computed(() => STATUS_MEANINGS[String(props.thread.status || '').toLowerCase()] || '')
 
-// ---- states ----
-// FE-9365f: the yellow card comes from the BATON and nothing else. It used to also
-// fire on `unread`, which painted virtually every card yellow for an operator who had
-// been away — and a highlight that is always on highlights nothing. Reported live
-// 2026-08-05; the prototype's legend states the rule outright: yellow = handover to
-// you, read from next_action_owner only.
 const attention = computed(() => !!props.thread._yourTurn)
 const isIdle = computed(() => isTerminal.value)
 
-// ---- relative time ----
-const relativeTime = computed(() => {
-  const iso = props.thread.last_message?.created_at || props.thread.last_activity_at || props.thread.created_at
-  if (!iso) return ''
-  const d = new Date(iso).getTime()
-  if (Number.isNaN(d)) return ''
-  const mins = Math.floor((Date.now() - d) / 60000)
-  if (mins < 1) return 'now'
-  if (mins < 60) return `${mins}m`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h`
-  return `${Math.floor(hrs / 24)}d`
-})
 
-// ---- inline rename ----
 const renaming = ref(false)
 const draft = ref('')
 const renameInput = ref(null)
@@ -365,7 +281,6 @@ function cancelRename() {
     box-shadow: $shadow-card-hover;
     transform: translateY(-2px);
 
-    .thread-card__time { opacity: 0; }
     .thread-card__actions { opacity: 1; pointer-events: auto; }
   }
 
@@ -403,7 +318,8 @@ function cancelRename() {
     // Padding rather than a width on `__title`: it keeps the actions out of flow, so
     // the no-layout-shift property still holds (the fading `__time` occupies the same
     // reserved strip), while the title now runs out of room BEFORE the buttons start.
-    // 3 buttons x 26px + 2 gaps x 4px + the 20px right offset.
+    // 3 buttons x 26px + 2 gaps x 4px + the 20px right offset. (FE-9593: the relative
+    // time that used to share this strip is gone; the strip stays reserved for them.)
     padding-right: 106px;
   }
 
@@ -433,13 +349,6 @@ function cancelRename() {
     text-overflow: ellipsis;
 
     &--unnamed { font-style: italic; color: var(--text-muted, #{$color-text-secondary}); }
-  }
-
-  &__time {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 0.6875rem; // 11 — the floor
-    color: var(--text-muted, #{$color-text-secondary});
-    transition: opacity $transition-fast;
   }
 
   &__actions {
@@ -542,9 +451,16 @@ function cancelRename() {
   &__foot {
     display: flex;
     align-items: center;
+    // FE-9593: the dates ride this row and wrap under the join block when the card
+    // is narrow (tablet band), rather than clipping either.
+    flex-wrap: wrap;
     gap: v.$spacing-sm;
     min-width: 0;
   }
+
+  // FE-9593: the dates sit right-aligned when the row has room and wrap under the join
+  // block on a narrow card.
+  &__dates { margin-left: auto; }
 
   // The terminal block that replaced the truncated id. Same shape the thread view
   // shows, so the operator learns one thing and uses it in both places.

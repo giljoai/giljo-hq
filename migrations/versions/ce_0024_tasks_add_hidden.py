@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Add hidden boolean column to tasks for UI declutter parity with projects.
-
-Revision ID: ce_0024_tasks_add_hidden
-Revises: ce_0023_tasks_shared_taxonomy_serial
-Create Date: 2026-05-13
-
-FE-5046 (Task UI Parity): ``projects`` carries a ``hidden`` flag (per-row UI
-declutter) that the task model lacked. Mirroring the column on ``tasks`` lets
-the FE expose the same hide/show affordance for tasks. The flag is NOT a
-default visibility gate -- agents and the MCP ``list_tasks`` tool see hidden
-and non-hidden rows alike; ``hidden`` only filters when an explicit
-``hidden=true|false`` is passed.
-
-Idempotent: column add is guarded by an information_schema lookup. Server
-default ``false`` backfills existing rows on add.
-
-Edition Scope: CE -- ``tasks`` is a CE table.
-"""
 
 import sqlalchemy as sa
 from alembic import op

@@ -139,8 +139,6 @@
       </div>
     </v-card>
 
-    <!-- FE-5073: CTX bootstrap confirmation dialog. Inline to stay inside the
-         file-count budget. Uses the dlg-header/dlg-footer design-system anatomy. -->
     <v-dialog v-model="ctxConfirmOpen" max-width="520" persistent>
       <v-card class="smooth-border">
         <div class="dlg-header dlg-header--warning">
@@ -228,10 +226,6 @@ const props = defineProps({
     type: String,
     default: null,
   },
-  // Parent-driven spinner state. Bound via v-model:saving so the parent
-  // can reset the button to idle on error (see ProductsView.saveProduct
-  // catch block). Without this, a 4xx from the backend left the button
-  // permanently in :loading state and looked like a frozen UI.
   saving: {
     type: Boolean,
     default: false,
@@ -248,26 +242,15 @@ const emit = defineEmits([
   'upload-vision-files',
 ])
 
-// Internal proxy mirrors the v-model:saving prop so the rest of the
-// component reads/writes through one symbol. setSaving() forwards to
-// the parent so the parent stays the source of truth.
 const saving = computed({
   get: () => props.saving,
   set: (value) => emit('update:saving', value),
 })
 const formValid = ref(false)
 const formRef = ref(null)
-// New-product onboarding paths (create mode only). Mutually exclusive:
-//   - skipAiAnalysis: a document IS required and still uploads + chunks; only
-//     the AI/agent prompt step is skipped. Tabs unlock for manual fill once a
-//     doc is attached (Path B).
-//   - createBlank: explicit doc-LESS escape — unlocks tabs immediately with no
-//     document (Path C). The only path that bypasses the document requirement.
-// Path A (AI-assisted) is unchanged: agent finishes -> optimistic WS unlock.
 const skipAiAnalysis = ref(false)
 const createBlank = ref(false)
 
-// Choosing one path clears the other so the gate has a single active intent.
 function onSkipAiAnalysis(value) {
   skipAiAnalysis.value = value
   if (value) createBlank.value = false
@@ -282,15 +265,6 @@ const { dialogTab, tabOrder, isFirstTab, isLastTab, goNextTab, goPrevTab, resetT
 
 const productStore = useProductStore()
 
-// BE-5118/FE-9121: vision_analysis_complete gate. The flag lives on the
-// Product model. Read priority:
-//   1. productStore.getProductById(props.product.id) — the store's per-id
-//      cache, write-through refreshed on WS event regardless of whether this
-//      product is the globally selected one.
-//   2. Fallback to props.product if the store doesn't have a fresh copy yet.
-// The store path is the source of truth so the gate flips reactively when the
-// vision:analysis_complete WebSocket event fires without requiring the dialog
-// to close+reopen.
 const visionAnalysisComplete = computed(() => {
   const sp = productStore.getProductById(props.product?.id)
   if (sp && typeof sp.vision_analysis_complete === 'boolean') {
@@ -301,26 +275,14 @@ const visionAnalysisComplete = computed(() => {
 
 const hasVisionDoc = computed(() => props.existingVisionDocuments.length > 0)
 
-// FE-6088: a NEW product is LOCKED BY DEFAULT (a document is the default-required
-// input) and unlocks only via one of the three explicit paths:
-//   A. AI analysis complete (optimistic WS unlock).
-//   B. "Skip AI Analysis" checked AND a document attached.
-//   C. "Create blank" chosen (no document).
-// "Skip AI Analysis" with NO document does NOT unlock — Path B requires the doc.
 const newProductUnlocked = computed(() => {
   if (createBlank.value) return true
   if (skipAiAnalysis.value && hasVisionDoc.value) return true
   return visionAnalysisComplete.value
 })
 
-// Gate is closed for a new product until one of the three paths opens it. Edit
-// mode (saved products) is never blocked — FE-5073 staleness banner covers the
-// re-analysis flow for saved products. FE-6007.
 const gateActive = computed(() => !props.isEdit && !newProductUnlocked.value)
 
-// Tabs beyond setup are locked while the gate is closed. The setup tab itself
-// stays available so the user can attach a document, stage analysis, or pick
-// the manual/blank paths.
 const TAB_LOCKABLE_VALUES = ['info', 'tech', 'arch', 'features']
 function isTabLocked(tabValue) {
   return gateActive.value && TAB_LOCKABLE_VALUES.includes(tabValue)
@@ -337,24 +299,12 @@ const {
   onVisionAnalysisComplete,
 } = useVisionAnalysis((formData) => { productForm.value = formData })
 
-// Footer single-CTA state machine. The Setup-tab now drives the primary
-// button through 4 logical states (create mode) plus the existing
-// Save/Create flow (edit + final tab). See ProductForm.spec.js for the
-// authoritative regression matrix.
 const primaryButtonState = computed(() => {
   if (props.isEdit) return 'save'
   if (isLastTab.value) return 'create'
   if (analysisAgentConnected.value || analysisInProgress.value) return 'analyzing'
-  // Path C (blank) and Path B (skip+doc) and Path A (analysis complete) all
-  // unlock the wizard, so the CTA advances to "Next".
   if (newProductUnlocked.value) return 'next'
-  // "Skip AI Analysis" checked but no doc yet: the path is chosen but blocked
-  // on the document — show "Next" (disabled until a doc is attached).
   if (skipAiAnalysis.value) return 'next'
-  // Idle on Setup tab — no docs yet OR docs present but not analyzed.
-  // Both surface as "Stage analysis" so the CTA is consistent regardless of
-  // whether the user has attached files. The disabled-ness differs (see
-  // nextOrSaveDisabled).
   return 'stage'
 })
 
@@ -369,16 +319,6 @@ const primaryButtonLabel = computed(() => {
   }
 })
 
-// Composite disabled-state for the footer primary button. Matrix:
-//   - saving spinner → disabled
-//   - edit mode → form must be valid + not analyzing
-//   - final-tab create → form must be valid
-//   - analyzing → disabled (spinner-like state)
-//   - stage analysis, no docs → disabled (must attach at least one doc)
-//   - stage analysis, docs present → enabled (user clicks to stage)
-//   - next (create blank) → requires product name only
-//   - next (skip AI Analysis) → requires product name AND a document (Path B)
-//   - next (analysis complete) → enabled
 const nextOrSaveDisabled = computed(() => {
   if (saving.value) return true
   if (props.isEdit) {
@@ -389,37 +329,18 @@ const nextOrSaveDisabled = computed(() => {
   }
   if (primaryButtonState.value === 'analyzing') return true
   if (primaryButtonState.value === 'stage') {
-    // Need a product name AND at least one vision doc to actually stage.
     const hasName = !!productForm.value.name?.trim()
     return !hasName || !hasVisionDoc.value
   }
   if (primaryButtonState.value === 'next') {
     const hasName = !!productForm.value.name?.trim()
-    // Path C (create blank): name is the only gate (no document required).
     if (createBlank.value) return !hasName
-    // Path B (skip AI Analysis): a document is mandatory before advancing.
     if (skipAiAnalysis.value) return !hasName || !hasVisionDoc.value
-    // Path A (analysis complete): name was required to attach docs already.
     return false
   }
   return false
 })
 
-// ============================================
-// FE-5073: AI context staleness banner + CTX bootstrap CTA
-// ============================================
-//
-// All banner-visibility / counter state is derived from the live store
-// (productStore.getProductById) — NOT props.product — so WebSocket-driven
-// mutations like vision_doc_added or consolidation_complete update the
-// banner without requiring the dialog to close+reopen (memory:
-// feedback_frontend_prop_vs_store_source_of_truth).
-//
-// Hash semantics (see src/giljo_mcp/services/vision_hash.py):
-//   * vision_inputs_hash carries a `sha256:` prefix; sentinel `sha256:empty`
-//     means no active docs.
-//   * consolidated_vision_hash is raw hex (no prefix), null until first
-//     consolidation. Comparison strips the prefix from vision_inputs_hash.
 const VISION_HASH_PREFIX = 'sha256:'
 const VISION_HASH_EMPTY = 'sha256:empty'
 
@@ -433,16 +354,10 @@ const { showToast } = useToast()
 const ctxConfirmOpen = ref(false)
 const ctxLaunching = ref(false)
 
-// Resolve the most-current product snapshot. The store's per-id cache wins
-// when it has a fresher copy of the edited product; otherwise fall back to
-// props. Banner derivation MUST flow through this so a WS event refreshing
-// productStore.productsById re-renders the banner.
 const liveProduct = computed(() => {
   return productStore.getProductById(props.product?.id) || props.product || null
 })
 
-// True iff the current vision inputs no longer match the last consolidated
-// hash. Banner is gated additionally on isEdit + presence of input docs.
 const visionContextIsStale = computed(() => {
   const p = liveProduct.value
   if (!p) return false
@@ -450,17 +365,11 @@ const visionContextIsStale = computed(() => {
   if (!inputs || inputs === VISION_HASH_EMPTY) return false
   const persisted = p.consolidated_vision_hash
   if (!persisted) {
-    // First-run case: docs exist but consolidation never happened. Treat as
-    // stale only if there is at least one input doc (inputs hash is real).
     return true
   }
   return stripHashPrefix(inputs) !== persisted
 })
 
-// "New documents since the last refresh" heuristic. Uses
-// existingVisionDocuments (the canonical visible list passed by parent) and
-// counts docs whose created_at exceeds product.consolidated_at. Falls back to
-// total doc count when consolidated_at is null (never consolidated).
 const newDocsSinceLastRefresh = computed(() => {
   const p = liveProduct.value
   if (!p) return 0
@@ -491,8 +400,6 @@ function openCtxConfirm() {
   ctxConfirmOpen.value = true
 }
 
-// Look up the CTX taxonomy row id at click-time. We avoid prefetching to keep
-// the modal's mount cheap and because the taxonomy is small (one extra GET).
 async function resolveCtxProjectTypeId() {
   const resp = await api.taxonomyTypes.list()
   const types = resp?.data || []
@@ -500,7 +407,6 @@ async function resolveCtxProjectTypeId() {
   return ctx?.id || null
 }
 
-// Cap payload to backend 422 limits: max 50 docs, each string <=200 chars.
 function buildBootstrapTemplateVars(docs) {
   const trim = (s) => (s ? String(s).slice(0, 200) : '')
   const truncated = (docs || []).slice(0, 50).map((d) => ({
@@ -515,8 +421,6 @@ async function confirmCtxLaunch() {
   if (!product?.id) return
   ctxLaunching.value = true
   try {
-    // Idempotency probe: if an open CTX project already exists for this
-    // product, prefer the server's hash_matches signal over re-launching.
     try {
       const existing = await api.products.getContextUpdateProject(product.id)
       const data = existing?.data
@@ -542,7 +446,6 @@ async function confirmCtxLaunch() {
         return
       }
     } catch (err) {
-      // 404 is the expected "no open CTX project" path — proceed to create.
       if (err?.response?.status !== 404) throw err
     }
 
@@ -589,7 +492,6 @@ async function confirmCtxLaunch() {
   }
 }
 
-// Product form data — single source of truth for the default shape
 function getDefaultFormState() {
   return {
     name: '',
@@ -624,13 +526,11 @@ function getDefaultFormState() {
 
 const productForm = ref(getDefaultFormState())
 
-// Computed v-model for dialog
 const isOpen = computed({
   get: () => props.modelValue,
   set: (val) => emit('update:modelValue', val),
 })
 
-// Handover 0425: Platform selection state
 const platformValidationError = ref('')
 
 function closeDialog() {
@@ -669,10 +569,6 @@ function stageAnalysis() {
   return runStageAnalysis(productForm.value, props.product?.id)
 }
 
-// Single dispatcher for the footer primary CTA. Branches on the computed
-// state from primaryButtonState. Edit + final-tab save flows go to
-// saveProduct(); the staging state goes to stageAnalysis(); everything else
-// advances the tab.
 function onPrimaryClick() {
   if (props.isEdit) {
     saveProduct()
@@ -686,15 +582,10 @@ function onPrimaryClick() {
     stageAnalysis()
     return
   }
-  // 'next' (skip ON, or analysis complete) — advance to next tab.
   goNextTab()
 }
 
-// Called from ProductSetupTab's @upload-vision-files event.
-// The tab emits {productName, files} so we forward to the parent view.
-// Also accepts a raw File[] for backward compat with the existing spec tests.
 function onFilesAttached(payload) {
-  // Support both {productName, files} (from ProductSetupTab) and File[] (tests)
   if (Array.isArray(payload)) {
     if (!payload.length) return
     emit('upload-vision-files', { productName: productForm.value.name, files: [...payload] })
@@ -704,7 +595,6 @@ function onFilesAttached(payload) {
   emit('upload-vision-files', payload)
 }
 
-// Handover 0425: Platform selection handlers
 function handleAllPlatformChange(value) {
   platformValidationError.value = ''
   if (value && productForm.value.targetPlatforms.includes('all')) {

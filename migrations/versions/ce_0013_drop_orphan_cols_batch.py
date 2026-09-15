@@ -3,34 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Drop orphan columns across messages, agent_templates, mcp_context_index,
-api_key_ip_log, and configurations.
-
-Revision ID: ce_0013_drop_orphan_cols_batch
-Revises: ce_0012_drop_setup_state_orphan_cols
-Create Date: 2026-05-05
-
-Bundles audit clusters 4, 7, 5, 9, 8 (mission numbering) plus cluster 6 of
-the analyzer matrix into a single CE migration to honor the bloat budget
-(<=4 new migration files in this sweep).
-
-Drops:
-
-- messages: processing_started_at, retry_count, max_retries, backoff_seconds,
-  circuit_breaker_status (queue-reliability columns; DLQ feature never landed)
-- agent_templates: last_used_at, usage_count (no writer; usage_count_at_archive
-  on TemplateArchive remains and now snapshots 0)
-- mcp_context_index: chunk_id, searchable_vector (FTS path uses keywords JSONB
-  instead) and dependent indexes idx_mcp_context_chunk_id +
-  idx_mcp_context_searchable
-- api_key_ip_log: first_seen_at, last_seen_at + idx_api_key_ip_log_last_seen
-  (write-only telemetry; no reader anywhere)
-- configurations: is_secret (no writer)
-
-Reference: internal design notes sec 3.a/3.b.
-
-Idempotent. Reversible.
-"""
 
 import sqlalchemy as sa
 from alembic import op

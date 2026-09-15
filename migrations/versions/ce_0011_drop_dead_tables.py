@@ -3,26 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Drop dead tables: git_commits and template_usage_stats.
-
-Revision ID: ce_0011_drop_dead_tables
-Revises: ce_0010_drop_projects_paused_at
-Create Date: 2026-05-05
-
-Both tables are zero-write surfaces:
-
-- `git_commits`: no service or repository inserts rows; commit history is tracked
-  via `ProductMemoryEntry.git_commits` JSONB instead.
-- `template_usage_stats`: `template_service.hard_delete_template` deletes from
-  this table but no code path ever inserts. The `AgentTemplate.usage_stats`
-  relationship at `templates.py:115` is dead, as is `repositories/template_repository.py::delete_usage_stats`.
-
-Reference: internal design notes sec 3.a /
-audit clusters 1 + 2 (mission numbering); analyzer matrix rows 1 + 2.
-
-Idempotent. Reversible (downgrade re-creates skeletal tables matching the
-baseline schema; row data is not preserved).
-"""
 
 import sqlalchemy as sa
 from alembic import op

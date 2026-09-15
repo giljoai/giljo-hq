@@ -1,21 +1,15 @@
-/**
- * Organization Store - Manages organization state.
- * Handover 0424d: State management for org UI.
- */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import api from '@/services/api'
 import { useUserStore } from './user'
 
 export const useOrgStore = defineStore('org', () => {
-  // State
   const organizations = ref([])
   const currentOrg = ref(null)
   const members = ref([])
   const loading = ref(false)
   const error = ref(null)
 
-  // Getters
   const userRole = computed(() => {
     if (!currentOrg.value || !members.value.length) return null
     const userStore = useUserStore()
@@ -37,7 +31,6 @@ export const useOrgStore = defineStore('org', () => {
     return ['owner', 'admin'].includes(userRole.value)
   })
 
-  // Actions
   async function fetchOrganizations() {
     loading.value = true
     error.value = null
@@ -62,17 +55,9 @@ export const useOrgStore = defineStore('org', () => {
       members.value = response.data.members || []
       return { success: true, data: currentOrg.value }
     } catch (err) {
-      // Stale org reference (commonly: demo accounts reaped after 7 days leave
-      // a dead org_id in localStorage). Clear local org state so views render
-      // with an empty org panel instead of stale data. Do NOT redirect from
-      // here -- the operator visiting /admin/settings legitimately needs to
-      // see the page even when their personal org_id is dead. Demo-visitor
-      // routing belongs in the auth guard, not in a generic data fetch.
       if (err?.response?.status === 404) {
         currentOrg.value = null
         members.value = []
-        // Friendly message instead of raw "Request failed with status code 404".
-        // Components that bind to orgStore.error will show this verbatim.
         error.value = null
         return { success: false, error: 'Workspace not found. It may have been deleted.' }
       }
@@ -101,7 +86,6 @@ export const useOrgStore = defineStore('org', () => {
     try {
       const response = await api.organizations.update(orgId, orgData)
       currentOrg.value = response.data
-      // Update in list
       const index = organizations.value.findIndex((o) => o.id === orgId)
       if (index >= 0) {
         organizations.value[index] = response.data
@@ -181,7 +165,6 @@ export const useOrgStore = defineStore('org', () => {
       await api.organizations.transferOwnership(orgId, {
         new_owner_id: newOwnerId,
       })
-      // Refresh members to get updated roles
       await fetchMembers(orgId)
       return { success: true }
     } catch (err) {
@@ -197,20 +180,17 @@ export const useOrgStore = defineStore('org', () => {
   }
 
   return {
-    // State
     organizations,
     currentOrg,
     members,
     loading,
     error,
 
-    // Getters
     userRole,
     isOwner,
     isAdmin,
     canManageMembers,
 
-    // Actions
     fetchOrganizations,
     fetchOrganization,
     createOrganization,

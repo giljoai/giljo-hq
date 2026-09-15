@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Migration regression for IMP-6262 — make the reserved ``TSK`` tag task-exclusive.
-
-Real scratch PostgreSQL DB, real alembic. Covers ce_0067's backfill:
-
-- A legacy non-TSK task (``BE-6080``) is re-typed to ``TSK``, keeping its serial.
-- COLLISION: two legacy tasks that share a serial under different types
-  (``BE-0019`` + ``FE-0019``) cannot both become ``TSK-0019`` (the partial-unique
-  ``uq_task_taxonomy_active`` forbids it) — the backfill reassigns one a fresh
-  serial above the bucket watermark, so both end TSK-typed with DISTINCT serials.
-- A legacy ``TSK``-typed PROJECT (a past conversion) is un-typed to NULL, so no
-  project is ever ``TSK``-typed after the harmonization.
-- Idempotency: re-running against an already-migrated DB is a clean no-op
-  (the "CE reruns upgrade head on every boot" scenario).
-
-Mirrors tests/integration/migrations/test_ce_0053_0054_comm_hub.py.
-"""
 
 from __future__ import annotations
 
@@ -142,7 +126,6 @@ def scratch_engine():
 
 @pytest.fixture
 def scratch_at_pre(scratch_engine: sa.Engine):
-    """Fresh schema built up to ce_0066 (the pre-revision), ready for seeding."""
     _drop_all_objects(scratch_engine)
     up = _run_alembic("upgrade", _PRE)
     assert up.returncode == 0, f"upgrade to {_PRE} failed:\n{up.stdout}\n{up.stderr}"
@@ -150,16 +133,12 @@ def scratch_at_pre(scratch_engine: sa.Engine):
     _drop_all_objects(scratch_engine)
 
 
-# --------------------------------------------------------------------------- #
-# Seed helpers (raw SQL — the ORM models are not needed for a migration test)  #
-# --------------------------------------------------------------------------- #
 
 TK = "tk_imp6262"
 PID = "prod_imp6262"
 
 
 def _seed_base(engine: sa.Engine) -> dict[str, str]:
-    """Seed a product + the taxonomy types (TSK/BE/FE) and return their ids."""
     ids = {"TSK": str(uuid4()), "BE": str(uuid4()), "FE": str(uuid4())}
     with engine.connect() as conn:
         conn.execute(
@@ -233,8 +212,6 @@ class TestCe0067TskTaskExclusive:
         assert series == 6080, "no collision → original serial preserved"
 
     def test_serial_collision_two_tasks_get_distinct_serials(self, scratch_at_pre: sa.Engine) -> None:
-        """BE-0019 + FE-0019 both re-typed to TSK cannot both be TSK-0019 — one is
-        reassigned a fresh serial so both end distinct + TSK-typed."""
         ids = _seed_base(scratch_at_pre)
         t_be = _seed_task(scratch_at_pre, "BE-0019", ids["BE"], 19)
         t_fe = _seed_task(scratch_at_pre, "FE-0019", ids["FE"], 19)
@@ -249,8 +226,6 @@ class TestCe0067TskTaskExclusive:
         assert {be_series, fe_series} == {19, 20}, "one keeps 19, the other bumps to the watermark+1"
 
     def test_tsk_typed_project_is_untyped(self, scratch_at_pre: sa.Engine) -> None:
-        """A legacy TSK-typed project (past conversion) is un-typed to NULL, keeping
-        its serial — so no project is TSK-typed after the harmonization."""
         ids = _seed_base(scratch_at_pre)
         proj_id = _seed_project(scratch_at_pre, "was a task", ids["TSK"], 100)
 
@@ -262,7 +237,6 @@ class TestCe0067TskTaskExclusive:
         assert series == 100, "serial preserved"
 
     def test_rerun_is_idempotent(self, scratch_at_pre: sa.Engine) -> None:
-        """Re-running ce_0067 (boot-rerun / stamp-behind) changes nothing further."""
         ids = _seed_base(scratch_at_pre)
         task_id = _seed_task(scratch_at_pre, "BE-6080 task", ids["BE"], 6080)
 

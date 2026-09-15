@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Unit/integration tests for loop_directive_composer (BE-6054c).
-
-The composer is the seam mission_service calls to append the thread loop/sleep
-directive. Covers the pure append helper + the DB-backed compose (appends only
-when the agent has a live loop directive; never raises on a read failure).
-"""
 
 from __future__ import annotations
 
@@ -76,7 +70,6 @@ async def test_compose_noop_when_not_armed(db_session):
 
 
 async def test_compose_never_raises_on_read_failure():
-    # A broken opener (raises on use) must degrade to the unchanged protocol.
     def _broken(_tenant_key):
         raise RuntimeError("db down")
 

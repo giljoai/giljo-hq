@@ -3,33 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9247 -- forward-on-send: a directed, action-required Hub post addressed to
-an already-TERMINAL (closed/decommissioned) recipient redirects to the live
-orchestrator at SEND time, instead of landing as a delivered row nobody will
-ever drain ("MESSAGES WAITING: 2" on a dead agent).
-
-This is P2 in the BE-9242/BE-9247 pair: P1 (merged, BE-9242) resolves a dead
-agent's cursors at CLOSE time; this project extends the send-time seam
-(``MessageRoutingService._auto_block_completed_recipients`` /
-``auto_block_for_thread_post``) so a NEW post never has to wait for a close to
-be resolved. Reuses P1's ``forward_action_required_to_orchestrator`` /
-``build_forwarded_annotation`` VERBATIM -- no forked annotation shape.
-
-Covered (DoD):
-  1. closed recipient -> forwarded to the live orchestrator, sender gets a
-     notice, the dead agent's cursor is acked (unread does not linger).
-  2. decommissioned recipient -> same redirect.
-  3. no live orchestrator -> structured RECIPIENT_FINISHED reject naming the
-     thread's baton owner; the dead cursor is left un-acked.
-  4. self-forward guard: the SENDER is the live orchestrator itself, recipient
-     closed -> no self-addressed forward, notice instead.
-  5. a 'complete' recipient still auto-blocks (existing BE-9012b behavior,
-     unchanged) -- pinned again at this layer for the sibling regression;
-     ``test_be9012b_reactivation_as_post.py`` MUST also stay green.
-
-Parallel-safe: db_session (TransactionalTestContext). Each test owns its
-setup. Edition Scope: Both (CE messaging/lifecycle core).
-"""
 
 from __future__ import annotations
 
@@ -138,8 +111,6 @@ async def _seed_thread_post(
     next_action_owner: str | None = None,
     requires_action: bool = True,
 ) -> tuple[Message, CommThread]:
-    """Persist a thread post exactly as comm_thread_service would: thread_id set,
-    project_id = thread.project_id."""
     thread = CommThread(
         id=str(uuid4()),
         tenant_key=tenant_key,
@@ -206,9 +177,6 @@ async def test_closed_or_decommissioned_recipient_forwards_to_live_orchestrator(
     test_tenant_key: str,
     dead_status: str,
 ) -> None:
-    """DoD 1+2: a directed, action-required post to an already-TERMINAL recipient
-    is redirected to the live orchestrator; the sender gets a notice; the dead
-    agent's cursor is acked so its unread does not linger."""
     project = await _seed_project(db_session, test_tenant_key)
     orchestrator = await _seed_execution(
         db_session, test_tenant_key, project.id, display_name="orchestrator", status="working"
@@ -231,17 +199,13 @@ async def test_closed_or_decommissioned_recipient_forwards_to_live_orchestrator(
         tenant_key=test_tenant_key,
     )
 
-    # No auto-block (nothing to reactivate on a truly-dead agent).
     assert list(outcome) == []
     assert outcome.notice is not None
     assert "tester" in outcome.notice
     assert "forwarded" in outcome.notice.lower()
 
-    # The dead agent's cursor for THIS message is acked -- unread does not linger.
     assert await _is_acked(db_session, test_tenant_key, msg.id, dead.agent_id)
 
-    # Exactly one forwarded message reaches the live orchestrator, carrying the
-    # original content and P1's canonical annotation shape.
     forwarded = await _forwarded_messages_to(db_session, test_tenant_key, project.id, orchestrator.agent_id)
     assert len(forwarded) == 1
     assert "Please handle this before you finish." in forwarded[0].content
@@ -255,12 +219,7 @@ async def test_no_live_orchestrator_rejects_and_leaves_dead_cursor_unacked(
     routing_service: MessageRoutingService,
     test_tenant_key: str,
 ) -> None:
-    """DoD 3: with no live orchestrator to redirect to, the sender gets a
-    structured RECIPIENT_FINISHED notice naming the thread's baton owner
-    (CommThread.next_action_owner fallback), and the dead cursor is left
-    un-acked -- never silently dropped."""
     project = await _seed_project(db_session, test_tenant_key)
-    # No orchestrator execution seeded at all.
     dead = await _seed_execution(db_session, test_tenant_key, project.id, display_name="tester", status="closed")
     msg, _thread = await _seed_thread_post(
         db_session,
@@ -285,7 +244,6 @@ async def test_no_live_orchestrator_rejects_and_leaves_dead_cursor_unacked(
     assert "RECIPIENT_FINISHED" in outcome.notice
     assert "live-participant-42" in outcome.notice
 
-    # The dead cursor stays un-acked -- fails open, visibly.
     assert not await _is_acked(db_session, test_tenant_key, msg.id, dead.agent_id)
 
 
@@ -294,9 +252,6 @@ async def test_self_forward_guard_no_redirect_to_own_author(
     routing_service: MessageRoutingService,
     test_tenant_key: str,
 ) -> None:
-    """DoD 4: when the resolved live orchestrator IS the sender, the message is
-    never forwarded to itself -- a RECIPIENT_FINISHED-style notice is emitted
-    instead, and the dead cursor is left un-acked (no forward happened)."""
     project = await _seed_project(db_session, test_tenant_key)
     orchestrator = await _seed_execution(
         db_session, test_tenant_key, project.id, display_name="orchestrator", status="working"
@@ -307,7 +262,7 @@ async def test_self_forward_guard_no_redirect_to_own_author(
         test_tenant_key,
         project_id=project.id,
         recipient_agent_id=dead.agent_id,
-        from_agent_id=orchestrator.agent_id,  # the orchestrator IS the sender
+        from_agent_id=orchestrator.agent_id,
         from_display_name="orchestrator",
     )
 
@@ -323,10 +278,8 @@ async def test_self_forward_guard_no_redirect_to_own_author(
     assert outcome.notice is not None
     assert "RECIPIENT_FINISHED" in outcome.notice
 
-    # No forward was created -- the orchestrator's own inbox stays untouched.
     forwarded = await _forwarded_messages_to(db_session, test_tenant_key, project.id, orchestrator.agent_id)
     assert forwarded == []
-    # No forward happened, so the dead cursor is NOT acked.
     assert not await _is_acked(db_session, test_tenant_key, msg.id, dead.agent_id)
 
 
@@ -335,29 +288,11 @@ async def test_self_forward_guard_catches_job_id_self_declaration(
     routing_service: MessageRoutingService,
     test_tenant_key: str,
 ) -> None:
-    """Regression for BE-9247 audit Finding 1: the shipped AGENT REACTIVATION
-    PROTOCOL teaches orchestrators to post with from_agent="{orchestrator_id}",
-    and {orchestrator_id} is the JOB_ID -- a different UUID from agent_id. When a
-    live orchestrator follows its own protocol and posts a directed
-    requires_action message to a since-closed recipient using its job_id, the
-    self-forward guard must still fire: no self-addressed forward to the
-    orchestrator's own agent_id (which would spuriously gate its own
-    complete_job), and the sender gets the RECIPIENT_FINISHED notice instead.
-
-    Fail-first: before the guard recognizes job_id, from_agent_id=job_id misses
-    (job_id != agent_id and != "orchestrator" display_name) and a self-addressed
-    forward is wrongly created; the forwarded-messages assertion below fails."""
     project = await _seed_project(db_session, test_tenant_key)
-    # The orchestrator MUST be discoverable as agent_display_name == "orchestrator"
-    # (find_active_orchestrator_in_project keys on that literal); otherwise the code
-    # falls through to the no-orchestrator branch and the guard is never exercised.
-    # Isolation of the FIX comes from from_agent_id = job_id, a UUID that is neither
-    # the agent_id nor the "orchestrator" literal -- so ONLY the job_id membership in
-    # the widened identity set can make the guard fire.
     orchestrator = await _seed_execution(
         db_session, test_tenant_key, project.id, display_name="orchestrator", status="working"
     )
-    assert orchestrator.job_id != orchestrator.agent_id  # the whole point of the gap
+    assert orchestrator.job_id != orchestrator.agent_id
     assert orchestrator.job_id != "orchestrator"
     dead = await _seed_execution(db_session, test_tenant_key, project.id, display_name="tester", status="closed")
     msg, _thread = await _seed_thread_post(
@@ -365,7 +300,7 @@ async def test_self_forward_guard_catches_job_id_self_declaration(
         test_tenant_key,
         project_id=project.id,
         recipient_agent_id=dead.agent_id,
-        from_agent_id=orchestrator.job_id,  # the protocol's {orchestrator_id} == job_id
+        from_agent_id=orchestrator.job_id,
         from_display_name="orchestrator",
     )
 
@@ -381,10 +316,8 @@ async def test_self_forward_guard_catches_job_id_self_declaration(
     assert outcome.notice is not None
     assert "RECIPIENT_FINISHED" in outcome.notice
 
-    # The guard fired: no self-addressed forward reached the orchestrator's inbox.
     forwarded = await _forwarded_messages_to(db_session, test_tenant_key, project.id, orchestrator.agent_id)
     assert forwarded == []
-    # No forward happened, so the dead cursor is NOT acked.
     assert not await _is_acked(db_session, test_tenant_key, msg.id, dead.agent_id)
 
 
@@ -393,12 +326,6 @@ async def test_self_forward_guard_catches_anonymous_orchestrator_attribution(
     routing_service: MessageRoutingService,
     test_tenant_key: str,
 ) -> None:
-    """Regression for a gap the self-forward guard would otherwise miss:
-    comm_thread_service.post_to_thread falls back to the literal from_agent_id
-    "orchestrator" (not a real agent_id) when a post carries no from_agent and no
-    authenticated user. The system already treats such a post as
-    orchestrator-authored end to end (from_display_name gets the same literal),
-    so the guard must recognize this fallback too, not just a real agent_id match."""
     project = await _seed_project(db_session, test_tenant_key)
     await _seed_execution(db_session, test_tenant_key, project.id, display_name="orchestrator", status="working")
     dead = await _seed_execution(db_session, test_tenant_key, project.id, display_name="tester", status="closed")
@@ -407,7 +334,7 @@ async def test_self_forward_guard_catches_anonymous_orchestrator_attribution(
         test_tenant_key,
         project_id=project.id,
         recipient_agent_id=dead.agent_id,
-        from_agent_id="orchestrator",  # the anonymous-post fallback literal, not a real agent_id
+        from_agent_id="orchestrator",
         from_display_name="orchestrator",
     )
 
@@ -430,9 +357,6 @@ async def test_complete_recipient_still_auto_blocks_unchanged(
     routing_service: MessageRoutingService,
     test_tenant_key: str,
 ) -> None:
-    """DoD 5: a 'complete' recipient keeps the existing auto-block/reactivate
-    behavior byte-identical -- no notice, no forward, just the pre-existing
-    reactivation."""
     project = await _seed_project(db_session, test_tenant_key)
     recipient = await _seed_execution(
         db_session, test_tenant_key, project.id, display_name="implementer", status="complete"

@@ -1,11 +1,3 @@
-/**
- * jobsNavTarget.spec.js — FE-6165f
- *
- * Unit tests for the pure Jobs-nav helpers extracted from NavigationDrawer.vue.
- * No Vue / store / router imports — pure function tests only.
- *
- * Edition scope: CE.
- */
 import { describe, it, expect } from 'vitest'
 import {
   resolveJobsNavPath,
@@ -15,15 +7,8 @@ import {
   JOBS_NAV_ICON_INACTIVE,
 } from '@/utils/jobsNavTarget'
 
-// ── resolveJobsNavPath ───────────────────────────────────────────────────────
 
 describe('resolveJobsNavPath', () => {
-  // FE-6174c: branch C reinstated — an in-flight chain run now resolves to the
-  // /jobs multi variant (/projects/<headPid>?run=<id>), NOT the retired
-  // /mission-control route. Precedence C > A > B.
-  // BE-6200 (Unit E): branch C only wins when the run CONTAINS the active
-  // project — so a stale/wedged run can't hijack the nav away from the user's
-  // real active project.
   it('branch C: returns /projects/<headPid>?run=<id> when the run contains the active project', () => {
     const result = resolveJobsNavPath({
       activeProject: { id: 'head' },
@@ -72,15 +57,12 @@ describe('resolveJobsNavPath', () => {
     expect(result).toBe('/projects/p1?via=jobs')
   })
 
-  // FE-6221b: mid-flight-entry fix. When a chain is already driving member N,
-  // clicking JOBS must land on member N (not member 0 / the head). The run's
-  // current_index drives the active member selection.
   it('branch C: mid-flight entry — lands on the active member (current_index), not the head', () => {
     const result = resolveJobsNavPath({
       activeProject: { id: 'p2' },
       activeRun: { id: 'run-mf', resolved_order: ['p1', 'p2', 'p3'], current_index: 1, project_ids: [] },
     })
-    expect(result).toBe('/projects/p2?run=run-mf') // member at index 1, not the head (p1)
+    expect(result).toBe('/projects/p2?run=run-mf')
   })
 
   it('branch C: mid-flight entry falls back to head (index 0) when current_index is 0', () => {
@@ -92,7 +74,6 @@ describe('resolveJobsNavPath', () => {
   })
 
   it('branch C: mid-flight entry falls back to resolved_order[0] when current_index is absent', () => {
-    // No current_index on the run object (e.g. older run records pre-FE-6221b)
     const result = resolveJobsNavPath({
       activeProject: null,
       activeRun: { id: 'run-mf3', resolved_order: ['p1', 'p2'], project_ids: [] },
@@ -122,9 +103,6 @@ describe('resolveJobsNavPath', () => {
     expect(result).toBe('/launch?via=jobs')
   })
 
-  // FE-9525d: branch D — several active projects at once (BE-9525a/b retired
-  // the single-active-project-per-product invariant) route to the sectioned
-  // Jobs viewport instead of an arbitrary single project.
   describe('branch D (FE-9525d: several active projects)', () => {
     it('returns /jobs-overview when activeProjects has more than one entry', () => {
       const result = resolveJobsNavPath({
@@ -160,10 +138,8 @@ describe('resolveJobsNavPath', () => {
   })
 })
 
-// ── isJobsRouteActive ────────────────────────────────────────────────────────
 
 describe('isJobsRouteActive', () => {
-  // FE-6173: /mission-control no longer highlights the Jobs nav (branch C removed).
   it('returns false for /mission-control even with a run query param', () => {
     expect(isJobsRouteActive('/mission-control', { run: 'r1' })).toBe(false)
     expect(isJobsRouteActive('/mission-control', {})).toBe(false)
@@ -190,12 +166,8 @@ describe('isJobsRouteActive', () => {
   })
 })
 
-// ── resolveJobsNavIcon ───────────────────────────────────────────────────────
 
 describe('resolveJobsNavIcon', () => {
-  // FE-9110: the icon MUST key off the same predicate as the highlight
-  // (isJobsRouteActive), so the colourised icon shows exactly when the Jobs nav
-  // item is highlighted — never gray-while-active. Truth table below.
   const ACTIVE = [
     ['/projects/<id> solo view', '/projects/abc123', {}],
     ['/projects/<id>?run= chain member', '/projects/abc123', { run: 'run-7' }],
@@ -219,8 +191,6 @@ describe('resolveJobsNavIcon', () => {
     expect(resolveJobsNavIcon(path, query)).toBe(JOBS_NAV_ICON_INACTIVE)
   })
 
-  // The load-bearing invariant: icon-active iff isJobsRouteActive. If these two
-  // ever disagree the FE-9110 drift is back.
   it('is active iff isJobsRouteActive is true (no drift)', () => {
     const cases = [...ACTIVE, ...GRAY]
     for (const [, path, query] of cases) {

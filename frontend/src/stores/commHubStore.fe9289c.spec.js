@@ -1,14 +1,3 @@
-/**
- * commHubStore.fe9289c.spec.js — FE-9289c
- *
- * The Quiet Cards store surface:
- *  - normalizeThread carries the BE-9289b enriched-list fields (title, project_name,
- *    participants, last_message, unread) when the list payload has them.
- *  - a partial thread_update (status / baton / subject over WS) must NOT wipe those
- *    enriched fields — the same guard the b WS-subject fix taught.
- *  - renameThread calls the PATCH, patches the local subject on success, and THROWS on
- *    rejection so the caller can surface the reason.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useCommHubStore } from '@/stores/commHubStore'
@@ -38,7 +27,6 @@ const ENRICHED_THREAD = {
   status: 'open',
   project_id: 'proj-1',
   created_at: '2026-07-25T10:00:00Z',
-  // enriched-list fields
   title: 'Message Hub redesign',
   project_name: 'Message Hub redesign',
   participants: [{ participant_id: 'agent-a', display_name: 'Alpha', role: 'implementer', harness: 'claude-code' }],
@@ -71,13 +59,11 @@ describe('commHubStore — FE-9289c enriched list + rename', () => {
     listMock.mockResolvedValueOnce({ data: { threads: [ENRICHED_THREAD] } })
     await store.loadThreads()
 
-    // A WS meta update carrying only status/baton — no participants/last_message/unread.
     store.handleThreadUpdate({ thread_id: 'thr-1', status: 'resolved', next_action_owner: 'user-1' })
 
     const t = store.threadsById.get('thr-1')
     expect(t.status).toBe('resolved')
     expect(t.next_action_owner).toBe('user-1')
-    // enriched fields survive
     expect(t.participants[0].display_name).toBe('Alpha')
     expect(t.last_message.excerpt).toBe('shipping it')
     expect(t.unread).toBe(true)

@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Pydantic schemas for the user_approvals primitive (BE-5029 Phase A).
-
-Schemas are closed (no ``extra="allow"``) -- the wire contract for approvals is
-fixed and untrusted agent input must be rejected with 422 at the tool boundary
-rather than reaching the database.
-"""
 
 from __future__ import annotations
 
@@ -24,12 +18,6 @@ MAX_OPTION_ID_LENGTH = 100
 MAX_REASON_LENGTH = 2000
 
 
-# FE-9511: the closed set of canned approval-banner states. Three are derived
-# from server state the caller never supplies (staging pause, execution
-# status, presence of the approval itself); ``input_needed`` is a reserved
-# catch-all not yet reachable from any server signal. ``request_approval``'s
-# signature does NOT grow a parameter for this -- see
-# UserApprovalService._compute_banner_state, the single place that assigns it.
 VALID_APPROVAL_BANNER_STATES = frozenset(
     {
         "waiting_at_staging",
@@ -114,15 +102,8 @@ class UserApprovalRead(BaseModel):
     decided_via: str | None
     requested_at: datetime
     decided_at: datetime | None
-    # FE-9511: server-derived canned banner state (see VALID_APPROVAL_BANNER_STATES)
-    # and the project's taxonomy_alias for the banner pill -- carried on the
-    # payload so the frontend never needs a store lookup for a project the user
-    # has not opened (FE-9508's trap).
     banner_state: str
     taxonomy_alias: str | None = None
-    # BE-9525c: additive, same batched-resolve pattern as taxonomy_alias above --
-    # without it the banner cannot say which PRODUCT an approval belongs to
-    # (product_id is on the project, not the approval row itself).
     product_id: str | None = None
 
     @field_validator("banner_state")

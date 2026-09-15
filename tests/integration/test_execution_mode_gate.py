@@ -3,31 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression tests for the execution_mode NULL-state gates.
-
-CLAUDE.md mandates a regression test at the failing layer. The original incident:
-a project whose ``execution_mode`` was never explicitly chosen silently behaved
-as ``multi_terminal`` — the spawn boundary handed the orchestrator a
-multi_terminal dashboard pointer it could not run. The NULL-state redesign makes
-``execution_mode`` nullable (NULL = "not yet selected") and GATES every boundary
-so a NULL is refused, never silently coerced.
-
-These tests exercise the gates at the exact layers that previously leaked:
-
-1. ``spawn_job`` through the FastMCP ``@mcp.tool`` wrapper (the failing layer) —
-   a NULL-mode project is REFUSED, a chosen-mode project still spawns (the gate
-   only bites NEW unset projects, not existing multi_terminal ones).
-2. ``get_job_mission`` through the wrapper — a NULL-mode project returns a
-   blocked mission, not a fabricated multi_terminal one.
-3. ``get_staging_instructions`` through the wrapper — a NULL-mode project
-   returns a STOP directive instead of a multi_terminal protocol.
-4. The staging-prompt endpoint (the PRIMARY user-facing gate where the mode is
-   persisted) returns 409 when no mode is resolvable.
-
-Pattern reference: ``tests/integration/test_multi_terminal_footgun.py`` (same
-in-memory MCP transport, ``_resolve_tenant`` monkeypatch, shared-session
-ToolAccessor rebinding).
-"""
 
 from __future__ import annotations
 
@@ -47,6 +22,7 @@ from giljo_mcp.models.projects import Project
 from giljo_mcp.models.templates import AgentTemplate
 from giljo_mcp.tenant import TenantManager
 from tests.helpers.mcp_session_fixture import create_connected_server_and_client_session
+from tests.helpers.product_crew_helper import adopt_all_templates
 
 
 pytestmark = pytest.mark.asyncio
@@ -79,11 +55,6 @@ async def _seed(
     orchestrator: bool = False,
     implementer: bool = False,
 ) -> dict:
-    """Seed org + product + project (+ optional orchestrator / implementer job).
-
-    ``execution_mode=None`` reproduces a freshly-created project before the user
-    has picked a mode — the state every boundary gate must refuse.
-    """
     suffix = uuid4().hex[:8]
     org = Organization(name=f"Org {suffix}", slug=f"org-{suffix}", tenant_key=tenant_key, is_active=True)
     db_session.add(org)
@@ -133,6 +104,7 @@ async def _seed(
         out["implementer_job"] = await _seed_job(db_session, tenant_key, project.id, "implementer")
 
     await db_session.commit()
+    await adopt_all_templates(db_session, tenant_key, product.id)
     return out
 
 
@@ -166,7 +138,6 @@ async def _seed_job(db_session, tenant_key: str, project_id: str, job_type: str)
 
 @pytest_asyncio.fixture
 async def gate_mcp_client(db_manager, db_session, monkeypatch):
-    """Shared-session ToolAccessor wired to the in-memory MCP transport."""
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -185,11 +156,6 @@ async def gate_mcp_client(db_manager, db_session, monkeypatch):
     accessor = ToolAccessor(db_manager=db_manager, tenant_manager=state.tenant_manager, test_session=db_session)
     state.tool_accessor = accessor
 
-    # Patch at the definition module (api.endpoints.mcp_tools._base): the tool
-    # dispatch (_call_tool) resolves tenant via the _base module global, so a
-    # monkeypatch on mcp_sdk_server's re-exported reference would miss the real
-    # call site. The in-memory MCP transport has no HTTP request, so without this
-    # _resolve_tenant would crash on request.scope (request is None).
     monkeypatch.setattr(_base, "_resolve_tenant", lambda ctx: tenant_key)
     monkeypatch.setattr(_base, "_resolve_user_id", lambda ctx: None)
 
@@ -204,14 +170,9 @@ async def gate_mcp_client(db_manager, db_session, monkeypatch):
         state.db_manager = prior_db_manager
 
 
-# ---------------------------------------------------------------------------
-# spawn_job — the failing layer
-# ---------------------------------------------------------------------------
 
 
 async def test_spawn_job_refuses_null_execution_mode_at_mcp_boundary(gate_mcp_client):
-    """THE FAILING LAYER. A NULL-mode project must be REFUSED at the spawn
-    boundary, not silently handed a multi_terminal bootstrap pointer."""
     new_client, tenant_key, db_session = gate_mcp_client
     seed = await _seed(db_session, tenant_key, execution_mode=None)
 
@@ -232,8 +193,6 @@ async def test_spawn_job_refuses_null_execution_mode_at_mcp_boundary(gate_mcp_cl
 
 
 async def test_spawn_job_succeeds_for_chosen_mode(gate_mcp_client):
-    """Control: the gate bites ONLY unset projects. An existing multi_terminal
-    project still spawns exactly as before."""
     new_client, tenant_key, db_session = gate_mcp_client
     seed = await _seed(db_session, tenant_key, execution_mode="multi_terminal")
 
@@ -253,9 +212,6 @@ async def test_spawn_job_succeeds_for_chosen_mode(gate_mcp_client):
     assert payload.get("job_id")
 
 
-# ---------------------------------------------------------------------------
-# get_job_mission (was get_agent_mission, renamed INF-6052a)
-# ---------------------------------------------------------------------------
 
 
 async def test_get_agent_mission_blocks_null_execution_mode(gate_mcp_client):
@@ -270,11 +226,6 @@ async def test_get_agent_mission_blocks_null_execution_mode(gate_mcp_client):
         assert "execution mode" in _error_text(result).lower()
     else:
         payload = _payload(result)
-        # Structural discriminators the blocked MissionResponse guarantees — far
-        # stronger than a bare substring (which a future protocol edit could
-        # accidentally satisfy). blocked alone is insufficient because the
-        # implementation-launch gate ALSO returns blocked=True, so the
-        # mode-identifying text must live in error/user_instruction.
         assert payload.get("blocked") is True, f"expected a blocked mission, got: {payload!r}"
         assert payload.get("mission") is None, f"a blocked mission must carry no mission body, got: {payload!r}"
         gate_text = f"{payload.get('error', '')} {payload.get('user_instruction', '')}".lower()
@@ -283,9 +234,6 @@ async def test_get_agent_mission_blocks_null_execution_mode(gate_mcp_client):
         )
 
 
-# ---------------------------------------------------------------------------
-# get_staging_instructions
-# ---------------------------------------------------------------------------
 
 
 async def test_get_staging_instructions_blocks_null_execution_mode(gate_mcp_client):
@@ -300,28 +248,19 @@ async def test_get_staging_instructions_blocks_null_execution_mode(gate_mcp_clie
     assert "execution mode" in text, f"expected execution-mode STOP, got: {text!r}"
     if not result.is_error:
         payload = _payload(result)
-        # The STOP shape must not carry a rendered orchestrator protocol.
         assert payload.get("action") == "STOP" or payload.get("status") == "BLOCKED", (
             f"NULL-mode orchestrator must get a STOP/BLOCKED directive, got keys: {list(payload)}"
         )
 
 
-# ---------------------------------------------------------------------------
-# staging-prompt endpoint — the PRIMARY user-facing gate
-# ---------------------------------------------------------------------------
 
 
 async def test_staging_prompt_endpoint_409s_when_no_mode_selected(db_session):
-    """The staging endpoint is where the mode becomes concrete. With neither a
-    query param nor a mode on the row, it must 409 (the gate that forces the
-    user to pick) — never default to multi_terminal."""
     from types import SimpleNamespace
 
     from api.endpoints.prompts import generate_staging_prompt
 
     tenant_key = TenantManager.generate_tenant_key()
-    # staging_status must NOT be staged/staging or the unrelated staging-guard
-    # 409 fires first; use a fresh unstaged project.
     seed = await _seed(db_session, tenant_key, execution_mode=None)
     project = seed["project"]
     project.staging_status = None

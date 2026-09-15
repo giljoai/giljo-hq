@@ -12,11 +12,9 @@
       <v-divider />
 
       <v-card-text v-if="product" class="pa-4 dialog-body-scroll product-details-body">
-        <!-- Product Name -->
         <div class="text-title-large mb-2">{{ product.name }}</div>
         <div class="text-body-small mb-4 text-muted-a11y font-mono product-id-text">ID: {{ product.id }}</div>
 
-        <!-- Description -->
         <div class="mb-4">
           <div class="text-title-small mb-1">Description</div>
           <div class="text-body-medium">
@@ -24,7 +22,6 @@
           </div>
         </div>
 
-        <!-- Statistics -->
         <div class="mb-4">
           <div class="text-title-small mb-2">Statistics</div>
           <v-row dense>
@@ -39,7 +36,6 @@
           </v-row>
         </div>
 
-        <!-- Vision Documents -->
         <div>
           <div class="text-title-small mb-2 d-flex align-center justify-space-between">
             <span>Vision Documents ({{ visionDocuments.length }})</span>
@@ -57,10 +53,6 @@
             </v-btn>
           </div>
 
-          <!-- Product-level vision context summary chevron.
-               Replaces the prior aggregate stats card and the
-               "Consolidated Vision Summaries" card chrome. Gated on
-               consolidated_vision_light existing (analysis has run). -->
           <div
             v-if="product?.consolidated_vision_light"
             class="vision-context-card smooth-border mb-3"
@@ -129,9 +121,6 @@
                   <div class="doc-card-heading-text">
                     <div class="doc-card-title">{{ doc.filename || doc.document_name }}</div>
                     <div class="doc-card-meta">
-                      <!-- BE-5118: per-doc analysis status pill based on
-                           whether the AI agent has written light+medium
-                           summaries for this specific document. -->
                       <span
                         class="doc-meta-pill doc-analysis-pill smooth-border"
                         :style="docAnalysisPillStyle(doc)"
@@ -152,7 +141,6 @@
             No vision documents attached
           </v-alert>
 
-          <!-- AI Analysis Result (Handover 0842d) -->
           <v-alert
             v-if="visionAnalysisResult"
             type="success"
@@ -175,13 +163,11 @@
           </v-alert>
         </div>
 
-        <!-- Configuration Data Display -->
         <div v-if="product.tech_stack || product.architecture || product.test_config || product.core_features || product.brand_guidelines" class="mt-4">
           <v-divider class="mb-3"></v-divider>
           <div class="text-title-small mb-2">Configuration Data</div>
 
           <v-expansion-panels variant="accordion">
-            <!-- Tech Stack -->
             <v-expansion-panel v-if="product.tech_stack">
               <v-expansion-panel-title>
                 <v-icon start>mdi-code-tags</v-icon>
@@ -211,7 +197,6 @@
               </v-expansion-panel-text>
             </v-expansion-panel>
 
-            <!-- Architecture -->
             <v-expansion-panel v-if="product.architecture">
               <v-expansion-panel-title>
                 <v-icon start>mdi-sitemap</v-icon>
@@ -239,8 +224,6 @@
               </v-expansion-panel-text>
             </v-expansion-panel>
 
-            <!-- Features & Testing -->
-            <!-- Brand Guidelines -->
             <v-expansion-panel v-if="product.brand_guidelines">
               <v-expansion-panel-title>
                 <v-icon start>mdi-palette-outline</v-icon>
@@ -251,7 +234,6 @@
               </v-expansion-panel-text>
             </v-expansion-panel>
 
-            <!-- Features & Testing -->
             <v-expansion-panel
               v-if="product.core_features || product.test_config"
             >
@@ -279,7 +261,6 @@
           </v-expansion-panels>
         </div>
 
-        <!-- Created/Updated -->
         <div class="text-body-small text-muted-a11y mt-4">
           Created: {{ formatDate(product.created_at) }}<br />
           Updated: {{ formatDate(product.updated_at) }}
@@ -295,7 +276,6 @@
     </v-card>
   </v-dialog>
 
-  <!-- FE-6138: Deleted vision documents recovery dialog -->
   <VisionDeletedDialog
     v-model="showDeletedDialog"
     :deleted-documents="deletedDocuments"
@@ -303,7 +283,6 @@
     @restore="handleRestore"
   />
 
-  <!-- Consolidated Summary Viewer Dialog (Handover 0377) -->
   <v-dialog v-model="consolidatedSummaryDialog" max-width="800" scrollable>
     <v-card v-draggable class="smooth-border">
       <div class="dlg-header">
@@ -353,22 +332,14 @@ import VisionDeletedDialog from '@/components/products/VisionDeletedDialog.vue'
 const { formatDate } = useFormatDate()
 const { showToast } = useToast()
 
-// Summary level color tokens (status-complete green, tester yellow, implementer blue)
 const CONSOLIDATED_TIER_COLORS = {
   light: getStatusColor('complete'),
   medium: getAgentColor('tester').hex,
   full: getAgentColor('implementer').hex,
 }
 
-// intentional fallback — not a hardcoded-color violation: this feeds hexToRgba() directly;
-// var() would break the rgba() computation. Matches --text-muted (#8895a8).
 const FALLBACK_MUTED = '#8895a8'
 
-// BE-5118: status colors for analysis pills. Green for analyzed (matches
-// status-complete elsewhere in the dashboard), tester yellow for pending
-// (warmer than warning-red, more accurate semantically — "in flight" not
-// "broken"). Both pass WCAG AA on the #12202e card surface when used at
-// full brightness over rgba(color, 0.15) backgrounds.
 const ANALYSIS_PILL_ANALYZED_HEX = getStatusColor('complete')
 const ANALYSIS_PILL_PENDING_HEX = getAgentColor('tester').hex
 
@@ -377,9 +348,6 @@ function consolidatedTierStyle(level) {
   return { background: hexToRgba(hex, 0.15), color: hex }
 }
 
-// BE-5118: per-document analysis state. A doc is "Analyzed" once the AI
-// agent has populated BOTH summary_light and summary_medium via the
-// update_product_context tool. Anything else is "Pending analysis".
 function docIsAnalyzed(doc) {
   return Boolean(doc?.summary_light && doc?.summary_medium)
 }
@@ -418,7 +386,6 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'refresh-product'])
 
-// FE-6138: Deleted vision documents recovery
 const showDeletedDialog = ref(false)
 const deletedDocuments = ref([])
 const restoringId = ref(null)
@@ -444,7 +411,6 @@ async function handleRestore(doc) {
       message: `Restored: ${doc.filename || doc.document_name}`,
       type: 'success',
     })
-    // Notify parent to refresh vision docs and product data
     emit('refresh-product')
   } catch (error) {
     console.error('[ProductDetailsDialog] Failed to restore vision document:', error)
@@ -454,14 +420,12 @@ async function handleRestore(doc) {
   }
 }
 
-// Product-level vision context summary chevron state.
 const contextSummaryOpen = ref(false)
 
 function toggleContextSummary() {
   contextSummaryOpen.value = !contextSummaryOpen.value
 }
 
-// Vision analysis result (Handover 0842d)
 const visionAnalysisResult = ref(null)
 
 function handleVisionAnalysisComplete(event) {
@@ -496,7 +460,6 @@ const handleClose = () => {
   emit('update:modelValue', false)
 }
 
-// Consolidated summary dialog state (Handover 0377)
 const consolidatedSummaryDialog = ref(false)
 const consolidatedSummaryContent = ref('')
 const consolidatedSummaryTitle = ref('')
@@ -505,7 +468,6 @@ const consolidatedSummaryTokens = ref(0)
 const consolidatedSummaryHash = ref('')
 
 const consolidatedSummaryColor = computed(() => {
-  // Handover 0377: Consolidated vision summaries
   switch (consolidatedSummaryLevel.value) {
     case 'Light (33%)': return 'success'
     case 'Medium (66%)': return 'warning'
@@ -522,10 +484,6 @@ function formatTokens(tokens) {
   return tokens.toString()
 }
 
-// 100%-tier token estimate: backend doesn't persist a
-// consolidated_vision_full_tokens column (full depth is per-doc raw
-// concatenation built on demand by get_vision_document). Sum the raw
-// original_token_count of each vision doc as a meaningful approximation.
 const fullDepthTokenEstimate = computed(() => {
   const sum = props.visionDocuments.reduce(
     (acc, doc) => acc + (doc.original_token_count || 0),
@@ -534,7 +492,6 @@ const fullDepthTokenEstimate = computed(() => {
   return sum > 0 ? sum : 0
 })
 
-// Helper functions
 function formatFileSize(bytes) {
   if (bytes < 1024) return `${bytes  } B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)  } KB`
@@ -555,18 +512,8 @@ function formatPlatform(platform) {
   return labels[platform] || platform
 }
 
-/**
- * Show consolidated vision summary (Handover 0377)
- * Displays light, medium, or full (per-doc concatenated) vision context.
- */
 async function showConsolidatedSummary(depth) {
   if (depth === 'full') {
-    // 100% tier is per-doc raw text concatenated with `# {filename}`
-    // headers. Backend already exposes this via get_vision_document; here we
-    // synthesize the same shape client-side from cached doc data so the
-    // viewer dialog can render without an extra fetch round-trip when
-    // possible. If raw vision_document content is not loaded yet, hydrate
-    // each missing doc individually.
     if (!props.visionDocuments.length) return
     try {
       const parts = []

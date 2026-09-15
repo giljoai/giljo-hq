@@ -110,26 +110,6 @@
 </template>
 
 <script setup>
-/**
- * JobsBoardDetailModal.vue — FE-9548
- *
- * The Jobs board's "Jobs detail" diagnostics modal: one row per agent with
- * BOTH Agent ID and Job ID rendered in full (never truncated -- the operator
- * was explicit these exist for diagnostics) plus a copy button each, and a
- * closing review-strip that routes into the SAME existing review pane the
- * board cards' "Review & close" button uses (no new review flow).
- *
- * One shared instance lives in JobsViewportView (not one per card) --
- * `project`/`agents` are swapped in on open via props, driven by the
- * parent's 'open-detail' handler.
- *
- * Uses the harmonized .dlg-header/.dlg-close dialog anatomy (CLAUDE.md bans
- * v-card-title/v-card-actions for dialog chrome) rather than BaseDialog,
- * since this dialog's body is a data table + review strip, not a
- * confirm/cancel prompt.
- *
- * Edition scope: Both.
- */
 import { computed, ref } from 'vue'
 import { getStatusLabel, getStatusColor } from '@/utils/statusConfig'
 import { getAgentBadgeStyle } from '@/utils/colorUtils'
@@ -158,11 +138,6 @@ const props = defineProps({
   },
 })
 
-// FE-9550: the strip asserts "All agents closed" and offers the review action,
-// so it must only appear when that is TRUE. It used to render unconditionally,
-// claiming every project was finished -- including a Staged one whose sole agent
-// read Waiting. Reuses the same isReadyForReview gate the board card uses, so the
-// modal and the card cannot disagree about whether a project is done.
 const readyForReview = computed(() => isReadyForReview(props.project, props.agents))
 
 const emit = defineEmits(['update:modelValue'])

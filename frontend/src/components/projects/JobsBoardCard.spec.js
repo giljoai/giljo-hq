@@ -1,13 +1,3 @@
-/**
- * JobsBoardCard.spec.js — FE-9548
- *
- * One project card on the redesigned Jobs board (design mock jobs-board-proposal-v4.html).
- * Covers: taxonomy pill, title UUID tooltip, per-state status pill/edge, the
- * HITL gate note (Staged only), the aggregate stat strip, agent rows, and the
- * exact button set per lifecycle state.
- *
- * Edition scope: Both.
- */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createVuetify } from 'vuetify'
@@ -25,8 +15,6 @@ const router = createRouter({
   ],
 })
 
-// Renders both activator and default slot so hover-only tooltip content is
-// assertable without simulating a hover (mirrors AgentRow.spec.js / JobsTab.spec.js).
 const tooltipStub = {
   template: `<div class="v-tooltip"><slot name="activator" :props="{}" /><slot /></div>`,
 }
@@ -70,7 +58,7 @@ describe('JobsBoardCard', () => {
   })
 
   it('aggregates the project-level stat strip from its agents (mock BE-6174: 7/12, 3, 1, 41m)', () => {
-    const now = Date.parse('2026-08-30T22:55:00Z') // launched 22:14 + 41m
+    const now = Date.parse('2026-08-30T22:55:00Z')
     const wrapper = mountCard({ project: needsInputProject, agents: needsInputAgents, now })
     expect(wrapper.find('[data-testid="jb-stat-steps"]').text()).toContain('7')
     expect(wrapper.find('[data-testid="jb-stat-steps"]').text()).toContain('/12')
@@ -99,11 +87,6 @@ describe('JobsBoardCard', () => {
     expect(implementing.find('[data-testid="jb-gate-note"]').exists()).toBe(false)
   })
 
-  // FE-9549 REGRESSION: the note used to be inferred from the card state alone,
-  // on the false premise that a project only waits at Staged when headless is
-  // off. It also waits when headless is ON and no agent has picked it up yet --
-  // so the card told users on a headless-enabled tenant that headless was off
-  // and to go turn it on. Observed live on test.giljo.ai with the toggle ON.
   it('does NOT show the gate note on a Staged card when headless is ON (FE-9549)', () => {
     const staged = mountCard({ project: stagedProject, agents: stagedAgents, headlessAllowed: true })
     expect(staged.find('[data-testid="jb-gate-note"]').exists()).toBe(false)
@@ -128,8 +111,6 @@ describe('JobsBoardCard', () => {
     const wrapper = mountCard({ project: needsInputProject, agents: needsInputAgents })
     expect(wrapper.find('[data-testid="jb-btn-open"]').classes()).toContain('jb-btn-ghost')
     expect(wrapper.find('[data-testid="jb-btn-review"]').exists()).toBe(false)
-    // No button anywhere reads bare "Implement" (word boundary -- "Implementer"
-    // role text inside the hover tooltip is expected and unrelated).
     const footerButtonText = wrapper.find('[data-testid="jb-btn-open"]').text()
       + wrapper.find('[data-testid="jb-btn-detail"]').text()
     expect(footerButtonText).not.toMatch(/\bImplement\b/)
@@ -156,9 +137,6 @@ describe('JobsBoardCard', () => {
     expect(wrapper.find('[data-testid="jb-btn-detail"]').exists()).toBe(true)
   })
 
-  // FE-9551: literal emoji replaced with mdi icons. v-icon is globally
-  // stubbed (tests/setup.js) to render its default slot as plain text, so
-  // the icon NAME is the observable signal here.
   it('the Hub button uses mdi-forum (same icon NavigationDrawer.vue uses for Message Hub), not a literal emoji', () => {
     const wrapper = mountCard({ project: needsInputProject, agents: needsInputAgents })
     const hubBtn = wrapper.find('[data-testid="jb-btn-hub"]')

@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9296a — a baton hand-off says WHO handed it over.
-
-The operator's bell could only say "<thread> — waiting on you", which is the least
-useful half of the sentence: they already know which thread they are being pulled
-into, and not which agent is blocked on them. ``broadcast_thread_message`` has
-carried ``from_display_name`` + ``from_kind`` since BE-9289a; ``broadcast_thread_update``
-did not, so two transports that should have matched did not.
-
-The identity is resolved SERVER-SIDE from the participant directory, never taken as
-self-declared display text — the same rule BE-9289a established for post authorship.
-
-Parallel-safe: rollback-isolated ``db_session``, fresh tenant per test, no
-module-level mutable state.
-"""
 
 from __future__ import annotations
 
@@ -51,13 +37,9 @@ async def _thread(svc: CommThreadService, tenant: str) -> str:
     return thread_id
 
 
-# ---------------------------------------------------------------------------
-# The service resolves the hander's identity
-# ---------------------------------------------------------------------------
 
 
 async def test_pass_baton_returns_the_handers_registered_display_name(db_manager, db_session):
-    """The bell's whole purpose: name the agent, not the thread."""
     tenant = _tk("named")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -70,11 +52,6 @@ async def test_pass_baton_returns_the_handers_registered_display_name(db_manager
 
 
 async def test_the_name_comes_from_the_directory_not_from_the_caller(db_manager, db_session):
-    """Identity is server-resolved, never self-declared text (the BE-9289a rule).
-
-    The caller supplies an ID; the NAME is looked up. Otherwise the alert would
-    render whatever string a caller chose to send.
-    """
     tenant = _tk("resolved")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -82,13 +59,11 @@ async def test_the_name_comes_from_the_directory_not_from_the_caller(db_manager,
 
     result = await svc.pass_baton(thread_id=thread_id, to="worker-1", from_agent="em", tenant_key=tenant)
 
-    # "em" is the id; "P1 Orchestrator" is what the directory holds for it.
     assert result["from_display_name"] != "em"
     assert result["from_display_name"] == "P1 Orchestrator"
 
 
 async def test_an_anonymous_handover_carries_no_name_rather_than_a_made_up_one(db_manager, db_session):
-    """Omitting from_agent must preserve the exact pre-BE-9296a payload."""
     tenant = _tk("anon")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -102,7 +77,6 @@ async def test_an_anonymous_handover_carries_no_name_rather_than_a_made_up_one(d
 
 
 async def test_an_unregistered_hander_falls_back_to_its_slug(db_manager, db_session):
-    """An ad-hoc lane id is legitimate, so tolerate it — it is a name, not a route."""
     tenant = _tk("slug")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -115,12 +89,6 @@ async def test_an_unregistered_hander_falls_back_to_its_slug(db_manager, db_sess
 
 
 async def test_resolving_the_hander_does_not_enrol_them_as_a_participant(db_manager, db_session):
-    """A hand-off must not silently mint a directory row for a non-participant.
-
-    Registration belongs to posting (writing a message IS participation), not to
-    moving the baton — otherwise every stray hand-off grows the roster and the
-    liveness view fills with entries that never acted.
-    """
     tenant = _tk("noenrol")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -135,7 +103,6 @@ async def test_resolving_the_hander_does_not_enrol_them_as_a_participant(db_mana
 
 
 async def test_a_refused_handover_still_carries_no_identity(db_manager, db_session):
-    """BE-9292a: a refused hand-off moved nothing, so it must announce nothing."""
     tenant = _tk("refused")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -147,13 +114,9 @@ async def test_a_refused_handover_still_carries_no_identity(db_manager, db_sessi
     assert "from_display_name" not in result
 
 
-# ---------------------------------------------------------------------------
-# The WS payload
-# ---------------------------------------------------------------------------
 
 
 async def test_thread_update_carries_the_hander_and_stays_additive():
-    """The new fields must not disturb the payload every other caller sends."""
     from api.endpoints._comm_ws import broadcast_thread_update
 
     sent: list[dict] = []
@@ -177,8 +140,6 @@ async def test_thread_update_carries_the_hander_and_stays_additive():
     assert sent[0]["data"]["from_kind"] == "agent"
 
     sent.clear()
-    # A status/rename/read update omits them and gets nulls — the shape the client's
-    # skip-null patch already ignores, so those events are unchanged.
     await broadcast_thread_update(
         _Manager(),
         "tk_x",
@@ -193,7 +154,6 @@ async def test_thread_update_carries_the_hander_and_stays_additive():
 
 
 def test_both_hub_transports_now_agree_on_identity_fields():
-    """The gap this closes: two transports that should have matched did not."""
     import inspect
 
     from api.endpoints._comm_ws import broadcast_thread_message, broadcast_thread_update
@@ -207,7 +167,6 @@ def test_both_hub_transports_now_agree_on_identity_fields():
 
 @pytest.mark.parametrize("missing", ["from_display_name", "from_kind"])
 def test_identity_fields_are_optional_on_the_update_transport(missing):
-    """Defaulted, so no existing caller had to change."""
     import inspect
 
     from api.endpoints._comm_ws import broadcast_thread_update

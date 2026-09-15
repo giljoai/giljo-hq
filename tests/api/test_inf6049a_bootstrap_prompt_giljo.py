@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""INF-6049a -- endpoint content lock for GET /api/download/bootstrap-prompt.
-
-The slash-command fleet (gil_add / gil_get / gil_chain / gil_get_agents)
-collapsed to one thin ``/giljo`` command. ``/api/download/bootstrap-prompt`` is a
-LIVE agent-facing endpoint: it renders a ready-to-paste onboarding prompt from
-the per-platform ``BOOTSTRAP_*`` templates. This drives the real HTTP endpoint
-(auth + token + slash-command staging) and asserts each platform's prompt now
-advertises the single ``/giljo`` command and NOT the deleted gil_* commands --
-leaving the old commands in would tell a fresh agent to run commands that no
-longer install (a broken bootstrap).
-"""
 
 from __future__ import annotations
 
@@ -24,9 +13,8 @@ from httpx import AsyncClient
 pytestmark = pytest.mark.asyncio
 
 
-_PLATFORMS = ["claude_code", "gemini_cli", "codex_cli", "antigravity_cli", "generic"]
+_PLATFORMS = ["claude_code", "codex_cli", "opencode", "generic"]
 
-# Every deleted command name, in both slash (/gil_) and codex ($gil-) spellings.
 _DELETED_COMMANDS = [
     "gil_get_agents",
     "gil-get-agents",
@@ -51,11 +39,26 @@ async def test_bootstrap_prompt_advertises_giljo_not_legacy(api_client: AsyncCli
         assert legacy not in prompt, f"{platform} bootstrap still advertises deleted command {legacy!r}"
 
 
-@pytest.mark.parametrize("platform", ["claude_code", "gemini_cli", "codex_cli", "antigravity_cli"])
-async def test_bootstrap_prompt_routes_agent_install_through_giljo_setup(
-    api_client: AsyncClient, auth_headers: dict, platform: str
+async def test_bootstrap_prompt_for_opencode_installs_the_opencode_command_dir(
+    api_client: AsyncClient, auth_headers: dict
 ):
-    """Agent-template install/refresh now folds into giljo_setup (no gil_get_agents)."""
-    resp = await api_client.get(f"/api/download/bootstrap-prompt?platform={platform}", headers=auth_headers)
-    assert resp.status_code == 200, f"{platform}: {resp.status_code} {resp.text}"
-    assert "giljo_setup" in resp.json()["prompt"], f"{platform} bootstrap must route agents through giljo_setup"
+    resp = await api_client.get("/api/download/bootstrap-prompt?platform=opencode", headers=auth_headers)
+    assert resp.status_code == 200, f"{resp.status_code} {resp.text}"
+    prompt = resp.json()["prompt"]
+    assert "~/.config/opencode/commands/" in prompt
+    assert "/giljo" in prompt
+    assert "{SLASH_COMMANDS_URL}" not in prompt, "download URL placeholder was not substituted"
+
+
+async def test_bootstrap_prompt_fails_closed_for_a_platform_without_a_template(
+    api_client: AsyncClient, auth_headers: dict, monkeypatch
+):
+    from api.endpoints.downloads import bundles
+
+    trimmed = {k: v for k, v in bundles._BOOTSTRAP_TEMPLATES.items() if k != "codex_cli"}
+    monkeypatch.setattr(bundles, "_BOOTSTRAP_TEMPLATES", trimmed)
+    resp = await api_client.get("/api/download/bootstrap-prompt?platform=codex_cli", headers=auth_headers)
+    assert resp.status_code == 422, f"{resp.status_code} {resp.text}"
+    body = resp.json()
+    assert "codex_cli" in str(body)
+    assert "claude_code" in str(body), "the rejection should name the platforms that do have a bootstrap"

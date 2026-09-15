@@ -49,8 +49,6 @@ function goHome() {
 }
 
 function goBack() {
-  // Prefer real browser history; fall back to Home when there is nowhere to go
-  // back to (a direct deep link / the 404 was the first navigation).
   if (typeof window !== 'undefined' && window.history.length > 1) {
     router.back()
   } else {

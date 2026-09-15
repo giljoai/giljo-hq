@@ -3,59 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-9227e (M5) — truly concurrent refreshes of the same token must converge.
-
-Defect (ordering): ``_refresh_grant_after_lookup`` checks the idempotency cache
-BEFORE taking the user-row ``FOR UPDATE`` lock. Two truly simultaneous
-refreshes of the same token — the multi-egress-IP connector retry shape the
-window was built for (see the live-evidence note in
-``oauth_token_idempotency.py``) — BOTH miss the cache (neither has written
-yet), then serialize on the lock: the first rotates and revokes the presented
-row; the second re-reads ``row.revoked`` fresh under the lock (the SEC-9217b
-re-read), sees True, and trips reuse detection — revoking the ENTIRE family,
-including the pair the first request just returned to its client. The
-convergence mechanism only works when the two requests are separated by more
-than the cache-write latency.
-
-Museum rule: the idempotency window and its in-window reuse-suppression are
-deliberate (real production incident) and are NOT weakened by these tests or
-the fix they specify. Only the truly-simultaneous case is tightened: honest
-concurrent retries converge on ONE rotated pair, while a genuine replay
-(revoked row + no matching cached response) still revokes the family.
-
-Test design:
-
-- ``test_truly_concurrent_refresh_converges_on_one_pair`` — the incident
-  shape. Two ``/refresh`` calls for the SAME token run concurrently via
-  ``asyncio.gather``; each request receives its OWN ``AsyncSession`` from the
-  ``get_db_session`` dependency override, so the two grants hold two separate
-  DB transactions (a single shared session would serialize them client-side
-  and prove nothing). A rendezvous barrier at the cache-get seam guarantees
-  BOTH requests complete their pre-lock cache read before either proceeds —
-  the sub-millisecond interleaving the incident produces, made deterministic.
-  Pre-fix this was ``xfail(strict=True)``: the family self-revoked (one 200
-  whose pair is already dead + one 401). The M5 fix (under-lock cache re-check
-  with bounded retry) removed the marker; both requests must return the same
-  rotated pair.
-
-  Deterministic fallback (if this ever flakes in CI): drop the gather and
-  replicate the loser's view directly — pre-set ``row.revoked=True`` on a
-  committed row, populate the cache with the winner's entry under the same
-  signature, monkeypatch the FIRST ``_refresh_idempotency_cache_get`` call to
-  miss (the early read that lost the interleaving), and assert convergence.
-
-- ``test_replay_of_revoked_token_with_empty_cache_revokes_family`` — the
-  genuine-replay path must KEEP revoking the family (the museum-rule
-  behavior). Guards the fix against overshoot.
-
-- ``test_cached_entry_with_mismatched_signature_still_revokes_family`` — a
-  cached response only converges for the SAME client identity; a signature
-  mismatch must fall through to reuse detection, before and after the fix.
-
-Parallel-safe: unique tenant/user/client per test, per-test cache-backend
-registry reset (precedent: ``tests/services/test_oauth_token_idempotency.py``),
-monkeypatch-only patching, no module-level mutable state.
-"""
 
 from __future__ import annotations
 
@@ -79,14 +26,12 @@ from giljo_mcp.services.oauth_refresh_service import (
 
 @pytest.fixture(autouse=True)
 def _isolated_cache_registry():
-    """Fresh cache-backend registry per test so no entry leaks across tests."""
     cache_backends.reset_registry_for_tests()
     yield
     cache_backends.reset_registry_for_tests()
 
 
 async def _seed_user(db_manager) -> tuple[str, str]:
-    """Create org+user, committed; return (user_id, tenant_key)."""
     from giljo_mcp.models.auth import User
     from giljo_mcp.models.organizations import Organization
     from giljo_mcp.tenant import TenantManager
@@ -123,7 +68,6 @@ async def _seed_user(db_manager) -> tuple[str, str]:
 
 
 def _install_confidential_resolver(client_id: str, secret_hash: str):
-    """Stub resolver recognizing one confidential client (test_sec9217b pattern)."""
     from giljo_mcp.services import oauth_service as svc
 
     prior = svc.get_client_resolver()
@@ -151,7 +95,6 @@ async def _seed_refresh_token(
     user_id: str,
     family_id: str | None = None,
 ) -> tuple[str, str]:
-    """Mint + commit one refresh row; return (raw_token, family_id)."""
     fam = family_id or new_family_id()
     async with db_manager.get_session_async(tenant_key=tenant_key) as session:
         raw = await issue_refresh_token(
@@ -215,18 +158,7 @@ async def _mark_revoked(db_manager, *, tenant_key: str, token_hash: str) -> None
 
 @pytest.mark.asyncio
 async def test_truly_concurrent_refresh_converges_on_one_pair(api_client, db_manager, monkeypatch):
-    """Two concurrent grants for the SAME token, two SEPARATE DB sessions.
-
-    Desired contract (post-M5): the lock winner rotates; the lock loser finds
-    the winner's cached response under the lock and returns the SAME pair.
-    Both calls 200, identical bodies, exactly one live row in the family.
-
-    Pre-fix behavior (the defect this test was written to reproduce): one 200
-    + one 401 invalid_grant, and ZERO live rows — the losing request revoked
-    the whole family, killing the pair the winning request returned.
-    """
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
-    # Real positive window: the in-window convergence contract is the subject.
     monkeypatch.setattr(_refresh_svc, "OAUTH_REFRESH_IDEMPOTENCY_WINDOW_SECONDS", 30)
 
     user_id, tk = await _seed_user(db_manager)
@@ -235,11 +167,6 @@ async def test_truly_concurrent_refresh_converges_on_one_pair(api_client, db_man
     secret_hash = bcrypt.hashpw(client_secret.encode("utf-8"), bcrypt.gensalt()).decode("ascii")
     restore = _install_confidential_resolver(client_id, secret_hash)
 
-    # Rendezvous at the cache-get seam: BOTH requests must complete their
-    # pre-lock cache read before either proceeds. This pins the exact
-    # interleaving of the incident (neither request has written the cache when
-    # the other reads it) without relying on wall-clock timing. Only the first
-    # two calls are gated so a post-fix under-lock re-check passes through.
     real_cache_get = _refresh_svc._refresh_idempotency_cache_get
     barrier = asyncio.Barrier(2)
     gate = {"remaining": 2}
@@ -264,16 +191,12 @@ async def test_truly_concurrent_refresh_converges_on_one_pair(api_client, db_man
             timeout=120,
         )
 
-        # The reproduction is only meaningful if both requests actually
-        # rendezvoused at the pre-lock cache read.
         assert gate["remaining"] == 0, "both requests must have completed the pre-lock cache read"
 
         statuses = sorted([resp_a.status_code, resp_b.status_code])
         rows = await _family_rows(db_manager, tenant_key=tk, family_id=fam)
         live = [r for r in rows if not r.revoked]
 
-        # Desired contract (post-M5). Pre-fix this fails with
-        # statuses == [200, 401] and live == [] — the family self-revocation.
         assert statuses == [200, 200], (
             f"concurrent refreshes must both succeed; got statuses={statuses} "
             f"(loser body: {_oauth_err_text((resp_a if resp_a.status_code != 200 else resp_b).json())!r}), "
@@ -292,13 +215,6 @@ async def test_truly_concurrent_refresh_converges_on_one_pair(api_client, db_man
 
 @pytest.mark.asyncio
 async def test_replay_of_revoked_token_with_empty_cache_revokes_family(api_client, db_manager, monkeypatch):
-    """Genuine replay (revoked row, NO cached response) must still revoke the family.
-
-    This is the museum-rule behavior the M5 fix must preserve: outside the
-    window — or inside it with no matching cached response — presenting a
-    consumed token is reuse, and reuse durably revokes every sibling. A
-    same-family live sibling proves the revocation is family-wide.
-    """
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     monkeypatch.setattr(_refresh_svc, "OAUTH_REFRESH_IDEMPOTENCY_WINDOW_SECONDS", 30)
 
@@ -315,8 +231,6 @@ async def test_replay_of_revoked_token_with_empty_cache_revokes_family(api_clien
         )
         await _mark_revoked(db_manager, tenant_key=tk, token_hash=hash_refresh_token(raw_consumed))
 
-        # Cache is empty (registry reset per test): the replay has no cached
-        # response to converge on, so reuse detection must fire.
         resp = await _refresh_call(
             api_client, refresh_token=raw_consumed, client_id=client_id, client_secret=client_secret
         )
@@ -333,13 +247,6 @@ async def test_replay_of_revoked_token_with_empty_cache_revokes_family(api_clien
 
 @pytest.mark.asyncio
 async def test_cached_entry_with_mismatched_signature_still_revokes_family(api_client, db_manager, monkeypatch):
-    """A cached response converges only for the SAME client identity.
-
-    A cache entry whose body signature does not match the caller must fall
-    through to reuse detection — before and after the M5 fix. This pins the
-    boundary between an honest in-window retry (same signature) and a replay
-    presented under a different identity.
-    """
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     monkeypatch.setattr(_refresh_svc, "OAUTH_REFRESH_IDEMPOTENCY_WINDOW_SECONDS", 30)
 
@@ -356,8 +263,6 @@ async def test_cached_entry_with_mismatched_signature_still_revokes_family(api_c
         )
         await _mark_revoked(db_manager, tenant_key=tk, token_hash=hash_refresh_token(raw_consumed))
 
-        # A cache entry exists for this token hash, but under a signature no
-        # real caller can produce — the convergence path must NOT accept it.
         await _refresh_svc._refresh_idempotency_cache_put(
             tk,
             hash_refresh_token(raw_consumed),

@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6049c regression: TSK reserved namespace + tasks TSK-only + conversion origin.
-
-Edition Scope: CE.
-
-Contract pinned here (real DB, no mocks; parallel-safe via the shared
-``db_session`` / ``two_tenant_service_setup`` fixtures):
-
-- New tasks are TSK-only and render ``TSK-nnnn`` (service + MCP-boundary).
-- The TSK row is seeded for new tenants and ensured lazily + race-safe for
-  existing tenants (no migration).
-- TSK is reserved: never in project ``valid_types``; a project cannot be
-  created as TSK.
-- TSK is immutable on task update (``task_type_id`` not in the allowlist).
-- Task -> project conversion preserves the global serial but STRIPS the type
-  (IMP-6262): the new project is untyped, never TSK-typed — the user re-tags it
-  later. (Supersedes the original BE-6049c "converted project carries TSK" origin
-  signal.)
-- Grandfathered (legacy-typed) tasks still load/render — forward-only.
-"""
 
 from __future__ import annotations
 
@@ -45,13 +26,9 @@ from giljo_mcp.tenant import TenantManager, current_tenant
 pytestmark = pytest.mark.asyncio
 
 
-# ---------------------------------------------------------------------------
-# Reserved TSK row: seeding + lazy ensure
-# ---------------------------------------------------------------------------
 
 
 async def test_tsk_in_default_seed_for_new_tenants(db_session, db_manager):
-    """A brand-new tenant gets TSK from default seeding (ensure_default_types_seeded)."""
     from giljo_mcp.services.taxonomy_ops import ensure_default_types_seeded, list_taxonomy_types
 
     tenant_key = TenantManager.generate_tenant_key()
@@ -62,7 +39,6 @@ async def test_tsk_in_default_seed_for_new_tenants(db_session, db_manager):
 
 
 async def test_ensure_reserved_task_type_is_idempotent_and_race_safe(db_session, db_manager):
-    """Calling ensure twice returns the SAME row (ON CONFLICT DO NOTHING, no dup)."""
     tenant_key = TenantManager.generate_tenant_key()
     svc = TaxonomyService(db_manager=db_manager, session=db_session)
 
@@ -90,12 +66,10 @@ async def test_ensure_reserved_task_type_is_idempotent_and_race_safe(db_session,
 
 
 async def test_existing_tenant_without_tsk_gets_it_lazily_on_create(db_session, two_tenant_service_setup):
-    """An existing tenant (taxonomy already seeded, no TSK) gets TSK on first task create."""
     tenant_a = two_tenant_service_setup["tenant_a"]
     db_manager = two_tenant_service_setup["db_manager"]
     task_service_a = two_tenant_service_setup["task_service_a"]
 
-    # Simulate a pre-TSK tenant: seed only BE/FE so default-seeding is skipped.
     svc = TaxonomyService(db_manager=db_manager, session=db_session)
     for abbr, label in (("BE", "Backend"), ("FE", "Frontend")):
         await svc.create_type(tenant_key=tenant_a, abbreviation=abbr, label=label)
@@ -116,9 +90,6 @@ async def test_existing_tenant_without_tsk_gets_it_lazily_on_create(db_session, 
     assert RESERVED_TASK_TYPE_ABBR in after
 
 
-# ---------------------------------------------------------------------------
-# Tasks are TSK-only (service layer) + render TSK-nnnn
-# ---------------------------------------------------------------------------
 
 
 async def test_new_task_renders_tsk_serial(db_session, two_tenant_service_setup):
@@ -134,18 +105,13 @@ async def test_new_task_renders_tsk_serial(db_session, two_tenant_service_setup)
     )
     assert response["task_type"] == RESERVED_TASK_TYPE_ABBR
     assert response["taxonomy_alias"].startswith("TSK-")
-    # global serial is a >=4-digit pad: TSK-0001, TSK-0042, ...
     suffix = response["taxonomy_alias"].split("-", 1)[1]
     assert suffix.isdigit() and len(suffix) >= 4
 
 
-# ---------------------------------------------------------------------------
-# TSK is immutable on update
-# ---------------------------------------------------------------------------
 
 
 async def test_task_type_id_excluded_from_update_allowlist():
-    """The constant gate: task_type_id must NOT be settable via update_task."""
     from giljo_mcp.services.task_service import _ALLOWED_TASK_UPDATE_FIELDS
 
     assert "task_type_id" not in _ALLOWED_TASK_UPDATE_FIELDS
@@ -156,7 +122,6 @@ async def test_update_cannot_change_task_type(db_session, two_tenant_service_set
     db_manager = two_tenant_service_setup["db_manager"]
     task_service_a = two_tenant_service_setup["task_service_a"]
 
-    # Seed a real BE type so validate() resolves it (and is then dropped).
     svc = TaxonomyService(db_manager=db_manager, session=db_session)
     await svc.create_type(tenant_key=tenant_a, abbreviation="BE", label="Backend")
     await db_session.commit()
@@ -176,24 +141,14 @@ async def test_update_cannot_change_task_type(db_session, two_tenant_service_set
     )
     assert "task_type_id" not in result["updated_fields"]
 
-    # The task still carries TSK.
     listing = await task_service_a.list_tasks_for_mcp(tenant_key=tenant_a, mode="summary")
     row = next(r for r in listing["tasks"] if r["task_id"] == task_id)
     assert row["task_type"]["abbreviation"] == RESERVED_TASK_TYPE_ABBR
 
 
-# ---------------------------------------------------------------------------
-# TSK reserved on the project side
-# ---------------------------------------------------------------------------
 
 
 async def test_tsk_excluded_from_project_valid_types(db_session, two_tenant_service_setup):
-    """DoD: TSK is never returned in project valid_types.
-
-    ``_get_valid_project_types`` opens its own session in production; route it
-    onto the test transaction (the conftest's established pattern) so its seed +
-    read run in-tx (no second connection deadlocking on uq_taxonomy_type_abbr).
-    """
     from contextlib import asynccontextmanager
 
     tenant_a = two_tenant_service_setup["tenant_a"]
@@ -216,7 +171,6 @@ async def test_tsk_excluded_from_project_valid_types(db_session, two_tenant_serv
 
     abbrs = {t["abbreviation"] for t in valid}
     assert RESERVED_TASK_TYPE_ABBR not in abbrs
-    # A normal type is still present (sanity: the filter didn't nuke everything).
     assert "BE" in abbrs
 
 
@@ -225,7 +179,6 @@ async def test_taxonomy_service_validate_rejects_tsk(db_session, two_tenant_serv
     db_manager = two_tenant_service_setup["db_manager"]
 
     svc = TaxonomyService(db_manager=db_manager, session=db_session)
-    # Ensure the TSK row physically exists for this tenant.
     await svc.ensure_reserved_task_type(tenant_a)
 
     with pytest.raises(ValidationError) as excinfo:
@@ -234,48 +187,28 @@ async def test_taxonomy_service_validate_rejects_tsk(db_session, two_tenant_serv
 
 
 async def test_cannot_create_project_as_tsk(db_session, two_tenant_service_setup):
-    """DoD: a project cannot be created as TSK.
-
-    Every create_project path resolves its type through
-    ``get_project_type_by_label`` — the reserved chokepoint. It returns None for
-    TSK (even when a TSK row physically exists), which forces the create path
-    into its 'Unknown project type' rejection. A real type still resolves,
-    proving the block is TSK-specific. (Tested at the resolver to stay in-tx;
-    the full create path opens its own session.)
-    """
     tenant_a = two_tenant_service_setup["tenant_a"]
     db_manager = two_tenant_service_setup["db_manager"]
     project_service_a = two_tenant_service_setup["project_service_a"]
 
-    # A TSK row physically exists, plus a normal BE type, for this tenant.
     svc = TaxonomyService(db_manager=db_manager, session=db_session)
     await svc.ensure_reserved_task_type(tenant_a)
     await svc.create_type(tenant_key=tenant_a, abbreviation="BE", label="Backend")
     await db_session.commit()
 
-    # Reserved → None (project can never resolve to it).
     assert await project_service_a.get_project_type_by_label(RESERVED_TASK_TYPE_ABBR, tenant_a) is None
-    # Non-reserved type still resolves (block is TSK-specific, not blanket).
     resolved_be = await project_service_a.get_project_type_by_label("BE", tenant_a)
     assert resolved_be is not None
     assert resolved_be.abbreviation == "BE"
 
 
 async def test_cannot_create_project_as_tsk_via_case_or_label_bypass(db_session, two_tenant_service_setup):
-    """BE-6049c H1 regression: the reserved chokepoint must reject EVERY spelling.
-
-    The repo lookups are case-insensitive (upper()/lower()), and the TSK row has
-    label "Task". A case-only early guard let ``"tsk"``/``"Tsk"`` and the label
-    ``"Task"`` slip through and resolve to the TSK row — minting a TSK project and
-    breaking the "TSK project <=> converted-from-task" invariant. All variants
-    must now resolve to None.
-    """
     tenant_a = two_tenant_service_setup["tenant_a"]
     db_manager = two_tenant_service_setup["db_manager"]
     project_service_a = two_tenant_service_setup["project_service_a"]
 
     svc = TaxonomyService(db_manager=db_manager, session=db_session)
-    await svc.ensure_reserved_task_type(tenant_a)  # seeds abbr "TSK", label "Task"
+    await svc.ensure_reserved_task_type(tenant_a)
     await db_session.commit()
 
     for spelling in ("tsk", "Tsk", "TsK", "Task", "task", " TSK "):
@@ -284,9 +217,6 @@ async def test_cannot_create_project_as_tsk_via_case_or_label_bypass(db_session,
         )
 
 
-# ---------------------------------------------------------------------------
-# Conversion (IMP-6262): serial preserved, taxonomy type STRIPPED (untyped)
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
@@ -329,9 +259,6 @@ async def _active_product(db_session, tenant_key: str) -> Product:
 async def test_tsk_task_conversion_preserves_serial_and_strips_type(
     conversion_service, db_session, db_manager, test_tenant_key
 ):
-    """IMP-6262: a TSK task converted to a project keeps its serial but the new
-    project is UNTYPED (type stripped, not copied) — TSK is task-exclusive, so a
-    conversion never mints a TSK-typed project. The user re-tags it later."""
     user = await _admin(db_session, test_tenant_key)
     product = await _active_product(db_session, test_tenant_key)
 
@@ -361,14 +288,11 @@ async def test_tsk_task_conversion_preserves_serial_and_strips_type(
     )
 
     project = (await db_session.execute(select(Project).where(Project.id == result.project_id))).scalar_one()
-    # Serial preserved (title + serial are the untyped project's identity).
     assert project.series_number == 42
-    # IMP-6262: type STRIPPED — the project is untyped, never re-stamped TSK.
     assert project.project_type_id is None
 
 
 async def test_untyped_legacy_task_conversion_still_works(conversion_service, db_session, test_tenant_key):
-    """Grandfathered untyped task (pre-TSK) still converts (forward-only)."""
     user = await _admin(db_session, test_tenant_key)
     product = await _active_product(db_session, test_tenant_key)
 
@@ -397,14 +321,9 @@ async def test_untyped_legacy_task_conversion_still_works(conversion_service, db
     assert project.series_number is not None
 
 
-# ---------------------------------------------------------------------------
-# Grandfathered legacy-typed tasks still load/render (forward-only)
-# ---------------------------------------------------------------------------
 
 
 async def test_legacy_be_typed_task_still_renders(db_session, two_tenant_service_setup):
-    """A task carrying a legacy BE type (pre-BE-6049c) still loads with its
-    BE-nnnn alias — we do not migrate/rewrite existing rows."""
     tenant_a = two_tenant_service_setup["tenant_a"]
     product_a = two_tenant_service_setup["product_a"]
     db_manager = two_tenant_service_setup["db_manager"]

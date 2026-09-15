@@ -1,20 +1,6 @@
-/**
- * SequenceLauncher.spec.js — FE-6165f
- *
- * Verifies that SequenceLauncher:
- *  - exposes the slot contract { selectedIds, toggle, clear, electionActive }
- *  - wires @run on SequenceBulkBar to onRunClicked (not the old openModal)
- *  - onRunClicked resolves order + calls api.sequenceRuns.create + router push
- *    includes phase: 'staging'
- *  - the confirm modal is no longer rendered (deleted component)
- *  - defineExpose no longer includes showModal or resolved
- *
- * Edition scope: CE.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
-// --- hoisted mocks ---
 const { createMock, roadmapGetMock, pushMock } = vi.hoisted(() => ({
   createMock: vi.fn(),
   roadmapGetMock: vi.fn(),
@@ -31,7 +17,6 @@ vi.mock('@/services/api', () => {
 
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: pushMock }) }))
 
-// Stub child components so we don't need Vuetify in unit tests.
 vi.mock('@/components/sequence/SequenceBulkBar.vue', () => ({
   default: {
     name: 'SequenceBulkBar',
@@ -55,11 +40,9 @@ describe('SequenceLauncher — slot contract', () => {
     const exposed = wrapper.vm
     expect(typeof exposed.toggle).toBe('function')
     expect(typeof exposed.clear).toBe('function')
-    // Vue Test Utils unwraps refs on the proxy, so .value is not needed.
     expect(Array.isArray(exposed.selectedIds)).toBe(true)
     expect(typeof exposed.selectedCount).toBe('number')
     expect(typeof exposed.electionActive).toBe('boolean')
-    // Deleted modal state must not be exposed.
     expect(exposed.showModal).toBeUndefined()
     expect(exposed.resolved).toBeUndefined()
   })
@@ -91,18 +74,13 @@ describe('SequenceLauncher — onRunClicked via @run', () => {
 
   it('calls api.sequenceRuns.create and router.push to the /jobs multi head project after @run', async () => {
     const wrapper = mount(SequenceLauncher, { slots: { default: '<span />' } })
-    // Select a project via the exposed toggle.
     wrapper.vm.toggle({ id: 'p-1', name: 'Alpha', taxonomy_alias: 'BE-0001' })
     await wrapper.find('[data-testid="bulk-bar"]').trigger('click')
-    // Wait for the async onRunClicked to settle.
     await new Promise((r) => setTimeout(r, 0))
     expect(createMock).toHaveBeenCalledTimes(1)
     const body = createMock.mock.calls[0][0]
     expect(body.review_policy).toBe('per_card')
     expect(body.execution_mode).toBe('multi_terminal')
-    // FE-6174c: Mission Control retired — navigate to the chain HEAD project's
-    // /jobs multi view (/projects/<headPid>?run=<id>). Head = resolved_order[0]
-    // = the single selected project 'p-1'.
     expect(pushMock).toHaveBeenCalledWith(
       expect.objectContaining({
         name: 'ProjectLaunch',
@@ -114,7 +92,6 @@ describe('SequenceLauncher — onRunClicked via @run', () => {
 
   it('does not render the confirm modal (removed in FE-6165f)', () => {
     const wrapper = mount(SequenceLauncher, { slots: { default: '<span />' } })
-    // The data-testid was on the deleted confirm modal's root element — it must be gone.
     expect(wrapper.find('[data-testid="seq-confirm-modal"]').exists()).toBe(false)
   })
 })

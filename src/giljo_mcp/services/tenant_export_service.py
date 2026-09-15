@@ -3,33 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""TenantExportService — GDPR data portability for the authenticated tenant.
-
-Produces a ZIP file containing:
-    manifest.json   (schema version, exported_at, tenant_key provenance,
-                     alembic_revision, giljo_mcp_version, per-file SHA-256,
-                     model_counts, model->file map)
-    schema.md       (human-readable redaction notice + table descriptions)
-    data/<Model>.json   (one file per exported model, list of row dicts)
-
-BE-5115: vision_documents are stored inline (vision_documents.vision_document
-column); their full content already lives in data/vision_documents.json, so
-no separate files/ entries are produced. Legacy 'file' / 'hybrid' rows were
-migrated to 'inline' by ce_0032_vision_docs_inline_only, after which the
-storage_type filter in _collect_vision_files matches zero rows.
-
-Strip filter is applied per-field at serialize time (mission spec, narrow):
-    ALWAYS_STRIP, CREDENTIAL_STRIP, PLATFORM_METADATA_STRIP    — field-level
-Entire-table selection is schema-DISCOVERED (BE-9188): see
-``giljo_mcp/services/capture_tables.py`` (tenant-keyed models minus the
-justified EXPORT_EXCLUDE).
-
-The full export is wrapped in REPEATABLE READ so the snapshot is consistent
-across all model queries.
-
-WebSocket progress emission uses the existing app.state.websocket_manager;
-no new broker is created. Event type is "tenant:export_progress".
-"""
 
 from __future__ import annotations
 
@@ -55,15 +28,12 @@ from giljo_mcp.services.capture_tables import (
     capture_models,
     capture_table_names,
 )
+from giljo_mcp.tenant import TENANT_KEY_SHAPE
 
 
 logger = logging.getLogger(__name__)
 
 
-# --------------------------------------------------------------------------- #
-# Strip lists — narrow form (mission spec, EXACT — different from
-# CE_TO_SOLO_ROADMAP round-trip migration version).
-# --------------------------------------------------------------------------- #
 
 ALWAYS_STRIP: frozenset[str] = frozenset({"tenant_key"})
 
@@ -90,15 +60,6 @@ PLATFORM_METADATA_STRIP: frozenset[str] = frozenset(
 _ALL_STRIP_FIELDS: frozenset[str] = ALWAYS_STRIP | CREDENTIAL_STRIP | PLATFORM_METADATA_STRIP
 
 
-# --------------------------------------------------------------------------- #
-# Table selection (BE-9188): the capture set is DISCOVERED, not listed here.
-# ``capture_tables.capture_models()`` derives it from ``Base.metadata`` (every
-# tenant-keyed model minus the justified ``EXPORT_EXCLUDE``), so adding a new
-# product table never requires touching this service. The old hand-maintained
-# EXPORT_MODELS allowlist is gone — it drifted twice (BE-6113 on the deletion
-# side, IMP-9186 here) and the second drift was a confirmed restore data-loss
-# defect (BE-9187).
-# --------------------------------------------------------------------------- #
 
 
 _REDACTION_NOTICE = (
@@ -112,15 +73,7 @@ _REDACTION_NOTICE = (
 )
 
 
-# Tenant-key values may appear inside free-form text or JSONB content
-# (mission strings, message bodies, memory entries, agent execution
-# result blobs). The per-field strip filter cannot reach those because
-# they are payload, not column names. We scrub them at the JSON-bytes
-# level just before each data/*.json is written to the ZIP. The pattern
-# is intentionally narrow (the GiljoAI tenant_key format is `tk_` +
-# 20+ alphanumeric chars) so it does not false-positive on normal user
-# content.
-_TENANT_KEY_PATTERN = re.compile(rb"tk_[A-Za-z0-9]{20,}")
+_TENANT_KEY_PATTERN = re.compile(TENANT_KEY_SHAPE.encode())
 _TENANT_KEY_REDACTION = b"<redacted-tenant-key>"
 
 
@@ -128,9 +81,6 @@ def _redact_tenant_key_values(blob: bytes) -> bytes:
     return _TENANT_KEY_PATTERN.sub(_TENANT_KEY_REDACTION, blob)
 
 
-# Fidelity (operator / restore-grade) export carries no redactions — the whole
-# point is to faithfully rebuild a tenant. This notice replaces the portability
-# redaction notice in schema.md so an operator knows the artifact is sensitive.
 _FIDELITY_NOTICE = (
     "> NOTE: This is a FIDELITY (operator / restore-grade) export. It is NOT "
     "redacted: tenant-key values, primary keys, foreign keys, password hashes, "
@@ -142,19 +92,10 @@ _FIDELITY_NOTICE = (
 
 
 def _fidelity_restore_order() -> list[str]:
-    """Capture-set table names in FK-correct INSERT order (parents first).
-
-    Delegates to the discovery module (BE-9188) — ``capture_table_names()`` is
-    the one source of truth for both the table set and its topological order.
-    The restore path (chain step f) reverses this list for FK-safe deletes.
-    Kept as a named seam because the manifest builder and the round-trip tests
-    reference it.
-    """
     return capture_table_names()
 
 
 class TenantExportService:
-    """Exports all tenant-scoped data for one tenant to a portable ZIP file."""
 
     def __init__(
         self,
@@ -167,39 +108,13 @@ class TenantExportService:
         self.products_root = products_root or (Path.cwd() / "products")
         self.websocket_manager = websocket_manager
 
-    # ------------------------------------------------------------------ #
-    # Public entry point
-    # ------------------------------------------------------------------ #
 
     async def export(self, *, tenant_key: str, fidelity: bool = False) -> tuple[Path, dict[str, int]]:
-        """Run the full export for ``tenant_key`` and return (zip_path, model_counts).
-
-        The zip is written to a temp file on disk; caller is responsible for
-        moving it to the download-token staging directory.
-
-        ``fidelity`` selects the export grade (BE-6130c):
-
-        * ``False`` (default) — *portability* grade (GDPR "download my data").
-          ``tenant_key``, credentials, and platform metadata are stripped per
-          :data:`_ALL_STRIP_FIELDS`, and ``tk_`` values embedded in free-form
-          text / JSONB are byte-scrubbed. You CANNOT faithfully rebuild a tenant
-          from this artifact — that is the point.
-        * ``True`` — *fidelity* (operator / restore) grade for backup & restore.
-          KEEPS ``tenant_key``, primary keys, and every FK column; does NOT redact
-          credentials (so a restore can reconstruct auth — the caller stores the
-          artifact encrypted, chain step d); does NOT byte-scrub ``tk_`` values.
-          The manifest records ``mode="fidelity"`` plus an FK-correct
-          ``restore_order`` so the restore path (chain step f) re-inserts
-          parents before children. Same REPEATABLE READ snapshot, same
-          discovered capture set as portability mode.
-        """
         if not tenant_key:
             raise ValueError("tenant_key is required")
 
         await self._set_repeatable_read()
 
-        # Discovered per call (BE-9188): every tenant-keyed model registered in
-        # this runtime, minus the justified EXPORT_EXCLUDE, parents-first.
         models = capture_models()
         model_data: dict[str, list[dict[str, Any]]] = {}
         model_counts: dict[str, int] = {}
@@ -221,11 +136,6 @@ class TenantExportService:
 
         vision_entries = self._collect_vision_files(model_data.get("VisionDocument", []))
 
-        # BE-9052: the serialize+compress (json.dumps of the whole dataset +
-        # ZIP_DEFLATE) is CPU-bound and previously ran inline on the event loop,
-        # so one large tenant stalled the single hosted worker for everyone. Run
-        # it in a worker thread — _write_zip touches no session (only the already
-        # materialized model_data + on-disk vision files), so it is thread-safe.
         zip_path = await asyncio.to_thread(
             self._write_zip,
             tenant_key=tenant_key,
@@ -245,19 +155,8 @@ class TenantExportService:
         )
         return zip_path, model_counts
 
-    # ------------------------------------------------------------------ #
-    # Snapshot consistency
-    # ------------------------------------------------------------------ #
 
     async def _set_repeatable_read(self) -> None:
-        # SET TRANSACTION ISOLATION LEVEL must precede any query in the
-        # transaction. SQLAlchemy AsyncSession lazily opens a tx on the
-        # first execute, so once any query has been issued on the session
-        # the SET will fail with ActiveSQLTransactionError AND poison the
-        # in-flight transaction. We skip the SET entirely when a tx is
-        # already in flight — the export still produces a coherent
-        # snapshot under default READ COMMITTED for single-user CE use,
-        # and SaaS/hosted modes are 403'd at the endpoint anyway.
         conn = await self.db_session.connection()
         if conn.in_transaction():
             logger.debug("Session already in transaction; export at default isolation")
@@ -268,9 +167,6 @@ class TenantExportService:
             await self.db_session.rollback()
             logger.warning("Could not set REPEATABLE READ for export: %s", exc)
 
-    # ------------------------------------------------------------------ #
-    # Per-model query + serialize
-    # ------------------------------------------------------------------ #
 
     async def _query_model_rows(self, model: type, tenant_key: str, *, fidelity: bool = False) -> list[dict[str, Any]]:
         columns = sa_inspect(model).columns
@@ -291,30 +187,17 @@ class TenantExportService:
     def _serialize_row(instance: Any, column_names: list[str], *, fidelity: bool = False) -> dict[str, Any]:
         out: dict[str, Any] = {}
         for col_name in column_names:
-            # Fidelity (restore-grade) keeps every column — tenant_key, PKs, FK
-            # columns, credentials — so the artifact can faithfully rebuild the
-            # tenant. Portability strips the security/identity columns.
             if not fidelity and col_name in _ALL_STRIP_FIELDS:
                 continue
             value = getattr(instance, col_name, None)
             out[col_name] = _to_json_safe(value)
         if not fidelity:
-            # Also strip any non-column attribute that happens to match a strip
-            # field name (defense-in-depth against ORM augmentations).
             for stripped in _ALL_STRIP_FIELDS:
                 out.pop(stripped, None)
         return out
 
-    # ------------------------------------------------------------------ #
-    # Vision file bundling
-    # ------------------------------------------------------------------ #
 
     def _collect_vision_files(self, vision_rows: list[dict[str, Any]]) -> list[tuple[str, Path]]:
-        """Resolve vision files referenced by VisionDocument rows.
-
-        Returns list of (zip_path, source_path) pairs for files that exist on
-        disk. Missing files emit a WARNING and are skipped (mission spec).
-        """
         entries: list[tuple[str, Path]] = []
         for row in vision_rows:
             vision_path = row.get("vision_path")
@@ -338,9 +221,6 @@ class TenantExportService:
             entries.append((zip_path, src))
         return entries
 
-    # ------------------------------------------------------------------ #
-    # ZIP packaging + manifest + schema.md
-    # ------------------------------------------------------------------ #
 
     def _write_zip(
         self,
@@ -359,12 +239,8 @@ class TenantExportService:
 
         file_entries: list[dict[str, Any]] = []
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            # data/*.json
             for model_name, rows in model_data.items():
                 raw = json.dumps(rows, indent=2, sort_keys=True).encode("utf-8")
-                # Fidelity keeps tk_ values intact (a restore needs them);
-                # portability scrubs tk_ values that hide inside free-form
-                # text / JSONB payloads (column-name strip cannot reach those).
                 blob = raw if fidelity else _redact_tenant_key_values(raw)
                 arcname = f"data/{model_name}.json"
                 zf.writestr(arcname, blob)
@@ -376,7 +252,6 @@ class TenantExportService:
                     }
                 )
 
-            # files/products/<id>/vision/<name>
             for arcname, src in vision_entries:
                 data = src.read_bytes()
                 zf.writestr(arcname, data)
@@ -388,7 +263,6 @@ class TenantExportService:
                     }
                 )
 
-            # schema.md
             schema_blob = self._build_schema_md(model_counts, fidelity=fidelity).encode("utf-8")
             zf.writestr("schema.md", schema_blob)
             file_entries.append(
@@ -399,7 +273,6 @@ class TenantExportService:
                 }
             )
 
-            # manifest.json — must be the LAST entry so it can reference all others
             manifest = self._build_manifest(
                 tenant_key=tenant_key,
                 model_counts=model_counts,
@@ -432,7 +305,6 @@ class TenantExportService:
             head = "unknown"
 
         manifest: dict[str, Any] = {
-            # "2.0" = discovery-era capture set (BE-9188); "1.0" = allowlist era.
             "schema_version": ARTIFACT_SCHEMA_VERSION,
             "mode": "fidelity" if fidelity else "portability",
             "exported_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
@@ -444,8 +316,6 @@ class TenantExportService:
             "files": file_entries,
         }
         if fidelity:
-            # The restore path (chain step f) re-inserts parents before children;
-            # this is the FK-correct INSERT order for the captured tables.
             manifest["restore_order"] = _fidelity_restore_order()
         return manifest
 
@@ -475,9 +345,6 @@ class TenantExportService:
             lines.append("")
         return "\n".join(lines)
 
-    # ------------------------------------------------------------------ #
-    # WebSocket progress emission (reuse existing broker)
-    # ------------------------------------------------------------------ #
 
     async def _emit_progress(
         self,
@@ -508,13 +375,9 @@ class TenantExportService:
             logger.debug("export progress emit failed (non-blocking): %s", exc)
 
 
-# --------------------------------------------------------------------------- #
-# JSON serialization helpers
-# --------------------------------------------------------------------------- #
 
 
 def _to_json_safe(value: Any) -> Any:
-    """Convert SQLAlchemy/Python values to JSON-safe primitives."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, datetime):
@@ -526,15 +389,10 @@ def _to_json_safe(value: Any) -> Any:
     if isinstance(value, dict):
         return {k: _to_json_safe(v) for k, v in value.items()}
     if isinstance(value, (bytes, bytearray, memoryview)):
-        return None  # TSVECTOR / bytea columns are not portable
-    # Fallback for SQLAlchemy ARRAY / Enum / etc.
+        return None
     return str(value)
 
 
-# --------------------------------------------------------------------------- #
-# schema.md descriptions (terse — schema is documented in models, this is
-# the user-facing crib sheet)
-# --------------------------------------------------------------------------- #
 
 _TABLE_DESCRIPTIONS: dict[str, str] = {
     "Organization": "Tenant organization record.",

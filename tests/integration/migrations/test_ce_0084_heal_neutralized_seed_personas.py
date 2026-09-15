@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Migration regression for ce_0084 -- heal neutralized tester/implementer/documenter
-seed personas (BE-9259 audit blocker).
-
-Real scratch PostgreSQL DB, real alembic. Covers ce_0084's byte-exact heal:
-
-- A row whose ``user_instructions``/``description`` still byte-match the
-  PRE-BE-9259 seed text are rewritten to the neutralized (post-BE-9259) text.
-- A row whose text was genuinely user-edited (diverges from the old seed) is
-  left byte-identical -- the migration must never guess at user prose.
-- A row already healed (matches the NEW text, e.g. a tenant seeded after
-  BE-9259 shipped) is a no-op.
-- Idempotency: re-running against an already-migrated DB changes nothing
-  further and does not crash (the "CE reruns upgrade head on every boot"
-  scenario).
-
-Mirrors tests/integration/migrations/test_ce_0068_purge_completed_sequence_runs.py.
-"""
 
 from __future__ import annotations
 
@@ -51,8 +34,6 @@ PRODUCTION_DB_NAME = "giljo_mcp"
 _PRE = "ce_0083_projects_parked_status"
 _REV = "ce_0084_heal_neutralized_seed_personas"
 
-# Load the migration module directly so the test's expected OLD/NEW text can
-# never drift from what the migration itself writes (single source of truth).
 _MIGRATION_PATH = PROJECT_ROOT / "migrations" / "versions" / f"{_REV}.py"
 _spec = importlib.util.spec_from_file_location(_REV, _MIGRATION_PATH)
 _migration = importlib.util.module_from_spec(_spec)
@@ -160,7 +141,6 @@ def scratch_engine():
 
 @pytest.fixture
 def scratch_at_pre(scratch_engine: sa.Engine):
-    """Fresh schema built up to ce_0083 (the pre-revision), ready for seeding."""
     _drop_all_objects(scratch_engine)
     up = _run_alembic("upgrade", _PRE)
     assert up.returncode == 0, f"upgrade to {_PRE} failed:\n{up.stdout}\n{up.stderr}"
@@ -168,9 +148,6 @@ def scratch_at_pre(scratch_engine: sa.Engine):
     _drop_all_objects(scratch_engine)
 
 
-# --------------------------------------------------------------------------- #
-# Seed helper (raw SQL -- the ORM models are not needed for a migration test) #
-# --------------------------------------------------------------------------- #
 
 TK = "tk_ce0084"
 
@@ -270,7 +247,6 @@ class TestCe0084HealNeutralizedSeedPersonas:
         assert row["user_instructions"] == NEW_DOCUMENTER_UI
 
     def test_user_edited_row_survives_byte_identical(self, scratch_at_pre: sa.Engine) -> None:
-        """A tenant's hand-edited tester prose must NOT be touched by the heal."""
         edited_ui = OLD_TESTER_UI + "\n\nCUSTOM: also verify our internal deploy checklist."
         tid = _insert_template(
             scratch_at_pre,
@@ -283,14 +259,10 @@ class TestCe0084HealNeutralizedSeedPersonas:
         assert up.returncode == 0, f"upgrade {_REV} failed:\n{up.stdout}\n{up.stderr}"
 
         row = _fetch_row(scratch_at_pre, tid)
-        # user_instructions diverged from the old seed -> untouched, byte-identical.
         assert row["user_instructions"] == edited_ui
-        # description still byte-matched the old seed -> that column IS healed
-        # independently (each column's guard is its own byte-equality check).
         assert row["description"] == NEW_TESTER_DESCRIPTION
 
     def test_already_healed_row_is_noop(self, scratch_at_pre: sa.Engine) -> None:
-        """A tenant seeded AFTER BE-9259 already has the new text -- must stay put."""
         tid = _insert_template(
             scratch_at_pre,
             name="documenter",
@@ -305,7 +277,6 @@ class TestCe0084HealNeutralizedSeedPersonas:
         assert row["user_instructions"] == NEW_DOCUMENTER_UI
 
     def test_rerun_is_idempotent(self, scratch_at_pre: sa.Engine) -> None:
-        """Re-running ce_0084 (boot-rerun / stamp-behind) heals once, then no-ops."""
         healed_tid = _insert_template(
             scratch_at_pre,
             name="implementer",

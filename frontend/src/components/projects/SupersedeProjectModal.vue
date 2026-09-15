@@ -11,7 +11,6 @@
     @keydown.esc="handleClose"
   >
     <v-card v-draggable class="smooth-border">
-      <!-- Modal header -->
       <div id="supersede-project-title" class="dlg-header">
         <v-icon class="dlg-icon" icon="mdi-file-replace-outline" />
         <span class="dlg-title">Mark Superseded: {{ projectName }}</span>
@@ -28,7 +27,6 @@
           This cannot be undone.
         </p>
 
-        <!-- Error state -->
         <v-alert v-if="error" type="error" variant="tonal" density="compact" class="mb-4" closable @click:close="error = null">
           {{ error }}
         </v-alert>
@@ -48,7 +46,6 @@
 
       <v-divider />
 
-      <!-- Modal actions -->
       <div class="dlg-footer">
         <v-btn variant="text" @click="handleClose">
           Cancel
@@ -94,22 +91,15 @@ const emit = defineEmits(['close', 'superseded'])
 
 const projectStore = useProjectStore()
 
-// Vuetify display breakpoints
 const { mobile } = useDisplay()
 const isMobile = computed(() => mobile.value)
 
-// Reactive state
 const candidates = ref([])
 const loadingCandidates = ref(false)
 const successorProjectId = ref(null)
 const submitting = ref(false)
 const error = ref(null)
 
-// FE-9508: lead with the taxonomy alias, the convention every other project
-// surface uses (e.g. ProjectsTable's serial badge) — plain names left the
-// operator unable to tell picker options apart (four candidates, none
-// identifiable by serial). Falls back to the bare name when a project has no
-// alias yet (e.g. a staged-but-unopened project).
 const successorOptions = computed(() =>
   candidates.value.map((p) => ({
     title: p.taxonomy_alias ? `${p.taxonomy_alias} — ${p.name}` : p.name,
@@ -145,8 +135,6 @@ watch(() => props.show, (open) => {
   }
 })
 
-// The parent renders this dialog under v-if, so it mounts already-open — load
-// candidates on mount too (the show watcher only fires on a later transition).
 onMounted(() => {
   if (props.show && props.projectId) {
     loadCandidates()

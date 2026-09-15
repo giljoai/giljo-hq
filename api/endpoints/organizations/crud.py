@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Organization CRUD Endpoints - Handover 0424c.
-
-Handles organization CRUD operations using OrgService.
-
-All database access goes through OrgService following the established
-service layer pattern (similar to ProductService, ProjectService).
-"""
 
 import logging
 
@@ -34,10 +26,6 @@ router = APIRouter()
 
 
 def _serialize_organization(org) -> dict:
-    """Convert Organization model to dict for JSON response.
-
-    Must be called while still in session context to access attributes.
-    """
     return {
         "id": org.id,
         "name": org.name,
@@ -54,7 +42,6 @@ def _serialize_organization(org) -> dict:
 
 
 def get_org_service(db: AsyncSession = Depends(get_db_session)) -> OrgService:
-    """Dependency for OrgService injection."""
     return OrgService(db)
 
 
@@ -139,7 +126,6 @@ async def get_organization(
         ResourceNotFoundError: Organization not found (404)
         DatabaseError: Database operation failed (500)
     """
-    # Log permission check for debugging
     logger.debug(
         "Organization access check",
         extra={
@@ -150,8 +136,6 @@ async def get_organization(
         },
     )
 
-    # Allow access if user's org_id matches OR has membership
-    # This handles cases where user has org_id but no membership record
     if str(current_user.org_id) != str(org_id) and not await org_service.can_view_org(org_id, current_user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this organization")
 

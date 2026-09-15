@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-ProductMemoryEntry Model (Handover 0390a)
-
-Normalized table for 360 memory entries.
-
-REPLACES: Product.product_memory.sequential_history JSONB array (DEPRECATED in 0390).
-
-This table is the SINGLE SOURCE OF TRUTH for 360 memory entries as of v3.3.
-"""
 
 from datetime import datetime
 from typing import Any
@@ -37,16 +28,9 @@ from .base import Base
 
 
 class ProductMemoryEntry(Base):
-    """
-    360 Memory Entry - normalized from Product.product_memory.sequential_history.
-
-    Each entry represents a project completion, closeout, or handover milestone
-    that contributes to the product's cumulative memory.
-    """
 
     __tablename__ = "product_memory_entries"
 
-    # Primary key
     id = Column(
         UUID(as_uuid=True),
         primary_key=True,
@@ -54,16 +38,12 @@ class ProductMemoryEntry(Base):
         comment="Unique entry identifier",
     )
 
-    # Tenant isolation
-    # BE-8000c: tenant lookups served by idx_pme_tenant_product /
-    # idx_pme_tenant_timestamp (tenant_key-leading); no column-level index=True.
     tenant_key = Column(
         String(36),
         nullable=False,
         comment="Tenant isolation key",
     )
 
-    # Foreign keys
     product_id = Column(
         String(36),
         ForeignKey("products.id", ondelete="CASCADE"),
@@ -77,7 +57,6 @@ class ProductMemoryEntry(Base):
         comment="Source project (SET NULL on delete - preserves history)",
     )
 
-    # Core fields
     sequence = Column(
         Integer,
         nullable=False,
@@ -109,7 +88,6 @@ class ProductMemoryEntry(Base):
         comment="When the entry was created",
     )
 
-    # Content fields
     project_name = Column(
         String(255),
         nullable=True,
@@ -139,7 +117,6 @@ class ProductMemoryEntry(Base):
         comment="List of git commit objects with sha, message, author",
     )
 
-    # Extended metadata (project_closeout specific)
     deliverables = Column(
         JSONB,
         default=list,
@@ -176,7 +153,6 @@ class ProductMemoryEntry(Base):
         comment="List of tags for categorization",
     )
 
-    # Author tracking (write_memory_entry specific)
     author_job_id = Column(
         String(36),
         nullable=True,
@@ -193,7 +169,6 @@ class ProductMemoryEntry(Base):
         comment="Type of agent (orchestrator, implementer, etc.)",
     )
 
-    # Soft-delete tracking
     deleted_by_user = Column(
         Boolean,
         default=False,
@@ -206,7 +181,6 @@ class ProductMemoryEntry(Base):
         comment="When the source project was deleted",
     )
 
-    # Timestamps
     created_at = Column(
         DateTime(timezone=True),
         default=datetime.utcnow,
@@ -221,19 +195,14 @@ class ProductMemoryEntry(Base):
         comment="When this row was last updated",
     )
 
-    # Relationships
     product = relationship("Product", back_populates="memory_entries")
     project = relationship("Project", back_populates="memory_entries")
 
-    # Constraints
     __table_args__ = (
         UniqueConstraint("product_id", "sequence", name="uq_product_sequence"),
         Index("idx_pme_tenant_product", "tenant_key", "product_id"),
         Index("idx_pme_project", "project_id", postgresql_where="project_id IS NOT NULL"),
-        # BE-8000c: idx_pme_sequence dropped — the UNIQUE uq_product_sequence
-        # (product_id, sequence) already covers it.
         Index("idx_pme_tenant_timestamp", "tenant_key", text("timestamp DESC")),
-        # TSK-9076: backup watermark sweep — MAX(updated_at) per tenant.
         Index("idx_product_memory_entries_tenant_updated", "tenant_key", "updated_at"),
         Index("idx_pme_type", "entry_type"),
         Index("idx_pme_deleted", "deleted_by_user", postgresql_where="deleted_by_user = true"),
@@ -243,7 +212,6 @@ class ProductMemoryEntry(Base):
         return f"<ProductMemoryEntry(id={self.id}, product_id={self.product_id}, sequence={self.sequence}, type={self.entry_type})>"
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary (matching JSONB entry format for compatibility)."""
         return {
             "id": str(self.id),
             "sequence": self.sequence,

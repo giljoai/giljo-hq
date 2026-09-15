@@ -10,16 +10,16 @@
 
     <div class="intg-line-main">
       <div class="intg-line-title-row">
-        <span class="intg-line-title">Skills and Agents Export</span>
+        <span class="intg-line-title">Skills Setup</span>
         <v-tooltip location="top" max-width="400">
           <template #activator="{ props }">
             <v-icon v-bind="props" size="small" style="color: var(--text-muted)">mdi-help-circle-outline</v-icon>
           </template>
           <div>
-            Once the MCP server is registered in your AI coding tool, run <code>giljo_setup</code> to install agents and skills in one step.
+            Once the MCP server is registered in your AI coding tool, run <code>giljo_setup</code> to install the skills and write the Giljo HQ marker block.
             <br /><br />
-            After setup, re-run <code>giljo_setup</code> ("Agents only") to update agent templates,
-            and use <code>/giljo</code> to create and read tasks and projects from your AI coding agent.
+            Agents receive their profile from the server when a job starts, so nothing else needs installing.
+            Use <code>/giljo</code> to create and read tasks and projects from your AI coding agent.
           </div>
         </v-tooltip>
       </div>
@@ -40,9 +40,8 @@ import { useRouter } from 'vue-router'
 
 const router = useRouter()
 
-// In-app User Guide, scrolled to the "Installing Skills and Agents" section.
 function openSkillGuide() {
-  router.push({ name: 'UserGuide', hash: '#installing-skills-and-agents-giljo_setup' })
+  router.push({ name: 'UserGuide', hash: '#installing-skills-giljo_setup' })
 }
 </script>
 

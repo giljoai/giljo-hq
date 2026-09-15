@@ -26,7 +26,7 @@ Define your product once. Every agent that connects gets the full picture.
 
 **Free Community Edition** · Self-Hosted · Privacy First · Bring Your Own AI
 
-**Works with:** Claude Code CLI · Claude.ai / Desktop · Codex CLI · ChatGPT.com · Gemini CLI · Antigravity CLI · Any MCP Client
+**Works with:** Claude Code CLI · Claude.ai / Desktop · Codex CLI · ChatGPT.com · Any MCP Client
 
 <br>
 
@@ -50,7 +50,7 @@ Giljo HQ, a GiljoAI product, is a passive context server for AI coding tools. It
 
 GiljoAI sits at the intersection of product thinking and development. Whether you are a developer learning to define what you build before you build it, or a product manager turning a specification into working software, the platform gives you a structured path from vision to execution. The clearer your product definition, the more effective every agent session becomes.
 
-**Bring Your Own AI.** GiljoAI works with Claude Code CLI, Claude.ai / Desktop, Codex CLI, ChatGPT.com, Gemini CLI, Antigravity CLI, or any MCP-compatible tool. Each connects with its own API key. You can run multiple tools simultaneously.
+**Bring Your Own AI.** GiljoAI works with Claude Code CLI, Claude.ai / Desktop, Codex CLI, ChatGPT.com, or any MCP-compatible tool. Each connects with its own API key. You can run multiple tools simultaneously.
 
 <br>
 
@@ -90,7 +90,7 @@ MCP integration picks it up automatically. No copy-pasting a connect command.
 
 ### Your Tools, Your Subscription
 
-GiljoAI never touches your AI credits. You bring your own Claude Code CLI, Claude.ai / Desktop, Codex CLI, ChatGPT.com, Gemini CLI, Antigravity CLI, or any MCP-compatible tool, each with your own subscription. GiljoAI acts as a passive MCP server: your tool connects over HTTP, reads context and coordination data, and does all the reasoning and coding itself.
+GiljoAI never touches your AI credits. You bring your own Claude Code CLI, Claude.ai / Desktop, Codex CLI, ChatGPT.com, or any MCP-compatible tool, each with your own subscription. GiljoAI acts as a passive MCP server: your tool connects over HTTP, reads context and coordination data, and does all the reasoning and coding itself.
 
 ### Define Your Product
 
@@ -120,11 +120,11 @@ The Roadmap turns a product's inactive projects and pending tasks into a single 
 
 One skill is installed on your machine during setup. Use it from your CLI without breaking flow:
 
-| Skill | Claude Code | Codex CLI | Gemini CLI | Antigravity CLI | What it does |
-|---|---|---|---|---|---|
-| **Projects and tasks** | `/giljo` | `$giljo` | `/giljo` | `$giljo` | Capture tasks, create or update projects, and look them up mid-session — one command routes both create and read |
+| Skill | Claude Code | Codex CLI | What it does |
+|---|---|---|---|
+| **Projects and tasks** | `/giljo` | `$giljo` | Capture tasks, create or update projects, and look them up mid-session — one command routes both create and read |
 
-Agent templates install and refresh through the `giljo_setup` tool (choose "Agents only"), not a slash command. The Agent Template Manager in the dashboard lets you customize agent profiles with roles, expertise, and chain strategies. Templates export in the correct format for your connected platform.
+Agent templates need no installation at all. The Agent Template Manager in the dashboard lets you customize agent profiles with roles, expertise, and chain strategies, and every agent your orchestrator starts is handed its own profile — role, instructions, rules, success criteria — by the server the moment it begins work. An edit applies to the very next agent you launch. To run an agent yourself instead, choose **Download profile (.md)** from its row menu and drop the Markdown into any tool.
 
 ### 360 Memory
 

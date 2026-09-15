@@ -3,21 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6070 (F8): report_progress TODO-rewrite reduction — proof + two-sided guard.
-
-report_progress today always DELETE-all + re-INSERT-all the todo rows, even when
-the agent re-sends the identical list every call. BE-6070 skips the rewrite when
-the normalized incoming list equals what's stored. These tests prove:
-
-- unchanged list  -> ZERO delete + ZERO insert (the reduction)
-- changed list    -> delete + insert as before (behavior preserved)
-- the completed-work regression guard still fires
-- the WS payload is built from in-hand data (no 2nd-session re-SELECT)
-
-Failing layer: the rewrite lives in ProgressService._process_todo_items, so the
-test drives ProgressService.report_progress directly against a real (rolled-back)
-session and spies the repository write methods.
-"""
 
 from __future__ import annotations
 
@@ -48,7 +33,6 @@ def ws_manager():
 
 @pytest.fixture
 async def seeded_job(db_session, test_tenant_key):
-    """A working job/execution with three todo items already stored."""
     suffix = uuid4().hex[:8]
     product = Product(id=str(uuid4()), tenant_key=test_tenant_key, name=f"P {suffix}", description="x")
     db_session.add(product)
@@ -105,7 +89,6 @@ async def seeded_job(db_session, test_tenant_key):
 
 
 def _service_with_spies(db_session, test_tenant_key, ws_manager):
-    """Build a ProgressService whose repo delete/insert are spied with counters."""
     tenant_manager = MagicMock()
     tenant_manager.get_current_tenant.return_value = test_tenant_key
     service = ProgressService(
@@ -139,7 +122,6 @@ _SAME_LIST = [
 
 
 async def test_unchanged_list_skips_delete_and_insert(db_session, test_tenant_key, seeded_job, ws_manager):
-    """Re-sending the identical list must NOT rewrite the todo rows."""
     service, counters = _service_with_spies(db_session, test_tenant_key, ws_manager)
 
     result = await service.report_progress(job_id=seeded_job, tenant_key=test_tenant_key, todo_items=_SAME_LIST)
@@ -150,12 +132,11 @@ async def test_unchanged_list_skips_delete_and_insert(db_session, test_tenant_ke
 
 
 async def test_changed_list_rewrites_rows(db_session, test_tenant_key, seeded_job, ws_manager):
-    """A genuinely different list still does delete-all + insert-all (behavior kept)."""
     service, counters = _service_with_spies(db_session, test_tenant_key, ws_manager)
 
     changed = [
         {"content": "Step 1", "status": "completed"},
-        {"content": "Step 2", "status": "completed"},  # in_progress -> completed
+        {"content": "Step 2", "status": "completed"},
         {"content": "Step 3", "status": "pending"},
     ]
     result = await service.report_progress(job_id=seeded_job, tenant_key=test_tenant_key, todo_items=changed)
@@ -179,10 +160,8 @@ async def test_changed_list_rewrites_rows(db_session, test_tenant_key, seeded_jo
 
 
 async def test_regression_guard_still_fires(db_session, test_tenant_key, seeded_job, ws_manager):
-    """Dropping completed count below what's stored must still raise (guard intact)."""
     service, counters = _service_with_spies(db_session, test_tenant_key, ws_manager)
 
-    # Stored has 1 completed (Step 1). Send a list with 0 completed -> regression.
     regressed = [
         {"content": "Step 1", "status": "pending"},
         {"content": "Step 2", "status": "pending"},
@@ -194,12 +173,10 @@ async def test_regression_guard_still_fires(db_session, test_tenant_key, seeded_
 
 
 async def test_unchanged_list_still_broadcasts_full_payload(db_session, test_tenant_key, seeded_job, ws_manager):
-    """Even when the rewrite is skipped, the WS payload carries the full todo list."""
     service, _counters = _service_with_spies(db_session, test_tenant_key, ws_manager)
 
     await service.report_progress(job_id=seeded_job, tenant_key=test_tenant_key, todo_items=_SAME_LIST)
 
-    # Find the job:progress_update broadcast and assert its todo_items payload.
     progress_calls = [
         c for c in ws_manager.broadcast_to_tenant.call_args_list if c.kwargs.get("event_type") == "job:progress_update"
     ]

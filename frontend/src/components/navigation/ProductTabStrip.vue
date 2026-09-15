@@ -1,8 +1,4 @@
 <template>
-  <!-- FE-9502c: the tabbed product shell's top-bar strip. Presentational —
-       DefaultLayout owns the productStore wiring; this component only emits.
-       Pill-toggle pattern per design-system-sample-v2.html §17 (v-tabs/v-tab
-       are prohibited); modeled on components/projects/chain/ProjectTabStrip.vue. -->
   <div class="product-tab-strip" role="tablist" aria-label="Open products" data-testid="product-tab-strip">
     <div
       v-for="tab in tabs"
@@ -20,8 +16,6 @@
         @click="emit('select', tab.id)"
       >
         {{ tab.name }}
-        <!-- FE-9502d: visualization only -- an agent working on a
-             background product surfaces as a badge here, never an auto-switch. -->
         <span
           v-if="tab.badgeCount > 0"
           class="product-tab__badge"
@@ -69,26 +63,15 @@
 </template>
 
 <script setup>
-/**
- * ProductTabStrip — FE-9502c
- * One tab per open product; the viewed tab is a UI-local concept, not the
- * server's single "active" product. Emits select/close/add; DefaultLayout
- * wires these to the products store (openTab/switchTab/closeTab).
- */
 defineProps({
-  // Ordered {id, name, badgeCount} descriptors for every open tab. badgeCount
-  // (FE-9502d) is the accumulated background-activity count for that
-  // product; 0 or absent renders no badge.
   tabs: {
     type: Array,
     required: true,
   },
-  // The currently viewed product id.
   viewedId: {
     type: String,
     default: '',
   },
-  // Products NOT currently open — offered in the "+" add-tab menu.
   addableProducts: {
     type: Array,
     default: () => [],

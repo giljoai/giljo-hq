@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tests for JobLifecycleService (Sprint 002f -- P1 security-critical).
-
-Covers:
-- spawn_job happy path and error paths
-- Predecessor context injection
-- Display name collision resolution
-- Template resolution
-- Orchestrator duplicate prevention
-- Tenant isolation on every query
-"""
 
 import logging
 from unittest.mock import AsyncMock, MagicMock, Mock
@@ -34,16 +24,12 @@ from tests.helpers.model_factories import make_project
 _TEST_LOGGER = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 TENANT_KEY = "test-tenant"
 PROJECT_ID = "proj-001"
 
 
 def _make_session():
-    """Create a mock async session configured as a context manager."""
     session = AsyncMock()
     session.__aenter__ = AsyncMock(return_value=session)
     session.__aexit__ = AsyncMock(return_value=False)
@@ -53,25 +39,11 @@ def _make_session():
     session.add = Mock()
     session.delete = Mock()
     session.flush = AsyncMock()
-    session.info = {}  # tenant_session_context save/restore target
+    session.info = {}
     return session
 
 
 def _make_project(project_id=PROJECT_ID, status="active", execution_mode="multi_terminal"):
-    """Create a Project stand-in.
-
-    ``status`` is coerced to a :class:`ProjectStatus` enum member to mirror
-    real DB behavior (SQLAlchemy returns enum members from the typed
-    ``project_status`` column). Tests may pass either a raw lifecycle string
-    ("active", "completed", ...) or a :class:`ProjectStatus` member.
-
-    INF-9399: a real transient instance, not a mock. Every column nobody sets
-    here reads ``None`` -- which is what an unset nullable column is, and what
-    these tests mean. ``product_id`` is the one BE-9385a had to hand-pin here on
-    2026-08-09: spawn scopes the agent allowlist by the project's product, and a
-    bare mock answered that with a truthy child mock. It needed the pin then; it
-    needs nothing now, and neither will the next nullable column.
-    """
     return make_project(
         id=project_id,
         name="Test Project",
@@ -82,7 +54,6 @@ def _make_project(project_id=PROJECT_ID, status="active", execution_mode="multi_
 
 
 def _make_service(session, tenant_key=TENANT_KEY):
-    """Create a JobLifecycleService with injected test session."""
     db_manager = Mock()
     db_manager.get_session_async = Mock(return_value=session)
     tenant_manager = Mock()
@@ -94,17 +65,12 @@ def _make_service(session, tenant_key=TENANT_KEY):
     )
 
 
-# ---------------------------------------------------------------------------
-# spawn_job tests
-# ---------------------------------------------------------------------------
 
 
 class TestSpawnJob:
-    """Tests for JobLifecycleService.spawn_job."""
 
     @pytest.mark.asyncio
     async def test_spawn_project_not_found_raises(self):
-        """Raises ResourceNotFoundError when project does not exist."""
         session = _make_session()
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
@@ -122,7 +88,6 @@ class TestSpawnJob:
 
     @pytest.mark.asyncio
     async def test_spawn_into_completed_project_raises(self):
-        """Raises ProjectStateError when project is completed."""
         project = _make_project(status="completed")
         session = _make_session()
         mock_result = MagicMock()
@@ -141,7 +106,6 @@ class TestSpawnJob:
 
     @pytest.mark.asyncio
     async def test_spawn_into_cancelled_project_raises(self):
-        """Raises ProjectStateError when project is cancelled."""
         project = _make_project(status="cancelled")
         session = _make_session()
         mock_result = MagicMock()
@@ -160,11 +124,6 @@ class TestSpawnJob:
 
     @pytest.mark.asyncio
     async def test_spawn_sets_agent_execution_started_at(self, monkeypatch):
-        """IMP-5036 task a8d7dac0: AgentExecution.started_at MUST be non-NULL
-        after spawn. Repository queries that downstream-read order_by(started_at)
-        and func.max(started_at) silently break on NULL rows; the spawn path
-        is the single chokepoint that guarantees the invariant.
-        """
         from datetime import UTC, datetime
 
         from giljo_mcp.services import job_lifecycle_service as jls_module
@@ -208,24 +167,17 @@ class TestSpawnJob:
         assert execution.started_at is not None, (
             "AgentExecution.started_at must be set at spawn (closes BE-staging-lock NULL gap)"
         )
-        # Bound the timestamp to the spawn window so a future regression that
-        # snapshots a stale timestamp also fails.
         assert before <= execution.started_at <= after, (
             f"started_at {execution.started_at} outside spawn window [{before}, {after}]"
         )
 
 
-# ---------------------------------------------------------------------------
-# _build_predecessor_context tests
-# ---------------------------------------------------------------------------
 
 
 class TestBuildPredecessorContext:
-    """Tests for predecessor context injection."""
 
     @pytest.mark.asyncio
     async def test_predecessor_not_found_raises(self):
-        """Raises ResourceNotFoundError when predecessor job does not exist."""
         session = _make_session()
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
@@ -244,7 +196,6 @@ class TestBuildPredecessorContext:
 
     @pytest.mark.asyncio
     async def test_predecessor_wrong_project_raises(self):
-        """Raises ValidationError when predecessor belongs to different project."""
         pred_job = MagicMock()
         pred_job.project_id = "other-project"
         session = _make_session()
@@ -265,7 +216,6 @@ class TestBuildPredecessorContext:
 
     @pytest.mark.asyncio
     async def test_predecessor_context_prepended_to_mission(self):
-        """Predecessor context is prepended to mission string."""
         pred_job = MagicMock()
         pred_job.project_id = PROJECT_ID
 
@@ -305,17 +255,12 @@ class TestBuildPredecessorContext:
         assert "original-agent" in result
 
 
-# ---------------------------------------------------------------------------
-# _resolve_display_name tests
-# ---------------------------------------------------------------------------
 
 
 class TestResolveDisplayName:
-    """Tests for display name collision resolution."""
 
     @pytest.mark.asyncio
     async def test_unique_name_returned_as_is(self):
-        """When name has no collision, it is returned unchanged."""
         session = _make_session()
         mock_result = MagicMock()
         mock_result.fetchall.return_value = []
@@ -327,7 +272,6 @@ class TestResolveDisplayName:
 
     @pytest.mark.asyncio
     async def test_collision_auto_suffixes(self):
-        """When name collides, a numeric suffix is appended."""
         session = _make_session()
         mock_result = MagicMock()
         mock_result.fetchall.return_value = [("impl-1",)]
@@ -339,7 +283,6 @@ class TestResolveDisplayName:
 
     @pytest.mark.asyncio
     async def test_collision_finds_next_available_suffix(self):
-        """When both name and name-2 are taken, returns name-3."""
         session = _make_session()
         mock_result = MagicMock()
         mock_result.fetchall.return_value = [("impl-1",), ("impl-1-2",)]
@@ -350,20 +293,14 @@ class TestResolveDisplayName:
         assert result == "impl-1-3"
 
 
-# ---------------------------------------------------------------------------
-# _validate_spawn_agent tests
-# ---------------------------------------------------------------------------
 
 
 class TestValidateSpawnAgent:
-    """Tests for agent name validation and display name collision."""
 
     @pytest.mark.asyncio
     async def test_invalid_agent_name_raises(self):
-        """Raises ValidationError when agent_name not in active templates."""
         session = _make_session()
 
-        # Template lookup returns no matching names
         mock_template_result = MagicMock()
         mock_template_result.fetchall.return_value = [("implementer",), ("tester",)]
         session.execute = AsyncMock(return_value=mock_template_result)
@@ -381,15 +318,12 @@ class TestValidateSpawnAgent:
 
     @pytest.mark.asyncio
     async def test_duplicate_orchestrator_raises(self):
-        """Raises AlreadyExistsError when active orchestrator exists."""
         existing_orch = MagicMock()
         existing_orch.agent_id = "existing-agent-id"
         existing_orch.status = "working"
 
         session = _make_session()
         mock_result = MagicMock()
-        # find_active_orchestrator_in_project extracts via .scalars().first()
-        # (BE-9242 FIX 1: multiplicity-tolerant, deterministic).
         mock_result.scalars.return_value.first.return_value = existing_orch
         session.execute = AsyncMock(return_value=mock_result)
 
@@ -406,15 +340,12 @@ class TestValidateSpawnAgent:
 
     @pytest.mark.asyncio
     async def test_orchestrator_succession_allowed(self):
-        """Orchestrator succession (parent_job_id matches) is allowed."""
         existing_orch = MagicMock()
         existing_orch.agent_id = "existing-agent-id"
         existing_orch.status = "working"
 
         session = _make_session()
         mock_result = MagicMock()
-        # find_active_orchestrator_in_project extracts via .scalars().first()
-        # (BE-9242 FIX 1: multiplicity-tolerant, deterministic).
         mock_result.scalars.return_value.first.return_value = existing_orch
         session.execute = AsyncMock(return_value=mock_result)
 
@@ -430,16 +361,11 @@ class TestValidateSpawnAgent:
         assert result == "orchestrator"
 
 
-# ---------------------------------------------------------------------------
-# _build_agent_prompt tests
-# ---------------------------------------------------------------------------
 
 
 class TestBuildAgentPrompt:
-    """Tests for thin agent prompt construction."""
 
     def test_prompt_contains_job_id(self):
-        """The prompt includes the job_id for get_job_mission."""
         service = _make_service(_make_session())
         prompt = service._build_agent_prompt(
             agent_name="implementer",
@@ -447,18 +373,11 @@ class TestBuildAgentPrompt:
             project_name="My Project",
             job_id="job-123",
         )
-        # BE-9012d (F1): bare tool name (this prose reaches Codex/Gemini/Desktop
-        # too, where the Claude Code mcp__giljo_mcp__ prefix is wrong).
         assert "get_job_mission" in prompt
         assert "mcp__giljo_mcp__get_job_mission" not in prompt
         assert 'job_id="job-123"' in prompt
 
     def test_prompt_does_not_pass_tenant_key(self):
-        """
-        The prompt MUST NOT instruct agents to pass tenant_key — the server
-        auto-injects it from the API key session. Documenting it as a
-        parameter would contradict the never-pass-tenant_key contract.
-        """
         service = _make_service(_make_session())
         prompt = service._build_agent_prompt(
             agent_name="implementer",
@@ -466,12 +385,10 @@ class TestBuildAgentPrompt:
             project_name="My Project",
             job_id="job-abc",
         )
-        # No interpolated tenant_key value, no "tenant_key=" parameter form.
         assert TENANT_KEY not in prompt
         assert 'tenant_key="' not in prompt
 
     def test_orchestrator_prompt_includes_staging_rules(self):
-        """Orchestrator prompt includes STAGING RULES section."""
         service = _make_service(_make_session())
         prompt = service._build_agent_prompt(
             agent_name="orchestrator",
@@ -482,7 +399,6 @@ class TestBuildAgentPrompt:
         assert "STAGING RULES" in prompt
 
     def test_non_orchestrator_prompt_no_staging_rules(self):
-        """Non-orchestrator prompt does not include STAGING RULES."""
         service = _make_service(_make_session())
         prompt = service._build_agent_prompt(
             agent_name="implementer",
@@ -493,30 +409,12 @@ class TestBuildAgentPrompt:
         assert "STAGING RULES" not in prompt
 
 
-# ---------------------------------------------------------------------------
-# _resolve_spawn_template tests
-# ---------------------------------------------------------------------------
 
 
 class TestResolveSpawnTemplate:
-    """Tests for template ID resolution at spawn time.
-
-    These stub the result object, so they assert how ``_resolve_spawn_template``
-    HANDLES a row -- not what the query selects. BE-9325 is the standing reminder
-    that they cannot see a WHERE-clause defect at all; the real-row coverage lives
-    in ``tests/services/test_be9325_trashed_template_lifecycle.py`` and
-    ``tests/integration/test_be9325_spawn_boundary_trashed_template.py``.
-
-    BE-9325 moved the repository from ``scalar_one_or_none()`` to
-    ``.scalars().first()`` so a duplicate name cannot raise instead of resolving.
-    The stubs below follow that shape -- stubbing the old one silently returned a
-    MagicMock chain that is not None, which is how the not-found case passed while
-    asserting nothing.
-    """
 
     @pytest.mark.asyncio
     async def test_template_found_returns_id(self):
-        """When template exists, returns its ID."""
         template = MagicMock()
         template.id = "tmpl-abc"
 
@@ -527,7 +425,7 @@ class TestResolveSpawnTemplate:
 
         project = _make_project()
         service = _make_service(session)
-        mission, template_id = await service._resolve_spawn_template(
+        mission, template_id, _template = await service._resolve_spawn_template(
             session=session,
             project=project,
             agent_name="implementer",
@@ -541,7 +439,6 @@ class TestResolveSpawnTemplate:
 
     @pytest.mark.asyncio
     async def test_template_not_found_returns_none(self):
-        """When no matching template, returns None template_id."""
         session = _make_session()
         mock_result = MagicMock()
         mock_result.scalars.return_value.first.return_value = None
@@ -549,7 +446,7 @@ class TestResolveSpawnTemplate:
 
         project = _make_project()
         service = _make_service(session)
-        mission, template_id = await service._resolve_spawn_template(
+        mission, template_id, _template = await service._resolve_spawn_template(
             session=session,
             project=project,
             agent_name="unknown",
@@ -563,17 +460,6 @@ class TestResolveSpawnTemplate:
 
     @pytest.mark.asyncio
     async def test_failed_resolution_is_logged(self, caplog):
-        """IMP-9342 item 4: a FAILED resolution must leave a log line.
-
-        Resolution logged on success only, with no ``else`` branch, so an agent
-        that silently lost its identity left nothing behind. An operator asking
-        "why did this agent behave generically" had no line to correlate against
-        -- the degradation was invisible in the logs as well as to the user.
-
-        Asserted at the service layer because that is where the gap is: the
-        method returns ``(mission, None)`` on both the healthy and the degraded
-        path, so no caller and no boundary test can tell them apart.
-        """
         session = _make_session()
         mock_result = MagicMock()
         mock_result.scalars.return_value.first.return_value = None
@@ -583,7 +469,7 @@ class TestResolveSpawnTemplate:
         service = _make_service(session)
 
         with caplog.at_level(logging.WARNING):
-            _mission, template_id = await service._resolve_spawn_template(
+            _mission, template_id, _template = await service._resolve_spawn_template(
                 session=session,
                 project=project,
                 agent_name="retired-specialist",
@@ -596,7 +482,6 @@ class TestResolveSpawnTemplate:
         records = [r for r in caplog.records if "TEMPLATE_RESOLVE" in r.getMessage()]
         assert records, f"no [TEMPLATE_RESOLVE] failure log emitted; saw: {[r.getMessage() for r in caplog.records]}"
         assert records[0].levelno >= logging.WARNING, "a failed resolution must not be logged at INFO"
-        # The agent name is the whole point -- it is what an operator correlates on.
         assert "retired-specialist" in records[0].getMessage() or "retired-specialist" in str(
             getattr(records[0], "agent_name", "")
         )

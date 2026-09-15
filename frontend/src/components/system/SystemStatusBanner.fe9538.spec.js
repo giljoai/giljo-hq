@@ -1,16 +1,3 @@
-/**
- * SystemStatusBanner.fe9538.spec.js — FE-9538
- *
- * Ask 1: a lifecycle banner row per project moment, one [Go to job] button
- * carrying the project id -- never auto-navigates, the user must
- * click.
- * Ask 2: the decision-banner click now carries `tab=jobs&decide=1` so it
- * lands on a page that actually opens the decision UI, from ANY page (the
- * OTHER half of this fix -- ProjectTabs consuming those params -- is pinned
- * separately in ProjectTabs.fe9538.spec.js).
- *
- * Edition scope: Both
- */
 import { describe, it, expect, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -159,7 +146,6 @@ describe('SystemStatusBanner lifecycle banner row (FE-9538)', () => {
 
 describe('SystemStatusBanner decision banner navigation (FE-9538, Ask 2)', () => {
   it('a single pending approval navigates with tab=jobs&decide=1 (not just the bare project page)', async () => {
-    // Reaching into the same store the approval row already reads (FE-9501b).
     const wrapper = await mountBanner()
     const { useApprovalsStore } = await import('@/stores/useApprovalsStore')
     useApprovalsStore().upsertApproval({

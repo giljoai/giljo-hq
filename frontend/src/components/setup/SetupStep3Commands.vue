@@ -1,9 +1,8 @@
 <template>
   <div class="step-commands">
-    <p class="step-heading-grad">Install skills &amp; agents</p>
-    <p class="step-sub">One command installs the <span class="inline-code">/giljo</span> skill and your agent templates.</p>
+    <p class="step-heading-grad">Install skills</p>
+    <p class="step-sub">One command installs the <span class="inline-code">/giljo</span> skill and writes the Giljo HQ marker block. Agents receive their profile from the server when a job starts.</p>
 
-    <!-- Tool tabs (only if multiple connected tools) -->
     <div v-if="tools.length > 1" class="tool-tabs" role="tablist">
       <button
         v-for="tool in tools"
@@ -19,11 +18,9 @@
       </button>
     </div>
 
-    <!-- Active tool panel — vertically centered below the pinned title/tabs -->
     <div class="wiz-center">
       <div class="tool-panel" role="tabpanel">
 
-        <!-- Primary path: giljo_setup (restyled to the numbered command-card idiom) -->
         <div class="panel-section">
           <div class="install-cmd-card">
             <div class="install-cmd-head">
@@ -33,12 +30,10 @@
             <div class="install-cmd-code">giljo_setup</div>
           </div>
           <p class="instruction-hint">
-            This installs skills and installs agents when none exist. Later runs refresh skills and ask before
-            replacing agents.
+            This installs the skills and the marker block. Run it again whenever the skills are outdated.
           </p>
         </div>
 
-        <!-- Status checklist -->
         <div class="checklist-centered">
           <div class="checklist-column">
           <div class="checklist-item">
@@ -54,28 +49,9 @@
             </span>
           </div>
 
-          <div class="checklist-item">
-            <v-icon
-              size="20"
-              data-testid="setup-agents-dot"
-              :color="toolStatus[activeToolId]?.agents ? COLOR_SUCCESS : COLOR_MUTED"
-            >
-              {{ toolStatus[activeToolId]?.agents ? 'mdi-check-circle' : 'mdi-checkbox-blank-circle-outline' }}
-            </v-icon>
-            <span :class="['checklist-text', { 'checklist-text--done': toolStatus[activeToolId]?.agents }]">
-              Agents downloaded
-            </span>
-          </div>
           </div>
         </div>
 
-        <Transition name="fade-slide">
-          <p v-if="toolStatus[activeToolId]?.agents" class="instruction-hint" style="text-align: center;">
-            Run <code class="inline-code">giljo_setup</code> and choose "Agents only" for agent-only refreshes
-          </p>
-        </Transition>
-
-        <!-- Manual setup pointer (no divider — the step 2 skip control lives in the shared wizard footer) -->
         <p class="manual-setup-hint">
           For manual setup, go to <strong>Tools &gt; Connect</strong>
         </p>
@@ -105,7 +81,6 @@ const emit = defineEmits(['can-proceed', 'step-data'])
 
 const wsStore = useWebSocketStore()
 
-// Derive tool list from connectedTools
 const tools = computed(() =>
   props.connectedTools.map((id) => ({
     id,
@@ -115,34 +90,17 @@ const tools = computed(() =>
 
 const activeTool = computed(() => TOOL_META[activeToolId.value] || { name: 'Tool' })
 
-// Active tab
 const activeToolId = ref(props.connectedTools[0] || 'claude_code')
 
-// Installation status per tool. Never pre-filled (FE-9497): a previous run tells
-// us nothing about what is installed now, so only observed install events tick a box.
-// FE-9569 detector 2: `toolStatus` used to be built ONCE here from the initial
-// `connectedTools` prop and never re-keyed. Detector 1's credential-status
-// seed is async, so this step could mount before connectedTools finished
-// settling -- toolStatus stayed `{}` forever, every `if (toolStatus[id])`
-// WS-event guard below silently no-opped, and the checklist looked
-// permanently stuck even once a real setup:bootstrap_complete arrived. The
-// FE-9497 rule itself is unchanged (still only an OBSERVED event ticks a
-// box -- nothing here pre-fills from history); this just keeps the map's
-// keys in sync with the tools the wizard actually knows about, so an event
-// for a real connected tool always has somewhere to land. Confirmed
-// 2026-09-03 (FE-9569 thread): api/endpoints/mcp_tools/_setup_tools.py's
-// giljo_setup handler already emits setup:bootstrap_complete unconditionally
-// on every call, re-run or not -- this was the one real gap.
 const toolStatus = reactive({})
 watch(
   () => props.connectedTools,
   (ids) => {
     for (const id of ids) {
       if (!toolStatus[id]) {
-        toolStatus[id] = { commands: false, agents: false }
+        toolStatus[id] = { commands: false }
       }
     }
-    // Keep the active tab pointed at a real, known tool once the list settles.
     if (ids.length > 0 && !ids.includes(activeToolId.value)) {
       activeToolId.value = ids[0]
     }
@@ -150,42 +108,32 @@ watch(
   { immediate: true },
 )
 
-// A tool counts as installed only when BOTH skills and agents landed (FE-9497).
 function isToolComplete(toolId) {
-  return !!toolStatus[toolId]?.commands && !!toolStatus[toolId]?.agents
+  return !!toolStatus[toolId]?.commands
 }
 
-// can-proceed: at least 1 tool with both checkmarks. Falls back to the active
-// tool so a canProceed check is never blind to a status key that exists but
-// whose id, for whatever reason, is momentarily absent from connectedTools.
 const canProceed = computed(() =>
   props.connectedTools.some((id) => isToolComplete(id)) || isToolComplete(activeToolId.value),
 )
 
-// Installed tools list for step-data
 const installedTools = computed(() =>
   props.connectedTools.filter((id) => isToolComplete(id)),
 )
 
-// Emit can-proceed whenever status changes
 watch(canProceed, (val) => {
   emit('can-proceed', val)
 }, { immediate: true })
 
-// Emit step-data whenever installed tools change
 watch(installedTools, (val) => {
   emit('step-data', { installedTools: [...val] })
 }, { deep: true })
 
-// WebSocket subscriptions
 let unsubCommands = null
-let unsubAgents = null
 
 function handleCommandsInstalled(payload) {
   const toolName = payload?.tool_name
   if (!toolName) return
 
-  // "all" means the CLI downloaded slash commands (we can't tell which tool)
   if (toolName === 'all') {
     for (const id of props.connectedTools) {
       if (toolStatus[id]) toolStatus[id].commands = true
@@ -198,21 +146,9 @@ function handleCommandsInstalled(payload) {
   }
 }
 
-function handleAgentsDownloaded() {
-  for (const id of props.connectedTools) {
-    if (toolStatus[id]) {
-      toolStatus[id].agents = true
-    }
-  }
-}
-
 function handleBootstrapComplete() {
-  // giljo_setup installs both commands and agents in one shot
   for (const id of props.connectedTools) {
-    if (toolStatus[id]) {
-      toolStatus[id].commands = true
-      toolStatus[id].agents = true
-    }
+    if (toolStatus[id]) toolStatus[id].commands = true
   }
 }
 
@@ -220,13 +156,11 @@ let unsubBootstrap = null
 
 onMounted(() => {
   unsubCommands = wsStore.on('setup:commands_installed', handleCommandsInstalled)
-  unsubAgents = wsStore.on('setup:agents_downloaded', handleAgentsDownloaded)
   unsubBootstrap = wsStore.on('setup:bootstrap_complete', handleBootstrapComplete)
 })
 
 onUnmounted(() => {
   if (unsubCommands) unsubCommands()
-  if (unsubAgents) unsubAgents()
   if (unsubBootstrap) unsubBootstrap()
 })
 </script>

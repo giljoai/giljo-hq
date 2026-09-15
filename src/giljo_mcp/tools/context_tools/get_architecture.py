@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""MCP tool for fetching architecture documentation.
-
-Handover 0840c: Reads from ProductArchitecture table (normalized from config_data JSONB).
-Always returns FULL architecture data (no truncation).
-"""
-# Read-only tool -- uses direct session.execute() for SELECT queries (no writes)
 
 import logging
 from typing import Any
@@ -24,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 
 def estimate_tokens(data: Any) -> int:
-    """Rough token estimation (1 token ~ 4 chars)."""
     import json
 
     text = json.dumps(data) if not isinstance(data, str) else data
@@ -34,22 +27,6 @@ def estimate_tokens(data: Any) -> int:
 async def get_architecture(
     product_id: str, tenant_key: str, db_manager: DatabaseManager | None = None
 ) -> dict[str, Any]:
-    """
-    Fetch architecture documentation for given product.
-
-    Handover 0840c: Reads from product_architectures table (normalized).
-
-    Args:
-        product_id: Product UUID
-        tenant_key: Tenant isolation key
-        db_manager: Database manager instance
-
-    Returns:
-        Dict with architecture data from product_architectures table.
-
-    Multi-Tenant Isolation:
-        All queries filter by tenant_key and product_id.
-    """
     logger.info("fetching_architecture_context product_id=%s tenant_key=%s", product_id, tenant_key)
 
     if db_manager is None:

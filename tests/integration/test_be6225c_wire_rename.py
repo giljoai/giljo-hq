@@ -3,28 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6225c -- MCP-transport boundary test for the wire + honest-rename change.
-
-CLAUDE.md mandates a regression test at the failing layer. The two fixes here live
-at the FastMCP @mcp.tool registry / transport boundary:
-
-* PART 2 RENAME: ``propose_product_context_update`` -> ``apply_context_tuning`` (a
-  hard rename using the INF-6052a / ce_0049 rename-heal pattern). The failing layer
-  is the @mcp.tool wrapper registry: a tool can pass every service test yet fail to
-  register under its new name (the exact BE-5042 gap). So we drive the REAL
-  in-memory transport and assert:
-    (a) the NEW name ``apply_context_tuning`` resolves and dispatches (isError False);
-    (b) the OLD name is GONE from the live surface AND the server-authored tuning
-        prompt heals -- it now names the new tool and never the retired one, so any
-        caller that used to reach for the old name is redirected (back-compat heal).
-
-* PART 1 WIRE: ``diagnose_project_state`` (a real read-only self-heal tool that
-  nothing told agents to call) is now named in ``get_giljo_guide`` -- and the guide
-  names NO retired tool. We assert through the transport's ``get_giljo_guide`` call.
-
-Parallel-safe: the autospec section needs no DB; no module-level mutable state; the
-tenant key is freshly generated per fixture use.
-"""
 
 from __future__ import annotations
 
@@ -68,9 +46,6 @@ def _error_text(result) -> str:
 
 @pytest_asyncio.fixture
 async def autospec_mcp(monkeypatch):
-    """Install an autospec ToolAccessor + tenant resolution on the in-memory
-    transport (mirrors the BE-3006d / INF-3000b smoke harness). Yields a client
-    factory so a test can dispatch any tool over the real transport without a DB."""
     from unittest.mock import create_autospec
 
     from api import app_state
@@ -111,12 +86,8 @@ async def autospec_mcp(monkeypatch):
         state.db_manager = prior_db_manager
 
 
-# ---------------------------------------------------------------------------
-# PART 2 -- the rename resolves over the transport, the old name is gone.
-# ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_apply_context_tuning_resolves_over_transport(autospec_mcp):
-    """(a) The NEW name dispatches cleanly through the real transport."""
     async with autospec_mcp() as session:
         result = await session.call_tool(
             "apply_context_tuning",
@@ -127,38 +98,14 @@ async def test_apply_context_tuning_resolves_over_transport(autospec_mcp):
 
 @pytest.mark.asyncio
 async def test_apply_context_tuning_in_live_tool_surface():
-    """The new name is registered on the live FastMCP instance; the old name is not."""
     live = {t.name for t in mcp._tool_manager.list_tools()}
     assert "apply_context_tuning" in live
     assert "propose_product_context_update" not in live
-    # BE-9012b (BE-6225e) merged reactivate_job + dismiss_reactivation into one
-    # resume_or_dismiss_job tool, so the whole surface was 47 (was 48). BE-9012d
-    # (bus retirement, phase d) hard-removed send_message / receive_messages /
-    # get_messages (-> 44). BE-9201 added create_product + create_vision_document
-    # (agent-side product bootstrap), so the whole surface is 46. BE-9296a added
-    # get_my_turn (the server wake signal) -> 47, and get_participant_liveness
-    # (the orchestrator's who-is-still-there read) -> 48.
-    # BE-9385b added set_agent_export_alias (the install-time "keep both" rename,
-    # which must round-trip to the server or spawn-by-name stops resolving) -> 49.
-    # BE-9396 retracted it unreleased: giljo_setup guarantees server -> disk only,
-    # so the install prose now flags a conflict for the LLM and the user to resolve
-    # instead of the server enforcing a rename -> 48.
-    # BE-9499d added decide_approval (the harness-side door that clears
-    # awaiting_user) -> 49.
-    # FE-9530 added update_thread (retag a thread's product/project(s), or
-    # rename/set status) -> 50.
-    # BE-9554 final-names flip: the seven one-release compat shims are dropped and
-    # finalize_job/get_vision_document renamed, so the surface SETTLES at 49. Kept rather than
-    # deleted -- the roster-lock owns the authoritative count, but this project pinned
-    # it too and removing another project's assertion is not this one's call.
     assert len(live) == 49
 
 
 @pytest.mark.asyncio
 async def test_old_name_does_not_resolve_over_transport(autospec_mcp):
-    """The retired name is no longer a live tool -- a call to it does not silently
-    dispatch to the wrong handler. Robust to either transport behavior for an
-    unknown tool: an error result (isError) or a raised protocol error."""
     failed = False
     try:
         async with autospec_mcp() as session:
@@ -174,23 +121,14 @@ async def test_old_name_does_not_resolve_over_transport(autospec_mcp):
 
 @pytest.mark.asyncio
 async def test_tuning_prompt_heals_to_new_name():
-    """(b) Back-compat heal: the server-authored tuning prompt redirects callers to
-    the NEW tool name and never names the retired one (no agent is told to call a
-    dead tool). The prompt is the only place the tool name was 'stored', and it is
-    regenerated server-side, so this is the heal that keeps the old name resolving."""
     from giljo_mcp.services.product_tuning_service import TUNING_PROMPT_TEMPLATE
 
     assert "apply_context_tuning" in TUNING_PROMPT_TEMPLATE
     assert "propose_product_context_update" not in TUNING_PROMPT_TEMPLATE
 
 
-# ---------------------------------------------------------------------------
-# PART 1 -- diagnose_project_state is wired into the guide; no retired tool named.
-# ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_giljo_guide_wires_diagnose_and_names_no_retired_tool(autospec_mcp):
-    """The guide (read over the transport) points agents at diagnose_project_state
-    for recovery, and names no retired tool (incl. the just-renamed one)."""
     async with autospec_mcp() as session:
         result = await session.call_tool("get_giljo_guide", {})
     assert result.is_error is False, f"get_giljo_guide must dispatch: {_error_text(result)}"

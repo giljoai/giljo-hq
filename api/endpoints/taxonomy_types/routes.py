@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Taxonomy Types API endpoints.
-
-Routes:
-- GET    / - List taxonomy types (triggers lazy seeding)
-- POST   / - Create custom taxonomy type
-- PUT    /{type_id} - Update taxonomy type
-- DELETE /{type_id} - Delete taxonomy type (protected)
-
-All endpoints enforce tenant isolation via ``get_current_active_user``.
-DB access is routed through ``giljo_mcp.services.taxonomy_ops`` service functions.
-Renamed from ``project_types/routes.py`` in Phase A.
-"""
 
 import logging
 

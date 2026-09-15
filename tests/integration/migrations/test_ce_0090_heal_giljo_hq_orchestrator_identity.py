@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Migration regression for ce_0090 -- heal the "GiljoAI MCP" -> "Giljo HQ"
-orchestrator identity prose (BE-9361) on legacy ``agent_templates`` rows.
-
-Real scratch PostgreSQL DB, real alembic. Mirrors
-tests/integration/migrations/test_ce_0085_heal_giljo_hq_bootstrap_rebrand.py.
-
-ce_0090 differs from ce_0084/ce_0085 in kind: those swap one byte-exact text
-generation, this one replaces two stable SUBSTRINGS so it reaches a legacy
-orchestrator row from ANY older seed generation. The cases below pin that
-difference -- notably that surrounding user prose survives untouched, which a
-byte-exact heal could not offer.
-"""
 
 from __future__ import annotations
 
@@ -46,8 +34,6 @@ PRODUCTION_DB_NAME = "giljo_mcp"
 _PRE = "ce_0089_be9348_repair_absorbed_closeout_arguments"
 _REV = "ce_0090_heal_giljo_hq_orchestrator_identity"
 
-# Load the migration module directly so the test's expected old/new substrings
-# can never drift from what the migration itself writes (single source of truth).
 _MIGRATION_PATH = PROJECT_ROOT / "migrations" / "versions" / f"{_REV}.py"
 _spec = importlib.util.spec_from_file_location(_REV, _MIGRATION_PATH)
 _migration = importlib.util.module_from_spec(_spec)
@@ -172,7 +158,6 @@ def scratch_engine():
 
 @pytest.fixture
 def scratch_at_pre(scratch_engine: sa.Engine):
-    """Fresh schema built up to ce_0089 (the pre-revision), ready for seeding."""
     _drop_all_objects(scratch_engine)
     up = _run_alembic("upgrade", _PRE)
     assert up.returncode == 0, f"upgrade to {_PRE} failed:\n{up.stdout}\n{up.stderr}"
@@ -222,8 +207,6 @@ def _fetch_user_instructions(engine: sa.Engine, template_id: str) -> str:
 @pytest.mark.integration
 class TestCe0090HealGiljoHqOrchestratorIdentity:
     def test_legacy_orchestrator_row_fully_healed(self, scratch_at_pre: sa.Engine) -> None:
-        """Both residuals a legacy row can carry -- the heading BE-9275b left and
-        the identity sentence BE-9361 flipped -- are healed in one pass."""
         tid = _insert_template(scratch_at_pre, name="orchestrator", user_instructions=LEGACY_ORCHESTRATOR_UI)
 
         up = _run_alembic("upgrade", _REV)
@@ -234,9 +217,6 @@ class TestCe0090HealGiljoHqOrchestratorIdentity:
         assert "GiljoAI MCP" not in healed
 
     def test_surrounding_user_prose_survives(self, scratch_at_pre: sa.Engine) -> None:
-        """The substring heal must rewrite ONLY the brand text. A tenant's own
-        added prose is left byte-identical -- the reason this migration replaces
-        substrings instead of swapping a whole byte-exact generation."""
         tid = _insert_template(scratch_at_pre, name="orchestrator", user_instructions=LEGACY_ORCHESTRATOR_UI)
 
         assert _run_alembic("upgrade", _REV).returncode == 0
@@ -246,8 +226,6 @@ class TestCe0090HealGiljoHqOrchestratorIdentity:
         assert healed.count(_CUSTOM_LINE) == 1
 
     def test_partial_generation_row_healed(self, scratch_at_pre: sa.Engine) -> None:
-        """A row carrying the sentence but NOT the heading (a different seed
-        generation) is still reached -- byte-exact matching would have missed it."""
         only_sentence = f"Some older preamble.\n\n{OLD_SENTENCE} - and the rest of the prose."
         tid = _insert_template(scratch_at_pre, name="orchestrator", user_instructions=only_sentence)
 
@@ -259,7 +237,6 @@ class TestCe0090HealGiljoHqOrchestratorIdentity:
         assert "GiljoAI MCP" not in healed
 
     def test_row_without_brand_text_untouched(self, scratch_at_pre: sa.Engine) -> None:
-        """A modern (or unrelated) row matches nothing and is left alone."""
         prose = "You are an implementation specialist responsible for production-grade code."
         tid = _insert_template(scratch_at_pre, name="implementer", user_instructions=prose)
 
@@ -268,8 +245,6 @@ class TestCe0090HealGiljoHqOrchestratorIdentity:
         assert _fetch_user_instructions(scratch_at_pre, tid) == prose
 
     def test_rerun_is_idempotent(self, scratch_at_pre: sa.Engine) -> None:
-        """Re-running ce_0090 (the CE installer's every-boot rerun) heals once,
-        then no-ops -- it must not double-apply or crash."""
         tid = _insert_template(scratch_at_pre, name="orchestrator", user_instructions=LEGACY_ORCHESTRATOR_UI)
 
         assert _run_alembic("upgrade", _REV).returncode == 0
@@ -282,7 +257,6 @@ class TestCe0090HealGiljoHqOrchestratorIdentity:
         assert _fetch_user_instructions(scratch_at_pre, tid) == HEALED_ORCHESTRATOR_UI
 
     def test_downgrade_restores_previous_text(self, scratch_at_pre: sa.Engine) -> None:
-        """The heal is reversible -- downgrade puts the legacy brand text back."""
         tid = _insert_template(scratch_at_pre, name="orchestrator", user_instructions=LEGACY_ORCHESTRATOR_UI)
 
         assert _run_alembic("upgrade", _REV).returncode == 0

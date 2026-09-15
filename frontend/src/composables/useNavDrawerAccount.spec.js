@@ -1,9 +1,3 @@
-/**
- * useNavDrawerAccount.spec.js — FE-6006 unit 3a
- *
- * Tests for the extracted account-state composable from NavigationDrawer.vue.
- * Edition scope: CE (no-ops) + SaaS (lazy-loads badge + store)
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ref } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'

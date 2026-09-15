@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6082 — repository-layer tests for 360-memory full-text search.
-
-Exercises ``ProductMemoryRepository.get_memory_entries_paginated(search_query=...)``
-against a real PostgreSQL test DB:
-
-- tsquery match over summary / project_name / tags (relevance-ranked);
-- ILIKE substring fallback when the tsquery matches nothing usable
-  (partial-word terms FTS cannot stem to a match);
-- tenant isolation (tenant A's entries never surface for tenant B);
-- pagination (limit) preserved under search;
-- a coarse 10k-entry perf smoke (correctness + a generous, non-flaky bound).
-
-Parallel-safe: uses the transactional ``db_session`` fixture (rollback at
-teardown) and per-test fixtures only — no module-level mutable state.
-
-Edition scope: Both (360 memory is core).
-"""
 
 import time
 from datetime import UTC, datetime
@@ -35,7 +18,6 @@ from giljo_mcp.services.dto import MemoryEntryCreateParams
 
 
 async def _make_entry(repo, session, product_id, tenant_key, *, sequence, **content):
-    """Create one memory entry via the repository write path."""
     return await repo.create_entry(
         session=session,
         params=MemoryEntryCreateParams(
@@ -52,7 +34,6 @@ async def _make_entry(repo, session, product_id, tenant_key, *, sequence, **cont
 
 @pytest.mark.asyncio
 class TestMemoryFullTextSearch:
-    """BE-6082 repository FTS contract."""
 
     async def test_tsquery_matches_summary(self, db_session: AsyncSession, test_product, test_tenant_key):
         repo = ProductMemoryRepository()
@@ -70,7 +51,6 @@ class TestMemoryFullTextSearch:
             search_query="tenant",
         )
         assert [e.sequence for e in entries] == [1]
-        # total_count is the overall product count, search-independent.
         assert total == 2
 
     async def test_tsquery_matches_tags(self, db_session: AsyncSession, test_product, test_tenant_key):
@@ -123,15 +103,11 @@ class TestMemoryFullTextSearch:
         assert [e.sequence for e in dec] == [2]
 
     async def test_ilike_fallback_partial_word(self, db_session: AsyncSession, test_product, test_tenant_key):
-        """A partial-word term the tsquery cannot stem to a match still resolves
-        via the ILIKE substring fallback."""
         repo = ProductMemoryRepository()
         await _make_entry(
             repo, db_session, test_product.id, test_tenant_key, sequence=1, summary="Hardened the tenant guard"
         )
 
-        # 'tena' is not a lexeme of 'tenant' -> plainto_tsquery yields no FTS hit,
-        # so the repo falls back to ILIKE '%tena%' which matches 'tenant'.
         entries, _ = await repo.get_memory_entries_paginated(
             session=db_session, product_id=test_product.id, tenant_key=test_tenant_key, search_query="tena"
         )
@@ -139,7 +115,6 @@ class TestMemoryFullTextSearch:
 
     async def test_tenant_isolation(self, db_session: AsyncSession, test_product, test_tenant_key):
         repo = ProductMemoryRepository()
-        # Same product_id, a DIFFERENT tenant owns the entry carrying the needle.
         await _make_entry(
             repo,
             db_session,
@@ -156,7 +131,7 @@ class TestMemoryFullTextSearch:
             search_query="roadmap",
         )
         assert entries == []
-        assert total == 0  # the other tenant's row is invisible to this tenant
+        assert total == 0
 
     async def test_pagination_under_search(self, db_session: AsyncSession, test_product, test_tenant_key):
         repo = ProductMemoryRepository()
@@ -191,10 +166,6 @@ class TestMemoryFullTextSearch:
         assert [e.sequence for e in entries] == [3, 2, 1]
 
     async def test_search_perf_smoke_10k(self, db_session: AsyncSession, test_product, test_tenant_key):
-        """Coarse perf smoke: ~10k entries, one carries a unique needle. Asserts
-        the search finds exactly it and returns within a generous, non-flaky
-        bound. (The expression GIN index is not present in the create_all test
-        schema, so this exercises the worst case — on-the-fly to_tsvector.)"""
         now = datetime.now(tz=UTC)
         needle_seq = 7421
         rows = [
@@ -229,7 +200,6 @@ class TestMemoryFullTextSearch:
 
 
 async def repo_search(session, product_id, tenant_key, term, limit=10):
-    """Thin call-through so the perf test reads cleanly."""
     return await ProductMemoryRepository().get_memory_entries_paginated(
         session=session, product_id=product_id, tenant_key=tenant_key, search_query=term, limit=limit
     )

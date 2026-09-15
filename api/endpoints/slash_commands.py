@@ -3,10 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Slash command HTTP endpoints
-Allows MCP adapter to route slash commands via HTTP (Handover 0080a)
-"""
 
 import logging
 from typing import Any
@@ -27,7 +23,7 @@ router = APIRouter(prefix="/slash", tags=["slash-commands"])
 class SlashCommandRequest(BaseModel):
     """Request model for slash command execution"""
 
-    command: str  # e.g., "gil_handover"
+    command: str
     project_id: str | None = None
     arguments: dict[str, Any] = {}
 
@@ -37,9 +33,9 @@ class SlashCommandResponse(BaseModel):
 
     success: bool
     message: str
-    launch_prompt: str | None = None  # Continuation prompt for simple handover
-    memory_entry_id: str | None = None  # 360 Memory entry ID (simple handover)
-    context_reset: bool | None = None  # Whether context was reset (simple handover)
+    launch_prompt: str | None = None
+    memory_entry_id: str | None = None
+    context_reset: bool | None = None
     error: str | None = None
     details: str | None = None
 
@@ -63,10 +59,8 @@ async def execute_slash_command(request: SlashCommandRequest, current_user: User
     if not handler:
         raise HTTPException(status_code=404, detail=f"Slash command /{request.command} not found")
 
-    # Import here to avoid circular dependency
     from api.app_state import state
 
-    # Execute handler with async database session
     async with state.db_manager.get_session_async() as session:
         result = await handler(
             db_session=session,

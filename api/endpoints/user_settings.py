@@ -3,26 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-User Settings endpoints for authenticated, per-user operations.
-
-This module provides admin-only endpoints for managing cookie domain whitelist
-configuration stored in the database via SettingsService (category='security').
-
-Project 0031: AI tool configuration is now handled entirely on the
-frontend via a mini-wizard. No backend endpoint is provided for
-configuration generation.
-
-Project 0036: Cookie domain whitelist management for cross-port authentication.
-
-BE-9084 / BE-9542: the account-wide setting controlling whether a connected
-agent may advance the implement gate. See the settings documentation for the
-current default. Admin-gated + tenant-scoped like the cookie-domain endpoints;
-the write is a read-modify-write so it never clobbers the sibling ``security``
-keys (ssl_*, cookie_domain_whitelist, rate_limiting), and it stamps an explicit
-marker so a deliberate write stays distinguishable from an incidental one made by
-another security writer's full-model round-trip (see ``SecuritySettingsData``).
-"""
 
 import logging
 import re
@@ -40,7 +20,6 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Pydantic Models
 
 
 class CookieDomainsResponse(BaseModel):
@@ -65,39 +44,16 @@ class AddCookieDomainRequest(BaseModel):
     @field_validator("domain")
     @classmethod
     def validate_domain(cls, v: str) -> str:
-        """
-        Validate domain name format.
-
-        Rules:
-        - Must match DNS hostname pattern
-        - Cannot be an IP address (IPs are auto-allowed)
-        - Min 3 chars, max 255 chars
-
-        Args:
-            v: Domain string to validate
-
-        Returns:
-            Validated domain string (lowercased)
-
-        Raises:
-            ValueError: If domain is invalid
-        """
-        # Lowercase for consistency
         domain = v.lower().strip()
 
-        # Check min/max length
         if len(domain) < 3:
             raise ValueError("Domain must be at least 3 characters long")
         if len(domain) > 255:
             raise ValueError("Domain must not exceed 255 characters")
 
-        # Reject IP addresses (they're auto-allowed)
-        # Simple check: if it looks like an IP (digits and dots only)
         if re.match(r"^[\d.]+$", domain):
             raise ValueError("IP addresses are automatically allowed - only add domain names")
 
-        # Validate domain format
-        # RFC 1123 compliant hostname regex
         domain_pattern = (
             r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$"
         )
@@ -140,10 +96,8 @@ class HeadlessLaunchUpdateRequest(BaseModel):
     )
 
 
-# API Endpoints
 
 
-# TENANT-LEVEL
 @router.get("/settings/cookie-domains", response_model=CookieDomainsResponse)
 async def get_cookie_domains(
     current_user: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)
@@ -174,7 +128,6 @@ async def get_cookie_domains(
     return CookieDomainsResponse(domains=domains)
 
 
-# TENANT-LEVEL
 @router.post("/settings/cookie-domains", response_model=CookieDomainsResponse, status_code=status.HTTP_201_CREATED)
 async def add_cookie_domain(
     request: AddCookieDomainRequest,
@@ -207,14 +160,12 @@ async def add_cookie_domain(
     security = await service.get_settings("security")
     domains: list[str] = security.get("cookie_domain_whitelist", [])
 
-    # Add domain if not already present (idempotent)
     if domain not in domains:
         domains.append(domain)
         logger.info("Added domain to whitelist: %s", sanitize(domain))
     else:
         logger.debug("Domain already in whitelist: %s", sanitize(domain))
 
-    # Update via SettingsService (single validated write path)
     security["cookie_domain_whitelist"] = domains
     await service.update_settings("security", security)
 
@@ -222,7 +173,6 @@ async def add_cookie_domain(
     return CookieDomainsResponse(domains=domains)
 
 
-# TENANT-LEVEL
 @router.delete("/settings/cookie-domains", response_model=CookieDomainsResponse)
 async def remove_cookie_domain(
     request: RemoveCookieDomainRequest,
@@ -254,7 +204,6 @@ async def remove_cookie_domain(
     security = await service.get_settings("security")
     domains: list[str] = security.get("cookie_domain_whitelist", [])
 
-    # Remove domain
     if domain not in domains:
         logger.warning("Domain not found in whitelist: %s", sanitize(domain))
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Domain '{domain}' not found in whitelist")
@@ -262,7 +211,6 @@ async def remove_cookie_domain(
     domains.remove(domain)
     logger.info("Removed domain from whitelist: %s", sanitize(domain))
 
-    # Update via SettingsService (single validated write path)
     security["cookie_domain_whitelist"] = domains
     await service.update_settings("security", security)
 
@@ -270,7 +218,6 @@ async def remove_cookie_domain(
     return CookieDomainsResponse(domains=domains)
 
 
-# TENANT-LEVEL (BE-9084): the account-wide Headless-vs-HITL launch toggle.
 @router.get("/settings/headless-launch", response_model=HeadlessLaunchResponse)
 async def get_headless_launch(
     current_user: User = Depends(require_admin), db: AsyncSession = Depends(get_db_session)
@@ -289,7 +236,6 @@ async def get_headless_launch(
     return HeadlessLaunchResponse(allow_headless_launch=bool(allow))
 
 
-# TENANT-LEVEL (BE-9084): PUT writes the toggle via a read-modify-write.
 @router.put("/settings/headless-launch", response_model=HeadlessLaunchResponse)
 async def update_headless_launch(
     request: HeadlessLaunchUpdateRequest,
@@ -314,7 +260,6 @@ async def update_headless_launch(
     )
 
     service = SettingsService(db, current_user.tenant_key)
-    # Read-modify-write: never clobber ssl_*/cookie_domain_whitelist/rate_limiting.
     security = await service.get_settings("security")
     security["allow_headless_launch"] = request.allow_headless_launch
     security["allow_headless_launch_explicit"] = True

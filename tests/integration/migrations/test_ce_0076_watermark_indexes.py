@@ -3,31 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Migration regression for the TSK-9076 watermark (tenant_key, updated_at) indexes.
-
-The failing layer is the SCHEMA layer: the SaaS backup watermark sweep
-(``saas/backup/scheduler.py``) runs ``MAX(updated_at) WHERE tenant_key = ?``
-against every table the schema exposes with both columns, and NONE of those
-source tables had a ``(tenant_key, updated_at)`` composite — so each leg was a
-per-tenant heap scan. ce_0076 (CE chain) + saas_028 (SaaS chain) add the
-composites. Unit tests against the ORM already "pass" (the model now declares
-the indexes), so the regression MUST run at the migrated-DB layer.
-
-Covered here against a real scratch PostgreSQL DB:
-
-1. fail-first — at ce_0075 (before the migration) NO ``idx_*_tenant_updated``
-   index exists.
-2. coverage + DRIFT GUARD — after ``upgrade head`` (CE), EVERY table the sweep's
-   own ``information_schema`` discovery query returns is backed by an index whose
-   leading columns are ``(tenant_key, updated_at)``. This is the exact drift the
-   task flagged: a future table that joins the sweep unindexed fails this test.
-3. idempotency — re-running the migration on a DB that already has the indexes
-   is a clean no-op (the CE installer reruns ``alembic upgrade head`` every boot).
-4. SaaS chain — after ``upgrade heads`` (SaaS), the two SaaS-only source tables
-   (``organization_plans``, ``tenant_trials``) carry the composite too.
-
-Mirrors tests/integration/migrations/test_ce_0069_index_dedup_fk_cascade.py.
-"""
 
 from __future__ import annotations
 
@@ -56,9 +31,6 @@ PRODUCTION_DB_NAME = "giljo_mcp"
 _PRE = "ce_0075_projects_ever_launched_at"
 _TARGET = "ce_0076_watermark_tenant_updated_indexes"
 
-# The sweep's own source-discovery query (verbatim from
-# BackupSnapshotScheduler._discover_watermark_sources) — tables carrying BOTH
-# tenant_key and updated_at. Kept in lockstep so this test guards real drift.
 _DISCOVERY_SQL = (
     "SELECT table_name FROM information_schema.columns"
     " WHERE table_schema = 'public' AND column_name = 'updated_at'"
@@ -135,10 +107,6 @@ def _discover_sources(engine: sa.Engine) -> list[str]:
 
 
 def _tenant_updated_indexed_tables(engine: sa.Engine) -> set[str]:
-    """Tables that have an index whose leading columns are (tenant_key, updated_at).
-
-    Matched by column shape (not index name) so the drift guard also catches a
-    correctly-shaped but differently-named future index."""
     with engine.connect() as conn:
         rows = conn.execute(
             text(
@@ -192,15 +160,12 @@ def empty_scratch_db(scratch_engine: sa.Engine):
 @pytest.mark.integration
 class TestCe0076WatermarkIndexes:
     def test_pre_migration_has_no_watermark_indexes(self, empty_scratch_db: sa.Engine) -> None:
-        """fail-first: at ce_0075 none of the (tenant_key, updated_at) composites exist."""
         assert _run_alembic("upgrade", _PRE).returncode == 0
         assert _tenant_updated_index_count(empty_scratch_db) == 0, (
             "precondition: no idx_*_tenant_updated index should exist before ce_0076"
         )
 
     def test_head_indexes_every_watermark_source(self, empty_scratch_db: sa.Engine) -> None:
-        """Coverage + drift guard: every CE table the sweep discovers is backed by a
-        (tenant_key, updated_at) index after the migration."""
         up = _run_alembic("upgrade", _TARGET)
         assert up.returncode == 0, f"upgrade {_TARGET} failed:\n{up.stdout}\n{up.stderr}"
 
@@ -215,27 +180,21 @@ class TestCe0076WatermarkIndexes:
         )
 
     def test_migration_is_idempotent(self, empty_scratch_db: sa.Engine) -> None:
-        """The CE installer reruns `alembic upgrade head` every boot: re-running
-        ce_0076 on a DB that already has the indexes is a clean no-op."""
         assert _run_alembic("upgrade", _TARGET).returncode == 0
         first = _tenant_updated_index_count(empty_scratch_db)
         assert first > 0
-        # Stamp back one revision WITHOUT dropping the indexes, then re-run upgrade:
-        # upgrade() executes again with the indexes already present.
         assert _run_alembic("stamp", _PRE).returncode == 0
         rerun = _run_alembic("upgrade", _TARGET)
         assert rerun.returncode == 0, f"idempotent re-run failed:\n{rerun.stdout}\n{rerun.stderr}"
         assert _tenant_updated_index_count(empty_scratch_db) == first
 
     def test_downgrade_drops_the_indexes(self, empty_scratch_db: sa.Engine) -> None:
-        """Reversible: downgrade to ce_0075 removes every composite it added."""
         assert _run_alembic("upgrade", _TARGET).returncode == 0
         assert _tenant_updated_index_count(empty_scratch_db) > 0
         assert _run_alembic("downgrade", _PRE).returncode == 0
         assert _tenant_updated_index_count(empty_scratch_db) == 0
 
     def test_saas_chain_indexes_saas_only_sources(self, empty_scratch_db: sa.Engine) -> None:
-        """The SaaS chain (saas_028) covers the two SaaS-only watermark sources."""
         up = _run_alembic("upgrade", "heads", mode="saas")
         assert up.returncode == 0, f"saas upgrade heads failed:\n{up.stdout}\n{up.stderr}"
         indexed = _tenant_updated_indexed_tables(empty_scratch_db)

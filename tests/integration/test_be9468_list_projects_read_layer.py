@@ -3,65 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9468 -- the agent-facing project list cannot tell the caller how big the answer is.
-
-The operator's framing: *"I am not sure why the tool is pulling entire lists of all
-projects unless the user specifically asks to do so. But the user SHOULD have the choice
-of doing this. Ultimately I want a listing and searching tool."*
-
-Root cause: **nothing tells the caller how big an answer will be before it asks for it.**
-An agent asked "what did we ship" cannot know whether that is 5 rows or 5,000, so it asks
-for everything and hopes. A size ceiling truncates the guess; it does not improve it.
-
-Four defects, each asserted below at the MCP boundary:
-
-1. **``mode="triage"`` is advertised as the cheap projection and is byte-identical to the
-   default.** ``_MODE_TO_PROJECTION["triage"]`` is ``(0, False, None)``, and the mode
-   branch sets ``summary_only=False`` before ``effective_depth = 0 if summary_only else
-   depth`` resolves back to 0 -- the same depth the default already produces. The shipped
-   tool docstring says *"triage = id+name+status+dates (cheapest)"*. A projection that is
-   documented lean and is not is a dishonest signal, which is the class this whole family
-   of fixes exists to kill.
-2. **No response says how much exists.** The caller sees the rows it got and nothing about
-   the board they came from, so it cannot choose a narrower next question.
-3. **There is no ``limit``.** Asking for less was not expressible; the row ceiling is a
-   defensive cap, not a caller-facing choice.
-4. **There is no text search.** ``search`` has existed at the repository layer since
-   BE-6076 (``_build_list_conditions``, a case-insensitive ``ilike`` across name / id /
-   taxonomy_alias) and ``ProjectService.list_projects`` already forwards it -- the MCP
-   boundary simply never passed it.
-
-FAIL-FIRST, measured on base master ``048e65df6`` (unpatched). Every test in
-``TestTheCheapProjectionIsActuallyCheap``, ``TestTheAnswerTeachesTheShapeOfTheNextQuestion``,
-``TestAskingForLessIsPossible`` and ``TestSearchIsARealVerb`` fails there.
-
-``TestTheHarnessItself`` is the BOTH-SIDES GUARD and the proof the red above is the
-assertion failing rather than a broken instrument: it exercises the identical transport,
-fixture and seed, and must pass BEFORE and AFTER the change. If it ever goes red, nothing
-else in this module proves anything.
-
-``TestTheRowCeilingCannotBoundARicherProjection`` is a CHARACTERIZATION test: it passes on
-master too, because it measures a property of the shipped code rather than a fix. It pins
-the finding that ``_MCP_LIST_PROJECT_CEILING`` is a row cap over an arbitrarily large row,
-so it cannot bound a ``depth >= 1`` response at all.
-
-Measurement discipline: bytes are taken on the REAL MCP wire serializer,
-``pydantic_core.to_json(data, fallback=str).decode()`` (compact JSON, reached via
-``fastmcp/tools/base.py`` ``_convert_to_content``), and tokens with a real BPE tokenizer.
-**The house ``chars // 4`` convention is deliberately NOT used**: measured on this payload
-shape it understates by 23-36%, because identifiers tokenize worst (a UUID is 38 chars but
-23 tokens; an ISO timestamp 32 chars but 19). Asserting leanness on measured bytes is the
-point -- a claim of cheapness checked by reading the code is what shipped defect 1.
-
-Transport: the REAL ``@mcp.tool`` path via ``create_connected_server_and_client_session``
-against the real Postgres test DB -- the boundary the operator's client actually hits.
-
-Parallel-safe: every test generates a fresh ``tenant_key`` and purges its own rows in a
-``finally``; these MCP-adapter calls commit for real via ``db_manager``, so there is no
-rollback isolation to lean on. No module-level mutable state, no ordering dependencies.
-
-Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -85,31 +26,13 @@ from tests.helpers.test_db_helper import purge_tenant_rows
 pytestmark = pytest.mark.asyncio
 
 
-# ---------------------------------------------------------------------------
-# Measurement helpers -- the real wire format, and a real tokenizer.
-# ---------------------------------------------------------------------------
 
 
 def _wire_bytes(obj) -> int:
-    """Serialized length on the REAL MCP wire serializer.
-
-    ``pydantic_core.to_json(..., fallback=str)`` is what FastMCP uses to turn a tool
-    result into content (compact JSON -- ``{"a":1,"b":"x"}``, no spaces). Measuring with
-    ``json.dumps`` instead inflates every row by its separator whitespace and is not the
-    payload the caller is charged for.
-    """
     return len(to_json(obj, fallback=str).decode())
 
 
 def _tokens(obj) -> int:
-    """Token count of the serialized object under a real BPE tokenizer.
-
-    ``tiktoken`` is not Claude's tokenizer, so the ABSOLUTE number is corroboration
-    rather than certification. What it is used for here is a RATIO and a COMPARISON
-    between two payloads measured the same way, both of which are robust across BPE
-    tokenizers. It is a declared production dependency (``requirements.txt``), not a
-    test-only import.
-    """
     import tiktoken
 
     return len(tiktoken.get_encoding("o200k_base").encode(to_json(obj, fallback=str).decode()))
@@ -132,18 +55,10 @@ def _content_text(call_tool_result) -> str:
     return "\n".join(parts)
 
 
-# ---------------------------------------------------------------------------
-# Fixtures -- the real transport over the real database.
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
 async def mcp_client(db_manager, monkeypatch):
-    """Wire a real ToolAccessor into the in-memory MCP transport.
-
-    No injected test session: every tool call opens its own real session, exactly as it
-    does in production. Yields ``(client_factory, tenant_key)``.
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -180,13 +95,6 @@ def _iso(day: str) -> datetime:
 
 
 async def _seed(db_manager, tenant_key: str, rows: list[dict]) -> str:
-    """Commit one active product plus the given project rows. Returns the product id.
-
-    Each row carries ``id``, ``name``, ``created``, ``completed`` (``YYYY-MM-DD`` or
-    None), ``status`` and optionally ``description`` / ``mission``. ``series_number`` is
-    assigned sequentially so the ``uq_project_taxonomy_active`` NULLS-NOT-DISTINCT index
-    cannot collide.
-    """
     product_id = str(uuid.uuid4())
 
     async with db_manager.get_session_async(tenant_key=tenant_key) as session:
@@ -233,13 +141,6 @@ def _row(name: str, status: str, created: str, completed: str | None = None, **e
 
 
 def _mixed_board() -> list[dict]:
-    """A board shaped like the operator's: completions dominate, unfinished work is small.
-
-    *"users rarely have thousands of INACTIVE projects, but often thousands of COMPLETED
-    ones"* -- so the expensive query is the archive read and the useful query is narrow.
-    Eight completed, two unfinished, at the same proportion, small enough to run in
-    milliseconds.
-    """
     completed = [
         _row(f"OAuth token refresh pass {n}", "completed", f"2026-0{n}-01", f"2026-0{n}-15") for n in range(1, 9)
     ]
@@ -251,23 +152,13 @@ def _mixed_board() -> list[dict]:
 
 
 async def _list_projects(client, **kwargs) -> object:
-    """Invoke the agent-facing ``list_projects`` @mcp.tool over the real transport."""
     async with client() as mcp_session:
         return await mcp_session.call_tool("list_projects", kwargs)
 
 
-# ---------------------------------------------------------------------------
-# BOTH-SIDES GUARD. Must pass before AND after. Read this first when anything is red.
-# ---------------------------------------------------------------------------
 
 
 class TestTheHarnessItself:
-    """If any of these is red, every failure below is an instrument fault, not a finding.
-
-    A broken instrument that goes red is not a reproduction. These assert only behavior
-    that BE-9468 does not change: the seeded rows come back, the count matches, and the
-    shipped BE-9455 Symptom A truncation signal is intact.
-    """
 
     async def test_the_default_list_returns_every_unfinished_seeded_row(self, mcp_client, db_manager):
         client, tenant_key = mcp_client
@@ -285,7 +176,6 @@ class TestTheHarnessItself:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_an_untruncated_response_still_reports_truncated_false(self, mcp_client, db_manager):
-        """BE-9455 Symptom A's shipped signal is untouched by this change."""
         client, tenant_key = mcp_client
         rows = _mixed_board()
         await _seed(db_manager, tenant_key, rows)
@@ -302,13 +192,6 @@ class TestTheHarnessItself:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_the_measurement_helpers_agree_with_the_transport(self, mcp_client, db_manager):
-        """The measuring instrument itself, checked against a payload of known shape.
-
-        Guards the two ways the byte measurements below could silently lie: measuring a
-        different serializer than the wire uses, and a tokenizer that returns something
-        unrelated to the text. Compact JSON has no ``", "`` separator; a tokenizer that
-        works produces fewer tokens than characters and more than zero.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _mixed_board())
         try:
@@ -322,24 +205,10 @@ class TestTheHarnessItself:
             await purge_tenant_rows(db_manager, tenant_key)
 
 
-# ---------------------------------------------------------------------------
-# DEFECT 1 -- the cheap projection is not cheap.
-# ---------------------------------------------------------------------------
 
 
 class TestTheCheapProjectionIsActuallyCheap:
     async def test_triage_is_leaner_than_the_default_projection(self, mcp_client, db_manager):
-        """THE regression for the stated defect, asserted on MEASURED BYTES.
-
-        ``mode="triage"`` is advertised in the shipped tool docstring as
-        *"id+name+status+dates (cheapest)"*. On master it resolves to the same depth 0 the
-        ``summary_only=True`` default already produces, so it is byte-identical -- there is
-        no cheap projection on this tool at all, only one that says it is.
-
-        Asserted on bytes rather than on field names deliberately: the defect is a claim
-        about cost, so the test has to be about cost. A field-name assertion would pass on
-        a projection that dropped a cheap field and kept an expensive one.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _mixed_board())
         try:
@@ -363,12 +232,6 @@ class TestTheCheapProjectionIsActuallyCheap:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_the_triage_row_carries_exactly_the_index_fields(self, mcp_client, db_manager):
-        """An index row is what sorting and identifying need, and nothing more.
-
-        ``project_id`` is non-negotiable -- it is the only field an agent can ACT on, and a
-        row without it is a label, not an answer. The dates are what any ordering question
-        needs. Everything else is enrichment that belongs to a richer mode.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _mixed_board())
         try:
@@ -382,19 +245,10 @@ class TestTheCheapProjectionIsActuallyCheap:
             await purge_tenant_rows(db_manager, tenant_key)
 
 
-# ---------------------------------------------------------------------------
-# DEFECT 2 -- no response says how much exists.
-# ---------------------------------------------------------------------------
 
 
 class TestTheAnswerTeachesTheShapeOfTheNextQuestion:
     async def test_every_response_carries_a_counts_block(self, mcp_client, db_manager):
-        """THE KEYSTONE. Without it, every other rule is the model guessing.
-
-        An agent that knows *"8 completed, 2 inactive"* before it chooses can ask a narrow
-        question. An agent that does not has exactly one strategy available -- ask for
-        everything and hope -- which is the behavior the operator reported.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _mixed_board())
         try:
@@ -410,17 +264,6 @@ class TestTheAnswerTeachesTheShapeOfTheNextQuestion:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_the_counts_describe_the_whole_board_not_the_filtered_page(self, mcp_client, db_manager):
-        """The load-bearing design call, pinned as a test.
-
-        The default list is active-lifecycle only, so a counts block scoped to what was
-        returned would report *"inactive: 2"* and never mention the eight completed
-        projects -- it would be derivable from the rows themselves and therefore carry no
-        information at all. The operator's stated need is to know the archive is there
-        BEFORE asking for it, which only a whole-board count can answer.
-
-        ``returned`` is carried alongside so the relationship between the page and the
-        board is explicit rather than inferred.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _mixed_board())
         try:
@@ -436,17 +279,6 @@ class TestTheAnswerTeachesTheShapeOfTheNextQuestion:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_by_type_is_populated_from_a_real_taxonomy_join(self, mcp_client, db_manager):
-        """`by_type` must come back with real abbreviations, not silently always empty.
-
-        The counts query reaches the abbreviation through an OUTER JOIN from
-        ``Project.project_type_id`` to ``TaxonomyType.id``, and rows with no type
-        contribute a NULL that is skipped. **So a wrong join condition would not raise --
-        it would produce an empty ``by_type`` on every call, forever.** That is a
-        dishonest signal of exactly the kind this project exists to remove: a documented
-        key that is always empty looks like "this tenant has no types" rather than "this
-        query is broken". The other counts tests seed untyped projects and would all pass
-        against that bug, which is precisely why this test exists.
-        """
         from giljo_mcp.models.projects import TaxonomyType
 
         client, tenant_key = mcp_client
@@ -472,20 +304,10 @@ class TestTheAnswerTeachesTheShapeOfTheNextQuestion:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_the_counts_block_is_small(self, mcp_client, db_manager):
-        """A block that teaches the next question must not itself be the expensive answer.
-
-        Budgeted at roughly 200 tokens. It is bounded by construction -- one entry per
-        status (six), one per configured taxonomy type, and four timestamps -- so this
-        asserts the construction held rather than a number that happens to fit today.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _mixed_board())
         try:
             counts = _payload(await _list_projects(client)).get("counts")
-            # Assert presence FIRST. Without this the budget assertion passes vacuously on
-            # a missing block -- ``to_json(None)`` is four characters, so "absent" would
-            # score as "comfortably within budget". A test that goes green on the feature
-            # being absent is the same dishonest signal this module exists to remove.
             assert isinstance(counts, dict), f"there is no counts block to measure, got {counts!r}"
             cost = _tokens(counts)
             assert cost <= 200, f"the counts block costs {cost} tokens against a ~200 budget: {counts!r}"
@@ -493,9 +315,6 @@ class TestTheAnswerTeachesTheShapeOfTheNextQuestion:
             await purge_tenant_rows(db_manager, tenant_key)
 
 
-# ---------------------------------------------------------------------------
-# DEFECT 3 -- asking for less was not expressible.
-# ---------------------------------------------------------------------------
 
 
 class TestAskingForLessIsPossible:
@@ -511,23 +330,6 @@ class TestAskingForLessIsPossible:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_a_limited_response_says_so_through_the_shipped_signal(self, mcp_client, db_manager):
-        """Extend the BE-9455 vocabulary; never fork it.
-
-        ``truncated: bool`` always present, a ``truncation`` block only on a cut, with the
-        shipped ``{reason, ceiling, rows_fetched, dropped, advice}`` keys. ``reason`` is the
-        discriminator, so a limit cut and a defensive-ceiling cut are distinguishable by a
-        caller that already understands the shipped shape. A second vocabulary would make
-        the tool behave two contradictory ways depending on which bound happened to bind.
-
-        BE-9469 WIDENED THE ALLOWED SET BY EXACTLY ONE KEY, and kept the lock's teeth. The
-        assertion was ``set(note) == SHIPPED``, which is a stronger claim than the docstring
-        it enforces: it forbade the additive extension this block was designed for, which is
-        how ``next_cursor`` came to live INSIDE ``truncation`` rather than beside it. So the
-        lock is now two-sided instead of relaxed -- every shipped key must still be present
-        (nothing may be dropped), and nothing outside a NAMED extension set may appear (no
-        key arrives unannounced). Adding a second key still fails this test, which is the
-        property worth keeping.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _mixed_board())
         try:
@@ -543,7 +345,6 @@ class TestAskingForLessIsPossible:
             assert note.get("ceiling") == 3, f"the detail must name the bound that cut, got {note!r}"
             assert note.get("rows_fetched") == 3, f"the detail must state how many rows survived, got {note!r}"
             shipped = {"reason", "ceiling", "rows_fetched", "dropped", "advice"}
-            # BE-9469: the ONE deliberate extension. Named here, so a third key is a failure.
             allowed_extensions = {"next_cursor"}
             assert shipped <= set(note), (
                 f"the truncation block dropped a SHIPPED key -- a caller reading the old shape "
@@ -557,7 +358,6 @@ class TestAskingForLessIsPossible:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_a_limit_that_does_not_bind_leaves_the_response_untruncated(self, mcp_client, db_manager):
-        """The other direction: a limit above the match count is not a cut and must not claim one."""
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _mixed_board())
         try:
@@ -569,29 +369,7 @@ class TestAskingForLessIsPossible:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_the_cut_is_deterministic_when_timestamps_tie(self, mcp_client, db_manager):
-        """A sort that decides what to DISCARD has to be a total order.
-
-        ``created_at`` defaults to ``func.now()``, and PostgreSQL's ``now()`` is
-        transaction-scoped -- so every project inserted in one transaction carries a
-        byte-identical timestamp. Ordered by that column alone those rows have NO defined
-        order, and the database is free to return them differently between two calls.
-
-        That was harmless while the list was unbounded: every tied row came back either
-        way. **``limit`` is what makes tie-order decide WHICH row is thrown away.** So the
-        unique ``id`` tiebreak already present in both of this surface's orderings
-        (``_completion_recency_order_clauses`` and the repository's ``created_at``
-        fallback, both ending ``Project.id.asc()``) acquires a second, load-bearing job
-        under BE-9468 that it did not have when BE-9455 added it.
-
-        This asserts the discriminating property rather than mere repeatability: the page
-        must be the ``id``-ascending prefix of the tied set. A "two calls agree" assertion
-        would pass without any tiebreak at all, because at this scale Postgres returns
-        stable heap order -- it would look like a guard and guard nothing. The seeded ids
-        are random UUIDs, so insertion order is uncorrelated with id order and heap order
-        cannot satisfy this by luck.
-        """
         client, tenant_key = mcp_client
-        # One timestamp, one transaction -- the real tie, not a simulated one.
         tied = [_row(f"tied project {n}", "inactive", "2026-07-04") for n in range(8)]
         await _seed(db_manager, tenant_key, tied)
         try:
@@ -608,14 +386,6 @@ class TestAskingForLessIsPossible:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_the_limit_cut_falls_on_the_oldest_completions(self, mcp_client, db_manager):
-        """BE-9455 Symptom A's ordering is load-bearing and the limit must not disturb it.
-
-        ``completed_at DESC NULLS FIRST`` makes unfinished work un-droppable, so a cut can
-        only ever fall on the oldest completions -- the one bucket where "older" honestly
-        means "less wanted". A limit that re-sorted, or that sliced before that ordering
-        was applied, would resurrect the exact defect BE-9455 fixed. Museum rule: this
-        pins the existing behavior rather than reasoning about it.
-        """
         client, tenant_key = mcp_client
         rows = _mixed_board()
         await _seed(db_manager, tenant_key, rows)
@@ -633,35 +403,13 @@ class TestAskingForLessIsPossible:
             await purge_tenant_rows(db_manager, tenant_key)
 
 
-# ---------------------------------------------------------------------------
-# DEFECT 4 -- search is not a verb on this surface.
-# ---------------------------------------------------------------------------
 
 
 class TestTheResponseSizeBackstop:
-    """The bound a ROW cap cannot be, on the one tool where all three are reachable.
-
-    ``limit`` bounds rows; at ``depth >= 1`` one row is arbitrarily large. Measured, a
-    single ``mode='planning'`` row with a 9,000-char description is ~1,976 tokens, so
-    ``limit=500`` -- a value this tool now advertises as legitimate -- can reach roughly
-    a million tokens. A row cap and a size cap are not alternatives.
-
-    The ceiling is patched small rather than seeded past, for the same reason BE-9455's
-    suite patches its ceiling to 4: the constant IS the mechanism, so a small dataset
-    against a small ceiling exercises the identical code path deterministically and in
-    milliseconds, and proves the ceiling VALUE is not what makes the behaviour correct.
-    """
 
     async def test_a_size_cut_reports_response_size_and_says_a_bigger_limit_will_not_help(
         self, mcp_client, db_manager, monkeypatch
     ):
-        """The discriminator earns its keep only if each reason names a remedy that works.
-
-        A ``limit`` cut is recoverable by raising ``limit``. A size cut is NOT -- the same
-        payload comes back. Telling the caller to raise the limit here would be a helpful
-        voice attached to advice that cannot work, which is the silent-wrong-signal defect
-        wearing a disguise.
-        """
         client, tenant_key = mcp_client
         monkeypatch.setattr(bounds_mod, "MCP_LIST_CHAR_CEILING", 3000)
         rows = [
@@ -689,24 +437,6 @@ class TestTheResponseSizeBackstop:
     async def test_the_ceiling_holds_as_a_postcondition_on_the_payload_the_client_receives(
         self, mcp_client, db_manager, monkeypatch
     ):
-        """Asserted on the FINAL payload, `_meta` and truncation block included.
-
-        The in-repo field trimmer writes its truncation metadata AFTER its last size
-        check and overshoots its own ceiling by exactly 64 chars while reporting success.
-        **A bound that does not hold is worse than no bound, because it reports success.**
-        So this measures what the client actually receives, not what the fitter thought
-        it was returning -- across several ceilings, because a postcondition that holds
-        at one value and not another is not a postcondition.
-
-        **The rows are deliberately SMALL, and that is what makes this a guard.** With
-        fat rows the fitter stops far below the budget and the leftover slack silently
-        absorbs any overshoot -- an earlier version of this test used 1,500-char
-        descriptions and **passed with the truncation block uncharged AND the transport
-        allowance set to zero**, i.e. it would have certified both of the bugs it exists
-        to catch. Small rows pack the budget tight, so the slack after the last row that
-        fits is smaller than the block being forgotten, and the breach becomes visible.
-        Verified in both directions before being trusted.
-        """
         client, tenant_key = mcp_client
         rows = [_row(f"p{n}", "inactive", "2026-07-03") for n in range(40)]
         await _seed(db_manager, tenant_key, rows)
@@ -727,24 +457,6 @@ class TestTheResponseSizeBackstop:
     async def test_a_single_oversized_row_yields_an_empty_page_whose_advertised_remedy_works(
         self, mcp_client, db_manager
     ):
-        """The degenerate case, at the REAL ceiling -- and it is reachable here.
-
-        ``mission`` is capped at 100,000 chars at the MCP boundary (``MCP_MISSION_MAX``)
-        and is serialized in full at ``depth >= 1``, so **one project row can exceed the
-        48,000-char ceiling on its own.** The sibling task tool cannot reach this -- its
-        description cap is 20,000, so its fattest row is ~21 KB and at least two always fit
-        -- but this tool can, and a bound that returns an empty page on a non-empty board is
-        alarming unless the response says what to do instead.
-
-        Dropping every row is the CORRECT behaviour: the alternative is returning a row
-        that breaches the ceiling, which un-does the postcondition the whole backstop
-        exists to provide. What makes it acceptable is that the advice names a remedy
-        that actually works -- so this asserts the remedy, not just the message. A
-        ``mode='triage'`` row is ~250 chars and always fits.
-
-        Run at the SHIPPED ceiling deliberately, unpatched: the point is that this is
-        reachable in production, not that a small ceiling can be provoked.
-        """
         client, tenant_key = mcp_client
         fat = _row("one enormous mission", "inactive", "2026-07-03", description="d" * 20_000, mission="m" * 90_000)
         await _seed(db_manager, tenant_key, [fat, *_mixed_board()])
@@ -764,7 +476,6 @@ class TestTheResponseSizeBackstop:
                 f"telling the caller the page is empty by size and not by emptiness. got {planning['counts']!r}"
             )
 
-            # THE REMEDY, exercised rather than asserted.
             triage = _payload(await _list_projects(client, mode="triage"))
             assert triage["count"] == 3, (
                 "the advertised remedy must actually work: the lean row must return the "
@@ -775,7 +486,6 @@ class TestTheResponseSizeBackstop:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_a_response_under_the_ceiling_is_not_reported_as_size_cut(self, mcp_client, db_manager):
-        """BOTH-SIDES GUARD on the new bound: it must not claim a cut it did not make."""
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _mixed_board())
         try:
@@ -787,15 +497,8 @@ class TestTheResponseSizeBackstop:
 
 
 class TestTheThreeWayPrecedence:
-    """`defensive_ceiling` > `response_size` > `limit`. Only this tool can reach all three.
-
-    Exactly one ``reason`` may be reported, and the winner is the bound whose obvious
-    remedy does NOT work. Reporting a recoverable reason while an unrecoverable one is
-    also true sends the caller somewhere that cannot help.
-    """
 
     async def test_size_beats_limit_when_both_bind(self, mcp_client, db_manager, monkeypatch):
-        """Raising `limit` would return the identical payload, so `limit` must not be blamed."""
         client, tenant_key = mcp_client
         monkeypatch.setattr(bounds_mod, "MCP_LIST_CHAR_CEILING", 3000)
         rows = [
@@ -804,7 +507,6 @@ class TestTheThreeWayPrecedence:
         ]
         await _seed(db_manager, tenant_key, rows)
         try:
-            # limit=5 of 8 rows binds, AND the payload blows the 3000-char ceiling.
             payload = _payload(await _list_projects(client, mode="planning", limit=5))
             assert payload["truncated"] is True
             assert payload["truncation"]["reason"] == "response_size", (
@@ -815,13 +517,6 @@ class TestTheThreeWayPrecedence:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_the_defensive_ceiling_beats_both(self, mcp_client, db_manager, monkeypatch):
-        """THE top of the order, and the case only this tool can reach.
-
-        A defensive-ceiling cut means the underlying set was truncated before projection,
-        so NO parameter the caller can change yields a complete answer -- not a bigger
-        limit, not a leaner row. It has to win the ``reason`` even when the other two
-        bounds also bit, or the caller is told to try something that cannot work.
-        """
         client, tenant_key = mcp_client
         monkeypatch.setattr(ceiling_mod, "_MCP_LIST_PROJECT_CEILING", 4)
         monkeypatch.setattr(bounds_mod, "MCP_LIST_CHAR_CEILING", 3000)
@@ -846,13 +541,6 @@ class TestTheThreeWayPrecedence:
 
 class TestSearchIsARealVerb:
     async def test_query_narrows_the_list_by_name(self, mcp_client, db_manager):
-        """*"update the OAuth one"* -- the cheapest path from a vague prompt to a single id.
-
-        The matcher itself is not new: BE-6076 shipped a case-insensitive substring across
-        name / id / taxonomy_alias in ``_build_list_conditions``, and
-        ``ProjectService.list_projects`` already forwards ``search``. The MCP boundary
-        simply never passed it, so the capability existed and was unreachable by an agent.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _mixed_board())
         try:
@@ -867,7 +555,6 @@ class TestSearchIsARealVerb:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_query_matches_the_taxonomy_alias_too(self, mcp_client, db_manager):
-        """An agent that half-remembers a serial gets to the row from the serial."""
         client, tenant_key = mcp_client
         rows = _mixed_board()
         await _seed(db_manager, tenant_key, rows)
@@ -882,12 +569,6 @@ class TestSearchIsARealVerb:
             await purge_tenant_rows(db_manager, tenant_key)
 
     async def test_query_and_counts_together_answer_the_narrowing_question(self, mcp_client, db_manager):
-        """The two moves compose, which is the whole point of building both.
-
-        The counts block reports the board so the agent can see its search is narrow, and
-        the search returns the few rows it asked for. Either alone leaves the agent
-        guessing about the half it cannot see.
-        """
         client, tenant_key = mcp_client
         await _seed(db_manager, tenant_key, _mixed_board())
         try:
@@ -902,26 +583,10 @@ class TestSearchIsARealVerb:
             await purge_tenant_rows(db_manager, tenant_key)
 
 
-# ---------------------------------------------------------------------------
-# CHARACTERIZATION -- passes on master; pins WHY a row cap is not a size bound.
-# ---------------------------------------------------------------------------
 
 
 class TestTheRowCeilingCannotBoundARicherProjection:
     async def test_one_planning_row_can_exceed_an_entire_ten_row_index_response(self, mcp_client, db_manager):
-        """A row ceiling cannot bound a response whose rows are arbitrarily large.
-
-        At ``depth >= 1`` (``mode='planning'|'audit'|'forensic'``) the projection adds the
-        project's ``description`` and ``mission`` **in full and untruncated**
-        (``_build_mcp_project_list``). So ``2,500 rows x unbounded row size`` is an
-        unbounded response *regardless of the row cap* -- ``_MCP_LIST_PROJECT_CEILING`` is
-        meaningful at depth 0 and close to decorative for every richer mode.
-
-        This is why the counts block and a caller-facing ``limit`` are the fix and a
-        bigger or smaller row number is not. It measures shipped behavior, so it passes
-        before and after; it exists to stop the row cap from being mistaken for a size
-        bound again.
-        """
         client, tenant_key = mcp_client
         fat = _row(
             "One verbose project",

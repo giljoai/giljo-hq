@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Unit tests for ``giljo_mcp.services.oauth_token_idempotency``.
-
-The module routes idempotency-window state through the
-``CacheBackend`` registry (INF-5074). End-to-end behavior is covered
-by ``tests/api/test_oauth_endpoints.py::TestTokenIdempotency`` at the
-FastAPI boundary — these unit tests lock the local building blocks:
-signature determinism / discrimination, and the round-trip through the
-registry-backed cache.
-"""
 
 from __future__ import annotations
 
@@ -23,8 +14,6 @@ from giljo_mcp.services import oauth_token_idempotency as idem
 
 @pytest.fixture(autouse=True)
 def _isolated_registry():
-    """Each test starts from a clean registry so a leaked Redis stub from one
-    test cannot poison the next."""
     cache_backends.reset_registry_for_tests()
     yield
     cache_backends.reset_registry_for_tests()
@@ -35,11 +24,9 @@ class TestComputeBodySignature:
         sig1 = idem.compute_body_signature(client_id="cid", proof="proof", redirect_uri="https://x/cb")
         sig2 = idem.compute_body_signature(client_id="cid", proof="proof", redirect_uri="https://x/cb")
         assert sig1 == sig2
-        assert len(sig1) == 64  # sha256 hex
+        assert len(sig1) == 64
 
     def test_field_separator_prevents_concatenation_collision(self):
-        # Without a unit separator, ("ab", "c", "d") and ("a", "bc", "d") would
-        # both hash sha256("abcd"). The 0x1F separator MUST disambiguate.
         sig_a = idem.compute_body_signature(client_id="ab", proof="c", redirect_uri="d")
         sig_b = idem.compute_body_signature(client_id="a", proof="bc", redirect_uri="d")
         assert sig_a != sig_b

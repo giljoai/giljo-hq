@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Widen alembic_version.version_num to VARCHAR(64).
-
-Revision ID: ce_0003_widen_alembic_version
-Revises: ce_0002_add_org_deleted_at
-Create Date: 2026-04-25
-
-Alembic's default ``alembic_version.version_num`` is VARCHAR(32). Long
-human-readable revision IDs (e.g. ``ce_0003_widen_alembic_version_num``) can
-exceed 32 chars and produce a ``StringDataRightTruncation`` on stamp/upgrade.
-Widen to VARCHAR(64). Idempotent: skips ALTER if column is already >= 64.
-PostgreSQL only (project is Postgres-only -- no SQLite branching).
-"""
 
 import sqlalchemy as sa
 from alembic import op
@@ -43,6 +31,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # No-op: shrinking version_num back to VARCHAR(32) would truncate any stamped
-    # revision IDs longer than 32 chars (data loss risk on the alembic state row).
     pass

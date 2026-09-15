@@ -7,11 +7,6 @@
   >
     <v-card-text class="jb-card-body">
       <div class="jb-head">
-        <!-- FE-9555: selection for the board-level "Launch staged..." gesture.
-             Rendered ONLY on a staged card -- the one state where handing someone
-             a conductor seed is the right next step. This is a SELECTION control,
-             not a launch control: FE-9548's ruling that no card carries Implement
-             is untouched. -->
         <button
           v-if="selectable"
           type="button"
@@ -124,9 +119,6 @@
           Review &amp; close
         </v-btn>
 
-        <!-- "Jobs detail" is present on every card (opens the diagnostics
-             modal); on Review it sits alongside Review & close rather than
-             replacing it, matching the mock's own Review card exactly. -->
         <v-btn
           class="jb-btn jb-btn-ghost"
           size="small"
@@ -155,36 +147,6 @@
 </template>
 
 <script setup>
-/**
- * JobsBoardCard.vue — FE-9548
- *
- * One project card on the redesigned Jobs board, built strictly to
- * design mock jobs-board-proposal-v4.html. Colors/aggregates/duration
- * strings all resolve through shared pure helpers (jobsBoardLifecycle,
- * jobsBoardCardStats, durationFormat) rather than being computed inline here
- * -- this component's job is layout + wiring, not arithmetic.
- *
- * Buttons per the mock, settled after two rounds of operator pushback:
- *   - Open -> the legacy project page (workbench). Primary (yellow) only
- *     when Staged (the action the card wants from you); ghost otherwise.
- *   - Jobs detail -> emits 'open-detail' so the parent view owns the one
- *     shared JobsBoardDetailModal instance (avoids one modal per card).
- *   - Review & close (Review cards only, green) -> navigates to the EXISTING
- *     single-project Jobs tab with a one-shot `review=1` query flag that
- *     ProjectTabs.vue already wires to its own openCloseoutModal -- no new
- *     review flow.
- *   - 💬 -> emits 'open-hub' (the parent view owns route/window semantics).
- *   - `Implement` is deliberately absent (the human staging gate).
- *
- * The HITL gate note renders on a Staged card ONLY when the tenant's
- * headless-self-advance setting is actually off (FE-9549). An earlier version
- * inferred that from the card state alone, on the theory that a project only
- * waits at Staged when headless is off -- untrue: it also waits when headless
- * is on and no agent has picked it up yet, so the note claimed the setting was
- * off on tenants where it was on.
- *
- * Edition scope: Both.
- */
 import { computed } from 'vue'
 import { hexToRgba } from '@/utils/colorUtils'
 import { jobsSectionLabelFor, JOBS_SECTION_LABELS } from '@/utils/jobsSectionLabel'
@@ -206,15 +168,10 @@ const props = defineProps({
     type: Number,
     required: true,
   },
-  // FE-9549: the tenant's ACTUAL headless-self-advance setting. Null while it is
-  // still loading, which suppresses the note rather than guessing at it.
   headlessAllowed: {
     type: Boolean,
     default: null,
   },
-  // FE-9555: whether this card may be picked for the board-level launch gesture.
-  // Decided by the BOARD, not inferred here -- the board owns which lifecycle
-  // state is eligible, and computing it twice is how the two would disagree.
   selectable: {
     type: Boolean,
     default: false,
@@ -229,11 +186,6 @@ const emit = defineEmits(['open-detail', 'open-hub', 'toggle-select'])
 
 const sectionLabel = computed(() => jobsSectionLabelFor(props.project, props.agents))
 const edgeColor = computed(() => jobsBoardLifecycleColor(sectionLabel.value))
-// FE-9549: a Staged card does NOT imply headless is off. A project sits at
-// Staged with headless ON too -- staging simply completed and no agent has
-// picked it up yet. Inferring the setting from the card state told users
-// "headless is off, go turn it on" on a tenant where it was already on.
-// Read the real setting; show nothing until it is known.
 const showGateNote = computed(
   () => sectionLabel.value === JOBS_SECTION_LABELS.STAGED && props.headlessAllowed === false,
 )

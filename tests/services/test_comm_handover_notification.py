@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9296a — the DURABLE record of a hand-off to the operator.
-
-FE-9289c already drops a bell entry when a baton lands on the operator, but it is
-built from the live WebSocket event and stored client-side. A hand-off that arrived
-while the dashboard was closed was therefore never seen at all, and one seen on the
-laptop did not exist on the phone: the agent did everything right and the request
-still evaporated. This is the server row that survives a reload and reaches a second
-browser.
-
-Two properties carry the weight and both are tested here: it fires ONLY for a
-hand-off to the human (an agent-to-agent baton is coordination, not an interruption),
-and it is written only AFTER the baton commits.
-
-Parallel-safe: rollback-isolated ``db_session``, fresh tenant per test, no
-module-level mutable state.
-"""
 
 from __future__ import annotations
 
@@ -45,11 +29,8 @@ def _service(db_manager, db_session) -> CommThreadService:
 
 
 async def _seed(db_session, tenant: str) -> str:
-    """Seed taxonomy + the tenant's single human. Returns the operator's id."""
     with tenant_session_context(db_session, tenant):
         await ensure_default_types_seeded(db_session, tenant)
-        # display_name is a derived property (full_name -> first/last -> username),
-        # so the fixture sets the column that feeds it rather than the property.
         operator = User(
             id=str(uuid.uuid4()),
             tenant_key=tenant,
@@ -80,39 +61,25 @@ async def _rows(db_session, tenant: str) -> list[Notification]:
         return list(result.scalars().all())
 
 
-# ---------------------------------------------------------------------------
-# The registry is closed — a new type needs a schema or the write is rejected
-# ---------------------------------------------------------------------------
 
 
 def test_the_payload_type_is_registered():
-    """``NotificationService._validate_fields`` rejects unregistered types outright.
-
-    Without this entry the emit would fail at the write boundary, silently (the
-    emitter is best-effort), and the durable row would never appear.
-    """
     assert NOTIFICATION_TYPE in NOTIFICATION_PAYLOAD_VALIDATORS
 
 
 def test_the_payload_schema_forbids_unknown_keys():
-    """extra='forbid' — this payload has a known shape, so drift must fail loudly."""
     model = NOTIFICATION_PAYLOAD_VALIDATORS[NOTIFICATION_TYPE]
     assert model.model_config.get("extra") == "forbid"
     ok = model(thread_id="t1", chat_id="CHT-0001", handed_by="P1 Orchestrator")
     assert ok.handed_by == "P1 Orchestrator"
-    # handed_by is optional: an anonymous hand-off still gets a durable row.
     assert model(thread_id="t1", chat_id="CHT-0001").handed_by is None
 
 
 def test_the_dedupe_key_is_per_thread():
-    """One OPEN row per thread, so a bouncing baton leaves one entry, not a stack."""
     assert handover_dedupe_key("t1") == handover_dedupe_key("t1")
     assert handover_dedupe_key("t1") != handover_dedupe_key("t2")
 
 
-# ---------------------------------------------------------------------------
-# It fires for the operator, and only for the operator
-# ---------------------------------------------------------------------------
 
 
 async def test_a_baton_to_the_operator_writes_a_durable_row(db_manager, db_session):
@@ -129,18 +96,10 @@ async def test_a_baton_to_the_operator_writes_a_durable_row(db_manager, db_sessi
     assert row.user_id == operator_id
     assert row.payload["thread_id"] == thread_id
     assert row.payload["handed_by"] == "P1 Orchestrator"
-    # The body names the agent — the whole point of the mechanism.
     assert "P1 Orchestrator" in row.body
 
 
 async def test_the_operator_alias_reaches_the_same_row(db_manager, db_session):
-    """Agents hand over with the literal "user"; that must produce the row too.
-
-    ``resolve_operator_alias`` expands it before the target is validated, so this is
-    the path an agent actually takes — if it missed, the mechanism would work only
-    for callers who already knew the operator's uuid, which is the discoverability
-    problem BE-9365b existed to remove.
-    """
     tenant = _tk("alias")
     operator_id = await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -154,7 +113,6 @@ async def test_the_operator_alias_reaches_the_same_row(db_manager, db_session):
 
 
 async def test_an_agent_to_agent_baton_writes_nothing(db_manager, db_session):
-    """Coordination between agents must not interrupt the human."""
     tenant = _tk("agenttoagent")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -166,7 +124,6 @@ async def test_an_agent_to_agent_baton_writes_nothing(db_manager, db_session):
 
 
 async def test_clearing_the_baton_writes_nothing(db_manager, db_session):
-    """'none' obligates nobody, so there is nothing to tell the operator about."""
     tenant = _tk("none")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -178,7 +135,6 @@ async def test_clearing_the_baton_writes_nothing(db_manager, db_session):
 
 
 async def test_a_repeated_handover_does_not_stack_rows(db_manager, db_session):
-    """A thread that bounces back and forth leaves ONE unread entry."""
     tenant = _tk("dedupe")
     operator_id = await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -192,12 +148,6 @@ async def test_a_repeated_handover_does_not_stack_rows(db_manager, db_session):
 
 
 async def test_the_atomic_post_with_baton_path_also_writes_the_row(db_manager, db_session):
-    """The auto-pass is the DEFAULT hand-off, so it must produce the row too.
-
-    Covering only the standalone ``set_next_actor`` would leave the common path — a
-    directed action-request that auto-passes — with no durable record. That is the
-    BE-9292a lesson: the default path is the one that goes untested.
-    """
     tenant = _tk("atomic")
     operator_id = await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -220,7 +170,6 @@ async def test_the_atomic_post_with_baton_path_also_writes_the_row(db_manager, d
 
 
 async def test_an_anonymous_handover_still_writes_a_row(db_manager, db_session):
-    """Not knowing WHO handed over is no reason to lose the hand-off entirely."""
     tenant = _tk("anonrow")
     operator_id = await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -235,7 +184,6 @@ async def test_an_anonymous_handover_still_writes_a_row(db_manager, db_session):
 
 
 async def test_a_refused_handover_writes_no_row(db_manager, db_session):
-    """BE-9292a: nothing moved, so the operator must not be told anything did."""
     tenant = _tk("refusedrow")
     await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -248,15 +196,6 @@ async def test_a_refused_handover_writes_no_row(db_manager, db_session):
 
 
 async def test_a_failing_emit_never_unwinds_the_baton(db_manager, db_session, monkeypatch):
-    """The baton is the load-bearing act; the bell is the nicety.
-
-    A notification failure must leave the hand-off intact — the recipient still finds
-    it via get_my_turn and the thread itself.
-
-    The break is injected at ``NotificationService.create``, INSIDE the emitter's own
-    try block, so this exercises the production guard. Patching the emitter function
-    itself would jump over that guard and prove only that the test can raise.
-    """
     tenant = _tk("emitfail")
     operator_id = await _seed(db_session, tenant)
     svc = _service(db_manager, db_session)
@@ -272,7 +211,6 @@ async def test_a_failing_emit_never_unwinds_the_baton(db_manager, db_session, mo
 
     result = await svc.pass_baton(thread_id=thread_id, to=operator_id, from_agent="em", tenant_key=tenant)
 
-    # The hand-off stands, and the recipient can still find it.
     assert result["next_action_owner"] == operator_id
     turn = await svc.get_my_turn(agent_id=operator_id, tenant_key=tenant)
     assert thread_id in [t["thread_id"] for t in turn["threads"]]

@@ -1,17 +1,3 @@
-/**
- * ThreadTimeline.search.fe9368.spec.js — FE-9368 (D)
- *
- * The in-thread search box filters the timeline that is already loaded: no request,
- * no debounce, no server round trip. What these pin:
- *
- *  - the filter narrows on the message TEXT and on the AUTHOR name (the resolved
- *    display name the operator reads on the post, not the raw from_agent_id);
- *  - clearing restores every message, including the null the clearable field emits;
- *  - no match is reported as "no match", never as an empty thread. Those are
- *    different facts and only one of them means something went wrong.
- *
- * Edition scope: Both
- */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
@@ -52,7 +38,6 @@ const MESSAGES = [
     from_display_name: 'reviewer-1',
     content: 'the MIGRATION looks fine to me',
     message_type: 'broadcast',
-    // Well outside the 5-minute grouping window, so m3 is never a continuation of m2.
     created_at: '2026-08-06T13:00:00Z',
   },
 ]
@@ -90,7 +75,6 @@ describe('ThreadTimeline in-thread search (FE-9368)', () => {
     const wrapper = mountTimeline(pinia, 'LANE')
     expect(renderedIds(wrapper)).toEqual(['timeline-message-m1'])
 
-    // The author is matched on the name the operator actually reads.
     await wrapper.setProps({ search: 'reviewer-1' })
     expect(renderedIds(wrapper)).toEqual(['timeline-message-m2', 'timeline-message-m3'])
   })
@@ -110,7 +94,6 @@ describe('ThreadTimeline in-thread search (FE-9368)', () => {
     await wrapper.setProps({ search: '' })
     expect(renderedIds(wrapper)).toHaveLength(3)
 
-    // A `clearable` v-text-field emits null, not '' — the filter has to survive it.
     await wrapper.setProps({ search: 'diff' })
     await wrapper.setProps({ search: null })
     expect(renderedIds(wrapper)).toHaveLength(3)
@@ -124,9 +107,6 @@ describe('ThreadTimeline in-thread search (FE-9368)', () => {
   })
 
   it('regroups against what is on screen, so a filtered post keeps its author badge', async () => {
-    // m2 and m3 are the same author. Unfiltered they are two separate posts (hours
-    // apart), so both carry a badge; the guard here is that filtering m2 away does not
-    // leave m3 grouped against a neighbour the operator can no longer see.
     const wrapper = mountTimeline(pinia, 'MIGRATION')
     const rows = wrapper.findAll('.timeline-msg')
     expect(rows).toHaveLength(2)

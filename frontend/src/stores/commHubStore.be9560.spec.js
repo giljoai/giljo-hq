@@ -1,14 +1,3 @@
-/**
- * commHubStore.be9560.spec.js — BE-9560
- *
- * Operator-reported 2026-09-02: replying in the dashboard never clears your turn,
- * so the "Waiting on you" banner can outlive the reply. useYourTurnThreads reads
- * next_action_owner straight off commHub.threadList (commHubStore.js), which
- * derives from threadsById -- so postMessage must patch that map locally on a
- * baton-moving response, the same way passBaton already does, or the banner in
- * THIS tab only clears once a WS baton broadcast round-trips (best-effort, and not
- * guaranteed live for the tab that just posted).
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useCommHubStore } from './commHubStore'

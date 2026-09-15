@@ -3,7 +3,6 @@
     <v-row class="align-center justify-center">
       <v-col cols="12" sm="8" md="5" lg="4">
         <v-card elevation="8" class="login-card smooth-border">
-          <!-- Logo/Header -->
           <v-card-title class="text-center pa-6">
             <div class="d-flex flex-column align-center w-100">
               <v-img
@@ -24,7 +23,6 @@
           <v-divider />
 
           <v-card-text class="pa-6">
-            <!-- Hostname mismatch warning -->
             <AppAlert
               v-if="hostnameMismatch"
               type="warning"
@@ -40,7 +38,6 @@
               </a>
             </AppAlert>
 
-            <!-- Alert for errors -->
             <AppAlert
               v-if="error"
               type="error"
@@ -52,7 +49,6 @@
               {{ error }}
             </AppAlert>
 
-            <!-- Alert for success messages -->
             <AppAlert
               v-if="successMessage"
               type="success"
@@ -64,7 +60,6 @@
               {{ successMessage }}
             </AppAlert>
 
-            <!-- Login Form -->
             <v-form ref="loginForm" @submit.prevent="handleLogin">
               <v-text-field
                 v-model="username"
@@ -131,17 +126,13 @@
                 </v-btn>
               </div>
 
-              <!-- Social login buttons (SaaS only, loaded dynamically -- CE bundle
-                   never ships this component). BE-1005. -->
               <component :is="socialLoginButtonsComponent" v-if="socialLoginButtonsComponent" />
 
-              <!-- Register link (SaaS only) -->
               <div v-if="isNonCe" class="text-center mt-3">
                 <span class="text-body-small text-muted-a11y">Don't have an account?</span>
                 <router-link to="/register" class="text-body-small font-weight-bold ml-1">Register</router-link>
               </div>
 
-              <!-- Forgot Password Link -->
               <div class="text-center mt-4">
                 <v-btn
                   variant="text"
@@ -157,13 +148,11 @@
             </v-form>
           </v-card-text>
 
-          <!-- Forgot Password Modal (CE: PIN-based) -->
           <ForgotPasswordPin
             v-model:show="showForgotPassword"
             @success="handlePasswordResetSuccess"
           />
 
-          <!-- Forgot Password Modal (SaaS: email-based, loaded dynamically) -->
           <component
             :is="forgotPasswordEmailComponent"
             v-if="forgotPasswordEmailComponent"
@@ -173,7 +162,6 @@
 
           <v-divider />
 
-          <!-- Footer Info -->
           <v-card-text class="text-center pa-4">
             <a
               href="https://www.giljo.ai"
@@ -192,7 +180,6 @@
 
 <script setup>
 // eslint-allow giljo-internal/no-manual-api-url-composition
-// (sanctioned: builds a "you should be at this URL" string shown to the user when hostname mismatch is detected — not the HTTP client base. See ADR-001)
 import { ref, computed, onMounted, shallowRef } from 'vue'
 import AppAlert from '@/components/ui/AppAlert.vue'
 import ForgotPasswordPin from '@/components/ForgotPasswordPin.vue'
@@ -206,18 +193,14 @@ const productName = PRODUCT_NAME
 import configService from '@/services/configService'
 import { isCeModeValue, isNonCeModeValue } from '@/composables/useGiljoMode'
 
-// SaaS ForgotPasswordEmail loaded dynamically to keep CE clean (Deletion Test)
 const forgotPasswordEmailComponent = shallowRef(null)
 
-// SaaS social-login buttons, loaded dynamically for the same reason (BE-1005).
 const socialLoginButtonsComponent = shallowRef(null)
 
-// Composables
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 
-// Edition mode
 const giljoMode = ref('ce')
 const isNonCe = computed(() => isNonCeModeValue(giljoMode.value))
 const editionLabel = computed(() => {
@@ -227,7 +210,6 @@ const editionLabel = computed(() => {
   }
 })
 
-// Hostname mismatch detection (populated after runtime config loads)
 const hostnameMismatch = ref(false)
 
 async function fetchEditionOrgSetupStatus() {
@@ -242,7 +224,6 @@ const currentHostname = ref('')
 const correctHost = ref('')
 const correctUrl = ref('')
 
-// State
 const username = ref('')
 const password = ref('')
 const rememberMe = ref(false)
@@ -254,15 +235,12 @@ const error = ref('')
 const successMessage = ref('')
 const loginForm = ref(null)
 
-// Validation rules
 const rules = {
   username: (value) => !!value || 'Email or username is required',
   password: (value) => !!value || 'Password is required',
 }
 
-// Methods
 async function handleLogin() {
-  // Validate form
   const { valid } = await loginForm.value.validate()
   if (!valid) {
     return
@@ -272,37 +250,25 @@ async function handleLogin() {
   error.value = ''
 
   try {
-    // Use user store login method - this will authenticate AND populate
-    // currentUser. FE-9556: login() now THROWS the axios error on failure
-    // (after clearing store state), so the status-branched catch block below
-    // owns every failure path -- the old `if (!loginSuccess)` generic branch
-    // was unreachable-correct code's replacement and is gone.
     await userStore.login(username.value, password.value)
 
-    // Check if first login is required (password change or PIN setup)
     try {
       const firstLoginResponse = await api.auth.checkFirstLogin(username.value)
       const firstLoginData = firstLoginResponse.data
 
       if (firstLoginData.must_change_password || firstLoginData.must_set_pin) {
-        // Redirect to first login page for password change and/or PIN setup
         router.push('/first-login')
         return
       }
     } catch (firstLoginErr) {
       console.warn('[Login] First login check failed:', firstLoginErr)
-      // Continue with normal login flow if check fails
     }
 
-    // Legacy check for backward compatibility
     if (userStore.currentUser?.password_change_required) {
-      // Redirect to first login page for password setup
       router.push('/first-login')
       return
     }
 
-    // Private editions can inject an org setup status check. The service is
-    // CE-export safe because the optional module is loaded through a glob.
     if (isNonCeModeValue(giljoMode.value)) {
       try {
         const orgStatus = await fetchEditionOrgSetupStatus()
@@ -316,10 +282,8 @@ async function handleLogin() {
       }
     }
 
-    // SECURITY: Mark setup as completed (user successfully logged in after setup)
     localStorage.setItem('setup_completed', 'true')
 
-    // Store remember me preference
     if (rememberMe.value) {
       localStorage.setItem('remember_me', 'true')
       localStorage.setItem('remembered_username', username.value)
@@ -328,19 +292,14 @@ async function handleLogin() {
       localStorage.removeItem('remembered_username')
     }
 
-    // Show success message briefly
     successMessage.value = 'Login successful! Redirecting...'
 
-    // Small delay to show success message
     await new Promise((resolve) => setTimeout(resolve, 500))
 
-    // Redirect to the original destination or dashboard
     const redirect = route.query.redirect || '/'
     router.push(redirect)
   } catch (err) {
-    // Handle specific error types with user-friendly messages
     if (err.response?.status === 401) {
-      // Check if there's a specific detail about inactive account or password change required
       const detail = err.response?.data?.detail || ''
       if (detail.toLowerCase().includes('inactive')) {
         error.value = 'Account is inactive. Please contact your administrator.'
@@ -348,7 +307,6 @@ async function handleLogin() {
         detail.toLowerCase().includes('must_change_password') ||
         detail.toLowerCase().includes('change password')
       ) {
-        // Redirect to welcome page for password setup
         router.push('/welcome')
         return
       } else {
@@ -360,14 +318,11 @@ async function handleLogin() {
         detail.toLowerCase().includes('must_change_password') ||
         detail.toLowerCase().includes('change password')
       ) {
-        // Redirect to welcome page for password setup
         router.push('/welcome')
         return
       }
       error.value = 'Access forbidden. Please contact your administrator.'
     } else if (err.response?.status === 429) {
-      // Copy harmonized to PR #1002's approved wording (it previously lived in
-      // the now-removed boolean branch).
       error.value = 'Too many sign-in attempts. Please wait a minute and try again.'
     } else if (err.response?.data?.detail) {
       error.value = err.response.data.detail
@@ -379,14 +334,12 @@ async function handleLogin() {
       error.value = 'Login failed. Please try again.'
     }
 
-    // Clear password field on error
     password.value = ''
   } finally {
     loading.value = false
   }
 }
 
-// Handle forgot password click -- CE uses PIN-based dialog, SaaS uses email-based
 function handleForgotPasswordClick() {
   if (isCeModeValue(giljoMode.value)) {
     showForgotPassword.value = true
@@ -395,16 +348,12 @@ function handleForgotPasswordClick() {
   }
 }
 
-// Handle password reset success
 function handlePasswordResetSuccess(message) {
   successMessage.value = message
   showForgotPassword.value = false
 }
 
-// Check if already authenticated on mount
 onMounted(async () => {
-  // Check hostname mismatch after runtime config loads
-  // Poll briefly since initializeApiConfig runs in background after mount
   const checkMismatch = () => {
     const cfg = getRuntimeConfig()
     if (!cfg?.api?.host) return false
@@ -423,14 +372,12 @@ onMounted(async () => {
     return true
   }
   if (!checkMismatch()) {
-    // Config not loaded yet, retry a few times
     let attempts = 0
     const interval = setInterval(() => {
       if (checkMismatch() || ++attempts > 10) clearInterval(interval)
     }, 500)
   }
 
-  // Load giljo_mode from config
   try {
     await configService.fetchConfig()
     giljoMode.value = configService.getGiljoMode()
@@ -438,13 +385,6 @@ onMounted(async () => {
     // Default to CE on config failure
   }
 
-  // Dynamically load SaaS ForgotPasswordEmail when not CE.
-  // Uses import.meta.glob (Vite-aware) so the component bundles into a chunk
-  // for SaaS/private builds and is silently absent in CE builds where the
-  // saas/ directory has been stripped by the export pipeline. The earlier
-  // @vite-ignore + runtime-URL approach failed in production builds because
-  // the unbundled .vue file 404'd into the SPA fallback (text/html), which
-  // the browser refused to evaluate as a module script.
   if (isNonCeModeValue(giljoMode.value)) {
     const forgotEmailLoaders = import.meta.glob('@/saas/components/ForgotPasswordEmail.vue')
     const [loader] = Object.values(forgotEmailLoaders)
@@ -457,7 +397,6 @@ onMounted(async () => {
       }
     }
 
-    // BE-1005: social-login buttons + confirm-link surface, same glob-load gate.
     const socialLoginLoaders = import.meta.glob('@/saas/components/auth/SocialLoginButtons.vue')
     const [socialLoginLoader] = Object.values(socialLoginLoaders)
     if (socialLoginLoader) {
@@ -470,19 +409,14 @@ onMounted(async () => {
     }
   }
 
-  // Check for password change success message
   if (route.query.passwordChanged === 'true') {
     successMessage.value = 'Password changed successfully! Please log in with your new credentials.'
   }
 
-  // Deep-link from the landing page's "Forgot your password?" (/login?forgot=1).
-  // Open the reset-request dialog directly so the user isn't dropped on the bare
-  // /reset-password confirm page, which needs an emailed token (FE-6010).
   if (route.query.forgot) {
     handleForgotPasswordClick()
   }
 
-  // Restore remembered username if available
   const rememberedUsername = localStorage.getItem('remembered_username')
   const rememberMeFlag = localStorage.getItem('remember_me')
 
@@ -491,8 +425,6 @@ onMounted(async () => {
     rememberMe.value = true
   }
 
-  // REMOVED: Auto-login check
-  // Always require manual login - no automatic authentication
 })
 </script>
 

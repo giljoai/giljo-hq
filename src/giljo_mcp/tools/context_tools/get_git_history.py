@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""MCP tool for fetching git commit history with depth control.
-
-Updated in Handover 0390b to read from product_memory_entries table instead of JSONB.
-
-Uses ProductMemoryRepository.get_git_history() to fetch aggregated commits.
-BE-9103: the git-integration toggle is read from the canonical settings path
-(``integrations.git_integration.enabled`` via SettingsService), NOT the legacy
-per-product ``product_memory.git_integration`` blob.
-
-Token Budget by Depth:
-- 10: Last 10 commits (~500 tokens)
-- 25: Last 25 commits (~1250 tokens)
-- 50: Last 50 commits (~2500 tokens)
-- 100: Last 100 commits (~5000 tokens)
-"""
-# Read-only tool -- uses direct session.execute() for SELECT queries (no writes)
 
 import logging
 from typing import Any
@@ -36,27 +20,16 @@ logger = logging.getLogger(__name__)
 
 
 def estimate_tokens(data: Any) -> int:
-    """Rough token estimation (1 token ≈ 4 chars)."""
     import json
 
     text = json.dumps(data) if not isinstance(data, str) else data
     return len(text) // 4
 
 
-# TSK-9159: the get_context boundary advertises string depth tokens for
-# git_history (e.g. {'git_history': 'summary'}), so the depth parser must
-# accept them alongside ints/numeric strings. Named tokens map to the
-# documented commit-count buckets above.
 _DEPTH_TOKENS = {"summary": 10}
 
 
 def parse_git_history_depth(depth: Any) -> int | None:
-    """Tolerant git_history depth parser: int, numeric string, or named token.
-
-    Returns None (= use the default commit count) for empty or unrecognized
-    values — with a warning for the unrecognized case, never an error: a bad
-    depth override must not fail the whole category.
-    """
     if not depth:
         return None
     try:
@@ -78,60 +51,8 @@ async def get_git_history(
     offset: int = 0,
     limit: int = None,
     db_manager: DatabaseManager | None = None,
-    session: AsyncSession | None = None,  # For testing only
+    session: AsyncSession | None = None,
 ) -> dict[str, Any]:
-    """
-    Fetch git commit history for given product with depth control.
-
-    Updated in Handover 0390b to read from product_memory_entries table.
-    Uses ProductMemoryRepository.get_git_history() to aggregate commits.
-    Returns empty if Git integration is disabled.
-
-    Args:
-        product_id: Product UUID
-        tenant_key: Tenant isolation key
-        commits: Number of recent commits to return (10, 25, 50, or 100)
-        offset: Skip first N items (reserved for future pagination)
-        limit: Max items to return (reserved for future pagination)
-        db_manager: Database manager instance
-
-    Pagination (Future):
-        offset and limit parameters are reserved for future implementation.
-        Currently ignored - full implementation deferred to future handover.
-
-    Returns:
-        Dict with git commits and metadata:
-        {
-            "source": "git_history",
-            "depth": 25,
-            "data": [
-                {
-                    "hash": "abc123",
-                    "message": "feat: Add feature X",
-                    "author": "developer@example.com",
-                    "timestamp": "2025-11-16T10:00:00Z"
-                }
-            ],
-            "metadata": {
-                "product_id": "uuid",
-                "tenant_key": "...",
-                "total_commits": 150,
-                "returned_commits": 25,
-                "estimated_tokens": 1250,
-                "git_integration_enabled": true
-            }
-        }
-
-    Multi-Tenant Isolation:
-        All queries filter by tenant_key and product_id.
-
-    Example:
-        result = await get_git_history(
-            product_id="123e4567-e89b-12d3-a456-426614174000",
-            tenant_key="tenant_abc",
-            commits=25
-        )
-    """
     logger.info("fetching_git_history_context product_id=%s tenant_key=%s depth=%s", product_id, tenant_key, commits)
 
     if db_manager is None and session is None:
@@ -151,8 +72,6 @@ async def _get_git_history_impl(
     tenant_key: str,
     commits: int,
 ) -> dict[str, Any]:
-    """Inner implementation for get_git_history using a provided session."""
-    # Verify product exists for tenant isolation
     stmt = select(Product).where(Product.id == product_id, Product.tenant_key == tenant_key)
     result = await session.execute(stmt)
     product = result.scalar_one_or_none()
@@ -175,8 +94,6 @@ async def _get_git_history_impl(
             },
         }
 
-    # BE-9103: canonical toggle read — settings integrations.git_integration.enabled,
-    # not the legacy per-product product_memory blob (which the current UI never writes).
     git_enabled = await SettingsService(session, tenant_key).git_integration_enabled()
 
     if not git_enabled:
@@ -200,9 +117,8 @@ async def _get_git_history_impl(
             },
         }
 
-    # Use service to fetch git commits from table
     memory_service = ProductMemoryService(
-        db_manager=None,  # session provided directly
+        db_manager=None,
         tenant_key=tenant_key,
     )
     all_commits = await memory_service.get_git_history(
@@ -231,10 +147,8 @@ async def _get_git_history_impl(
             },
         }
 
-    # Repository already returns sorted commits (newest first) and limited
     filtered_commits = all_commits
 
-    # Calculate token estimate
     total_tokens = estimate_tokens(filtered_commits)
 
     logger.info(
@@ -257,6 +171,6 @@ async def _get_git_history_impl(
             "total_commits": len(all_commits),
             "returned_commits": len(filtered_commits),
             "git_integration_enabled": True,
-            "pagination_supported": False,  # Reserved for future implementation
+            "pagination_supported": False,
         },
     }

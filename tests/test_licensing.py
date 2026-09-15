@@ -19,11 +19,6 @@ def test_ce_validator_returns_ce_edition():
 
 
 def test_ce_validator_has_no_seat_limit_under_elv2():
-    """Under Elastic License 2.0 there is no per-user gate. seat_limit=None
-    signals unlimited (within ELv2's three restrictions: no managed-service
-    redistribution, no license-key tampering, no notice removal). The old
-    GiljoAI Community License v1.1 enforced seat_limit=1 — that was retired
-    on 2026-05-07."""
     result = LicenseValidator().validate()
     assert result.seat_limit is None
 

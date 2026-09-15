@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-User Management API endpoints.
-
-Provides REST API for comprehensive user CRUD operations:
-- List all users (admin only, filtered by tenant)
-- Create new user (admin only)
-- Get user details (admin or self)
-- Update user profile (admin or self)
-- Soft-delete user (admin only)
-- Change user role (admin only)
-- Change password (self or admin)
-- Field Toggle Configuration (Handover 0048, 0820):
-  - GET /me/field-priority: Get user's toggle config or defaults
-  - PUT /me/field-priority: Update user's field toggle config
-  - POST /me/field-priority/reset: Reset to system defaults
-
-All endpoints enforce role-based access control and multi-tenant isolation.
-"""
 
 import logging
 from typing import Any, Literal
@@ -63,7 +45,6 @@ class UserCreate(BaseModel):
     @field_validator("role")
     @classmethod
     def validate_role(cls, v: str) -> str:
-        """Validate role is one of allowed values"""
         allowed_roles = ["admin", "developer", "viewer"]
         if v not in allowed_roles:
             raise ValueError(f"Role must be one of: {', '.join(allowed_roles)}")
@@ -92,7 +73,6 @@ class UserResponse(BaseModel):
     email: str | None
     first_name: str | None = None
     last_name: str | None = None
-    # full_name retained for one release as a derived/legacy display field.
     full_name: str | None
     role: str
     tenant_key: str
@@ -116,7 +96,6 @@ class RoleChange(BaseModel):
     @field_validator("role")
     @classmethod
     def validate_role(cls, v: str) -> str:
-        """Validate role is one of allowed values"""
         allowed_roles = ["admin", "developer", "viewer"]
         if v not in allowed_roles:
             raise ValueError(f"Role must be one of: {', '.join(allowed_roles)}")
@@ -167,14 +146,6 @@ class FieldPriorityConfig(BaseModel):
     @field_validator("priorities")
     @classmethod
     def validate_toggle_values(cls, v: dict[str, Any]) -> dict[str, Any]:
-        """
-        Validate toggle configuration.
-
-        Rules:
-        1. Toggle values must be boolean (or dict with 'toggle' key)
-        2. Valid categories only
-        3. At least one category must be enabled
-        """
         valid_categories = {
             "product_core",
             "vision_documents",
@@ -187,12 +158,10 @@ class FieldPriorityConfig(BaseModel):
             "testing",
         }
 
-        # Validate category names
         invalid_categories = set(v.keys()) - valid_categories
         if invalid_categories:
             raise ValueError(f"Invalid category names: {invalid_categories}. Valid categories: {valid_categories}")
 
-        # Validate toggle values and check at least one enabled
         has_enabled = False
         for category, value in v.items():
             if isinstance(value, dict):
@@ -210,8 +179,6 @@ class FieldPriorityConfig(BaseModel):
                     f"Invalid value for '{category}': {value}. Must be {{'toggle': true/false}} or a flat boolean"
                 )
 
-        # product_core and project_description are always-on and never sent
-        # in the payload, so all toggleable categories being disabled is valid
         always_on = {"product_core", "project_description"}
         has_always_on = bool(always_on & set(v.keys()))
         if not has_enabled and has_always_on:
@@ -273,11 +240,9 @@ class UpdateDepthConfigRequest(BaseModel):
     depth_config: DepthConfig
 
 
-# Helper Functions
 
 
 def user_to_response(user: User) -> UserResponse:
-    """Convert User model to UserResponse (excludes password)"""
     return UserResponse(
         id=str(user.id),
         username=user.username,
@@ -293,10 +258,8 @@ def user_to_response(user: User) -> UserResponse:
     )
 
 
-# API Endpoints
 
 
-# TENANT-LEVEL
 @router.get("/", response_model=list[UserResponse])
 async def list_users(
     current_user: User = Depends(require_admin), user_service: UserService = Depends(get_user_service)
@@ -333,16 +296,13 @@ async def list_users(
         sanitize(current_user.tenant_key),
     )
 
-    # Tenant-scoped: admin sees only users in their own tenant (SEC-0005a)
     users = await user_service.list_users(tenant_key=current_user.tenant_key)
 
     logger.info("Found %d users in tenant %s", len(users), sanitize(current_user.tenant_key))
 
-    # 0731d: UserService returns list[User] ORM objects - use attribute access
     return [user_to_response(user) for user in users]
 
 
-# TENANT-LEVEL
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user(
     user_data: UserCreate,
@@ -367,15 +327,6 @@ async def create_user(
         AuthorizationError: User is not admin (403)
         BaseGiljoError: Database operation failed (500)
     """
-    # IMP-5042: adding ADDITIONAL users (multi-seat) is gated to editions that
-    # support it. No shipping edition does today — CE is single-user (self-hosted
-    # license) and SaaS Solo is single-seat — so this returns 403, matching the
-    # hidden "Add User" button in the dashboard. It re-opens automatically for the
-    # future SaaS Team tier via member_management_enabled(). This is the second of
-    # two admin user-creation surfaces (the other is POST /api/auth/register);
-    # both gate on the same edition policy. The gate lives at this boundary so
-    # UserService.create_user stays a capability-agnostic mechanism reused by
-    # bootstrap, provisioning, and tests.
     from api.app_state import member_management_enabled
 
     if not member_management_enabled():
@@ -390,12 +341,6 @@ async def create_user(
 
     logger.debug("Admin %s creating user: %s", sanitize(current_user.username), sanitize(user_data.username))
 
-    # SEC (v1.1.9.2): pass the admin-supplied password through. The historical
-    # `password=None` here silently dropped the validated UserCreate.password and
-    # caused every user created via the admin UI to be hashed against the literal
-    # "GiljoMCP". Pydantic UserCreate already enforces min_length=8 — no extra
-    # validation needed here. UserService.create_user raises ValidationError on
-    # missing/empty password as defense-in-depth.
     user = await user_service.create_user(
         username=user_data.username,
         email=user_data.email,
@@ -413,7 +358,6 @@ async def create_user(
         sanitize(current_user.tenant_key),
     )
 
-    # 0731d: UserService returns User ORM object - use helper
     return user_to_response(user)
 
 
@@ -444,12 +388,9 @@ async def get_user(
     """
     logger.debug("User %s retrieving user %s", sanitize(current_user.username), sanitize(str(user_id)))
 
-    # Tenant-scoped lookup: admins can manage users only within their own tenant (SEC-0005a)
     is_admin = current_user.role == "admin"
     user = await user_service.get_user(str(user_id))
 
-    # 0731d: UserService returns User ORM object - use attribute access
-    # Authorization: admin can view any user in tenant, non-admin can only view self
     if not is_admin and str(user.id) != str(current_user.id):
         logger.warning("Non-admin %s tried to view user %s", sanitize(current_user.username), sanitize(user.username))
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot view other users' profiles")
@@ -487,23 +428,16 @@ async def update_user(
     """
     logger.debug("User %s updating user %s", sanitize(current_user.username), sanitize(str(user_id)))
 
-    # SEC-9170: a leaked API key / OAuth Bearer must not mutate account-security
-    # fields (password/email/is_active/recovery_pin); require a browser session.
-    # recovery_pin is additionally refused in hosted SaaS (CE-only boundary).
     enforce_sensitive_account_field_guard(request, user_data)
 
-    # Tenant-scoped update: admins can manage users only within their own tenant (SEC-0005a)
     is_admin = current_user.role == "admin"
 
-    # Authorization: admin can update any user in tenant, non-admin can only update self
     user = await user_service.get_user(str(user_id))
 
-    # 0731d: UserService returns User ORM object - use attribute access
     if not is_admin and str(user.id) != str(current_user.id):
         logger.warning("Non-admin %s tried to update user %s", sanitize(current_user.username), sanitize(user.username))
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot update other users' profiles")
 
-    # Build updates dict (only include non-None values)
     updates = {}
     if user_data.username is not None:
         updates["username"] = user_data.username
@@ -518,7 +452,6 @@ async def update_user(
     if user_data.password is not None:
         updates["password"] = user_data.password
 
-    # PIN write routes through UserService (tenant-scoped, single-field allowlist) — BE-6003
     if user_data.recovery_pin is not None:
         await user_service.set_recovery_pin(str(user_id), user_data.recovery_pin)
 
@@ -529,7 +462,6 @@ async def update_user(
     return user_to_response(updated_user)
 
 
-# TENANT-LEVEL
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: UUID,
@@ -558,7 +490,6 @@ async def delete_user(
     logger.info("Deactivated user: %s", sanitize(str(user_id)))
 
 
-# TENANT-LEVEL
 @router.put("/{user_id}/role", response_model=RoleChangeResponse)
 async def change_user_role(
     user_id: UUID,
@@ -590,7 +521,6 @@ async def change_user_role(
         f"Admin {sanitize(current_user.username)} changing role for user {sanitize(user_id)} to {sanitize(role_data.role)}"
     )
 
-    # Prevent self-demotion (admin cannot change their own role)
     if str(user_id) == str(current_user.id):
         logger.warning(f"Admin {current_user.username} tried to change their own role")
         raise HTTPException(
@@ -598,7 +528,6 @@ async def change_user_role(
             detail="You cannot change your own role (prevents lockout)",
         )
 
-    # 0731d: UserService returns User ORM object - use attribute access
     user = await user_service.auth.change_role(str(user_id), role_data.role)
 
     logger.info(f"Changed role for user {user.username} to {user.role}")
@@ -685,14 +614,12 @@ async def change_password(
     """
     logger.debug(f"User {sanitize(current_user.username)} changing password for user {sanitize(user_id)}")
 
-    # Authorization: admin can change any password, non-admin can only change own
     if current_user.role != "admin" and str(user_id) != str(current_user.id):
         logger.warning(
             f"Non-admin {sanitize(current_user.username)} tried to change password for user {sanitize(user_id)}"
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot change other users' passwords")
 
-    # Determine if admin is bypassing old password check
     is_admin = current_user.role == "admin" and str(user_id) != str(current_user.id)
 
     await user_service.auth.change_password(
@@ -702,12 +629,6 @@ async def change_password(
         is_admin=is_admin,
     )
 
-    # SEC-6001: a password change must invalidate the session that performed it.
-    # Revoke the requester's presented access token by jti so the old cookie
-    # cannot continue to authenticate after the credential changed. Admin
-    # changing ANOTHER user's password cannot revoke that user's tokens by jti
-    # (no token in hand) — those roll off at expiry; this closes the
-    # self-service path, which is the common case.
     if str(user_id) == str(current_user.id):
         access_token = request.cookies.get("access_token")
         if access_token:
@@ -719,7 +640,6 @@ async def change_password(
     return PasswordChangeResponse(message="Password changed successfully")
 
 
-# Field Toggle Configuration Endpoints (Handover 0048, 0820)
 
 
 @router.get("/me/field-priority", response_model=FieldPriorityConfig)
@@ -806,7 +726,6 @@ async def update_field_priority_config(
         },
     )
 
-    # Validate: git_history cannot be enabled when git_integration is disabled
     git_history_entry = config.priorities.get("git_history")
     if git_history_entry:
         wants_git_history = (
@@ -822,7 +741,6 @@ async def update_field_priority_config(
                     "Enable git integration first via Settings > Integrations.",
                 )
 
-    # Pydantic validation already enforced (toggle booleans, valid categories, at least one enabled)
     await user_service.update_field_priority_config(str(current_user.id), config.model_dump())
 
     logger.info(
@@ -875,12 +793,10 @@ async def reset_field_priority_config(
 
     logger.info(f"Reset field toggle config to defaults for user: {current_user.username}")
 
-    # Return defaults by re-reading from service (which returns defaults when no rows exist)
     config = await user_service.get_field_priority_config(str(current_user.id))
     return FieldPriorityConfig(**config)
 
 
-# Depth Configuration Endpoints (Handover 0314)
 
 
 @router.get("/me/context/depth", response_model=dict[str, Any])
@@ -973,9 +889,6 @@ async def update_depth_config(
         extra={"user_id": str(current_user.id), "tenant_key": current_user.tenant_key},
     )
 
-    # BE-9322: every DepthConfig field has a default, so a plain model_dump()
-    # turned a partial body into a six-key overwrite. The service already
-    # merges per key; exclude_unset is what makes the merge reach it.
     await user_service.update_depth_config(
         str(current_user.id), depth_request.depth_config.model_dump(exclude_unset=True)
     )
@@ -985,17 +898,10 @@ async def update_depth_config(
         extra={"user_id": str(current_user.id), "tenant_key": current_user.tenant_key},
     )
 
-    # Get updated config from service
     config = await user_service.get_depth_config(str(current_user.id))
 
     return {"depth_config": config}
 
 
-# ---------------------------------------------------------------------------
-# Notification preferences (Handover 0831). FE-9553 moved both handlers to
-# users_notification_prefs.py -- this module is on the shrink-only size budget
-# and three new preferences took it over. The sub-router carries no prefix, so
-# the paths are unchanged.
-# ---------------------------------------------------------------------------
 
 router.include_router(users_notification_prefs_router)

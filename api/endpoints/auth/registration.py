@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""User-registration endpoints: admin-only register + first-admin bootstrap.
-
-Extracted verbatim from api/endpoints/auth.py (BE-6042f route-group split).
-The in-function imports of ``member_management_enabled`` / ``GILJO_MODE`` from
-api.app_state are PRESERVED on purpose — the edition-gate tests rebind those
-symbols via patch/importlib.reload, which only works if they are imported at
-call time, not module load time.
-"""
 
 import asyncio
 import logging
@@ -24,7 +16,6 @@ from giljo_mcp.auth.dependencies import require_admin
 from giljo_mcp.database import tenant_session_context
 from giljo_mcp.models import User
 from giljo_mcp.services import AuthService
-from giljo_mcp.template_seeder import seed_tenant_templates
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 from .models import RegisterUserRequest, RegisterUserResponse
@@ -34,16 +25,9 @@ from .session import _build_cookie_params
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Security: Application-level lock to prevent concurrent first admin creation
-# Protects against race condition where multiple requests check user count simultaneously
-# and both create admin accounts (Handover 0034 security fix)
 _first_admin_creation_lock = asyncio.Lock()
 
 
-# TENANT-LEVEL: per-user tenancy — admin creates new user, AuthService.register_user
-# generates a fresh tenant_key per registrant via TenantManager.generate_tenant_key(username).
-# Hidden today for both CE (single-user license) and SaaS Solo (single-user plan);
-# forward-looking scaffolding to re-open for the SaaS Team tier (see GILJO_MODE gate below).
 @router.post("/register", response_model=RegisterUserResponse, status_code=status.HTTP_201_CREATED, tags=["auth"])
 async def register_user(
     http_request: Request,
@@ -72,12 +56,6 @@ async def register_user(
         HTTPException: 403 if not admin
         HTTPException: 429 if rate limit exceeded
     """
-    # IMP-5042: multi-user creation is gated to editions that support it. No
-    # shipping edition does today (CE single-user license, SaaS Solo single-seat),
-    # so this 403s — matching POST /api/v1/users/ and the hidden dashboard "Add
-    # User" button. Re-opens automatically for the future SaaS Team tier via the
-    # single edition-policy flip point member_management_enabled(). Gate before
-    # spending rate-limit budget on a permanently-unavailable feature.
     from api.app_state import member_management_enabled
 
     if not member_management_enabled():
@@ -86,11 +64,9 @@ async def register_user(
             detail="Adding additional users isn't available on this plan.",
         )
 
-    # Rate limiting: 3 attempts per minute (Handover 1009)
     rate_limiter = get_rate_limiter()
     await rate_limiter.check_rate_limit(http_request, limit=limit_for("register"), window=60, raise_on_limit=True)
 
-    # BE-6109: capture client IP (proxy-aware) for audit / abuse signal.
     forwarded = http_request.headers.get("X-Forwarded-For")
     if forwarded:
         registration_ip: str | None = forwarded.split(",")[0].strip()
@@ -99,7 +75,6 @@ async def register_user(
             http_request.client.host if http_request.client else None
         )
 
-    # Service raises ValidationError on failure (0480 migration)
     user_data = await auth_service.register_user(
         username=request.username,
         email=request.email,
@@ -159,18 +134,11 @@ async def create_first_admin_user(
         HTTPException 400: If password doesn't meet requirements
         HTTPException 503: If database check fails (fail-secure)
     """
-    # Log client IP for audit trail (LAN access allowed for remote setup)
     client_ip = request.client.host
     logger.info(f"[SETUP] Admin creation attempt from IP: {sanitize(client_ip)}")
 
-    # IMP-0011: Gate the unauthenticated admin-creation endpoint to CE mode.
-    # In SaaS mode this endpoint must refuse -- operators bootstrap the
-    # admin user out-of-band via `python -m giljo_mcp.saas.cli.admin_bootstrap`.
     from api.app_state import GILJO_MODE
 
-    # CE is "" (default/unset) OR "ce" — canonical edition idiom (downloads.py
-    # `in ("", "ce")`, startup.py:1010). `!= "ce"` alone wrongly 403'd a CE
-    # self-hoster on GILJO_MODE="" and could not bootstrap their first admin.
     if GILJO_MODE not in ("", "ce"):
         logger.warning(
             "[SETUP] /auth/create-first-admin refused in mode=%s from IP=%s",
@@ -185,19 +153,10 @@ async def create_first_admin_user(
             ),
         )
 
-    # BE-6063f: this is an unauthenticated POST that mints an admin + tenant +
-    # seeds templates. Rate-limit per IP so a fresh install can't be hammered.
-    # (CE localhost is exempt inside check_rate_limit, so the operator's own
-    # setup from 127.0.0.1 is never throttled.)
     rate_limiter = get_rate_limiter()
     await rate_limiter.check_rate_limit(request, limit=limit_for("create_first_admin"), window=60, raise_on_limit=True)
 
-    # CRITICAL SECURITY FIX (Handover 0034): Acquire lock to prevent race condition
-    # Without this lock, multiple concurrent requests could all check user_count == 0
-    # simultaneously and create multiple admin accounts
     async with _first_admin_creation_lock:
-        # Create first admin via service (includes all security checks)
-        # Service raises ValidationError on failure (0480 migration)
         admin_data = await auth_service.create_first_admin(
             username=request_body.username,
             email=request_body.email,
@@ -205,13 +164,12 @@ async def create_first_admin_user(
             full_name=None,
             first_name=request_body.first_name,
             last_name=request_body.last_name,
-            org_name=request_body.workspace_name,  # Handover 0424h
+            org_name=request_body.workspace_name,
         )
 
         token = admin_data.token
         tenant_key = admin_data.tenant_key
 
-        # Save recovery PIN if provided during admin creation
         if request_body.recovery_pin:
             if request_body.recovery_pin != request_body.confirm_pin:
                 raise HTTPException(status_code=400, detail="Recovery PINs do not match")
@@ -225,13 +183,6 @@ async def create_first_admin_user(
             async with db_manager.get_session_async() as db:
                 from sqlalchemy import select
 
-                # Tenant-scoped: under the fail-closed isolation guard, every ORM
-                # statement touching User requires tenant *context* (not just a
-                # predicate). Use the just-created admin's tenant_key (mirrors the
-                # refresh handler above). Without this the lookup raised
-                # TenantIsolationError -> HTTP 500 and the PIN was silently never
-                # saved, because auth_service.create_first_admin already committed
-                # the admin row before this block runs.
                 with tenant_session_context(db, tenant_key):
                     stmt = select(User).where(User.username == request_body.username)
                     result = await db.execute(stmt)
@@ -243,25 +194,7 @@ async def create_first_admin_user(
                         await db.commit()
                         logger.info(f"[SETUP] Recovery PIN set for admin user: {sanitize(request_body.username)}")
 
-        # Seed default agent templates for this tenant (Handover 0041 Phase 2)
-        # CRITICAL: Templates are seeded with the user's tenant_key (not default_tenant_key)
-        # This ensures templates appear in UI immediately after user creation
-        try:
-            # Need to get db session for template seeding
 
-            from api.endpoints.dependencies import get_db_manager
-
-            db_manager = await get_db_manager()
-            async with db_manager.get_session_async() as db:
-                template_count = await seed_tenant_templates(db, tenant_key)
-                await db.commit()  # Ensure templates are persisted
-            logger.info(f"[SETUP] Seeded {template_count} default agent templates for tenant {tenant_key[:12]}...")
-        except (ImportError, ValueError) as e:
-            # Non-blocking - templates can be added later via UI
-            logger.warning(f"[SETUP] Template seeding failed (non-critical): {e}")
-            template_count = 0
-
-        # Set httpOnly cookie for immediate login (same pattern as login endpoint)
         cookie_params = _build_cookie_params(request)
         response.set_cookie(value=token, **cookie_params)
 

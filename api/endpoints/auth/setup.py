@@ -3,10 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Setup-wizard state endpoint (Handover 0855a).
-
-Extracted verbatim from api/endpoints/auth.py (BE-6042f route-group split).
-"""
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,8 +33,6 @@ async def update_setup_state(
         current_user.setup_complete = payload.setup_complete
     if payload.learning_complete is not None:
         current_user.learning_complete = payload.learning_complete
-    # BE-9201: onboarding-tutorial re-entry state (validated by SetupStateUpdate:
-    # learning_beat 1-6, router_choice A|B|C|D).
     if payload.learning_beat is not None:
         current_user.learning_beat = payload.learning_beat
     if payload.router_choice is not None:

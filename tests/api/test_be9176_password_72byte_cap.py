@@ -3,38 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9176 — password-SET paths 500 on passwords over bcrypt's 72-UTF-8-byte limit.
-
-Password-set schemas advertised ``max_length=128`` CHARACTERS (or no cap at
-all) while bcrypt >= 4 raises ``ValueError`` on any secret over 72 UTF-8
-BYTES — so setting a 73-128-char (or shorter multibyte, e.g. emoji) password
-passed validation and 500'd at ``async_hash_password``. SEC-9174 #6 already
-fail-closed the VERIFY side; this is the WRITE side.
-
-Fix under test: every password-set schema caps at 72 (``max_length=72`` chars
-as the advertised bound, plus the shared ``validate_password_byte_length``
-check for multibyte strings that fit 72 chars but exceed 72 bytes), so the
-reject is a clean 422 at the validation boundary.
-
-Failing-layer regression tests (the bug lived at the validation boundary —
-the schema admitted what the hasher cannot take), driven through the FastAPI
-routes that reach the hash call:
-
-  - PUT /api/v1/users/{user_id}/password          (change-password)
-  - POST /api/auth/verify-pin-and-reset-password  (CE recovery-PIN reset)
-  - POST /api/auth/complete-first-login           (first-login password set)
-
-The register endpoints are gated BEFORE their hash call (/api/auth/register
-403s via member_management_enabled(); /api/auth/create-first-admin only runs
-on an empty users table), so the register-path cap is proven at the schema
-layer (RegisterUserRequest / UserCreate) — the exact layer the fix lives at.
-
-Two-sided: a password of exactly 72 UTF-8 bytes (ASCII and multibyte) still
-validates and the route flows still succeed end-to-end.
-
-Parallel-safe: unique tenant/user per test, monkeypatch-only module patching,
-no module-level mutable state.
-"""
 
 from __future__ import annotations
 
@@ -51,11 +19,8 @@ from giljo_mcp.auth.jwt_manager import JWTManager
 OLD_PASSWORD = "OldPassword1!"
 RECOVERY_PIN = "4242"
 
-# 100 chars = 100 UTF-8 bytes: inside the old advertised 128-char cap, over bcrypt's 72.
 LONG_ASCII_100 = "Aa1!" + "x" * 96
-# 24 chars but 4 + 20*4 = 84 UTF-8 bytes: fits ANY character cap, over bcrypt's 72 bytes.
 EMOJI_OVER_72_BYTES = "Aa1!" + "\U0001f600" * 20
-# Boundary passes: exactly 72 bytes, ASCII (72 chars) and multibyte (21 chars).
 EXACT_72_BYTES_ASCII = "Aa1!" + "x" * 68
 EXACT_72_BYTES_EMOJI = "Aa1!" + "\U0001f600" * 17
 
@@ -66,20 +31,15 @@ _CSRF = secrets.token_urlsafe(32)
 
 
 def test_password_constants_byte_math():
-    """Guard the fixture math the whole module leans on."""
     assert len(LONG_ASCII_100) == 100 and len(LONG_ASCII_100.encode("utf-8")) == 100
     assert len(EMOJI_OVER_72_BYTES) <= 72 and len(EMOJI_OVER_72_BYTES.encode("utf-8")) == 84
     assert len(EXACT_72_BYTES_ASCII.encode("utf-8")) == 72
     assert len(EXACT_72_BYTES_EMOJI) <= 72 and len(EXACT_72_BYTES_EMOJI.encode("utf-8")) == 72
 
 
-# ---------------------------------------------------------------------------
-# Route helpers (sec9047/sec9084 pattern)
-# ---------------------------------------------------------------------------
 
 
 async def _seed_user(db_manager, *, with_pin: bool = False, must_change_password: bool = False) -> tuple[str, str, str]:
-    """Create org+user; return (user_id, username, tenant_key)."""
     from giljo_mcp.models.auth import User
     from giljo_mcp.models.organizations import Organization
     from giljo_mcp.tenant import TenantManager
@@ -122,7 +82,6 @@ async def _seed_user(db_manager, *, with_pin: bool = False, must_change_password
 
 
 def _cookie_headers(token: str) -> dict:
-    """Cookie-auth headers with the CSRF double-submit pair (conftest pattern)."""
     return {
         "Cookie": f"access_token={token}; csrf_token={_CSRF}",
         "X-CSRF-Token": _CSRF,
@@ -145,7 +104,6 @@ class _NoopRateLimiter:
 
 
 def _pin_route_patches(monkeypatch) -> None:
-    """CE-mode + rate-limit-free PIN recovery route (sec9047 pattern, parallel-safe)."""
     monkeypatch.setattr("api.endpoints.auth_pin_recovery.GILJO_MODE", "")
     monkeypatch.setattr("api.endpoints.auth_pin_recovery.get_rate_limiter", _NoopRateLimiter)
 
@@ -158,15 +116,11 @@ async def _persisted_password_hash(db_manager, *, tenant_key: str, user_id: str)
         return user.password_hash
 
 
-# ---------------------------------------------------------------------------
-# RED: change-password route (PUT /api/v1/users/{id}/password) — was a 500
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bad_password", OVERSIZED, ids=["ascii-100", "emoji-84-bytes"])
 async def test_change_password_route_over_72_bytes_is_422(api_client, db_manager, monkeypatch, bad_password):
-    """A >72-UTF-8-byte new password on the change-password route is a 422, not a 500."""
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     user_id, username, tk = await _seed_user(db_manager)
 
@@ -180,7 +134,6 @@ async def test_change_password_route_over_72_bytes_is_422(api_client, db_manager
 
 @pytest.mark.asyncio
 async def test_change_password_route_exactly_72_bytes_succeeds(api_client, db_manager, monkeypatch):
-    """Boundary GREEN: exactly-72-byte password changes fine and is the persisted credential."""
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     user_id, username, tk = await _seed_user(db_manager)
 
@@ -196,15 +149,11 @@ async def test_change_password_route_exactly_72_bytes_succeeds(api_client, db_ma
     assert not bcrypt.checkpw(OLD_PASSWORD.encode("utf-8"), password_hash.encode("utf-8"))
 
 
-# ---------------------------------------------------------------------------
-# RED: CE recovery-PIN reset route — was a 500
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bad_password", OVERSIZED, ids=["ascii-100", "emoji-84-bytes"])
 async def test_pin_reset_route_over_72_bytes_is_422(api_client, db_manager, monkeypatch, bad_password):
-    """A valid PIN with a >72-byte new password is a 422 at validation, not a 500 at the hash."""
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     _pin_route_patches(monkeypatch)
     _, username, _ = await _seed_user(db_manager, with_pin=True)
@@ -223,7 +172,6 @@ async def test_pin_reset_route_over_72_bytes_is_422(api_client, db_manager, monk
 
 @pytest.mark.asyncio
 async def test_pin_reset_route_exactly_72_bytes_succeeds(api_client, db_manager, monkeypatch):
-    """Boundary GREEN: a 72-byte multibyte password resets fine through the PIN route."""
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     _pin_route_patches(monkeypatch)
     user_id, username, tk = await _seed_user(db_manager, with_pin=True)
@@ -243,15 +191,11 @@ async def test_pin_reset_route_exactly_72_bytes_succeeds(api_client, db_manager,
     assert bcrypt.checkpw(EXACT_72_BYTES_EMOJI.encode("utf-8"), password_hash.encode("utf-8"))
 
 
-# ---------------------------------------------------------------------------
-# RED: first-login password-set route — was a 500
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bad_password", OVERSIZED, ids=["ascii-100", "emoji-84-bytes"])
 async def test_complete_first_login_over_72_bytes_is_422(api_client, db_manager, monkeypatch, bad_password):
-    """A >72-byte first-login password is a 422, not a 500."""
     monkeypatch.setenv("JWT_SECRET", "test_secret_key")
     user_id, username, tk = await _seed_user(db_manager, must_change_password=True)
 
@@ -267,10 +211,6 @@ async def test_complete_first_login_over_72_bytes_is_422(api_client, db_manager,
     assert resp.status_code == 422, f"expected 422, got {resp.status_code}: {resp.text}"
 
 
-# ---------------------------------------------------------------------------
-# Schema layer: every CE password-set schema rejects >72 bytes, accepts ==72
-# (register endpoints are gated pre-hash, so this IS their failing layer)
-# ---------------------------------------------------------------------------
 
 
 def _schema_cases():

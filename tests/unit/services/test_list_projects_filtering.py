@@ -3,26 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Unit tests for v1.2.1 list_projects server-side filtering contract.
-
-Covers ProjectService.list_projects_for_mcp() new parameter surface:
-- status: str | list[str] | None
-- project_type: str | list[str] | None
-- taxonomy_alias_prefix: str | None
-- created_after / created_before: datetime | None
-- completed_after / completed_before: datetime | None
-- include_completed: bool (default False) -- new lifecycle filter
-- hidden: bool | None
-
-Default behavior change (BREAKING):
-- status=None AND include_completed=False  ->  exclude {completed, cancelled}
-- status explicitly set                    ->  user wins, ignore include_completed
-- hidden defaults to None (do NOT auto-hide hidden projects)
-
-Tenant isolation: every test passes an explicit tenant_key. Cross-tenant
-test confirms tenant_key flows through unchanged.
-"""
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock, patch
@@ -43,9 +23,6 @@ _TENANT_B = "tenant-bbb"
 _PRODUCT_SERVICE_PATH = "giljo_mcp.services.product_service.ProductService"
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _make_service(tenant_key: str) -> ProjectService:
@@ -55,7 +32,7 @@ def _make_service(tenant_key: str) -> ProjectService:
     db_manager.get_tenant_session_async = Mock(return_value=mock_session)
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=False)
-    mock_session.info = {}  # tenant_session_context save/restore target
+    mock_session.info = {}
     mock_result = Mock()
     mock_result.scalars = Mock(return_value=Mock(all=Mock(return_value=[])))
     mock_session.execute = AsyncMock(return_value=mock_result)
@@ -84,7 +61,6 @@ def _make_item(
     completed_at: datetime | None = None,
     tenant_key: str = _TENANT_A,
 ) -> ProjectListItem:
-    """Build a ProjectListItem with the fields list_projects_for_mcp consumes."""
     created = (created_at or datetime(2026, 1, 1, tzinfo=UTC)).isoformat()
     completed_iso = completed_at.isoformat() if completed_at else None
     type_info = (
@@ -115,18 +91,11 @@ def _make_item(
 
 
 def _patch_active_product(product_id: str = "prod-001"):
-    """Return a contextmanager-style patch object setting an active product."""
     p = patch(_PRODUCT_SERVICE_PATH)
     return p, product_id
 
 
 async def _call_with_items(service: ProjectService, items, **kwargs):
-    """Run list_projects_for_mcp with list_projects() returning the given items.
-
-    The inner ``list_projects`` mock simulates the repo's SQL pushdown: when
-    called with ``status=<value|list>``, it returns only items whose status
-    matches. This mirrors what the real repo does after the seq 161 fix.
-    """
     mock_product = Mock()
     mock_product.id = kwargs.pop("active_product_id", "prod-001")
 
@@ -163,44 +132,25 @@ async def _call_with_items(service: ProjectService, items, **kwargs):
         ),
     ):
         mock_product_svc.return_value.get_default_product = AsyncMock(return_value=mock_product)
-        # BE-9499a: list_projects_for_mcp resolves through resolve_binding_product now
-        # (byte-identical result for an omitted product_id -- the active product).
         mock_product_svc.return_value.resolve_binding_product = AsyncMock(return_value=mock_product)
         result = await service.list_projects_for_mcp(tenant_key=_TENANT_A, **kwargs)
     return result, list_proj_mock
 
 
-# ---------------------------------------------------------------------------
-# Constant exposure
-# ---------------------------------------------------------------------------
 
 
 class TestLifecycleFinishedConstant:
     def test_lifecycle_finished_constant_exposed(self):
-        # BE-5037 follow-up: all lifecycle-finished statuses so the default
-        # exclusion bucket matches the frontend StatusBadge enum. BE-9157 added
-        # ``superseded`` (a replaced-by-successor terminal state).
         assert (
             frozenset({"completed", "cancelled", "terminated", "deleted", "superseded"}) == LIFECYCLE_FINISHED_STATUSES
         )
 
 
-# ---------------------------------------------------------------------------
-# Default behavior (BREAKING change)
-# ---------------------------------------------------------------------------
 
 
 class TestDefaultLifecycleFilter:
     @pytest.mark.asyncio
     async def test_default_excludes_all_lifecycle_finished(self):
-        """BE-5037 follow-up: default exclusion covers the full finished set
-        {completed, cancelled, terminated, deleted}.
-
-        On the test install at the time of this test, two projects (INF-0002 Ops Panel
-        and BE-5006 BE-SPRINT-002f) carry status=='terminated'. Before this
-        change they leaked through the default response because terminated was
-        not in the exclusion bucket; now they are filtered out by default.
-        """
         service = _make_service(_TENANT_A)
         items = [
             _make_item(project_id="a", status="active"),
@@ -212,8 +162,6 @@ class TestDefaultLifecycleFilter:
         ]
         result, _ = await _call_with_items(service, items)
         ids = {p["project_id"] for p in result["projects"]}
-        # 6 in -> 2 out (active + inactive). Mirrors the test-install 24->22 drop:
-        # the two terminated rows are excluded by default.
         assert ids == {"a", "b"}, "Default must exclude completed, cancelled, terminated, deleted"
 
     @pytest.mark.asyncio
@@ -241,7 +189,6 @@ class TestDefaultLifecycleFilter:
 
     @pytest.mark.asyncio
     async def test_explicit_status_overrides_include_completed(self):
-        """When status is explicitly set, include_completed is ignored."""
         service = _make_service(_TENANT_A)
         items = [
             _make_item(project_id="c1", status="completed"),
@@ -253,9 +200,6 @@ class TestDefaultLifecycleFilter:
         assert ids == {"c1", "c2"}
 
 
-# ---------------------------------------------------------------------------
-# Status filter
-# ---------------------------------------------------------------------------
 
 
 class TestStatusFilter:
@@ -285,7 +229,6 @@ class TestStatusFilter:
         service = _make_service(_TENANT_A)
         with pytest.raises(ValidationError) as exc_info:
             await service.list_projects_for_mcp(tenant_key=_TENANT_A, status="bogus")
-        # Error message must list valid values
         assert "active" in str(exc_info.value)
         assert "bogus" in str(exc_info.value)
 
@@ -297,10 +240,6 @@ class TestStatusFilter:
 
     @pytest.mark.asyncio
     async def test_status_terminated_returns_only_terminated(self):
-        """BE-5037 follow-up: status='terminated' must be a valid filter value
-        (was rejected as 'bogus' by the v1.2.1 4-value enum). Returns only
-        rows where status=='terminated'.
-        """
         service = _make_service(_TENANT_A)
         items = [
             _make_item(project_id="a", status="active"),
@@ -313,30 +252,16 @@ class TestStatusFilter:
 
     @pytest.mark.asyncio
     async def test_status_deleted_filter_validates(self):
-        """status='deleted' must validate (no ValidationError).
-
-        At runtime, ProjectRepository.list_projects() special-cases
-        status='deleted' by switching the soft-delete clause from
-        deleted_at IS NULL (default) to deleted_at IS NOT NULL when the
-        caller supplies that status, so soft-deleted rows ARE reachable
-        when the agent asks for them by status. This unit test pins the
-        validation contract and the in-memory status filter; the
-        repository-layer reachability is covered by repository tests.
-        """
         service = _make_service(_TENANT_A)
         items = [
             _make_item(project_id="a", status="active"),
             _make_item(project_id="d1", status="deleted"),
         ]
         result, _ = await _call_with_items(service, items, status="deleted")
-        # Only the deleted row should pass the in-memory status filter.
         assert {p["project_id"] for p in result["projects"]} == {"d1"}
 
     @pytest.mark.asyncio
     async def test_status_validation_error_lists_all_six_values(self):
-        """Validation message must enumerate all 6 valid statuses so agents
-        get an actionable error.
-        """
         service = _make_service(_TENANT_A)
         with pytest.raises(ValidationError) as exc_info:
             await service.list_projects_for_mcp(tenant_key=_TENANT_A, status="bogus")
@@ -352,9 +277,6 @@ class TestStatusFilter:
             assert expected in msg, f"Validation message missing '{expected}': {msg}"
 
 
-# ---------------------------------------------------------------------------
-# Project type filter
-# ---------------------------------------------------------------------------
 
 
 class TestProjectTypeFilter:
@@ -410,9 +332,6 @@ class TestProjectTypeFilter:
         assert "BOGUS" in str(exc_info.value)
 
 
-# ---------------------------------------------------------------------------
-# Taxonomy alias prefix
-# ---------------------------------------------------------------------------
 
 
 class TestTaxonomyAliasPrefix:
@@ -439,9 +358,6 @@ class TestTaxonomyAliasPrefix:
         assert {p["project_id"] for p in result["projects"]} == {"x1"}
 
 
-# ---------------------------------------------------------------------------
-# Date range filters
-# ---------------------------------------------------------------------------
 
 
 class TestDateRangeFilters:
@@ -485,9 +401,6 @@ class TestDateRangeFilters:
         assert {p["project_id"] for p in result["projects"]} == {"late"}
 
 
-# ---------------------------------------------------------------------------
-# Combination filters
-# ---------------------------------------------------------------------------
 
 
 class TestCombinationFilters:
@@ -513,9 +426,6 @@ class TestCombinationFilters:
         assert {p["project_id"] for p in result["projects"]} == {"be_active"}
 
 
-# ---------------------------------------------------------------------------
-# Hidden filter
-# ---------------------------------------------------------------------------
 
 
 class TestHiddenFilter:
@@ -546,7 +456,7 @@ class TestHiddenFilter:
             _make_item(project_id="v", hidden=False),
             _make_item(project_id="h", hidden=True),
         ]
-        result, _ = await _call_with_items(service, items)  # default hidden=None
+        result, _ = await _call_with_items(service, items)
         assert {p["project_id"] for p in result["projects"]} == {"v", "h"}
 
     @pytest.mark.asyncio
@@ -558,9 +468,6 @@ class TestHiddenFilter:
             assert "hidden" in row, "hidden column must remain in row payload"
 
 
-# ---------------------------------------------------------------------------
-# Tenant isolation
-# ---------------------------------------------------------------------------
 
 
 class TestTenantIsolation:
@@ -582,46 +489,15 @@ class TestTenantIsolation:
                 mock_product_svc.return_value.resolve_binding_product = AsyncMock(return_value=mock_product)
                 result = await service.list_projects_for_mcp(tenant_key=tenant_key)
             assert result["product_id"] == product_id
-            # tenant_key passed to the inner list_projects call
             kwargs = list_proj_mock.call_args.kwargs
             assert kwargs.get("tenant_key") == tenant_key
 
 
-# ---------------------------------------------------------------------------
-# MCP tool surface — list_projects param forwarding
-#
-# BE-6118: the pure ToolAccessor.list_projects pass-through was deleted (the
-# @mcp.tool wrapper now dispatches straight to ProjectService.list_projects_for_mcp
-# via TOOL_DISPATCH). The two former tests here asserted the deleted accessor
-# method's signature + that it forwards to the service — both are now structurally
-# guaranteed and locked elsewhere: the advertised param surface in
-# test_be6042d_mcp_tool_registry_surface.py (list_projects exposes status /
-# project_type / taxonomy_alias_prefix / include_completed / hidden / ...), the
-# service-method presence in test_be6042c_project_service_surface.py, and the
-# dispatch-to-service property in test_be3010b_registry_dispatch.py. The service's
-# own forwarding/filtering behavior stays covered by the TestListProjects* tests
-# above in this file.
-# ---------------------------------------------------------------------------
 
 
-# ---------------------------------------------------------------------------
-# Regression: list_projects vs fetch_context status agreement
-# ---------------------------------------------------------------------------
-#
-# Reported bug: list_projects(status="inactive") returned a project that
-# fetch_context(categories=["project"]) reported as status="completed". The
-# same window also showed list_projects ignoring its status filter (returning
-# all rows regardless of value). These regressions pin the contract:
-#
-#  1) The status filter must filter for EVERY canonical ProjectStatus value.
-#  2) After a status transition, the next list_projects call must reflect it
-#     (no stale cached row).
-#  3) For a given (tenant_key, project_id), list_projects and the underlying
-#     get_project read path must agree on the status value.
 
 
 class TestStatusFilterCoversEntireEnum:
-    """Parametrize over every ProjectStatus value: each must filter precisely."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -641,13 +517,6 @@ class TestStatusFilterCoversEntireEnum:
 
 
 class TestStatusTransitionReflectedInList:
-    """After a status transition, list_projects reflects the new value.
-
-    This is a read-path regression: calling list_projects twice across a
-    transition must return the row under its new status, never under the old.
-    No sleeps, no caches in between -- if a cache layer is ever introduced,
-    this test pins that it must be invalidated on write.
-    """
 
     @pytest.mark.asyncio
     async def test_transition_active_to_completed_visible_in_next_call(self):
@@ -673,14 +542,6 @@ class TestStatusTransitionReflectedInList:
 
 
 class TestListProjectsAndFetchContextAgree:
-    """list_projects rows and the underlying get_project read path agree on status.
-
-    Both paths read Project.status from the same model attribute. This
-    regression asserts that the value flowing into the list payload (via
-    ProjectListItem.status -> _build_mcp_project_list) matches the value the
-    fetch_context project category reads (get_project -> project.status).
-    Catches drift if either path ever introduces a derived/cached column.
-    """
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("status_value", ["inactive", "active", "completed"])
@@ -691,14 +552,13 @@ class TestListProjectsAndFetchContextAgree:
 
         service = _make_service(_TENANT_A)
         items = [_make_item(project_id="p-1", status=status_value)]
-        # include_completed=True so 'completed' is not excluded by the default
-        # lifecycle filter; we are testing read-path parity, not the default.
         result, _ = await _call_with_items(service, items, include_completed=True)
         list_status = next(p["status"] for p in result["projects"] if p["project_id"] == "p-1")
 
         fake_project = MagicMock()
         fake_project.name = "n"
         fake_project.alias = "abc123"
+        fake_project.taxonomy_alias = "BE-0001"
         fake_project.description = "d"
         fake_project.mission = "m"
         fake_project.status = status_value
@@ -708,7 +568,7 @@ class TestListProjectsAndFetchContextAgree:
         fake_session = AsyncMock()
         fake_session.__aenter__ = AsyncMock(return_value=fake_session)
         fake_session.__aexit__ = AsyncMock(return_value=False)
-        fake_session.info = {}  # tenant_session_context save/restore target
+        fake_session.info = {}
         fake_result = Mock()
         fake_result.scalar_one_or_none = Mock(return_value=fake_project)
         fake_session.execute = AsyncMock(return_value=fake_result)
@@ -728,14 +588,6 @@ class TestListProjectsAndFetchContextAgree:
         )
 
 
-# ---------------------------------------------------------------------------
-# Seq 161 — SQL pushdown for status filter
-# ---------------------------------------------------------------------------
-#
-# When status is provided to list_projects_for_mcp, the inner list_projects
-# call must receive status (single string OR list) so the repo pushes the
-# filter to SQL. Pre-fix behavior: outer always called list_projects(status=None,
-# include_cancelled=True) and filtered status in a Python for-loop.
 
 
 class TestStatusSqlPushdown:
@@ -745,7 +597,6 @@ class TestStatusSqlPushdown:
         items = [_make_item(project_id="a", status="active")]
         _, list_proj_mock = await _call_with_items(service, items, status="active")
         kwargs = list_proj_mock.call_args.kwargs
-        # SQL pushdown: inner call must receive the status filter, not None
         assert kwargs.get("status") in ("active", ["active"]), (
             f"Expected status pushdown to inner list_projects; got status={kwargs.get('status')!r}"
         )
@@ -760,7 +611,6 @@ class TestStatusSqlPushdown:
         _, list_proj_mock = await _call_with_items(service, items, status=["active", "inactive"])
         kwargs = list_proj_mock.call_args.kwargs
         pushed = kwargs.get("status")
-        # Either passed as list or normalized; must NOT be None.
         assert pushed is not None, "status list must be pushed down, not silently dropped"
         if isinstance(pushed, list):
             assert set(pushed) == {"active", "inactive"}
@@ -769,11 +619,6 @@ class TestStatusSqlPushdown:
 
     @pytest.mark.asyncio
     async def test_no_status_filter_pushes_lifecycle_exclusion_to_sql(self):
-        """IMP-5036 task 9257a74c: when status is omitted and include_completed
-        is False (default agent view), the inner list_projects call must receive
-        the active-status complement set so the repo emits a SQL IN clause
-        instead of pulling lifecycle-finished rows just to drop them in Python.
-        """
         from giljo_mcp.domain.project_status import LIFECYCLE_FINISHED_STATUSES, ProjectStatus
 
         service = _make_service(_TENANT_A)
@@ -791,11 +636,6 @@ class TestStatusSqlPushdown:
 
     @pytest.mark.asyncio
     async def test_include_completed_does_not_push_status(self):
-        """IMP-5036 task 9257a74c: when include_completed=True is passed (caller
-        wants archived buckets too), inner list_projects must receive status=None
-        so the repo's bare-tenant path with include_cancelled=True returns all
-        non-deleted rows.
-        """
         service = _make_service(_TENANT_A)
         items = [_make_item(project_id="a", status="completed")]
         _, list_proj_mock = await _call_with_items(service, items, include_completed=True)
@@ -806,9 +646,6 @@ class TestStatusSqlPushdown:
 
     @pytest.mark.asyncio
     async def test_repo_accepts_status_list(self):
-        """Repository.list_projects must accept status as str | list[str] | None
-        and emit a SQL IN clause when a list is passed.
-        """
         import inspect
 
         from giljo_mcp.repositories.project_repository import ProjectRepository
@@ -822,9 +659,6 @@ class TestStatusSqlPushdown:
 
     @pytest.mark.asyncio
     async def test_repo_emits_in_clause_for_status_list(self):
-        """Direct repo unit test: passing status=['active', 'inactive'] must
-        produce a SQL WHERE ... IN (...) (not equality, not ignored).
-        """
         from sqlalchemy.dialects import postgresql
 
         from giljo_mcp.repositories.project_repository import ProjectRepository
@@ -862,14 +696,6 @@ class TestStatusSqlPushdown:
         )
 
 
-# ---------------------------------------------------------------------------
-# BE-6078 — repo hidden filter (server-side offload)
-# ---------------------------------------------------------------------------
-#
-# ProjectRepository.list_projects gained a ``hidden`` param so the REST list
-# endpoint can exclude/return hidden rows at the SQL layer instead of shipping
-# them over the wire to be dropped in JS. None=no filter, False=exclude hidden
-# (NULL-safe), True=hidden only.
 
 
 class TestRepoHiddenFilter:
@@ -904,14 +730,11 @@ class TestRepoHiddenFilter:
     @pytest.mark.asyncio
     async def test_hidden_none_emits_no_hidden_predicate(self):
         sql = await self._compile(hidden=None)
-        # ``projects.hidden`` is always in the SELECT column list; assert there is
-        # no ``hidden IS [NOT] TRUE`` WHERE predicate (the None = no-filter case).
         assert "hidden is" not in sql, f"hidden=None must not emit a hidden predicate; got: {sql}"
 
     @pytest.mark.asyncio
     async def test_hidden_false_excludes_hidden_null_safe(self):
         sql = await self._compile(hidden=False)
-        # NULL-safe exclusion: ``hidden IS NOT TRUE`` (legacy NULLs stay visible).
         assert "hidden is not true" in sql, f"hidden=False must emit IS NOT TRUE; got: {sql}"
 
     @pytest.mark.asyncio
@@ -920,21 +743,6 @@ class TestRepoHiddenFilter:
         assert "hidden is true" in sql, f"hidden=True must emit IS TRUE; got: {sql}"
 
 
-# ---------------------------------------------------------------------------
-# Seq 139 — list_projects payload byte-share audit
-# ---------------------------------------------------------------------------
-#
-# Measurement only (no trimming). Builds a representative depth-2 payload
-# (the cohort that historically blew past 63K) and reports per-field byte
-# share so a follow-up project knows where the inflation lives. Field
-# expectations:
-#   - top-level shape: count, depth, projects[N], product_id, success
-#   - per-row at depth>=1: description, mission, agent_summary
-#   - per-row at depth>=2: memory_entries (suspected primary), agent_details
-#   - per-row at depth>=3: message_history, git_commits
-#
-# This test always passes — it asserts the report shape and prints the
-# breakdown. CI runs the print; the report is the artifact.
 
 
 class TestListProjectsPayloadShareAudit:
@@ -965,13 +773,9 @@ class TestListProjectsPayloadShareAudit:
         return report
 
     def test_payload_share_report_depth_2(self, capsys):
-        """Build a representative depth-2 payload with 24 projects (the
-        test-install cohort) and report byte share per field. Prints to stdout
-        so the audit artifact is visible in CI logs.
-        """
         sample_memory_entry = {
             "entry_type": "decision",
-            "content": "x" * 800,  # representative entry body
+            "content": "x" * 800,
             "tags": ["edition:CE", "audit:seq139"],
             "git_commits": [{"sha": "a" * 40, "message": "y" * 80} for _ in range(3)],
             "created_at": "2026-05-04T00:00:00+00:00",
@@ -1022,7 +826,6 @@ class TestListProjectsPayloadShareAudit:
         for field, bytes_, pct in report:
             print(f"{field:<30} {bytes_:>10} {pct:>9.2f}%")
 
-        # Sanity: report has every field we built and totals roughly add up.
         field_names = {f for f, _, _ in report}
         for expected in (
             "memory_entries",
@@ -1034,20 +837,11 @@ class TestListProjectsPayloadShareAudit:
         ):
             assert expected in field_names, f"audit must report on '{expected}'"
 
-        # Capture proves the print landed (regression for silent test).
         captured = capsys.readouterr()
         assert "byte-share audit" in captured.out
         assert "memory_entries" in captured.out
 
     def test_audit_mode_payload_70pct_smaller_than_depth_2(self, capsys):
-        """BE-5042: mode='audit' must produce a payload at least 70% smaller
-        than depth=2 on the test-install cohort shape (24 projects, 6 memory entries
-        each, 4 agent details each).
-
-        Audit mode trims memory entries to headlines (drops key_outcomes,
-        decisions_made, git_commits, project_name) and caps to last 5; agent
-        details drop the result blob and full mission text.
-        """
         import json
 
         sample_memory_full = {
@@ -1135,13 +929,9 @@ class TestListProjectsPayloadShareAudit:
         assert reduction_pct >= 70.0, f"audit-mode payload must be >=70% smaller than depth=2; got {reduction_pct:.2f}%"
 
 
-# ---------------------------------------------------------------------------
-# BE-5042 — mode parameter (triage/planning/audit/forensic)
-# ---------------------------------------------------------------------------
 
 
 class TestModeParameter:
-    """mode is the agent-facing surface; numeric depth remains for back-compat."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -1156,10 +946,8 @@ class TestModeParameter:
 
     @pytest.mark.asyncio
     async def test_mode_wins_over_depth(self):
-        """When both passed, mode determines the depth (agent intent wins)."""
         service = _make_service(_TENANT_A)
         items = [_make_item(project_id="a", status="active")]
-        # depth=3 + mode=triage -> depth resolves to 0
         result, _ = await _call_with_items(service, items, mode="triage", depth=3, summary_only=False)
         assert result["depth"] == 0
 
@@ -1172,15 +960,9 @@ class TestModeParameter:
         assert "bogus" in str(exc_info.value)
 
 
-# ---------------------------------------------------------------------------
-# BE-5042 — query service headlines projection
-# ---------------------------------------------------------------------------
 
 
 class TestQueryServiceHeadlines:
-    """ProjectQueryService methods accept headlines and limit params (single
-    method, parameter flag — no forked methods).
-    """
 
     @pytest.mark.asyncio
     async def test_get_project_memory_entries_full_keys(self):
@@ -1210,7 +992,7 @@ class TestQueryServiceHeadlines:
                 session = AsyncMock()
                 session.__aenter__ = AsyncMock(return_value=session)
                 session.__aexit__ = AsyncMock(return_value=False)
-                session.info = {}  # tenant_session_context save/restore target
+                session.info = {}
                 gs.return_value = session
                 rows = await svc.get_project_memory_entries("p-1", _TENANT_A)
         assert rows[0]["entry_type"] == "decision"
@@ -1243,7 +1025,7 @@ class TestQueryServiceHeadlines:
                 session = AsyncMock()
                 session.__aenter__ = AsyncMock(return_value=session)
                 session.__aexit__ = AsyncMock(return_value=False)
-                session.info = {}  # tenant_session_context save/restore target
+                session.info = {}
                 gs.return_value = session
                 rows = await svc.get_project_memory_entries("p-1", _TENANT_A, headlines=True)
         row = rows[0]
@@ -1262,7 +1044,7 @@ class TestQueryServiceHeadlines:
                 session = AsyncMock()
                 session.__aenter__ = AsyncMock(return_value=session)
                 session.__aexit__ = AsyncMock(return_value=False)
-                session.info = {}  # tenant_session_context save/restore target
+                session.info = {}
                 gs.return_value = session
                 await svc.get_project_memory_entries("p-1", _TENANT_A, headlines=True, limit=5)
         assert repo_mock.call_args.kwargs.get("limit") == 5 or 5 in repo_mock.call_args.args
@@ -1294,7 +1076,7 @@ class TestQueryServiceHeadlines:
                 session = AsyncMock()
                 session.__aenter__ = AsyncMock(return_value=session)
                 session.__aexit__ = AsyncMock(return_value=False)
-                session.info = {}  # tenant_session_context save/restore target
+                session.info = {}
                 gs.return_value = session
                 rows = await svc.get_project_agent_details("p-1", _TENANT_A, headlines=True)
         row = rows[0]
@@ -1303,20 +1085,11 @@ class TestQueryServiceHeadlines:
         assert "mission" not in row
 
 
-# ---------------------------------------------------------------------------
-# BE-5042 — memory_limit clamp + forensic full bodies
-# ---------------------------------------------------------------------------
 
 
 class TestMemoryLimitClamp:
     @pytest.mark.asyncio
     async def test_audit_default_limit_5(self):
-        """Audit mode passes memory_limit=5 to the query service by default.
-
-        BE-6071 F6b: _build_mcp_project_list now calls the BATCHED enrichment
-        methods (one grouped query per facet), so the propagation is asserted
-        against those siblings.
-        """
         service = _make_service(_TENANT_A)
         captured: dict = {}
 
@@ -1397,7 +1170,6 @@ class TestMemoryLimitClamp:
                 service.query, "get_project_agent_details_batch", new=AsyncMock(side_effect=_fake_agents)
             ):
                 with patch.object(service.query, "get_project_agent_summaries", new=AsyncMock(return_value={})):
-                    # Depth-3 forensic messages stay PER-PROJECT (not batched).
                     with patch.object(service.query, "get_project_messages", new=AsyncMock(return_value=[])):
                         await _call_with_items_real_build(service, items, mode="forensic")
         assert captured["headlines"] is False
@@ -1405,33 +1177,20 @@ class TestMemoryLimitClamp:
         assert captured["agent_headlines"] is False
 
 
-# ---------------------------------------------------------------------------
-# BE-5042 — tenant isolation regression (mode-mode queries)
-# ---------------------------------------------------------------------------
 
 
 class TestModeTenantIsolation:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("mode", ["triage", "planning", "audit", "forensic"])
     async def test_tenant_key_filters_in_every_mode(self, mode):
-        """A project from another tenant must never appear in any mode."""
         service = _make_service(_TENANT_A)
-        # _call_with_items mocks list_projects to honor the test fixture only;
-        # cross-tenant items should never reach the response. Pass a tenant-B
-        # item alongside a tenant-A item; the inner mock must filter by tenant.
         items_a = [_make_item(project_id="a-1", status="active", tenant_key=_TENANT_A)]
-        # Confirm tenant_key flows to the inner list_projects call.
         result, list_proj_mock = await _call_with_items(service, items_a, mode=mode)
         assert list_proj_mock.call_args.kwargs.get("tenant_key") == _TENANT_A
         assert {p["project_id"] for p in result["projects"]} == {"a-1"}
 
 
 async def _call_with_items_real_build(service: ProjectService, items, **kwargs):
-    """Like _call_with_items but exercises the real _build_mcp_project_list.
-
-    Used when the test needs to assert that mode/headlines/limit propagate from
-    list_projects_for_mcp into the query-service calls.
-    """
     mock_product = Mock()
     mock_product.id = kwargs.pop("active_product_id", "prod-001")
 
@@ -1449,26 +1208,16 @@ async def _call_with_items_real_build(service: ProjectService, items, **kwargs):
         patch(_PRODUCT_SERVICE_PATH) as mock_product_svc,
     ):
         mock_product_svc.return_value.get_default_product = AsyncMock(return_value=mock_product)
-        # BE-9499a: list_projects_for_mcp resolves through resolve_binding_product now
-        # (byte-identical result for an omitted product_id -- the active product).
         mock_product_svc.return_value.resolve_binding_product = AsyncMock(return_value=mock_product)
         result = await service.list_projects_for_mcp(tenant_key=_TENANT_A, **kwargs)
     return result, list_proj_mock
 
 
-# ---------------------------------------------------------------------------
-# IMP-5036 task 696cf625 — payload-size instrumentation
-# ---------------------------------------------------------------------------
 
 
 class TestPayloadSizeInstrumentation:
     @pytest.mark.asyncio
     async def test_payload_size_logged_with_breakdown(self, caplog):
-        """list_projects_for_mcp must emit a DEBUG log line per call with
-        total payload bytes, per-row top contributing field, and field-byte
-        counts. This is the post-strip 63K-overflow forensic signal — DEBUG
-        so it stays out of the operational INFO log.
-        """
         import logging
 
         service = _make_service(_TENANT_A)

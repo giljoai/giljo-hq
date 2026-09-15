@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-9502c: the four ``api/endpoints/projects/series.py`` endpoints accept
-an explicit ``product_id`` override.
-
-The tabbed product shell can have a viewed tab that is not the server's
-single "active" product (only one product can be server-active at a time;
-BE-9509/BE-9515 pinned the active-product fallback these endpoints use when
-no override is given). Before this project, none of the four endpoints
-accepted ``product_id`` at all -- a caller viewing a non-active tab had no
-way to scope a series-number lookup to that tab's product, and would
-silently get the active product's (or the null-product bucket's) taxonomy
-instead.
-
-Fixture shape: two REAL products, B activated (server-active), A left
-inactive. A project sits in A only. Every assertion below passes
-``product_id=A`` explicitly while the server's active product is B, and
-expects A's data -- proving the override, not the fallback, decided the
-answer.
-"""
 
 from __future__ import annotations
 
@@ -71,10 +53,6 @@ async def _make_project(api_client, auth_headers, *, product_id, project_type_id
 
 @pytest.fixture
 async def two_product_fixture(api_client, auth_headers):
-    """Product A (inactive) holds the data; product B is activated on the
-    server. Every test in this module asks for A explicitly while B is
-    server-active, so the fallback path (if it fired) would answer wrong.
-    """
     type_id = await _make_taxonomy_type(api_client, auth_headers)
     product_a = await _make_product(api_client, auth_headers)
     product_b = await _make_product(api_client, auth_headers)
@@ -103,8 +81,6 @@ class TestNextSeriesProductIdOverride:
         )
 
         assert resp.status_code == 200, resp.text
-        # Product A already has series 1 and 2 -- if the override were
-        # ignored in favour of active product B (empty), this would be 1.
         assert resp.json() == {"next_series_number": 3}
 
 
@@ -123,8 +99,6 @@ class TestAvailableSeriesProductIdOverride:
         )
 
         assert resp.status_code == 200, resp.text
-        # Gap-fill around A's used numbers {1, 2} -- if the override were
-        # ignored in favour of empty product B, this would start at 1.
         assert resp.json() == {"available_series_numbers": [3, 4, 5, 6, 7]}
 
 
@@ -143,8 +117,6 @@ class TestCheckSeriesProductIdOverride:
         )
 
         assert resp.status_code == 200, resp.text
-        # Series 1 is used in A -- if the override were ignored in favour of
-        # empty product B, this would report available.
         assert resp.json() == {"available": False}
 
     async def test_control_an_unused_number_in_the_overridden_product_is_available(
@@ -179,6 +151,4 @@ class TestUsedSubseriesProductIdOverride:
         )
 
         assert resp.status_code == 200, resp.text
-        # Series 2 subseries "a" is used in A -- if the override were
-        # ignored in favour of empty product B, this would be [].
         assert resp.json() == {"used_subseries": ["a"]}

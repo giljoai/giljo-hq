@@ -8,7 +8,6 @@
     @keydown.esc="handleClose"
   >
     <v-card v-draggable class="smooth-border">
-      <!-- Header -->
       <div class="dlg-header">
         <v-icon class="dlg-icon" color="primary">mdi-lock-reset</v-icon>
         <span class="dlg-title">{{ stage === 'pin' ? 'Forgot Password?' : 'Reset Password' }}</span>
@@ -20,7 +19,6 @@
       <v-divider />
 
       <v-card-text class="pa-6">
-        <!-- Alert for errors -->
         <AppAlert
           v-if="error"
           type="error"
@@ -32,23 +30,19 @@
           {{ error }}
         </AppAlert>
 
-        <!-- Alert for success -->
         <AppAlert v-if="success" type="success" variant="tonal" class="mb-4">
           {{ success }}
         </AppAlert>
 
-        <!-- Lockout Warning -->
         <AppAlert v-if="lockoutMessage" type="warning" variant="tonal" class="mb-4">
           <strong>Account Locked:</strong> {{ lockoutMessage }}
         </AppAlert>
 
-        <!-- Stage 1: PIN Verification -->
         <div v-if="stage === 'pin'">
           <p class="text-body-medium mb-4">
             Enter your username and 4-digit recovery PIN to reset your password.
           </p>
 
-          <!-- Attempts remaining indicator -->
           <AppAlert
             v-if="attemptsRemaining !== null && attemptsRemaining < 5"
             type="warning"
@@ -63,7 +57,6 @@
           </AppAlert>
 
           <v-form ref="pinForm" @submit.prevent="handleVerifyPin">
-            <!-- Username -->
             <v-text-field
               v-model="username"
               label="Email or username"
@@ -79,7 +72,6 @@
               @input="error = ''"
             />
 
-            <!-- Recovery PIN -->
             <v-text-field
               v-model="pin"
               label="Recovery PIN (4 digits)"
@@ -101,12 +93,10 @@
               @keypress="onlyNumbers"
             />
 
-            <!-- Info -->
             <AppAlert type="info" variant="tonal" density="compact" class="mb-4">
               If you have forgotten both your password and PIN, please contact your administrator.
             </AppAlert>
 
-            <!-- Verify Button -->
             <v-btn
               type="submit"
               color="primary"
@@ -122,14 +112,12 @@
           </v-form>
         </div>
 
-        <!-- Stage 2: Password Reset (shown after successful PIN verification) -->
         <div v-if="stage === 'reset'">
           <AppAlert type="success" variant="tonal" class="mb-4">
             <strong>PIN Verified!</strong> Please enter your new password below.
           </AppAlert>
 
           <v-form ref="resetPasswordForm" @submit.prevent="handleResetPassword">
-            <!-- New Password -->
             <v-text-field
               v-model="newPassword"
               label="New Password"
@@ -155,7 +143,6 @@
               </template>
             </v-text-field>
 
-            <!-- Confirm Password -->
             <v-text-field
               v-model="confirmPassword"
               label="Confirm New Password"
@@ -180,7 +167,6 @@
               </template>
             </v-text-field>
 
-            <!-- Password Requirements -->
             <v-list density="compact" class="requirement-list mb-4">
               <v-list-item v-for="req in passwordRequirements" :key="req.text" class="px-0 py-1">
                 <template #prepend>
@@ -196,7 +182,6 @@
               </v-list-item>
             </v-list>
 
-            <!-- Reset Button -->
             <v-btn
               type="submit"
               color="primary"
@@ -229,7 +214,6 @@ import AppAlert from '@/components/ui/AppAlert.vue'
 import api from '@/services/api'
 import { PIN_RULES as pinRules, onlyNumbers, usePasswordForm } from '@/composables/usePasswordForm'
 
-// Props
 const props = defineProps({
   show: {
     type: Boolean,
@@ -237,17 +221,14 @@ const props = defineProps({
   },
 })
 
-// Emits
 const emit = defineEmits(['update:show', 'success'])
 
-// Internal state
 const internalShow = computed({
   get: () => props.show,
   set: (value) => emit('update:show', value),
 })
 
-// State
-const stage = ref('pin') // 'pin' or 'reset'
+const stage = ref('pin')
 const username = ref('')
 const pin = ref('')
 const {
@@ -266,7 +247,6 @@ const lockoutMessage = ref('')
 const attemptsRemaining = ref(null)
 const pinForm = ref(null)
 const resetPasswordForm = ref(null)
-// Validation rules
 const rules = {
   username: (value) => !!value || 'Email or username is required',
 }
@@ -280,7 +260,6 @@ const isPasswordValid = computed(() => {
   )
 })
 
-// Methods
 function handlePinInput(value) {
   pin.value = value.replace(/\D/g, '').slice(0, 4)
 }
@@ -307,7 +286,6 @@ function handleClose() {
 }
 
 async function handleVerifyPin() {
-  // Validate form
   const { valid } = await pinForm.value.validate()
   if (!valid) {
     return
@@ -343,7 +321,6 @@ async function handleVerifyPin() {
 }
 
 async function handleResetPassword() {
-  // Validate form
   const { valid } = await resetPasswordForm.value.validate()
   if (!valid) {
     return
@@ -360,25 +337,21 @@ async function handleResetPassword() {
       confirm_password: confirmPassword.value,
     })
 
-    // Show success message
     success.value = 'Password reset successfully! You can now log in with your new password.'
 
-    // Wait a moment to show success message
     await new Promise((resolve) => setTimeout(resolve, 2000))
 
-    // Close modal and emit success
     resetFormState()
     emit('update:show', false)
     emit('success', 'Password reset successfully! Please log in with your new credentials.')
   } catch (err) {
     console.error('[ForgotPassword] Password reset failed:', err)
 
-    // Handle lockout
     if (err.response?.status === 429) {
       lockoutMessage.value =
         err.response.data?.detail || 'Too many attempts. Please try again in 15 minutes.'
       attemptsRemaining.value = 0
-      stage.value = 'pin' // Go back to PIN stage
+      stage.value = 'pin'
     } else if (err.response?.data?.detail) {
       error.value = err.response.data.detail
     } else {
@@ -389,7 +362,6 @@ async function handleResetPassword() {
   }
 }
 
-// Watch for dialog close to reset form
 watch(
   () => props.show,
   (newValue) => {

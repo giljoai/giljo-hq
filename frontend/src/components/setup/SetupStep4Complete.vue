@@ -1,6 +1,5 @@
 <template>
   <div class="step-complete">
-    <!-- Header -->
     <div class="complete-header">
       <span class="complete-ring">
         <v-icon size="26" class="complete-icon">mdi-check</v-icon>
@@ -11,8 +10,6 @@
       </p>
     </div>
 
-    <!-- Next-step cards — informational only. The user finishes via the
-         footer's Finish/Done button, not by clicking a card. -->
     <div class="wiz-center">
       <div class="ctas" data-testid="launch-ctas">
         <div class="cta" data-testid="launch-cta-product">
@@ -42,9 +39,6 @@
             <p>Learn how GiljoAI works.</p>
           </div>
         </div>
-        <!-- FE-9503b: informational only, per ruling 19 -- no toggle, no
-             preference stored, the dashboard cards above stay exactly as
-             they were. Teaches that the harness door exists alongside them. -->
         <div class="cta" data-testid="launch-cta-terminal">
           <span class="cta-icon cta-icon--terminal">
             <v-icon size="18">mdi-console</v-icon>
@@ -60,9 +54,7 @@
 </template>
 
 <script setup>
-// Launch cards are informational only (Gradient Rail spec, FE-6259b) — the
-// user finishes setup via the wizard footer's Finish/Done button, not by
-// clicking a card. No props/emits needed.
+/* intentionally empty */
 </script>
 
 <style lang="scss" scoped>

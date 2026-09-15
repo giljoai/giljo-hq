@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Test suite for TaskService Exception Handling - CRUD operations.
-
-Split from test_task_service_exceptions.py during test reorganization.
-Covers exception paths for: log_task, list_tasks, update_task, get_task.
-"""
 
 import random
 from datetime import UTC, datetime
@@ -28,16 +22,10 @@ from giljo_mcp.models.tasks import Task
 from giljo_mcp.services.task_service import TaskService
 
 
-# ============================================================================
-# LOCAL FIXTURES
-# These override conftest.py versions because the exception tests need
-# a simpler test_project (with product_id, without test_agent_templates).
-# ============================================================================
 
 
 @pytest_asyncio.fixture
 async def test_project(db_session, test_tenant_key, test_product):
-    """Create test project in database"""
     project = Project(
         id=str(uuid4()),
         name=f"Test Project {uuid4().hex[:6]}",
@@ -57,7 +45,6 @@ async def test_project(db_session, test_tenant_key, test_product):
 
 @pytest_asyncio.fixture
 async def test_task(db_session, test_tenant_key, test_product, test_project, test_user):
-    """Create test task in database"""
     task = Task(
         id=str(uuid4()),
         tenant_key=test_tenant_key,
@@ -78,21 +65,15 @@ async def test_task(db_session, test_tenant_key, test_product, test_project, tes
 
 @pytest_asyncio.fixture
 async def tenant_manager(test_tenant_key):
-    """Mock tenant manager"""
     manager = MagicMock()
     manager.get_current_tenant.return_value = test_tenant_key
     return manager
 
 
-# ============================================================================
-# EXCEPTION TESTS - log_task & _log_task_impl
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_log_task_raises_exception_on_database_error(task_service, tenant_manager):
-    """Test log_task raises BaseGiljoError on database errors"""
-    # Simulate database error
     with patch.object(task_service, "_log_task_impl", side_effect=Exception("Database connection failed")):
         with pytest.raises(BaseGiljoError) as exc_info:
             await task_service.log_task(content="Test task")
@@ -103,7 +84,6 @@ async def test_log_task_raises_exception_on_database_error(task_service, tenant_
 
 @pytest.mark.asyncio
 async def test_log_task_impl_raises_not_found_on_nonexistent_project(task_service, test_tenant_key, test_product):
-    """Test _log_task_impl raises ResourceNotFoundError when project_id not found"""
     nonexistent_project_id = str(uuid4())
 
     with pytest.raises(ResourceNotFoundError) as exc_info:
@@ -117,15 +97,10 @@ async def test_log_task_impl_raises_not_found_on_nonexistent_project(task_servic
     assert f"Project {nonexistent_project_id} not found" in str(exc_info.value)
 
 
-# ============================================================================
-# EXCEPTION TESTS - list_tasks
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_list_tasks_raises_validation_error_no_tenant_context(db_manager):
-    """Test list_tasks raises ValidationError when no tenant context"""
-    # Create tenant manager that returns None
     tenant_manager = MagicMock()
     tenant_manager.get_current_tenant.return_value = None
 
@@ -140,7 +115,6 @@ async def test_list_tasks_raises_validation_error_no_tenant_context(db_manager):
 
 @pytest.mark.asyncio
 async def test_list_tasks_raises_exception_on_database_error(task_service):
-    """Test list_tasks raises BaseGiljoError on database errors"""
     with patch.object(task_service, "_list_tasks_impl", side_effect=Exception("DB error")):
         with pytest.raises(BaseGiljoError) as exc_info:
             await task_service.list_tasks()
@@ -148,14 +122,10 @@ async def test_list_tasks_raises_exception_on_database_error(task_service):
         assert "DB error" in str(exc_info.value)
 
 
-# ============================================================================
-# EXCEPTION TESTS - update_task
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_update_task_raises_not_found_on_nonexistent_task(task_service):
-    """Test update_task raises ResourceNotFoundError when task not found"""
     nonexistent_task_id = str(uuid4())
 
     with pytest.raises(ResourceNotFoundError) as exc_info:
@@ -166,7 +136,6 @@ async def test_update_task_raises_not_found_on_nonexistent_task(task_service):
 
 @pytest.mark.asyncio
 async def test_update_task_raises_exception_on_database_error(task_service):
-    """Test update_task raises BaseGiljoError on database errors"""
     with patch.object(task_service, "_update_task_impl", side_effect=Exception("DB error")):
         with pytest.raises(BaseGiljoError) as exc_info:
             await task_service.update_task(task_id=str(uuid4()), status="completed")
@@ -174,14 +143,10 @@ async def test_update_task_raises_exception_on_database_error(task_service):
         assert "DB error" in str(exc_info.value)
 
 
-# ============================================================================
-# EXCEPTION TESTS - get_task & _get_task_impl
-# ============================================================================
 
 
 @pytest.mark.asyncio
 async def test_get_task_raises_validation_error_no_tenant_context(db_manager, db_session):
-    """Test get_task raises ValidationError when no tenant context"""
     tenant_manager = MagicMock()
     tenant_manager.get_current_tenant.return_value = None
 
@@ -196,7 +161,6 @@ async def test_get_task_raises_validation_error_no_tenant_context(db_manager, db
 
 @pytest.mark.asyncio
 async def test_get_task_raises_not_found_on_nonexistent_task(task_service):
-    """Test get_task raises ResourceNotFoundError when task not found"""
     nonexistent_task_id = str(uuid4())
 
     with pytest.raises(ResourceNotFoundError) as exc_info:
@@ -208,7 +172,6 @@ async def test_get_task_raises_not_found_on_nonexistent_task(task_service):
 
 @pytest.mark.asyncio
 async def test_get_task_raises_exception_on_database_error(task_service):
-    """Test get_task raises BaseGiljoError on database errors"""
     with patch.object(task_service, "_get_task_impl", side_effect=Exception("DB error")):
         with pytest.raises(BaseGiljoError) as exc_info:
             await task_service.get_task(task_id=str(uuid4()))

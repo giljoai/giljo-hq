@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SequenceRunService — owning service for sequence_runs (BE-6131a).
-
-Owns ALL writes to ``sequence_runs``. Mirrors RoadmapService conventions:
-session handling, tenant scoping, exceptions-on-error (post-0480 — never a
-success-dict). Every read and write filters ``tenant_key``.
-
-Validation discipline: execution_mode / status / review_policy / per-project
-status values are membership-validated here BEFORE any DB write, raising
-ValidationError (-> 422) rather than letting a DB constraint produce a 500.
-JSONB columns (project_ids, resolved_order, project_statuses) are validated at
-the write boundary via jsonb_validators.
-
-Edition Scope: CE.
-"""
 
 import logging
 from datetime import UTC, datetime
@@ -58,20 +44,12 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 
 logger = logging.getLogger(__name__)
 
-# BE-6165e: release-verb modes. graceful -> terminated (conductor closed out);
-# cancel -> cancelled (hard reset, the killed-terminals escape hatch).
 VALID_RELEASE_MODES: frozenset[str] = frozenset({"graceful", "cancel"})
 
-# Re-exported for back-compat callers that import the cap from this module
-# (the canonical definition now lives in sequence_run_validation, BE-6185).
 __all__ = ["MAX_CHAIN_MISSION_CHARS", "VALID_RELEASE_MODES", "SequenceRunService"]
 
 
 class SequenceRunService(SequenceRunQueryMixin):
-    """Service for the multi-project sequential runner state machine.
-
-    Session-scoped; do not share across requests.
-    """
 
     def __init__(
         self,
@@ -82,12 +60,11 @@ class SequenceRunService(SequenceRunQueryMixin):
     ):
         self.db_manager = db_manager
         self.tenant_manager = tenant_manager
-        self._session = session  # injected test session for transaction isolation
+        self._session = session
         self._websocket_manager = websocket_manager
         self._logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def _get_session(self, tenant_key: str | None = None):
-        """Yield a tenant-scoped DB session, honoring an injected test session (shared helper, BE-8000d)."""
         return optional_tenant_session(
             self.db_manager,
             tenant_key or (self.tenant_manager.get_current_tenant() if self.tenant_manager else None),
@@ -106,11 +83,6 @@ class SequenceRunService(SequenceRunQueryMixin):
         project_statuses: dict[str, str] | None = None,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
-        """Create a new sequence run record.
-
-        Returns the serialized run dict on success. Raises ValidationError (-> 422)
-        for invalid field values. Never returns a success/failure dict on error.
-        """
         try:
             effective_tenant_key = tenant_key or (
                 self.tenant_manager.get_current_tenant() if self.tenant_manager else None
@@ -128,7 +100,6 @@ class SequenceRunService(SequenceRunQueryMixin):
                 project_statuses=ps,
             )
 
-            # JSONB boundary validation.
             validated_project_ids = validate_sequence_run_project_ids(project_ids)
             validated_resolved_order = validate_sequence_run_project_ids(resolved_order)
             validated_project_statuses = validate_sequence_run_project_statuses(ps)
@@ -141,10 +112,6 @@ class SequenceRunService(SequenceRunQueryMixin):
 
             run_id = generate_uuid()
             async with self._get_session(effective_tenant_key) as session:
-                # BE-6184: run row + its DEDICATED project-less conductor minted in ONE
-                # savepoint: a failed conductor insert atomically removes the run, so a
-                # run can never exist without an addressable conductor (no orphans). The
-                # conductor owns NO project (conductor_project_id stays NULL).
                 async with session.begin_nested():
                     run = SequenceRun(
                         id=run_id,
@@ -172,15 +139,8 @@ class SequenceRunService(SequenceRunQueryMixin):
                 await session.refresh(run)
                 result = _serialize(run)
 
-            # BE-6221a: broadcast sequence:updated on CREATE too (parity with update()).
-            # A headless link_projects then lights up the dashboard election tickboxes
-            # the instant the run is minted, and a multi-tab REST create no longer goes
-            # stale until the next update(). No-ops when no websocket_manager is injected.
             await self._broadcast_sequence_updated(run_id, effective_tenant_key)
 
-            # BE-9440 Phase 1: the conductor mint previously broadcast nothing, so it
-            # appeared on no dashboard until a manual refresh. Post-commit only (see
-            # conductor_job_minter's TRANSACTION_OWNERSHIP_CONVENTION note).
             await broadcast_conductor_created(
                 self._websocket_manager,
                 tenant_key=effective_tenant_key,
@@ -223,28 +183,6 @@ class SequenceRunService(SequenceRunQueryMixin):
         conductor_label: str | None = None,
         clear_conductor: bool = False,
     ) -> dict[str, Any]:
-        """Partial update of a sequence run.
-
-        Only fields explicitly passed (non-None) are updated. Raises
-        ResourceNotFoundError (-> 404) if the run does not exist under this
-        tenant. Raises ValidationError (-> 422) for invalid field values.
-
-        ``execution_mode`` + ``resolved_order`` are mutable here (BE-6165b) so the
-        cockpit can set the mode at staging and reorder the cards pre-Stage;
-        ``project_ids`` stays immutable (no param). The three ``conductor_*``
-        fields are written by the sequence driver's self-registration (BE-6165c).
-
-        ``locked`` is the FE-6171 edit lock: Stage -> True, Unstage -> False. Once
-        the run is ultralocked (running, or a member reached ``staging_complete``)
-        a request to UNLOCK (``locked=False``) is refused with ValidationError
-        (-> 422) so the API and FE agree that Unstage is no longer available.
-
-        ``chain_mission`` (BE-6185) is the conductor-owned cross-project plan: the
-        FE edit pen PATCHes it pre-Implement. It is length-capped
-        (``MAX_CHAIN_MISSION_CHARS``; over-cap -> ValidationError -> 422). A write
-        is REFUSED once the run is ultralocked (the same staging-complete / running
-        gate that freezes Unstage), making it read-only after Implement.
-        """
         try:
             effective_tenant_key = tenant_key or (
                 self.tenant_manager.get_current_tenant() if self.tenant_manager else None
@@ -276,13 +214,6 @@ class SequenceRunService(SequenceRunQueryMixin):
                         context={"run_id": run_id, "tenant_key": effective_tenant_key},
                     )
 
-                # FE-6171 ultralock gate: refuse to UNLOCK (Unstage) once the run is
-                # ultralocked (running, or a member reached staging_complete). Locking
-                # (Stage) and other field updates stay allowed.
-                #
-                # BE-6185: the chain_mission write reuses the SAME gate — once the run
-                # is ultralocked (Implement reached) the conductor-owned mission is
-                # read-only. Compute the gate once and share it across both refusals.
                 needs_ultralock_check = locked is False or chain_mission is not None
                 ultralocked = (
                     await self._is_ultralocked(session, run, effective_tenant_key) if needs_ultralock_check else False
@@ -327,8 +258,6 @@ class SequenceRunService(SequenceRunQueryMixin):
                     run.conductor_project_id = conductor_project_id
                 if conductor_label is not None:
                     run.conductor_label = conductor_label
-                # FE-6180: explicit conductor reset on chain back-out (None values
-                # alone can't clear, since the writes above are non-None-gated).
                 if clear_conductor:
                     run.conductor_agent_id = None
                     run.conductor_project_id = None
@@ -355,7 +284,6 @@ class SequenceRunService(SequenceRunQueryMixin):
             raise BaseGiljoError(message=str(exc), context={"operation": "update_sequence_run"}) from exc
 
     async def _broadcast_sequence_updated(self, run_id: str, tenant_key: str) -> None:
-        """Fire sequence:updated WS event after a run update. Fire-and-forget: failure never breaks the update."""
         if self._websocket_manager is None:
             return
         try:
@@ -371,18 +299,6 @@ class SequenceRunService(SequenceRunQueryMixin):
         mode: str,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
-        """End a run and free its membership (BE-6165e convenience verb).
-
-        ``graceful`` -> status=terminated (the conductor drained + closed out the
-        in-flight project): REQUIRES the in-flight project at ``current_index`` to
-        already be in a terminal per-project status. ``cancel`` -> status=cancelled
-        (no precondition — the "I killed all my terminals" escape hatch).
-
-        Released downstream members are NOT mutated (``released`` is modeled as
-        drop-out-of-run, NOT a status value): the run going terminal removes it
-        from ``list_active`` so the FE unlocks their checkboxes. No ProjectStatus
-        write. Routes through the existing ``update()`` writer — no new write path.
-        """
         if mode not in VALID_RELEASE_MODES:
             raise ValidationError(
                 message=f"Invalid release mode {mode!r}. Valid: {sorted(VALID_RELEASE_MODES)}",
@@ -404,7 +320,7 @@ class SequenceRunService(SequenceRunQueryMixin):
                     context={"field": "mode", "run_id": run_id, "in_flight_project": in_flight_pid},
                 )
             new_status = "terminated"
-        else:  # cancel
+        else:
             new_status = "cancelled"
 
         return await self.update(run_id=run_id, tenant_key=tenant_key, status=new_status)
@@ -415,17 +331,6 @@ class SequenceRunService(SequenceRunQueryMixin):
         run_id: str,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
-        """Back out of a chain: RESET every member to original + dissolve the run.
-
-        FE-6178/FE-6180: the destructive "Deactivate Chain" rewind (distinct from
-        Terminate, which preserves audit). Each member is returned to pre-stage state
-        via the owning ``ProjectStagingService.reset_to_prestage`` (clears staging /
-        mission / implementation_launched_at, status->inactive, HARD-DELETES the
-        orchestrator + spawned agent jobs — no audit); a hard-deleted member is
-        skipped. The run is then cancelled + conductor cleared. Raises
-        ResourceNotFoundError if the run is not found for this tenant.
-        """
-        # Local import avoids a module-load cycle (ProjectService is a heavy facade).
         from giljo_mcp.services.project_service import ProjectService
 
         run = await self.get(run_id=run_id, tenant_key=tenant_key)
@@ -440,7 +345,6 @@ class SequenceRunService(SequenceRunQueryMixin):
             try:
                 await proj_svc.lifecycle.reset_to_prestage(pid, tenant_key=tenant_key)
             except ResourceNotFoundError:
-                # Member hard-deleted — skip; the run dissolve below still runs.
                 continue
 
         return await self.update(
@@ -456,33 +360,6 @@ class SequenceRunService(SequenceRunQueryMixin):
         run_id: str,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
-        """DELETE a finished run + its project-less conductor rows in one txn.
-
-        The owning service is the ONLY writer that deletes ``sequence_runs`` — there
-        is no parallel delete path. Called from ``complete_chain_run_if_finished``
-        when every project in the chain is terminal: the durable record is each
-        project row + its 360 memory, so the chain GROUPING is ephemeral and the
-        dead ``completed`` run row is removed rather than left forever.
-
-        In ONE tenant-scoped transaction:
-          * DELETE the ``sequence_runs`` row (tenant-filtered). BE-9291: exactly one FK
-            references it — ``comm_threads.sequence_run_id``, the chain hub's link —
-            and it is ``ON DELETE SET NULL`` precisely so this delete stays safe. The
-            hub thread OUTLIVES its run (the coordination history is durable; the chain
-            grouping is not) and is simply unlinked here. Nothing cascades.
-          * DELETE the conductor's ``AgentJob`` + ``AgentExecution`` rows. These are
-            PROJECT-LESS (``project_id IS NULL``) and linked to the run ONLY via
-            ``agent_jobs.job_metadata->>'run_id'`` (JSON, not an FK) — so they would
-            ORPHAN unless deleted here. Executions go first (FK to agent_jobs),
-            then the jobs (``agent_todo_items`` cascade at the DB level).
-
-        IDEMPOTENT: the run / rows already gone is a clean no-op (the hook is
-        best-effort and can fire more than once). Fires the existing
-        ``sequence:updated`` broadcast so the FE re-hydrates and drops the run live.
-
-        Returns a small summary dict (run_id + counts) for observability. Never
-        returns a success/failure dict on error — raises (post-0480).
-        """
         try:
             effective_tenant_key = tenant_key or (
                 self.tenant_manager.get_current_tenant() if self.tenant_manager else None
@@ -491,8 +368,6 @@ class SequenceRunService(SequenceRunQueryMixin):
                 raise ValidationError(message="tenant_key is required", context={"operation": "purge_sequence_run"})
 
             async with self._get_session(effective_tenant_key) as session:
-                # Resolve the run's project-less conductor jobs via the JSON run_id
-                # link (mint_conductor_job stamps job_metadata.run_id). Tenant-scoped.
                 job_id_rows = await session.execute(
                     select(AgentJob.job_id).where(
                         AgentJob.tenant_key == effective_tenant_key,
@@ -545,25 +420,10 @@ class SequenceRunService(SequenceRunQueryMixin):
                 message=str(exc), context={"operation": "purge_sequence_run", "run_id": run_id}
             ) from exc
 
-    # ------------------------------------------------------------------
-    # Ultralock + membership editing (FE-6171)
-    # ------------------------------------------------------------------
 
-    # Run statuses that mean "implementation is in flight" -> ultralocked.
     _RUNNING_STATUSES: frozenset[str] = frozenset({"running", "stalled"})
 
     async def _is_ultralocked(self, session: AsyncSession, run: SequenceRun, tenant_key: str) -> bool:
-        """Return True if the run is in the ultralock tier (FE-6171).
-
-        Ultralock = staging-complete / implement-available / running. Reuses the
-        EXISTING signals (no new concept beyond the ``locked`` flag):
-          * ``run.status`` in {running, stalled}  -> implementation in flight; OR
-          * any member project's ``projects.staging_status == 'staging_complete'``
-            -> the Implement button is live for the chain.
-
-        At this tier the server refuses Unstage (unlock) + member edits, so the
-        API and FE agree. Tenant-scoped membership lookup.
-        """
         if run.status in self._RUNNING_STATUSES:
             return True
         member_ids = list(run.project_ids or [])
@@ -588,24 +448,6 @@ class SequenceRunService(SequenceRunQueryMixin):
         project_id: str,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
-        """Remove ONE project from a run's membership (FE-6171 granular removal).
-
-        Drops ``project_id`` from ``project_ids`` + ``resolved_order`` +
-        ``project_statuses`` and recomputes ``current_index`` so it still points at
-        the same in-flight project. Tenant-scoped; the SequenceRun owning service is
-        the only writer of these columns (no parallel write path).
-
-        Refuses (ValidationError -> 422) when the run is ultralocked (staging-
-        complete / running) — only Terminate/Release may end such a run.
-
-        Reduce-to-one: when removal leaves EXACTLY ONE project the run is dissolved
-        (status=cancelled). The lone project is NOT auto-activated — a one-project
-        chain is not a valid chain, so the run simply ends and the project returns
-        to its normal pre-run state (the FE election surface shows the "select at
-        least 2, or use play" warning; FE-6174b removed the old collapse-to-solo
-        auto-flip). Idempotent: removing a project already absent is a no-op that
-        returns the current run.
-        """
         try:
             effective_tenant_key = tenant_key or (
                 self.tenant_manager.get_current_tenant() if self.tenant_manager else None
@@ -632,16 +474,10 @@ class SequenceRunService(SequenceRunQueryMixin):
 
                 project_ids = list(run.project_ids or [])
                 if project_id not in project_ids:
-                    # Idempotent no-op: nothing to remove.
                     return _serialize(run)
 
                 remaining = [pid for pid in project_ids if pid != project_id]
 
-                # Reduce-to-one: removal leaves exactly one project. A one-project
-                # chain is not viable, so dissolve the run (status=cancelled). The
-                # lone project is deliberately left in its existing status — FE-6174b
-                # removed the collapse-to-solo auto-activate (new rule: reduce-to-1 is
-                # a warning, never an auto-flip to active).
                 if len(remaining) == 1:
                     lone_project_id = remaining[0]
                     run.status = "cancelled"
@@ -657,12 +493,9 @@ class SequenceRunService(SequenceRunQueryMixin):
                     )
                     return serialized
 
-                # Normal removal: still >= 2 members remain.
                 resolved_order = [pid for pid in (run.resolved_order or []) if pid != project_id]
                 project_statuses = {pid: st for pid, st in (run.project_statuses or {}).items() if pid != project_id}
 
-                # Recompute current_index so it keeps pointing at the same in-flight
-                # project; clamp into range if the removed project was at/before it.
                 old_order = list(run.resolved_order or [])
                 old_index = run.current_index or 0
                 in_flight_pid = old_order[old_index] if 0 <= old_index < len(old_order) else None
@@ -702,19 +535,6 @@ class SequenceRunService(SequenceRunQueryMixin):
         tenant_key: str | None = None,
         via: str = "ui",
     ) -> dict[str, Any]:
-        """Durably record that a chain member has been reviewed (BE-9098 / BE-9540).
-
-        Append-only write to ``reviewed_project_ids`` (durable Review-badge ack)
-        plus the parallel ``reviewed_via`` provenance map — "ui" (default) for the
-        dashboard's per-card flow, "harness" for a headlessly-auto-marked member
-        (project_helpers.complete_chain_run_if_finished), mirroring
-        UserApproval.decided_via. Membership-validated against VALID_REVIEWED_VIA.
-
-        NON-GATING (never touches ``project_statuses``). Idempotent: a re-mark is
-        a no-op that returns the run UNCHANGED (first-recorded provenance wins).
-        Raises ResourceNotFoundError (-> 404) / ValidationError (-> 422) as usual.
-        The SequenceRun owning service is the only writer of these columns.
-        """
         try:
             effective_tenant_key = tenant_key or (
                 self.tenant_manager.get_current_tenant() if self.tenant_manager else None
@@ -735,8 +555,6 @@ class SequenceRunService(SequenceRunQueryMixin):
             async with self._get_session(effective_tenant_key) as session:
                 run = await self._load_run(session, run_id, effective_tenant_key)
 
-                # Membership guard: only a project actually in this run may be marked
-                # reviewed (keeps the array a bounded subset of members).
                 members = set(run.project_ids or []) | set(run.resolved_order or [])
                 if project_id not in members:
                     raise ValidationError(
@@ -746,11 +564,9 @@ class SequenceRunService(SequenceRunQueryMixin):
 
                 current = list(run.reviewed_project_ids or [])
                 if project_id in current:
-                    # Idempotent no-op — already reviewed, provenance unchanged.
                     return _serialize(run)
 
                 current.append(project_id)
-                # Reassign (not mutate) so SQLAlchemy flags the JSONB dirty.
                 run.reviewed_project_ids = validate_sequence_run_reviewed_project_ids(current)
                 via_map = dict(run.reviewed_via or {})
                 via_map[project_id] = via
@@ -795,6 +611,4 @@ class SequenceRunService(SequenceRunQueryMixin):
         return run
 
 
-# Serialization extracted to sequence_run_serialization.py (800-line guardrail,
-# BE-6184). Aliased to the prior private name so all internal call sites are unchanged.
 _serialize = serialize_sequence_run

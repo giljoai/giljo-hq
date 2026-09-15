@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-MCP Tool: apply_context_tuning (Handover 0831; renamed from
-propose_product_context_update in BE-6225c, itself renamed from submit_tuning_review
-in INF-6052a — this file name is retained for import stability).
-
-Allows agents to submit structured product context tuning proposals
-after analyzing current product context against recent project history.
-
-Called by the user's AI coding agent after reviewing the tuning comparison prompt.
-Approved proposals are applied directly to product fields — no dashboard review step
-(which is why the tool is named apply_context_tuning, not propose_*).
-"""
 
 import logging
 from typing import Any
@@ -50,7 +38,6 @@ VALID_CONFIDENCE_LEVELS = {"high", "medium", "low"}
 
 
 def _validate_proposals(proposals: list[dict[str, Any]]) -> list[str]:
-    """Validate proposal structure. Returns list of error messages."""
     errors = []
 
     if not proposals:
@@ -104,24 +91,6 @@ async def submit_tuning_review(
     db_manager: DatabaseManager | None = None,
     websocket_manager: Any = None,
 ) -> dict[str, Any]:
-    """
-    Apply approved product context tuning proposals directly to product fields.
-
-    Called by the user's AI coding agent after interactive review in the CLI.
-    Proposals where drift_detected is True are written immediately. Proposals
-    where drift_detected is False are skipped — no change is needed.
-
-    Args:
-        product_id: Target product UUID
-        tenant_key: Tenant isolation key
-        proposals: Per-section proposal dicts (user-reviewed)
-        overall_summary: High-level drift assessment (informational)
-        db_manager: Injected by ToolAccessor
-        websocket_manager: Injected by ToolAccessor
-
-    Returns:
-        Dict with success, applied_count, sections_applied
-    """
     if not db_manager:
         raise ValueError("db_manager is required")
 

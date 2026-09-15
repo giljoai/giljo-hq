@@ -3,16 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Tests for ProjectSummaryService (Sprint 002f -- P2 core).
-
-Covers:
-- get_project_summary happy path
-- Project not found error path
-- Job count aggregation
-- Completion percentage calculation
-- Product context resolution
-- Tenant isolation on every query
-"""
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, Mock
@@ -23,23 +13,19 @@ from giljo_mcp.exceptions import ResourceNotFoundError
 from giljo_mcp.services.project_summary_service import ProjectSummaryService
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 TENANT_KEY = "test-tenant"
 PROJECT_ID = "proj-001"
 
 
 def _make_session():
-    """Create a mock async session configured as a context manager."""
     session = AsyncMock()
     session.__aenter__ = AsyncMock(return_value=session)
     session.__aexit__ = AsyncMock(return_value=False)
     session.execute = AsyncMock()
     session.commit = AsyncMock()
     session.refresh = AsyncMock()
-    session.info = {}  # tenant_session_context save/restore target
+    session.info = {}
     return session
 
 
@@ -51,7 +37,6 @@ def _make_project(
     name="Test Project",
     mission="Test mission",
 ):
-    """Create a mock Project model."""
     project = MagicMock()
     project.id = project_id
     project.name = name
@@ -64,7 +49,6 @@ def _make_project(
 
 
 def _make_service(session, tenant_key=TENANT_KEY):
-    """Create a ProjectSummaryService with injected test session."""
     db_manager = Mock()
     db_manager.get_session_async = Mock(return_value=session)
     tenant_manager = Mock()
@@ -76,17 +60,12 @@ def _make_service(session, tenant_key=TENANT_KEY):
     )
 
 
-# ---------------------------------------------------------------------------
-# get_project_summary tests
-# ---------------------------------------------------------------------------
 
 
 class TestGetProjectSummary:
-    """Tests for ProjectSummaryService.get_project_summary."""
 
     @pytest.mark.asyncio
     async def test_project_not_found_raises(self):
-        """Raises ResourceNotFoundError when project does not exist."""
         session = _make_session()
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
@@ -98,13 +77,11 @@ class TestGetProjectSummary:
 
     @pytest.mark.asyncio
     async def test_summary_with_no_jobs(self):
-        """Returns zero counts when project has no agent jobs."""
         project = _make_project()
         session = _make_session()
 
         call_count = 0
 
-        # Mock job_counts query returning empty
         mock_project_result = MagicMock()
         mock_project_result.scalar_one_or_none.return_value = project
         mock_job_counts = MagicMock()
@@ -120,12 +97,12 @@ class TestGetProjectSummary:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return mock_project_result  # project lookup
+                return mock_project_result
             if call_count == 2:
-                return mock_job_counts  # job counts
+                return mock_job_counts
             if call_count == 3:
-                return mock_last_activity  # last activity
-            return mock_product_result  # product lookup
+                return mock_last_activity
+            return mock_product_result
 
         session.execute = AsyncMock(side_effect=side_effect)
 
@@ -140,7 +117,6 @@ class TestGetProjectSummary:
 
     @pytest.mark.asyncio
     async def test_summary_calculates_completion_percentage(self):
-        """Correctly calculates completion percentage from job counts."""
         project = _make_project()
         session = _make_session()
 
@@ -148,7 +124,6 @@ class TestGetProjectSummary:
 
         mock_project_result = MagicMock()
         mock_project_result.scalar_one_or_none.return_value = project
-        # 2 complete + 1 working + 1 waiting = 4 total, 50% complete
         mock_job_counts = MagicMock()
         mock_job_counts.all.return_value = [("complete", 2), ("working", 1), ("waiting", 1)]
         mock_last_activity = MagicMock()
@@ -180,7 +155,6 @@ class TestGetProjectSummary:
 
     @pytest.mark.asyncio
     async def test_summary_no_product_returns_empty_name(self):
-        """Returns empty product_name when project has no product."""
         project = _make_project(product_id=None)
         session = _make_session()
 
@@ -212,7 +186,6 @@ class TestGetProjectSummary:
 
     @pytest.mark.asyncio
     async def test_summary_includes_timestamps(self):
-        """Summary includes properly formatted timestamps."""
         project = _make_project()
         session = _make_session()
 

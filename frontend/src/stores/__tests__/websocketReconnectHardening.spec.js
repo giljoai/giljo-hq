@@ -1,19 +1,7 @@
-/**
- * websocketReconnectHardening.spec.js — FE-9056
- *
- * Two layers:
- *  1. createReconnectPolicy (unit): slow-retry interval, online + visibility
- *     re-arm, idempotent arm, leak-free disarm.
- *  2. websocket store (integration): after the fast-retry ladder exhausts, the
- *     store arms the policy so an 'online' event and the slow-retry timer each
- *     drive a fresh reconnect, and a successful open disarms it.
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { createReconnectPolicy } from '@/stores/websocketReconnectPolicy'
 
-// Keep the URL resolvers deterministic (no window.location dependence).
-// config/api.js also imports getApiBaseUrl, so both must be present on the mock.
 vi.mock('@/composables/useApiUrl', () => ({
   getApiBaseUrl: () => 'http://localhost:8000',
   getWsBaseUrl: () => 'ws://localhost:8000',
@@ -21,9 +9,6 @@ vi.mock('@/composables/useApiUrl', () => ({
 
 import { useWebSocketStore } from '@/stores/websocket'
 
-// ---------------------------------------------------------------------------
-// 1. Policy unit tests
-// ---------------------------------------------------------------------------
 describe('createReconnectPolicy (FE-9056)', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
@@ -81,16 +66,13 @@ describe('createReconnectPolicy (FE-9056)', () => {
     policy.arm()
     policy.arm()
     vi.advanceTimersByTime(60000)
-    expect(cb).toHaveBeenCalledTimes(1) // one interval, not two
+    expect(cb).toHaveBeenCalledTimes(1)
     window.dispatchEvent(new Event('online'))
-    expect(cb).toHaveBeenCalledTimes(2) // one online listener, not two
+    expect(cb).toHaveBeenCalledTimes(2)
     policy.disarm()
   })
 })
 
-// ---------------------------------------------------------------------------
-// 2. Store integration: cap exhaustion -> policy takes over
-// ---------------------------------------------------------------------------
 describe('websocket store post-cap reconnect (FE-9056)', () => {
   let sockets
   let RealWebSocket
@@ -122,7 +104,6 @@ describe('websocket store post-cap reconnect (FE-9056)', () => {
     vi.useRealTimers()
   })
 
-  // Drive the current live socket's close handler (a dropped connection).
   const failLatest = () => {
     const s = sockets[sockets.length - 1]
     if (s && s.onclose) {
@@ -134,7 +115,6 @@ describe('websocket store post-cap reconnect (FE-9056)', () => {
     const store = useWebSocketStore()
     store.connect({}).catch(() => {})
 
-    // Exhaust the fast-retry ladder: fail, let the scheduled retry open the next.
     let guard = 0
     while (store.reconnectAttempts < 10 && guard++ < 50) {
       failLatest()
@@ -142,22 +122,17 @@ describe('websocket store post-cap reconnect (FE-9056)', () => {
     }
     expect(store.reconnectAttempts).toBe(10)
 
-    // The final failure hits the else-branch: no more scheduled fast retry — the
-    // policy is armed instead.
     failLatest()
     const countAfterArm = sockets.length
 
-    // 'online' -> an immediate reconnect attempt (a fresh socket).
     window.dispatchEvent(new Event('online'))
     expect(sockets.length).toBe(countAfterArm + 1)
 
-    // Fail that attempt; the slow-retry timer then drives another attempt.
     failLatest()
     const countBeforeSlow = sockets.length
     await vi.advanceTimersByTimeAsync(60000)
     expect(sockets.length).toBe(countBeforeSlow + 1)
 
-    // A successful open disarms the policy: no further slow-retry sockets.
     sockets[sockets.length - 1].onopen()
     expect(store.isConnected).toBe(true)
     const countAfterOpen = sockets.length

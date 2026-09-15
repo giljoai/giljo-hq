@@ -36,7 +36,6 @@ describe('useProjectTaxonomy', () => {
     expect(typeDropdownItems.value[0].id).toBe('type-be')
   })
 
-  // FE-6049e: TSK is reserved for tasks — never a selectable project type.
   it('excludes the reserved TSK type from typeDropdownItems', () => {
     projectTypes.value = [
       ...projectTypes.value,
@@ -44,14 +43,9 @@ describe('useProjectTaxonomy', () => {
     ]
     const { typeDropdownItems } = useProjectTaxonomy({ projectTypes, projectData })
     expect(typeDropdownItems.value.some((i) => i.abbreviation === 'TSK')).toBe(false)
-    // BE + FE + add-custom (TSK filtered out).
     expect(typeDropdownItems.value).toHaveLength(3)
   })
 
-  // FE-6049e / ENTRY 7: a converted project ALREADY HAS type TSK. TSK is
-  // excluded from the selectable set, so when editing such a project its
-  // current type must still appear — as a DISABLED, non-selectable entry —
-  // so the bound value renders instead of going blank.
   it('surfaces an excluded-but-current TSK type as a disabled entry when editing', () => {
     projectTypes.value = [
       ...projectTypes.value,

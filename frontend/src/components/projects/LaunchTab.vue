@@ -1,8 +1,6 @@
 <template>
   <div class="launch-tab-wrapper">
-    <!-- 3-column grid: Description | Mission | Agents -->
     <div class="content-grid">
-      <!-- Description Card -->
       <div class="content-card smooth-border" data-testid="description-panel">
         <div class="section-label">
           <span>Project Description</span>
@@ -24,7 +22,6 @@
         </div>
       </div>
 
-      <!-- Mission Card -->
       <div class="content-card smooth-border" data-testid="mission-panel">
         <div class="section-label">
           <span>Mission</span>
@@ -47,9 +44,7 @@
         </div>
       </div>
 
-      <!-- Agents Column (bare, no card) -->
       <div class="agents-column" data-testid="agents-panel">
-        <!-- Agents label + integration icons inline -->
         <div class="section-label section-label--standalone">
           <span>Agents</span>
           <div class="integrations-row">
@@ -123,9 +118,7 @@
           </div>
         </div>
 
-        <!-- Agents list (bare, no card wrapper) -->
         <div class="agents-list">
-      <!-- All agents shown together -->
       <div
         v-for="agent in sortedJobs"
         :key="agent.job_id || agent.agent_id || agent.id"
@@ -181,7 +174,6 @@
           @keydown.enter="handleAgentInfo(agent)"
         >mdi-eye</v-icon>
       </div>
-      <!-- Empty state when no agents -->
       <div v-if="!sortedJobs || sortedJobs.length === 0" class="empty-agents">
         <v-icon size="48" class="empty-icon">mdi-account-group-outline</v-icon>
         <p class="text-body-small text-muted-a11y">No agents yet - click Stage Project to begin</p>
@@ -190,13 +182,11 @@
       </div>
     </div>
 
-    <!-- Agent Details Modal -->
     <AgentDetailsModal
       v-model="showDetailsModal"
       :agent="selectedAgent"
     />
 
-    <!-- Agent Mission Edit Modal -->
     <AgentMissionEditModal
       v-model="showMissionEditModal"
       :agent="selectedAgentForEdit"
@@ -220,11 +210,6 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import { getAgentBadgeStyle } from '@/utils/colorUtils'
 import { getAgentColorKey, getAgentInitials } from '@/config/agentColors'
 
-/**
- * LaunchTab Component - Complete Rewrite (Handover 0241)
- * Execution Mode Toggle moved to ProjectTabs (Handover 0428)
- * Flattened layout (Handover 0873): 2-col grid for cards, bare agents list
- */
 
 const props = defineProps({
   project: {
@@ -250,11 +235,6 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  // TSK-9234: gitEnabled/serenaEnabled default to false, which means BOTH
-  // "known to be off" and "not read yet". Without this flag the icons assert
-  // "disabled -- click to enable" against a status nobody has read. Defaults to
-  // false so a caller that omits it renders the honest unknown state rather
-  // than a false negative.
   integrationsResolved: {
     type: Boolean,
     default: false,
@@ -275,9 +255,6 @@ function goToIntegrations() {
   router.push({ path: '/tools', query: { tab: 'connect' } })
 }
 
-/**
- * Project ID from props
- */
 const projectId = computed(() => {
   const id = props.project?.project_id || props.project?.id
   if (!id) {
@@ -295,25 +272,16 @@ const missionText = computed(
 const { sortedJobs } = useAgentJobs()
 const agentJobsStore = useAgentJobsStore()
 
-/**
- * Component State
- */
 const { showToast } = useToast()
 const showDetailsModal = ref(false)
 const selectedAgent = ref(null)
 const showMissionEditModal = ref(false)
 const selectedAgentForEdit = ref(null)
 
-/**
- * Handle Edit Description button
- */
 function editDescription() {
   emit('edit-description')
 }
 
-/**
- * Handle Info icon click for Agent Team members
- */
 function handleAgentInfo(agent) {
   selectedAgent.value = {
     ...agent,
@@ -322,12 +290,8 @@ function handleAgentInfo(agent) {
   showDetailsModal.value = true
 }
 
-/**
- * Handle Edit icon click for Agent Team members
- */
 function handleAgentEdit(agent) {
   if (agent.agent_display_name === 'orchestrator') {
-    // Orchestrators don't have editable missions
     showToast({ message: 'Orchestrator configuration cannot be edited here', type: 'info' })
     return
   }
@@ -336,25 +300,12 @@ function handleAgentEdit(agent) {
   showMissionEditModal.value = true
 }
 
-/**
- * Handle mission updated event from modal
- */
 function handleMissionUpdated({ jobId, mission }) {
   agentJobsStore.upsertJob?.({ job_id: jobId, mission })
 
   showToast({ message: 'Agent mission updated successfully', type: 'success' })
 }
 
-/**
- * Watchers
- */
-// FE-9553: this watch used to raise a success toast when mission text first
-// appeared. Removed rather than relocated, and the reasoning is worth keeping:
-// the watch fires when the AGENT produces the mission, which ruling 6 puts off
-// the toast entirely -- but it also needs no other surface, because the thing
-// being announced is the mission text becoming visible in the field the
-// operator is already looking at. A notification that something appeared, next
-// to the thing that appeared, is noise on any surface.
 
 </script>
 

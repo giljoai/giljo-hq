@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Authentication API endpoints for LAN/WAN modes.
-
-Provides REST API for:
-- Login/logout (JWT cookies for web users)
-- User profile access
-- API key management (create, list, revoke)
-- User registration (admin only)
-
-All endpoints support multi-tenant isolation through tenant_key.
-
-BE-6042f: this package is the behavior-preserving split of the former
-single-file api/endpoints/auth.py (980 lines). Route wrappers are grouped by
-concern into submodules; this ``__init__`` owns the aggregate ``router`` (built
-by including each submodule's sub-router in the original source order) and
-re-exports every symbol other modules and tests reach via
-``api.endpoints.auth.<symbol>``.
-"""
 
 from fastapi import APIRouter
 
@@ -64,9 +46,6 @@ from .setup import update_setup_state
 
 
 router = APIRouter()
-# Include sub-routers in the original source order (session → setup → api-keys →
-# registration). Order is preserved for parity; no overlapping (path, method)
-# pairs exist across groups, so matching is unaffected.
 router.include_router(session.router)
 router.include_router(setup.router)
 router.include_router(api_keys.router)

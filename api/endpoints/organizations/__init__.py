@@ -3,4 +3,4 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Organization endpoints package."""
+pass

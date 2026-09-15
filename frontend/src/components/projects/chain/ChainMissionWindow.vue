@@ -1,16 +1,9 @@
 <template>
-  <!-- FE-6174b: the wide overarching "Multi project mission" window (slide 5).
-       Shows the head project's mission field (OD-4 — no new schema); live-fills
-       over WebSocket exactly like the solo mission. Conditional layer only. -->
   <div class="chain-mission-window smooth-border" data-testid="chain-mission-window">
     <div class="chain-mission-window__label">
       <span>Multi project mission</span>
     </div>
     <div class="chain-mission-window__body scrollbar-standard">
-      <!-- FE-9538 (Ask 3): compact -- this window caps at max-height:180px,
-           and EmptyState's default (full-page) padding+icon budget clipped
-           against that cap. See EmptyState.vue's doc comment for the root
-           cause. -->
       <EmptyState
         v-if="!mission"
         icon="mdi-file-document-outline"
@@ -29,11 +22,6 @@
 </template>
 
 <script setup>
-/**
- * ChainMissionWindow — FE-6174b
- * The chain-level overarching mission, stored on the head project's mission
- * field. Pure display; the host supplies the live value. Design-token only.
- */
 import EmptyState from '@/components/common/EmptyState.vue'
 
 defineProps({

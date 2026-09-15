@@ -2,13 +2,6 @@
 # Licensed under the Elastic License 2.0.
 # [CE] Community Edition.
 
-"""
-Python-based validation tests for install.sh.
-
-These tests verify structural properties of the Bash installer
-without requiring execution on Linux/macOS. They run as part of
-the standard pytest suite.
-"""
 
 import subprocess
 import sys
@@ -25,7 +18,6 @@ _BASH_UNAVAILABLE = sys.platform == "win32" and not _GIT_BASH_WIN.exists()
 
 
 class TestInstallShExists:
-    """Verify the installer script file exists and is non-empty."""
 
     def test_script_file_exists(self):
         assert INSTALL_SH.exists(), f"Expected {INSTALL_SH} to exist"
@@ -36,7 +28,6 @@ class TestInstallShExists:
 
 
 class TestInstallShHeader:
-    """Verify shebang, safety flags, and license header."""
 
     @pytest.fixture(autouse=True)
     def _load_content(self):
@@ -54,7 +45,6 @@ class TestInstallShHeader:
 
 
 class TestInstallShParameters:
-    """Verify CLI parameter handling."""
 
     @pytest.fixture(autouse=True)
     def _load_content(self):
@@ -77,7 +67,6 @@ class TestInstallShParameters:
 
 
 class TestInstallShOsDetection:
-    """Verify OS detection handles both Linux and macOS."""
 
     @pytest.fixture(autouse=True)
     def _load_content(self):
@@ -106,7 +95,6 @@ class TestInstallShOsDetection:
 
 
 class TestInstallShPhases:
-    """Verify all 6 installation phases are present."""
 
     @pytest.fixture(autouse=True)
     def _load_content(self):
@@ -138,7 +126,6 @@ class TestInstallShPhases:
 
 
 class TestInstallShSecurity:
-    """Verify SHA256 verification and download integrity checks."""
 
     @pytest.fixture(autouse=True)
     def _load_content(self):
@@ -161,7 +148,6 @@ class TestInstallShSecurity:
 
 
 class TestInstallShServiceTemplates:
-    """Verify systemd and launchd templates are correctly structured."""
 
     @pytest.fixture(autouse=True)
     def _load_content(self):
@@ -203,7 +189,6 @@ class TestInstallShServiceTemplates:
 
 
 class TestInstallShEditionIsolation:
-    """Verify no SaaS references leak into the CE installer."""
 
     @pytest.fixture(autouse=True)
     def _load_content(self):
@@ -223,7 +208,6 @@ class TestInstallShEditionIsolation:
 
 
 class TestInstallShUpdateMode:
-    """Verify idempotent update functionality."""
 
     @pytest.fixture(autouse=True)
     def _load_content(self):
@@ -248,11 +232,9 @@ class TestInstallShUpdateMode:
 
 
 class TestInstallShSyntax:
-    """Validate Bash syntax if bash is available."""
 
     @pytest.mark.skipif(_BASH_UNAVAILABLE, reason="bash not found on Windows (Git Bash absent)")
     def test_bash_syntax_check(self):
-        """Use bash -n to check for syntax errors."""
         bash_cmd = str(_GIT_BASH_WIN) if sys.platform == "win32" else "bash"
 
         result = subprocess.run(

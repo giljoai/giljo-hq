@@ -3,23 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Add series_number + subseries to tasks for taxonomy parity with projects.
-
-Revision ID: ce_0017_tasks_add_series_number_subseries
-Revises: ce_0016_tasks_drop_category
-Create Date: 2026-05-06
-
-BE-5058 parity gap: ``tasks`` had ``task_type_id`` after the Phase B taxonomy
-unification but lacked the structured-naming companion fields that
-``projects`` already carried. Adding both columns here lets the new
-``Task.taxonomy_alias`` ``column_property`` produce the same ``ABBR-NNNN[a]``
-shape as projects.
-
-Both columns are nullable -- existing tasks have no series numbering, and
-the alias expression treats NULL series as "abbreviation only" or empty.
-
-Idempotent: column adds are guarded by information_schema lookups.
-"""
 
 import sqlalchemy as sa
 from alembic import op

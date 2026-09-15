@@ -3,12 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Handover 0379e: SaaS Broker (Pub/Sub) + Loopback Elimination
-
-These tests enforce that OrchestrationService emits WebSocket events via the
-in-process WebSocketManager.
-"""
 
 from __future__ import annotations
 
@@ -22,7 +16,6 @@ import pytest
 from giljo_mcp.services.orchestration_service import OrchestrationService
 
 
-# pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture
@@ -35,7 +28,7 @@ def mock_db_manager():
     session.commit = AsyncMock()
     session.refresh = AsyncMock()
     session.add = MagicMock()
-    session.info = {}  # tenant_session_context save/restore target
+    session.info = {}
     db_manager.get_session_async = MagicMock(return_value=session)
     return db_manager, session
 
@@ -117,15 +110,8 @@ async def test_get_agent_mission_emits_ack_and_status_changed(
         _scalar_result(job),
         _scalar_result(execution),
         _scalar_result(project),
-        # TSK-9459: get_agent_mission now resolves the project's bound Hub thread
-        # for the ORCHESTRATOR too, so it is joined structurally instead of being
-        # left off its own thread. This mocked test does not exercise the Hub —
-        # let the resolver take its documented best-effort degradation to None.
         RuntimeError("TSK-9459: no Hub thread in this mocked session"),
         _rows_result([(execution, job)]),
-        # Extra entries to cover additional queries in _resolve_mission_template
-        # (project lookup) and other downstream code added since this test was
-        # first written. Excess entries are harmless if not consumed.
         _scalar_result(project),
         _scalar_result(project),
         _scalar_result(project),
@@ -133,7 +119,6 @@ async def test_get_agent_mission_emits_ack_and_status_changed(
 
     await orchestration_service.get_agent_mission(job_id=job_id, tenant_key=tenant_key)
 
-    # No success wrapper after 0730b refactor
     assert execution.status == "working"
     assert execution.started_at is not None
 
@@ -183,15 +168,8 @@ async def test_get_agent_mission_is_idempotent_and_does_not_re_emit(
         _scalar_result(job),
         _scalar_result(execution),
         _scalar_result(project),
-        # TSK-9459: get_agent_mission now resolves the project's bound Hub thread
-        # for the ORCHESTRATOR too, so it is joined structurally instead of being
-        # left off its own thread. This mocked test does not exercise the Hub —
-        # let the resolver take its documented best-effort degradation to None.
         RuntimeError("TSK-9459: no Hub thread in this mocked session"),
         _rows_result([(execution, job)]),
-        # Extra entries to cover additional queries in _resolve_mission_template
-        # (project lookup) and other downstream code added since this test was
-        # first written. Excess entries are harmless if not consumed.
         _scalar_result(project),
         _scalar_result(project),
         _scalar_result(project),
@@ -199,7 +177,6 @@ async def test_get_agent_mission_is_idempotent_and_does_not_re_emit(
 
     await orchestration_service.get_agent_mission(job_id=job_id, tenant_key=tenant_key)
 
-    # No success wrapper after 0730b refactor
     mock_websocket_manager.broadcast_to_tenant.assert_not_awaited()
 
 
@@ -235,23 +212,6 @@ async def test_complete_job_emits_status_changed_with_duration_seconds(
         job_type="orchestrator",
     )
 
-    # complete_job's execute calls for orchestrator jobs:
-    # 1. execution lookup (scalar_one_or_none)
-    # 2. job lookup (scalar_one_or_none)
-    # 3. unread messages (scalars().all())
-    # 4. todo items (scalars().all())
-    # 5. other active executions (scalar_one_or_none)
-    # 6. find orchestrator execution for auto-completion message (scalar_one_or_none)
-    #
-    # Of the two trailing entries this list used to carry, only the LAST was spare.
-    # Both were labelled as 360-memory lookups, and the 360-memory query really is
-    # gone (BE-5028 "Fix A" removed the warning that called it; IMP-9342 deleted the
-    # orphaned _check_360_memory_written and its repository query). But the
-    # second-to-last entry was feeding a live call it was never named for: the
-    # conductor-purge (complete_chain_run_if_finished -> find_active_run_for_conductor),
-    # which now takes the StopIteration from this shortened list and swallows it in the
-    # broad except at project_helpers.py:650. The call_count assert after the call under
-    # test pins the real total so a future 10th execute cannot hide in that same swallow.
     unread_result = MagicMock()
     unread_result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
 
@@ -264,32 +224,20 @@ async def test_complete_job_emits_status_changed_with_duration_seconds(
     session.execute.side_effect = [
         _scalar_result(execution),
         _scalar_result(job),
-        # BE-6177 (C1): the conductor-chain guard runs for every orchestrator
-        # complete_job and queries find_active_run_for_conductor. None = this
-        # agent is not a conductor (solo), so the guard no-ops (byte-identical).
-        _scalar_result(None),  # conductor guard: no active run for this agent
-        unread_result,  # unread messages (empty list)
-        todo_result,  # todo items (empty list)
-        _scalar_result(None),  # BE-9153: closeout_mode settings read (no row -> default hitl; clean result -> no gate)
-        _scalar_result(None),  # other active executions (none)
-        _scalar_result(None),  # find_orchestrator_execution (none — skip auto-message)
-        # BE-9518: _finalize_conductor_chain's OWN find_active_run_for_conductor
-        # check (distinct call site from the guard above; same underlying query).
         _scalar_result(None),
-        product_result,  # BE-9518: product_id resolution (job -> project) for the completion broadcast
+        unread_result,
+        todo_result,
+        _scalar_result(None),
+        _scalar_result(None),
+        _scalar_result(None),
+        _scalar_result(None),
+        product_result,
     ]
 
     result = await orchestration_service.complete_job(job_id=job_id, result={"ok": True}, tenant_key=tenant_key)
 
-    # Pinned: exactly 10 execute calls, all fed by this list -- the conductor-purge
-    # (complete_chain_run_if_finished) is gated on is_conductor and never fires for
-    # this non-conductor job, so it consumes no execute call.
     assert session.execute.call_count == 10
 
-    # Handover 0731c: Returns CompleteJobResult typed model.
-    # BE-9153: a CLEAN orchestrator closeout completes under the default (hitl) mode —
-    # the gate blocks only on signal, and result={"ok": True} carries none. (Was the
-    # vacuous ``in ("success", "blocked_hitl")`` — "blocked_hitl" is produced nowhere.)
     assert result.status == "success"
     assert execution.status == "complete"
 
@@ -297,7 +245,6 @@ async def test_complete_job_emits_status_changed_with_duration_seconds(
     assert last_call["event_type"] == "agent:status_changed"
     assert last_call["data"]["status"] == "complete"
     assert 59 <= last_call["data"]["duration_seconds"] <= 61
-    # BE-9518: product_id must ride the completion broadcast too.
     assert last_call["data"]["product_id"] == "product-test-1"
 
 
@@ -326,23 +273,19 @@ async def test_report_progress_fallback_emits_message_new_event(
         job_id=job_id,
         tenant_key=tenant_key,
         project_id=str(uuid4()),
-        job_metadata={},  # Required for websocket broadcast
+        job_metadata={},
         job_type="orchestrator",
     )
 
-    # report_progress uses 2 session contexts with 3 total execute calls:
-    # Session 1: execution, job (both scalar_one_or_none)
-    # Session 2: todo_items (scalars().all())
     todo_items_result = MagicMock()
     todo_items_result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
 
     session.execute.side_effect = [
         _scalar_result(execution),
         _scalar_result(job),
-        todo_items_result,  # todo_items query (empty list)
+        todo_items_result,
     ]
 
-    # Force fallback path by ensuring MessageService is unavailable
     orchestration_service._message_service = None
 
     result = await orchestration_service.report_progress(
@@ -351,11 +294,9 @@ async def test_report_progress_fallback_emits_message_new_event(
         tenant_key=tenant_key,
     )
 
-    # Handover 0731c: Returns ProgressResult typed model
     assert result.status == "success"
     mock_websocket_manager.broadcast_to_tenant.assert_awaited()
 
-    # report_progress emits job:progress_update event (not message:new)
     last_call = mock_websocket_manager.broadcast_to_tenant.await_args_list[-1].kwargs
     assert last_call["tenant_key"] == tenant_key
     assert last_call["event_type"] == "job:progress_update"

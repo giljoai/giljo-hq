@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Message + user-approval domain tools mixin for ToolAccessor (BE-6042a split)."""
 
 from __future__ import annotations
 
@@ -13,24 +12,7 @@ from giljo_mcp.exceptions import ResourceNotFoundError, ValidationError
 
 
 class MessageToolsMixin:
-    """User-approval adapter tools. Composed into ToolAccessor.
 
-    BE-6118: the pure send_message / receive_messages / get_messages pass-throughs
-    were deleted here (``_call_tool`` dispatched them straight to
-    MessageRoutingService / MessageService via ``TOOL_DISPATCH``). BE-9012d then
-    hard-removed those 3 tools + MessageService entirely (bus retirement).
-    ``request_approval`` — which validates input through ``RequestApprovalInput``
-    before the service call — stays.
-
-    BE-9499d added ``decide_approval``: the harness-side door that clears
-    ``awaiting_user``. It validates through ``DecideApprovalInput`` and calls the
-    SAME ``UserApprovalService.mark_decided`` the REST ``/decide`` endpoint
-    (api/endpoints/approvals.py) and the dormant MRTR elicitation round-2 path
-    (api/endpoints/mcp_tools/_inline_approval.py) already use — one writer, three
-    doors.
-    """
-
-    # User Approval Tools (BE-5029)
 
     async def request_approval(
         self,
@@ -41,20 +23,6 @@ class MessageToolsMixin:
         context: dict | None = None,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
-        """Create a pending user approval and flip the calling agent to awaiting_user.
-
-        Input is validated through ``RequestApprovalInput`` (closed schema, length
-        caps, unique option ids) before reaching the service. The service performs
-        the insert + status flip + WebSocket broadcast atomically.
-
-        BE-9054 (a): orchestrator-only. A worker job's request is converted here
-        into the BE-6081 Tier-2 structured domain rejection (``{"success": False,
-        "error": "ORCHESTRATOR_ONLY_APPROVAL", ...}``) — a deliberate,
-        agent-actionable declined request that reaches the agent as normal tool
-        content, not isError. The dashboard's Approve/Reject card binds only to
-        the orchestrator's job, so a worker approval would be an unreachable dead
-        end (awaiting_user with no UI able to clear it).
-        """
         from giljo_mcp.schemas.user_approval import RequestApprovalInput
 
         if tenant_key is None:
@@ -104,20 +72,6 @@ class MessageToolsMixin:
         user_id: str | None = None,
         tenant_key: str | None = None,
     ) -> dict[str, Any]:
-        """Resolve a pending user approval from the harness, clearing awaiting_user.
-
-        Input is validated through ``DecideApprovalInput`` (closed schema, length
-        caps) before reaching the service. Calls the SAME
-        ``UserApprovalService.mark_decided`` the dashboard's decide button uses —
-        no parallel write path. ``user_id`` is the resolved MCP session
-        user (``None`` for a legacy API-key session with no user back-reference,
-        matching the REST endpoint's ``current_user.id`` semantics as closely as
-        the transport allows).
-
-        A not-found, already-decided, or invalid option_id is a deliberate,
-        agent-actionable BE-6081 Tier-2 rejection (mirrors the REST endpoint's
-        404/409/422 mapping) — returned as structured content, never raised.
-        """
         from giljo_mcp.schemas.user_approval import DecideApprovalInput
 
         if tenant_key is None:

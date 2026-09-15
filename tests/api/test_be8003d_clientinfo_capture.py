@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""INF-8003d: capture MCP ``initialize`` clientInfo + generalized capability probe.
-
-Failing-layer discipline (per CLAUDE.md): the clientInfo capture lives in the
-ASGI auth middleware's ``initialize`` special-case (``mcp_sdk_server.py``), so
-the regression test drives a real ``initialize`` JSON-RPC payload through
-``MCPAuthMiddleware`` end-to-end (the same boundary a real MCP client hits) and
-asserts the persisted ``MCPSession.session_data`` reflects it -- not a unit
-test of an inner helper in isolation.
-
-Reuses the seed + middleware drivers from ``tests/api/test_mcp_session.py``
-(same pattern as ``test_be6070_session_debounce.py``).
-"""
 
 from __future__ import annotations
 
@@ -48,7 +36,6 @@ async def _read_session_data(db_manager, tenant_key: str, session_id: str) -> di
 
 @pytest.mark.asyncio
 async def test_initialize_populates_client_info_on_new_session(db_manager, jwt_env):
-    """A fresh initialize with clientInfo -> the newly created session_data reflects it."""
     from api.app_state import state
     from api.endpoints.mcp_sdk_server import MCPAuthMiddleware
 
@@ -81,9 +68,6 @@ async def test_initialize_populates_client_info_on_new_session(db_manager, jwt_e
 
 @pytest.mark.asyncio
 async def test_second_initialize_mints_new_session_and_preserves_first(db_manager, jwt_env):
-    """BE-9066 re-target: a second initialize on the same key is a NEW connection —
-    it mints its OWN session and must NOT overwrite the first session's clientInfo
-    (the pre-fix same-id reuse + overwrite was the last-writer-wins bug)."""
     from api.app_state import state
     from api.endpoints.mcp_sdk_server import MCPAuthMiddleware
 
@@ -128,7 +112,6 @@ async def test_second_initialize_mints_new_session_and_preserves_first(db_manage
 
 @pytest.mark.asyncio
 async def test_non_initialize_call_does_not_touch_client_info(db_manager, jwt_env):
-    """DoD #4: zero behavior change for a post-initialize call with no clientInfo re-sent."""
     from api.app_state import state
     from api.endpoints.mcp_sdk_server import MCPAuthMiddleware
 
@@ -170,7 +153,6 @@ async def test_non_initialize_call_does_not_touch_client_info(db_manager, jwt_en
 
 
 class _CapturingProbe:
-    """Minimal inner ASGI app that returns 200 and drains the body."""
 
     async def __call__(self, scope, receive, send) -> None:
         await receive()
@@ -179,13 +161,10 @@ class _CapturingProbe:
 
 
 class TestGetSessionCapabilities:
-    """Unit coverage for the generalized capability-probe helper (DoD #2)."""
 
     def _make_ctx(self, *, supports: bool) -> MagicMock:
         ctx = MagicMock()
         ctx.session.check_client_capability.return_value = supports
-        # BE-9035b: no captured clientInfo → the "harness" axis resolves to "generic"
-        # (the fail-safe floor) without touching the boolean probes under test.
         ctx.session.client_params.client_info = None
         return ctx
 
@@ -193,9 +172,6 @@ class TestGetSessionCapabilities:
         from api.endpoints.mcp_tools._base import get_session_capabilities
 
         caps = get_session_capabilities(self._make_ctx(supports=True))
-        # BE-9035b added the DETECTED "harness" key (generic here — no clientInfo).
-        # BE-9327 added the DETECTED "preset" key, always present and None when no
-        # preset applies (as here: no clientInfo, so nothing to target).
         assert caps == {"elicitation": True, "tasks": True, "harness": "generic", "preset": None}
 
     def test_both_capabilities_false_when_client_declines(self):
@@ -214,7 +190,6 @@ class TestGetSessionCapabilities:
         assert caps == {"elicitation": False, "tasks": False, "harness": "generic", "preset": None}
 
     def test_harness_key_resolves_claude_code_from_client_info(self):
-        """BE-9035b: a rich claude-code clientInfo surfaces as harness='claude-code'."""
         from types import SimpleNamespace
 
         from api.endpoints.mcp_tools._base import get_session_capabilities

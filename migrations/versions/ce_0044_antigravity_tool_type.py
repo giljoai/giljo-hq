@@ -3,32 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6041b: widen agent_executions.tool_type CHECK to include 'antigravity'.
-
-Revision ID: ce_0044_antigravity_tool_type
-Revises: ce_0043_projects_execution_mode_nullable
-Create Date: 2026-06-09
-
-Antigravity CLI (`agy`) replaces the free/Pro/individual Gemini CLI tier on
-2026-06-18. A switching user's agy executions record under
-``tool_type = 'antigravity'`` (the platform string is ``antigravity_cli``; the
-tool_type drops the ``_cli`` suffix, mirroring ``gemini_cli`` -> ``gemini``).
-
-This ADDITIVELY widens the ``ck_agent_execution_tool_type`` CHECK constraint to
-accept ``'antigravity'`` alongside the existing values. The ``'gemini'`` value is
-KEPT -- Enterprise / Gemini Code Assist Standard+Enterprise / paid-API-key users
-retain Gemini CLI (no announced end date). This is a widening, not a rename.
-
-Idempotent: the CHECK constraint is dropped (existence-guarded) and recreated
-with the wider value set. The CE installer reruns ``alembic upgrade head`` on
-every boot, so a second run is a clean no-op.
-
-Edition Scope: CE -- ``agent_executions`` is a CE table; this migration lives in
-``migrations/versions/`` (NOT ``saas_versions/``). SaaS inherits the change
-unchanged. The unified baseline (``baseline_v37_unified.py``) is intentionally
-NOT edited: fresh installs converge to the wider constraint via this incremental,
-matching the ce_0043 precedent for incremental-driven schema convergence.
-"""
 
 import sqlalchemy as sa
 from alembic import op

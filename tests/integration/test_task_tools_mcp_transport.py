@@ -3,32 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Transport-layer smoke tests for the new task MCP tools (BE-5057).
-
-Closes the BE-5042 lesson gap: ``tests/services/test_task_taxonomy_mcp_tools.py``
-covers the service layer with 24 tests, but the FastMCP ``@mcp.tool`` wrappers
-at ``api/endpoints/mcp_sdk_server.py:584-702`` are themselves untested. CLAUDE.md
-mandates a regression test at the failing layer for every bug-fix project; this
-file is defense-in-depth for that layer before a real bug ever lives there.
-
-What this file does NOT do:
-
-- Re-test service logic (taxonomy resolution, status transitions, audit-trail
-  appending). Those have ~24 dedicated tests in tests/services/.
-- Cover wrappers other than create_task / update_task / list_tasks (the task
-  wrappers; BE-6225a retired complete_task by folding it into update_task via
-  the completion_notes param).
-
-Pattern reference: ``tests/integration/test_mcp_protocol_harness.py`` — same
-in-memory ``create_connected_server_and_client_session`` transport.
-
-Tenant injection: in production, ``MCPAuthMiddleware`` puts ``tenant_key`` into
-the ASGI scope and the wrappers read it via ``_resolve_tenant``. The in-memory
-transport has no HTTP scope, so we monkeypatch ``_resolve_tenant`` /
-``_resolve_user_id`` to return the test tenant. That is the boundary we want
-to hold steady — the wrappers' own kwarg-unpacking + ``_call_tool`` dispatch.
-"""
 
 from __future__ import annotations
 
@@ -50,13 +24,9 @@ from tests.helpers.mcp_session_fixture import create_connected_server_and_client
 pytestmark = pytest.mark.asyncio
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _payload(call_tool_result) -> dict:
-    """Decode a CallToolResult into a dict (mirrors the harness helper)."""
     if getattr(call_tool_result, "structuredContent", None):
         return call_tool_result.structured_content
     first_block = call_tool_result.content[0]
@@ -67,7 +37,6 @@ def _payload(call_tool_result) -> dict:
 
 
 def _error_text(call_tool_result) -> str:
-    """Concatenate error text blocks from an error CallToolResult."""
     parts = []
     for block in call_tool_result.content:
         text = getattr(block, "text", None)
@@ -114,9 +83,6 @@ async def _seed_taxonomy(db_session, tenant_key: str) -> None:
     await db_session.commit()
 
 
-# ---------------------------------------------------------------------------
-# Fixtures: shared-session ToolAccessor + tenant-aware MCP client
-# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
@@ -130,7 +96,6 @@ async def secondary_tenant_key() -> str:
 
 
 class _TenantSwitch:
-    """Mutable holder so tests can flip the resolved tenant_key per call."""
 
     def __init__(self, value: str):
         self.value = value
@@ -138,29 +103,6 @@ class _TenantSwitch:
 
 @pytest_asyncio.fixture
 async def task_mcp_client(db_manager, db_session, primary_tenant_key, monkeypatch):
-    """
-    Yield a tuple ``(new_client, tenant_switch)``.
-
-    ``new_client()`` returns a fresh single-use async context manager that
-    produces an initialized ``ClientSession`` against the live FastMCP server
-    (the SDK's in-memory ``create_connected_server_and_client_session`` is
-    one-shot — call ``new_client()`` once per ``async with`` block).
-    ``tenant_switch``
-    lets a test mutate the tenant_key the wrappers see (used for cross-tenant
-    list_tasks scoping).
-
-    Built on top of the ``mcp_client`` pattern but with three deltas:
-    1. Replaces ``ToolAccessor._task_service`` with a ``TaskService`` bound to
-       the test ``db_session`` so writes/reads happen inside the same
-       rolled-back transaction (otherwise wrapper-spawned sessions would see
-       no taxonomy/products and would commit live rows past the test).
-    2. Monkeypatches ``_resolve_tenant`` / ``_resolve_user_id`` to read from
-       a closure (no auth middleware in the in-memory transport).
-    3. Monkeypatches ``_call_tool``'s post-call ``auto_clear_silent`` /
-       ``touch_heartbeat`` paths to no-ops — they only fire when ``job_id``
-       is in kwargs (which it isn't here), but importing app_state.db_manager
-       would crash if state were unset, so we belt-and-brace the import path.
-    """
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from giljo_mcp.services.task_service import TaskService
@@ -186,8 +128,6 @@ async def task_mcp_client(db_manager, db_session, primary_tenant_key, monkeypatc
 
     tenant_switch = _TenantSwitch(primary_tenant_key)
 
-    # BE-6042d: _resolve_tenant/_resolve_user_id moved to mcp_tools._base (the
-    # _call_tool call site reads them there). Patch _base, not mcp_sdk_server.
     from api.endpoints.mcp_tools import _base
 
     monkeypatch.setattr(
@@ -212,9 +152,6 @@ async def task_mcp_client(db_manager, db_session, primary_tenant_key, monkeypatc
         state.db_manager = prior_db_manager
 
 
-# ---------------------------------------------------------------------------
-# create_task wrapper (mcp_sdk_server.py:584-603)
-# ---------------------------------------------------------------------------
 
 
 async def test_create_task_happy_path_returns_task_id(task_mcp_client, db_session, primary_tenant_key):
@@ -236,14 +173,10 @@ async def test_create_task_happy_path_returns_task_id(task_mcp_client, db_sessio
     assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     assert payload["task_id"]
-    # BE-6049c: tasks are TSK-only — an explicit task_type ("BE") is
-    # accepted-but-ignored; the task is always created as the reserved TSK tag.
     assert payload.get("task_type") == "TSK"
 
 
 async def test_create_task_ignores_task_type_param_and_forces_tsk(task_mcp_client, db_session, primary_tenant_key):
-    """BE-6049c: a bogus task_type no longer errors — it is ignored and the
-    task is created as TSK (the param is accepted-but-ignored, not validated)."""
     new_client, _switch = task_mcp_client
     await _seed_product(db_session, primary_tenant_key)
     await _seed_taxonomy(db_session, primary_tenant_key)
@@ -264,9 +197,6 @@ async def test_create_task_ignores_task_type_param_and_forces_tsk(task_mcp_clien
     assert payload.get("task_type") == "TSK"
 
 
-# ---------------------------------------------------------------------------
-# update_task wrapper (mcp_sdk_server.py:606-643)
-# ---------------------------------------------------------------------------
 
 
 async def _create_seed_task(new_client, db_session, tenant_key) -> str:
@@ -302,8 +232,6 @@ async def test_update_task_sets_status_via_wrapper(task_mcp_client, db_session, 
 
 
 async def test_update_task_ignores_task_type_immutable(task_mcp_client, db_session, primary_tenant_key):
-    """BE-6049c: the TSK tag is immutable — update_task ignores an inbound
-    task_type (no error) instead of validating/rejecting it."""
     new_client, _switch = task_mcp_client
     task_id = await _create_seed_task(new_client, db_session, primary_tenant_key)
 
@@ -328,24 +256,16 @@ async def test_update_task_rejects_invalid_status(task_mcp_client, db_session, p
             {"task_id": task_id, "status": "not_a_real_status"},
         )
 
-    assert result.is_error is True
-    assert "not_a_real_status" in _error_text(result) or "status" in _error_text(result).lower()
+    assert result.is_error is False, _error_text(result)
+    payload = _payload(result)
+    assert payload["success"] is False
+    assert payload["error"] == "VALIDATION_ERROR"
+    assert payload["field"] == "status"
 
 
-# ---------------------------------------------------------------------------
-# BE-6225a: update_task completion_notes fold (regression at the @mcp.tool
-# boundary). The standalone complete_task tool was RETIRED and folded into
-# update_task via the completion_notes param — completing a task is now
-# update_task(status="completed", completion_notes=...). These tests prove the
-# folded contract THROUGH the MCP transport (the layer the fold changed), not
-# just the service layer.
-# ---------------------------------------------------------------------------
 
 
 async def test_update_task_completed_with_notes_appends_and_stamps(task_mcp_client, db_session, primary_tenant_key):
-    """update_task(status="completed", completion_notes=...) stamps completed_at
-    AND appends the note to the description as an audit-trail entry — the parity
-    contract that retired complete_task depends on."""
     new_client, _switch = task_mcp_client
     task_id = await _create_seed_task(new_client, db_session, primary_tenant_key)
 
@@ -362,21 +282,17 @@ async def test_update_task_completed_with_notes_appends_and_stamps(task_mcp_clie
     assert "completed_at" in payload["updated_fields"]
     assert payload["completion_notes"] == "all green via transport"
 
-    # The note must have been appended to the task description (audit trail).
     async with new_client() as session:
         full = await session.call_tool("list_tasks", {"mode": "full"})
     row = next(r for r in _payload(full)["tasks"] if r["task_id"] == task_id)
     assert row["status"] == "completed"
     assert row["completed_at"]
-    # Round-trip the timestamp to confirm it's a real ISO datetime.
     parsed = datetime.fromisoformat(row["completed_at"])
     assert parsed.tzinfo is not None or parsed <= datetime.now()  # noqa: DTZ005 — stored as naive in DB
     assert "all green via transport" in row["description"]
 
 
 async def test_update_task_completion_notes_without_completed_is_noop(task_mcp_client, db_session, primary_tenant_key):
-    """A completion_notes value with a non-completing status must NOT append the
-    note — the audit entry only makes sense on completion (BE-6225a contract)."""
     new_client, _switch = task_mcp_client
     task_id = await _create_seed_task(new_client, db_session, primary_tenant_key)
 
@@ -396,17 +312,9 @@ async def test_update_task_completion_notes_without_completed_is_noop(task_mcp_c
     assert "should not be appended" not in row["description"]
 
 
-# ---------------------------------------------------------------------------
-# TSK-9163: due_date through the transport. The wrapper's due_date param is
-# typed str, so the service ALWAYS receives a string on this path; before the
-# _parse_due_date fix the raw str reached the DateTime(timezone=True) column
-# and asyncpg rejected it at commit — every MCP due_date write 500'd with the
-# generic internal-error envelope (REST was unaffected: Pydantic parses).
-# ---------------------------------------------------------------------------
 
 
 async def test_update_task_due_date_string_via_transport(task_mcp_client, db_session, primary_tenant_key):
-    """The exact TSK-9163 repro call: update_task(task_id, due_date='2026-07-15')."""
     new_client, _switch = task_mcp_client
     task_id = await _create_seed_task(new_client, db_session, primary_tenant_key)
 
@@ -421,7 +329,6 @@ async def test_update_task_due_date_string_via_transport(task_mcp_client, db_ses
     assert payload["task_id"] == task_id
     assert "due_date" in payload["updated_fields"]
 
-    # Round-trip: the stored value must read back as the requested date.
     async with new_client() as session:
         full = await session.call_tool("list_tasks", {"mode": "full"})
     row = next(r for r in _payload(full)["tasks"] if r["task_id"] == task_id)
@@ -433,8 +340,6 @@ async def test_update_task_due_date_string_via_transport(task_mcp_client, db_ses
 async def test_update_task_due_date_garbage_is_actionable_error_via_transport(
     task_mcp_client, db_session, primary_tenant_key
 ):
-    """An unparseable due_date must surface as an actionable validation error
-    naming the field, not the generic internal-error envelope."""
     new_client, _switch = task_mcp_client
     task_id = await _create_seed_task(new_client, db_session, primary_tenant_key)
 
@@ -448,9 +353,6 @@ async def test_update_task_due_date_garbage_is_actionable_error_via_transport(
     assert "due_date" in _error_text(result)
 
 
-# ---------------------------------------------------------------------------
-# list_tasks wrapper (mcp_sdk_server.py:665-702)
-# ---------------------------------------------------------------------------
 
 
 async def test_list_tasks_summary_mode_field_shape(task_mcp_client, db_session, primary_tenant_key):
@@ -499,18 +401,11 @@ async def test_list_tasks_is_tenant_scoped_across_two_tenants(
     primary_tenant_key,
     secondary_tenant_key,
 ):
-    """Two tenants, each with one task. list_tasks called as tenant A must
-    not return tenant B's task. This is the regression that proves the
-    wrapper passes tenant_key through to the service correctly.
-    """
     new_client, switch = task_mcp_client
 
-    # Tenant A: create product + taxonomy + task via the wrapper as tenant A.
     switch.value = primary_tenant_key
     a_task_id = await _create_seed_task(new_client, db_session, primary_tenant_key)
 
-    # Tenant B: seed product + taxonomy directly, then create task via wrapper
-    # while monkeypatched tenant is B.
     await _seed_product(db_session, secondary_tenant_key)
     await _seed_taxonomy(db_session, secondary_tenant_key)
     switch.value = secondary_tenant_key
@@ -523,7 +418,6 @@ async def test_list_tasks_is_tenant_scoped_across_two_tenants(
     b_task_id = _payload(b_result)["task_id"]
     assert b_task_id != a_task_id
 
-    # Now call list_tasks as tenant A; tenant B's task must not appear.
     switch.value = primary_tenant_key
     async with new_client() as session:
         list_result = await session.call_tool("list_tasks", {"mode": "summary"})
@@ -536,13 +430,9 @@ async def test_list_tasks_is_tenant_scoped_across_two_tenants(
     )
 
 
-# ---------------------------------------------------------------------------
-# FE-5046: Task UI parity -- hidden + taxonomy fields via the wrapper
-# ---------------------------------------------------------------------------
 
 
 async def test_list_tasks_summary_includes_taxonomy_and_hidden_fields(task_mcp_client, db_session, primary_tenant_key):
-    """Wrapper-level shape check for FE-5046 parity contract."""
     new_client, _switch = task_mcp_client
     await _create_seed_task(new_client, db_session, primary_tenant_key)
 
@@ -555,7 +445,6 @@ async def test_list_tasks_summary_includes_taxonomy_and_hidden_fields(task_mcp_c
     for key in ("taxonomy_alias", "series_number", "subseries", "task_type", "hidden"):
         assert key in row, f"FE-5046: summary row missing '{key}'"
     assert isinstance(row["task_type"], dict)
-    # BE-6049c: tasks are TSK-only, so the seeded task's type is the reserved TSK tag.
     assert row["task_type"]["abbreviation"] == "TSK"
     assert row["hidden"] is False
 
@@ -609,21 +498,18 @@ async def test_list_tasks_hidden_filter_via_wrapper(task_mcp_client, db_session,
     async with new_client() as session:
         await session.call_tool("update_task", {"task_id": hidden_id, "hidden": "true"})
 
-    # No filter -> both visible (default contract)
     async with new_client() as session:
         both = await session.call_tool("list_tasks", {"mode": "summary"})
     ids_both = {r["task_id"] for r in _payload(both)["tasks"]}
     assert visible_id in ids_both
     assert hidden_id in ids_both
 
-    # hidden=true -> only hidden
     async with new_client() as session:
         only_hidden = await session.call_tool("list_tasks", {"mode": "summary", "hidden": "true"})
     ids_h = {r["task_id"] for r in _payload(only_hidden)["tasks"]}
     assert hidden_id in ids_h
     assert visible_id not in ids_h
 
-    # hidden=false -> only visible
     async with new_client() as session:
         only_visible = await session.call_tool("list_tasks", {"mode": "summary", "hidden": "false"})
     ids_v = {r["task_id"] for r in _payload(only_visible)["tasks"]}
@@ -631,17 +517,9 @@ async def test_list_tasks_hidden_filter_via_wrapper(task_mcp_client, db_session,
     assert hidden_id not in ids_v
 
 
-# ---------------------------------------------------------------------------
-# TSK-9177: due_before through the transport. Same class as TSK-9163: the
-# wrapper's due_before param is typed str and was forwarded raw into
-# ``Task.due_date < due_before``, so asyncpg rejected the str-vs-timestamptz
-# comparison and every MCP list_tasks(due_before=...) call failed with the
-# generic internal-error envelope.
-# ---------------------------------------------------------------------------
 
 
 async def test_list_tasks_due_before_string_via_transport(task_mcp_client, db_session, primary_tenant_key):
-    """The exact TSK-9177 repro call: list_tasks(due_before='2026-07-15')."""
     new_client, _switch = task_mcp_client
     task_id = await _create_seed_task(new_client, db_session, primary_tenant_key)
 
@@ -659,8 +537,6 @@ async def test_list_tasks_due_before_string_via_transport(task_mcp_client, db_se
     ids = {row["task_id"] for row in _payload(result)["tasks"]}
     assert task_id in ids
 
-    # The parsed bound must actually filter: a cutoff before the due date
-    # excludes the task.
     async with new_client() as session:
         earlier = await session.call_tool("list_tasks", {"due_before": "2026-07-01"})
     assert earlier.is_error is False, _error_text(earlier)
@@ -671,8 +547,6 @@ async def test_list_tasks_due_before_string_via_transport(task_mcp_client, db_se
 async def test_list_tasks_due_before_garbage_is_actionable_error_via_transport(
     task_mcp_client, db_session, primary_tenant_key
 ):
-    """An unparseable due_before must surface as an actionable validation error
-    naming the field, not the generic internal-error envelope."""
     new_client, _switch = task_mcp_client
     await _create_seed_task(new_client, db_session, primary_tenant_key)
 
@@ -683,6 +557,4 @@ async def test_list_tasks_due_before_garbage_is_actionable_error_via_transport(
     assert "due_before" in _error_text(result)
 
 
-# Suppress unused-import warning: random/datetime are kept for future
-# parameterization; keep them imported so contributors don't re-add them.
 _ = random

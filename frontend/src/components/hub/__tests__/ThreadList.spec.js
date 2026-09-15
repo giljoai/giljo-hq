@@ -1,11 +1,3 @@
-/**
- * ThreadList.spec.js — FE-6054e, rewritten for the Quiet Cards card list (FE-9289c)
- *
- * ThreadList now owns list-level state (scope, search, selection, the delete dialog)
- * and renders one ThreadCard per thread. The card emits open/rename/copy/delete/lock-info;
- * ThreadList turns those into store calls + toasts. These tests exercise that seam and
- * the scope split; ThreadCard's own rendering is covered in ThreadCard.spec.js.
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
@@ -25,7 +17,6 @@ vi.mock('@/services/api', () => ({
       search: (...args) => searchThreadsMock(...args),
       update: (...args) => updateMock(...args),
       delete: (...args) => deleteMock(...args),
-      // FE-9586: opening a card selects the thread, which persists the read watermark.
       markRead: vi.fn(() => Promise.resolve({ data: {} })),
     },
   },
@@ -75,9 +66,6 @@ describe('ThreadList (Quiet Cards)', () => {
   })
 
   it('never decorates a TERMINAL thread as your-turn, wherever the baton stopped', async () => {
-    // FE-9365i, caught live by the operator: resolved threads wore the gold frame and
-    // raised hand because the baton simply stopped where the conversation stopped.
-    // "Done" and "waiting on you" cannot both be true.
     const userStore = useUserStore()
     userStore.currentUser = { id: 'op-1' }
     store._testSeedThread({ thread_id: 'open1', chat_id: 'CHT-0001', subject: 'live', project_id: null, status: 'open', next_action_owner: 'op-1' })
@@ -148,7 +136,6 @@ describe('ThreadList (Quiet Cards)', () => {
     await wrapper.findComponent(ThreadCard).vm.$emit('delete', { thread_id: 'a', chat_id: 'CHT-0001' })
     await flushPromises()
     expect(wrapper.find('[data-testid="thread-delete-dialog"]').exists()).toBe(true)
-    // The dialog body states the real consequence.
     expect(wrapper.text()).toContain('no longer shown')
   })
 })

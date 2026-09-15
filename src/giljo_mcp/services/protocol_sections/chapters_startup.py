@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Orchestrator protocol chapter builders for CH1 and CH2 (startup sequence)."""
 
 from __future__ import annotations
 
@@ -11,20 +10,8 @@ from typing import Any
 
 
 def _build_ch1_mission(tool: str = "claude-code") -> str:
-    """Build CH1: YOUR MISSION section (~180 tokens).
-
-    Args:
-        tool: Platform identifier — 'claude-code', 'codex', 'gemini', 'antigravity', or
-            'multi_terminal'.
-    """
-    # Platform-specific "do not spawn" warning. Gemini and Antigravity share
-    # identical @-syntax spawn behavior (BE-6041b D1-B) — one shared string, not a
-    # hand-copied duplicate.
-    _at_syntax_warning = "You do NOT invoke @agent commands (that's for implementation phase)"
     spawn_warning_map = {
         "codex": "You do NOT call spawn_agent() (that's for implementation phase)",
-        "gemini": _at_syntax_warning,
-        "antigravity": _at_syntax_warning,
         "claude-code": "You do NOT call Task() tool (that's for implementation phase)",
     }
     spawn_warning = spawn_warning_map.get(tool, "You do NOT execute implementation work directly")
@@ -78,40 +65,6 @@ def _build_ch2_fetch_calls(
     tenant_key: str,
     category_metadata: dict[str, dict] | None = None,
 ) -> str:
-    """
-    Generate batched get_context() calls for CH2 Step 2 (Handover 0823).
-
-    IMP-4: Categories are batched into two calls instead of one-per-category:
-      - Call 1 (product-definition): product_core, tech_stack, architecture, testing
-      - Call 2 (historical/evolving): memory_360, git_history, vision_documents
-
-    Handover 0823b: depth_config is no longer snapshotted into fetch calls.
-    get_context reads the user's current depth settings from the DB at runtime,
-    making depth tunable without re-staging.
-
-    The depth_config parameter is still needed for the agent_templates skip check
-    (skip_on_depth logic).
-
-    CE-OPT-001: category_metadata adds Modified timestamps and entry counts to
-    per-category framing lines, enabling warm orchestrators to skip unchanged categories.
-
-    Args:
-        field_toggles: Dict mapping category name -> bool (enabled/disabled)
-        depth_config: Dict mapping category name -> depth value (used only for skip logic)
-        product_id: Product UUID
-        tenant_key: Tenant isolation key
-        category_metadata: Optional dict mapping category -> {modified, entries} metadata
-
-    Returns:
-        Formatted string with numbered batch fetch calls, or empty string if none enabled.
-    """
-    # Category configs: maps field name to framing text and depth-awareness.
-    # Handover 0823b: Framing text is now generic (no depth placeholders).
-    # Depth is resolved at get_context runtime, not at protocol build time.
-    # HO1024: per-category framing now includes a "[needed if: ...]" hint so the
-    # orchestrator can apply judgment at fetch time and skip categories that are
-    # enabled-but-irrelevant for this specific project. The user-toggle UI defines
-    # what is AVAILABLE; these hints help the agent decide what is APPLICABLE.
     category_configs = {
         "product_core": {
             "framing": "Product name, features. [scoping new features; skip for tech-debt]",
@@ -146,7 +99,6 @@ def _build_ch2_fetch_calls(
         },
     }
 
-    # Batch grouping: product-definition vs historical/evolving context
     batch_groups = [
         {
             "label": "Product-definition context",
@@ -161,7 +113,6 @@ def _build_ch2_fetch_calls(
     inlined_fields = {"project_description"}
 
     def _is_enabled(field: str) -> bool:
-        """Check if a category is enabled and not skipped by depth logic."""
         if not field_toggles.get(field, False):
             return False
         if field in inlined_fields:
@@ -177,7 +128,6 @@ def _build_ch2_fetch_calls(
         return True
 
     def _format_metadata_suffix(field: str) -> str:
-        """Build CE-OPT-001 metadata suffix for a category."""
         meta = (category_metadata or {}).get(field, {})
         modified = meta.get("modified")
         suffix_parts = []
@@ -188,7 +138,6 @@ def _build_ch2_fetch_calls(
             suffix_parts.append(f"entries: {entry_count}")
         return f" \u2014 {', '.join(suffix_parts)}" if suffix_parts else ""
 
-    # Build batched calls
     lines: list[str] = []
     call_num = 0
 
@@ -199,13 +148,11 @@ def _build_ch2_fetch_calls(
 
         call_num += 1
         cats_str = ", ".join(f'"{c}"' for c in enabled_cats)
-        # CE-0034 Task 3: tenant_key is auto-injected server-side; never render it in protocol examples.
         call_str = f'get_context(categories=[{cats_str}], product_id="{product_id}")'
 
         lines.append(f"{call_num}. {call_str}")
         lines.append(f"   -- {group['label']}")
 
-        # Per-category framing with metadata
         for cat in enabled_cats:
             config = category_configs[cat]
             suffix = _format_metadata_suffix(cat)
@@ -225,24 +172,6 @@ def _build_ch2_startup(
     tenant_key: str | None = None,
     category_metadata: dict[str, dict] | None = None,
 ) -> str:
-    """
-    Build CH2: STARTUP SEQUENCE section (Handover 0823: inline fetch calls).
-
-    When field_toggles and depth_config are provided, Step 2 contains explicit
-    numbered get_context() calls. The agent sees exactly what to call.
-
-    CE-OPT-001: category_metadata threads Modified timestamps to fetch call framing.
-
-    Args:
-        orchestrator_id: Job ID for parameter substitution
-        project_id: Project UUID for parameter substitution
-        field_toggles: Category toggle dict (True=enabled). If None, Step 2 is generic.
-        depth_config: Depth settings per category. If None, uses defaults.
-        product_id: Product UUID for fetch calls.
-        tenant_key: Tenant key for fetch calls.
-        category_metadata: Optional dict mapping category -> {modified, entries} metadata.
-    """
-    # Build the dynamic Step 2 content
     if field_toggles and product_id and tenant_key:
         fetch_calls = _build_ch2_fetch_calls(
             field_toggles=field_toggles,

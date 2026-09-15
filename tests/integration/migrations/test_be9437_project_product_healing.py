@@ -3,41 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Migration regression for BE-9437 — ``ce_0004`` keeps orphan projects instead of deleting them.
-
-Real scratch PostgreSQL DB, real alembic. ``ce_0004`` enforces
-``projects.product_id NOT NULL``, and as shipped it made room for that constraint
-with ``DELETE FROM projects WHERE product_id IS NULL`` -- silent, unrecoverable
-data loss on any install where "none expected in a healthy install" was wrong.
-The CE installer reruns ``alembic upgrade`` on every boot with no operator
-present to notice. BE-9437 rewrote the migration to BIND those rows to a product
-instead, under the operator's 2026-08-15 ruling that a project must belong to a
-product -- which decides where the rows go, not whether they live.
-
-THE DISCRIMINATING CONTROL is ``test_the_orphan_survives_the_upgrade``: against
-the shipped migration that project is GONE after the upgrade. Every other
-assertion here would pass just as happily against a chain that deleted the row
-and then found nothing left to collide -- which is exactly how a destructive
-migration reads as a clean one.
-
-Binding is not free, and the rest of this file is about that. An orphan moving
-into a product's bucket meets partial unique indexes that NULL product_ids
-escape today, and any of them would abort the upgrade -- turning a boot-time
-migration into a boot failure, the outcome the rewrite exists to prevent:
-
-- ``idx_project_single_active_per_product`` (UNIQUE(product_id) WHERE
-  status='active') -- several ACTIVE orphans can legitimately coexist while their
-  product_id is NULL.
-- ``uq_project_taxonomy_active`` (NULLS NOT DISTINCT, WHERE deleted_at IS NULL)
-  -- the arriving row can collide with one already in the bucket.
-- ``idx_product_single_active_per_tenant`` (UNIQUE(tenant_key) WHERE
-  is_active=true) -- reached only when a placeholder product has to be created,
-  and it does not exclude soft-deleted rows, so a trashed-but-active product
-  still holds the slot.
-
-Mirrors tests/integration/migrations/test_be9431_task_index_teeth.py, whose
-heal-then-enforce shape and reassign-above-the-watermark rule ce_0004 now follows.
-"""
 
 from __future__ import annotations
 
@@ -160,7 +125,6 @@ def scratch_engine():
 
 @pytest.fixture
 def scratch_at_pre(scratch_engine: sa.Engine):
-    """Fresh schema built up to ce_0003 (the pre-revision), ready for seeding."""
     _drop_all_objects(scratch_engine)
     up = _run_alembic("upgrade", _PRE)
     assert up.returncode == 0, f"upgrade to {_PRE} failed:\n{up.stdout}\n{up.stderr}"
@@ -168,9 +132,6 @@ def scratch_at_pre(scratch_engine: sa.Engine):
     _drop_all_objects(scratch_engine)
 
 
-# --------------------------------------------------------------------------- #
-# Seed helpers (raw SQL — the ORM models are not needed for a migration test)  #
-# --------------------------------------------------------------------------- #
 
 TK = "tk_be9437"
 
@@ -183,13 +144,6 @@ def _seed_product(
     created_at: str | None = None,
     is_active: bool = False,
 ) -> str:
-    """Seed a product. ``is_active`` defaults to FALSE deliberately.
-
-    ``idx_product_single_active_per_tenant`` is UNIQUE(tenant_key) WHERE
-    is_active = true, so a helper that defaulted to active could seed at most one
-    product per tenant -- and the "which product wins" cases here need several.
-    Only the tests that are ABOUT that index set it.
-    """
     product_id = str(uuid4())
     with engine.connect() as conn:
         conn.execute(
@@ -214,7 +168,6 @@ def _seed_project(
     project_type_id: str | None = None,
     trashed: bool = False,
 ) -> str:
-    """INSERT a project directly. Raises IntegrityError if an index refuses it."""
     project_id = str(uuid4())
     with engine.connect() as conn:
         conn.execute(
@@ -275,25 +228,12 @@ def _product_names(engine: sa.Engine, tenant_key: str = TK) -> list[str]:
 @pytest.mark.integration
 class TestBe9437ProjectProductHealing:
     def test_the_pre_revision_accepts_an_orphan_project(self, scratch_at_pre: sa.Engine) -> None:
-        """THE PRE-STATE, and the reason any of this is needed.
-
-        At ce_0003 ``product_id`` is nullable and a product-less project inserts
-        cleanly. If this ever fails, the pre-state changed and every assertion in
-        this file stops meaning anything.
-        """
         orphan = _seed_project(scratch_at_pre, "orphan")
 
         assert _product_id_is_nullable(scratch_at_pre) is True
         assert _project_row(scratch_at_pre, orphan).product_id is None
 
     def test_the_orphan_survives_the_upgrade(self, scratch_at_pre: sa.Engine) -> None:
-        """THE DISCRIMINATING CONTROL. Against the shipped ce_0004 this row is GONE.
-
-        The old migration opened with ``DELETE FROM projects WHERE product_id IS
-        NULL``. Nothing else in this file can tell a healing migration from a
-        deleting one -- delete the rows and every collision assertion below passes
-        vacuously, because there is nothing left to collide.
-        """
         product = _seed_product(scratch_at_pre, "The Only Product")
         orphan = _seed_project(scratch_at_pre, "orphan")
 
@@ -307,11 +247,6 @@ class TestBe9437ProjectProductHealing:
         assert _product_id_is_nullable(scratch_at_pre) is False, "the column must end up NOT NULL"
 
     def test_the_upgrade_still_enforces_not_null_afterwards(self, scratch_at_pre: sa.Engine) -> None:
-        """The constraint is the POINT of the migration; healing must not cost it.
-
-        The property, not just the catalog flag -- the same INSERT the
-        pre-revision accepted is now refused.
-        """
         _seed_product(scratch_at_pre, "p")
         assert _run_alembic("upgrade", _REV).returncode == 0
 
@@ -319,7 +254,6 @@ class TestBe9437ProjectProductHealing:
             _seed_project(scratch_at_pre, "new orphan")
 
     def test_multiple_products_bind_to_the_oldest(self, scratch_at_pre: sa.Engine) -> None:
-        """The documented rule when the choice is ambiguous: oldest, deterministically."""
         oldest = _seed_product(scratch_at_pre, "First", created_at="2020-01-01T00:00:00Z")
         _seed_product(scratch_at_pre, "Second", created_at="2021-01-01T00:00:00Z")
         orphan = _seed_project(scratch_at_pre, "orphan")
@@ -329,16 +263,6 @@ class TestBe9437ProjectProductHealing:
         assert _project_row(scratch_at_pre, orphan).product_id == oldest
 
     def test_a_soft_deleted_product_is_not_a_binding_target(self, scratch_at_pre: sa.Engine) -> None:
-        """Filing a live project into a trashed product hides it as effectively as
-        deleting it, so the tenant gets a real product instead.
-
-        The trashed product is seeded ACTIVE on purpose, which makes this the
-        regression for a second index too: ``idx_product_single_active_per_tenant``
-        is UNIQUE(tenant_key) WHERE is_active=true and does NOT exclude
-        soft-deleted rows, so this tenant's active slot is already taken. A
-        placeholder inserted with a hardcoded ``is_active = true`` raises a unique
-        violation here and aborts the whole upgrade.
-        """
         with scratch_at_pre.connect() as conn:
             conn.execute(
                 text(
@@ -363,12 +287,6 @@ class TestBe9437ProjectProductHealing:
         assert is_active is False, "the tenant's active slot was taken, so the placeholder must not claim it"
 
     def test_a_tenant_with_no_product_gets_one_rather_than_losing_its_projects(self, scratch_at_pre: sa.Engine) -> None:
-        """The case with no good answer, resolved the only non-destructive way.
-
-        Refusing to boot is not available (the CE installer reruns this with
-        nobody to ask), and deleting is the defect. So a product is created, named
-        so the user can find what happened to their projects.
-        """
         orphan = _seed_project(scratch_at_pre, "orphan")
 
         assert _run_alembic("upgrade", _REV).returncode == 0
@@ -378,13 +296,6 @@ class TestBe9437ProjectProductHealing:
         assert _product_names(scratch_at_pre) == ["Recovered Projects"]
 
     def test_a_second_active_orphan_is_deactivated_not_dropped(self, scratch_at_pre: sa.Engine) -> None:
-        """``idx_project_single_active_per_product`` collision.
-
-        Two ACTIVE orphans are legal while product_id is NULL (NULLS DISTINCT), and
-        binding both to one product would violate that unique index and abort the
-        upgrade. The incumbent keeps its status; the later row is demoted. Both
-        live: status is one click to restore, a failed boot is not.
-        """
         product = _seed_product(scratch_at_pre, "The Only Product")
         first = _seed_project(scratch_at_pre, "active one", status="active", series_number=1)
         second = _seed_project(scratch_at_pre, "active two", status="active", series_number=2)
@@ -399,9 +310,6 @@ class TestBe9437ProjectProductHealing:
         assert demoted.deleted_at is None
 
     def test_an_incumbent_active_project_outranks_an_arriving_orphan(self, scratch_at_pre: sa.Engine) -> None:
-        """The collision the other way round: the product already has an active
-        project, and the orphan is the newcomer. The row the user is looking at
-        must not be deactivated by an upgrade."""
         product = _seed_product(scratch_at_pre, "The Only Product")
         incumbent = _seed_project(scratch_at_pre, "incumbent", product_id=product, status="active", series_number=1)
         orphan = _seed_project(scratch_at_pre, "arriving", status="active", series_number=2)
@@ -412,14 +320,6 @@ class TestBe9437ProjectProductHealing:
         assert _project_row(scratch_at_pre, orphan).status == "inactive"
 
     def test_a_taxonomy_collision_is_renumbered_above_the_watermark(self, scratch_at_pre: sa.Engine) -> None:
-        """``uq_project_taxonomy_active`` collision.
-
-        The orphan carries serial 1 with no type, and the product already holds a
-        live row with the same (type, serial, subseries) tuple -- a genuine
-        collision, since that index is NULLS NOT DISTINCT. The ARRIVING row is
-        renumbered above the bucket's watermark; the row already filed there keeps
-        its number.
-        """
         product = _seed_product(scratch_at_pre, "The Only Product")
         incumbent = _seed_project(scratch_at_pre, "already here", product_id=product, series_number=1)
         _seed_project(scratch_at_pre, "high water", product_id=product, series_number=7)
@@ -432,8 +332,6 @@ class TestBe9437ProjectProductHealing:
         assert _project_row(scratch_at_pre, orphan).series_number == 8, "reassigned above the watermark (7 + 1)"
 
     def test_a_non_colliding_orphan_keeps_its_serial(self, scratch_at_pre: sa.Engine) -> None:
-        """The renumbering is a collision remedy, not a blanket renumber -- an
-        orphan whose serial is free in the target bucket keeps it."""
         product = _seed_product(scratch_at_pre, "The Only Product")
         _seed_project(scratch_at_pre, "already here", product_id=product, series_number=1)
         orphan = _seed_project(scratch_at_pre, "no collision", series_number=5)
@@ -443,9 +341,6 @@ class TestBe9437ProjectProductHealing:
         assert _project_row(scratch_at_pre, orphan).series_number == 5
 
     def test_a_soft_deleted_orphan_is_bound_but_not_renumbered(self, scratch_at_pre: sa.Engine) -> None:
-        """The taxonomy index is partial on ``deleted_at IS NULL``, so a trashed
-        orphan is out of its scope -- it may share a serial with a live row, and
-        renumbering it would be churn on data the user already discarded."""
         product = _seed_product(scratch_at_pre, "The Only Product")
         _seed_project(scratch_at_pre, "live", product_id=product, series_number=1)
         trashed = _seed_project(scratch_at_pre, "trashed orphan", series_number=1, trashed=True)
@@ -457,8 +352,6 @@ class TestBe9437ProjectProductHealing:
         assert row.series_number == 1, "but it is not a duplicate here, so it is not renumbered"
 
     def test_each_tenant_binds_within_its_own_products(self, scratch_at_pre: sa.Engine) -> None:
-        """Tenant isolation is not suspended for a backfill: an orphan may never
-        land on another tenant's product."""
         mine = _seed_product(scratch_at_pre, "Mine")
         other_tenant = "tk_be9437_other"
         theirs = _seed_product(scratch_at_pre, "Theirs", tenant_key=other_tenant)
@@ -471,8 +364,6 @@ class TestBe9437ProjectProductHealing:
         assert _project_row(scratch_at_pre, their_orphan).product_id == theirs
 
     def test_rerun_is_idempotent(self, scratch_at_pre: sa.Engine) -> None:
-        """The CE installer's every-boot ``alembic upgrade`` re-entry: the second
-        run finds the column already NOT NULL and changes nothing."""
         _seed_product(scratch_at_pre, "The Only Product")
         orphan = _seed_project(scratch_at_pre, "orphan", status="active", series_number=3)
 
@@ -487,8 +378,6 @@ class TestBe9437ProjectProductHealing:
         assert _product_names(scratch_at_pre) == ["The Only Product"], "no second placeholder product on rerun"
 
     def test_downgrade_then_upgrade_round_trips(self, scratch_at_pre: sa.Engine) -> None:
-        """The chain stays walkable: downgrade relaxes the column (schema only,
-        the bound rows keep their product) and upgrade re-enforces it."""
         product = _seed_product(scratch_at_pre, "The Only Product")
         orphan = _seed_project(scratch_at_pre, "orphan")
 

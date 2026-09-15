@@ -1,25 +1,3 @@
-<!--
-  BannerPreferencesCard.vue — FE-9553
-
-  The title-bar banner card: the only actionable notification surface, and the
-  only one whose settings can be got wrong in a way that hurts.
-
-  THE ALWAYS-ON LINE IS TEXT, NOT A DISABLED SWITCH, and that is a ruling rather
-  than a styling choice. Decisions, your-turn batons and mentions are always on,
-  because a settings menu must never be able to unplug the doorbell for a
-  decision the system is blocked on. A greyed-out switch would state the same
-  fact while implying the control exists and is merely unavailable — which is a
-  control that lies, which is exactly what must not ship.
-  So the guarantee is written in words and there is nothing to click.
-
-  Each toggle here means BELL-ONLY, never "gone". The lifecycle path writes its
-  durable bell row unconditionally and advisories stay in the bell when they
-  leave the fold, so both of these move an event between surfaces rather than
-  deleting it.
-
-  Extracted as its own component because ToolsView.vue is at the 800-line
-  guardrail — the same reason FE-9555 extracted ExecutionModeDefaultSelect.
--->
 <template>
   <v-card variant="flat" class="smooth-border settings-card" data-test="banner-preferences">
     <v-card-text>
@@ -98,15 +76,6 @@ const error = ref(false)
 
 onMounted(() => settings.loadNotificationPrefs())
 
-/**
- * Save on change, matching the Agent Behaviour group's peers rather than
- * offering a Save button — one preference, one write, no half-applied state.
- *
- * The store mirrors what the server confirmed, so a rejected write leaves the
- * switch showing what the account actually holds rather than what was clicked.
- * The error line says the setting is UNCHANGED for that reason: it would be
- * worse to imply a save that did not happen.
- */
 async function save(key, value) {
   saving.value = true
   error.value = false

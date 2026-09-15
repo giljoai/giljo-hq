@@ -3,18 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""INF-6007: role-specific Serena guidance reaches agent missions.
-
-Previously the agent mission only ever got the generic ~50-token Serena notice
-(`generate_serena_instructions`). The richer role-specific guidance lived in
-`template_manager._get_serena_guidance` and was injected via a broken string
-anchor that never matched the live template, so it never reached agents.
-
-These tests exercise `MissionService._assemble_mission_context` — the synchronous
-boundary where the Serena toggle is applied to the mission text — directly. No
-DB access is required: the method composes strings from the passed-in job,
-execution, project, and integrations dict.
-"""
 
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -77,14 +65,9 @@ class TestMissionSerenaGuidance:
 
         assert isinstance(response, MissionResponse)
         mission = response.mission or ""
-        # Role-specific implementer framing, NOT the generic notice.
         assert "Implementation Guidance" in mission
         assert "replace_symbol_body" in mission
         assert "SYMBOLIC EDITING" in mission
-        # BE-9260: the caveat no longer asserts "Python-only" as a universal fact
-        # (that was THIS repo's own LSP config leaking into every customer's
-        # guidance) -- it now derives the claim from the workspace's configured
-        # language(s). The reworded caveat must still travel with every role block.
         assert "cover only the language(s) its LSP is configured for in this workspace" in mission
 
     def test_tester_gets_tester_block_when_toggle_on(self):
@@ -95,7 +78,6 @@ class TestMissionSerenaGuidance:
 
         mission = response.mission or ""
         assert "Testing Guidance" in mission
-        # The implementer-only editing block must not bleed into the tester mission.
         assert "SYMBOLIC EDITING" not in mission
 
     def test_no_serena_guidance_when_toggle_off(self):
@@ -109,12 +91,11 @@ class TestMissionSerenaGuidance:
 
     def test_unknown_role_falls_back_to_generic_block(self):
         service = _make_service()
-        job, execution = _make_job_and_execution("agent")  # not a known role
+        job, execution = _make_job_and_execution("agent")
 
         response = _assemble(service, job, execution, integrations={"serena_mcp": {"use_in_prompts": True}})
 
         mission = response.mission or ""
-        # Generic fallback block is present; no role-specific editing framing.
         assert "Serena MCP Available" in mission
         assert "SYMBOLIC EDITING" not in mission
 

@@ -3,26 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-6207 — STEP A assembly: the conductor runs ONE direct command (file-less).
-
-The cold-start gap: a raw conductor reached CH_CHAIN_DRIVE STEP A but the spawn
-command was a four-level nested-quoted one-liner an agent reformatted into wt-breaking
-array form (0x80070002). BE-6207 reshapes STEP A to a FILE-LESS one-liner: the conductor
-runs ONE direct terminal command ($PWD self-resolves the cwd, the tiny prompt inline),
-substituting only two UUIDs. The conductor ALWAYS opens each sub-orch in its OWN FRESH
-TERMINAL (every execution_mode); execution_mode governs only how the sub-orch spawns its
-WORKERS.
-
-These assembly tests pin:
-  - STEP A carries the one-line direct spawn command (no files).
-  - The fatal nested one-liner / Start-Process / file shapes are GONE (regression lock).
-  - The VERBATIM directive is present (the load-bearing latitude reducer).
-  - CH_CAPABILITY clause 2 is mode-INDEPENDENT fresh-terminal sub-orch spawn.
-  - SOLO deletion test: chain_ctx=None leaks no terminal-spawn prose.
-
-Pure-string assertions (no DB, no module-level mutable state) — parallel-safe.
-Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -45,16 +25,8 @@ def _drive(execution_mode: str = "claude_code_cli") -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# STEP A carries the atomic artifact (two files + one run line)
-# ---------------------------------------------------------------------------
 
 
-# BE-9035c collapse: the direct per-harness spawn commands (with the concrete
-# `claude --dangerously-skip-permissions` binary baked in) now render on the
-# 'multi_terminal' path; a subagent-folded mode gets the <your-harness> placeholder
-# block instead. STEP A's direct wt/gnome commands are therefore asserted here on
-# the multi_terminal render.
 def test_step_a_has_windows_direct_wt_command() -> None:
     chapter = _drive("multi_terminal")
     assert "wt -w 0 new-tab --title 'giljo sub-orch' -d \"$PWD\"" in chapter, "STEP A carries the direct wt command"
@@ -68,19 +40,14 @@ def test_step_a_has_linux_direct_gnome_command() -> None:
 
 
 def test_step_a_regression_no_nested_no_startprocess_no_files() -> None:
-    """All 0x80070002 failure classes must never reappear in STEP A."""
     chapter = _drive("claude_code_cli")
     assert "Start-Process wt -ArgumentList '" not in chapter, "the nested single-string ArgumentList form is the bug"
     assert 'powershell.exe -Command "Start-Process wt' not in chapter
-    # NB: the STEP A directive legitimately NAMES Start-Process as a "do NOT" — so we lock
-    # the COMMAND shape (no files, direct wt) here and the exact no-Start-Process command
-    # in test_be6205_conductor_spawn_render; we don't forbid the warning text itself.
     assert "launch.ps1" not in chapter and "suborch.txt" not in chapter, "file-less: no launcher/prompt FILES"
     assert "<YOUR_CWD>" not in chapter, "$PWD self-resolves the cwd; no placeholder for the agent to mangle"
 
 
 def test_step_a_has_verbatim_directive() -> None:
-    """The single sharp directive — reducing latitude is the whole point."""
     chapter = _drive("claude_code_cli")
     low = chapter.lower()
     assert "verbatim" in low, "STEP A must tell the conductor to copy the launcher verbatim"
@@ -95,7 +62,6 @@ def test_step_a_substitutes_uuid_placeholders_inline() -> None:
 
 
 def test_step_a_keeps_idempotent_reuse_resolution() -> None:
-    """STEP A still resolves + reuses the already-minted sub-orch (BE-6198 idempotency)."""
     chapter = _drive("claude_code_cli")
     low = chapter.lower()
     assert "get_workflow_status" in chapter
@@ -105,16 +71,12 @@ def test_step_a_keeps_idempotent_reuse_resolution() -> None:
 
 
 def test_step_a_fails_loud_on_headless() -> None:
-    """Headless (no DISPLAY / WAYLAND_DISPLAY) → STOP + re-stage in a subagent mode."""
     chapter = _drive("claude_code_cli")
     assert "DISPLAY" in chapter
     assert "WAYLAND_DISPLAY" in chapter
     assert "re-stage" in chapter.lower()
 
 
-# ---------------------------------------------------------------------------
-# CH_CAPABILITY clause 2 — fresh-terminal sub-orch spawn, no Task() sub-orch language
-# ---------------------------------------------------------------------------
 
 
 def test_ch_capability_subagent_spawns_suborch_in_fresh_terminal() -> None:
@@ -133,9 +95,6 @@ def test_ch_capability_multi_terminal_spawns_suborch_in_fresh_terminal() -> None
     assert "worker" in low
 
 
-# ---------------------------------------------------------------------------
-# SOLO deletion test — no terminal-spawn prose leaks into a solo protocol
-# ---------------------------------------------------------------------------
 
 
 def test_solo_protocol_has_no_terminal_spawn_leak() -> None:

@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-9408 — the widened override resolution, the line it renders, and the content pin.
-
-Three layers, beside ``test_be9385d_orchestrator_product_resolver.py`` because they
-extend what that file established:
-
-1. **The formatter** -- pure, so its three pinned shapes and its two degraded ones are
-   asserted directly rather than inferred from a served response.
-2. **The widened resolution** -- ``updated_at`` and ``product_id`` now survive both
-   reads (the get_job_mission resolver and the staging read). They were computed and
-   dropped one line before the caller needed them, which is why a substituted persona
-   could be served in silence.
-3. **The content pin (project DoD 3)** -- served identity is the untouched composition
-   plus exactly one appended line, for all three rungs. Stated as a delta rather than a
-   frozen blob: a golden 10 KB fixture would break on the next legitimate seed edit and
-   get re-baselined by whoever hit it, which is how a content pin quietly stops pinning.
-
-Parallel-safe: DB-touching tests use the db_session fixture (TransactionalTestContext,
-rollback at teardown). No module-level mutable state. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -56,9 +37,6 @@ PRODUCT_NAME = "Acme Widgets"
 SAVED_AT = datetime(2026, 7, 16, 9, 30, tzinfo=UTC)
 
 
-# ---------------------------------------------------------------------------
-# 1. The formatter -- the pinned wording, and what it does with missing data
-# ---------------------------------------------------------------------------
 
 
 def test_tenant_line_names_the_rung_and_the_date():
@@ -82,11 +60,6 @@ def test_default_line_says_built_in_and_claims_no_override():
 
 
 def test_an_unparseable_stored_date_drops_the_clause_instead_of_saying_saved_none():
-    """``_fetch_override`` nulls a timestamp it cannot parse, so None is reachable here.
-
-    ``saved None`` would be worse than saying nothing: it reads as data. The rung is
-    still named, which is the part that answers "is this the built-in?".
-    """
     assert format_identity_source(SCOPE_TENANT, updated_at=None) == "identity source: tenant-wide override"
 
 
@@ -98,11 +71,6 @@ def test_an_unreadable_product_name_drops_the_parenthetical_only():
 
 
 def test_the_line_is_neutral_about_whose_product_it_is():
-    """The conductor resolves its product through its run's HEAD project, not its own.
-
-    Wording like "your project's product" would be false for exactly the role where a
-    chain persona mismatch is hardest to notice.
-    """
     line = format_identity_source(SCOPE_PRODUCT, updated_at=SAVED_AT, product_name=PRODUCT_NAME)
     assert "your project" not in line
     assert "this project" not in line
@@ -115,16 +83,6 @@ def test_append_puts_the_line_last_behind_a_blank_line():
 
 
 def test_provenance_is_withheld_with_the_identity_it_describes():
-    """BE-9402: no source line on a response that carries no identity.
-
-    Tested HERE, at the function, deliberately. At the MCP boundary this gate is
-    currently unreachable: the only path that produces a source line is the composed
-    ``orchestrator_default`` identity, and BE-9402 carves that one out to be served in
-    every mode -- so no wire-level test can distinguish a working gate from a missing
-    one today, and a boundary assertion alone would be a non-regression check wearing
-    the costume of a proof. The gate stays because it is cheap and because the carve-out
-    is a decision that could change; this is what gives it teeth in the meantime.
-    """
     assert gate_identity_source("some identity", "identity source: built-in default") == (
         "identity source: built-in default"
     )
@@ -132,13 +90,9 @@ def test_provenance_is_withheld_with_the_identity_it_describes():
     assert gate_identity_source("", "identity source: built-in default") is None
 
 
-# ---------------------------------------------------------------------------
-# 2. The widened resolution -- both reads keep scope, date and product
-# ---------------------------------------------------------------------------
 
 
 def _mission_service(db_manager, *, project_row, product_name: str | None = PRODUCT_NAME):
-    """A MissionService with only its repository doubled (the ladder itself is real)."""
     from giljo_mcp.services.mission_service import MissionService
 
     svc = MissionService.__new__(MissionService)
@@ -197,7 +151,6 @@ class TestWidenedResolution:
         assert resolved.product_id == product_id
 
     async def test_tenant_rung_reports_its_date_and_no_product(self, db_manager, db_session, test_tenant_key):
-        """The winning row is tenant-wide, so naming a product would misattribute it."""
         product_id = str(uuid.uuid4())
         await _seed(db_manager, db_session, test_tenant_key, product_id=product_id, tenant=True, product=False)
 
@@ -223,11 +176,6 @@ class TestWidenedResolution:
         assert resolved.product_id is None
 
     async def test_the_degraded_branch_still_never_raises(self, db_manager, db_session, test_tenant_key):
-        """HO1027's contract: a failed read degrades to the seed, it does not fail delivery.
-
-        Widening the return must not have introduced a path that raises -- so the failure
-        is forced at the repository the resolver calls first.
-        """
         svc = _mission_service(db_manager, project_row=_project_row(str(uuid.uuid4())))
         svc._repo.get_project_by_id = AsyncMock(side_effect=RuntimeError("database is on fire"))
 
@@ -241,7 +189,6 @@ class TestWidenedResolution:
         assert resolved.product_id is None
 
     async def test_the_staging_read_reports_the_same_rung(self, db_manager, db_session, test_tenant_key):
-        """Staging and mission must never describe one override differently."""
         product_id = str(uuid.uuid4())
         await _seed(db_manager, db_session, test_tenant_key, product_id=product_id, tenant=True, product=True)
 
@@ -261,7 +208,6 @@ class TestWidenedResolution:
     async def test_an_unusable_product_id_degrades_the_staging_read_to_the_tenant_rung(
         self, db_manager, db_session, test_tenant_key
     ):
-        """Coerced, not validated -- a malformed id must not cost the tenant its override."""
         await _seed(db_manager, db_session, test_tenant_key, tenant=True)
 
         staging = await read_orchestrator_override(
@@ -274,27 +220,16 @@ class TestWidenedResolution:
     async def test_a_failed_product_name_lookup_costs_the_label_and_nothing_else(
         self, db_manager, db_session, test_tenant_key
     ):
-        """Separately guarded on purpose: a name is cosmetic, the override text is not."""
         svc = _mission_service(db_manager, project_row=_project_row(None))
         svc._repo.get_product_name = AsyncMock(side_effect=RuntimeError("product row unreadable"))
 
         assert await resolve_product_name(svc, db_session, test_tenant_key, str(uuid.uuid4())) is None
 
 
-# ---------------------------------------------------------------------------
-# 3. The content pin (project DoD 3) -- purely additive, all three rungs
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 class TestServedContentIsUnchanged:
-    """Served identity == the untouched composition + exactly one appended line.
-
-    ``compose_orchestrator_identity`` is not modified by this project, so the
-    right-hand side of each assertion IS the pre-change content. A drift anywhere in
-    composition -- a lost harness block, a trimmed seed, a changed separator -- fails
-    here, and so does a wrong provenance line.
-    """
 
     async def _served(self, db_manager, db_session, tenant_key, *, product_id):
         svc = _mission_service(db_manager, project_row=_project_row(product_id))
@@ -345,14 +280,6 @@ class TestServedContentIsUnchanged:
     async def test_the_conductors_role_trim_is_preserved_under_the_append(
         self, db_manager, db_session, test_tenant_key
     ):
-        """BE-6211g trims the project-less conductor's identity body. The append must sit
-        on top of the TRIMMED composition, not quietly restore the untrimmed one.
-
-        Exercised on the packaged SEED, not on an override: the trim removes named
-        blocks of the seed (the single-project workflow, the verify-all-agents finale,
-        the worker-spawn bullet), so a short custom override has nothing for it to cut
-        and conductor-vs-solo would come out identical -- proving nothing.
-        """
         svc = _mission_service(db_manager, project_row=_project_row(None))
         identity, source, _scope = await compose_identity_with_provenance(
             svc,

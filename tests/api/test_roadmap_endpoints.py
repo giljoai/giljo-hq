@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-REST API tests for the Roadmap endpoints (FE-6022a).
-
-Exercises ``GET /api/v1/roadmap`` and ``PATCH /api/v1/roadmap/reorder`` at the
-HTTP boundary (api_client) with tenant + active-product isolation:
-
-- GET returns the active product's roadmap + items joined to display fields,
-  sorted by sort_order; 404 when no product is active.
-- PATCH reorders by item id; out-of-range sort_order -> 422 (FastAPI body
-  validation); cross-tenant ids are silently skipped (0 reordered).
-"""
 
 from __future__ import annotations
 
@@ -35,7 +24,6 @@ _TEST_CSRF_TOKEN = secrets.token_urlsafe(32)
 
 
 async def _seed(db_manager, *, active: bool = True) -> dict:
-    """Seed org + user + product + one project in a fresh tenant; return auth+ids."""
     async with db_manager.get_session_async() as session:
         suffix = uuid.uuid4().hex[:8]
         tenant_key = TenantManager.generate_tenant_key()
@@ -93,7 +81,6 @@ async def _seed(db_manager, *, active: bool = True) -> dict:
 
 
 async def _upsert_one_project_item(db_manager, tenant_key: str, project_id: str, sort_order: int = 0) -> None:
-    """Persist one roadmap item via the owning service (commits to the test DB)."""
     svc = RoadmapService(db_manager=db_manager, tenant_manager=TenantManager())
     await svc.upsert_metadata(
         items=[{"item_type": "project", "project_id": project_id, "sort_order": sort_order, "risk": "low"}],
@@ -167,7 +154,6 @@ async def test_get_roadmap_is_tenant_isolated(api_client: AsyncClient, db_manage
     b = await _seed(db_manager)
     await _upsert_one_project_item(db_manager, a["tenant_key"], a["project_id"])
 
-    # Tenant B has an active product but no roadmap items; must not see A's item.
     resp = await api_client.get("/api/v1/roadmap", headers=b["headers"])
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -184,7 +170,6 @@ async def test_reorder_cross_tenant_item_is_noop(api_client: AsyncClient, db_man
 
     a_item_id = (await api_client.get("/api/v1/roadmap", headers=a["headers"])).json()["items"][0]["id"]
 
-    # Tenant B reorders A's item -> 0 changed.
     resp = await api_client.patch(
         "/api/v1/roadmap/reorder",
         headers=b["headers"],
@@ -199,8 +184,6 @@ async def test_reorder_cross_tenant_item_is_noop(api_client: AsyncClient, db_man
 
 @pytest.mark.asyncio
 async def test_delete_roadmap_item_removes_own(api_client: AsyncClient, db_manager) -> None:
-    """DELETE /api/v1/roadmap/items/{id} removes the caller's own item (removed=1)
-    and the card disappears from the next GET."""
     seed = await _seed(db_manager)
     await _upsert_one_project_item(db_manager, seed["tenant_key"], seed["project_id"])
     item_id = (await api_client.get("/api/v1/roadmap", headers=seed["headers"])).json()["items"][0]["id"]
@@ -215,7 +198,6 @@ async def test_delete_roadmap_item_removes_own(api_client: AsyncClient, db_manag
 
 @pytest.mark.asyncio
 async def test_delete_roadmap_item_cross_tenant_is_noop(api_client: AsyncClient, db_manager) -> None:
-    """Tenant B deleting tenant A's item is a clean no-op (removed=0); A's item stands."""
     a = await _seed(db_manager)
     b = await _seed(db_manager)
     await _upsert_one_project_item(db_manager, a["tenant_key"], a["project_id"])
@@ -227,6 +209,5 @@ async def test_delete_roadmap_item_cross_tenant_is_noop(api_client: AsyncClient,
     assert resp.status_code == 200, resp.text
     assert resp.json()["removed"] == 0
 
-    # A's item survives the cross-tenant delete.
     a_items = (await api_client.get("/api/v1/roadmap", headers=a["headers"])).json()["items"]
     assert len(a_items) == 1

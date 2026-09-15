@@ -3,9 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Pydantic schemas for API request/response models.
-"""
 
 from .task import (
     ProjectConversionResponse,

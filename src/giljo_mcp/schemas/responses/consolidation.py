@@ -3,7 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Consolidation/vision summarization service response models."""
 
 from pydantic import BaseModel, ConfigDict, Field
 

@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Get agent self-identity (template) context tool.
-
-Handover 0430: Internal tool for fetch_context() self_identity category.
-
-Fetches the agent's own template from the database, providing behavioral guidance,
-success criteria, and protocol instructions from the AgentTemplate stored in Admin Settings.
-"""
-# Read-only tool -- uses direct session.execute() for SELECT queries (no writes)
 
 import json
 import logging
@@ -28,23 +19,6 @@ logger = logging.getLogger(__name__)
 
 
 def estimate_tokens(data: dict[str, Any]) -> int:
-    """
-    Estimate token count for response data.
-
-    chars÷4 measured and found SAFE here, unlike
-    get_tasks.py's identifier-dense rows. Agent-template content
-    (system_instructions/user_instructions/behavioral_rules/success_criteria) is
-    prose, not identifier-dense JSON -- measured on a realistic template payload
-    against the real wire serializer (pydantic_core.to_json) and tiktoken
-    o200k_base: 5.65 chars/token, i.e. ÷4 OVERestimates token cost here (the safe
-    direction) rather than understating it. Left unchanged.
-
-    Args:
-        data: Dictionary to estimate tokens for
-
-    Returns:
-        Estimated token count
-    """
     json_str = json.dumps(data, default=str)
     return len(json_str) // 4
 
@@ -53,54 +27,8 @@ async def get_self_identity(
     agent_name: str,
     tenant_key: str,
     db_manager: DatabaseManager | None = None,
-    session: AsyncSession | None = None,  # For testing only
+    session: AsyncSession | None = None,
 ) -> dict[str, Any]:
-    """
-    Fetch agent template by name for self-identity context.
-
-    Handover 0430: Internal tool for fetch_context() self_identity category.
-
-    Returns the agent's template content including:
-    - system_instructions: Protected MCP coordination instructions
-    - user_instructions: User-customizable role-specific guidance
-    - behavioral_rules: Role-specific behavioral constraints
-    - success_criteria: Success metrics and completion criteria
-
-    Args:
-        agent_name: Template name (matches AgentTemplate.name, e.g., "orchestrator-coordinator")
-        tenant_key: Tenant isolation key
-        db_manager: Database manager instance
-
-    Returns:
-        Dict with agent identity info:
-        {
-            "source": "self_identity",
-            "data": {
-                "name": "orchestrator-coordinator",
-                "role": "Orchestrator",
-                "description": "...",
-                "system_instructions": "...",
-                "user_instructions": "...",
-                "behavioral_rules": [...],
-                "success_criteria": [...]
-            },
-            "metadata": {
-                "agent_name": "orchestrator-coordinator",
-                "tenant_key": "...",
-                "estimated_tokens": 2000
-            }
-        }
-
-    Multi-Tenant Isolation:
-        All queries filter by tenant_key.
-
-    Example:
-        result = await get_self_identity(
-            agent_name="orchestrator-coordinator",
-            tenant_key="tenant_abc",
-            db_manager=db_manager
-        )
-    """
     logger.info("fetching_self_identity agent_name=%s tenant_key=%s", agent_name, tenant_key)
 
     if db_manager is None and session is None:
@@ -119,13 +47,9 @@ async def _get_self_identity_impl(
     agent_name: str,
     tenant_key: str,
 ) -> dict[str, Any]:
-    """Inner implementation for get_self_identity using a provided session."""
-    # Query template by name with multi-tenant isolation.
-    # BE-6137: exclude soft-deleted templates from self-identity reads.
     stmt = select(AgentTemplate).where(
         AgentTemplate.name == agent_name,
         AgentTemplate.tenant_key == tenant_key,
-        AgentTemplate.is_active,
         AgentTemplate.deleted_at.is_(None),
     )
     result = await session.execute(stmt)
@@ -143,7 +67,6 @@ async def _get_self_identity_impl(
             "metadata": {"agent_name": agent_name, "tenant_key": tenant_key, "error": "template_not_found"},
         }
 
-    # Build data dict with all identity fields
     data = {
         "name": template.name,
         "role": template.role or "",
@@ -156,7 +79,6 @@ async def _get_self_identity_impl(
         "expertise": template.meta_data.get("expertise", []) if template.meta_data else [],
     }
 
-    # Calculate token estimate
     total_tokens = estimate_tokens(data)
 
     logger.info(

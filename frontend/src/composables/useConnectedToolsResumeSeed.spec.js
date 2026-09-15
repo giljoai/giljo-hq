@@ -1,13 +1,3 @@
-/**
- * useConnectedToolsResumeSeed.spec.js — FE-9569 detector 2, second cause.
- *
- * Extracted from SetupWizardOverlay.vue (CI guardrail 1's file-size budget)
- * to keep that file's line count flat -- tested here in isolation instead.
- * See the composable's own doc comment for the full story: a wizard resumed
- * directly onto Install (currentStep >= 2, e.g. from a persisted
- * setup_step_completed) never mounts SetupStep2Connect in that session, so
- * connectedTools stays empty forever without this seed.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ref, nextTick } from 'vue'
 import { useConnectedToolsResumeSeed } from './useConnectedToolsResumeSeed'
@@ -111,7 +101,6 @@ describe('useConnectedToolsResumeSeed', () => {
     await Promise.resolve()
     await Promise.resolve()
 
-    // Untouched -- the real live SetupStep2Connect data wins, never overwritten.
     expect(step2Data.value.connectedTools).toEqual(['codex_cli'])
   })
 })

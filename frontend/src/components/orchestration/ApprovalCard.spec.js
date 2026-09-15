@@ -1,15 +1,3 @@
-/**
- * ApprovalCard.spec.js — FE-5017 Phase C.
- *
- * Edition Scope: CE.
- *
- * Covers:
- *  - renders title from `reason` and one button per option
- *  - first option is primary (variant="flat" / color="primary"), rest are text
- *  - click POSTs to api.approvals.decide with the correct (id, optionId)
- *  - successful decide removes the row from the store
- *  - error path shows the error and emits 'error'
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -43,7 +31,6 @@ describe('ApprovalCard.vue (FE-5017 Phase C)', () => {
     pinia = createPinia()
     setActivePinia(pinia)
     vi.clearAllMocks()
-    // Pre-seed the store with the row so decide() can remove it.
     const store = useApprovalsStore()
     store.upsertApproval(baseApproval)
   })
@@ -65,7 +52,6 @@ describe('ApprovalCard.vue (FE-5017 Phase C)', () => {
     const wrapper = mountCard()
     const primary = wrapper.find('[data-testid="approval-option-continue"]')
     const secondary = wrapper.find('[data-testid="approval-option-pause"]')
-    // The Vuetify stub passes attrs through to the underlying button.
     expect(primary.attributes('variant')).toBe('flat')
     expect(primary.attributes('color')).toBe('primary')
     expect(secondary.attributes('variant')).toBe('text')
@@ -104,11 +90,6 @@ describe('ApprovalCard.vue (FE-5017 Phase C)', () => {
   })
 
   it('leaves the approval row in the store after decide (WS event handles removal)', async () => {
-    // Regression: previously the store removed the row optimistically inside
-    // decide(), which caused ApprovalCard to unmount before its 'decided'
-    // emit could reach the parent dialog. Removal is now WS-driven so the
-    // emit chain completes cleanly. The row clears a beat later via
-    // handleStatusEvent when the backend broadcasts the resume.
     api.approvals.decide.mockResolvedValueOnce({
       data: {
         approval_id: baseApproval.id,

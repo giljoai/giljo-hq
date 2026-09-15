@@ -3,11 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Background tasks initialization module
-
-Handles background tasks: download token cleanup, API metrics sync, and one-time purge.
-Extracted from api/app.py lifespan function (lines ~335-577).
-"""
 
 import asyncio
 import logging
@@ -46,23 +41,12 @@ from giljo_mcp.tenant import TenantManager
 logger = logging.getLogger(__name__)
 
 
-# Named Vue route the admin system banners deep-link to (Tools page).
 _TOOLS_ROUTE = "Tools"
 
-# Public GitHub releases page the "update available" banner links out to.
-# Used as a fallback when the update checker did not capture a specific
-# release_url (git-mode installs report commit counts, not a release URL).
 _GITHUB_RELEASES_URL = "https://github.com/giljoai/giljo-hq/releases"
 
 
 async def _tenant_keys_with_admins(db_manager: DatabaseManager) -> set[str]:
-    """Return the set of tenant_keys that have at least one active admin user.
-
-    The CE system banners (pending migrations / update available / skills drift)
-    are admin-only (``role_filter='admin'``), so there is no value emitting them
-    for tenants with no admin to see them. Cross-tenant discovery uses the
-    audited model-scoped bypass (mirrors ``scan_expiring_api_keys_task``).
-    """
     async with db_manager.get_session_async() as session:
         with tenant_isolation_bypass(
             session,
@@ -76,22 +60,6 @@ async def _tenant_keys_with_admins(db_manager: DatabaseManager) -> set[str]:
 
 
 async def emit_system_banners(state: APIState) -> None:
-    """Upsert/resolve the CE admin system banners for every tenant.
-
-    Idempotent and safe to call repeatedly (startup + each update-checker cycle):
-    each banner is a present-or-not upsert keyed by a stable ``dedupe_key`` with
-    ``role_filter='admin'`` and ``surface='banner'``. When a condition no longer
-    holds, the matching open notification is resolved (auto-clear).
-
-    Conditions:
-    - ``system.pending_migrations`` — DB schema behind the bundled head.
-    - ``system.update_available`` — newer code/release available (from
-      ``state.update_available`` populated by the update checker).
-    - ``system.skills_drift`` — bundled SKILLS_VERSION ahead of the announced
-      value.
-    - ``system.tool_rename_notice`` — INF-6049a one-time migration prompt, shown
-      for the first few CE process boots (counter bumped once per startup).
-    """
     if not state.db_manager:
         return
 
@@ -104,23 +72,13 @@ async def emit_system_banners(state: APIState) -> None:
     if not tenant_keys:
         return
 
-    # On hosted SaaS, GiljoAI controls migrations and code rollout, so the
-    # self-hosted "pending migrations" / "update available" admin banners do not
-    # apply. The skills-drift banner stays in BOTH editions (BE-6031c).
     is_saas = os.environ.get("GILJO_MODE") == "saas"
 
     pending_info = None if is_saas else get_pending_migration_info(state)
     update_info = None if is_saas else getattr(state, "update_available", None)
-    # INF-6049a: the first-3-boots tool-rename notice is CE-only. The counter is
-    # READ here (per emit cycle) and incremented exactly once per process startup
-    # in init_background_tasks -- never advanced by an update-checker tick.
     tool_rename_boot_count = None if is_saas else await _get_tool_rename_boot_count(state.db_manager)
 
     for tenant_key in tenant_keys:
-        # FE-9202 F1: per-tenant isolation. One tenant's failure (e.g. a product
-        # deactivated mid-cycle) must NOT abort the emit for every tenant after it
-        # — otherwise a single broken tenant silently freezes the whole banner
-        # refresh (including the skills-drift resurface) on every 6-hour tick.
         try:
             service = NotificationService(
                 db_manager=state.db_manager,
@@ -130,18 +88,11 @@ async def emit_system_banners(state: APIState) -> None:
                 await _emit_pending_migrations_banner(service, tenant_key, pending_info)
                 await _emit_update_available_banner(service, tenant_key, update_info)
                 await _emit_tool_rename_notice_banner(service, tenant_key, tool_rename_boot_count)
-            # Drift is PER TENANT: compare the bundled SKILLS_VERSION against THIS
-            # tenant's acknowledged_version, so one tenant re-running /giljo_setup
-            # clears only its own banner.
             skills_drift = await _compute_skills_drift(state.db_manager, tenant_key)
             await _emit_skills_drift_banner(service, tenant_key, skills_drift)
-            # FE-9202: context-tuning-due reminder. Emits in BOTH editions (context
-            # tuning is a core concern) and is per-user (role_filter=None), so it
-            # runs outside the is_saas guard above. Gated on the user's
-            # tuning_reminder_threshold (count-based staleness, BE-9218).
             tuning_due = await compute_context_tuning_due(state.db_manager, tenant_key)
             await emit_context_tuning_due_banner(service, tenant_key, tuning_due, tools_route=_TOOLS_ROUTE)
-        except Exception as exc:  # Broad catch: one tenant's failure never blocks the rest.
+        except Exception as exc:
             logger.error("system banner emit failed for tenant %s: %s", tenant_key, exc, exc_info=True)
 
 
@@ -179,10 +130,6 @@ async def _emit_update_available_banner(
 
     commits_behind = update_info.get("commits_behind")
     tag = update_info.get("latest_version") or update_info.get("tag")
-    # Always carry a usable GitHub URL: release-zip installs report a specific
-    # release_url; git-mode installs report only a commit count, so fall back to
-    # the releases landing page. The banner CTA opens this externally (no in-app
-    # cta_route) since the actual upgrade happens in the user's terminal.
     release_url = update_info.get("release_url") or _GITHUB_RELEASES_URL
     natural = tag or (str(commits_behind) if commits_behind is not None else "available")
     dedupe_key = f"system.update_available:{natural}"
@@ -205,23 +152,16 @@ async def _emit_update_available_banner(
             "tag": tag,
         },
     )
-    # Clear any stale older-version update banners now superseded by this one.
     await service.resolve_open_by_type(tenant_key, "system.update_available", keep_dedupe_key=dedupe_key)
 
 
-# Resurface a dismissed skills-drift banner after this many hours if drift persists.
 _SKILLS_DRIFT_RESURFACE_HOURS = 24
 
-# Stable per-tenant dedupe key: drift is now evaluated against the tenant's
-# acknowledged_version and cleared by resolve-on-catch-up, so a single open row
-# per tenant is correct (no per-version key churn).
 _SKILLS_DRIFT_DEDUPE_KEY = "system.skills_drift"
 
 
 async def _emit_skills_drift_banner(service: NotificationService, tenant_key: str, drift: dict | None) -> None:
     if drift is None:
-        # Tenant has caught up (acknowledged == bundled) or never ran setup:
-        # resolve any open drift banner so a re-run of /giljo_setup clears it.
         await service.resolve_by_dedupe_key(tenant_key, _SKILLS_DRIFT_DEDUPE_KEY)
         return
     await service.upsert_by_dedupe_key(
@@ -246,15 +186,6 @@ async def _emit_skills_drift_banner(service: NotificationService, tenant_key: st
 
 
 async def _compute_skills_drift(db_manager: DatabaseManager, tenant_key: str) -> dict | None:
-    """Return drift info when the bundled SKILLS_VERSION is ahead of this tenant.
-
-    ``acknowledged`` is THIS tenant's ``tenant_skills_ack.acknowledged_version``
-    (the version it last installed via ``/giljo_setup``). Drift exists when the
-    tenant has acknowledged some version that is not the bundled
-    ``SKILLS_VERSION``. A tenant that has NEVER run setup (``acknowledged`` is
-    None) raises no banner: there is nothing to "re-run" yet, and a fresh
-    install should not nag before first setup.
-    """
     from giljo_mcp.services.settings_service import TenantSkillsAckService
     from giljo_mcp.tools.slash_command_templates import SKILLS_VERSION
 
@@ -274,28 +205,16 @@ async def _compute_skills_drift(db_manager: DatabaseManager, tenant_key: str) ->
     }
 
 
-# INF-6049a: one-time CE migration notice for the get_orchestrator_instructions ->
-# get_staging_context tool rename. Surfaced for the first N CE process boots after
-# this version, reusing the EXISTING system-banner family (no new banner family).
 _TOOL_RENAME_NOTICE_DEDUPE_KEY = "system.tool_rename_notice"
 
 
 async def _get_tool_rename_boot_count(db_manager: DatabaseManager) -> int:
-    """Read the deployment-wide tool-rename-notice boot count (0 if unset)."""
     from giljo_mcp.services.settings_service import SystemSettingsService
 
     async with db_manager.get_session_async() as session:
         return await SystemSettingsService(session).get_tool_rename_boot_count()
 
 
-# The rename pairs the CE first-boots migration banner shows a self-hoster.
-#
-# BE-9563: module-level so a startup guard can assert every TARGET name against the
-# live registry -- a hardcoded roster that nothing re-checks silently goes stale, and
-# this one is read by a human.
-#
-# The LEFT side is history and must not be edited -- it records what those names used to
-# be. Only the right side is a live claim.
 TOOL_RENAME_NOTICE_PAIRS: tuple[str, ...] = (
     "get_agent_mission → get_job_mission",
     "update_agent_mission → update_job_mission",
@@ -311,12 +230,6 @@ TOOL_RENAME_NOTICE_PAIRS: tuple[str, ...] = (
 async def _emit_tool_rename_notice_banner(
     service: NotificationService, tenant_key: str, boot_count: int | None
 ) -> None:
-    """Upsert/resolve the first-3-boots tool-rename migration notice (CE-only).
-
-    Fires while the process boot count is within the notice window (1..MAX_BOOTS);
-    once past it (or never set, or SaaS where ``boot_count`` is None) the open
-    banner is resolved so it disappears.
-    """
     from giljo_mcp.services.settings_service import TOOL_RENAME_NOTICE_MAX_BOOTS
 
     if boot_count is None or not (1 <= boot_count <= TOOL_RENAME_NOTICE_MAX_BOOTS):
@@ -345,34 +258,20 @@ async def _emit_tool_rename_notice_banner(
 
 
 async def cleanup_expired_download_tokens(state: APIState):
-    """Background task to cleanup expired download tokens every 15 minutes.
-
-    Deletes expired token rows AND reaps their on-disk staging directories
-    (``temp/{tenant_key}/{token}/``). Before BE-3011 the reaper deleted rows
-    only, orphaning the staging dirs on disk (a slow disk-filler with no
-    operator on CE self-hosts). The DB delete returns the purged
-    ``(tenant_key, token)`` pairs; each dir is removed via the path-validated
-    ``FileStaging.purge_token_dir`` (idempotent; refuses any path escaping the
-    staging root).
-    """
     from giljo_mcp.download_tokens import TokenManager
     from giljo_mcp.file_staging import FileStaging
 
     while True:
         try:
-            await asyncio.sleep(900)  # 15 minutes
+            await asyncio.sleep(900)
 
             if state.db_manager:
                 async with state.db_manager.get_session_async() as session:
                     token_manager = TokenManager(session)
                     result = await token_manager.cleanup_expired_tokens()
-                    # Backward-compatible handling: support int or dict
                     deleted_total = result.get("total", 0) if isinstance(result, dict) else int(result or 0)
                     pairs = result.get("pairs", []) if isinstance(result, dict) else []
 
-                    # Reap the on-disk staging dir for each purged token. Default
-                    # base_path (Path.cwd()/temp) matches every production
-                    # FileStaging caller. Path-validated + idempotent per pair.
                     staging = FileStaging()
                     reaped = 0
                     for tenant_key, token in pairs:
@@ -387,42 +286,29 @@ async def cleanup_expired_download_tokens(state: APIState):
                         logger.debug("Download token cleanup: no tokens removed")
         except asyncio.CancelledError:
             raise
-        # BE-9053: catch-log-continue at the loop boundary (SaaS reaper pattern).
-        # The old narrow tuple let one unexpected exception kill the loop
-        # permanently and silently.
         except Exception as e:
             logger.error(f"Error during download token cleanup: {e}", exc_info=True)
 
 
 async def purge_expired_deleted_items(db_manager: DatabaseManager, tenant_manager: TenantManager):
-    """Run one-time purge of expired deleted projects and products (Handover 0070)"""
     try:
         logger.info("Running startup purge of expired deleted items...")
 
-        # Get all tenants that have deleted items
         async with db_manager.get_session_async() as session:
-            # Find all unique tenant keys with deleted items
             cutoff_date = datetime.now(UTC) - timedelta(days=10)
 
-            # Get unique tenants with expired deleted projects
             project_stmt = (
                 select(Project.tenant_key)
                 .distinct()
                 .where(Project.deleted_at.isnot(None), Project.deleted_at < cutoff_date)
             )
 
-            # Get unique tenants with expired deleted products
             product_stmt = (
                 select(Product.tenant_key)
                 .distinct()
                 .where(Product.deleted_at.isnot(None), Product.deleted_at < cutoff_date)
             )
 
-            # BE6004C-5: these two discovery reads enumerate EVERY tenant with
-            # expired deleted items -- no single tenant is knowable before the
-            # query, so the audited model-scoped bypass is the correct mechanism.
-            # The per-tenant purge BELOW runs tenant-scoped (set_current_tenant
-            # per tenant), NOT under this bypass.
             with tenant_isolation_bypass(
                 session,
                 reason="cross-tenant maintenance scan: enumerate tenants for purge",
@@ -441,11 +327,8 @@ async def purge_expired_deleted_items(db_manager: DatabaseManager, tenant_manage
                 total_projects_purged = 0
                 total_products_purged = 0
 
-                # Purge for each tenant
                 for tenant_key in all_tenants:
-                    # Purge expired deleted projects
                     project_service = ProjectService(db_manager=db_manager, tenant_manager=tenant_manager)
-                    # Set tenant context for this purge
                     tenant_manager.set_current_tenant(tenant_key)
 
                     project_purge_result = await project_service.deletion.purge_expired_deleted_projects(
@@ -453,7 +336,6 @@ async def purge_expired_deleted_items(db_manager: DatabaseManager, tenant_manage
                     )
                     total_projects_purged += project_purge_result.purged_count
 
-                    # Purge expired deleted products
                     product_service = ProductService(db_manager=db_manager, tenant_key=tenant_key)
 
                     product_purge_result = await product_service.lifecycle.purge_expired_deleted_products(
@@ -461,7 +343,6 @@ async def purge_expired_deleted_items(db_manager: DatabaseManager, tenant_manage
                     )
                     total_products_purged += product_purge_result.purged_count
 
-                # Clear tenant context
                 tenant_manager.clear_current_tenant()
 
                 if total_projects_purged > 0 or total_products_purged > 0:
@@ -473,29 +354,18 @@ async def purge_expired_deleted_items(db_manager: DatabaseManager, tenant_manage
                     logger.debug("[Handover 0070] No expired deleted items to purge")
 
         logger.info("Startup purge complete")
-    except Exception as e:  # Broad catch: background task startup, non-fatal
+    except Exception as e:
         logger.error(f"Failed to purge expired deleted items: {e}", exc_info=True)
         logger.warning("Continuing startup despite purge failure")
 
 
 async def scan_expiring_api_keys_task(state: APIState):
-    """Background task: notify users of API keys expiring within 7 days.
-
-    Runs once per hour (NEVER per-minute). Enumerates every tenant that owns at
-    least one API key, then runs the tenant-scoped expiry scan; the scan emits
-    de-duplicated ``api_key.expiring_soon`` notifications, so re-running each hour
-    does not produce duplicates.
-    """
     while True:
-        await asyncio.sleep(3600)  # 1 hour
+        await asyncio.sleep(3600)
         if not state.db_manager:
             continue
         try:
             async with state.db_manager.get_session_async() as session:
-                # Cross-tenant discovery: no single tenant is knowable before the
-                # query, so the audited model-scoped bypass is the correct
-                # mechanism (mirrors purge_expired_deleted_items). The per-tenant
-                # scan BELOW runs tenant-scoped via its own session.
                 with tenant_isolation_bypass(
                     session,
                     reason="cross-tenant maintenance scan: enumerate tenants with API keys",
@@ -518,44 +388,22 @@ async def scan_expiring_api_keys_task(state: APIState):
             logger.debug("API key expiry scan complete for %d tenant(s)", len(tenant_keys))
         except asyncio.CancelledError:
             raise
-        # BE-9053: catch-log-continue at the loop boundary (SaaS reaper pattern).
-        # The old narrow tuple let one unexpected exception kill the loop
-        # permanently and silently.
         except Exception as e:
             logger.error("Error during API key expiry scan: %s", e, exc_info=True)
 
 
-# BE-3011: the notifications table had no purge path and grows unbounded per
-# tenant. Conservative default retention for SAFELY-purgeable (resolved/expired)
-# rows only. A module constant — NOT a new env var — keeps this within the
-# complexity budget (mirrors MCPSessionManager.SESSION_CLEANUP_THRESHOLD_HOURS).
 NOTIFICATION_RETENTION_DAYS = 30
 
 
 async def purge_old_notifications_task(state: APIState):
-    """Background task: purge resolved/expired notifications past retention.
-
-    BE-3011 retention valve. Runs every 6 hours. Enumerates every tenant that
-    owns at least one notification (audited model-scoped bypass — no single
-    tenant is knowable before the query), then runs the tenant-scoped purge via
-    the owning service so tenant A's sweep can never touch tenant B's rows.
-    Only SAFELY-purgeable rows are removed (resolved or expired AND older than
-    the retention window); active/unresolved notifications are never deleted by
-    age alone.
-    """
     from giljo_mcp.models.notifications import Notification
 
     while True:
-        await asyncio.sleep(21600)  # 6 hours
+        await asyncio.sleep(21600)
         if not state.db_manager:
             continue
         try:
             async with state.db_manager.get_session_async() as session:
-                # Cross-tenant discovery: no single tenant is knowable before the
-                # query, so the audited model-scoped bypass is the correct
-                # mechanism (mirrors the APIKey scan above). The per-tenant purge
-                # BELOW stays tenant-scoped via the owning service's explicit
-                # predicate, so tenant A's sweep can never reach tenant B's rows.
                 with tenant_isolation_bypass(
                     session,
                     reason="cross-tenant maintenance scan: enumerate tenants with notifications",
@@ -584,25 +432,15 @@ async def purge_old_notifications_task(state: APIState):
                 logger.debug("Notification retention purge: nothing to purge")
         except asyncio.CancelledError:
             raise
-        # BE-9053: catch-log-continue at the loop boundary (SaaS reaper pattern).
-        # The old narrow tuple let one unexpected exception kill the loop
-        # permanently and silently.
         except Exception as e:
             logger.error("Error during notification retention purge: %s", e, exc_info=True)
 
 
 async def cleanup_expired_mcp_sessions_task(state: APIState):
-    """Background task: purge MCP HTTP sessions inactive beyond the threshold.
-
-    BE-3011: ``MCPSessionManager.cleanup_expired_sessions`` existed and was
-    correct but had ZERO callers, so the ``mcp_sessions`` table grew unbounded.
-    Wired in here (runs every 6 hours). The manager method now runs its
-    cross-tenant DELETE under the audited tenant-isolation bypass.
-    """
     from api.endpoints.mcp_session import MCPSessionManager
 
     while True:
-        await asyncio.sleep(21600)  # 6 hours
+        await asyncio.sleep(21600)
         if not state.db_manager:
             continue
         try:
@@ -615,28 +453,13 @@ async def cleanup_expired_mcp_sessions_task(state: APIState):
                 logger.debug("MCP session cleanup: nothing to remove")
         except asyncio.CancelledError:
             raise
-        # BE-9053: catch-log-continue at the loop boundary (SaaS reaper pattern).
-        # The old narrow tuple let one unexpected exception kill the loop
-        # permanently and silently.
         except Exception as e:
             logger.error("Error during MCP session cleanup: %s", e, exc_info=True)
 
 
 async def refresh_system_banners_task(state: APIState) -> None:
-    """Re-evaluate the CE system banners every 6 hours (FE-9202).
-
-    ``emit_system_banners`` is idempotent (present-or-not upserts + resolve-on-
-    clear) but was only ever invoked at startup and on update-checker
-    transitions, so TIME-based banners never re-evaluated on a long-running
-    server. This loop closes that gap. Two banners depend on it:
-    - ``system.context_tuning_due`` (new) — the 14-day reminder can only appear
-      once its window elapses, which needs periodic evaluation.
-    - ``system.skills_drift`` (existing) — its documented 24h dismissal-resurface
-      now actually fires; a dismissed drift banner reappears daily while drift
-      persists, exactly as its ``resurface_after_hours`` always specified.
-    """
     while True:
-        await asyncio.sleep(21600)  # 6 hours
+        await asyncio.sleep(21600)
         if not state.db_manager:
             continue
         try:
@@ -644,49 +467,29 @@ async def refresh_system_banners_task(state: APIState) -> None:
             logger.debug("System banners re-evaluated (6-hourly refresh)")
         except asyncio.CancelledError:
             raise
-        # BE-9053: catch-log-continue at the loop boundary (SaaS reaper pattern).
         except Exception as e:
             logger.error("Error during system banner refresh: %s", e, exc_info=True)
 
 
 async def init_background_tasks(state: APIState) -> None:
-    """Initialize background tasks: cleanup, metrics sync, and one-time purge
-
-    Args:
-        state: APIState instance to populate with task references
-
-    Raises:
-        Exception: Logged but not raised - background task failures are non-fatal
-    """
-    # Per-worker telemetry flushers ALWAYS run, regardless of the background-jobs
-    # gate: they drain THIS worker's in-memory API/WebSocket counters, so routing
-    # them to a request-less worker process would silently lose telemetry
-    # (INF-3009b — the audit's "justify staying per-worker" carve-out).
-    # Start API metrics sync task
     try:
         logger.info("Starting API metrics sync task...")
         metrics_sync_task = asyncio.create_task(sync_api_metrics_to_db(state), name="api-metrics-flusher")
         metrics_sync_task.add_done_callback(log_task_death)
         state.metrics_sync_task = metrics_sync_task
         logger.info("API metrics sync task started (runs every 5 minutes)")
-    except Exception as e:  # Broad catch: background task startup, non-fatal
+    except Exception as e:
         logger.error(f"Failed to start API metrics sync task: {e}", exc_info=True)
 
-    # Start WebSocket runtime-gauge sync task (BE-6108)
     try:
         logger.info("Starting WebSocket metrics sync task...")
         ws_metrics_sync_task = asyncio.create_task(sync_ws_metrics_to_db(state), name="ws-metrics-flusher")
         ws_metrics_sync_task.add_done_callback(log_task_death)
         state.ws_metrics_sync_task = ws_metrics_sync_task
         logger.info("WebSocket metrics sync task started (runs every 30 seconds)")
-    except Exception as e:  # Broad catch: background task startup, non-fatal
+    except Exception as e:
         logger.error(f"Failed to start WebSocket metrics sync task: {e}", exc_info=True)
 
-    # INF-3009b worker gate: everything below is a shared cross-tenant
-    # maintenance/reaper loop or one-time sweep. Behind GILJO_RUN_BACKGROUND_JOBS
-    # (default ON) so a single dedicated worker service can own them once
-    # WEB_CONCURRENCY>1 — stopping duplicate reaper emails and racing destructive
-    # sweeps. Default ON keeps CE single-process + un-split SaaS byte-identical.
     if not should_run_background_jobs():
         logger.info(
             "Background maintenance jobs DISABLED for this process (%s=off) — "
@@ -696,37 +499,33 @@ async def init_background_tasks(state: APIState) -> None:
         return
     logger.info("Background maintenance jobs ENABLED for this process (%s)", _BG_JOBS_ENV)
 
-    # Start download token cleanup task (Handover 0100)
     try:
         logger.info("Starting download token cleanup task...")
         cleanup_task = asyncio.create_task(cleanup_expired_download_tokens(state), name="download-token-cleanup")
         cleanup_task.add_done_callback(log_task_death)
-        state.cleanup_task = cleanup_task  # Store reference to prevent garbage collection
+        state.cleanup_task = cleanup_task
         logger.info("Download token cleanup task started (runs every 15 minutes)")
-    except Exception as e:  # Broad catch: background task startup, non-fatal
+    except Exception as e:
         logger.error(f"Failed to start download token cleanup task: {e}", exc_info=True)
 
-    # Start API key expiry scan task (IMP-5037a Phase 3)
     try:
         logger.info("Starting API key expiry scan task...")
         api_key_expiry_task = asyncio.create_task(scan_expiring_api_keys_task(state), name="api-key-expiry-scan")
         api_key_expiry_task.add_done_callback(log_task_death)
         state.api_key_expiry_task = api_key_expiry_task
         logger.info("API key expiry scan task started (runs every hour)")
-    except Exception as e:  # Broad catch: background task startup, non-fatal
+    except Exception as e:
         logger.error(f"Failed to start API key expiry scan task: {e}", exc_info=True)
 
-    # Start notification retention purge task (BE-3011)
     try:
         logger.info("Starting notification retention purge task...")
         notification_purge_task = asyncio.create_task(purge_old_notifications_task(state), name="notification-purge")
         notification_purge_task.add_done_callback(log_task_death)
         state.notification_purge_task = notification_purge_task
         logger.info("Notification retention purge task started (runs every 6 hours)")
-    except Exception as e:  # Broad catch: background task startup, non-fatal
+    except Exception as e:
         logger.error(f"Failed to start notification retention purge task: {e}", exc_info=True)
 
-    # Start MCP session cleanup task (BE-3011 — was dead/uncalled)
     try:
         logger.info("Starting MCP session cleanup task...")
         mcp_session_cleanup_task = asyncio.create_task(
@@ -735,15 +534,11 @@ async def init_background_tasks(state: APIState) -> None:
         mcp_session_cleanup_task.add_done_callback(log_task_death)
         state.mcp_session_cleanup_task = mcp_session_cleanup_task
         logger.info("MCP session cleanup task started (runs every 6 hours)")
-    except Exception as e:  # Broad catch: background task startup, non-fatal
+    except Exception as e:
         logger.error(f"Failed to start MCP session cleanup task: {e}", exc_info=True)
 
-    # Start OAuth authorization code cleanup task (BE-8000i -- was dead/uncalled).
-    # Extracted to oauth_code_reaper.py: this module was already at the 800-line
-    # CI guardrail (same rationale as tenant_guard.py's split from database.py).
     start_oauth_code_cleanup_task(state)
 
-    # Start git update checker (CE only — hosted SaaS controls its own rollout, BE-6031c)
     is_saas = os.environ.get("GILJO_MODE") == "saas"
     if not is_saas:
         try:
@@ -756,39 +551,30 @@ async def init_background_tasks(state: APIState) -> None:
         except Exception as e:  # noqa: BLE001 — background task startup, non-fatal
             logger.debug("Git update checker not available: %s", e)
 
-    # INF-6049a: bump the first-3-boots CE tool-rename-notice counter exactly ONCE
-    # per process startup (NOT inside emit_system_banners, which also runs on every
-    # update-checker tick — otherwise "first 3 boots" would become "first 3 ticks").
     if not is_saas and state.db_manager:
         try:
             from giljo_mcp.services.settings_service import SystemSettingsService
 
             async with state.db_manager.get_session_async() as session:
                 await SystemSettingsService(session).increment_tool_rename_boot_count()
-        except Exception as e:  # Broad catch: counter bump must never block startup
+        except Exception as e:
             logger.error(f"Failed to bump tool-rename notice boot count: {e}", exc_info=True)
 
-    # Emit CE admin system banners (pending migrations / update / skills drift / tool-rename notice)
     try:
         await emit_system_banners(state)
         logger.info("System banners emitted at startup")
-    except Exception as e:  # Broad catch: banner emission must never block startup
+    except Exception as e:
         logger.error(f"Failed to emit system banners at startup: {e}", exc_info=True)
 
-    # FE-9202: 6-hourly system-banner refresh so time-based banners (context-tuning
-    # due + skills-drift resurface) re-evaluate on long-running servers.
     try:
         logger.info("Starting system banner refresh task...")
         banner_refresh_task = asyncio.create_task(refresh_system_banners_task(state), name="system-banner-refresh")
         banner_refresh_task.add_done_callback(log_task_death)
         state.system_banner_refresh_task = banner_refresh_task
         logger.info("System banner refresh task started (runs every 6 hours)")
-    except Exception as e:  # Broad catch: background task startup, non-fatal
+    except Exception as e:
         logger.error(f"Failed to start system banner refresh task: {e}", exc_info=True)
 
-    # Run one-time purge of expired deleted items
     if state.db_manager:
         await purge_expired_deleted_items(state.db_manager, state.tenant_manager)
-        # TSK-6132: reap expired soft-deleted trash/recover rows (CommThread,
-        # Task, VisionDocument, AgentTemplate) past the BE-6130b recovery window.
         await purge_expired_soft_deleted_entities(state.db_manager, state.tenant_manager)

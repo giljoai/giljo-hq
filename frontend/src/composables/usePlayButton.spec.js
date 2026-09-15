@@ -106,7 +106,6 @@ describe('usePlayButton', () => {
     expect(mockShowToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }))
   })
 
-  // --- Layer 4: error/success surfacing for Copy Implementation Prompt ---
 
   it('handlePlay surfaces actionable toast when implementation prompt returns 404', async () => {
     project = { project_id: 'proj-404', execution_mode: 'claude_code_cli' }
@@ -219,26 +218,19 @@ describe('usePlayButton', () => {
     warnSpy.mockRestore()
   })
 
-  // --- FE-6019 regression: stale prop vs store-authoritative execution_mode ---
 
   it('[FE-6019] shouldShowCopyButton uses store execution_mode over stale prop', () => {
-    // Simulate: prop snapshot has stale CLI mode (e.g., from a previous mode before re-staging)
-    // but the projectStateStore holds the persisted multi_terminal value.
     const staleProject = { project_id: 'proj-fe6019', execution_mode: 'claude_code_cli' }
     const storeState = { stagingComplete: true, execution_mode: 'multi_terminal' }
     const getStoreFn = vi.fn(() => storeState)
 
     const { shouldShowCopyButton } = usePlayButton(staleProject, getStoreFn, clipboardCopy)
 
-    // A non-orchestrator specialist in multi_terminal mode MUST get a copy button.
-    // Before fix: prop claudeCodeCliMode=true → shouldShowLaunchAction returns false → button hidden.
-    // After fix: store mode=multi_terminal → claudeCodeCliMode=false → button shown.
     const specialist = { agent_display_name: 'implementer', status: 'waiting' }
     expect(shouldShowCopyButton(specialist)).toBe(true)
   })
 
   it('[FE-6019] shouldShowCopyButton correctly hides specialist button in CLI mode from store', () => {
-    // When the store itself says CLI mode, specialists should not get the copy button.
     const staleProject = { project_id: 'proj-fe6019b', execution_mode: 'multi_terminal' }
     const storeState = { stagingComplete: true, execution_mode: 'claude_code_cli' }
     const getStoreFn = vi.fn(() => storeState)
@@ -246,13 +238,10 @@ describe('usePlayButton', () => {
     const { shouldShowCopyButton } = usePlayButton(staleProject, getStoreFn, clipboardCopy)
 
     const specialist = { agent_display_name: 'implementer', status: 'waiting' }
-    // Store says CLI → specialist copy button is hidden (correct CLI behavior)
     expect(shouldShowCopyButton(specialist)).toBe(false)
   })
 
   it('[BE-9035a] shouldShowCopyButton treats generic_mcp as a subagent CLI mode', () => {
-    // Before fix: generic_mcp was absent from the hardcoded CLI-mode array, so it
-    // was misclassified as multi_terminal and specialists wrongly got a copy button.
     const project = { project_id: 'proj-9035a', execution_mode: 'generic_mcp' }
     const storeState = { stagingComplete: true, execution_mode: 'generic_mcp' }
     const getStoreFn = vi.fn(() => storeState)

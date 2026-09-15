@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""TSK-9205 regression: two write-races surface a clean domain rejection, not a 500.
-
-Two independent instances of one class, both fixed by mapping the losing writer's
-``IntegrityError`` to the existing already-exists domain rejection (409) at the
-owning-service write:
-
-1. ``ProductVisionService.upload_vision_document`` — two concurrent same-name
-   uploads race past any pre-check; the loser hits the ``uq_vision_doc_product_name``
-   partial unique index. Reproduced here with a real DB constraint (a live doc of
-   the same name already present == the concurrent winner).
-2. ``template_import.import_default_templates`` — two concurrent import sessions
-   both pass the name pre-check and race to add the same name+version; the loser
-   hits ``uq_template_tenant_name_version``. Reproduced by injecting the losing
-   writer's ``IntegrityError`` at the owning-service write.
-
-Happy paths are asserted unchanged. Real DB, rollback-isolated ``db_session``;
-each test mints its own tenant key (parallel-safe, no module-level mutable state).
-"""
 
 from __future__ import annotations
 
@@ -57,19 +39,13 @@ async def _make_product(db_session, tenant: str) -> Product:
     return product
 
 
-# ---------------------------------------------------------------------------
-# Site 1 — vision document upload name race
-# ---------------------------------------------------------------------------
 
 
 async def test_duplicate_vision_upload_raises_already_exists(db_manager, db_session):
-    """A second upload of an already-present doc name -> AlreadyExistsError (409),
-    not the generic BaseGiljoError 500 the broad catch used to produce."""
     tenant = _tk("vision_race")
     svc = ProductVisionService(db_manager=db_manager, tenant_key=tenant, test_session=db_session)
     with tenant_session_context(db_session, tenant):
         product = await _make_product(db_session, tenant)
-        # The concurrent winner: a live doc with the contested name already committed.
         db_session.add(
             VisionDocument(
                 id=str(uuid4()),
@@ -97,8 +73,6 @@ async def test_duplicate_vision_upload_raises_already_exists(db_manager, db_sess
 
 
 async def test_vision_upload_happy_path_unchanged(db_manager, db_session):
-    """A unique-name upload still succeeds (the new IntegrityError branch does not
-    touch the happy path)."""
     tenant = _tk("vision_ok")
     svc = ProductVisionService(db_manager=db_manager, tenant_key=tenant, test_session=db_session)
     with tenant_session_context(db_session, tenant):
@@ -112,14 +86,9 @@ async def test_vision_upload_happy_path_unchanged(db_manager, db_session):
     assert result.document_name == "fresh.md"
 
 
-# ---------------------------------------------------------------------------
-# Site 2 — default-template import name+version race
-# ---------------------------------------------------------------------------
 
 
 async def test_default_import_write_race_raises_already_exists(db_manager, db_session, monkeypatch):
-    """When the losing import session's write trips uq_template_tenant_name_version,
-    import_default_templates re-raises AlreadyExistsError (409), not a raw 500."""
     tenant = _tk("import_race")
 
     async def _raise_integrity(self, session, template):  # noqa: ARG001
@@ -131,28 +100,24 @@ async def test_default_import_write_race_raises_already_exists(db_manager, db_se
 
     monkeypatch.setattr(TemplateService, "add_and_commit_template", _raise_integrity)
 
+    product = await _make_product(db_session, tenant)
     with pytest.raises(AlreadyExistsError) as exc:
-        await import_default_templates(db_session, tenant)
+        await import_default_templates(db_session, tenant, product.id)
     assert "already exists" in str(exc.value).lower()
 
 
 async def test_default_import_happy_path_unchanged(db_manager, db_session):
-    """A fresh tenant imports the seeded defaults with no collision (happy path
-    unaffected by the new IntegrityError branch)."""
     tenant = _tk("import_ok")
-    report = await import_default_templates(db_session, tenant)
-    # Seeded defaults land as first-time adds for a previously-empty tenant.
+    product = await _make_product(db_session, tenant)
+    report = await import_default_templates(db_session, tenant, product.id)
     assert report.added
     assert not report.added_as_duplicate
 
 
 async def test_default_import_is_idempotent_after_race_retry(db_manager, db_session):
-    """After the losing writer bails out, a retry is safe: the second import over
-    the same tenant adds nothing new (proves the domain rejection is recoverable,
-    not corrupting)."""
     tenant = _tk("import_retry")
-    first = await import_default_templates(db_session, tenant)
+    product = await _make_product(db_session, tenant)
+    first = await import_default_templates(db_session, tenant, product.id)
     assert first.added
-    second = await import_default_templates(db_session, tenant)
-    # Everything the first run added is now present -> the retry skips it.
+    second = await import_default_templates(db_session, tenant, product.id)
     assert not second.added

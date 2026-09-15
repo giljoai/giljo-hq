@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-9555: the account-level execution-mode default (Tools -> Agents).
-
-``stage_project`` refuses an omitted ``mode`` rather than picking one -- see
-``tests/unit/test_fe9555_execution_mode_required.py``. A refusal with no off
-switch is a nag, so ruling 6 pairs it with exactly ONE account default: *ask
-every time* (the default), *terminals*, or *subagents*. This is the endpoint
-behind that control.
-
-Hosted on ``SettingsService`` category ``general``, which is already
-tenant-scoped -- so unlike the silence threshold and check-in cadence next to
-it, there is no CE-vs-SaaS split to make here. It is a per-account preference
-in both editions, and ADR-009 makes tenant and user the same thing.
-
-Red-first: the endpoint does not exist on the pre-FE-9555 tree, so every test
-below 404s.
-"""
 
 from __future__ import annotations
 
@@ -79,12 +63,6 @@ async def _admin_headers_and_tenant(db_manager) -> tuple[dict[str, str], str]:
 
 @pytest.mark.asyncio
 async def test_defaults_to_ask_when_never_set(api_client, db_manager):
-    """An account that has never expressed a preference gets asked every time.
-
-    This is the value the staging refusal keys on, so the default is the whole
-    behaviour: ship it as 'subagent' or 'multi_terminal' and FE-9555's silent
-    pick comes straight back, just from a different file.
-    """
     headers, _tenant_key = await _admin_headers_and_tenant(db_manager)
 
     response = await api_client.get(ENDPOINT, headers=headers)
@@ -109,12 +87,6 @@ async def test_put_then_get_round_trips_every_choice(api_client, db_manager, cho
 @pytest.mark.asyncio
 @pytest.mark.parametrize("junk", ["terminals", "SUBAGENT", "claude", "", "true"])
 async def test_a_value_that_is_not_one_of_the_three_is_refused(api_client, db_manager, junk):
-    """Rejected at the boundary with a 422, not stored and quietly ignored later.
-
-    ``claude`` is the interesting one: ``stage_project`` still TOLERATES it on an
-    explicit call (BE-9554), but tolerance is owed to callers registered against
-    the old surface -- not to a preference being written today.
-    """
     headers, _tenant_key = await _admin_headers_and_tenant(db_manager)
 
     response = await api_client.put(ENDPOINT, headers=headers, json={"execution_mode_default": junk})
@@ -124,8 +96,6 @@ async def test_a_value_that_is_not_one_of_the_three_is_refused(api_client, db_ma
 
 @pytest.mark.asyncio
 async def test_the_write_preserves_sibling_general_settings(api_client, db_manager):
-    """Read-modify-write, like the headless toggle next door. A blind overwrite
-    of the `general` category would silently drop every other key in it."""
     headers, tenant_key = await _admin_headers_and_tenant(db_manager)
 
     async with db_manager.get_session_async() as session:
@@ -148,7 +118,6 @@ async def test_the_write_preserves_sibling_general_settings(api_client, db_manag
 
 @pytest.mark.asyncio
 async def test_the_default_is_tenant_isolated(api_client, db_manager):
-    """ADR-009: tenant A's preference is invisible to and unaffected by tenant B."""
     headers_a, _tenant_a = await _admin_headers_and_tenant(db_manager)
     headers_b, _tenant_b = await _admin_headers_and_tenant(db_manager)
 
@@ -161,14 +130,6 @@ async def test_the_default_is_tenant_isolated(api_client, db_manager):
 
 @pytest.mark.asyncio
 async def test_the_stored_value_is_what_staging_actually_reads(api_client, db_manager):
-    """Closes the loop the two suites would otherwise leave open.
-
-    The staging refusal reads settings ``general`` / ``execution_mode_default``
-    through ``default_stage_mode``. This endpoint writes it. A test on each side
-    can pass while the two disagree about the key or the vocabulary, which is a
-    real failure mode -- so assert the handoff itself, on a value written through
-    the REST door and read back through the staging translation.
-    """
     from giljo_mcp.execution_mode_default import (
         EXECUTION_MODE_DEFAULT_KEY,
         default_stage_mode,

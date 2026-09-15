@@ -82,11 +82,6 @@
 </template>
 
 <script setup>
-// FE-9320: each door states what it actually expects of the user BEFORE they
-// commit — whether it needs a connected agent, how long it runs, and who is
-// actually doing the talking. Doors are addressed by NAME everywhere; the
-// stored router_choice letters (D/B/A/C) do not match the displayed order and
-// renaming them would need a migration for no user-visible benefit.
 import { PRODUCT_NAME } from '@/branding'
 
 defineEmits(['pick'])

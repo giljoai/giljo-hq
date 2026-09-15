@@ -1,17 +1,3 @@
-/**
- * useProductVisionUpload.js — FE-6006 unit 3b
- *
- * Encapsulates the vision-file upload flow for ProductsView:
- *   - Client-side file validation
- *   - Auto-create product in create mode (silent save to get UUID)
- *   - Per-file upload with progress tracking
- *   - Toast notifications per file
- *   - Refresh existing docs list after upload
- *
- * The composable returns upload state refs plus the handler function.
- * The caller owns `editingProduct` and `autoSavedForAnalysis` — they
- * are passed in so mutations propagate back to the view.
- */
 import { ref } from 'vue'
 import { useToast } from '@/composables/useToast'
 import { useProductStore } from '@/stores/products'
@@ -27,18 +13,6 @@ export function useProductVisionUpload({ editingProduct, autoSavedForAnalysis })
   const uploadingVision = ref(false)
   const uploadProgress = ref(0)
   const visionUploadError = ref(null)
-  /**
-   * FE-9553c: is retrying SAFE, or would it duplicate work already done?
-   *
-   * null  -- nothing has failed.
-   * true  -- the attempt created nothing server-side, so a retry is clean.
-   * false -- something WAS created and could not be bound, so a retry mints a
-   *          second one and the operator needs to know that before pressing.
-   *
-   * Published rather than inferred from the message text: a caller
-   * string-matching the copy would silently start offering the wrong remedy the
-   * first time anyone reworded it.
-   */
   const visionUploadRetrySafe = ref(null)
   const existingVisionDocuments = ref([])
 
@@ -52,14 +26,6 @@ export function useProductVisionUpload({ editingProduct, autoSavedForAnalysis })
     }
   }
 
-  /**
-   * Say what actually went wrong when nothing was created.
-   *
-   * The old single message was "Check your connection and try again", which is
-   * wrong for a rate-limited request: a 429 is not a connection
-   * problem, and telling someone to check their network when they are being
-   * rate-limited sends them to debug the wrong thing.
-   */
   function describeCreateFailure(error) {
     const status = error?.response?.status
     if (status === 429) {
@@ -92,9 +58,6 @@ export function useProductVisionUpload({ editingProduct, autoSavedForAnalysis })
     return false
   }
 
-  // SEC-0001 Phase 2: client-side pre-check mirrors backend UploadConfig.
-  // Backend (api/endpoints/vision_documents.py + upload_guard.py) remains
-  // the authoritative security boundary.
   async function uploadVisionFilesOnAttach({ productName, files }) {
     if (!files || files.length === 0) return
     if (!validateFiles(files)) return
@@ -104,21 +67,8 @@ export function useProductVisionUpload({ editingProduct, autoSavedForAnalysis })
       if (editingProduct.value) {
         productId = editingProduct.value.id
       } else {
-        // In create mode: silently create the product to get a UUID
         const product = await productStore.createProduct({ name: productName })
 
-        // The product may already EXIST server-side at this point even when we
-        // cannot use it: createProduct returns `response.data`, and its call is
-        // written `(await api.products?.create(...)) || { data: null }`, so a
-        // response carrying no usable body is a normal outcome there rather
-        // than an error. Reading `.id` off that used to throw a TypeError,
-        // which the catch below swallowed into a generic toast -- leaving a
-        // product created and the caller holding nothing, with no way to tell
-        // that apart from a validation refusal that created nothing.
-        //
-        // Named explicitly so callers can distinguish the two, because the
-        // remedies differ: nothing was created (retry is clean) versus
-        // something WAS created (retry would duplicate it).
         if (!product?.id) {
           const err = new Error(
             'The product was created but the server returned no usable record, so the upload could not be attached to it.',
@@ -164,9 +114,6 @@ export function useProductVisionUpload({ editingProduct, autoSavedForAnalysis })
         } catch (uploadError) {
           console.error(`[useProductVisionUpload] Failed to upload ${file.name}:`, uploadError)
 
-          // SEC-0001 Phase 2: Surface backend {error_code, message} verbatim
-          // (UPLOAD_TOO_LARGE / UPLOAD_TYPE_NOT_ALLOWED / UPLOAD_CONTENT_NOT_TEXT /
-          // UPLOAD_FILENAME_INVALID). 409 gets dedicated UX copy.
           let errorMessage
           if (uploadError?.response?.status === 409) {
             errorMessage = `${file.name}: Document already exists. Please rename and try again.`
@@ -188,9 +135,6 @@ export function useProductVisionUpload({ editingProduct, autoSavedForAnalysis })
     } catch (error) {
       console.error('[useProductVisionUpload] Failed to upload vision files:', error)
       uploadingVision.value = false
-      // Published so a caller can render the failure rather than having to
-      // infer it from an unset editingProduct -- inferring it is what let the
-      // tutorial screen strand the operator in silence.
       const created = error?.code === 'PRODUCT_CREATED_BUT_UNBOUND'
       visionUploadRetrySafe.value = !created
       visionUploadError.value = created

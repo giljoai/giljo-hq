@@ -149,10 +149,6 @@ describe('useProjectCloseout', () => {
       expect(allJobsTerminal.value).toBe(true)
     })
 
-    // CE-0028: at the staging→implementation handoff the orchestrator's
-    // staging execution is 'complete' but the project is NOT done. Closeout
-    // must be suppressed until the Implement button is clicked and the
-    // implementation phase has actually launched.
     it('returns false when staging_complete and implementation has not launched (CE-0028)', () => {
       const project = makeProject({
         staging_status: 'staging_complete',
@@ -182,10 +178,6 @@ describe('useProjectCloseout', () => {
     })
   })
 
-  // CE-0028: when staging just finished and Implement hasn't been clicked,
-  // none of the closeout UI should fire — no modal, no memory polling, no
-  // closeout button. These are integration-style checks across the
-  // composable's surface.
   describe('CE-0028 staging→implementation handoff', () => {
     it('does not surface closeout button while staging_complete + implementation not launched', () => {
       const project = makeProject({
@@ -224,14 +216,6 @@ describe('useProjectCloseout', () => {
     })
   })
 
-  // CE-0029 Item 1 regression: after the parent (ProjectTabs.vue) was
-  // refactored to maintain a reactive project ref that refetches on
-  // project:staging_complete + project:implementation_launched WS events,
-  // the composable reads staging_status and implementation_launched_at
-  // directly from the ref. No dual-source store-OR-prop fallback exists.
-  // These tests mutate the project ref directly (the same observable change
-  // a parent's refetch would produce) instead of injecting through a now-removed
-  // store path.
   describe('CE-0029 Item 1 reactive-project regression', () => {
     it('updates allJobsTerminal when the project ref mutates from staging to staging_complete', async () => {
       const project = makeProject({
@@ -246,12 +230,8 @@ describe('useProjectCloseout', () => {
         sortedJobs: makeJobs(jobs),
       })
 
-      // Initial: not staging_complete, single orch is 'complete' — composable
-      // sees it as full closeout-eligible (no staging suppression).
       expect(allJobsTerminal.value).toBe(true)
 
-      // Parent refetches and the ref reflects staging_complete (impl not yet
-      // launched). Closeout must be suppressed.
       project.value = { ...project.value, staging_status: 'staging_complete' }
       await nextTick()
       expect(allJobsTerminal.value).toBe(false)
@@ -272,8 +252,6 @@ describe('useProjectCloseout', () => {
 
       expect(allJobsTerminal.value).toBe(false)
 
-      // Implement-click landed; the parent's WS-driven refetch populates the
-      // timestamp on the reactive ref. Composable lets the closeout flow run.
       project.value = {
         ...project.value,
         implementation_launched_at: '2026-05-17T10:00:00Z',
@@ -499,12 +477,10 @@ describe('useProjectCloseout', () => {
       await nextTick()
       await nextTick()
 
-      // Trigger timeout
       vi.advanceTimersByTime(30_000)
       await nextTick()
       expect(memoryPollTimedOut.value).toBe(true)
 
-      // Clear mock and set up to return entries on retry
       api.products.getMemoryEntries.mockResolvedValue({ data: { entries: [{ id: 1 }] } })
 
       retryMemoryPoll()
@@ -527,12 +503,10 @@ describe('useProjectCloseout', () => {
       await nextTick()
       await nextTick()
 
-      // Trigger timeout
       vi.advanceTimersByTime(30_000)
       await nextTick()
       expect(memoryPollTimedOut.value).toBe(true)
 
-      // Retry with entries now available
       api.products.getMemoryEntries.mockResolvedValue({ data: { entries: [{ id: 1 }] } })
       retryMemoryPoll()
       await nextTick()
@@ -569,8 +543,6 @@ describe('useProjectCloseout', () => {
   })
 
   describe('showMemoryPending with error states', () => {
-    // TEMP 2026-05-15: error short-circuit suppressed in useProjectCloseout — spinner now stays
-    // visible on timeout/error instead of swapping to the warning chip. Revisit ~2026-05-29.
     it('stays true when memoryPollTimedOut is true (spinner kept visible by design)', () => {
       const project = makeProject({ product_id: 'prod-1' })
       const jobs = [{ agent_display_name: 'orchestrator', status: 'complete' }]
@@ -579,7 +551,6 @@ describe('useProjectCloseout', () => {
         projectId: computed(() => 'proj-1'),
         sortedJobs: makeJobs(jobs),
       })
-      // Manually set timed out to simulate
       memoryPollTimedOut.value = true
       expect(showMemoryPending.value).toBe(true)
     })

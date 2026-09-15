@@ -3,29 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""``ce_0089`` recovers closeout arguments absorbed into ``summary`` (BE-9348).
-
-BE-9348 fixes the write path at the MCP dispatch seam. This migration repairs the rows
-that path already produced: a closeout whose OPTIONAL argument was swallowed by the
-caller's tool-call serialization stored the raw markup inside ``summary`` and left the
-real column empty.
-
-What is asserted here is the part that is easy to get wrong and impossible to see by
-reading the SQL:
-
-* the empty-column guard is ``NULL OR '[]'``, not ``IS NULL`` -- every real damaged row
-  stores ``[]``, so a NULL-only guard would repair NOTHING while reporting success;
-* a row that merely MENTIONS a marker in prose is left byte-for-byte alone -- the
-  closeout written for BE-9348 itself is exactly that shape, and truncating it would be
-  the migration reproducing the defect it exists to repair;
-* a populated target column is never overwritten, and such a row's summary is not
-  cleaned either, because a disagreeing residue means the row was not fully recoverable;
-* a replay moves nothing.
-
-Real database, real ``alembic upgrade`` -- these assertions are about what Postgres did
-to seeded rows, not about what the SQL reads like. Mirrors
-``test_ce_0088_completed_at_backfill.py``.
-"""
 
 from __future__ import annotations
 
@@ -57,11 +34,8 @@ _PRE = "ce_0088_backfill_project_completed_at"
 _REV = "ce_0089_be9348_repair_absorbed_closeout_arguments"
 
 TK = "tk_ce0089"
-PRODUCT_ID = "ce008900-0000-4000-8000-000000000001"  # id columns are varchar(36)
+PRODUCT_ID = "ce008900-0000-4000-8000-000000000001"
 
-# ---------------------------------------------------------------------------
-# The three residue shapes, transcribed from real damaged 360 memory rows.
-# ---------------------------------------------------------------------------
 PROSE_A = "Swept the remaining operator docs and repaired every pointer."
 SHAPE_TAGS_PARAMETER = PROSE_A + '</summary>\n<parameter name="tags">["docs", "chore", "infrastructure"]'
 
@@ -73,25 +47,18 @@ SHAPE_GIT_COMMITS = (
     PROSE_C + '</summary>\n<parameter name="git_commits">[{"sha": "7dafbb675", "message": "feat: pane"}]'
 )
 
-# The self-protection case: BE-9348's own closeout discusses these markers in prose and
-# therefore MATCHES the existence guard. It must survive byte-for-byte.
 SELF_REFERENTIAL_SUMMARY = (
     "A caller's serializer merged one argument into its neighbour, so a summary could end "
     "with </summary> followed by a serialized array while the real column stayed empty. "
     "The server now refuses that call at the dispatch seam and names the absorbed argument."
 )
 
-# Residue-looking but unparseable: a recoverable tag whose payload is not valid JSON.
 UNPARSEABLE_SUMMARY = "Closed the lane." + '</summary>\n<tags>["backend", "frontend"'
 
-# Residue present, but the target column already carries data that disagrees with it.
 OCCUPIED_SUMMARY = "Shipped the limiter." + '</summary>\n<parameter name="tags">["backend"]'
 
 UNDAMAGED_SUMMARY = "An ordinary closeout with no residue at all."
 
-# The audit's must-fix: a LEGITIMATE closeout that quotes the residue verbatim at the
-# very end, with an empty tags column. Byte-identical to real damage -- no gate can tell
-# them apart. Its prose must survive; gaining tags is the accepted, logged trade.
 QUOTES_RESIDUE_SUMMARY = (
     'The damaged shape is: ...filed as INF-9293.</summary>\n<parameter name="tags">["docs", "chore"]'
 )
@@ -234,8 +201,6 @@ def _read(conn, entry_id: str):
 
 @pytest.fixture
 def seeded_at_pre(scratch_engine: sa.Engine):
-    """Fresh schema built up to ce_0088 -- the revision before the repair runs -- with
-    every residue shape plus the rows that must NOT be touched."""
     _drop_all_objects(scratch_engine)
     up = _run_alembic("upgrade", _PRE)
     assert up.returncode == 0, f"upgrade to {_PRE} failed:\n{up.stdout}\n{up.stderr}"
@@ -299,9 +264,6 @@ class TestCe0089RepairsAbsorbedArguments:
 
 class TestCe0089LeavesEverythingElseAlone:
     def test_prose_that_merely_mentions_the_marker_is_byte_identical(self, seeded_at_pre) -> None:
-        """The load-bearing safety case. BE-9348's own closeout has this shape, so it
-        MATCHES the existence guard -- the narrowing gate is the only thing between it
-        and truncation. Byte-for-byte, not 'still present'."""
         engine, ids = seeded_at_pre
         up = _run_alembic("upgrade", _REV)
         assert up.returncode == 0, f"upgrade failed:\n{up.stdout}\n{up.stderr}"
@@ -315,17 +277,6 @@ class TestCe0089LeavesEverythingElseAlone:
         assert row["tags"] == ["bug-fix"]
 
     def test_a_legitimate_closeout_quoting_the_residue_keeps_its_summary(self, seeded_at_pre) -> None:
-        """The audit's must-fix case, pinned.
-
-        A closeout that quotes the residue VERBATIM at the very end, whose own ``tags``
-        column happens to be empty, is byte-identical to a genuinely damaged row. No
-        gate can separate them -- the information is not in the row. An earlier draft
-        truncated this summary and fabricated tags for it.
-
-        The summary must now survive byte-for-byte. The row still gains tags it should
-        not have, which is the stated, accepted limitation: additive, hand-reversible,
-        and logged with its pre-state. What is NOT acceptable is destroying the prose.
-        """
         engine, ids = seeded_at_pre
         up = _run_alembic("upgrade", _REV)
         assert up.returncode == 0, f"upgrade failed:\n{up.stdout}\n{up.stderr}"
@@ -373,9 +324,6 @@ class TestCe0089LeavesEverythingElseAlone:
 
 class TestCe0089Idempotency:
     def test_a_replay_of_the_revision_moves_nothing(self, seeded_at_pre) -> None:
-        """Re-running must be a clean no-op: repaired rows no longer match the guard,
-        and skipped rows are skipped identically. The CE installer re-runs this on
-        every boot."""
         engine, ids = seeded_at_pre
         up = _run_alembic("upgrade", _REV)
         assert up.returncode == 0, f"upgrade failed:\n{up.stdout}\n{up.stderr}"

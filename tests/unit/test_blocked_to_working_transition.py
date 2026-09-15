@@ -3,20 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tests for blocked->working status transition in report_progress().
-
-When an agent calls report_progress() while in "blocked" status, the execution
-should transition to "working" and broadcast a status change event. This mirrors
-the silent->working auto-recovery pattern used elsewhere in the orchestration service.
-
-Covers:
-- Blocked -> working transition with block_reason cleared
-- WebSocket broadcast on blocked -> working transition
-- No status change when already "working"
-- No status change when "waiting"
-- No status change when "silent" (handled by auto_clear_silent, not report_progress)
-"""
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, Mock, patch
@@ -35,7 +21,6 @@ def _make_mock_execution(
     block_reason=None,
     agent_display_name="Test Agent",
 ):
-    """Create a mock AgentExecution with the given status."""
     execution = Mock()
     execution.agent_id = agent_id
     execution.job_id = job_id
@@ -51,7 +36,6 @@ def _make_mock_execution(
 
 
 def _make_mock_job(*, job_id="job-001", project_id="proj-001", tenant_key="test-tenant"):
-    """Create a mock AgentJob."""
     job = Mock()
     job.job_id = job_id
     job.project_id = project_id
@@ -61,7 +45,6 @@ def _make_mock_job(*, job_id="job-001", project_id="proj-001", tenant_key="test-
 
 
 def _build_service(db_manager, mock_tenant_manager, mock_ws=None):
-    """Build OrchestrationService with mocked dependencies."""
     return OrchestrationService(
         db_manager=db_manager,
         tenant_manager=mock_tenant_manager,
@@ -70,11 +53,6 @@ def _build_service(db_manager, mock_tenant_manager, mock_ws=None):
 
 
 def _setup_session_mocks(session, execution, job):
-    """Configure session.execute for the queries report_progress issues:
-    1) active execution, 2) job, 3) BE-6070 in-hand WS todo payload SELECT
-    (report_progress now resolves the todo payload on the request's own session
-    instead of opening a 2nd session — for a legacy progress call with no
-    todo_items it reads the current list, here empty)."""
     exec_result = Mock()
     exec_result.scalar_one_or_none = Mock(return_value=execution)
     job_result = Mock()
@@ -86,7 +64,6 @@ def _setup_session_mocks(session, execution, job):
 
 @pytest.mark.asyncio
 async def test_report_progress_transitions_blocked_to_working(mock_db_manager, mock_tenant_manager):
-    """When execution status is 'blocked', report_progress sets it to 'working' and clears block_reason."""
     db_manager, session = mock_db_manager
     mock_ws = Mock()
     mock_ws.broadcast_to_tenant = AsyncMock()
@@ -111,7 +88,6 @@ async def test_report_progress_transitions_blocked_to_working(mock_db_manager, m
 
 @pytest.mark.asyncio
 async def test_report_progress_broadcasts_status_change_on_blocked_to_working(mock_db_manager, mock_tenant_manager):
-    """When transitioning blocked->working, broadcast agent:status_changed event after commit."""
     db_manager, session = mock_db_manager
     mock_ws = Mock()
     mock_ws.broadcast_to_tenant = AsyncMock()
@@ -129,7 +105,6 @@ async def test_report_progress_broadcasts_status_change_on_blocked_to_working(mo
             progress={"percent": 25, "message": "Resumed work"},
         )
 
-    # Verify broadcast_to_tenant convenience API was called (not broadcast_event_to_tenant)
     mock_ws.broadcast_to_tenant.assert_called_once()
     call_kwargs = mock_ws.broadcast_to_tenant.call_args
     assert call_kwargs.kwargs["tenant_key"] == "test-tenant"
@@ -142,7 +117,6 @@ async def test_report_progress_broadcasts_status_change_on_blocked_to_working(mo
 
 @pytest.mark.asyncio
 async def test_report_progress_does_not_change_working_status(mock_db_manager, mock_tenant_manager):
-    """When execution is already 'working', report_progress does not change status."""
     db_manager, session = mock_db_manager
     mock_ws = Mock()
     mock_ws.broadcast_to_tenant = AsyncMock()
@@ -162,13 +136,11 @@ async def test_report_progress_does_not_change_working_status(mock_db_manager, m
 
     assert result.status == "success"
     assert execution.status == "working"
-    # No WebSocket broadcast for status change (status did not change)
     mock_ws.broadcast_to_tenant.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_report_progress_does_not_change_waiting_status(mock_db_manager, mock_tenant_manager):
-    """When execution is 'waiting', report_progress does not change status."""
     db_manager, session = mock_db_manager
     mock_ws = Mock()
     mock_ws.broadcast_to_tenant = AsyncMock()
@@ -193,7 +165,6 @@ async def test_report_progress_does_not_change_waiting_status(mock_db_manager, m
 
 @pytest.mark.asyncio
 async def test_report_progress_does_not_change_silent_status(mock_db_manager, mock_tenant_manager):
-    """When execution is 'silent', report_progress does not change status (auto_clear_silent handles that)."""
     db_manager, session = mock_db_manager
     mock_ws = Mock()
     mock_ws.broadcast_to_tenant = AsyncMock()

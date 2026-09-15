@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Direct unit tests for services/_error_helpers.not_found_or_wrong_state_error.
-
-TSK-9003: the shared disambiguation builder lifted out of
-OrchestrationAgentStateService. The sibling-integration behavior is covered in
-test_tsk9003_error_split_siblings.py; this file pins the helper's OWN contract
-(unknown_job_id vs wrong_state envelopes) at the module layer.
-
-Edition Scope: Both
-"""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -24,7 +15,6 @@ from giljo_mcp.services import _error_helpers
 
 @pytest.fixture
 def repo_mock(monkeypatch):
-    """Patch AgentJobRepository inside the module under test; return the instance mock."""
     instance = MagicMock()
     instance.get_latest_execution_for_job = AsyncMock(return_value=None)
     instance.get_agent_job_by_job_id = AsyncMock(return_value=None)

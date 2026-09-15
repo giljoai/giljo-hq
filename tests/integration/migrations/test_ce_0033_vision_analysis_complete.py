@@ -3,17 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-5117 migration regression: products.vision_analysis_complete.
-
-Verifies ce_0033_vision_analysis_complete against a real scratch PostgreSQL DB:
-
-1. A legacy row with consolidated_vision_light + consolidated_vision_medium
-   populated is backfilled to vision_analysis_complete=TRUE.
-2. A legacy row with both consolidated_vision_* columns NULL is left at the
-   server_default of FALSE.
-3. Downgrade drops the column cleanly; re-upgrade is idempotent and restores
-   the column with the same backfill semantics.
-"""
 
 from __future__ import annotations
 
@@ -32,9 +21,6 @@ from tests.helpers.test_db_helper import bootstrap_db_base, worker_suffix
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 ALEMBIC_INI = PROJECT_ROOT / "alembic.ini"
 
-# Per-worker scratch DB (BE-6014): each migration test runs DROP SCHEMA public
-# CASCADE, so under pytest-xdist the workers must not share one bootstrap DB or
-# they wipe each other's schema mid-run. worker_suffix() is "" outside xdist.
 SCRATCH_DB = f"{bootstrap_db_base()}{worker_suffix()}"
 ADMIN_USER = os.environ.get("POSTGRES_OWNER_USER", "giljo_owner")
 ADMIN_PASSWORD = os.environ.get("POSTGRES_OWNER_PASSWORD", "")
@@ -249,6 +235,4 @@ class TestCe0033Migration:
         reupgrade = _run_alembic("upgrade", "ce_0033_vision_analysis_complete")
         assert reupgrade.returncode == 0, reupgrade.stderr
         assert _column_exists(empty_scratch_db)
-        # The backfill still works on re-upgrade because the row still has the
-        # consolidated_vision_light/medium values populated.
         assert _column_value(empty_scratch_db, "be5117-roundtrip") is True

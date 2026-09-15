@@ -4,7 +4,6 @@
       <v-col cols="12" class="d-flex flex-column align-center justify-center">
         <v-card class="admin-card smooth-border mx-auto" max-width="500" elevation="8">
 
-          <!-- ============ STEP 1: Account Setup ============ -->
           <template v-if="step === 1">
             <div class="text-center pa-6">
               <GilMascot :size="80" :happy="mascotHappy" class="mb-4" />
@@ -16,7 +15,6 @@
 
             <v-card-text class="pa-6 pt-0">
               <v-form ref="step1Form" v-model="step1Valid" @submit.prevent="goToStep2">
-                <!-- Workspace Name -->
                 <v-text-field
                   v-model="workspaceName"
                   label="Workspace Name"
@@ -31,7 +29,6 @@
                   @keydown.enter="flashHappy" @keydown.tab="flashHappyOnly"
                 />
 
-                <!-- Username -->
                 <v-text-field
                   v-model="username"
                   label="Username"
@@ -45,7 +42,6 @@
                   @keydown.enter="flashHappy" @keydown.tab="flashHappyOnly"
                 />
 
-                <!-- Email -->
                 <v-text-field
                   v-model="email"
                   label="Email (optional)"
@@ -58,7 +54,6 @@
                   @keydown.enter="flashHappy" @keydown.tab="flashHappyOnly"
                 />
 
-                <!-- First Name -->
                 <v-text-field
                   v-model="firstName"
                   label="First Name"
@@ -73,7 +68,6 @@
                   @keydown.enter="flashHappy" @keydown.tab="flashHappyOnly"
                 />
 
-                <!-- Last Name -->
                 <v-text-field
                   v-model="lastName"
                   label="Last Name (optional)"
@@ -87,7 +81,6 @@
                   @keydown.enter="flashHappy" @keydown.tab="flashHappyOnly"
                 />
 
-                <!-- Password -->
                 <v-text-field
                   v-model="password"
                   label="Password"
@@ -109,7 +102,6 @@
                   </template>
                 </v-text-field>
 
-                <!-- Confirm Password -->
                 <v-text-field
                   ref="confirmPasswordField"
                   v-model="confirmPassword"
@@ -132,7 +124,6 @@
                   </template>
                 </v-text-field>
 
-                <!-- Compact Password Compliance Indicator -->
                 <div v-if="passwordMeetsAll" class="d-flex align-center mb-4">
                   <v-icon color="success" size="16" class="mr-1">mdi-check-circle</v-icon>
                   <span class="text-body-small">Meets password requirements</span>
@@ -147,7 +138,6 @@
                   </v-tooltip>
                 </div>
 
-                <!-- Next Button -->
                 <div class="d-flex justify-center mt-4">
                   <v-btn
                     type="submit"
@@ -163,13 +153,11 @@
               </v-form>
             </v-card-text>
 
-            <!-- Footer -->
             <div class="text-center pa-4 pt-0">
               <span class="text-body-small footer-brand">www.giljo.ai</span>
             </div>
           </template>
 
-          <!-- ============ STEP 2: Recovery PIN ============ -->
           <template v-if="step === 2">
             <div class="text-center pa-6">
               <h2 class="text-headline-small font-weight-bold mb-2">
@@ -184,7 +172,6 @@
 
             <v-card-text class="pa-6 pt-0">
               <v-form ref="step2Form" v-model="step2Valid" @submit.prevent="createAdmin">
-                <!-- Recovery PIN -->
                 <v-text-field
                   v-model="recoveryPin"
                   label="Recovery PIN (4 digits)"
@@ -204,7 +191,6 @@
                   @keypress="onlyNumbers"
                 />
 
-                <!-- Confirm PIN -->
                 <v-text-field
                   v-model="confirmPin"
                   label="Confirm Recovery PIN"
@@ -222,12 +208,10 @@
                   @keypress="onlyNumbers"
                 />
 
-                <!-- Error Message -->
                 <v-alert v-if="errorMessage" type="error" variant="tonal" class="mb-4">
                   {{ errorMessage }}
                 </v-alert>
 
-                <!-- Action Buttons -->
                 <div class="d-flex justify-space-between mt-4">
                   <v-btn
                     variant="outlined"
@@ -248,7 +232,6 @@
               </v-form>
             </v-card-text>
 
-            <!-- Footer -->
             <div class="text-center pa-4 pt-0">
               <span class="text-body-small footer-brand">www.giljo.ai</span>
             </div>
@@ -266,17 +249,12 @@ import { useRouter } from 'vue-router'
 import api from '@/services/api'
 import setupService from '@/services/setupService'
 import GilMascot from '@/components/GilMascot.vue'
-// FE-9151: consume the shared stateless validators instead of hand-rolling them
-// (dup-11 gap). The stateful confirm/requirements below stay local — this
-// multi-step wizard owns unique refs (password, recoveryPin, confirmPin).
 import { PASSWORD_RULES as passwordRules, PIN_RULES as pinRules, onlyNumbers } from '@/composables/usePasswordForm'
 
 const router = useRouter()
 
-// Wizard step
 const step = ref(1)
 
-// Greeting updates on Enter/Tab once username is filled
 const greeting = ref('Welcome!')
 function updateGreeting() {
   if (username.value.trim()) {
@@ -284,7 +262,6 @@ function updateGreeting() {
   }
 }
 
-// Mascot happy eyes on Enter + advance to next field
 const mascotHappy = ref(false)
 let happyTimer = null
 function flashHappyOnly() {
@@ -297,7 +274,6 @@ function flashHappyOnly() {
 function flashHappy(event) {
   flashHappyOnly()
 
-  // Move focus to the next input field
   const form = event.target.closest('form')
   if (form) {
     const inputs = Array.from(form.querySelectorAll('input:not([type="hidden"])'))
@@ -309,12 +285,10 @@ function flashHappy(event) {
   }
 }
 
-// Form refs
 const step1Form = ref(null)
 const step2Form = ref(null)
 const confirmPasswordField = ref(null)
 
-// Form data
 const workspaceName = ref('')
 const username = ref('')
 const email = ref('')
@@ -331,7 +305,6 @@ const step2Valid = ref(false)
 const loading = ref(false)
 const errorMessage = ref('')
 
-// Validation rules
 const workspaceNameRules = [
   (v) => !!v || 'Workspace name is required',
   (v) => v.length >= 1 || 'Workspace name is required',
@@ -369,7 +342,6 @@ const confirmPinRules = [
   (v) => v === recoveryPin.value || 'PINs do not match',
 ]
 
-// Password requirements
 const passwordRequirements = computed(() => [
   { text: 'At least 8 characters', met: password.value.length >= 8 },
   { text: 'One uppercase letter', met: /[A-Z]/.test(password.value) },
@@ -382,10 +354,8 @@ const passwordRequirements = computed(() => [
   },
 ])
 
-// All requirements satisfied?
 const passwordMeetsAll = computed(() => passwordRequirements.value.every((r) => r.met))
 
-// Step 1 -> Step 2
 async function goToStep2() {
   const { valid } = await step1Form.value.validate()
   if (valid) {
@@ -393,7 +363,6 @@ async function goToStep2() {
   }
 }
 
-// Methods for PIN input handling
 function handlePinInput(value) {
   const val = typeof value === 'string' ? value : value?.target?.value || ''
   recoveryPin.value = val.replace(/\D/g, '').slice(0, 4)
@@ -404,8 +373,6 @@ function handleConfirmPinInput(value) {
   confirmPin.value = val.replace(/\D/g, '').slice(0, 4)
 }
 
-// Clear error on input
-// Re-validate confirm password when password changes (user corrects password 1)
 watch(password, () => {
   if (confirmPasswordField.value && confirmPassword.value) {
     confirmPasswordField.value.validate()
@@ -416,7 +383,6 @@ watch([workspaceName, username, email, password, confirmPassword, recoveryPin, c
   errorMessage.value = ''
 })
 
-// Create admin function - submits all cached data from both steps
 const createAdmin = async () => {
   const { valid } = await step2Form.value.validate()
   if (!valid) return

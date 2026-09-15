@@ -5,15 +5,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Giljo HQ - Production Startup Script (DEPRECATED)
-
-DEPRECATED: Use 'python startup.py' instead.
-Production mode is now automatic when frontend/dist/ exists.
-Use 'python startup.py --dev' to force development mode.
-
-This script is kept for backward compatibility and delegates to startup.py.
-"""
 
 import atexit
 import contextlib
@@ -27,7 +18,6 @@ from pathlib import Path
 import click
 from colorama import Fore, Style, init
 
-# Import helper functions from startup.py
 from startup import (
     check_database_connectivity,
     check_dependencies,
@@ -46,25 +36,13 @@ from startup import (
 )
 
 
-# ExitStack for managing log file handles that must outlive the function scope
-# (passed to subprocess.Popen). Registered with atexit so handles close on exit.
 _log_file_stack = contextlib.ExitStack()
 atexit.register(_log_file_stack.close)
 
-# Initialize colorama for cross-platform colored output
 init(autoreset=True)
 
 
 def start_api_server(verbose: bool = False) -> subprocess.Popen | None:
-    """
-    Start the API server (same as dev mode).
-
-    Args:
-        verbose: If True, show console window with output (Windows only)
-
-    Returns:
-        Popen process object or None if failed
-    """
     try:
         api_script = Path.cwd() / "api" / "run_api.py"
 
@@ -72,7 +50,6 @@ def start_api_server(verbose: bool = False) -> subprocess.Popen | None:
             print_error(f"API script not found: {api_script}")
             return None
 
-        # Determine Python executable (prefer venv)
         venv_python = Path.cwd() / "venv" / "Scripts" / "python.exe"
         if not venv_python.exists():
             venv_python = Path.cwd() / "venv" / "bin" / "python"
@@ -82,7 +59,6 @@ def start_api_server(verbose: bool = False) -> subprocess.Popen | None:
         else:
             python_executable = sys.executable
 
-        # Configure process creation for verbose mode
         popen_kwargs = {
             "cwd": str(Path.cwd()),
         }
@@ -94,7 +70,6 @@ def start_api_server(verbose: bool = False) -> subprocess.Popen | None:
             else:
                 print_success("API server output will stream to this terminal (verbose mode)")
         else:
-            # Background mode: hide output for quiet startup
             logs_dir = Path.cwd() / "logs"
             logs_dir.mkdir(parents=True, exist_ok=True)
             api_stdout = _log_file_stack.enter_context(
@@ -106,7 +81,6 @@ def start_api_server(verbose: bool = False) -> subprocess.Popen | None:
             popen_kwargs["stdout"] = api_stdout
             popen_kwargs["stderr"] = api_stderr
 
-        # Start API server
         process = subprocess.Popen([python_executable, str(api_script)], **popen_kwargs)
 
         print_success(f"API server started (PID: {process.pid})")
@@ -121,22 +95,10 @@ def start_api_server(verbose: bool = False) -> subprocess.Popen | None:
 
 
 def start_frontend_production_server(verbose: bool = False) -> subprocess.Popen | None:
-    """
-    Start the frontend PRODUCTION server using serve_frontend.py.
-
-    This serves pre-built files from frontend/dist/ directory.
-
-    Args:
-        verbose: If True, show console window with output (Windows only)
-
-    Returns:
-        Popen process object or None if failed
-    """
     try:
         serve_script = Path.cwd() / "serve_frontend.py"
         frontend_dist = Path.cwd() / "frontend" / "dist"
 
-        # Check if production build exists
         if not frontend_dist.exists():
             print_error("Production build not found!")
             print_error(f"Missing directory: {frontend_dist}")
@@ -145,15 +107,12 @@ def start_frontend_production_server(verbose: bool = False) -> subprocess.Popen 
             print_info("  npm run build")
             return None
 
-        # Check if serve_frontend.py exists
         if not serve_script.exists():
             print_error(f"Production server script not found: {serve_script}")
             return None
 
-        # Determine Python executable
         python_executable = sys.executable
 
-        # Configure process creation for verbose mode
         popen_kwargs = {
             "cwd": str(Path.cwd()),
         }
@@ -165,17 +124,15 @@ def start_frontend_production_server(verbose: bool = False) -> subprocess.Popen 
             else:
                 print_success("Frontend output will stream to this terminal (verbose mode)")
         else:
-            # Background mode: hide output for quiet startup
             logs_dir = Path.cwd() / "logs"
             logs_dir.mkdir(parents=True, exist_ok=True)
             fe_stdout = _log_file_stack.enter_context(
                 open(logs_dir / "frontend_prod.log", "a", buffering=1, encoding="utf-8")  # noqa: SIM115
             )
-            fe_stderr = fe_stdout  # Use same file for stderr
+            fe_stderr = fe_stdout
             popen_kwargs["stdout"] = fe_stdout
             popen_kwargs["stderr"] = fe_stderr
 
-        # Start production frontend server
         process = subprocess.Popen([python_executable, str(serve_script)], **popen_kwargs)
 
         print_success(f"Frontend production server started (PID: {process.pid})")
@@ -190,13 +147,6 @@ def start_frontend_production_server(verbose: bool = False) -> subprocess.Popen 
 
 
 def open_browser(url: str, delay: int = 3) -> None:
-    """
-    Open browser to specified URL after a delay.
-
-    Args:
-        url: URL to open
-        delay: Delay in seconds before opening
-    """
     try:
         print_info(f"Opening browser to {url} in {delay} seconds...")
         time.sleep(delay)
@@ -210,23 +160,10 @@ def open_browser(url: str, delay: int = 3) -> None:
 def run_production_startup(
     check_only: bool = False, verbose: bool = False, no_browser: bool = False, no_migrations: bool = False
 ) -> int:
-    """
-    Main production startup function.
-
-    Args:
-        check_only: If True, only check dependencies without starting services
-        verbose: If True, show console windows for API/frontend (Windows only)
-        no_browser: If True, skip automatic browser launch
-        no_migrations: If True, skip automatic database migrations
-
-    Returns:
-        Exit code (0 for success, non-zero for failure)
-    """
     print_header("Giljo HQ - PRODUCTION Startup v3.0")
     print_warning("Running in PRODUCTION MODE")
     print_info("Frontend will serve pre-built files from frontend/dist/")
 
-    # Step 1: Check dependencies (Python, PostgreSQL, pip)
     if not check_dependencies():
         print_error("Dependency checks failed")
         return 1
@@ -235,14 +172,12 @@ def run_production_startup(
         print_success("All dependency checks passed")
         return 0
 
-    # Step 2: Install requirements
     print_header("Installing Requirements")
     if not install_requirements():
         print_error("Failed to install requirements")
         print_info("Please install manually: pip install -r requirements.txt")
         return 1
 
-    # Step 2.5: Run database migrations
     if not no_migrations:
         if not run_database_migrations():
             print_error("Database migrations failed")
@@ -250,7 +185,6 @@ def run_production_startup(
     else:
         print_info("Skipping database migrations as requested")
 
-    # Step 3: Check database connectivity
     print_header("Database Connectivity")
     print_info("Checking database connection...")
     db_success, _db_error = check_database_connectivity()
@@ -260,12 +194,10 @@ def run_production_startup(
         print_info("Please ensure PostgreSQL is running and configured correctly")
         return 1
 
-    # Step 4: Check first-run status
     print_header("Setup Status")
     print_info("Checking setup completion status...")
     is_first_run, _state = check_first_run()
 
-    # Step 5: Get ports and protocol from config
     api_port, frontend_port = get_config_ports()
     try:
         import yaml as _yaml
@@ -277,7 +209,6 @@ def run_production_startup(
         _ssl_on = False
     http_proto = "https" if _ssl_on else "http"
 
-    # Step 6: Check port availability
     print_header("Port Availability")
     print_info(f"Checking API port {api_port}...")
     if not is_port_available(api_port):
@@ -291,7 +222,6 @@ def run_production_startup(
         print_info("Stop the existing process or use a different port")
         return 1
 
-    # Step 7: Start services
     print_header("Starting Services")
 
     if verbose:
@@ -310,11 +240,9 @@ def run_production_startup(
     if not frontend_process:
         print_error("Failed to start frontend production server")
         print_info("Make sure you've built the frontend: cd frontend && npm run build")
-        # Terminate API server since frontend failed
         api_process.terminate()
         return 1
 
-    # Step 7.5: Wait for API to be ready before opening browser
     print_header("Waiting for Services")
     api_ready = wait_for_api_ready(api_port, max_attempts=60, interval=0.5)
 
@@ -322,11 +250,9 @@ def run_production_startup(
         print_warning("API did not respond to health check, but continuing anyway")
         print_warning("You may see connection errors in the browser initially")
 
-    # Step 8: Open browser
     print_header("Opening Browser")
 
     if no_browser:
-        # User chose not to auto-launch browser
         network_ip = get_network_ip()
         if network_ip:
             print_info("Access the application via network IP:")
@@ -335,11 +261,9 @@ def run_production_startup(
 
         print_header("Giljo HQ - Production Mode Active")
     else:
-        # Auto-launch browser
         network_ip = get_network_ip()
 
         if is_first_run:
-            # Open welcome setup
             target_route = "/welcome"
             if network_ip:
                 setup_url = f"{http_proto}://{network_ip}:{frontend_port}{target_route}"
@@ -350,7 +274,6 @@ def run_production_startup(
 
             open_browser(setup_url, delay=2)
         else:
-            # Open dashboard
             if network_ip:
                 dashboard_url = f"{http_proto}://{network_ip}:{frontend_port}"
                 print_info("Opening dashboard at network IP...")
@@ -360,7 +283,6 @@ def run_production_startup(
 
             open_browser(dashboard_url, delay=2)
 
-    # Step 9: Display status
     print_header("Services Running (PRODUCTION MODE)")
     print_success(f"API Server: {http_proto}://localhost:{api_port}")
     print_success(f"API Docs: {http_proto}://localhost:{api_port}/docs")
@@ -372,7 +294,6 @@ def run_production_startup(
 
     print_info("\nPress Ctrl+C to stop all services")
 
-    # Wait for processes
     try:
         api_process.wait()
     except KeyboardInterrupt:

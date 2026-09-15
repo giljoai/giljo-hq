@@ -43,25 +43,11 @@
 </template>
 
 <script setup>
-/**
- * InviteMemberDialog - Dialog for inviting users to an organization.
- * Handover 0424d: Invite member dialog component.
- *
- * @component
- * @example
- * <InviteMemberDialog
- *   v-model="showDialog"
- *   :org-id="currentOrg.id"
- *   @invited="handleMemberInvited"
- * />
- */
 import { ref, computed } from 'vue'
 import { useOrgStore } from '@/stores/orgStore'
 
 const props = defineProps({
-  /** Organization ID to invite members to */
   orgId: { type: String, required: true },
-  /** v-model for dialog visibility */
   modelValue: { type: Boolean, default: false },
 })
 
@@ -73,7 +59,6 @@ const role = ref('member')
 const loading = ref(false)
 const error = ref('')
 
-// Two-way binding for dialog visibility
 const dialogModel = computed({
   get: () => props.modelValue,
   set: (value) => emit('update:modelValue', value),

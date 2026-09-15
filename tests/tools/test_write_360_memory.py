@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""MCP-boundary regression tests for write_360_memory (IMP-5037 bug 2).
-
-IMP-5037 bug 2: prior to the fix, ``_check_and_emit_tuning_staleness`` was
-called with ``user_id=str(product.tenant_key)``, so the user lookup always
-returned None and notification preferences silently fell back to defaults
-(enabled=True, threshold=10). The staleness reminder then fired forever
-because the no-drift submission path never stamped ``last_tuned_at_sequence``
-(see bug 1, fixed in the prompt template at the same time).
-
-These tests exercise the bug at the @mcp.tool wrapper boundary by calling
-``write_360_memory`` end-to-end against the in-memory test DB. They assert
-on the ``user_id`` argument that reaches
-``ProductTuningService.check_tuning_staleness`` -- the layer where the bug
-actually lived. A pre-fix run would see ``tenant_key`` here instead of a
-real user UUID.
-"""
 
 from __future__ import annotations
 
@@ -36,7 +20,6 @@ from giljo_mcp.tools.write_memory_entry import write_360_memory
 
 @pytest_asyncio.fixture
 async def linked_project(db_session, test_tenant_key, test_product):
-    """A project linked to test_product (write_360_memory requires product link)."""
     project = Project(
         id=str(uuid.uuid4()),
         name="IMP-5037 Boundary Test Project",
@@ -54,7 +37,6 @@ async def linked_project(db_session, test_tenant_key, test_product):
 
 @pytest_asyncio.fixture
 async def opt_in_user(db_session, test_tenant_key):
-    """A user who has opted in to context-tuning reminders with threshold=3."""
     user = User(
         id=str(uuid.uuid4()),
         username=f"opt-in-{uuid.uuid4().hex[:8]}",
@@ -77,13 +59,6 @@ async def opt_in_user(db_session, test_tenant_key):
 async def test_write_360_memory_passes_real_user_id_to_staleness_check(
     db_session, test_tenant_key, test_product, linked_project, opt_in_user
 ):
-    """IMP-5037 bug 2 regression: write_360_memory must call
-    check_tuning_staleness with a real user UUID, NOT tenant_key.
-
-    Before the fix, the caller passed ``user_id=str(product.tenant_key)``
-    so the user lookup silently failed. This test asserts the actual
-    user_id argument that reaches the service layer.
-    """
     mock_db_manager = MagicMock()
     captured_user_ids: list[str] = []
 
@@ -118,13 +93,7 @@ async def test_write_360_memory_passes_real_user_id_to_staleness_check(
 async def test_write_360_memory_resolves_tenant_user_when_user_id_omitted(
     db_session, test_tenant_key, test_product, linked_project, opt_in_user
 ):
-    """When the caller omits user_id, the helper must resolve the primary
-    active user for the tenant via _resolve_tenant_user_id -- NOT pass
-    tenant_key in. This is the CE-solo fallback path.
-    """
     mock_db_manager = MagicMock()
-    # Wire mock_db_manager.get_session_async to yield db_session so the
-    # resolver query runs against the test DB.
     from contextlib import asynccontextmanager
 
     @asynccontextmanager
@@ -152,7 +121,6 @@ async def test_write_360_memory_resolves_tenant_user_when_user_id_omitted(
             entry_type="session_handover",
             db_manager=mock_db_manager,
             session=db_session,
-            # user_id omitted on purpose
         )
 
     assert captured_user_ids == [str(opt_in_user.id)], (
@@ -164,10 +132,6 @@ async def test_write_360_memory_resolves_tenant_user_when_user_id_omitted(
 async def test_write_360_memory_emits_notification_when_threshold_exceeded(
     db_session, test_tenant_key, test_product, linked_project, opt_in_user
 ):
-    """Counter-test: when the staleness service reports is_stale=True,
-    write_360_memory MUST emit a notification:new event with type=context_tuning.
-    Proves the emit path is wired and not bypassed.
-    """
     mock_db_manager = MagicMock()
     captured_events: list[dict] = []
 

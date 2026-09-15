@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""SEC-9174 #34 — secret-bearing query params must not reach access logs.
-
-Lifecycle links (password reset / account deletion / email change) arrive as
-GET requests with the plaintext token in ``?token=...``; uvicorn's access log
-writes the full request line to captured stdout (Railway log drain in SaaS,
-``logs/giljo_mcp.log`` in CE). The redaction filter on the ``uvicorn.access``
-logger rewrites the path arg so sensitive param VALUES never hit a sink,
-while keeping the param name so the line stays debuggable.
-
-Uvicorn passes the access tuple via ``record.args``:
-``(client_addr, method, full_path, http_version, status_code)`` — these tests
-emit records shaped exactly like that.
-"""
 
 import logging
 
@@ -28,7 +15,6 @@ UVICORN_ACCESS_FORMAT = '%s - "%s %s HTTP/%s" %d'
 
 
 def _access_record(path: str) -> logging.LogRecord:
-    """Build a LogRecord shaped like uvicorn.access emits."""
     return logging.LogRecord(
         name="uvicorn.access",
         level=logging.INFO,
@@ -66,8 +52,6 @@ class TestSensitiveQueryAccessFilter:
         assert "page=2" in line
 
     def test_param_name_match_is_exact_not_substring(self):
-        """``access_token_hint`` or ``statement`` must NOT be redacted — the
-        match is on the exact param name, case-insensitive."""
         record = _access_record("/search?statement=select&csrftoken_like=keepme")
         _SensitiveQueryAccessFilter().filter(record)
         line = record.getMessage()
@@ -87,7 +71,6 @@ class TestSensitiveQueryAccessFilter:
         assert '"GET /api/health HTTP/1.1" 200' in record.getMessage()
 
     def test_non_access_shaped_record_passes_through(self):
-        """A record without the uvicorn access args tuple must pass unharmed."""
         record = logging.LogRecord(
             name="uvicorn.access",
             level=logging.INFO,
@@ -103,18 +86,12 @@ class TestSensitiveQueryAccessFilter:
 
 class TestFilterRegisteredOnUvicornAccess:
     def test_configure_logging_attaches_redaction_filter(self):
-        """The filter must be live on the ``uvicorn.access`` logger after
-        ``configure_logging()`` (auto-runs on package import), so both the CE
-        ``uvicorn.run`` path and the SaaS ``uvicorn api.app:app`` path get it
-        without any deploy-config change."""
-        configure_logging()  # no-op if already configured on import
+        configure_logging()
         access_logger = logging.getLogger("uvicorn.access")
         assert any(isinstance(f, _SensitiveQueryAccessFilter) for f in access_logger.filters)
 
     @pytest.mark.asyncio
     async def test_end_to_end_reset_request_line_has_no_token_value(self, caplog):
-        """WO verify clause: a reset request produces no token value in the
-        emitted access-log line."""
         configure_logging()
         logger = logging.getLogger("uvicorn.access")
         with caplog.at_level(logging.INFO, logger="uvicorn.access"):

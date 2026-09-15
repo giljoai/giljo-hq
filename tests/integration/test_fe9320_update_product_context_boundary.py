@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""FE-9320 — the update_product_context / get_vision_document changes tested AT the MCP
-boundary, through the real transport.
-
-Two of FE-9320's changes live in the ``@mcp.tool`` wrapper, not the service:
-``dev_tools`` as a tech_stack sub-key, and ``emit_completion`` as a parameter on the
-EXISTING tool (no new tool — a new tool would add surface to a product about to be
-submitted to a connector directory). CLAUDE.md's BE-5042 rule mandates a boundary
-test for a boundary change: FastMCP silently DROPS an unknown top-level arg, so a
-param that exists in the service but not on the wrapper loses data with a 200.
-
-Section A drives the autospec transport (arg validation, no DB); Section B drives a
-real ToolAccessor on the rolled-back ``db_session``. Both mirror the fixtures in
-test_be9118_update_product_context_regroup.py.
-
-Parallel-safe: fresh tenant key per test, rolled-back session, no module state.
-"""
 
 from __future__ import annotations
 
@@ -47,9 +31,6 @@ def _live_tool(name: str):
     raise AssertionError(f"{name} not registered on the live FastMCP surface")
 
 
-# ---------------------------------------------------------------------------
-# Section A — autospec transport: the params exist and validate.
-# ---------------------------------------------------------------------------
 @pytest_asyncio.fixture
 async def autospec_mcp(monkeypatch):
     from unittest.mock import create_autospec
@@ -92,8 +73,6 @@ async def autospec_mcp(monkeypatch):
 
 
 def test_emit_completion_is_a_param_on_the_existing_tool_not_a_new_tool():
-    """The completion signal had to be a PARAMETER: a new MCP tool fires the
-    app-surface/tool-count locks and adds surface to the connector listing."""
     params = _live_tool("update_product_context").parameters.get("properties", {})
     assert "emit_completion" in params, "emit_completion must be on the live tool schema"
 
@@ -103,15 +82,12 @@ def test_emit_completion_is_a_param_on_the_existing_tool_not_a_new_tool():
 
 
 def test_dev_tools_is_reachable_as_a_tech_stack_subkey():
-    """dev_tools is a real column; it must be addressable from the tool schema, or
-    content about tooling again has nowhere to land."""
     tech_stack_schema = _live_tool("update_product_context").parameters["$defs"]["_TechStackContext"]
     assert "dev_tools" in tech_stack_schema["properties"]
 
 
 @pytest.mark.asyncio
 async def test_dev_tools_and_emit_completion_dispatch(autospec_mcp):
-    """Positive: both new inputs pass FastMCP arg validation and dispatch."""
     async with autospec_mcp() as session:
         result = await session.call_tool(
             "update_product_context",
@@ -124,14 +100,8 @@ async def test_dev_tools_and_emit_completion_dispatch(autospec_mcp):
     assert result.is_error is False, f"must dispatch: {_error_text(result)}"
 
 
-# ---------------------------------------------------------------------------
-# Section B — DB-backed transport: staged calls through the real tool.
-# ---------------------------------------------------------------------------
 @pytest_asyncio.fixture
 async def product_context_client(db_manager, db_session, monkeypatch):
-    """Real ToolAccessor on the transport with update_product_fields threaded onto
-    the rolled-back test session (the accessor mixin imports the symbol at call
-    time, so a module-level monkeypatch is what reaches it)."""
     from api import app_state
     from api.endpoints.mcp_tools import _base
     from giljo_mcp.tools import vision_analysis
@@ -203,9 +173,6 @@ async def _seed(session, tenant_key: str) -> tuple[Product, VisionDocument]:
 
 @pytest.mark.asyncio
 async def test_staged_calls_complete_a_multi_part_ingest(product_context_client):
-    """DoD 4 + 5, at the boundary: THREE staged calls finish the analysis, and each
-    response reports the completion state instead of leaving the agent to infer it.
-    The one-call mandate is what died at 62,420 bytes on a real run."""
     new_client, tenant_key, session = product_context_client
     product, doc = await _seed(session, tenant_key)
 
@@ -243,7 +210,6 @@ async def test_staged_calls_complete_a_multi_part_ingest(product_context_client)
         assert third.structured_content["vision_analysis_complete"] is True
         assert third.structured_content["missing_for_completion"] == []
 
-    # dev_tools actually reached its column through the transport...
     ts = (
         await session.execute(
             select(ProductTechStack).where(
@@ -254,15 +220,12 @@ async def test_staged_calls_complete_a_multi_part_ingest(product_context_client)
     ).scalar_one_or_none()
     assert ts is not None and ts.dev_tools == "ruff, pytest, Vite"
 
-    # ...and the staged sequence flipped the flag the wizard reads.
     await session.refresh(product)
     assert product.vision_analysis_complete is True
 
 
 @pytest.mark.asyncio
 async def test_a_second_staged_call_does_not_discard_empty_columns(product_context_client):
-    """The museum-rule fix, verified through the transport rather than in-process:
-    a repair call fills the still-empty columns of an already-touched block."""
     new_client, tenant_key, session = product_context_client
     product, _doc = await _seed(session, tenant_key)
 

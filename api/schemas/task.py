@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Task API Pydantic schemas for Phase 4: Task-Centric Multi-User Dashboard.
-
-Provides request/response models for:
-- Task updates (PATCH /tasks/{id})
-- Task conversion to projects (POST /tasks/{id}/convert)
-- Task responses with user fields
-"""
 
 from datetime import datetime
 from typing import Literal
@@ -79,7 +71,6 @@ class TaskUpdate(BaseModel):
         max_length=4,
         description="Taxonomy type abbreviation (e.g. BE, FE, INF). Replaces the legacy category field.",
     )
-    # Handover 0076: Removed assigned_to_user_id field
     estimated_effort: float | None = Field(None, ge=0, description="Estimated effort in hours")
     actual_effort: float | None = Field(None, ge=0, description="Actual effort in hours")
     due_date: datetime | None = Field(None, description="Task due date")
@@ -179,19 +170,15 @@ class TaskResponse(BaseModel):
 
     parent_task_id: str | None = Field(None, description="Parent task ID for subtasks")
 
-    # Phase 4: User fields (Handover 0076: removed assigned_to_user_id)
     created_by_user_id: str | None = Field(None, description="User who created task")
     converted_to_project_id: str | None = Field(None, description="Project ID if task was converted")
 
-    # Timestamps
     created_at: datetime = Field(..., description="Task creation timestamp")
     started_at: datetime | None = Field(None, description="Task start timestamp")
     completed_at: datetime | None = Field(None, description="Task completion timestamp")
     due_date: datetime | None = Field(None, description="Task due date")
-    # BE-6130b: set on the trash/recover ("deleted tasks") listing; NULL for live tasks.
     deleted_at: datetime | None = Field(None, description="Soft-delete timestamp (NULL for live tasks)")
 
-    # Effort tracking
     estimated_effort: float | None = Field(None, description="Estimated effort in hours")
     actual_effort: float | None = Field(None, description="Actual effort in hours")
 

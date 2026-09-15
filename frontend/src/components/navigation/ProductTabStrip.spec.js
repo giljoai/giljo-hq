@@ -1,11 +1,3 @@
-/**
- * ProductTabStrip.spec.js — FE-9502c
- * Presentational tab strip for the tabbed product shell. Proves the TWO-TAB
- * case is real: two tabs render simultaneously,
- * each is independently selectable/closable, and the last tab cannot be
- * closed from here (the strip just doesn't render a close button for it —
- * the store enforces the invariant, this proves the affordance matches it).
- */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ProductTabStrip from './ProductTabStrip.vue'
@@ -13,9 +5,6 @@ import ProductTabStrip from './ProductTabStrip.vue'
 const TAB_A = { id: 'prod-a', name: 'Product A' }
 const TAB_B = { id: 'prod-b', name: 'Product B' }
 
-// The global v-menu stub (tests/setup.js) only renders the default slot,
-// which hides the activator button — override locally so the add-tab
-// affordance actually renders (same pattern as JobsTab.spec.js).
 const menuStub = {
   template: `<div class="v-menu"><slot name="activator" :props="{}" /><slot /></div>`,
 }

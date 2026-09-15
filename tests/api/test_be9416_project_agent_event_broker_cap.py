@@ -3,29 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9416 — project_update and agent:created/agent:mission_updated must cross the broker.
-
-Edition Scope: Both (the emitters and the broker are CE code; multi-worker is the
-SaaS deployment shape).
-
-The defect, measured live on prod 2026-08-14 (WS006 at 06:57Z and 14:52Z): a
-``project_update`` carrying a long project description serialized to 12,825 bytes
-against the pg_notify 7999-byte cap, so ``PostgresNotifyWebSocketEventBroker.publish``
-raised (BE-3008c's guard, working as designed), ``api/websocket.py`` swallowed it as
-a WS006 warning (also correct -- the local send already happened), and every session
-on a DIFFERENT uvicorn worker silently never saw the update. Same latent shape on
-``agent:created`` and ``agent:mission_updated``, which ship the full agent mission.
-
-Tested AT THE FAILING LAYER, reusing BE-9414's proven harness shape: two real
-``WebSocketManager`` + real ``PostgresNotifyWebSocketEventBroker`` pairs over one
-routing fake cluster, so a publish on worker A has to survive the byte cap and reach
-a socket on worker B. Every assertion is on DELIVERY, not on "no exception raised" --
-the production failure is SWALLOWED, so an exception-based assertion would pass on
-the broken code for the wrong reason.
-
-Parallel-safe: no DB, no module-level mutable state; asyncpg is replaced with an
-in-test fake via monkeypatch.
-"""
 
 from __future__ import annotations
 
@@ -51,29 +28,13 @@ from giljo_mcp.services.job_lifecycle_service import JobLifecycleService
 CHANNEL = "giljo_ws_events"
 TENANT = "tk_be9416"
 
-# The most expensive character json.dumps can emit. ensure_ascii=True escapes an
-# ASTRAL character as a SURROGATE PAIR -- ``\udbxx\udcxx`` -- 12 bytes on the wire
-# for one source character. Measured, not assumed: this is why the bound is
-# computed in bytes and never in characters.
 WORST_CHAR = "\U0001f600"
 
-# A 3-byte-in-UTF-8 BMP character. Deliberately NOT the astral fixture: a byte
-# slice of pure 4-byte astral text happens to land on character boundaries anyway,
-# so it stays green under exactly the mutation the text-integrity test is written
-# to catch. 3-byte characters do not divide evenly and expose it (BE-9414's finding).
 CJK_CHAR = "中"
 
-# Headroom the boundary pin requires between the worst-case envelope and the cap,
-# so growth above the emitter (ws envelope + broker envelope) cannot silently
-# re-approach the cliff.
 _REQUIRED_HEADROOM_BYTES = 1_000
 
 
-# ---------------------------------------------------------------------------
-# A fake asyncpg that ROUTES pg_notify between brokers (a one-node cluster).
-# Same shape as BE-9414's; cross-worker delivery is the whole subject, so the
-# fake has to actually deliver rather than merely record what a pool executed.
-# ---------------------------------------------------------------------------
 
 
 class _FakePostgresError(Exception):
@@ -164,7 +125,6 @@ class _RoutingFakeAsyncpg:
 
 
 class _RecordingWS:
-    """A subscribed browser socket on the receiving worker."""
 
     def __init__(self) -> None:
         self.sent: list[str] = []
@@ -185,12 +145,6 @@ def cluster(monkeypatch) -> _RoutingFakeAsyncpg:
 
 @pytest.fixture
 def multiworker(monkeypatch) -> None:
-    """Cross-worker publishing is disabled at worker_count == 1 (m15).
-
-    That is exactly why single-worker CE never hit this defect and every test
-    stayed green -- so the failing shape only exists with this forced on. A test
-    in this module that forgets this fixture passes VACUOUSLY on broken code.
-    """
     import api.startup.database as db_startup
 
     monkeypatch.setattr(db_startup, "_worker_count", lambda: 2)
@@ -219,7 +173,6 @@ async def _wait_until(condition, tries: int = 500) -> None:
 
 @dataclass
 class _Pair:
-    """Two workers sharing one cluster, with a browser socket on worker B."""
 
     manager_a: WebSocketManager
     manager_b: WebSocketManager
@@ -250,19 +203,9 @@ async def _delivered(pair: _Pair) -> dict:
     return json.loads(pair.ws_b.sent[0])
 
 
-# ---------------------------------------------------------------------------
-# project_update — the event that is failing LIVE
-# ---------------------------------------------------------------------------
 
 
 async def test_a_long_project_description_reaches_a_session_on_another_worker(pair):
-    """The prod defect, end to end: worker A updates a project, worker B's browser must see it.
-
-    12,000 characters of description reproduces the size range prod recorded
-    (12,825 bytes). Before the fix the publish raises, api/websocket.py swallows
-    it as WS006, and this assertion fails with an empty socket -- the silent
-    realtime gap itself.
-    """
     await pair.manager_a.broadcast_project_update(
         project_id="11111111-1111-4111-8111-111111111111",
         update_type="updated",
@@ -282,7 +225,6 @@ async def test_a_long_project_description_reaches_a_session_on_another_worker(pa
 
 
 async def test_the_published_project_update_stays_under_the_pg_notify_cap(cluster, multiworker):
-    """The guard must never be the thing that stops it -- the emitter fits first."""
     manager_a, broker_a = await _worker(cluster)
     try:
         await manager_a.broadcast_project_update(
@@ -306,12 +248,6 @@ async def test_the_published_project_update_stays_under_the_pg_notify_cap(cluste
 
 
 async def test_a_truncated_project_update_says_so_and_states_the_full_length(pair):
-    """ids-not-blobs: what does not fit must still be findable.
-
-    Without the flags a client cannot tell a shortened description from a short
-    one, and would render the excerpt forever. ``project_id`` + ``_length`` is
-    everything a consumer needs to decide to re-fetch.
-    """
     await pair.manager_a.broadcast_project_update(
         project_id="p" * 36,
         update_type="updated",
@@ -326,12 +262,6 @@ async def test_a_truncated_project_update_says_so_and_states_the_full_length(pai
 
 
 async def test_a_short_project_update_travels_whole_and_says_it_is_whole(pair):
-    """Ordinary updates must be unaffected, and must SAY they are unaffected.
-
-    "No flag" can never be allowed to mean "not truncated" -- a client reading an
-    event from a worker that predates this field would guess wrong. So the flags
-    are always present, including on the untouched path.
-    """
     await pair.manager_a.broadcast_project_update(
         project_id="p" * 36,
         update_type="status_changed",
@@ -352,9 +282,6 @@ async def test_a_short_project_update_travels_whole_and_says_it_is_whole(pair):
     assert data["mission_truncated"] is False
 
 
-# ---------------------------------------------------------------------------
-# agent:created — the MCP spawn path's emitter
-# ---------------------------------------------------------------------------
 
 
 def _agent_created_ctx(mission: str) -> BroadcastAgentCreatedContext:
@@ -373,11 +300,6 @@ def _agent_created_ctx(mission: str) -> BroadcastAgentCreatedContext:
 
 
 async def test_an_oversized_agent_created_mission_reaches_another_worker(pair):
-    """A spawn with a long mission must still put the agent row on every browser.
-
-    SpawnAgentRequest.mission carries no max_length at all, so this is not a
-    theoretical size -- an orchestrator mission of tens of KB is ordinary.
-    """
     service = JobLifecycleService(db_manager=None, tenant_manager=None, websocket_manager=pair.manager_a)
 
     await service._broadcast_agent_created(_agent_created_ctx("M" * 30_000))
@@ -399,13 +321,9 @@ async def test_a_short_agent_created_mission_travels_whole(pair):
     assert data["mission_truncated"] is False
 
 
-# ---------------------------------------------------------------------------
-# agent:mission_updated — the REPAIR path, which had never fired at all
-# ---------------------------------------------------------------------------
 
 
 def _mission_update_deps(pair: _Pair):
-    """The handler's injectables, stubbed. No DB, no ASGI scope."""
     orchestration_service = AsyncMock()
     orchestration_service.update_agent_mission.return_value = SimpleNamespace(mission_length=1)
 
@@ -433,15 +351,6 @@ async def _patch_mission(pair: _Pair, mission: str):
 
 
 async def test_editing_a_mission_broadcasts_at_all(pair):
-    """RED ON MASTER for a reason that has nothing to do with byte caps.
-
-    The handler did ``from api.websocket_manager import manager`` -- that shim has
-    no ``manager`` -- and called ``emit_to_tenant``, which exists nowhere in the
-    repo. So every mission edit raised ImportError AFTER the write had committed:
-    the mission saved, the operator was shown a failure, and no session anywhere
-    updated. Broken since Handover 0244b; invisible because the import is
-    function-local and no test drove the route.
-    """
     await _patch_mission(pair, "A corrected mission.")
 
     delivered = await _delivered(pair)
@@ -451,11 +360,6 @@ async def test_editing_a_mission_broadcasts_at_all(pair):
 
 
 async def test_an_oversized_mission_edit_reaches_another_worker(pair):
-    """The bound, on the path that repairs a mission.
-
-    UpdateMissionRequest.mission caps at 50,000 characters -- 6x the pg_notify cap
-    in the cheapest possible encoding.
-    """
     await _patch_mission(pair, "M" * 50_000)
 
     data = (await _delivered(pair))["data"]
@@ -465,11 +369,6 @@ async def test_an_oversized_mission_edit_reaches_another_worker(pair):
 
 
 async def test_a_websocket_outage_does_not_fail_a_committed_mission_write(pair):
-    """Graceful degradation: the write already committed, so WS must never 500 it.
-
-    This is the posture the broken code got wrong in the other direction -- it
-    raised, on a write that had already succeeded.
-    """
     orchestration_service, job_query_service = _mission_update_deps(pair)
 
     result = await update_agent_mission(
@@ -479,25 +378,16 @@ async def test_a_websocket_outage_does_not_fail_a_committed_mission_write(pair):
         orchestration_service=orchestration_service,
         session=None,
         job_query_service=job_query_service,
-        ws_dep=WebSocketDependency(manager=None),  # WS unavailable
+        ws_dep=WebSocketDependency(manager=None),
     )
 
     assert result.success is True
     assert result.mission == "m"
 
 
-# ---------------------------------------------------------------------------
-# Properties the bound quietly depends on
-# ---------------------------------------------------------------------------
 
 
 async def test_worst_case_envelope_keeps_headroom_under_the_cap(cluster, multiworker):
-    """Pin the headroom by measurement rather than asserting it in a comment.
-
-    Every bounded field at its maximum, in the most expensive encoding, with
-    maximal ids. If a future field is added to any of these events, this fails
-    before the cliff rather than after it.
-    """
     manager_a, broker_a = await _worker(cluster)
     try:
         await manager_a.broadcast_project_update(
@@ -522,13 +412,6 @@ async def test_worst_case_envelope_keeps_headroom_under_the_cap(cluster, multiwo
 
 
 async def test_the_excerpt_is_valid_text_not_valid_looking_bytes(pair):
-    """The bound searches CHARACTER prefixes, so a slice can never split a code point.
-
-    The obvious optimisation -- slice the encoded bytes instead -- is faster and
-    emits U+FFFD mid-word. Pinned with CJK content specifically: a byte slice of
-    pure 4-byte astral text happens to land on character boundaries anyway and
-    would stay GREEN under exactly the mutation this test exists to catch.
-    """
     await pair.manager_a.broadcast_project_update(
         project_id="p" * 36,
         update_type="updated",
@@ -544,11 +427,6 @@ async def test_the_excerpt_is_valid_text_not_valid_looking_bytes(pair):
 
 
 async def test_an_absent_field_is_not_invented(pair):
-    """A None field carries no bytes worth trimming, and must not gain flags.
-
-    Stamping ``mission_truncated`` on an event whose emitter deliberately sent no
-    mission would tell the consumer to re-fetch something that does not exist.
-    """
     await pair.manager_a.broadcast_project_update(
         project_id="p" * 36,
         update_type="updated",
@@ -564,14 +442,6 @@ async def test_an_absent_field_is_not_invented(pair):
 
 
 async def test_a_rebound_never_overwrites_the_true_original_length(pair):
-    """Events arriving FROM the broker pass through this funnel a second time.
-
-    They are already bounded, so recomputing ``mission_length`` on the receiving
-    worker would overwrite the TRUE original length with the excerpt's -- telling the
-    client its excerpt is the whole thing, which is the exact silent-truncation
-    ambiguity the flags exist to prevent. ``setdefault`` is what stops it, and this
-    is the test that fails if someone "simplifies" it to a plain assignment.
-    """
     service = JobLifecycleService(db_manager=None, tenant_manager=None, websocket_manager=pair.manager_a)
     await service._broadcast_agent_created(_agent_created_ctx("M" * 30_000))
 
@@ -582,11 +452,6 @@ async def test_a_rebound_never_overwrites_the_true_original_length(pair):
 
 
 async def test_an_unregistered_event_type_is_passed_through_untouched(pair):
-    """The registry is the impact area. Only the three censused types are bounded.
-
-    BE-9414's thread_message bounds itself in _comm_ws.py and must never be
-    double-bounded here; nothing else should acquire flags it did not ask for.
-    """
     assert "thread_message" not in BOUNDED_EVENT_FIELDS
 
     await pair.manager_a.broadcast_to_tenant(
@@ -602,6 +467,5 @@ async def test_an_unregistered_event_type_is_passed_through_untouched(pair):
 
 
 def test_the_budget_leaves_room_for_the_broker_envelope():
-    """MAX_EVENT_BYTES must sit far enough below the hard cap to wrap the event."""
     assert MAX_EVENT_BYTES < _MAX_NOTIFY_PAYLOAD_BYTES
     assert _MAX_NOTIFY_PAYLOAD_BYTES - MAX_EVENT_BYTES >= _REQUIRED_HEADROOM_BYTES

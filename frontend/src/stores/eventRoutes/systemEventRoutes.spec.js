@@ -1,12 +1,3 @@
-/**
- * systemEventRoutes.spec.js — FE-9121
- *
- * vision:analysis_complete must refresh productsById[payload.product_id]
- * unconditionally — including when that product is NOT the globally
- * selected one (the create-wizard case the ProductForm gate exists for).
- *
- * Edition scope: Both.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 
@@ -55,7 +46,6 @@ describe('systemEventRoutes — FE-9121 vision:analysis_complete write-through',
 
     expect(mockGet).toHaveBeenCalledWith('p-new')
     expect(productStore.getProductById('p-new')).toMatchObject({ id: 'p-new', vision_analysis_complete: true })
-    // The non-selected product must be left alone.
     expect(productStore.currentProductId).toBe('p-other-selected')
   })
 

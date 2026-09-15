@@ -3,22 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Service-layer tests for SEC-3001a Wave 2 item 6 — per-(identifier, IP) login lockout.
-
-The lockout LOGIC lives in ``LoginLockoutService`` (the owning service), so this
-is the failing-layer regression for the feature (CLAUDE.md rule). It proves the
-load-bearing design choices with precise (identifier, IP) control:
-  - 10 failures from ONE (identifier, IP) → locked, 15-min window;
-  - a DIFFERENT IP for the same identifier is NOT locked (anti-DoS — the whole
-    reason for keying on email+IP rather than the user row);
-  - a DIFFERENT identifier is NOT locked;
-  - the window auto-unlocks and the counter resets;
-  - clear (successful login) and clear_for_identifiers (password reset) release it;
-  - the identifier is case-normalized.
-
-Parallel-safe: every test uses a unique identifier; the ``db_session`` fixture
-(TransactionalTestContext) rolls back; no module-level mutable state.
-"""
 
 from __future__ import annotations
 
@@ -53,7 +37,6 @@ async def test_below_threshold_not_locked(db_session):
     outcome = await _fail_n(db_session, ident, _IP_A, MAX_FAILED_ATTEMPTS - 1)
     assert outcome.failed_count == MAX_FAILED_ATTEMPTS - 1
     assert outcome.just_locked is False
-    # Still under the threshold -> not locked.
     await _SVC.assert_not_locked(db_session, ident, _IP_A)
 
 
@@ -69,19 +52,16 @@ async def test_threshold_locks_and_blocks(db_session):
 
 @pytest.mark.asyncio
 async def test_different_ip_not_locked(db_session):
-    """Anti-DoS: locking (victim, attacker_ip) must NOT lock (victim, victim_ip)."""
     ident = "victim@example.com"
     await _fail_n(db_session, ident, _IP_A, MAX_FAILED_ATTEMPTS)
     with pytest.raises(AccountLockedError):
         await _SVC.assert_not_locked(db_session, ident, _IP_A)
-    # Same identifier, DIFFERENT IP -> NOT locked.
     await _SVC.assert_not_locked(db_session, ident, _IP_B)
 
 
 @pytest.mark.asyncio
 async def test_different_identifier_not_locked(db_session):
     await _fail_n(db_session, "a@example.com", _IP_A, MAX_FAILED_ATTEMPTS)
-    # Same IP, different identifier -> NOT locked.
     await _SVC.assert_not_locked(db_session, "b@example.com", _IP_A)
 
 
@@ -89,16 +69,13 @@ async def test_different_identifier_not_locked(db_session):
 async def test_auto_unlock_after_window_resets_counter(db_session):
     ident = "expire@example.com"
     await _fail_n(db_session, ident, _IP_A, MAX_FAILED_ATTEMPTS)
-    # Force the lock window into the past.
     await db_session.execute(
         update(LoginLockout)
         .where(LoginLockout.identifier == ident, LoginLockout.ip_address == _IP_A)
         .values(locked_until=datetime.now(UTC) - timedelta(seconds=1))
     )
     await db_session.flush()
-    # An expired window reads as not-locked (auto-unlock)...
     await _SVC.assert_not_locked(db_session, ident, _IP_A)
-    # ...and the next failure starts a fresh count (not 11).
     outcome = await _SVC.record_failure(db_session, ident, _IP_A)
     assert outcome.failed_count == 1
     assert outcome.just_locked is False
@@ -115,21 +92,18 @@ async def test_clear_removes_counter(db_session):
         )
     ).scalar_one_or_none()
     assert row is None
-    # A fresh failure after a clear starts at 1.
     outcome = await _SVC.record_failure(db_session, ident, _IP_A)
     assert outcome.failed_count == 1
 
 
 @pytest.mark.asyncio
 async def test_clear_for_identifiers_unlocks_every_ip(db_session):
-    """Password-reset instant unlock: clearing by identifier releases all IPs."""
     username, email = "resetuser", "reset@example.com"
     await _fail_n(db_session, email, _IP_A, MAX_FAILED_ATTEMPTS)
     await _fail_n(db_session, email, _IP_B, MAX_FAILED_ATTEMPTS)
     with pytest.raises(AccountLockedError):
         await _SVC.assert_not_locked(db_session, email, _IP_A)
 
-    # Reset clears both the username and the email key, across every IP.
     await _SVC.clear_for_identifiers(db_session, [username, email])
     await _SVC.assert_not_locked(db_session, email, _IP_A)
     await _SVC.assert_not_locked(db_session, email, _IP_B)
@@ -138,12 +112,10 @@ async def test_clear_for_identifiers_unlocks_every_ip(db_session):
 @pytest.mark.asyncio
 async def test_identifier_is_case_normalized(db_session):
     await _fail_n(db_session, "MixedCase@Example.com", _IP_A, MAX_FAILED_ATTEMPTS)
-    # A differently-cased identifier resolves to the same lockout key.
     with pytest.raises(AccountLockedError):
         await _SVC.assert_not_locked(db_session, "mixedcase@example.com", _IP_A)
 
 
 @pytest.mark.asyncio
 async def test_assert_not_locked_noop_when_no_row(db_session):
-    # No prior failures -> never locked, never raises.
     await _SVC.assert_not_locked(db_session, "stranger@example.com", _IP_A)

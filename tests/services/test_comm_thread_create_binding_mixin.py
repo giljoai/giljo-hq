@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""``CommThreadCreateBindingMixin._resolve_create_product_id`` (FE-9530, ruling 1).
-
-Unit-focused coverage of the resolver itself, isolated from ``create_thread``'s
-full write path (which is covered end-to-end in test_be6054b_comm_thread_service.py
-and, at the MCP boundary, tests/integration/test_be9420_create_thread_product_binding.py).
-This file exists to pin the THREE branches of the resolver directly:
-
-1. ``project_id`` supplied -> derive from that project's OWN product, ignoring
-   whatever else the tenant owns.
-2. No ``project_id``, exactly one product -> resolves to it silently.
-3. No ``project_id``, several products -> ``ProductAmbiguousError``.
-
-The genuinely-zero-product case and the sequence_run_id exemption are decided by
-``create_thread`` BEFORE calling this resolver at all (it is not invoked in either
-case), so they are pinned on ``create_thread`` itself, not here.
-
-Parallel-safe: real DB via the rollback-isolated ``db_session`` fixture, no
-module-level mutable state, each test owns its setup, every query tenant-scoped.
-"""
 
 from __future__ import annotations
 
@@ -88,9 +69,6 @@ async def _seed_project_for_product(db_session, tenant: str, product_id: str) ->
 
 
 async def test_project_id_derives_the_projects_own_product(db_manager, db_session):
-    """A thread anchored to project P belongs to P's product, regardless of
-    which OTHER product the tenant owns or shows -- proven by seeding a second,
-    unrelated product for the same tenant and confirming it is never picked."""
     tenant = _tk("project")
     await _seed(db_session, tenant)
     project_product = await _seed_product(db_session, tenant, is_active=False)

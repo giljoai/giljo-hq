@@ -1,15 +1,3 @@
-/**
- * DashboardView.legacyCommitTitle.spec.js — BE-9256 (frontend layer 4).
- *
- * Edition Scope: Both.
- *
- * Stored 360 memory rows can carry a git_commits entry with an empty
- * `message` (legacy bare-SHA normalization, pre-validator). Before this
- * fix, the "Recent Commits" tile rendered the commit-msg div blank for such
- * a row — visually, the project name on the meta line reads like the
- * commit's title. The floor: an empty message must render the short SHA
- * as the title text instead of a blank div.
- */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -55,7 +43,6 @@ function dashboardPayload(overrides = {}) {
         product_name: 'Demo Product',
         project_name: 'Legacy Project',
         git_commits: [
-          // Legacy row: empty message (pre-validator bare-SHA normalization)
           { sha: '569905bd0abcdef1234567890', message: '' },
         ],
       },

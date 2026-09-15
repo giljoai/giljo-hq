@@ -11,7 +11,6 @@
     @keydown.esc="handleClose"
   >
     <v-card v-draggable data-testid="closeout-modal" class="smooth-border">
-      <!-- Modal header -->
       <div id="closeout-modal-title" class="dlg-header dlg-header--primary dlg-header--sticky">
         <v-icon class="dlg-icon" icon="mdi-memory" />
         <span class="dlg-title">Project 360 Memory: {{ projectName }}</span>
@@ -22,9 +21,7 @@
 
       <v-divider />
 
-      <!-- Modal content -->
       <v-card-text class="pa-4">
-        <!-- 360 Memory Info Banner -->
         <v-alert
           type="info"
           variant="tonal"
@@ -41,18 +38,15 @@
           </span>
         </v-alert>
 
-        <!-- Loading state -->
         <div v-if="loading" class="text-center py-8">
           <v-progress-circular indeterminate color="primary" size="64" />
           <div class="text-body-large mt-4">Loading 360 memory entries...</div>
         </div>
 
-        <!-- Error state -->
         <v-alert v-if="error" type="error" variant="tonal" density="compact" class="mb-4">
           {{ error }}
         </v-alert>
 
-        <!-- No entries state -->
         <v-alert
           v-if="!loading && !error && memoryEntries.length === 0"
           type="info"
@@ -64,7 +58,6 @@
           projects are completed or when orchestrators trigger handovers.
         </v-alert>
 
-        <!-- Memory Entries -->
         <div v-if="!loading && !error && memoryEntries.length > 0">
           <div class="text-body-large font-weight-medium mb-3">
             {{ memoryEntries.length }} Memory
@@ -91,13 +84,11 @@
               </v-expansion-panel-title>
 
               <v-expansion-panel-text>
-                <!-- Summary section -->
                 <div v-if="entry.summary" class="mb-4">
                   <h4 class="text-title-small font-weight-bold mb-2">Summary</h4>
                   <div class="text-body-medium summary-text">{{ entry.summary }}</div>
                 </div>
 
-                <!-- Key Outcomes -->
                 <div v-if="entry.key_outcomes && entry.key_outcomes.length > 0" class="mb-4">
                   <h4 class="text-title-small font-weight-bold mb-2">Key Outcomes</h4>
                   <v-list density="compact" class="outcomes-list">
@@ -114,7 +105,6 @@
                   </v-list>
                 </div>
 
-                <!-- Decisions Made -->
                 <div v-if="entry.decisions_made && entry.decisions_made.length > 0" class="mb-4">
                   <h4 class="text-title-small font-weight-bold mb-2">Decisions Made</h4>
                   <v-list density="compact" class="decisions-list">
@@ -131,7 +121,6 @@
                   </v-list>
                 </div>
 
-                <!-- Git Commits (if available) -->
                 <div v-if="entry.git_commits && entry.git_commits.length > 0" class="mb-4">
                   <h4 class="text-title-small font-weight-bold mb-2">
                     Git Commits ({{ entry.git_commits.length }})
@@ -155,7 +144,6 @@
                   </v-list>
                 </div>
 
-                <!-- Metadata -->
                 <div class="metadata-section mt-4 pt-3" style="border-top: 1px solid rgba(0,0,0,0.12)">
                   <div class="text-body-small text-muted-a11y">
                     <strong>Type:</strong> {{ formatEntryType(entry.entry_type) }}
@@ -170,7 +158,6 @@
           </v-expansion-panels>
         </div>
 
-        <!-- Action Guidance -->
         <v-alert
           v-if="!loading && !error"
           type="success"
@@ -195,7 +182,6 @@
 
       <v-divider />
 
-      <!-- Modal actions -->
       <div class="dlg-footer">
         <template v-if="orchestratorCloseoutBlocked">
           <div class="closeout-blocked-indicator" data-testid="closeout-blocked-indicator">
@@ -216,7 +202,6 @@
             Cancel
           </v-btn>
         </template>
-        <!-- Normal actions: Close Out Project -->
         <template v-else>
           <v-btn
             color="success"
@@ -282,17 +267,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  // FE-5017 Phase C: orchestrator job_id is needed to look up the pending
-  // user_approval row in the approvals store. Optional for backwards compat —
-  // when absent, the awaiting_user banner renders without an inline card.
   orchestratorJobId: {
     type: String,
     default: null,
   },
-  // FE-6131e: when true, closing out does NOT navigate to /projects. The
-  // chain review cockpit reuses this modal for per-card review and must keep
-  // the user in place (the card drops off on the next roster refresh).
-  // Default false preserves the existing navigate-to-/projects behavior.
   suppressNavigation: {
     type: Boolean,
     default: false,
@@ -301,25 +279,21 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'closeout'])
 
-// Vuetify display breakpoints
 const { mobile } = useDisplay()
 const isMobile = computed(() => mobile.value)
 
-// Reactive state
 const loading = ref(false)
 const error = ref(null)
 const memoryEntries = ref([])
-const expandedPanels = ref([]) // Multiple panels can be expanded
+const expandedPanels = ref([])
 const closeoutLoading = ref(false)
 
-// Methods
 const loadMemoryEntries = async () => {
   loading.value = true
   error.value = null
   memoryEntries.value = []
 
   try {
-    // Handover 0490: Fetch memory entries from normalized table via new API endpoint
     const response = await api.products.getMemoryEntries(
       props.productId,
       {
@@ -328,7 +302,6 @@ const loadMemoryEntries = async () => {
       }
     )
 
-    // API returns structured response: { success, entries, total_count, filtered_count }
     memoryEntries.value = response.data.entries || []
   } catch (err) {
     console.error('[CloseoutModal] Failed to load 360 memory:', err)
@@ -344,10 +317,6 @@ const handleCloseOutProject = async () => {
   error.value = null
 
   try {
-    // Chain review path: when the conductor already flipped the member to 'completed',
-    // skip the archive call (idempotent today, but redundant and re-broadcasts).
-    // This confirm is review-only — markReviewed + advance is handled by the @closeout
-    // handler in ProjectTabs. SOLO path (projectStatus != 'completed') still archives.
     let responseData = null
     if (props.projectStatus !== 'completed') {
       const response = await api.projects.archive(props.projectId)
@@ -357,10 +326,6 @@ const handleCloseOutProject = async () => {
     emit('closeout', responseData)
     emit('close')
 
-    // WI-2/TSK-9195: toast + immediate navigation. The toast renders in the
-    // layout-level ToastManager and survives the route change, so there is no
-    // reason to hold the stale view (a delay left Review re-clickable for ~2s).
-    // FE-6131e: suppressNavigation keeps the sequence cockpit in place.
     showToast({ message: 'Project closed out successfully', type: 'success' })
     if (!props.suppressNavigation) {
       router.push('/projects')
@@ -396,7 +361,6 @@ const formatCommitDate = (timestamp) => {
 
 const formatEntryType = (type) => {
   if (!type) return 'Unknown'
-  // Convert snake_case to Title Case
   return type
     .split('_')
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
@@ -410,19 +374,11 @@ const resetState = () => {
   closeoutLoading.value = false
 }
 
-// Watch for modal open to load data.
-// MUST sit below loadMemoryEntries + resetState (both are const arrow-functions,
-// subject to TDZ). An immediate watcher's callback runs synchronously during
-// setup() — calling an undefined const would throw a ReferenceError.
-// { immediate: true } ensures a chain instance that mounts with show=true
-// (v-if + set-in-same-tick) runs loadMemoryEntries() on first open.
-// A solo instance mounts with show=false → immediate fires resetState() (no-op).
 watch(
   () => props.show,
   (newValue) => {
     if (newValue) {
       loadMemoryEntries()
-      // Expand first entry by default
       expandedPanels.value = [0]
     } else {
       resetState()

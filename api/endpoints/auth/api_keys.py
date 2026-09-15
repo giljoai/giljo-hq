@@ -3,11 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""API-key management endpoints (list active, list all, create, revoke).
-
-Extracted verbatim from api/endpoints/auth.py (BE-6042f route-group split).
-Every query keeps its tenant_key filter; no new write paths.
-"""
 
 import logging
 from uuid import UUID
@@ -84,7 +79,6 @@ async def list_api_keys(
     Returns:
         List of API keys (masked)
     """
-    # Service raises exceptions on failure (0480 migration)
     keys = await auth_service.list_api_keys(str(current_user.id), include_revoked=include_revoked)
 
     return [
@@ -127,7 +121,6 @@ async def create_api_key(
     Returns:
         API key response with plaintext key (shown only once)
     """
-    # Service raises exceptions on failure (0480 migration)
     key_data = await auth_service.create_api_key(
         user_id=str(current_user.id),
         tenant_key=current_user.tenant_key,
@@ -142,7 +135,7 @@ async def create_api_key(
     return APIKeyCreateResponse(
         id=key_data.id,
         name=key_data.name,
-        api_key=key_data.api_key,  # Plaintext key - only shown once!
+        api_key=key_data.api_key,
         key_prefix=key_data.key_prefix,
         message="API key created successfully. Store this key securely - it will not be shown again!",
         expires_at=key_data.expires_at,
@@ -173,14 +166,10 @@ async def revoke_api_key(
     Raises:
         HTTPException: 404 if key not found or belongs to another user
     """
-    # Service raises ResourceNotFoundError on failure (0480 migration).
-    # Pass notification_service so the live path resolves the key's open
-    # api_key.expiring_soon bell notification (the hourly scan only creates).
     await auth_service.revoke_api_key(str(key_id), str(current_user.id), notification_service=notification_service)
 
     logger.info(f"API key revoked (user: {sanitize(current_user.username)})")
 
-    # Need to get key name for response - let's list keys and find it
     keys = await auth_service.list_api_keys(str(current_user.id), include_revoked=True)
     key_name = "Unknown"
     for key in keys:

@@ -1,31 +1,7 @@
-/**
- * ProjectsView.roadmapSort.fe6179.spec.js — FE-6179
- *
- * Regression test at the FE wiring layer for the roadmap-order sort button on
- * /projects. The projects list is server-paginated (BE-6076): the sort is done
- * in SQL, driven by the `sort`/`sortDir` query params the view sends. The
- * roadmap-icon toolbar button must:
- *   - use the SAME icon the navbar uses for /roadmap (mdi-map-marker-path), so it
- *     reads as "roadmap order";
- *   - flip the server sort key to 'roadmap' (the repository then orders by each
- *     project's roadmap_items.sort_order — the SAME single source /roadmap
- *     renders; backend ordering proven in
- *     tests/services/test_be6076_projects_list_pagination.py);
- *   - reset to page 1 and re-fetch on toggle;
- *   - toggle OFF back to the default newest-first order (must-sort forbids an
- *     empty sort, so "off" is the default sort, not no sort).
- *
- * Asserts the entry point only — that the button drives `sort=roadmap` through
- * fetchProjects. The actual roadmap ordering is asserted server-side.
- *
- * Edition scope: CE.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
 
-// The navbar's Roadmap entry icon (NavigationDrawer.vue: { name: 'Roadmap',
-// path: '/roadmap', icon: 'mdi-map-marker-path' }). The button MUST reuse it.
 const ROADMAP_ICON = 'mdi-map-marker-path'
 
 const h = vi.hoisted(() => ({
@@ -66,8 +42,6 @@ vi.mock('@/stores/projects', () => ({
 }))
 vi.mock('@/stores/products', () => ({
   useProductStore: () => ({
-    // FE-9502c: ProjectsView now scopes by the viewed tab (currentProduct),
-    // not the server's single activeProduct.
     currentProduct: { id: 'prod-1' },
     activeProduct: { id: 'prod-1' },
     fetchProducts: vi.fn().mockResolvedValue(undefined),
@@ -100,9 +74,7 @@ async function mountView() {
     shallow: true,
     global: { renderStubDefaultSlot: true },
   })
-  await flushPromises() // let onMounted's initial fetchPage settle
-  // onMounted fires the first fetchProjects (default created_at sort); clear so
-  // assertions reflect ONLY what the button triggers.
+  await flushPromises()
   h.fetchProjects.mockClear()
   return wrapper
 }
@@ -139,8 +111,6 @@ describe('ProjectsView roadmap-order sort (FE-6179)', () => {
     expect(wrapper.vm.roadmapSortActive).toBe(true)
     expect(wrapper.vm.sortBy[0]).toEqual({ key: 'roadmap', order: 'asc' })
     expect(wrapper.vm.currentPage).toBe(1)
-    // The roadmap order is carried to the server as sort=roadmap (the SAME
-    // ordering source /roadmap uses — no second ordering invented client-side).
     const params = lastSortParams()
     expect(params.sort).toBe('roadmap')
     expect(params.sortDir).toBe('asc')
@@ -149,11 +119,11 @@ describe('ProjectsView roadmap-order sort (FE-6179)', () => {
   it('toggle OFF -> reverts to the default newest-first server sort', async () => {
     const wrapper = await mountView()
 
-    wrapper.vm.toggleRoadmapSort() // on
+    wrapper.vm.toggleRoadmapSort()
     await flushPromises()
     h.fetchProjects.mockClear()
 
-    wrapper.vm.toggleRoadmapSort() // off
+    wrapper.vm.toggleRoadmapSort()
     await flushPromises()
 
     expect(wrapper.vm.roadmapSortActive).toBe(false)

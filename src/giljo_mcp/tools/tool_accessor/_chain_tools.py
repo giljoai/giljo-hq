@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Chain (linked multi-project / sequence-run) tools mixin for ToolAccessor (BE-6221a).
-
-``start_chain_run`` is the HEADLESS entry point the dashboard "Run Sequential"
-button already has but MCP lacked: it creates the durable sequence_run + mints the
-dedicated, PROJECT-LESS chain conductor by reusing ``SequenceRunService.create``
-(the exact path the REST POST /api/v1/sequence-runs endpoint drives) — NO new
-write path, store, schema, or migration.
-
-Because there is no election UI for a headless caller to lean on, this mixin owns
-the server-side guards the UI would otherwise enforce: every project must exist for
-the tenant, be chainable (not terminal, not already in another active run),
-``resolved_order`` must be a permutation of ``project_ids``, and a chain needs >= 2
-distinct members. A failed guard is returned as a structured
-``{"success": False, "error": <CODE>, ...}`` rejection (BE-6081 MCP-boundary
-carve-out — an agent-actionable declined request, NOT a raised error). Enum/cap
-violations (execution_mode, chain_mission length) raise ValidationError as usual.
-
-Edition Scope: CE.
-"""
 
 from __future__ import annotations
 
@@ -41,20 +22,10 @@ from giljo_mcp.services.sequence_run_service import MAX_CHAIN_MISSION_CHARS, Seq
 
 logger = logging.getLogger(__name__)
 
-# MUST-FIX #4: the conductor's FIRST drive call after run-create is
-# get_staging_instructions — verified against the CURRENT build:
-#   * the dashboard "Run Sequential" -> Stage flow fetches the chain-staging prompt
-#     (useChainLifecycle.stageChain -> api.prompts.chainStaging), whose bootstrap
-#     calls get_staging_instructions(job_id=conductor_job_id) (test_be6191);
-#   * a project-less conductor calling get_staging_instructions resolves the
-#     conductor branch and returns CH_CAPABILITY + CH_CHAIN_STAGING (BE-6186);
-#   * get_job_mission is the LATER implementation-phase drive (chain-implementation
-#     prompt / Implement button), reached only after staging-end.
 _CONDUCTOR_BOOTSTRAP_TOOL = "get_staging_instructions"
 
 
 class ChainToolsMixin:
-    """start_chain_run adapter tool. Composed into ToolAccessor (BE-6221a)."""
 
     async def start_chain_run(
         self,
@@ -68,28 +39,6 @@ class ChainToolsMixin:
         run_id: str | None = None,
         member_project_id: str | None = None,
     ) -> dict[str, Any]:
-        """Create a chain (sequence run) + its conductor, reusing the existing engine.
-
-        Returns the serialized run plus the conductor identity and a next_action
-        that bootstraps the conductor's drive, or a structured rejection dict.
-
-        BE-9500b: ``action`` is the chain reverse gear / member-review verb, the
-        same one-tool-many-actions pattern ``stage_project`` uses for its staging
-        reverse gear (BE-9499b) -- no new tool registered, roster-lock untouched.
-        ``action="start"`` (default) is the behavior above, unchanged.
-        ``action="terminate_remaining"`` (requires ``run_id``) cancels the run via
-        ``SequenceRunService.release(mode="cancel")`` -- byte-identical to the REST
-        ``POST /sequence-runs/{run}/release?mode=cancel`` door, no precondition.
-        ``action="mark_reviewed"`` (requires ``run_id`` + ``member_project_id``)
-        durably records a member reviewed via
-        ``SequenceRunService.mark_member_reviewed`` -- byte-identical to the REST
-        ``POST /sequence-runs/{run}/members/{pid}/review`` door. Verified by call
-        path (BE-9500b): this is NON-GATING, it never touches
-        ``current_index``/``project_statuses`` -- a completed member is already
-        advanced past automatically (BE-9500a). It exists so a headless conductor
-        can take the one action a human takes closing the review pane, keeping the
-        durable review record consistent regardless of which door drove it.
-        """
         effective_tenant_key = tenant_key or self.tenant_manager.get_current_tenant()
         if not effective_tenant_key:
             raise ValidationError(message="tenant_key is required", context={"operation": "accessor.start_chain_run"})
@@ -108,9 +57,6 @@ class ChainToolsMixin:
                 context={"operation": "accessor.start_chain_run"},
             )
 
-        # Tool-layer input validation: agent input is untrusted (CLAUDE.md). Type +
-        # enum + length are checked BEFORE the service so a bad value is a clean 422,
-        # never a 500 from a downstream DB constraint.
         self._validate_chain_inputs(project_ids, execution_mode, chain_mission)
 
         order = list(resolved_order) if resolved_order is not None else list(project_ids)
@@ -119,9 +65,6 @@ class ChainToolsMixin:
         if rejection is not None:
             return rejection
 
-        # MUST-FIX #1: inject the bound websocket_manager so create()'s
-        # broadcast-on-create (BE-6221a) actually fires; without it the broadcast
-        # silently no-ops and the dashboard tickboxes never light up.
         service = SequenceRunService(
             db_manager=self.db_manager,
             tenant_manager=self.tenant_manager,
@@ -136,8 +79,6 @@ class ChainToolsMixin:
             tenant_key=effective_tenant_key,
         )
         if chain_mission:
-            # Routed through the owning service's writer (no parallel write path);
-            # the freshly created run is not ultralocked so the edit is accepted.
             run = await service.update(
                 run_id=run["id"],
                 tenant_key=effective_tenant_key,
@@ -147,9 +88,6 @@ class ChainToolsMixin:
         conductor_job_id = await self._resolve_conductor_job_id(run["conductor_agent_id"], effective_tenant_key)
         return self._chain_run_response(run, conductor_job_id)
 
-    # ------------------------------------------------------------------
-    # BE-9500b: chain reverse gear (terminate-remaining, mark-reviewed)
-    # ------------------------------------------------------------------
 
     _CHAIN_REVERSE_ACTIONS = frozenset({"terminate_remaining", "mark_reviewed"})
 
@@ -161,14 +99,6 @@ class ChainToolsMixin:
         member_project_id: str | None,
         tenant_key: str,
     ) -> dict[str, Any]:
-        """The two surviving chain verbs (BE-9500b), dispatched off ``action``.
-
-        Each branch calls the exact ``SequenceRunService`` method the matching
-        REST door calls -- one owning writer, two doors. Both routes
-        end in ``service.update()`` internally, so ``sequence:updated`` fires the
-        same as the REST path and the dashboard cockpit tracks a headless-driven
-        end/review exactly as it tracks a UI-driven one.
-        """
         if action not in self._CHAIN_REVERSE_ACTIONS:
             raise ValidationError(
                 message=f"Invalid action {action!r}. Valid actions: start, "
@@ -189,7 +119,6 @@ class ChainToolsMixin:
             run = await service.release(run_id=run_id, mode="cancel", tenant_key=tenant_key)
             return {"success": True, "action": action, "run": run}
 
-        # Remaining branch: action == "mark_reviewed" (enforced by the membership check above).
         if not isinstance(member_project_id, str) or not member_project_id.strip():
             raise ValidationError(
                 message="member_project_id is required for action='mark_reviewed'",
@@ -198,13 +127,9 @@ class ChainToolsMixin:
         run = await service.mark_member_reviewed(run_id=run_id, project_id=member_project_id, tenant_key=tenant_key)
         return {"success": True, "action": action, "run": run}
 
-    # ------------------------------------------------------------------
-    # Validation helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _validate_chain_inputs(project_ids: Any, execution_mode: Any, chain_mission: Any) -> None:
-        """Type/enum/length validation of the raw agent inputs (clean 422 on failure)."""
         if not isinstance(project_ids, list) or not project_ids:
             raise ValidationError(
                 message="project_ids must be a non-empty list of project_id strings",
@@ -235,10 +160,8 @@ class ChainToolsMixin:
         order: list[str],
         tenant_key: str,
     ) -> dict[str, Any] | None:
-        """Return a structured rejection dict if the membership is invalid, else None."""
-        ordered_distinct = list(dict.fromkeys(project_ids))  # preserve order, drop dups
+        ordered_distinct = list(dict.fromkeys(project_ids))
 
-        # (d) a chain needs >= 2 distinct members.
         if len(ordered_distinct) < 2:
             return self._reject(
                 "CHAIN_TOO_SMALL",
@@ -246,7 +169,6 @@ class ChainToolsMixin:
                 project_ids=project_ids,
             )
 
-        # (c) resolved_order must be a permutation of project_ids.
         if len(order) != len(project_ids) or set(order) != set(project_ids):
             return self._reject(
                 "RESOLVED_ORDER_MISMATCH",
@@ -255,8 +177,6 @@ class ChainToolsMixin:
                 resolved_order=order,
             )
 
-        # (a) existence + (b) not-terminal + (BE-9069) solo-HITL / launched screen —
-        # one tenant-scoped query carrying the two extra gate columns.
         async with self.get_session_async() as session:
             rows = await session.execute(
                 select(
@@ -294,11 +214,6 @@ class ChainToolsMixin:
                 reason="terminal",
             )
 
-        # BE-9069 (Defect A): refuse a member parked at the SOLO human Implement gate
-        # (staging_status='staging_complete' with implementation_launched_at still NULL).
-        # Enrolling it would let start_chain_run cross that project's sacred Implement gate
-        # as a side effect, with ZERO human GO (BE-6115a). A genuine chain member is never
-        # in this state — its staging-end stamps launch + staging_complete together.
         awaiting_implement = [
             pid for pid in ordered_distinct if found[pid][2] == "staging_complete" and found[pid][3] is None
         ]
@@ -311,10 +226,6 @@ class ChainToolsMixin:
                 reason="awaiting_implement",
             )
 
-        # BE-9069 (Defect B): refuse a member already in implementation (implementation_
-        # launched_at set). Enrolling it mid-flight forces a forbidden mixed-mode chain (the
-        # conductor re-stamp silently keeps its old execution_mode) and downgrades its live
-        # staging_status. Re-election must start from a clean pre-launch project.
         launched = [pid for pid in ordered_distinct if found[pid][3] is not None]
         if launched:
             return self._reject(
@@ -324,7 +235,6 @@ class ChainToolsMixin:
                 reason="already_launched",
             )
 
-        # (b) not already a member of another active run (reuse the owning service's read).
         run_service = SequenceRunService(
             db_manager=self.db_manager,
             tenant_manager=self.tenant_manager,
@@ -345,12 +255,6 @@ class ChainToolsMixin:
         return None
 
     async def _resolve_conductor_job_id(self, conductor_agent_id: str, tenant_key: str) -> str:
-        """Resolve the project-less conductor's job_id from its agent_id (tenant-scoped).
-
-        The serialized run carries conductor_agent_id, but the bootstrap call
-        (get_staging_instructions) takes a job_id — so resolve it the same way the
-        chain-prompt endpoint does (api/endpoints/prompts.py._resolve_conductor_job_id).
-        """
         async with self.get_session_async() as session:
             row = await session.execute(
                 select(AgentExecution.job_id).where(
@@ -360,13 +264,9 @@ class ChainToolsMixin:
             )
             return str(row.scalar_one())
 
-    # ------------------------------------------------------------------
-    # Response shaping
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _reject(error_code: str, message: str, **extra: Any) -> dict[str, Any]:
-        """BE-6081 structured rejection (returned, not raised; reaches the agent as content)."""
         return {"success": False, "error": error_code, "message": message, **extra}
 
     @staticmethod

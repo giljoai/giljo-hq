@@ -1,7 +1,4 @@
 <template>
-  <!-- FE-6131e: contextual bulk-action bar — appears only when projects are
-       selected for a sequential run. Spec §4 (/projects checkboxes → "Run
-       sequential (N/5)"). -->
   <div v-if="count > 0" class="seq-bulk-bar smooth-border" data-testid="seq-bulk-bar">
     <span class="seq-bulk-count" data-testid="seq-bulk-count">{{ count }} selected</span>
     <span v-if="overCap" class="seq-bulk-warn" data-testid="seq-bulk-warn">
@@ -42,8 +39,6 @@ defineEmits(['run', 'clear'])
 const MIN_SEQUENCE_PROJECTS = 2
 const max = MAX_SEQUENCE_PROJECTS
 const overCap = computed(() => props.count > max)
-// FE-6170: chain requires at least 2 projects; 1-elected user can still
-// use the per-row/card single-project play button (not dead-ended).
 const underMin = computed(() => props.count < MIN_SEQUENCE_PROJECTS)
 </script>
 

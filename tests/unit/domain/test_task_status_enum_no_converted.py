@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression guard: ``converted`` is dead and must stay dead (BE-5095).
-
-The Convert button is a one-shot user action that:
-  1. Sets ``Task.converted_to_project_id`` (FK)
-  2. Deletes the task row
-
-A ``converted`` task status was never reachable post-conversion (the row
-is gone). Keeping it in the enum advertised a non-existent state to
-agents via the ``task-statuses`` metadata endpoint and the ``update_task``
-MCP tool docstring, which could be abused to set status="converted" on
-tasks that were never run through the Convert flow. This test ensures
-the enum stays at exactly 5 members.
-"""
 
 from __future__ import annotations
 

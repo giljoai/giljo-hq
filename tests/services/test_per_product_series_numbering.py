@@ -3,14 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-Tests for per-product taxonomy series numbering (commit 5ca1c43ff).
-
-Verifies that the uq_project_taxonomy_active unique index is scoped per
-product_id, so two products under the same tenant can independently have
-BE-0001. Also verifies same-product uniqueness, cross-tenant isolation,
-and subseries behaviour.
-"""
 
 from uuid import uuid4
 
@@ -23,24 +15,14 @@ from giljo_mcp.services.project_service import ProjectService
 from giljo_mcp.tenant import TenantManager
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
 async def project_service(project_service_with_session):
-    """Alias that keeps test code readable."""
     return project_service_with_session
 
 
 async def _make_product(db_session, tenant_key: str) -> Product:
-    """Helper: create a Product row directly in the DB.
-
-    is_active=False to avoid violating idx_product_single_active_per_tenant
-    (only one active product is allowed per tenant).  Series numbering is
-    independent of is_active, so inactive products are fine for these tests.
-    """
     product = Product(
         id=str(uuid4()),
         name=f"Product {uuid4().hex[:6]}",
@@ -55,7 +37,6 @@ async def _make_product(db_session, tenant_key: str) -> Product:
 
 
 async def _make_project_type(db_session, tenant_key: str, label: str, abbreviation: str) -> TaxonomyType:
-    """Helper: create a TaxonomyType row directly in the DB."""
     pt = TaxonomyType(
         id=str(uuid4()),
         tenant_key=tenant_key,
@@ -68,13 +49,9 @@ async def _make_project_type(db_session, tenant_key: str, label: str, abbreviati
     return pt
 
 
-# ---------------------------------------------------------------------------
-# Scenario 1 — Per-product independence (the core fix)
-# ---------------------------------------------------------------------------
 
 
 class TestPerProductIndependence:
-    """Two products under the same tenant start their own independent series."""
 
     @pytest.mark.asyncio
     async def test_two_products_same_tenant_both_get_series_1(
@@ -83,7 +60,6 @@ class TestPerProductIndependence:
         db_session,
         test_tenant_key: str,
     ):
-        """Both products get series_number=1 for the same project type."""
         pt = await _make_project_type(db_session, test_tenant_key, "Backend", "BE")
         product_a = await _make_product(db_session, test_tenant_key)
         product_b = await _make_product(db_session, test_tenant_key)
@@ -113,7 +89,6 @@ class TestPerProductIndependence:
         db_session,
         test_tenant_key: str,
     ):
-        """Products without a project_type_id also get independent numbering."""
         product_a = await _make_product(db_session, test_tenant_key)
         product_b = await _make_product(db_session, test_tenant_key)
 
@@ -134,13 +109,9 @@ class TestPerProductIndependence:
         assert p_b.series_number == 1
 
 
-# ---------------------------------------------------------------------------
-# Scenario 2 — Same-product uniqueness preserved
-# ---------------------------------------------------------------------------
 
 
 class TestSameProductUniqueness:
-    """Within a single product, series numbers are sequential and non-duplicatable."""
 
     @pytest.mark.asyncio
     async def test_same_product_auto_assigns_sequential_numbers(
@@ -149,7 +120,6 @@ class TestSameProductUniqueness:
         db_session,
         test_tenant_key: str,
     ):
-        """Two auto-assigned projects in the same product get 1 then 2."""
         pt = await _make_project_type(db_session, test_tenant_key, "Backend", "BE")
         product = await _make_product(db_session, test_tenant_key)
 
@@ -178,7 +148,6 @@ class TestSameProductUniqueness:
         db_session,
         test_tenant_key: str,
     ):
-        """Explicitly supplying an already-used series_number in the same product raises AlreadyExistsError."""
         pt = await _make_project_type(db_session, test_tenant_key, "Backend", "BE")
         product = await _make_product(db_session, test_tenant_key)
 
@@ -208,7 +177,6 @@ class TestSameProductUniqueness:
         db_session,
         test_tenant_key: str,
     ):
-        """Same series_number is allowed in a different product under the same tenant."""
         pt = await _make_project_type(db_session, test_tenant_key, "Backend", "BE")
         product_a = await _make_product(db_session, test_tenant_key)
         product_b = await _make_product(db_session, test_tenant_key)
@@ -221,7 +189,6 @@ class TestSameProductUniqueness:
             series_number=1,
             tenant_key=test_tenant_key,
         )
-        # Should NOT raise — different product_id
         p_b = await project_service.create_project(
             name="BE-0001 in Product B",
             mission="Series 1 is valid for product B",
@@ -235,13 +202,9 @@ class TestSameProductUniqueness:
         assert p_b.series_number == 1
 
 
-# ---------------------------------------------------------------------------
-# Scenario 3 — Cross-tenant isolation
-# ---------------------------------------------------------------------------
 
 
 class TestCrossTenantIsolation:
-    """Projects in different tenants never interfere with each other's numbering."""
 
     @pytest.mark.asyncio
     async def test_different_tenants_get_independent_series_numbers(
@@ -250,14 +213,11 @@ class TestCrossTenantIsolation:
         db_session,
         test_tenant_key: str,
     ):
-        """Tenant A and tenant B each get series_number=1 independently."""
         tenant_b = TenantManager.generate_tenant_key()
 
-        # Project type and product for tenant A
         pt_a = await _make_project_type(db_session, test_tenant_key, "Backend", "BE")
         product_a = await _make_product(db_session, test_tenant_key)
 
-        # Project type and product for tenant B
         pt_b = await _make_project_type(db_session, tenant_b, "Backend", "BE")
         product_b = await _make_product(db_session, tenant_b)
 
@@ -286,10 +246,8 @@ class TestCrossTenantIsolation:
         db_session,
         test_tenant_key: str,
     ):
-        """Tenant A's projects do not inflate tenant B's auto-assigned series_number."""
         tenant_b = TenantManager.generate_tenant_key()
 
-        # Create 3 projects for tenant A
         pt_a = await _make_project_type(db_session, test_tenant_key, "Backend", "BE")
         product_a = await _make_product(db_session, test_tenant_key)
         for i in range(3):
@@ -301,7 +259,6 @@ class TestCrossTenantIsolation:
                 tenant_key=test_tenant_key,
             )
 
-        # Tenant B starts fresh at 1 regardless of tenant A's count
         pt_b = await _make_project_type(db_session, tenant_b, "Backend", "BE")
         product_b = await _make_product(db_session, tenant_b)
         p_b = await project_service.create_project(
@@ -315,13 +272,9 @@ class TestCrossTenantIsolation:
         assert p_b.series_number == 1, f"Tenant B should start at 1 independently of tenant A. Got {p_b.series_number}"
 
 
-# ---------------------------------------------------------------------------
-# Scenario 4 — Subseries behaviour
-# ---------------------------------------------------------------------------
 
 
 class TestSubseriesBehaviour:
-    """subseries field does not break the per-product unique index."""
 
     @pytest.mark.asyncio
     async def test_subseries_projects_in_different_products_coexist(
@@ -330,7 +283,6 @@ class TestSubseriesBehaviour:
         db_session,
         test_tenant_key: str,
     ):
-        """BE-0001a in product A and BE-0001a in product B are valid simultaneously."""
         pt = await _make_project_type(db_session, test_tenant_key, "Backend", "BE")
         product_a = await _make_product(db_session, test_tenant_key)
         product_b = await _make_product(db_session, test_tenant_key)
@@ -344,7 +296,6 @@ class TestSubseriesBehaviour:
             subseries="a",
             tenant_key=test_tenant_key,
         )
-        # Should not raise — different product_id
         p_b = await project_service.create_project(
             name="BE-0001a in Product B",
             mission="Subseries a for product B",
@@ -367,7 +318,6 @@ class TestSubseriesBehaviour:
         db_session,
         test_tenant_key: str,
     ):
-        """BE-0001a used twice in the same product raises AlreadyExistsError."""
         pt = await _make_project_type(db_session, test_tenant_key, "Backend", "BE")
         product = await _make_product(db_session, test_tenant_key)
 

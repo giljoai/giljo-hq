@@ -3,17 +3,6 @@ import api from '@/services/api'
 import { useNotificationStore } from '@/stores/notifications'
 import { useToast } from '@/composables/useToast'
 
-/**
- * Manages the project closeout gate: detects when all agent jobs reach terminal
- * state, polls for 360 memory writes, and exposes the modal + guidance flags.
- *
- * @param {object} options
- * @param {import('vue').Ref}       options.project     - Reactive project object ref
- * @param {import('vue').ComputedRef} options.projectId  - Computed project ID string
- * @param {import('vue').ComputedRef} options.sortedJobs - Computed array of agent jobs
- * @param {Function} [options.onComplete]               - Called after closeout or continue
- * @returns Reactive state, computeds, and action methods
- */
 export function useProjectCloseout({ project, projectId, sortedJobs, onComplete }) {
   const notificationStore = useNotificationStore()
   const { showToast } = useToast()
@@ -35,11 +24,6 @@ export function useProjectCloseout({ project, projectId, sortedJobs, onComplete 
 
   const allJobsTerminal = computed(() => {
     if (['completed', 'terminated', 'cancelled'].includes(project.value?.status)) return false
-    // CE-0029 Item 1: project is now a reactive parent-owned ref that
-    // refetches on project:staging_complete + project:implementation_launched
-    // WS events. Both staging_status and implementation_launched_at update
-    // in place — no dual-source store-OR-prop fallback needed (the CE-0028b
-    // band-aid that this refactor retires).
     if (
       project.value?.staging_status === 'staging_complete'
       && !project.value?.implementation_launched_at
@@ -65,10 +49,6 @@ export function useProjectCloseout({ project, projectId, sortedJobs, onComplete 
   const showMemoryPending = computed(() => {
     if (!allJobsTerminal.value) return false
     if (!project.value?.product_id) return false
-    // TEMP 2026-05-15: suppressed timeout/error UI so spinner stays visible until memory lands.
-    // Product decision: infinite spinner is preferred over the "Closeout may have failed" warning, since memory
-    // always arrives in practice. Revisit ~2026-05-29 — either restore this line or delete it.
-    // if (memoryPollTimedOut.value || memoryPollError.value) return false
     return !memoryWritten.value
   })
 
@@ -110,10 +90,8 @@ export function useProjectCloseout({ project, projectId, sortedJobs, onComplete 
       return false
     }
 
-    // Check immediately
     checkMemory().then((done) => {
       if (done) return
-      // Start 30s timeout
       memoryCheckTimeout = setTimeout(() => {
         if (!memoryWritten.value) {
           memoryPollTimedOut.value = true

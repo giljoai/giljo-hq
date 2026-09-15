@@ -3,19 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9107 item 1 - the codex lane driver helper.
-
-What these tests are for
-------------------------
-The driver exists to pin three literals that a poll-only lane cannot get wrong
-without hanging silently, and to turn any unanswered server->client request into a
-visible fault. So the tests pin behaviour at the wire, not the source text:
-a fake WebSocket transport replays frames recorded live against codex-cli 0.146.0
-during the BE-9107 gate work, and the driver is driven through it for real.
-
-Scratch objects carry slot digit 6. No module-level mutable state; every test owns
-its own setup and nothing here touches a database or the network.
-"""
 
 from __future__ import annotations
 
@@ -36,12 +23,6 @@ OTHER_TURN_ID_6 = "01a00931-e6c2-7381-b77b-e2f11a323907"
 
 
 class FakeWebSocket:
-    """A scripted ws connection.
-
-    ``responder`` maps an outbound method name to the list of frames the server
-    sends back. Every frame the driver sends is recorded so a test can assert on
-    the exact JSON-RPC params that went over the wire.
-    """
 
     def __init__(self, responder):
         self.responder = responder
@@ -58,8 +39,6 @@ class FakeWebSocket:
 
     async def recv(self) -> str:
         if not self._inbox:
-            # Nothing scripted: behave like a quiet server rather than raising, so a
-            # driver bug shows up as its own timeout fault instead of a fake error.
             await asyncio.sleep(3600)
         return self._inbox.pop(0)
 
@@ -74,7 +53,6 @@ class FakeWebSocket:
 
 
 def install_fake_transport(monkeypatch, responder) -> list[FakeWebSocket]:
-    """Point LaneConnection at a scripted transport. Returns the sockets it opened."""
     opened: list[FakeWebSocket] = []
 
     class _FakeWebsocketsModule:
@@ -101,7 +79,6 @@ def _turn(status: str, *, turn_id: str = TURN_ID_6, text: str = "DONE-6") -> dic
 
 
 def scripted_server(*, turns: list[dict] | None = None, extra: dict | None = None):
-    """A responder replaying the shapes recorded live on 0.146.0."""
 
     def responder(message: dict) -> list[dict]:
         method = message.get("method")
@@ -122,23 +99,17 @@ def scripted_server(*, turns: list[dict] | None = None, extra: dict | None = Non
     return responder
 
 
-# --- The three pinned literals ---------------------------------------------
 
 
 class TestThePinnedLiterals:
-    """The reason this module exists. Two of the three are silent-hang traps."""
 
     def test_approval_policy_is_never(self):
-        # The stall knob. Anything else can produce a server->client approval request
-        # that a poll-only driver never answers, parking the turn at item/started.
         assert codex_lane.APPROVAL_POLICY == "never"
 
     def test_sandbox_is_danger_full_access(self):
         assert codex_lane.SANDBOX_MODE == "danger-full-access"
 
     def test_include_turns_is_true(self):
-        # thread/read defaults to false and then reports turns: [] for a turn that has
-        # already completed. 31 polls over 150s were lost to this during the gate work.
         assert codex_lane.INCLUDE_TURNS is True
 
     async def test_thread_start_puts_both_autonomy_literals_on_the_wire(self, monkeypatch):
@@ -160,8 +131,6 @@ class TestThePinnedLiterals:
 
 
 class TestTheLiteralsCannotBeOverriddenFromArgv:
-    """Pinning is the feature. A flag that moves any of the three would reintroduce
-    exactly the failure the module exists to prevent."""
 
     @pytest.mark.parametrize("forbidden", ["--approval-policy", "--sandbox", "--include-turns", "--approval"])
     def test_no_subcommand_exposes_an_autonomy_flag(self, forbidden):
@@ -174,7 +143,6 @@ class TestTheLiteralsCannotBeOverriddenFromArgv:
                 parser.parse_args(argv)
 
     async def test_thread_start_ignores_a_caller_supplied_policy(self, monkeypatch):
-        # Even reaching past the CLI into the function, there is no parameter to move it.
         opened = install_fake_transport(monkeypatch, scripted_server())
 
         await codex_lane.thread_start("ws://127.0.0.1:8916", cwd="C:/scratch6", model="gpt-5.6-sol")
@@ -184,16 +152,9 @@ class TestTheLiteralsCannotBeOverriddenFromArgv:
         assert params["model"] == "gpt-5.6-sol"
 
 
-# --- The unanswered server->client request rule ----------------------------
 
 
 class TestAnyUnansweredServerRequestIsALaneFault:
-    """The rule is structural: method + id means a server->client request.
-
-    Deliberately not an allowlist of known method names. codex 0.146.0 already
-    defines ten of these, and a request added in a later version must fault the
-    same way rather than hang.
-    """
 
     @pytest.mark.parametrize(
         "method",
@@ -217,7 +178,6 @@ class TestAnyUnansweredServerRequestIsALaneFault:
                 return initialize_response(message)
             if message.get("method") == "initialized":
                 return []
-            # The server asks something before answering. A poll-only lane cannot reply.
             return [{"jsonrpc": "2.0", "method": method, "id": 99, "params": {}}]
 
         install_fake_transport(monkeypatch, responder)
@@ -235,12 +195,9 @@ class TestAnyUnansweredServerRequestIsALaneFault:
         assert LaneConnection.classify({"id": 4, "error": {"code": -1}}) == "response"
 
     def test_a_request_with_id_zero_still_counts(self):
-        # id 0 is falsy; a truthiness check here would let a real request through.
         assert LaneConnection.classify({"method": "applyPatchApproval", "id": 0}) == "server_request"
 
     async def test_a_notification_does_not_fault(self, monkeypatch):
-        # Notifications carry a method and no id. The driver ignores dozens per turn;
-        # if this faulted, no lane could ever complete.
         def responder(message):
             if message.get("method") == "initialize":
                 return initialize_response(message)
@@ -259,7 +216,6 @@ class TestAnyUnansweredServerRequestIsALaneFault:
         assert result["thread_id"] == THREAD_ID_6
 
 
-# --- Polling ---------------------------------------------------------------
 
 
 class TestPollingReadsThePerTurnStatus:
@@ -281,8 +237,6 @@ class TestPollingReadsThePerTurnStatus:
         assert result["status"] == "failed"
 
     async def test_an_unrecognised_status_surfaces_instead_of_polling_forever(self, monkeypatch):
-        # A status name no one has seen must not be treated as "still running" -- that
-        # is the hang this module exists to prevent, wearing a different hat.
         install_fake_transport(monkeypatch, scripted_server(turns=[_turn("cancelledByOperator")]))
 
         result = await codex_lane.poll_turn("ws://127.0.0.1:8916", THREAD_ID_6, TURN_ID_6, timeout=5, interval=0)
@@ -291,7 +245,6 @@ class TestPollingReadsThePerTurnStatus:
         assert result["status"] == "cancelledByOperator"
 
     async def test_another_turns_completion_is_not_mistaken_for_ours(self, monkeypatch):
-        # A thread can hold several turns. "any turn is done" is the wrong question.
         turns = [_turn("completed", turn_id=OTHER_TURN_ID_6, text="AN OLDER TURN"), _turn("inProgress")]
         install_fake_transport(monkeypatch, scripted_server(turns=turns))
 
@@ -308,8 +261,6 @@ class TestPollingReadsThePerTurnStatus:
             await codex_lane.poll_turn("ws://127.0.0.1:8916", THREAD_ID_6, TURN_ID_6, timeout=0.3, interval=0.1)
 
         assert caught.value.error_code == "TURN_POLL_TIMEOUT"
-        # The driver cannot observe a request emitted while it was disconnected, so it
-        # names that as the likely cause rather than reporting a bare timeout.
         assert "request nobody answered" in caught.value.message
 
     async def test_turn_start_returns_the_turn_id_the_poller_needs(self, monkeypatch):
@@ -321,7 +272,6 @@ class TestPollingReadsThePerTurnStatus:
         assert result["status"] == "inProgress"
 
 
-# --- Loopback ---------------------------------------------------------------
 
 
 class TestLoopbackIsEnforcedNotDocumented:
@@ -361,7 +311,6 @@ class TestLoopbackIsEnforcedNotDocumented:
 
 class TestStopServerRefusesToSignalAnythingElse:
     def test_a_pid_that_is_not_a_codex_app_server_is_refused(self, monkeypatch):
-        # A stale or wrong pid must never let a lane terminate an unrelated process.
         monkeypatch.setattr(codex_lane, "_is_codex_app_server", lambda *_args: False)
 
         with pytest.raises(CodexLaneFaultError) as caught:
@@ -371,7 +320,6 @@ class TestStopServerRefusesToSignalAnythingElse:
 
 
 class FakeProcess:
-    """Enough psutil.Process for the teardown path."""
 
     def __init__(self, pid, children=(), *, stubborn=False):
         self.pid = pid
@@ -381,8 +329,6 @@ class FakeProcess:
         self.killed = False
 
     def children(self, recursive=False):  # noqa: ARG002 - signature parity with psutil
-        # Mirrors psutil: once the parent is dead the links are gone. This is what
-        # made the real bug invisible -- collect after terminate and you see nothing.
         if self.terminated:
             return []
         return list(self._children)
@@ -400,20 +346,6 @@ class FakeProcess:
 
 
 class TestTheGuardDistinguishesOurChildFromTheOperatorsCodex:
-    """Regression, BE-9107 live check 2026-08-16.
-
-    "Looks like codex" is not enough. The Codex desktop app runs its OWN
-    app-server, and its command line contains both `codex` and `app-server`:
-
-        ...\\OpenAI.Codex_26.803.10989.0_x64__...\\codex.exe
-            -c features.code_mode_host=true app-server --analytics-default-enabled
-
-    A substring test on those two words returned True for it, so `stop-server`
-    on that pid would have terminated the operator's editor session and, with
-    tree teardown, everything under it. The discriminator is an explicit
-    loopback `--listen`, which every child this module starts carries and the
-    desktop app does not.
-    """
 
     @staticmethod
     def _with_cmdline(monkeypatch, argv):
@@ -464,8 +396,6 @@ class TestTheGuardDistinguishesOurChildFromTheOperatorsCodex:
         assert codex_lane._listen_url_of(25964) == "ws://127.0.0.1:49481"
 
     def test_a_non_loopback_listener_is_not_ours(self, monkeypatch):
-        # Something bound to the world is not a child this driver started, and
-        # the whole module refuses non-loopback anyway.
         self._with_cmdline(monkeypatch, [*self.OUR_CHILD[:-1], "ws://0.0.0.0:49481"])
 
         assert codex_lane._is_codex_app_server(25964) is False
@@ -488,14 +418,6 @@ class TestTheGuardDistinguishesOurChildFromTheOperatorsCodex:
 
 
 class TestStopServerKillsTheWholeTree:
-    """Regression, BE-9107 live run 2026-08-16.
-
-    `codex` on PATH is a `codex.CMD` shim on Windows, so start-server's pid is
-    cmd.exe -> node.exe -> codex.exe, and only the grandchild holds the socket.
-    Terminating the reported pid alone returned {"stopped": true} while the real
-    app-server kept running and kept the port. Verified against live processes:
-    reported pid 25964 (cmd.exe), listener pid 22868 (codex.exe).
-    """
 
     @staticmethod
     def _install(monkeypatch, parent):
@@ -536,8 +458,6 @@ class TestStopServerKillsTheWholeTree:
         assert sorted(result["stopped_pids"]) == [22868, 25964, 29020]
 
     def test_a_survivor_is_a_fault_not_a_clean_stop(self, monkeypatch):
-        # Reporting "stopped" while a process still holds the port is the exact lie
-        # the live run produced. It must be an error instead.
         listener = FakeProcess(22868, stubborn=True)
         listener.kill = lambda: None
         shim = FakeProcess(25964, children=[listener])
@@ -557,7 +477,6 @@ class TestStopServerKillsTheWholeTree:
         assert codex_lane._terminate_process_tree(999906)["already_gone"] is True
 
 
-# --- CLI contract -----------------------------------------------------------
 
 
 class TestCliSurface:
@@ -592,11 +511,9 @@ class TestCliSurface:
         assert codex_lane._read_prompt(args) == "lane 6 mission"
 
 
-# --- Live integration -------------------------------------------------------
 
 
 def _pids_listening_on(port: int) -> set[int]:
-    """Which pids hold a listening socket on this loopback port."""
     import psutil
 
     pids = set()
@@ -609,8 +526,6 @@ def _pids_listening_on(port: int) -> set[int]:
 
 @pytest.mark.integration
 class TestLiveCodexAppServer:
-    """Drives a real `codex app-server` child. Opt-in: it costs model tokens and
-    needs the codex CLI installed and authenticated."""
 
     @pytest.mark.timeout(300)
     def test_a_real_lane_runs_end_to_end_and_the_child_is_stopped(self, tmp_path):
@@ -641,8 +556,5 @@ class TestLiveCodexAppServer:
         finally:
             codex_lane.stop_server(started["pid"])
 
-        # The port being free is the assertion that matters. Checking only that the
-        # launched pid is gone passed happily while the real app-server -- a
-        # grandchild behind the codex.CMD shim -- kept running and kept the port.
         assert codex_lane._is_codex_app_server(started["pid"]) is False
         assert _pids_listening_on(started["port"]) == set(), "the app-server still holds the port"

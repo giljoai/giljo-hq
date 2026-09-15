@@ -1,31 +1,7 @@
-/**
- * TutorialReviewScreen.live-update.spec.js — FE-9569
- *
- * The operator's open question: "not sure if the proposal changes on screen
- * even if the user asked to update it." Answer: it did NOT. `product` used to
- * be a local `ref(null)` snapshotted once in onMounted and never looked at
- * the store again. The store itself IS live -- systemEventRoutes'
- * vision:analysis_complete handler (fired on every update_product_context
- * write, per TutorialPromptScreen.vue's own doc comment) and
- * stores/products.js's updateProduct() both write-through into
- * productsById -- so an agent revision arriving while the user sits on this
- * screen was invisible, letting them approve stale text.
- *
- * Fix: derive `product` from productStore.getProductById(id), a REACTIVE
- * getter, instead of a local snapshot. This spec proves the live-update by
- * mutating the same reactive cache the real store's getter reads from and
- * checking the DOM updates with no remount.
- *
- * Edition scope: Both (shared frontend/src).
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref } from 'vue'
 
-// A minimal stand-in for productStore.productsById -- a REAL Vue ref, so a
-// component's `computed(() => productStore.getProductById(id))` tracks it
-// exactly as it would the genuine Pinia store's own computed-of-function
-// getter (stores/products.js:55).
 const cache = ref({})
 
 const h = vi.hoisted(() => ({
@@ -72,9 +48,6 @@ describe('TutorialReviewScreen — live-updates from the store while the user is
     await flushPromises()
     expect(wrapper.find('[data-testid="tutorial-review-description"]').text()).toBe('v1')
 
-    // Simulate the agent revising the product via update_product_context
-    // while the user is sitting on this screen -- systemEventRoutes'
-    // vision:analysis_complete handler write-throughs into this SAME cache.
     cache.value = {
       ...cache.value,
       'p-1': { ...cache.value['p-1'], description: 'v2 -- tightened the tech stack per your ask' },

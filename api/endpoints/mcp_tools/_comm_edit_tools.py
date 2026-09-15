@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""``update_thread`` -- the MCP door for retagging/renaming a thread (FE-9530).
-
-Split out of ``_comm_tools.py`` to keep that module under its 800-line guardrail
-(the same reason ``_comm_broadcast_helpers.py`` exists) -- this single tool was the
-overage, so it gets its own module rather than crowding the create/list/history
-surface it is a sibling of. Registration side effect is identical either way:
-importing this module runs the ``@mcp.tool`` decorator, and ``mcp_tools/__init__.py``
-imports it alongside every other domain module.
-"""
 
 import logging
 from typing import Annotated, Any, Literal

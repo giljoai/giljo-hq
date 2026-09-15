@@ -19,33 +19,16 @@ from giljo_mcp.logging import ErrorCode
 
 logger = logging.getLogger(__name__)
 
-# BE-3008c: LISTEN-connection reconnect backoff (capped exponential).
 _RECONNECT_INITIAL_DELAY_SECONDS = 0.5
 _RECONNECT_MAX_DELAY_SECONDS = 30.0
-# BE-3008c: PostgreSQL rejects NOTIFY payloads of 8000 bytes or more. Guard here so
-# an oversized event fails with a clear ValueError at the publish boundary instead
-# of an opaque asyncpg error from the server.
 _MAX_NOTIFY_PAYLOAD_BYTES = 7999
 
-# INF-3009f: this broker's direct database connections per worker process —
-# 1 session-pinned LISTEN + the publish pool. The startup connection-budget check
-# (api/startup/database.py) counts these; keep in sync with start() below.
 _PUBLISH_POOL_MIN_SIZE = 1
 _PUBLISH_POOL_MAX_SIZE = 5
 MAX_DB_CONNECTIONS_PER_PROCESS = 1 + _PUBLISH_POOL_MAX_SIZE
 
 
 class PostgresNotifyWebSocketEventBroker(WebSocketEventBroker):
-    """
-    PostgreSQL LISTEN/NOTIFY broker for multi-worker / multi-instance deployments.
-
-    Publishes the full event payload as JSON (capped at the pg_notify limit — send
-    ids, not blobs). The LISTEN connection is supervised: PG maintenance events
-    (restart, failover, idle reaping) kill it silently, and this broker carries the
-    disconnect_tenant control message (TSK-9006) that revokes live sessions across
-    workers — so a dead listener is auto-reconnected with capped backoff rather
-    than staying dead until process restart.
-    """
 
     def __init__(self, *, dsn: str, channel: str = "giljo_ws_events") -> None:
         self._dsn = dsn
@@ -66,8 +49,6 @@ class PostgresNotifyWebSocketEventBroker(WebSocketEventBroker):
         self._stopping = False
         self._connection_lost.clear()
         try:
-            # Fail loud: an unreachable PG at boot is a config error, not a
-            # degrade case (the caller decides whether boot survives it).
             await self._connect_listener()
             self._publish_pool = await asyncpg.create_pool(
                 self._dsn, min_size=_PUBLISH_POOL_MIN_SIZE, max_size=_PUBLISH_POOL_MAX_SIZE
@@ -87,8 +68,6 @@ class PostgresNotifyWebSocketEventBroker(WebSocketEventBroker):
             self._reconnect_task = None
 
         if self._listen_conn:
-            # Deregister the termination callback first: asyncpg fires it on
-            # explicit close too, and a deliberate close must not arm a reconnect.
             try:
                 self._listen_conn.remove_termination_listener(self._on_listen_connection_lost)
             except (asyncpg.PostgresError, RuntimeError) as e:
@@ -117,16 +96,9 @@ class PostgresNotifyWebSocketEventBroker(WebSocketEventBroker):
         self._listen_conn = conn
 
     def _on_listen_connection_lost(self, _connection: asyncpg.Connection) -> None:
-        # Runs in the event loop when asyncpg closes/loses the LISTEN connection.
         self._connection_lost.set()
 
     async def _reconnect_loop(self) -> None:
-        """Supervise the LISTEN connection: reconnect with capped exponential backoff.
-
-        Without this, the first PG maintenance event silently kills cross-worker
-        realtime AND live-session revocation until the process restarts — the
-        worst-to-diagnose failure shape.
-        """
         while not self._stopping:
             await self._connection_lost.wait()
             self._connection_lost.clear()
@@ -140,7 +112,6 @@ class PostgresNotifyWebSocketEventBroker(WebSocketEventBroker):
             )
             old_conn, self._listen_conn = self._listen_conn, None
             if old_conn is not None:
-                # Deregister first so our own close cannot re-arm the event.
                 try:
                     old_conn.remove_termination_listener(self._on_listen_connection_lost)
                 except (asyncpg.PostgresError, RuntimeError) as e:
@@ -160,7 +131,7 @@ class PostgresNotifyWebSocketEventBroker(WebSocketEventBroker):
                         self._channel,
                     )
                     break
-                except Exception:  # supervisor must outlive any connect error
+                except Exception:
                     logger.exception(
                         "websocket_broker_listen_reconnect_failed error_code=%s retry_in_seconds=%.1f",
                         ErrorCode.WS_CONNECTION_FAILED.value,
@@ -215,9 +186,7 @@ class PostgresNotifyWebSocketEventBroker(WebSocketEventBroker):
         )
 
     def _on_notification(self, _connection: asyncpg.Connection, _pid: int, _channel: str, payload: str) -> None:
-        # Fire and forget - task will run in background
         task = asyncio.create_task(self._handle_payload(payload))
-        # Store reference to prevent task from being garbage collected
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
 

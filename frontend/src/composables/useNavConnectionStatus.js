@@ -1,16 +1,3 @@
-/**
- * useNavConnectionStatus Composable
- *
- * Derives the navigation-drawer connection orb's icon / color / tooltip text
- * from the WebSocket store's `connectionStatus`. Extracted from
- * NavigationDrawer (INF-6055) to keep that component under the 800-line
- * guardrail — a cohesive group of three pure computeds with no state or side
- * effects, mirroring the existing useNavDrawerAccount split.
- *
- * Reads the Pinia WebSocket store directly (singleton), so the returned
- * computeds track live connection changes exactly as the prior in-component
- * implementation did.
- */
 import { computed } from 'vue'
 import { useWebSocketStore } from '@/stores/websocket'
 

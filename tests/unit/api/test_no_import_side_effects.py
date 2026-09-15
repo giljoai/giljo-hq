@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""Regression test for module-import side effects in `api/`.
-
-Closes seq 100 (load_dotenv at module scope) and seq 97
-(api/__init__.py import-time DATABASE_URL mutation) from
-the ACTION_REQUIRED audit.
-
-Importing `api` and `api.app` MUST NOT mutate `os.environ` or read any
-`.env` file. All such side effects belong in the FastAPI lifespan.
-"""
 
 from __future__ import annotations
 
@@ -25,13 +16,6 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _run_in_subprocess(script: str) -> subprocess.CompletedProcess[str]:
-    """Run a Python snippet in a fresh interpreter rooted at the project.
-
-    Reimport-in-process pollutes SQLAlchemy metadata and module-level state
-    that downstream unit tests depend on; subprocess isolation is the only
-    way to observe import-time side effects without breaking the rest of the
-    suite.
-    """
     return subprocess.run(  # noqa: S603 -- controlled inputs, no shell
         [sys.executable, "-c", textwrap.dedent(script)],
         cwd=str(_PROJECT_ROOT),
@@ -43,7 +27,6 @@ def _run_in_subprocess(script: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_importing_api_does_not_mutate_os_environ() -> None:
-    """`import api` and `import api.app` must leave os.environ untouched."""
     script = """
         import json
         import os
@@ -74,7 +57,6 @@ def test_importing_api_does_not_mutate_os_environ() -> None:
 
 
 def test_importing_api_does_not_call_load_dotenv() -> None:
-    """No dotenv entry point may be invoked during import of api / api.app."""
     script = """
         import sys
         from unittest.mock import MagicMock

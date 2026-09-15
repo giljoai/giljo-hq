@@ -3,25 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9539 — MCP-transport boundary regression test: archive respects the
-closeout gate.
-
-The contract under test: archiving a project requires a recorded closeout, or
-an explicit override. Previously one of the completion paths ran the full
-archive lifecycle without either, so a project could end up completed and
-archived with no closeout entry recorded against it.
-
-These tests pin the refusal and the override path from both doors, so neither
-can regress independently of the other.
-
-Transport: drives the REAL ``@mcp.tool`` transport via
-``create_connected_server_and_client_session``, mirroring
-``tests/integration/test_be9384_mcp_completion_archive_lifecycle.py``.
-
-Parallel-safe: fresh tenant_key per test, no rollback isolation needed (each
-tool call commits for real via db_manager), no module-level mutable state, no
-ordering dependencies. Edition Scope: Both.
-"""
 
 from __future__ import annotations
 
@@ -58,7 +39,6 @@ def _payload(call_tool_result) -> dict:
 
 @pytest_asyncio.fixture
 async def mcp_client(db_manager, monkeypatch):
-    """Wire a real ToolAccessor into the in-memory MCP transport (mirrors BE-9384)."""
     from api import app_state
     from api.endpoints import mcp_sdk_server
     from api.endpoints.mcp_tools import _base
@@ -91,13 +71,6 @@ async def mcp_client(db_manager, monkeypatch):
 
 
 async def _seed_project_with_working_agent(db_manager, tenant_key: str) -> tuple[str, str]:
-    """Commit an active product + one project + one agent still 'working'.
-
-    A 'working' (not 'complete') execution is exactly what
-    ``evaluate_closeout_readiness`` reports as a blocker -- mirrors the live
-    sequence's "unread decision, orchestrator still working" state without
-    needing the full message-hub machinery. Returns ``(project_id, execution_id)``.
-    """
     product_id = str(uuid.uuid4())
     project_id = str(uuid.uuid4())
     job_id = str(uuid.uuid4())
@@ -161,11 +134,6 @@ async def _read_back_project(db_manager, tenant_key: str, project_id: str) -> Pr
 
 
 async def test_update_project_completed_without_closeout_is_blocked(mcp_client, db_manager):
-    """Completing a project with no recorded closeout must be refused.
-
-    The state under test is a project with an unfinished agent, reached without
-    any prior closeout call.
-    """
     client, tenant_key = mcp_client
     project_id, _execution_id = await _seed_project_with_working_agent(db_manager, tenant_key)
 
@@ -187,7 +155,6 @@ async def test_update_project_completed_without_closeout_is_blocked(mcp_client, 
 
 
 async def test_update_project_completed_with_explicit_override_still_archives(mcp_client, db_manager):
-    """The deliberate-abandon path: an explicit override still archives."""
     client, tenant_key = mcp_client
     project_id, _execution_id = await _seed_project_with_working_agent(db_manager, tenant_key)
 
@@ -208,12 +175,6 @@ async def test_update_project_completed_with_explicit_override_still_archives(mc
 
 
 async def test_rest_archive_endpoint_keeps_its_explicit_abandon_contract(db_manager):
-    """The dashboard's Archive button is an explicit one-click abandon action and
-    must not regress into refusing. Drives the real
-    ``@router.post('/{project_id}/archive')`` endpoint FUNCTION directly against
-    a real ``ProjectService`` (same pattern as
-    ``tests/api/test_be9343_archive_preserves_ship_date.py``), not a fake.
-    """
     tenant_key = TenantManager.generate_tenant_key()
     project_id, _execution_id = await _seed_project_with_working_agent(db_manager, tenant_key)
 

@@ -1,7 +1,3 @@
-/**
- * useChainImplementation.spec.js — FE-6165f
- * Implement Chain copy action: fetch chain-implementation prompt -> clipboard -> toast.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import api from '@/services/api'
 
@@ -48,10 +44,6 @@ describe('useChainImplementation (FE-6165f)', () => {
     expect(api.prompts.chainImplementation).not.toHaveBeenCalled()
   })
 
-  // BE-6177 Bug 1 (BLOCKER): the chain Implement must cross the head project's
-  // launch gate BEFORE fetching the chain-implementation prompt — otherwise the
-  // endpoint raises ImplementationNotReadyError (404) because the head's
-  // implementation_launched_at is still null. Mirrors the solo play button.
   it('launches the head project gate BEFORE fetching the chain-implementation prompt', async () => {
     api.projects.launchImplementation.mockClear()
     api.prompts.chainImplementation.mockClear()
@@ -63,7 +55,6 @@ describe('useChainImplementation (FE-6165f)', () => {
     expect(ok).toBe(true)
     expect(api.projects.launchImplementation).toHaveBeenCalledWith('head-pid')
     expect(api.prompts.chainImplementation).toHaveBeenCalledWith('run-9')
-    // Ordering: launch must precede the prompt fetch.
     const launchOrder = api.projects.launchImplementation.mock.invocationCallOrder[0]
     const fetchOrder = api.prompts.chainImplementation.mock.invocationCallOrder[0]
     expect(launchOrder).toBeLessThan(fetchOrder)

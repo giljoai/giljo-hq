@@ -3,24 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""BE-9554 -- ``stage_project.mode`` advertises two choices and still tolerates six.
-
-Before this change the parameter was a ``Literal`` carrying six values, four of which
-(``claude``/``codex``/``gemini``/``antigravity``) were legacy harness-name aliases the
-description then spent ~700 characters warning the caller off. A model choosing from
-that enum picked a discouraged value two times out of three by construction, which is
-the "action-enum tools split or simplified wherever a small model would misfire" case.
-
-The fix is deliberately NOT a narrowed ``Literal``. A ``Literal`` validates, so
-narrowing it would make the boundary REJECT the legacy names -- and the ruling is
-**tolerance, not removal**: callers registered against the old surface keep working,
-they are simply no longer offered the dead options. So the parameter is typed ``str``
-(accepts anything the service accepts) with an ``enum`` published in the JSON schema
-for the two real choices.
-
-That combination is easy to break by "tidying" the type back to a ``Literal``, and the
-break would be invisible until an old client 422s. Both halves are pinned here.
-"""
 
 import asyncio
 
@@ -32,7 +14,6 @@ REAL_CHOICES = ("multi_terminal", "subagent")
 
 
 def _mode_schema() -> dict:
-    """The `mode` property exactly as an MCP client receives it."""
     from api.endpoints.mcp_tools import mcp
 
     async def _read() -> dict:
@@ -61,9 +42,6 @@ def test_legacy_aliases_are_not_advertised(alias: str) -> None:
 
 
 def test_the_type_still_accepts_a_legacy_value() -> None:
-    """The tolerance half. A narrowed ``Literal`` would publish the same enum as the
-    test above expects while silently making the boundary reject old callers -- so
-    assert on the TYPE, which is what decides whether a legacy value validates."""
     schema = _mode_schema()
     assert schema.get("type") == "string", (
         "mode must stay a plain string so legacy harness-name values still validate at "
@@ -74,8 +52,6 @@ def test_the_type_still_accepts_a_legacy_value() -> None:
 
 
 def test_the_description_no_longer_spends_itself_warning_about_dead_values() -> None:
-    """The saving only lands if the prose that existed to warn callers off the legacy
-    values went with them."""
     from api.endpoints.mcp_tools import mcp
 
     async def _desc() -> str:

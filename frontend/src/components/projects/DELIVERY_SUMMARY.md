@@ -207,7 +207,7 @@
 
 ### Orchestrator Features ✅
 
-- ✅ LaunchPromptIcons component (Claude Code, Codex, Gemini)
+- ✅ LaunchPromptIcons component (Claude Code, Codex)
 - ✅ "Closeout Project" button (green, when all complete)
 - ✅ Only displayed when `isOrchestrator={true}`
 

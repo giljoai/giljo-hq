@@ -1,13 +1,3 @@
-/**
- * DashboardView.poll.spec.js — FE-6059.
- *
- * Edition Scope: Both.
- *
- * The live-counter poll was 30s and ran even while the tab was backgrounded.
- * FE-6059 raises the cadence to 60s and pauses polling while the page is hidden
- * (Page Visibility API), resuming + refetching immediately on re-show. This
- * spec drives the real view with fake timers and asserts all three behaviors.
- */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -70,8 +60,6 @@ describe('DashboardView.vue — FE-6059 poll cadence + visibility pause', () => 
   })
 
   afterEach(() => {
-    // Unmount so the component's visibilitychange listener is removed — a leaked
-    // listener from a prior test would double-fire on the shared `document`.
     if (wrapper) {
       wrapper.unmount()
       wrapper = null
@@ -84,21 +72,17 @@ describe('DashboardView.vue — FE-6059 poll cadence + visibility pause', () => 
     mountView()
     await flushPromises()
 
-    // One initial fetch from onMounted's Promise.all.
     const base = getCallCounts.mock.calls.length
     expect(base).toBe(1)
 
-    // At 30s nothing new fires — the interval is 60s now.
     vi.advanceTimersByTime(30_000)
     await flushPromises()
     expect(getCallCounts).toHaveBeenCalledTimes(base)
 
-    // At 60s the poll fires once.
     vi.advanceTimersByTime(30_000)
     await flushPromises()
     expect(getCallCounts).toHaveBeenCalledTimes(base + 1)
 
-    // Hide the tab -> polling stops; no further fetches while hidden.
     setHidden(true)
     const afterHide = getCallCounts.mock.calls.length
     vi.advanceTimersByTime(180_000)
@@ -115,14 +99,12 @@ describe('DashboardView.vue — FE-6059 poll cadence + visibility pause', () => 
     vi.advanceTimersByTime(120_000)
     await flushPromises()
     const afterHide = getCallCounts.mock.calls.length
-    expect(afterHide).toBe(base) // paused while hidden
+    expect(afterHide).toBe(base)
 
-    // Re-show -> immediate refetch.
     setHidden(false)
     await flushPromises()
     expect(getCallCounts).toHaveBeenCalledTimes(afterHide + 1)
 
-    // ...and the 60s interval is running again.
     vi.advanceTimersByTime(60_000)
     await flushPromises()
     expect(getCallCounts).toHaveBeenCalledTimes(afterHide + 2)

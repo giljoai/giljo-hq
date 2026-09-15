@@ -1,13 +1,3 @@
-/**
- * ProjectReviewModal.legacyCommitTitle.spec.js — BE-9256 (frontend layer 4).
- *
- * Edition Scope: Both.
- *
- * Stored 360 memory rows can carry a git_commits entry with an empty
- * `message` (legacy bare-SHA normalization, pre-validator). Before this fix,
- * the Commits section rendered a blank text-body-medium span for such a row.
- * The floor: an empty message must render the short SHA as the title text.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -18,8 +8,6 @@ import api from '@/services/api'
 
 const vuetify = createVuetify()
 
-// FE-9427: ProjectReviewModal calls useRouter() -- openInHub() pushes the named
-// 'Hub' route. Mounted without a router that returned `undefined`.
 const hubRouter = createRouter({
   history: createMemoryHistory(),
   routes: [
@@ -78,7 +66,6 @@ describe('ProjectReviewModal.vue — legacy titleless commit-row floor (BE-9256)
   it('renders the short SHA for a legacy empty-message commit row, never blank', async () => {
     api.projects.review = vi.fn().mockResolvedValue(
       makeReviewResponse([
-        // Legacy row: empty message (pre-validator bare-SHA normalization)
         { sha: '569905bd0abcdef1234567890', message: '' },
       ])
     )

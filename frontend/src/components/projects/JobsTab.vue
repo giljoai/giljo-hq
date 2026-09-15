@@ -1,16 +1,11 @@
 <template>
   <div class="implement-tab-wrapper">
-    <!-- Agent Table Container -->
     <div class="table-container smooth-border">
-      <!-- Handover 0411a: Proposed execution order (multi-terminal mode) -->
       <ExecutionOrderBar
         v-if="executionOrderPhases"
         :phases="executionOrderPhases"
       />
 
-      <!-- FE-9296b: the per-project auto check-in slider is retired. The cadence
-           is an account-level Settings value now (Tools → Notifications); rows
-           with slider-era auto_checkin_* values keep them as overrides. -->
       <table class="agents-table" data-testid="agent-status-table">
         <thead>
           <tr>
@@ -46,11 +41,6 @@
       </table>
     </div>
 
-    <!-- Message Composer (Bottom) — FE-6174b: in a chain the Orchestrator button
-         reroutes to the conductor (master orchestrator); solo passes nothing.
-         BE-9012d Part 1: sends via the Hub now (bus retired) — chain-run-id
-         resolves the conductor's own coordination thread, orchestrator-agent-id
-         addresses this project's own orchestrator. -->
     <MessageComposer
       :project-id="projectId"
       :chain-mode="!!chainCtx"
@@ -59,13 +49,11 @@
       :orchestrator-agent-id="orchestratorAgentId"
     />
 
-    <!-- Agent Details Modal (GiljoAI face - shows role/template) -->
     <AgentDetailsModal
       v-model="showAgentDetailsModal"
       :agent="selectedAgent"
     />
 
-    <!-- Agent Job Modal (Info button - shows assigned job/mission) - Handover 0423 -->
     <AgentJobModal
       :show="showAgentJobModal"
       :agent="selectedAgent"
@@ -73,7 +61,6 @@
       @close="showAgentJobModal = false"
     />
 
-    <!-- Handover Modal (Orchestrator session refresh) -->
     <HandoverModal
       :show="showHandoverModal"
       :retirement-prompt="handoverData.retirement_prompt"
@@ -104,9 +91,7 @@ import HandoverModal from '@/components/projects/HandoverModal.vue'
 import MessageComposer from '@/components/projects/MessageComposer.vue'
 import ExecutionOrderBar from '@/components/projects/ExecutionOrderBar.vue'
 
-/** JobsTab — Handover 0241 + 0243c + 0461d. Pure table layout with inline actions. */
 const props = defineProps({
-  /** Project object with project_id/id and name fields. */
   project: {
     type: Object,
     required: true,
@@ -119,8 +104,6 @@ const props = defineProps({
       )
     },
   },
-  /** FE-6174b: chain context (null in solo). Drives the message-bar conductor
-   *  reroute; everything else in the table is per-active-project, unchanged. */
   chainCtx: {
     type: Object,
     default: null,
@@ -159,20 +142,13 @@ const {
   clipboardCopy
 )
 
-/** Subagent mode: all agents launched together by orchestrator (Handover 0875) */
 const isSubagentMode = computed(() => {
-  // FE-6019: WS-synced store is source of truth; prop is only the pre-hydration fallback.
   const state = projectStateStore.getProjectState(projectId.value)
   const executionMode = state?.execution_mode ?? props.project?.execution_mode
-  // BE-9035c: fold rule lives once in useExecutionMode.js — anything that
-  // isn't multi_terminal is subagent-style (covers 'subagent' + tolerated
-  // legacy CLI tokens).
   return isSubagentExecutionMode(executionMode)
 })
 
-/** Handover 0411a: Proposed execution order phases for multi-terminal mode. */
 const executionOrderPhases = computed(() => {
-  // FE-6019: WS-synced store is source of truth; prop is only the pre-hydration fallback.
   const state = projectStateStore.getProjectState(projectId.value)
   const executionMode = state?.execution_mode ?? props.project?.execution_mode
   if (isSubagentExecutionMode(executionMode)) return null
@@ -215,29 +191,7 @@ const executionOrderPhases = computed(() => {
   return phases
 })
 
-/**
- * CE-0029: phase sort only. The CE-0028b applyStagingHandoffStatusOverride
- * relabel is gone — CE-0029 Item 2 makes the backend pre-spawn an impl-phase
- * orchestrator execution at staging-end, so the latest orch exec is
- * genuinely `status='waiting'` immediately, with no UI fiction. The DB and
- * the displayed status now agree.
- */
 const phaseSortedAgents = computed(() => {
-  // BE-6200 (#6 follow-up): exclude the dedicated chain conductor from EVERY
-  // project's agent lane. It gets its own ChainConductorCard. The filter keys
-  // on the FLAT `chain_conductor` field the API now serializes — NOT on
-  // job_metadata (never serialized + clobbered by the WS progress handler) and
-  // NOT on project_id IS NULL (the conductor's pre-spawned impl-phase execution
-  // carries a real project_id, which is exactly the row that leaked in).
-  // Unconditional (not gated on chainCtx): a stale/mis-loaded chain context must
-  // never let a conductor row render. Solo: no conductor exists → no-op.
-  //
-  // BE-6229 (belt-and-suspenders): the jobs store is GLOBAL (shared across
-  // projects); only a project-scoped REST setJobs() reload self-cleans it. A
-  // live WS event for a project-less conductor or a foreign project upserts into
-  // that shared map and would render here. Drop any row whose project_id is null
-  // or does not match the open project, so such a row can never leak into this
-  // lane even if a future WS path forgets the chain_conductor flag.
   const openProjectId = projectId.value
   const agents = sortedAgents.value.filter((a) => {
     if (a.chain_conductor === true) return false
@@ -252,15 +206,8 @@ const phaseSortedAgents = computed(() => {
   })
 })
 
-/** BE-9012d Part 1: this project's own orchestrator agent_id, so the bottom
- *  composer can address a DIRECTED Hub post to it (the Hub addresses
- *  participants by agent_id, not by role — unlike the retired bus). */
 const orchestratorAgentId = computed(() => phaseSortedAgents.value.find(isOrchestrator)?.agent_id || '')
 
-// BE-5107: backend computes duration_seconds; FE ticks locally between WS events
-// using working_started_at as the anchor so the cell doesn't freeze. For terminal
-// statuses we trust the backend's frozen duration_seconds (completed_at-based).
-// The single setInterval here drives all AgentRow duration cells via the :now prop.
 const now = ref(Date.now())
 let durationTickerId = null
 
@@ -275,9 +222,6 @@ async function refreshJobs() {
     await loadJobs(projectId.value)
   } catch (error) {
     console.warn('[JobsTab] Failed to load agent jobs:', error)
-    // FE-9553: was a toast. refreshJobs runs from a watch with immediate:true
-    // and from onMounted -- there is no click path to it at all, so a toast
-    // here announces a failure the operator did not cause as though they had.
     notifyFailure(notificationStore, {
       operation: 'jobs.load',
       entityId: projectId.value || 'none',
@@ -293,10 +237,6 @@ async function refreshJobs() {
 watch(projectId, () => { refreshJobs() }, { immediate: true })
 
 onMounted(() => {
-  // FE-3007b: jobs are refetched on reconnect by the generalized resync
-  // registry (useProjectTabsLifecycle registers the open-project resync, which
-  // reloads agent jobs). JobsTab no longer needs its own onConnectionChange
-  // listener — that was a redundant per-view reconnect path.
   durationTickerId = setInterval(() => { now.value = Date.now() }, 1000)
 })
 

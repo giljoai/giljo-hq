@@ -1,14 +1,3 @@
-/**
- * HubView.threadHeader.spec.js — FE-9289c
- *
- * The thread header is the SHARING moment: it is where the operator hands a thread id
- * to an agent, so it carries the id with a `join_thread <id>` hint (DoD 5) and the
- * second rename affordance (DoD 3 — "from both the card AND the thread header").
- *
- * A project thread is named after its project and kept with its 360 memory, so the
- * pencil becomes a lock that SAYS WHY rather than a button that quietly vanishes.
- * That is the same rule BE-9289b enforces server-side; here it must be legible.
- */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
@@ -18,8 +7,6 @@ vi.mock('@/services/api', () => ({
   default: { threads: { list: vi.fn().mockResolvedValue({ data: { threads: [] } }) } },
 }))
 vi.mock('@/stores/websocketEventRouter', () => ({ registerReconnectResync: () => () => {} }))
-// FE-9410: HubView now pushes routes as well as reading them (the attention strip
-// navigates instead of selecting in place), so the mock has to answer useRouter too.
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ push: vi.fn() }) }))
 
 const toasts = []
@@ -77,7 +64,6 @@ describe('HubView thread header (FE-9289c)', () => {
     expect(wrapper.get('[data-testid="thread-header-title"]').text()).toBe('Laptop interop')
     const id = wrapper.get('[data-testid="thread-header-id"]').text()
     expect(id).toContain('join_thread')
-    // the UUID, not the CHT alias — the UUID is what an agent needs
     expect(id).toContain(GENERAL_ID)
   })
 
@@ -115,7 +101,6 @@ describe('HubView thread header (FE-9289c)', () => {
     expect(btn.exists()).toBe(true)
     expect(btn.html()).toContain('mdi-lock-outline')
     await btn.trigger('click')
-    // it explains, it does not open an editor and it does not call the API
     expect(wrapper.find('[data-testid="thread-header-rename-input"]').exists()).toBe(false)
     expect(rename).not.toHaveBeenCalled()
     expect(toasts.at(-1).message).toContain('named after their project')
@@ -126,7 +111,9 @@ describe('HubView thread header (FE-9289c)', () => {
     expect(mountHub(pinia).get('[data-testid="thread-header-scope"]').text()).toContain('next poll')
 
     seed(store, { thread_id: PROJECT_ID, subject: 'Bound', project_id: 'p-1' })
-    expect(mountHub(pinia).get('[data-testid="thread-header-scope"]').text()).toContain('Audit record')
+    expect(mountHub(pinia).get('[data-testid="thread-header-scope"]').text()).toContain(
+      "not part of an agent's working context",
+    )
   })
 
   it('copies the thread UUID', async () => {

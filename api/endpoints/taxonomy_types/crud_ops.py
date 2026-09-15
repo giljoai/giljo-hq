@@ -3,15 +3,6 @@
 # See LICENSE in the project root for terms.
 # [CE] Community Edition.
 
-"""
-CRUD operation re-exports for the taxonomy_types endpoint module.
-
-All DB logic lives in ``giljo_mcp.services.taxonomy_ops``. This thin wrapper
-keeps the endpoint imports flat (one local import line per route).
-
-Renamed from ``project_types/crud_ops.py`` in Phase A of the agent-parity +
-unified Type taxonomy project.
-"""
 
 from giljo_mcp.services.taxonomy_ops import (
     DEFAULT_TAXONOMY_TYPES,
