@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from giljo_mcp.domain.project_status import ProjectStatus
+from giljo_mcp.services.next_action import project_next_action_for
 
 
 STAGING_STUCK_HINTS: dict[str, tuple[str, ...]] = {
@@ -65,3 +66,8 @@ def compute_stuck_conditions(
         stuck.append("awaiting_user_approval")
         suggested.append("Resolve pending user approvals (see blockers) via the dashboard.")
     return stuck, suggested
+
+
+def lifecycle_next_action_field(project: Any, findings: Any) -> dict[str, Any]:
+    hint = project_next_action_for(project, awaiting_user=any(f.awaiting_user for f in findings))
+    return {"next_action": hint} if hint is not None else {}

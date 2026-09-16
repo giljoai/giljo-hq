@@ -2,6 +2,34 @@
 
 All notable changes to this project are recorded here. This changelog follows the [Keep a Changelog](https://keepachangelog.com/) convention — entries are grouped by change type (Added / Changed / Fixed / Removed / Security). Versions follow `MAJOR.MINOR.PATCH[.HOTFIX]` and tags live on the public repository (`giljoai/giljo-hq`).
 
+## [2.3.0] — 2026-09-16
+
+### Added
+
+- **Your agent now sees the next workflow step when it reads a project.** It stages
+  and launches instead of improvising. Task lists carry the same one-line
+  pointer, and finished projects say nothing at all.
+
+### Changed
+
+- **Release notes stick to what changed for you.** Entries that only described
+  internal plumbing no longer make it into the notes, so each line is something
+  you can act on.
+
+### Fixed
+
+- **Renaming something to a blank name now tells you what went wrong.** Asking
+  an assistant to set a task title or project name to nothing used to come back
+  as "nothing to update"; it now says plainly that the name cannot be empty, and
+  the existing name is left alone.
+- **"Where do I install skills?" now jumps to the right place.** Links from the
+  app into the user guide land on the exact section they name, including
+  sub-sections, instead of leaving you at the top of the page.
+
+### Security
+
+- **Closed five published advisories in the dashboard's build and test tooling.** A high-severity issue in a YAML parser and four moderate ones in the test runner are resolved. These are build-time packages, so nothing in the running product changed. The dashboard's dependency audit now reports zero known vulnerabilities.
+
 ## [2.2.0] — 2026-09-15
 
 ### Added
@@ -19,44 +47,21 @@ All notable changes to this project are recorded here. This changelog follows th
 
 ### Changed
 
-- **One switch, one meaning.** An agent is on for a product when that product's
-  switch says so — nothing else can override it. Previously an account-wide
-  setting could quietly veto the switch you could see, leaving agents that
-  looked enabled but were never handed to a job, with no way to fix it from any
-  screen. If agents of yours were stuck that way, they work again now.
-- **A new agent starts switched off** for the product you create it in. Switching
-  it on is yours to do, and only affects that product.
-- **Agents stay with their product.** Editing one can no longer change other
-  products, and the "enable for all products" buttons are gone — they could not
-  do anything an agent's own product switch does not.
-- Agent templates no longer need to be installed into your coding tool — agents fetch them when a job starts. You can still download any profile as a Markdown file.
-- **Each product now has its own agents.** Rename, rewrite or delete an agent in
-  one product and your other products are untouched — every product holds its
-  own copy instead of sharing one set across the whole account. A new product
-  arrives with a full crew of its own, named so the team reads as a set.
+- **Each product now has its own agents.** Rename, rewrite, switch on or delete an agent
+  in one product and your other products are untouched — every product holds its own
+  crew instead of sharing one set across the account. A new product arrives with a full
+  crew of its own; a new agent starts switched off until you turn it on. The per-product
+  switch is now the only control over which agents your coding tools can use, so agents
+  that looked enabled but were never handed to a job work again.
 - **Your existing setup is converted on upgrade with every switch exactly as you
-  left it.** An agent you had enabled in two products becomes a real agent in
-  each; an agent only one product used is simply marked as belonging there, name
-  and all. Nothing is switched on, switched off or deleted for you.
-- **The per-product switch is now the only control over which agents your coding
-  agents can use.** Agents that had been retired account-wide — and could no
-  longer be un-retired from any screen — start working again for the products
-  that still had them switched on.
-- **Your agents now arrive with your first product**, rather than with your
-  account. A brand-new account has no agents until it has somewhere to put them —
-  create a product and it comes with the full crew.
-- **"Add default agents" adds them to the product you are viewing**, switched on
-  and ready, instead of to the account as a whole.
-- **A product with no agents is a valid setup.** Your coding agent is told to use
-  its own default instead of being handed an error.
+  left it.** Nothing is switched on, switched off, or deleted for you.
+- Agent templates no longer need to be installed into your coding tool — agents fetch them when a job starts. You can still download any profile as a Markdown file.
 - The guides and setup steps now match how agents actually work: nothing about an agent lives on your machine, so there is no install or sync step to remember. Edit an agent and the very next one you launch uses the new version.
 - **Message Hub threads now show real dates.** Each thread card and the open thread's header show when the thread was created and when its last message arrived, as labelled date and time, instead of a single "1d"-style age.
 - **Read a thread newest-first if you prefer.** A new control beside the in-thread search flips the message order between oldest on top and newest on top, and remembers your choice in this browser.
 - **More room to search the thread list.** The sort and product filters are now only as wide as their longest option, and the search field takes the space they gave back.
 - **Chat badges in notification banners open their chat.** When a banner names one or more chat threads, clicking a badge opens that thread directly.
 - **Searching a chat id finds that chat first.** Typing a thread's id, such as CHT-0400, now lists that thread at the top of the results instead of burying it under threads that merely mention it.
-- **The agent list now follows the product you are viewing.** Switching product tabs on the Tools page reloads each agent's "Active here" state, and the switch always saves to the product on screen.
-- **One switch per agent, no more locked toggles.** "Active here" is the only per-product control; an agent that was switched off account-wide can be turned on for a product directly. The edit dialog's "Available in all products" switch is replaced by "Enable for all products" and "Disable for all products" actions.
 - **Clearer wording on the project-thread scope note.** A thread bound to a project
   now states plainly that it is kept with the project record and is not part of an
   agent's working context.
@@ -66,42 +71,21 @@ All notable changes to this project are recorded here. This changelog follows th
   name, role, harness, colour, tool or category now comes back as a plain
   validation error naming the field, instead of a server error that told you
   nothing about what was wrong.
-Fixed: turning an agent on or off for a specific product from the Tools page now saves correctly.
-- Fixed a typing error that prevented the template validation module from importing.
 
 ### Fixed
 
-- **The "Active here" switch now always matches what agents actually receive.**
-  In a few situations the switch showed an agent as on for a product when the
-  server would never hand that agent to a job: agents added after a product had
-  been curated, and agents retired account-wide while a product still listed
-  them. Those switches now read off, which is the true state — if an agent you
-  expected to see has turned itself off, switch it back on and it will stay on.
-- **Sorting by "Active here" orders by the switch you can see**, rather than by
-  a hidden account-wide setting behind it.
-- **"Enable for all products" no longer reports success without doing anything.**
-  Opening the agent manager as your first page left it unaware of your products,
-  so the action reported "all 0 products" and wrote nothing.
-- **Each product has its own agents, and the Agents screen now shows just
-  those.** Open a product tab and you see that product's crew — not every agent
-  on your account. A new product arrives with a full crew already switched on.
+- **Your Team on the home page and the Agents screen now agree**, and both follow the
+  product tab you are on.
+- **Creating an agent works again.** It briefly failed for everyone.
 - **See every product's agents at once.** Turn on "All products" to list the
   whole account, with each row labelled by the product that owns it. Agents from
   other products are read-only there; switch one on from its own tab.
-- **Turn every agent on or off for a product in one step**, from the "This
-  Product" menu, with a count of what changed. If your product is already at its
-  agent limit, you are told which agents were left off and why.
-- **Creating an agent works again.** It briefly failed for everyone.
-- **Your Team on the home page** shows the crew of the product you are viewing,
-  chosen by the same switch as the Agents screen — it previously mixed products
-  together and used a setting nothing else follows.
 - **Empty states explain themselves.** No product yet, a product with no agents,
   a product with everything switched off, and a filter that matched nothing are
   four different situations, and each now says which one you are in and what to
   do about it.
 - **Blank task and project titles are now refused.** Creating or renaming a task or project with an empty or whitespace-only title returns a clear, structured error instead of quietly saving a nameless row.
 - **Every invalid tool argument now comes back the same way.** An over-long value, a wrong type, or a missing field is reported as a plain message naming the field and the limit, instead of a raw validation dump.
-- **Fewer "expect a response" reminders in the Message Hub.** The reminder to keep listening now appears only after a post that hands work on, asks for action, or asks a question. Informational posts and posts that resolve or close a thread no longer carry it.
 - **Closing a project twice no longer duplicates its history.** A repeated closeout returns the entry that was already written instead of adding a second one.
 - **OpenCode users can download the bootstrap prompt again.** The one-time setup prompt for OpenCode failed with a server error; it now installs the `/giljo` command into OpenCode's commands folder like the other tools.
 
@@ -474,8 +458,6 @@ they are still running.
 - **Tools state their rules before you hit them.** Several tools taught their own rules by rejecting you. They now say up front which fields take a single value, which need updating one at a time, and when overwriting existing content needs an explicit flag.
 - **Roadmap editing got easier.** Name items the way you already see them (`BE-0001`), change one field without resending the rest, and see every problem in a rejected batch at once.
 - **Agent badges agree with themselves.** The same agent shows the same initials and the same colour everywhere, and a name with a bracket no longer renders as "R(".
-- **Chain member cards are single-row**, and a member no longer flips to "planning" just because you clicked it.
-- **Release downloads are named after the product**: `giljo-hq-<version>.tar.gz`.
 
 ### Added
 
@@ -499,9 +481,6 @@ they are still running.
   fixed it and tried again; the answer now lists every row that needs a change,
   and says what the limit is.
 - **Your AI assistant now sees, up front, that overwriting an already-filled-in product field needs an extra flag.** Updating your product's tech stack, architecture, quality, or testing details when they already have values used to require the assistant to guess or fail once before learning it needed to opt in explicitly; that requirement is now documented directly on the tool it was missing from.
-Chain member cards in the project strip are now single-row, showing just the taxonomy tag and current status at a glance instead of a two-row pill with a truncated project name.
-After posting to a Message Hub thread, agents now get a one-line reminder in the reply itself: expect a response, and stay available to catch it. Posts that close or resolve a thread do not carry the reminder. This keeps agents attached to conversations instead of posting and walking away.
-Release downloads are now named after the product: `giljo-hq-<version>.tar.gz` instead of the old `giljoai-mcp-` name. The installer reads the download location from the release manifest, so upgrading and installing are unaffected.
 
 ### Fixed
 

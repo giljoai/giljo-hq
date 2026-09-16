@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from giljo_mcp.database import DatabaseManager, tenant_session_context
 from giljo_mcp.models import Task, TaxonomyType
+from giljo_mcp.services.next_action import task_list_next_action
 
 
 logger = logging.getLogger(__name__)
@@ -108,7 +109,10 @@ async def get_tasks(
             summary_rows = await _query(new_session, product_id=product_id, tenant_key=tenant_key, limit=limit)
             true_open_count = await _count_open(new_session, product_id=product_id, tenant_key=tenant_key)
 
-    data = {"tasks": summary_rows, "open_count": true_open_count}
+    data: dict[str, Any] = {"tasks": summary_rows, "open_count": true_open_count}
+    task_hint = task_list_next_action(row["status"] for row in summary_rows)
+    if task_hint is not None:
+        data["next_action"] = task_hint
     truncated = true_open_count > len(summary_rows)
     logger.info(
         "tasks_context_fetched product_id=%s tenant_key=%s returned=%d open_count=%d truncated=%s",

@@ -218,3 +218,61 @@ async def test_valid_call_is_unaffected_by_the_pre_validation(be9602_client, db_
 
     assert result.is_error is False, _text(result)
     assert _payload(result).get("task_id")
+
+
+
+
+async def test_update_task_empty_title_is_rejected_like_create(be9602_client, db_session):
+    client, tenant_key = be9602_client
+    product = await _seed_product(db_session, tenant_key)
+    task = await _seed_task(db_session, tenant_key, product.id)
+
+    async with client() as session:
+        result = await session.call_tool("update_task", {"task_id": task.id, "title": ""})
+
+    _assert_validation_rejection(result, field="title", constraint="non_empty")
+    assert "No fields supplied" not in _text(result)
+    await db_session.refresh(task)
+    assert task.title == "Keep this title"
+
+
+async def test_update_project_empty_name_is_rejected_like_create(be9602_client, db_session):
+    client, tenant_key = be9602_client
+    product = await _seed_product(db_session, tenant_key)
+    project = await _seed_project(db_session, tenant_key, product.id)
+
+    async with client() as session:
+        result = await session.call_tool("update_project", {"project_id": project.id, "name": ""})
+
+    _assert_validation_rejection(result, field="name", constraint="non_empty")
+    assert "No fields supplied" not in _text(result)
+    await db_session.refresh(project)
+    assert project.name == "Keep this name"
+
+
+async def test_update_task_omitting_title_still_updates_other_fields(be9602_client, db_session):
+    client, tenant_key = be9602_client
+    product = await _seed_product(db_session, tenant_key)
+    task = await _seed_task(db_session, tenant_key, product.id)
+
+    async with client() as session:
+        result = await session.call_tool("update_task", {"task_id": task.id, "priority": "high"})
+
+    assert result.is_error is False, _text(result)
+    await db_session.refresh(task)
+    assert task.priority == "high"
+    assert task.title == "Keep this title"
+
+
+async def test_update_project_omitting_name_still_updates_other_fields(be9602_client, db_session):
+    client, tenant_key = be9602_client
+    product = await _seed_product(db_session, tenant_key)
+    project = await _seed_project(db_session, tenant_key, product.id)
+
+    async with client() as session:
+        result = await session.call_tool("update_project", {"project_id": project.id, "description": "a new body"})
+
+    assert result.is_error is False, _text(result)
+    await db_session.refresh(project)
+    assert project.description == "a new body"
+    assert project.name == "Keep this name"

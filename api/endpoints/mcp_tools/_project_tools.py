@@ -450,8 +450,9 @@ async def list_projects(
 async def update_project(
     project_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Project UUID to update (required).")],
     name: Annotated[
-        str, Field(max_length=MCP_NAME_MAX, description="New project name. Empty keeps the current one.")
-    ] = "",
+        str | None,
+        Field(max_length=MCP_NAME_MAX, description="New project name; omit to keep it."),
+    ] = None,
     description: Annotated[
         str,
         Field(max_length=MCP_DESCRIPTION_MAX, description="New description. Empty keeps the current one."),
@@ -515,7 +516,8 @@ async def update_project(
 
     Args:
         project_id: Project UUID (required).
-        name: New project name (max 200 chars). Leave empty to keep current.
+        name: New project name (max 200 chars). Omit it to keep the current one; supplying a
+            blank one is refused.
         description: New description (max 20000 chars). Leave empty to keep current.
         status: New status — "inactive", "active", "completed", "cancelled", "parked", or
             "superseded". Leave empty to keep current. "parked" sets a project aside without
@@ -543,7 +545,7 @@ async def update_project(
             deliberately abandoning without a closeout record.
     """
     params: dict = {"project_id": project_id, "force": force}
-    if name:
+    if name is not None:
         if not name.strip():
             return blank_text_rejection("name", entity="Project")
         params["name"] = name

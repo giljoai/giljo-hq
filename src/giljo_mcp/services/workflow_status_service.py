@@ -21,6 +21,7 @@ from giljo_mcp.schemas.service_responses import (
     build_next_action,
 )
 from giljo_mcp.services._session_helpers import optional_tenant_session
+from giljo_mcp.services.next_action import project_next_action_for
 from giljo_mcp.services.project_helpers import compute_completion_percent
 from giljo_mcp.services.settings_service import resolve_checkin_cadence_safe
 from giljo_mcp.tenant import TenantManager
@@ -126,6 +127,11 @@ class WorkflowStatusService:
                         tool="write_project_closeout",
                         args_hint={"project_id": project_id},
                         why="All agents finished -- call write_project_closeout to record the project closeout.",
+                    )
+                else:
+                    next_action = project_next_action_for(
+                        project,
+                        awaiting_user=any(ex.status == "awaiting_user" for ex in executions),
                     )
 
                 agent_details = await self._build_agent_details(

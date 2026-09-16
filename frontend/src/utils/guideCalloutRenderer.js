@@ -10,11 +10,8 @@ export function installGuideCalloutRenderer(markedInstance) {
     renderer: {
       heading({ text, depth }) {
         const safeText = _escapeHtml(text)
-        if (depth === 2) {
-          const anchor = _slugify(text)
-          return `<h2 id="${anchor}">${safeText}</h2>\n`
-        }
-        return `<h${depth}>${safeText}</h${depth}>\n`
+        const anchor = _slugify(text)
+        return `<h${depth} id="${anchor}">${safeText}</h${depth}>\n`
       },
 
       blockquote({ tokens }) {
