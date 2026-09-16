@@ -31,6 +31,19 @@ Every tool carries one of three permission scopes:
 
 Tools are organized by functional category below; each entry lists its scope.
 
+### `next_action` on project and task reads
+
+Project and task reads carry a `next_action` object — the same
+`{tool, args_hint, why}` envelope other tools already return — naming the one
+workflow step that follows from the item's current state: stage it, wait for
+your go, report progress, resolve a decision, or leave a parked project alone.
+It appears on `get_context(categories=['project'])`, on each row of
+`list_projects` in `planning`, `audit` and `forensic` modes, on
+`diagnose_project_state`, on `get_workflow_status`, and once per response on
+`list_tasks` in `summary` and `full` modes. The field is omitted entirely for
+finished work and for the lean `triage`/`index` projections, so its presence
+is itself the signal that something is still open.
+
 ---
 
 ## Discovery & Health

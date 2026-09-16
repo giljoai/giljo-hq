@@ -31,7 +31,7 @@ from giljo_mcp.services.closeout_ws_broadcast import (
     broadcast_agent_status_events,
     build_agent_status_change_events,
 )
-from giljo_mcp.services.diagnose_staging_hints import compute_stuck_conditions
+from giljo_mcp.services.diagnose_staging_hints import compute_stuck_conditions, lifecycle_next_action_field
 from giljo_mcp.services.project_closeout_readiness import (
     AgentReadinessFinding,
     CloseoutReadinessReport,
@@ -576,4 +576,5 @@ class ProjectCloseoutService:
                 },
                 "stuck_conditions": stuck,
                 "suggested_actions": suggested,
+                **lifecycle_next_action_field(project, report.findings),
             }

@@ -109,7 +109,7 @@ async def create_task(
 )
 async def update_task(
     task_id: Annotated[str, Field(max_length=MCP_ID_MAX, description="Task UUID (required).")],
-    title: Annotated[str, Field(max_length=MCP_NAME_MAX, description="New title; empty string keeps current.")] = "",
+    title: Annotated[str | None, Field(max_length=MCP_NAME_MAX, description="New title; omit to keep it.")] = None,
     description: Annotated[
         str, Field(max_length=MCP_DESCRIPTION_MAX, description="New description; empty string keeps current.")
     ] = "",
@@ -166,7 +166,7 @@ async def update_task(
     ctx: Context = None,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {"task_id": task_id}
-    if title:
+    if title is not None:
         if not title.strip():
             return blank_text_rejection("title", entity="Task")
         params["title"] = title

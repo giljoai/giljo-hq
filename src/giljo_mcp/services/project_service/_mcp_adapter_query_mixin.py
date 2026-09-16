@@ -15,6 +15,7 @@ from giljo_mcp.domain.project_status import (
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.repositories.project_repository import ProjectRepository
 from giljo_mcp.services._mcp_wire_bounds import worst_case_cursor_charge
+from giljo_mcp.services.next_action import project_next_action_for
 from giljo_mcp.services.project_service._mcp_lifecycle_advice import (
     attach_lifecycle_hidden_advice,
     has_narrowing_filter,
@@ -404,6 +405,9 @@ class McpAdapterQueryMixin:
                 item["description"] = p.description or ""
                 item["mission"] = getattr(p, "mission", None) or ""
                 item["agent_summary"] = agent_summary_map.get(p.id, {"agent_count": 0, "job_types": []})
+                next_action = project_next_action_for(p)
+                if next_action is not None:
+                    item["next_action"] = next_action
 
             memory_entries: list = []
             if depth >= 2:

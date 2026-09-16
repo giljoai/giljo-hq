@@ -89,7 +89,7 @@ def _build_sandbox(tmp_path: Path) -> Path:
 
 
 def _run_delete_promote_branch(
-    *, public_local_path: Path, branch_name: str, branch_pushed: bool
+    *, public_local_path: Path, branch_name: str, branch_pushed: bool, keep_branch: bool = False
 ) -> subprocess.CompletedProcess:
     harness = f"""
 set -uo pipefail
@@ -103,6 +103,7 @@ delete_promote_branch
     env["PUBLIC_LOCAL_PATH"] = str(public_local_path)
     env["BRANCH_NAME"] = branch_name
     env["BRANCH_PUSHED"] = "true" if branch_pushed else "false"
+    env["KEEP_BRANCH"] = "true" if keep_branch else "false"
     return subprocess.run(
         [BASH, "-c", harness],
         capture_output=True,
@@ -268,3 +269,51 @@ def test_delete_promote_branch_never_uses_a_wildcard_or_pattern_delete():
     for line in invocation_lines:
         assert '"$BRANCH_NAME"' in line, f"deletion line does not target the exact branch: {line}"
         assert "*" not in line, f"deletion line contains a wildcard: {line}"
+
+
+
+
+def test_keep_branch_preserves_local_and_remote(tmp_path):
+    public = _build_sandbox(tmp_path)
+    origin = tmp_path / "origin.git"
+    branch = "promote/2099-01-01-000000"
+
+    _git("checkout", "-b", branch, cwd=public)
+    _git("push", "origin", branch, cwd=public)
+
+    result = _run_delete_promote_branch(
+        public_local_path=public, branch_name=branch, branch_pushed=True, keep_branch=True
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert _local_branch_exists(public, branch), "local promote branch was deleted despite KEEP_BRANCH"
+    assert _remote_branch_exists(origin, branch), "remote promote branch was deleted despite KEEP_BRANCH"
+    assert "--resume" in result.stdout + result.stderr, "the operator must be told how to continue"
+
+
+def test_an_unset_keep_branch_still_cleans_up(tmp_path):
+    public = _build_sandbox(tmp_path)
+    origin = tmp_path / "origin.git"
+    branch = "promote/2099-01-01-000000"
+
+    _git("checkout", "-b", branch, cwd=public)
+    _git("push", "origin", branch, cwd=public)
+
+    harness = f"""
+set -uo pipefail
+log()  {{ :; }}
+warn() {{ echo "WARN: $*"; }}
+err()  {{ :; }}
+{DELETE_BLOCK}
+delete_promote_branch
+"""
+    env = dict(os.environ)
+    env["PUBLIC_LOCAL_PATH"] = str(public)
+    env["BRANCH_NAME"] = branch
+    env["BRANCH_PUSHED"] = "true"
+    env.pop("KEEP_BRANCH", None)
+    result = subprocess.run([BASH, "-c", harness], capture_output=True, text=True, env=env, check=False)
+
+    assert result.returncode == 0, result.stderr
+    assert not _local_branch_exists(public, branch)
+    assert not _remote_branch_exists(origin, branch)

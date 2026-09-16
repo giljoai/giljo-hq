@@ -15,6 +15,7 @@ from giljo_mcp.domain.task_status import VALID_TASK_STATUSES
 from giljo_mcp.exceptions import ValidationError
 from giljo_mcp.models import Task
 from giljo_mcp.services._mcp_wire_bounds import worst_case_cursor_charge
+from giljo_mcp.services.next_action import task_list_next_action_field
 from giljo_mcp.services.task_service._mcp_filter_validators import (
     resolve_active_product_for_list_tasks,
     resolve_list_mode,
@@ -433,6 +434,7 @@ class McpAdapterMixin:
             "counts": counts,
             "product_id": active_product.id,
         }
+        response.update(task_list_next_action_field(mode=mode, statuses=(t.status for t in tasks)))
         apply_bounds(
             response,
             rows,

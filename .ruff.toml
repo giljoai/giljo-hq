@@ -232,12 +232,6 @@ inline-quotes = "double"
     "E402",   # Module-level imports after code - fixture setup may require this
 ]
 
-# SEC-0002: standalone admin app, not loaded into the MCP server process --
-# the passive-server property does not apply to it (see project_closeout.py
-# per-file-ignore below for the matching pyproject.toml precedent).
-"ops_panel/**/*.py" = [
-    "TID251",
-]
 
 # --- Application entry points (logging/config before imports) ---
 "api/app.py" = [
