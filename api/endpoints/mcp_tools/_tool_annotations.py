@@ -22,7 +22,7 @@ def _tool_hints(name: str, *, destructive: bool = False, open_world: bool = Fals
     read_only = name not in _READ_SCOPED_BUT_MUTATING and scope == SCOPE_READ
     return ToolAnnotations(
         read_only_hint=read_only,
-        destructive_hint=None if read_only else destructive,
+        destructive_hint=False if read_only else destructive,
         open_world_hint=open_world,
     )
 

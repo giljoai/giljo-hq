@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   resolveJobsNavPath,
+  jobsNavPathToLocation,
   isJobsRouteActive,
   resolveJobsNavIcon,
   JOBS_NAV_ICON_ACTIVE,
@@ -197,5 +198,32 @@ describe('resolveJobsNavIcon', () => {
       const iconActive = resolveJobsNavIcon(path, query) === JOBS_NAV_ICON_ACTIVE
       expect(iconActive).toBe(isJobsRouteActive(path, query))
     }
+  })
+})
+
+
+describe('jobsNavPathToLocation', () => {
+  it('maps the chain-member path to the named project route carrying ?run', () => {
+    expect(jobsNavPathToLocation('/projects/member-2?run=run-1')).toEqual({
+      name: 'ProjectLaunch',
+      params: { projectId: 'member-2' },
+      query: { run: 'run-1' },
+    })
+  })
+
+  it('maps the solo project path to the named project route carrying ?via=jobs', () => {
+    expect(jobsNavPathToLocation('/projects/proj-1?via=jobs')).toEqual({
+      name: 'ProjectLaunch',
+      params: { projectId: 'proj-1' },
+      query: { via: 'jobs' },
+    })
+  })
+
+  it('maps the several-projects path to the Jobs viewport BY NAME (the route has no reachable literal path)', () => {
+    expect(jobsNavPathToLocation('/jobs-overview')).toEqual({ name: 'JobsViewport' })
+  })
+
+  it('returns null for the launch page — the caller shows its empty state instead', () => {
+    expect(jobsNavPathToLocation('/launch?via=jobs')).toBeNull()
   })
 })

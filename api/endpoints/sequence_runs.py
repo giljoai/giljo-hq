@@ -28,6 +28,12 @@ from giljo_mcp.utils.log_sanitizer import sanitize
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+_PRODUCT_ID_QUERY = Query(
+    None,
+    max_length=64,
+    description="Product to scope to (the viewed tab). Omitted: every product in the tenant.",
+)
+
 
 
 
@@ -180,6 +186,7 @@ async def list_sequence_runs(
             "after a cold refresh. Appended (deduped) to the status-filtered active set."
         ),
     ),
+    product_id: str | None = _PRODUCT_ID_QUERY,
     current_user: User = Depends(get_current_active_user),
     service: SequenceRunService = Depends(get_sequence_run_service),
 ) -> list[dict[str, Any]]:
@@ -189,13 +196,18 @@ async def list_sequence_runs(
     checkboxes from here and detects an orphaned run for the reset hatch. 422 on
     an unknown status value. With ``include_review_pending=true`` the response also
     carries terminal runs awaiting review (FE-9104) — additive, tenant-scoped.
+
+    ``product_id`` (FE-9627) narrows both halves to runs whose member projects
+    belong to that product — the tab being viewed. Omitted, the response stays
+    tenant-wide exactly as before. A product_id this tenant does not own is a
+    422, never a silent tenant-wide fallback.
     """
     statuses = tuple(s.strip() for s in status_filter.split(",") if s.strip())
     logger.debug("User %s listing sequence_runs (status=%s)", sanitize(current_user.username), sanitize(status_filter))
     try:
-        runs = await service.list_active(tenant_key=current_user.tenant_key, statuses=statuses)
+        runs = await service.list_active(tenant_key=current_user.tenant_key, statuses=statuses, product_id=product_id)
         if include_review_pending:
-            pending = await service.list_review_pending(tenant_key=current_user.tenant_key)
+            pending = await service.list_review_pending(tenant_key=current_user.tenant_key, product_id=product_id)
             seen = {r["id"] for r in runs}
             runs = runs + [r for r in pending if r["id"] not in seen]
         return runs
@@ -363,19 +375,52 @@ async def release_sequence_run(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.message) from exc
 
 
+@router.post("/{run_id}/stop")
+async def stop_sequence_run(
+    run_id: str,
+    current_user: User = Depends(get_current_active_user),
+    service: SequenceRunService = Depends(get_sequence_run_service),
+) -> dict[str, Any]:
+    """Stop a running chain (FE-9632): end the run and stand its members down.
+
+    The running-chain screen's Stop control, and the safe one: the work already done is
+    never thrown away. A project that already finished stays finished. The project that
+    was underway is marked terminated and its agents are stood down, with their history
+    kept so you can still read what they did. Projects the chain never reached go back
+    to inactive and need staging again, which clears the mission they had not started
+    on. The run is then cancelled, releasing the group. 404 if the run is not found for
+    this tenant. Returns the stopped run.
+    """
+    logger.info(
+        "User %s stopping chain (sequence_run %s)",
+        sanitize(current_user.username),
+        sanitize(run_id),
+    )
+    try:
+        return await service.stop_chain(run_id=run_id, tenant_key=current_user.tenant_key)
+    except ResourceNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="sequence_run not found") from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.message) from exc
+
+
 @router.post("/{run_id}/deactivate")
 async def deactivate_sequence_run(
     run_id: str,
     current_user: User = Depends(get_current_active_user),
     service: SequenceRunService = Depends(get_sequence_run_service),
 ) -> dict[str, Any]:
-    """Back out of a chain (FE-6178): reset all member projects to inactive + dissolve the run.
+    """Back out of a chain (FE-6178): rewind every member to its original state.
 
     The /projects "Deactivate Chain" escape hatch — the chain equivalent of solo
-    Deactivate. Each ACTIVE member project is flipped active->inactive via the owning
-    ProjectService; terminal / already-inactive / hard-deleted members are skipped.
-    The run is then cancelled, freeing membership (checkboxes unlock, the "In chain"
-    pill clears). 404 if the run is not found for this tenant. Returns the dissolved run.
+    Deactivate, and the DESTRUCTIVE one. Every member is returned to pre-staging: its
+    staging state, mission and launch timestamp are cleared, it goes back to inactive,
+    and its agent jobs and their history are DELETED — so the record of any work those
+    agents did is gone. A hard-deleted member is skipped. The run is then cancelled,
+    freeing membership (checkboxes unlock, the "In chain" pill clears).
+
+    To stop a chain WITHOUT losing that history, use POST /{run_id}/stop instead.
+    404 if the run is not found for this tenant. Returns the dissolved run.
     """
     logger.info(
         "User %s deactivating chain (sequence_run %s)",

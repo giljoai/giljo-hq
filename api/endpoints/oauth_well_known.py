@@ -6,8 +6,10 @@
 
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
 from api.endpoints.oauth import (
@@ -158,3 +160,25 @@ async def mcp_server_info():
         server_name=mcp.name,
         server_version=giljo_version,
     )
+
+
+@well_known_router.get(
+    "/.well-known/openai-apps-challenge",
+    response_class=PlainTextResponse,
+    tags=["oauth"],
+)
+async def openai_apps_challenge():
+    """Serve the OpenAI apps directory domain-ownership token (INF-9618).
+
+    OpenAI verifies that you control this server's domain by fetching this
+    path and expecting the body to be exactly the challenge token issued by
+    their portal, as plain text. This endpoint is inert unless the operator
+    sets ``GILJO_OPENAI_APPS_CHALLENGE_TOKEN``: with the variable unset or
+    blank it answers 404, so nothing is exposed by default. The 404 is a
+    direct response rather than a raised exception so the single-port SPA
+    fallback never turns it into a 200 HTML page.
+    """
+    token = os.environ.get("GILJO_OPENAI_APPS_CHALLENGE_TOKEN", "").strip()
+    if not token:
+        return PlainTextResponse("Not Found", status_code=404, media_type="text/plain")
+    return PlainTextResponse(token, media_type="text/plain")

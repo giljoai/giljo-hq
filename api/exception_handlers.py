@@ -29,6 +29,12 @@ def register_exception_handlers(app):
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        if request.url.path.startswith("/api/oauth/"):
+            fields = ", ".join(
+                f"{'.'.join(str(part) for part in error.get('loc', ()) if part != 'body')}: {error.get('type', '')}"
+                for error in exc.errors()
+            )
+            logger.warning("OAuth request validation failed on %s: %s", request.url.path, fields)
         sanitized_errors = []
         for error in exc.errors():
             sanitized = {

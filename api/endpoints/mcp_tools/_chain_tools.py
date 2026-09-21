@@ -109,7 +109,10 @@ async def unlink_projects(
     conductor with no way to abandon its own run would leave the record pinned open with
     no headless door to release it.
 
-    Byte-identical to the dashboard's Terminate control -- both reach
-    ``SequenceRunService.release(mode='cancel')`` through the one owning service.
+    Byte-identical to the dashboard's Stop chain control -- both reach
+    ``SequenceRunService.stop_chain`` through the one owning service (FE-9632). The
+    group stops without throwing away the work already done: a member already finished
+    stays finished, the member underway is terminated with its agent history kept, and
+    members the chain never reached return to inactive so they can be staged again.
     """
     return await _call_tool(ctx, "start_chain_run", {"action": "terminate_remaining", "run_id": run_id})

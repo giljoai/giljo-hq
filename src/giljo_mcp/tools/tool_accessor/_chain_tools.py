@@ -24,6 +24,24 @@ logger = logging.getLogger(__name__)
 
 _CONDUCTOR_BOOTSTRAP_TOOL = "get_staging_instructions"
 
+_EXECUTION_MODE_QUESTION = (
+    "Ask the user ONE question before you retry, and do not guess: how should this chain "
+    "run -- 'subagent' (each project's sub-orchestrator runs its workers inside this "
+    "session, using this harness's own task/subagent tool) or 'multi_terminal' (one "
+    "terminal per agent, coordinated over the Message Hub)? Then call link_projects again "
+    "with execution_mode set to their answer."
+)
+
+
+def _execution_mode_question() -> dict[str, Any]:
+    return {
+        "success": False,
+        "error": "EXECUTION_MODE_REQUIRED",
+        "options": ["subagent", "multi_terminal"],
+        "message": "execution_mode was not answered. It is the user's choice, so ask them.",
+        "next_action": build_next_action(tool="link_projects", why=_EXECUTION_MODE_QUESTION),
+    }
+
 
 class ChainToolsMixin:
 
@@ -51,11 +69,13 @@ class ChainToolsMixin:
                 tenant_key=effective_tenant_key,
             )
 
-        if project_ids is None or execution_mode is None:
+        if project_ids is None:
             raise ValidationError(
-                message="project_ids and execution_mode are required for action='start'",
+                message="project_ids is required for action='start'",
                 context={"operation": "accessor.start_chain_run"},
             )
+        if execution_mode is None:
+            return _execution_mode_question()
 
         self._validate_chain_inputs(project_ids, execution_mode, chain_mission)
 
@@ -116,7 +136,7 @@ class ChainToolsMixin:
         )
 
         if action == "terminate_remaining":
-            run = await service.release(run_id=run_id, mode="cancel", tenant_key=tenant_key)
+            run = await service.stop_chain(run_id=run_id, tenant_key=tenant_key)
             return {"success": True, "action": action, "run": run}
 
         if not isinstance(member_project_id, str) or not member_project_id.strip():

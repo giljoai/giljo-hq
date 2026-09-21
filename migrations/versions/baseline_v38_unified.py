@@ -266,7 +266,6 @@ def upgrade() -> None:
             sa.Column("model", sa.String(length=120), nullable=True),
             sa.Column("tools", sa.String(length=50), nullable=True),
             sa.Column("avg_generation_ms", sa.Float(precision=53), nullable=True),
-            sa.Column("last_exported_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("description", sa.Text(), nullable=True),
             sa.Column("version", sa.String(length=20), nullable=True),
             sa.Column("is_active", sa.Boolean(), nullable=True),
@@ -276,7 +275,6 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("created_by", sa.String(length=100), nullable=True),
-            sa.Column("user_managed_export", sa.Boolean(), server_default=sa.text("false"), nullable=False),
             sa.Column(
                 "deleted_at",
                 sa.DateTime(timezone=True),
@@ -790,12 +788,6 @@ def upgrade() -> None:
             sa.Column("tenant_key", sa.String(length=36), nullable=False),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=True),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
-            sa.Column(
-                "last_exported_at",
-                sa.DateTime(timezone=True),
-                nullable=True,
-                comment="BE-9385e: when THIS product last exported this agent (NULL falls back to the template)",
-            ),
             sa.PrimaryKeyConstraint("id", name="product_agent_assignments_pkey"),
             sa.UniqueConstraint("product_id", "template_id", name="uq_product_template_assignment"),
         )

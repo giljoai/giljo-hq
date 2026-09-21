@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { ref } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
+import { useSequenceRunStore } from '@/stores/sequenceRunStore'
 import { usePlayButton } from './usePlayButton'
 import { api } from '@/services/api'
 
@@ -250,5 +252,135 @@ describe('usePlayButton', () => {
 
     const specialist = { agent_display_name: 'implementer', status: 'waiting' }
     expect(shouldShowCopyButton(specialist)).toBe(false)
+  })
+})
+
+
+
+describe('usePlayButton — chain member (FE-9629)', () => {
+  let getProjectState
+  let clipboardCopy
+  let store
+
+  const ORCHESTRATOR = { agent_display_name: 'orchestrator', job_id: 'orc-job', status: 'waiting' }
+
+  function chainCtx(currentIndex = 0, statuses = { 'p1': 'planning', 'p2': 'pending' }) {
+    return ref({
+      runId: 'run-1',
+      run: {
+        id: 'run-1',
+        project_ids: ['p1', 'p2'],
+        resolved_order: ['p1', 'p2'],
+        current_index: currentIndex,
+        project_statuses: statuses,
+      },
+      tabs: [
+        { projectId: 'p1', taxonomyAlias: 'FE-9640', name: 'Ingest rewrite' },
+        { projectId: 'p2', taxonomyAlias: 'FE-9641', name: 'Search index' },
+      ],
+    })
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    store = useSequenceRunStore()
+    store._testSeedRuns([
+      {
+        id: 'run-1',
+        project_ids: ['p1', 'p2'],
+        resolved_order: ['p1', 'p2'],
+        current_index: 0,
+        status: 'running',
+        execution_mode: 'multi_terminal',
+        project_statuses: { p1: 'planning', p2: 'pending' },
+      },
+    ])
+    getProjectState = vi.fn(() => ({ stagingComplete: false, execution_mode: 'multi_terminal' }))
+    clipboardCopy = vi.fn(() => Promise.resolve(true))
+    vi.clearAllMocks()
+  })
+
+  it('renders the play button for the member at the current index, despite staging not being complete', () => {
+    const { shouldShowCopyButton, isPlayButtonFaded, playButtonTooltip } = usePlayButton(
+      { project_id: 'p1' }, getProjectState, clipboardCopy, chainCtx(0),
+    )
+    expect(shouldShowCopyButton(ORCHESTRATOR)).toBe(true)
+    expect(isPlayButtonFaded(ORCHESTRATOR)).toBe(false)
+    expect(playButtonTooltip(ORCHESTRATOR)).toBe('Copy prompt')
+  })
+
+  it('renders a FADED button naming the predecessor for a member whose turn has not come', () => {
+    const { shouldShowCopyButton, isPlayButtonFaded, playButtonTooltip } = usePlayButton(
+      { project_id: 'p2' }, getProjectState, clipboardCopy, chainCtx(0),
+    )
+    expect(shouldShowCopyButton(ORCHESTRATOR)).toBe(true)
+    expect(isPlayButtonFaded(ORCHESTRATOR)).toBe(true)
+    expect(playButtonTooltip(ORCHESTRATOR)).toBe('Starts after FE-9640 closes out')
+  })
+
+  it('handlePlay launches THIS member and copies ITS OWN orchestrator prompt', async () => {
+    api.prompts.chainMember.mockResolvedValue({ data: { prompt: 'MEMBER 1 BOOTSTRAP' } })
+    const { handlePlay } = usePlayButton(
+      { project_id: 'p1' }, getProjectState, clipboardCopy, chainCtx(0),
+    )
+
+    await handlePlay(ORCHESTRATOR)
+
+    expect(api.projects.launchImplementation).toHaveBeenCalledWith('p1')
+    expect(api.prompts.chainMember).toHaveBeenCalledWith('p1')
+    expect(api.prompts.implementation).not.toHaveBeenCalled()
+    expect(clipboardCopy).toHaveBeenCalledWith('MEMBER 1 BOOTSTRAP')
+    expect(mockShowToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'success' }))
+    const launchOrder = api.projects.launchImplementation.mock.invocationCallOrder[0]
+    const fetchOrder = api.prompts.chainMember.mock.invocationCallOrder[0]
+    expect(launchOrder).toBeLessThan(fetchOrder)
+  })
+
+  it('handlePlay does nothing at all for a member whose turn has not come', async () => {
+    const { handlePlay } = usePlayButton(
+      { project_id: 'p2' }, getProjectState, clipboardCopy, chainCtx(0),
+    )
+
+    await handlePlay(ORCHESTRATOR)
+
+    expect(api.projects.launchImplementation).not.toHaveBeenCalled()
+    expect(api.prompts.chainMember).not.toHaveBeenCalled()
+    expect(clipboardCopy).not.toHaveBeenCalled()
+  })
+
+  it('surfaces the server refusal verbatim when the launch is rejected', async () => {
+    api.projects.launchImplementation.mockRejectedValueOnce({
+      response: { data: { message: 'Cannot start this chain member yet: FE-9640 is still open.' } },
+    })
+    const { handlePlay } = usePlayButton(
+      { project_id: 'p1' }, getProjectState, clipboardCopy, chainCtx(0),
+    )
+
+    await handlePlay(ORCHESTRATOR)
+
+    expect(api.prompts.chainMember).not.toHaveBeenCalled()
+    expect(mockShowToast).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', message: expect.stringContaining('FE-9640') }),
+    )
+  })
+
+  it('leaves a SPECIALIST row on the solo rule (chain membership changes the orchestrator row only)', () => {
+    const { shouldShowCopyButton } = usePlayButton(
+      { project_id: 'p1' }, getProjectState, clipboardCopy, chainCtx(0),
+    )
+    expect(shouldShowCopyButton({ agent_display_name: 'implementer', status: 'waiting' })).toBe(false)
+  })
+
+  it('leaves a SOLO project untouched when no chain context is supplied', async () => {
+    api.prompts.implementation.mockResolvedValue({ data: { prompt: 'SOLO', agent_count: 2 } })
+    getProjectState = vi.fn(() => ({ stagingComplete: true, execution_mode: 'multi_terminal' }))
+    const { shouldShowCopyButton, handlePlay } = usePlayButton(
+      { project_id: 'solo-pid' }, getProjectState, clipboardCopy,
+    )
+
+    expect(shouldShowCopyButton(ORCHESTRATOR)).toBe(true)
+    await handlePlay(ORCHESTRATOR)
+    expect(api.prompts.implementation).toHaveBeenCalledWith('solo-pid')
+    expect(api.prompts.chainMember).not.toHaveBeenCalled()
   })
 })

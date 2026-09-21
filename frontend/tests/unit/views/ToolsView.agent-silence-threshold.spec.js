@@ -1,5 +1,6 @@
 /**
- * ToolsView.agent-silence-threshold.spec.js — PLACEMENT ONLY as of FE-9553.
+ * ToolsView.agent-silence-threshold.spec.js — PLACEMENT ONLY as of FE-9553,
+ * and one level further down as of FE-9616.
  *
  * This file used to mount the whole view and assert that the agent silence
  * threshold and check-in cadence loaded and saved. That worked only because
@@ -15,7 +16,10 @@
  * failing without taking the other down.
  *
  * What is left here is the claim only the VIEW can make: that the controls are
- * actually reachable from the page, on the tab they were moved to. Kept as its
+ * actually reachable from the page, on the tab they were moved to. FE-9616 moved
+ * them again, from a block on that tab into a dialog the roster's toolbar opens,
+ * so the claim is now that the tab renders the roster and holds no settings block
+ * of its own. Kept as its
  * own file rather than folded away, because "the component exists and works"
  * and "the component is wired into the page" are different failures and the
  * second one is the sort that ships.
@@ -108,10 +112,17 @@ describe('ToolsView — FE-9553 relocation and the four notification cards', () 
 
   // load-sensitive: the dynamic import + mount can exceed vitest's 5s default
   // when this spec runs alongside the two -n6 pytest jobs on a busy CI runner.
-  it('mounts the agent timing controls at all', async () => {
+  //
+  // FE-9616: the agents tab renders the roster and nothing else. The timing
+  // controls did not leave the product -- they moved one level down, into the
+  // behaviour dialog the roster's own toolbar opens -- so the reachability claim
+  // this file makes is now "the agents tab renders the manager that owns them",
+  // and the dialog's own contents are asserted in
+  // src/components/settings/AgentBehaviourDialog.spec.js.
+  it('mounts the agent roster on the agents tab', async () => {
     const wrapper = await mountView('agents')
 
-    expect(wrapper.find('[data-test="agent-timing-settings"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="template-manager"]').exists()).toBe(true)
   }, 15000)
 
   // WHICH TAB a control sits on is asserted from the SOURCE, not by mounting,
@@ -136,8 +147,15 @@ describe('ToolsView — FE-9553 relocation and the four notification cards', () 
       return source.slice(start, end === -1 ? source.length : end)
     }
 
-    it('puts AgentTimingSettings in the agents tab', () => {
-      expect(tabBlock('agents')).toContain('<AgentTimingSettings')
+    it('leaves the agents tab to the roster alone', () => {
+      // FE-9616: the five behaviour settings open from the roster's toolbar, so
+      // the tab holds ONE child. A settings component reappearing here means the
+      // block grew back and the same 250px is being paid for twice.
+      const block = tabBlock('agents')
+      expect(block).toContain('<TemplateManager')
+      expect(block).not.toContain('<AgentTimingSettings')
+      expect(block).not.toContain('<ExecutionModeDefaultSelect')
+      expect(block).not.toContain('<OrchestrationToggles')
     })
 
     it('does NOT leave the agent controls in the notifications tab', () => {

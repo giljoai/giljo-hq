@@ -1,87 +1,58 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import api from '@/services/api'
 
-const { mockShowToast, mockCopy } = vi.hoisted(() => ({
-  mockShowToast: vi.fn(),
-  mockCopy: vi.fn(() => Promise.resolve(true)),
-}))
+const { mockShowToast } = vi.hoisted(() => ({ mockShowToast: vi.fn() }))
 
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ showToast: mockShowToast }) }))
-vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copy: mockCopy }) }))
 
 import { useChainImplementation } from './useChainImplementation'
 
-describe('useChainImplementation (FE-6165f)', () => {
+describe('useChainImplementation — starting the chain at member 1 (FE-9629)', () => {
   beforeEach(() => {
     mockShowToast.mockClear()
-    mockCopy.mockClear()
-    mockCopy.mockResolvedValue(true)
-  })
-
-  it('fetches the chain-implementation prompt and copies it, with a success toast', async () => {
-    api.prompts.chainImplementation.mockResolvedValueOnce({ data: { prompt: 'DRIVE THE CHAIN' } })
-    const { copyImplPrompt } = useChainImplementation()
-    const ok = await copyImplPrompt('run-9')
-    expect(ok).toBe(true)
-    expect(api.prompts.chainImplementation).toHaveBeenCalledWith('run-9')
-    expect(mockCopy).toHaveBeenCalledWith('DRIVE THE CHAIN')
-    expect(mockShowToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'success' }))
-  })
-
-  it('returns false and toasts an error when the clipboard is blocked', async () => {
-    api.prompts.chainImplementation.mockResolvedValueOnce({ data: { prompt: 'X' } })
-    mockCopy.mockResolvedValueOnce(false)
-    const { copyImplPrompt } = useChainImplementation()
-    const ok = await copyImplPrompt('run-9')
-    expect(ok).toBe(false)
-    expect(mockShowToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }))
-  })
-
-  it('no-ops without a runId', async () => {
-    const { copyImplPrompt } = useChainImplementation()
-    const ok = await copyImplPrompt('')
-    expect(ok).toBe(false)
-    expect(api.prompts.chainImplementation).not.toHaveBeenCalled()
-  })
-
-  it('launches the head project gate BEFORE fetching the chain-implementation prompt', async () => {
     api.projects.launchImplementation.mockClear()
+    api.projects.launchImplementation.mockResolvedValue({ data: { success: true } })
     api.prompts.chainImplementation.mockClear()
-    api.prompts.chainImplementation.mockResolvedValueOnce({ data: { prompt: 'DRIVE' } })
+  })
 
-    const { copyImplPrompt } = useChainImplementation()
-    const ok = await copyImplPrompt('run-9', 'head-pid')
+  it('opens the head member\'s launch gate and reports success', async () => {
+    const { launchChainHead } = useChainImplementation()
+
+    const ok = await launchChainHead('head-pid')
 
     expect(ok).toBe(true)
     expect(api.projects.launchImplementation).toHaveBeenCalledWith('head-pid')
-    expect(api.prompts.chainImplementation).toHaveBeenCalledWith('run-9')
-    const launchOrder = api.projects.launchImplementation.mock.invocationCallOrder[0]
-    const fetchOrder = api.prompts.chainImplementation.mock.invocationCallOrder[0]
-    expect(launchOrder).toBeLessThan(fetchOrder)
   })
 
-  it('treats a failing head launch as non-blocking and still copies the prompt', async () => {
-    api.projects.launchImplementation.mockClear()
-    api.projects.launchImplementation.mockRejectedValueOnce(new Error('gate 409'))
-    api.prompts.chainImplementation.mockResolvedValueOnce({ data: { prompt: 'DRIVE' } })
+  it('does NOT copy a conductor prompt on this path', async () => {
+    const { launchChainHead } = useChainImplementation()
 
-    const { copyImplPrompt } = useChainImplementation()
-    const ok = await copyImplPrompt('run-9', 'head-pid')
+    await launchChainHead('head-pid')
 
-    expect(ok).toBe(true)
-    expect(api.prompts.chainImplementation).toHaveBeenCalledWith('run-9')
-    expect(mockCopy).toHaveBeenCalledWith('DRIVE')
+    expect(api.prompts.chainImplementation).not.toHaveBeenCalled()
+    expect(mockShowToast).not.toHaveBeenCalled()
   })
 
-  it('skips the launch gate when no head pid is supplied (still fetches)', async () => {
-    api.projects.launchImplementation.mockClear()
-    api.prompts.chainImplementation.mockResolvedValueOnce({ data: { prompt: 'DRIVE' } })
+  it('reports failure and surfaces the server refusal when the head will not open', async () => {
+    api.projects.launchImplementation.mockRejectedValueOnce({
+      response: { data: { message: 'Cannot start this chain member yet: FE-9640 is still open.' } },
+    })
+    const { launchChainHead } = useChainImplementation()
 
-    const { copyImplPrompt } = useChainImplementation()
-    const ok = await copyImplPrompt('run-9')
+    const ok = await launchChainHead('head-pid')
 
-    expect(ok).toBe(true)
+    expect(ok).toBe(false)
+    expect(mockShowToast).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', message: expect.stringContaining('FE-9640') }),
+    )
+  })
+
+  it('no-ops without a head project id', async () => {
+    const { launchChainHead } = useChainImplementation()
+
+    const ok = await launchChainHead('')
+
+    expect(ok).toBe(false)
     expect(api.projects.launchImplementation).not.toHaveBeenCalled()
-    expect(api.prompts.chainImplementation).toHaveBeenCalledWith('run-9')
   })
 })

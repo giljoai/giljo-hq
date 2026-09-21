@@ -44,6 +44,7 @@ from giljo_mcp.services.job_completion_staging import (  # noqa: F401 — consta
     guard_conductor_chain_incomplete,
     handle_staging_end,
     is_staging_end_orchestrator_call,
+    is_staging_phase_orchestrator,
     staging_directive_for,
 )
 from giljo_mcp.services.protocol_survival import build_complete_job_footer
@@ -364,12 +365,7 @@ class JobCompletionService:
 
         incomplete_todos = await repo.get_incomplete_todos(session, tenant_key, job_id)
 
-        is_staging_orchestrator = (
-            job.job_type == "orchestrator"
-            and project is not None
-            and project.staging_status in ("staging", "staged", "staging_complete")
-            and project.implementation_launched_at is None
-        )
+        is_staging_orchestrator = is_staging_phase_orchestrator(job, project)
         if is_staging_orchestrator and incomplete_todos:
             self._logger.info(
                 "[STAGING] Bypassing incomplete-TODOs gate for staging-phase orchestrator "

@@ -17,7 +17,7 @@ from giljo_mcp.services.protocol_sections.chapters_chain import (
 from giljo_mcp.services.protocol_sections.orchestrator_body import (
     trim_embedded_protocol_for_chain,
 )
-from giljo_mcp.services.sequence_chain_context import SequenceChainContextResolver
+from giljo_mcp.services.sequence_chain_context import SequenceChainContextResolver, chain_member_phase
 
 
 if TYPE_CHECKING:
@@ -74,7 +74,7 @@ async def inject_conductor_chain_drive(
         pid = str(job.project_id) if job.project_id else None
         if pid is not None and pid in order:
             position = order.index(pid) + 1
-            phase = "implementation" if getattr(project, "implementation_launched_at", None) is not None else "staging"
+            phase = chain_member_phase(project)
             return "\n\n".join(
                 [
                     _build_ch_sub_orchestrator(

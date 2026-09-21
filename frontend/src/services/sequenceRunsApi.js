@@ -7,6 +7,7 @@ export const sequenceRunsApi = {
   list: (params = {}) => apiClient.get('/api/v1/sequence-runs', { params }),
   release: (runId, mode) => apiClient.post(`/api/v1/sequence-runs/${runId}/release`, null, { params: { mode } }),
   deactivate: (runId) => apiClient.post(`/api/v1/sequence-runs/${runId}/deactivate`),
+  stop: (runId) => apiClient.post(`/api/v1/sequence-runs/${runId}/stop`),
   markReviewed: (runId, projectId) =>
     apiClient.post(`/api/v1/sequence-runs/${runId}/members/${projectId}/review`),
 }

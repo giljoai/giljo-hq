@@ -10,6 +10,7 @@ import { useAgentJobsStore } from '@/stores/agentJobsStore'
 import { useProjectStateStore } from '@/stores/projectStateStore'
 import { useProjectStore } from '@/stores/projects'
 import { useUserStore } from '@/stores/user'
+import { useSequenceRunStore } from '@/stores/sequenceRunStore'
 
 const vuetify = createVuetify()
 
@@ -448,5 +449,102 @@ describe('JobsTab.vue — BE-6229 conductor excluded on the live WS store path',
     const rows = wrapper.findAll('[data-testid="agent-row"]')
     expect(rows.length, 'only the open project agent renders').toBe(1)
     expect(rows.map((r) => r.text()).some((t) => t.includes('conductor'))).toBe(false)
+  })
+})
+
+
+
+describe('JobsTab.vue — chain member play button (FE-9629)', () => {
+  const MEMBER_PID = 'proj-fe5058'
+
+  function seedChainRun(currentIndex, statuses) {
+    const sequenceRunStore = useSequenceRunStore()
+    sequenceRunStore._testSeedRuns([
+      {
+        id: 'run-1',
+        project_ids: [MEMBER_PID, 'p2'],
+        resolved_order: [MEMBER_PID, 'p2'],
+        current_index: currentIndex,
+        status: 'running',
+        execution_mode: 'multi_terminal',
+        project_statuses: statuses,
+      },
+    ])
+  }
+
+  const chainCtx = {
+    runId: 'run-1',
+    run: {
+      id: 'run-1',
+      project_ids: [MEMBER_PID, 'p2'],
+      resolved_order: [MEMBER_PID, 'p2'],
+      current_index: 0,
+      project_statuses: { [MEMBER_PID]: 'planning', p2: 'pending' },
+    },
+    tabs: [
+      { projectId: MEMBER_PID, taxonomyAlias: 'FE-9640', name: 'Ingest rewrite' },
+      { projectId: 'p2', taxonomyAlias: 'FE-9641', name: 'Search index' },
+    ],
+  }
+
+  async function mountChainMember(projectId, currentIndex, statuses) {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const userStore = useUserStore()
+    userStore.currentUser = { id: 'user-1', tenant_key: 'tenant-test' }
+    seedChainRun(currentIndex, statuses)
+
+    const wrapper = mount(JobsTab, {
+      props: {
+        project: { ...mockProject, project_id: projectId, id: projectId },
+        chainCtx: { ...chainCtx, run: { ...chainCtx.run, current_index: currentIndex, project_statuses: statuses } },
+      },
+      global: { plugins: [pinia, vuetify, hubRouter], stubs },
+    })
+    await wrapper.vm.$nextTick()
+    const agentJobsStore = useAgentJobsStore()
+    agentJobsStore.setJobs([
+      makeAgent({ status: 'waiting', agent_display_name: 'orchestrator', project_id: projectId }),
+    ])
+    await wrapper.vm.$nextTick()
+    return wrapper
+  }
+
+  it('shows the play button for the member at the current index, though staging is not complete', async () => {
+    const wrapper = await mountChainMember(MEMBER_PID, 0, { [MEMBER_PID]: 'planning', p2: 'pending' })
+
+    const btn = wrapper.find('.play-cell [aria-label="Copy agent prompt"]')
+    expect(btn.exists(), 'member play button').toBe(true)
+    expect(btn.classes()).not.toContain('play-btn-faded')
+    expect(wrapper.find('.play-cell .v-tooltip').attributes('data-tooltip-text')).toBe('Copy prompt')
+  })
+
+  it('renders the waiting member faded, naming what it waits for, in the real row', async () => {
+    const wrapper = await mountChainMember('p2', 0, { [MEMBER_PID]: 'planning', p2: 'pending' })
+
+    const btn = wrapper.find('.play-cell [aria-label="Copy agent prompt"]')
+    expect(btn.exists(), 'faded member play button').toBe(true)
+    expect(btn.classes()).toContain('play-btn-faded')
+    expect(btn.attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.play-cell .v-tooltip').attributes('data-tooltip-text')).toBe(
+      'Starts after FE-9640 closes out',
+    )
+  })
+
+  it('leaves a SOLO project on the staging gate (no chain context, no play button)', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const userStore = useUserStore()
+    userStore.currentUser = { id: 'user-1', tenant_key: 'tenant-test' }
+
+    const wrapper = mount(JobsTab, {
+      props: { project: mockProject },
+      global: { plugins: [pinia, vuetify, hubRouter], stubs },
+    })
+    await wrapper.vm.$nextTick()
+    useAgentJobsStore().setJobs([makeAgent({ status: 'waiting', agent_display_name: 'orchestrator' })])
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('.play-cell [aria-label="Copy agent prompt"]').exists()).toBe(false)
   })
 })

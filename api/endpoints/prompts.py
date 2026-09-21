@@ -13,9 +13,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from api.dependencies.websocket import WebSocketDependency, get_websocket_dependency
+from api.endpoints.chain_prompt_bootstrap import (
+    _build_conductor_bootstrap,
+    _conductor_mcp_url,
+    _resolve_conductor_job_id,
+)
 from api.endpoints.projects.dependencies import get_project_service
 from api.schemas.prompt import (
     AgentPromptResponse,
+    ChainMemberPromptResponse,
     ChainPromptResponse,
     ImplementationPromptResponse,
     OrchestratorPromptRequest,
@@ -24,9 +30,7 @@ from api.schemas.prompt import (
     ThinOrchestratorPromptResponse,
 )
 from giljo_mcp.auth.dependencies import get_current_active_user, get_db_session
-from giljo_mcp.branding import MCP_ALIAS
 from giljo_mcp.exceptions import BaseGiljoError, ProjectStateError, ResourceNotFoundError
-from giljo_mcp.http.url_resolver import get_public_url
 from giljo_mcp.models import Project, User
 from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
 from giljo_mcp.platform_registry import (
@@ -35,17 +39,18 @@ from giljo_mcp.platform_registry import (
     execution_mode_pattern,
     tool_type_pattern,
 )
-from giljo_mcp.prompts._canonical_tool_list import render_toolsearch_call_one_line
+from giljo_mcp.repositories.project_lifecycle_repository import ProjectLifecycleRepository
+from giljo_mcp.services.execution_mode_gate import effective_execution_mode
 from giljo_mcp.services.mission_orchestration_service import MissionOrchestrationService
 from giljo_mcp.services.orchestrator_prompt_ws_broadcast import broadcast_orchestrator_prompt_generated
 from giljo_mcp.services.project_service import ProjectService
+from giljo_mcp.services.sequence_chain_context import chain_member_phase
 from giljo_mcp.services.sequence_run_service import SequenceRunService
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.thin_prompt_generator import ThinClientPromptGenerator
 from giljo_mcp.utils.log_sanitizer import sanitize
 
 
-_TOOL_PREFIX = f"mcp__{MCP_ALIAS}__"
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -591,92 +596,6 @@ project_id: {project_id}"""
     )
 
 
-
-
-async def _resolve_conductor_job_id(run: dict, tenant_key: str, db: AsyncSession) -> str:
-    cond_agent_id = run.get("conductor_agent_id")
-    if not cond_agent_id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="This chain has no dedicated conductor yet (legacy run). Recreate the chain to mint one.",
-        )
-    row = await db.execute(
-        select(AgentExecution.job_id).where(
-            AgentExecution.agent_id == cond_agent_id,
-            AgentExecution.tenant_key == tenant_key,
-        )
-    )
-    job_id = row.scalar_one_or_none()
-    if job_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conductor execution not found for this run.",
-        )
-    return str(job_id)
-
-
-def _conductor_mcp_url() -> str:
-    return get_public_url()
-
-
-def _build_conductor_bootstrap(*, identity: dict, mcp_url: str, phase: str, harness_is_claude: bool) -> str:
-    job_id = identity.get("job_id") or ""
-    agent_id = identity.get("agent_id") or ""
-    run_id = identity.get("run_id") or ""
-
-    fetch_tool = _TOOL_PREFIX if harness_is_claude else ""
-    if phase == "staging":
-        fetch_line = f"2. Fetch your chain protocol: {fetch_tool}get_staging_instructions(job_id='{job_id}')"
-        protocol_note = (
-            "   -> Returns your full chain protocol (CH_CAPABILITY + CH_CHAIN_STAGING):\n"
-            "      how each project is spawned and the authoritative staging script."
-        )
-    else:
-        fetch_line = f"2. Fetch your chain protocol: {fetch_tool}get_job_mission(job_id='{job_id}')"
-        protocol_note = (
-            "   -> Returns your full chain-drive protocol (CH_CHAIN_DRIVE): the\n"
-            "      auto-continue loop that advances the chain project by project."
-        )
-
-    toolsearch_bootstrap = ""
-    tool_prefix_line = (
-        "  Tool names below are bare; your MCP client may expose them under a prefix "
-        "(e.g. `mcp__<server>__<tool>`) — call them by the names your harness lists."
-    )
-    if harness_is_claude:
-        toolsearch_bootstrap = (
-            "STEP 0 — TOOLSEARCH BOOTSTRAP (Claude Code only — do this FIRST):\n"
-            "Claude Code defers MCP tool schemas. You CANNOT call any\n"
-            f"{_TOOL_PREFIX}* tool (including health_check) until its schema\n"
-            "is loaded. Fire this single call before the START NOW workflow below:\n"
-            f"  {render_toolsearch_call_one_line()}\n"
-            "After that, every tool in the canonical orchestrator set is callable.\n"
-            "\n"
-        )
-        tool_prefix_line = f"  Tool Prefix: {_TOOL_PREFIX}"
-
-    health_check_call = f"{_TOOL_PREFIX}health_check()" if harness_is_claude else "health_check()"
-
-    return f"""You are the dedicated CHAIN ORCHESTRATOR (project-less). You stage/drive ALL projects in this run; you own no project of your own.
-
-YOUR IDENTITY (use these in all MCP calls):
-  YOUR Agent ID: {agent_id}
-  YOUR Job ID: {job_id}
-  Run ID: {run_id}
-  Project ID: none (project-less)
-
-MCP CONNECTION:
-  Server URL: {mcp_url}
-{tool_prefix_line}
-
-{toolsearch_bootstrap}START NOW:
-1. Verify MCP: {health_check_call}
-   -> Expected: {{"status": "healthy"}} - If failed, STOP and report error
-{fetch_line}
-{protocol_note}
-"""
-
-
 @router.get("/chain-staging/{run_id}", response_model=ChainPromptResponse)
 async def get_chain_staging_prompt(
     run_id: str,
@@ -826,5 +745,80 @@ async def get_chain_implementation_prompt(
         run_id=run_id,
         head_project_id=head_pid,
         orchestrator_job_id=conductor_job_id,
+        prompt=prompt_text,
+    )
+
+
+@router.get("/chain-member/{project_id}", response_model=ChainMemberPromptResponse)
+async def get_chain_member_prompt(
+    project_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> ChainMemberPromptResponse:
+    """Return the orchestrator prompt for ONE project in a linked chain.
+
+    A chain runs one project at a time, so each member starts from its own play
+    button exactly the way a single project does. This is the prompt that button
+    copies: the member's own orchestrator identity on the shared thin bootstrap,
+    which stages this project, implements it, and stops at close-out. The next
+    member's button unlocks once this one has closed out.
+
+    Raises 404 when the project is not found, is not a member of an active chain,
+    or has no orchestrator of its own yet.
+    """
+    tenant_key = current_user.tenant_key
+
+    project = (
+        await db.execute(select(Project).where(Project.id == project_id, Project.tenant_key == tenant_key))
+    ).scalar_one_or_none()
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Project {project_id} not found or not accessible.",
+        )
+
+    run = await SequenceRunService(
+        db_manager=None, tenant_manager=TenantManager(), session=db
+    ).find_active_run_for_project(project_id=project_id, tenant_key=tenant_key)
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This project is not a member of an active chain. Use the project's own staging prompt.",
+        )
+
+    execution = await ProjectLifecycleRepository().find_existing_orchestrator(db, tenant_key, project_id)
+    if execution is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This chain member has no orchestrator yet. Stage the chain first.",
+        )
+
+    run_mode = effective_execution_mode(project.execution_mode, run.get("execution_mode"))
+    harness_is_claude = effective_harness(run_mode) == HARNESS_CLAUDE_CODE or run_mode == "multi_terminal"
+
+    prompt_text = _build_conductor_bootstrap(
+        identity={
+            "agent_id": str(execution.agent_id),
+            "job_id": str(execution.job_id),
+            "run_id": run["id"],
+            "project_id": project_id,
+        },
+        mcp_url=_conductor_mcp_url(),
+        phase=chain_member_phase(project),
+        harness_is_claude=harness_is_claude,
+    )
+
+    logger.info(
+        "[CHAIN MEMBER PROMPT] Generated for project=%s, run=%s, job=%s, user=%s",
+        sanitize(project_id),
+        sanitize(run["id"]),
+        sanitize(str(execution.job_id)),
+        sanitize(current_user.username),
+    )
+
+    return ChainMemberPromptResponse(
+        run_id=run["id"],
+        project_id=project_id,
+        orchestrator_job_id=str(execution.job_id),
         prompt=prompt_text,
     )

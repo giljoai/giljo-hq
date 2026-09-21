@@ -612,7 +612,7 @@ async def update_project_mission(
         "'unstage' instead). "
         "`mode` is ignored for every action other than the default 'stage'."
     ),
-    annotations=_tool_hints("stage_project"),
+    annotations=_tool_hints("stage_project", destructive=True),
 )
 async def stage_project(
     project_id: str,

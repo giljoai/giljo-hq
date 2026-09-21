@@ -62,6 +62,7 @@ import { useHubNotifications } from '@/composables/useHubNotifications'
 import { useBannerPopoutLifecycle } from '@/composables/useBannerPopoutLifecycle'
 import { useActiveProductReconciliation } from '@/composables/useActiveProductReconciliation'
 import { withProductActivityBadges } from '@/composables/useProductTabBadges'
+import { useProductTabNavigation } from '@/composables/useProductTabNavigation'
 import { useProductActivityStore } from '@/stores/productActivityStore'
 import StarField from '@/components/StarField.vue'
 import NavigationDrawer from '@/components/navigation/NavigationDrawer.vue'
@@ -86,6 +87,7 @@ const router = useRouter()
 const userStore = useUserStore()
 const productStore = useProductStore()
 const productActivityStore = useProductActivityStore()
+const productTabNavigation = useProductTabNavigation()
 const projectStatusesStore = useProjectStatusesStore()
 const taskStatusesStore = useTaskStatusesStore()
 const wsStore = useWebSocketStore()
@@ -126,8 +128,7 @@ const tabsWithBadges = computed(() =>
 )
 
 function onProductTabSelect(productId) {
-  productStore.switchTab(productId)
-  productActivityStore.clearActivity(productId)
+  productTabNavigation.selectTab(productId)
 }
 
 function onProductTabClose(productId) {

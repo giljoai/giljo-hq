@@ -44,3 +44,30 @@ async def filter_runs_with_live_members(
     }
 
     return [run for run in runs if any(pid in live_project_ids for pid in _run_member_ids(run))]
+
+
+async def filter_runs_by_product(
+    *,
+    session: AsyncSession,
+    runs: list[SequenceRun],
+    tenant_key: str,
+    product_id: str,
+) -> list[SequenceRun]:
+    member_ids: set[str] = set()
+    for run in runs:
+        member_ids.update(_run_member_ids(run))
+
+    if not member_ids:
+        return []
+
+    rows = await session.execute(
+        select(Project.id).where(
+            Project.tenant_key == tenant_key,
+            Project.product_id == product_id,
+            Project.deleted_at.is_(None),
+            Project.id.in_(member_ids),
+        )
+    )
+    in_product: set[str] = {str(pid) for (pid,) in rows.all()}
+
+    return [run for run in runs if any(pid in in_product for pid in _run_member_ids(run))]

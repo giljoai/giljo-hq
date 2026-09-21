@@ -218,6 +218,29 @@ describe('AgentRow — play button visibility', () => {
     const btn = wrapper.find('.play-circle-btn')
     expect(btn.classes()).toContain('play-btn-faded')
   })
+
+  it('defaults the play tooltip to the solo wording', async () => {
+    const wrapper = await mountRow({
+      agent: makeAgent({ status: 'waiting' }),
+      now: NOW_MS,
+      shouldShowCopy: true,
+      playFaded: false,
+    })
+    const tip = wrapper.find('.play-cell .v-tooltip')
+    expect(tip.attributes('data-tooltip-text')).toBe('Copy prompt')
+  })
+
+  it('renders the supplied play tooltip (chain member waiting its turn)', async () => {
+    const wrapper = await mountRow({
+      agent: makeAgent({ status: 'waiting' }),
+      now: NOW_MS,
+      shouldShowCopy: true,
+      playFaded: true,
+      playTooltip: 'Starts after FE-9640 closes out',
+    })
+    const tip = wrapper.find('.play-cell .v-tooltip')
+    expect(tip.attributes('data-tooltip-text')).toBe('Starts after FE-9640 closes out')
+  })
 })
 
 

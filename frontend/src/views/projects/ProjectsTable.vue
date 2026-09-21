@@ -133,29 +133,11 @@
                 </template>
               </v-tooltip>
             </template>
-            <template v-else-if="inChainIds.includes(item.id)">
-              <span class="status-full d-flex align-center gap-1">
-                <StatusBadge :status="normalizeStatus(item.status)" />
-                <span
-                  class="in-chain-pill"
-                  data-testid="project-in-chain-pill"
-                >In chain</span>
-              </span>
-              <v-tooltip :text="`${normalizeStatus(item.status)} (in chain)`">
-                <template #activator="{ props: ttProps }">
-                  <span
-                    v-bind="ttProps"
-                    class="status-dot"
-                    :style="{ backgroundColor: statusDotColor(normalizeStatus(item.status)) }"
-                  >{{ normalizeStatus(item.status).charAt(0).toUpperCase() }}</span>
-                </template>
-              </v-tooltip>
-            </template>
             <template v-else>
               <span class="status-full">
                 <StatusBadge :status="normalizeStatus(item.status)" />
               </span>
-              <v-tooltip :text="normalizeStatus(item.status)">
+              <v-tooltip :text="statusTooltip(item)">
                 <template #activator="{ props: ttProps }">
                   <span
                     v-bind="ttProps"
@@ -421,6 +403,11 @@ const isProjectStaged = (project) =>
 
 function normalizeStatus(status) {
   return status || 'inactive'
+}
+
+function statusTooltip(item) {
+  const status = normalizeStatus(item.status)
+  return props.inChainIds.includes(item.id) ? `${status} (in chain)` : status
 }
 
 const statusActionDefs = {

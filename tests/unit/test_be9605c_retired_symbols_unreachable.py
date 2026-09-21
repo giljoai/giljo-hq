@@ -48,8 +48,20 @@ _RETIRED = (
     "build_agent_install_block",
 )
 
-_COLUMN_ONLY = ("last_exported_at", "user_managed_export")
-_COLUMN_ALLOWED = ("src/giljo_mcp/models/templates.py", "src/giljo_mcp/models/product_agent_assignment.py")
+_DROPPED_COLUMNS = ("last_exported_at", "user_managed_export")
+
+_MIGRATION_ALLOWED = {
+    "migrations/versions/baseline_v37_unified.py",
+    "migrations/versions/ce_0081_download_tokens_staged_at.py",
+    "migrations/versions/ce_0094_per_product_export_staleness.py",
+    "migrations/versions/ce_0105_db9607_drop_template_export_columns.py",
+}
+
+_MIGRATION_REQUIRED = {
+    "migrations/versions/baseline_v37_unified.py",
+    "migrations/versions/ce_0094_per_product_export_staleness.py",
+    "migrations/versions/ce_0105_db9607_drop_template_export_columns.py",
+}
 
 
 def _files():
@@ -92,9 +104,27 @@ def test_retired_symbols_have_zero_callers():
     assert hits == [], "retired install-path references survive:\n" + "\n".join(hits)
 
 
-def test_export_columns_only_live_on_the_orm_model():
-    hits = _hits(_COLUMN_ONLY, allowed=_COLUMN_ALLOWED)
-    assert hits == [], "export-tracking columns leaked past the ORM model:\n" + "\n".join(hits)
+def test_dropped_export_columns_have_zero_references():
+    hits = _hits(_DROPPED_COLUMNS)
+    assert hits == [], "dropped export-tracking columns still referenced:\n" + "\n".join(hits)
+
+
+def test_dropped_export_columns_appear_only_in_their_own_migration_history():
+    pattern = re.compile("|".join(re.escape(n) for n in _DROPPED_COLUMNS))
+    seen = set()
+    for path in (_ROOT / "migrations").rglob("*.py"):
+        rel = path.relative_to(_ROOT).as_posix()
+        if rel.startswith("migrations/archive/") or "__pycache__" in rel:
+            continue
+        if pattern.search(path.read_text(encoding="utf-8", errors="ignore")):
+            seen.add(rel)
+    assert seen <= _MIGRATION_ALLOWED, (
+        f"a migration outside the DB-9607 history names a dropped export column: {sorted(seen - _MIGRATION_ALLOWED)}"
+    )
+    assert seen >= _MIGRATION_REQUIRED, (
+        "a revision that must name these columns no longer does -- the drop or the "
+        f"history it rests on has gone missing: {sorted(_MIGRATION_REQUIRED - seen)}"
+    )
 
 
 @pytest.mark.parametrize(

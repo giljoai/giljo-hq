@@ -24,6 +24,7 @@ from giljo_mcp.repositories.project_repository import ProjectRepository
 from giljo_mcp.schemas.service_responses import ProjectData
 from giljo_mcp.services._session_helpers import optional_tenant_session
 from giljo_mcp.services.project_helpers import _build_ws_project_data, advance_chain_member_to_implementing
+from giljo_mcp.services.sequence_chain_context import chain_predecessor_open_error, resolve_chain_launch_gate
 from giljo_mcp.tenant import TenantManager
 from giljo_mcp.utils.log_sanitizer import sanitize
 
@@ -265,7 +266,18 @@ class ProjectStagingService:
             already_launched = project.implementation_launched_at is not None
 
             if not already_launched:
-                if project.staging_status != "staging_complete":
+                is_chain_member, blocking_predecessor = await resolve_chain_launch_gate(
+                    session,
+                    db_manager=self.db_manager,
+                    tenant_manager=self.tenant_manager,
+                    project_id=project_id,
+                    tenant_key=effective_tenant,
+                    test_session=self._test_session,
+                )
+                if blocking_predecessor is not None:
+                    raise chain_predecessor_open_error(project, blocking_predecessor)
+
+                if not is_chain_member and project.staging_status != "staging_complete":
                     raise ImplementationNotReadyError(
                         reason="staging_incomplete",
                         message=(
@@ -296,22 +308,14 @@ class ProjectStagingService:
                 launched_by or "unknown",
             )
 
-        if ws:
-            payload = {
-                "project_id": project_id,
-                "product_id": product_id,
-                "implementation_launched_at": launched_at_iso,
-            }
-            if origin is not None:
-                payload["source"] = origin
-            try:
-                await ws.broadcast_to_tenant(
-                    tenant_key=effective_tenant,
-                    event_type="project:implementation_launched",
-                    data=payload,
-                )
-            except Exception as ws_error:  # noqa: BLE001 — WS resilience
-                self._logger.warning("[LAUNCH_IMPL] WS broadcast failed: %s", ws_error)
+        await self._broadcast_launch_event(
+            ws,
+            tenant_key=effective_tenant,
+            project_id=project_id,
+            product_id=product_id,
+            launched_at_iso=launched_at_iso,
+            origin=origin,
+        )
 
         result: dict[str, Any] = {
             "success": True,
@@ -329,6 +333,34 @@ class ProjectStagingService:
                 "in the dashboard. Activation is a separate step by design."
             )
         return result
+
+    async def _broadcast_launch_event(
+        self,
+        ws: Any | None,
+        *,
+        tenant_key: str,
+        project_id: str,
+        product_id: str | None,
+        launched_at_iso: str,
+        origin: str | None,
+    ) -> None:
+        if not ws:
+            return
+        payload: dict[str, Any] = {
+            "project_id": project_id,
+            "product_id": product_id,
+            "implementation_launched_at": launched_at_iso,
+        }
+        if origin is not None:
+            payload["source"] = origin
+        try:
+            await ws.broadcast_to_tenant(
+                tenant_key=tenant_key,
+                event_type="project:implementation_launched",
+                data=payload,
+            )
+        except Exception as ws_error:  # noqa: BLE001 — WS resilience
+            self._logger.warning("[LAUNCH_IMPL] WS broadcast failed: %s", ws_error)
 
     async def _advance_chain_on_launch(
         self,

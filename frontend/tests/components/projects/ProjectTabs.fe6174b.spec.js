@@ -13,7 +13,7 @@
  * Mirrors the mock/mount scaffold of ProjectTabs.spec.js.
  * Edition scope: CE.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createVuetify } from 'vuetify'
@@ -47,16 +47,20 @@ vi.mock('@/stores/notifications', () => ({ useNotificationStore: () => ({ clearF
 // Chain verbs — mocked so we can assert they are reused, not reimplemented.
 const stageChainMock = vi.fn().mockResolvedValue({})
 const unstageChainMock = vi.fn().mockResolvedValue({})
-const copyImplPromptMock = vi.fn().mockResolvedValue(true)
+const launchChainHeadMock = vi.fn().mockResolvedValue(true)
 const patchRunMock = vi.fn().mockResolvedValue({})
 vi.mock('@/composables/useChainLifecycle', () => ({
   useChainLifecycle: () => ({ stageChain: stageChainMock, unstageChain: unstageChainMock }),
 }))
 vi.mock('@/composables/useChainImplementation', () => ({
-  useChainImplementation: () => ({ copyImplPrompt: copyImplPromptMock }),
+  useChainImplementation: () => ({ launchChainHead: launchChainHeadMock }),
 }))
+// FE-9632: the chain screen now asks the store whether the run is underway. Default
+// false -- every pre-existing case in this file describes a chain that has NOT
+// started, and they must keep passing untouched (the pre-run screen is unchanged).
+let mockRunIsRunning = false
 vi.mock('@/stores/sequenceRunStore', () => ({
-  useSequenceRunStore: () => ({ patchRun: patchRunMock }),
+  useSequenceRunStore: () => ({ patchRun: patchRunMock, isRunning: () => mockRunIsRunning }),
 }))
 
 vi.mock('@/services/api', () => {
@@ -112,7 +116,7 @@ function createWrapper(extraProps = {}) {
         LaunchTab: { name: 'LaunchTab', template: '<div class="launch-tab-stub" />', props: ['project'] },
         JobsTab: { name: 'JobsTab', template: '<div class="jobs-tab-stub" />', props: ['project', 'chainCtx'] },
         CloseoutModal: { name: 'CloseoutModal', template: '<div class="closeout-modal-stub" />', props: ['show', 'projectId', 'projectName', 'productId'], emits: ['close', 'closeout', 'continue'] },
-        ChainModeBar: { name: 'ChainModeBar', template: '<div class="chain-mode-bar-stub" />', props: ['counter'] },
+        ChainModeBar: { name: 'ChainModeBar', template: '<div class="chain-mode-bar-stub" />', props: ['counter', 'mode'] },
         ProjectTabStrip: { name: 'ProjectTabStrip', template: '<div class="tab-strip-stub" />', props: ['tabs', 'activePid'], emits: ['select'] },
         ChainMissionWindow: { name: 'ChainMissionWindow', template: '<div class="mission-window-stub" />', props: ['mission'] },
         'v-tooltip': { template: '<div><slot /><slot name="activator" /></div>' },
@@ -201,14 +205,14 @@ describe('ProjectTabs FE-6174b — chain variant (chainCtx present)', () => {
     expect(wrapper.find('[data-testid="implement-chain-btn"]').attributes('disabled')).toBeDefined()
   })
 
-  it('Implement reuses copyImplPrompt(runId)', async () => {
+  it('Implement reuses launchChainHead(headProjectId)', async () => {
     const wrapper = createWrapper({ chainCtx: makeChainCtx({ locked: true, run: { ...READY_RUN } }) })
     await flushPromises()
     await wrapper.find('[data-testid="implement-chain-btn"]').trigger('click')
     await flushPromises()
-    // FE-6174b: copyImplPrompt now takes (runId, headProjectId). headProjectId
-    // resolves to run.project_ids[0] ('project-123').
-    expect(copyImplPromptMock).toHaveBeenCalledWith('run-1', 'project-123')
+    // FE-9629: Implement opens the HEAD member's gate (run.project_ids[0] ->
+    // 'project-123') and navigates there; it no longer copies a conductor prompt.
+    expect(launchChainHeadMock).toHaveBeenCalledWith('project-123')
   })
 
   it('tab select navigates to that project carrying ?run', async () => {
@@ -252,5 +256,111 @@ describe('ProjectTabs FE-6174b — chain variant (chainCtx present)', () => {
       return showProp === true && !hasSuppressNav
     })
     expect(soloModal).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// FE-9632 — the RUNNING chain screen. Mounted, because the point of the change is
+// what is on screen: the staging affordances have to be GONE (v-if), not merely
+// disabled, and Stop chain has to be present on BOTH tabs.
+// ---------------------------------------------------------------------------
+
+describe('ProjectTabs FE-9632 — running chain', () => {
+  const RUNNING_RUN = {
+    id: 'run-1',
+    execution_mode: 'subagent',
+    locked: true,
+    status: 'running',
+    chain_mission: 'Overarching chain mission',
+    project_ids: ['project-123', 'p2'],
+    resolved_order: ['project-123', 'p2'],
+    project_statuses: { 'project-123': 'implementing', p2: 'pending' },
+  }
+
+  beforeEach(() => {
+    currentTestPinia = createPinia()
+    setActivePinia(currentTestPinia)
+    mockRoute.query = { run: 'run-1' }
+    vi.clearAllMocks()
+    mockSortedJobs.value = []
+    mockRunIsRunning = true
+  })
+
+  afterEach(() => {
+    mockRunIsRunning = false
+  })
+
+  it('shows Stop chain on the Staging tab', async () => {
+    const wrapper = createWrapper({ chainCtx: makeChainCtx({ run: RUNNING_RUN, locked: true }) })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="stop-chain-btn"]').exists()).toBe(true)
+  })
+
+  it('shows Stop chain on the Implementation tab too', async () => {
+    mockRoute.query = { run: 'run-1', tab: 'jobs' }
+    const wrapper = createWrapper({ chainCtx: makeChainCtx({ run: RUNNING_RUN, locked: true }) })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="jobs-tab"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="stop-chain-btn"]').exists()).toBe(true)
+  })
+
+  it('REMOVES Stage/Unstage Chain rather than disabling it', async () => {
+    const wrapper = createWrapper({ chainCtx: makeChainCtx({ run: RUNNING_RUN, locked: true }) })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="stage-chain-btn"]').exists()).toBe(false)
+  })
+
+  it('REMOVES Implement rather than disabling it', async () => {
+    const wrapper = createWrapper({ chainCtx: makeChainCtx({ run: RUNNING_RUN, locked: true }) })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="implement-chain-btn"]').exists()).toBe(false)
+  })
+
+  it('does not fall back to the SOLO staging buttons when the chain ones are hidden', async () => {
+    const wrapper = createWrapper({ chainCtx: makeChainCtx({ run: RUNNING_RUN, locked: true }) })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="stage-project-btn"]').exists()).toBe(false)
+  })
+
+  it('replaces the Execution Mode selector with the read-only readout', async () => {
+    const wrapper = createWrapper({ chainCtx: makeChainCtx({ run: RUNNING_RUN, locked: true }) })
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'ExecutionModeSelector' }).exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'ChainModeBar' }).props('mode')).toBe('subagent')
+  })
+
+  it('keeps the read-only mode readout on the Implementation tab (the bar renders on both)', async () => {
+    mockRoute.query = { run: 'run-1', tab: 'jobs' }
+    const wrapper = createWrapper({ chainCtx: makeChainCtx({ run: RUNNING_RUN, locked: true }) })
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'ChainModeBar' }).props('mode')).toBe('subagent')
+  })
+
+  it('passes no mode when the run carries no execution_mode (old runs render nothing)', async () => {
+    const wrapper = createWrapper({
+      chainCtx: makeChainCtx({ run: { ...RUNNING_RUN, execution_mode: null }, locked: true }),
+    })
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'ChainModeBar' }).props('mode')).toBe('')
+  })
+
+  it('passes no mode before the run starts, so the pre-run bar is unchanged', async () => {
+    mockRunIsRunning = false
+    const wrapper = createWrapper({ chainCtx: makeChainCtx() })
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'ChainModeBar' }).props('mode')).toBe('')
+  })
+
+  it('keeps the chain chrome (counter + tab strip) while running', async () => {
+    const wrapper = createWrapper({ chainCtx: makeChainCtx({ run: RUNNING_RUN, locked: true }) })
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'ChainModeBar' }).exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'ProjectTabStrip' }).exists()).toBe(true)
+  })
+
+  it('shows no Stop chain in SOLO mode even if the flag were somehow set', async () => {
+    const wrapper = createWrapper({ chainCtx: null })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="stop-chain-btn"]').exists()).toBe(false)
   })
 })

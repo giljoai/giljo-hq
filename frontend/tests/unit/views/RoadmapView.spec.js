@@ -138,6 +138,7 @@ import RoadmapView from '@/views/RoadmapView.vue'
 
 const stubs = {
   RoadmapCard: true,
+  RoadmapPromptActions: true,
   ProjectCreateEditDialog: true,
   TaskEditDialog: true,
   BaseDialog: true,
@@ -215,7 +216,7 @@ describe('RoadmapView.vue — reorder persistence', () => {
       { id: 'c', sort_order: 0 },
       { id: 'a', sort_order: 1 },
       { id: 'b', sort_order: 2 },
-    ])
+    ], 'prod-1')
     // optimistic local order updated
     expect(w.vm.items.map((i) => i.id)).toEqual(['c', 'a', 'b'])
   })
@@ -231,7 +232,7 @@ describe('RoadmapView.vue — reorder persistence', () => {
       { id: 'b', sort_order: 0 },
       { id: 'a', sort_order: 1 },
       { id: 'c', sort_order: 2 },
-    ])
+    ], 'prod-1')
   })
 
   it('demote moves an item to the bottom and persists', async () => {
@@ -241,7 +242,7 @@ describe('RoadmapView.vue — reorder persistence', () => {
       { id: 'b', sort_order: 0 },
       { id: 'c', sort_order: 1 },
       { id: 'a', sort_order: 2 },
-    ])
+    ], 'prod-1')
     expect(w.vm.items.map((i) => i.id)).toEqual(['b', 'c', 'a'])
   })
 
@@ -269,7 +270,7 @@ describe('RoadmapView.vue — remove from roadmap (FE-6022c-polish)', () => {
     const w = await mountView()
     await w.vm.removeItem({ id: 'b' })
     await flushPromises()
-    expect(mockRemoveItem).toHaveBeenCalledWith('b')
+    expect(mockRemoveItem).toHaveBeenCalledWith('b', 'prod-1')
     expect(w.vm.items.map((i) => i.id)).toEqual(['a', 'c']) // 'b' gone
   })
 
@@ -324,7 +325,7 @@ describe('RoadmapView.vue — 0006 auto-drop is server-side', () => {
     const w = await mountView()
     await w.vm.removeItem({ id: 'a' })
     await flushPromises()
-    expect(mockRemoveItem).toHaveBeenCalledWith('a')
+    expect(mockRemoveItem).toHaveBeenCalledWith('a', 'prod-1')
     expect(w.vm.items.map((i) => i.id)).toEqual(['b', 'c'])
   })
 })
@@ -374,7 +375,8 @@ describe('RoadmapView.vue — copy-prompt bridge (FE-6022c)', () => {
   it('shows "Create Roadmap" when empty and copies a build prompt w/ product + host (no longer sets the indicator)', async () => {
     mockGet.mockResolvedValue({ data: { product_id: 'prod-1', roadmap: null, items: [] } })
     const w = await mountView()
-    expect(w.text()).toContain('Create Roadmap')
+    // FE-9617: the Create/Refresh label lives in the toolbar's split button now.
+    expect(w.findComponent({ name: 'RoadmapPromptActions' }).props('isEmpty')).toBe(true)
 
     await w.vm.copyRoadmapPrompt()
     expect(mockWriteText).toHaveBeenCalledTimes(1)
@@ -391,7 +393,7 @@ describe('RoadmapView.vue — copy-prompt bridge (FE-6022c)', () => {
   it('shows "Refresh Roadmap" when items exist and copies a re-rank prompt (reads get_roadmap)', async () => {
     mockGet.mockResolvedValue({ data: { product_id: 'prod-1', roadmap: null, items: ITEMS.map((i) => ({ ...i })) } })
     const w = await mountView()
-    expect(w.text()).toContain('Refresh Roadmap')
+    expect(w.findComponent({ name: 'RoadmapPromptActions' }).props('isEmpty')).toBe(false)
 
     await w.vm.copyRoadmapPrompt()
     const prompt = mockWriteText.mock.calls[0][0]
@@ -448,7 +450,7 @@ describe('RoadmapView.vue — copy-prompt bridge (FE-6022c)', () => {
   })
 })
 
-describe('RoadmapView.vue — editable custom prompt (FE-6240)', () => {
+describe('RoadmapView.vue — one-off editable prompt, re-homed to the toolbar menu (FE-9617)', () => {
   let mockWriteText
   beforeEach(() => {
     vi.clearAllMocks()
@@ -458,26 +460,39 @@ describe('RoadmapView.vue — editable custom prompt (FE-6240)', () => {
     mockGet.mockResolvedValue({ data: { product_id: 'prod-1', roadmap: null, items: ITEMS.map((i) => ({ ...i })) } })
   })
 
-  it('is off by default; copy uses the generated prompt', async () => {
+  it('no longer renders the page-level "Add my own instructions" checkbox', async () => {
     const w = await mountView()
-    expect(w.vm.customPromptEnabled).toBe(false)
-    await w.vm.copyRoadmapPrompt()
-    expect(mockWriteText.mock.calls[0][0]).toContain('Re-rank the roadmap') // generated
+    expect(w.text()).not.toContain('Add my own instructions')
   })
 
-  it('enabling pre-fills the editable text with the generated prompt for the current mode', async () => {
+  it('hands the toolbar the generated prompt for the current mode', async () => {
     const w = await mountView()
-    w.vm.onCustomPromptToggle(true)
-    expect(w.vm.customPromptEnabled).toBe(true)
-    expect(w.vm.customPromptText).toContain('Re-rank the roadmap') // non-empty roadmap -> refresh
+    expect(w.vm.currentPromptText).toContain('Re-rank the roadmap') // non-empty roadmap -> refresh
+    const actions = w.findComponent({ name: 'RoadmapPromptActions' })
+    expect(actions.exists()).toBe(true)
+    expect(actions.props('promptText')).toContain('Re-rank the roadmap')
+    expect(actions.props('isEmpty')).toBe(false)
   })
 
-  it('when enabled, copy uses the user-edited text instead of the generated prompt', async () => {
+  it('a copy with no edited text copies the generated prompt', async () => {
     const w = await mountView()
-    w.vm.onCustomPromptToggle(true)
-    w.vm.customPromptText = 'work on the UI first, then the database'
-    await w.vm.copyRoadmapPrompt()
+    w.findComponent({ name: 'RoadmapPromptActions' }).vm.$emit('copy', undefined)
+    await flushPromises()
+    expect(mockWriteText.mock.calls[0][0]).toContain('Re-rank the roadmap')
+  })
+
+  it('a copy carrying edited text copies that text through the SAME clipboard path', async () => {
+    const w = await mountView()
+    w.findComponent({ name: 'RoadmapPromptActions' }).vm.$emit('copy', 'work on the UI first, then the database')
+    await flushPromises()
     expect(mockWriteText).toHaveBeenCalledWith('work on the UI first, then the database')
+    expect(showToastSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'success' }))
+  })
+
+  it('a click event argument is not mistaken for edited prompt text', async () => {
+    const w = await mountView()
+    await w.vm.copyRoadmapPrompt(new MouseEvent('click'))
+    expect(mockWriteText.mock.calls[0][0]).toContain('Re-rank the roadmap')
   })
 })
 

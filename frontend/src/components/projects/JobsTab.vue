@@ -28,6 +28,7 @@
             :is-subagent-mode="isSubagentMode"
             :should-show-copy="shouldShowCopyButton(agent)"
             :play-faded="isPlayButtonFaded(agent)"
+            :play-tooltip="playButtonTooltip(agent)"
             @play="handlePlay"
             @reactivate-play="reactivatePlay"
             @messages="(agent) => handleMessages(agent, projectId)"
@@ -134,12 +135,14 @@ const {
 const {
   shouldShowCopyButton,
   isPlayButtonFaded,
+  playButtonTooltip,
   reactivatePlay,
   handlePlay,
 } = usePlayButton(
   computed(() => props.project),
   (pid) => projectStateStore.getProjectState(pid),
-  clipboardCopy
+  clipboardCopy,
+  computed(() => props.chainCtx)
 )
 
 const isSubagentMode = computed(() => {

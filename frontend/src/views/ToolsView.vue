@@ -57,21 +57,6 @@
       </v-window-item>
 
       <v-window-item value="agents">
-        <div class="tab-header mb-4 d-flex align-center">
-          <h2 class="text-title-large">Agent Behaviour Settings</h2>
-          <v-tooltip location="bottom" max-width="360">
-            <template #activator="{ props: behaviourTipProps }">
-              <v-icon v-bind="behaviourTipProps" size="small" class="ml-2" color="medium-emphasis"
-                >mdi-help-circle-outline</v-icon
-              >
-            </template>
-            <span>Settings that modify how agents operate in the application</span>
-          </v-tooltip>
-        </div>
-        <ExecutionModeDefaultSelect />
-        <AgentTimingSettings class="mb-4" />
-        <OrchestrationToggles class="mb-6" />
-
         <TemplateManager />
       </v-window-item>
 
@@ -240,13 +225,10 @@ import setupService from '@/services/setupService'
 import { isCeModeValue } from '@/composables/useGiljoMode'
 import CertTrustModal from '@/components/setup/CertTrustModal.vue'
 import { recordCertTrustDismissal } from '@/utils/certTrustPreference'
-import AgentTimingSettings from '@/components/settings/AgentTimingSettings.vue'
 import BannerPreferencesCard from '@/components/settings/BannerPreferencesCard.vue'
 import BellPreferencesCard from '@/components/settings/BellPreferencesCard.vue'
 import PopoutPreferencesCard from '@/components/settings/PopoutPreferencesCard.vue'
 import ToastPreferencesCard from '@/components/settings/ToastPreferencesCard.vue'
-import ExecutionModeDefaultSelect from '@/components/settings/ExecutionModeDefaultSelect.vue'
-import OrchestrationToggles from '@/components/templates/OrchestrationToggles.vue'
 const router = useRouter()
 
 const { on, off } = useWebSocketStore()
@@ -550,6 +532,12 @@ function handleGitIntegrationUpdate(data) {
 
 .pill-tabs-content {
   padding: 16px 0;
+}
+
+/* FE-9616: sticky toolbar. Pinned by
+   ToolsView.fe9616.spec.js -- do not remove. */
+.pill-tabs-content :deep(.v-window) {
+  overflow: visible;
 }
 
 /* Credentials section -- compact API key manager folded under Connect tab */

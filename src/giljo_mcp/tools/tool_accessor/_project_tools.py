@@ -47,12 +47,35 @@ _STAGING_STOP_INSTRUCTION = (
 )
 
 _STAGING_CHAIN_CONTINUE_INSTRUCTION = (
-    "STAGING COMPLETE — chain mode. There is NO per-project human Implement gate in a "
-    "chain; the conductor already released you. Continue to implementation now: call "
-    "get_job_mission ONCE — it returns your implementation protocol and flips you to "
-    "working. Do NOT wait for a human, do NOT return to the dashboard, do NOT sleep-poll "
-    "a gate."
+    "chain mode: there is NO per-project human Implement gate in a chain; the conductor "
+    "already released you. Continue to implementation: call get_job_mission ONCE — it "
+    "returns your implementation protocol and flips you to working. Do NOT wait for a "
+    "human, do NOT return to the dashboard, do NOT sleep-poll a gate."
 )
+
+_STAGING_START_PHASES = (
+    "Project ready for staging. Follow these phases in order: "
+    "(1) call health_check(); stop and report if it fails. "
+    '(2) call get_staging_instructions(job_id="{job_id}"). '
+    "(3) follow the returned staging protocol to prepare and save the mission, execution "
+    "plan and worker assignments. Do NOT begin implementation. "
+    '(4) when all staging requirements are satisfied, call complete_job(job_id="{job_id}") '
+    "to mark staging complete. "
+    '(5) when the server confirms phase="staging_end", {phase_five} '
+    "This response starts staging; it does not mean staging is complete."
+)
+
+_STAGING_PHASE_FIVE_SOLO = (
+    "STOP: present the staged plan and wait for the user's explicit approval to implement "
+    "(dashboard Implement, or launch_implementation where enabled)."
+)
+
+
+def _staging_start_instruction(job_id: str, *, is_chain_member: bool) -> str:
+    return _STAGING_START_PHASES.format(
+        job_id=job_id,
+        phase_five=_STAGING_CHAIN_CONTINUE_INSTRUCTION if is_chain_member else _STAGING_PHASE_FIVE_SOLO,
+    )
 
 
 class ProjectToolsMixin:
@@ -135,13 +158,13 @@ class ProjectToolsMixin:
             product_id=result.get("product_id"),
         )
 
-        why = _STAGING_CHAIN_CONTINUE_INSTRUCTION if is_chain_member else _STAGING_STOP_INSTRUCTION
+        why = _staging_start_instruction(str(result.get("orchestrator_id", "")), is_chain_member=is_chain_member)
         return {
             "status": "staged",
             "mode": mode,
             "execution_mode": execution_mode,
             **result,
-            "next_action": build_next_action(why=why),
+            "next_action": build_next_action(tool="health_check", why=why),
         }
 
     async def _resolve_stage_mode_default(self, tenant_key: str) -> str:
@@ -254,6 +277,7 @@ class ProjectToolsMixin:
         if mission is not None and mission.strip():
             await self.update_project_mission(project_id, mission)
 
+        from giljo_mcp.exceptions import ImplementationNotReadyError
         from giljo_mcp.services.project_staging_service import ProjectStagingService
 
         staging_service = ProjectStagingService(
@@ -262,12 +286,15 @@ class ProjectToolsMixin:
             test_session=self._test_session,
             websocket_manager=self._websocket_manager,
         )
-        result = await staging_service.launch_implementation(
-            project_id=project_id,
-            tenant_key=tenant_key,
-            launched_by=user_id,
-            origin="mcp",
-        )
+        try:
+            result = await staging_service.launch_implementation(
+                project_id=project_id,
+                tenant_key=tenant_key,
+                launched_by=user_id,
+                origin="mcp",
+            )
+        except ImplementationNotReadyError as e:
+            return self._implementation_gate_error(e, project_id)
         return {
             "status": "launched",
             **result,
@@ -286,11 +313,20 @@ class ProjectToolsMixin:
                     "condition and the suggested recovery step."
                 ),
             ),
+            "chain_predecessor_open": build_next_action(
+                tool="get_workflow_status",
+                why=(
+                    "Linked projects run ONE AT A TIME. The project before this one has not closed "
+                    "out yet, so this one cannot start. Finish that project and call "
+                    "write_project_closeout on it; this project's launch (and its play button in "
+                    "the dashboard) unlocks the moment that close-out is recorded."
+                ),
+            ),
             "not_launched": build_next_action(
                 why=(
-                    "The human Implement gate has not been pressed. Ask the user to open this project in "
-                    "the GiljoAI dashboard and click Implement, then call get_implementation_prompt again. This "
-                    "gate is intentional and CANNOT be bypassed by the agent. If you are unsure why the "
+                    f"{_STAGING_STOP_INSTRUCTION} Ask the user to open this project in "
+                    "the GiljoAI dashboard and click Implement, then call get_implementation_prompt again. "
+                    "If you are unsure why the "
                     "gate has not cleared, call diagnose_project_state(project_id) (read-only) to see the "
                     "stuck condition and the suggested recovery step."
                 )

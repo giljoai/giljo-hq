@@ -7,17 +7,22 @@
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy import delete as sql_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from giljo_mcp.database import tenant_isolation_bypass
-from giljo_mcp.models import Product
+from giljo_mcp.models import Product, Project, Task
+from giljo_mcp.models.agent_identity import AgentExecution, AgentJob
+from giljo_mcp.models.config import Configuration
 from giljo_mcp.models.products import (
     ProductArchitecture,
     ProductTechStack,
     ProductTestConfig,
 )
+from giljo_mcp.models.tasks import Message
+from giljo_mcp.models.user_approval import UserApproval
 
 
 logger = logging.getLogger(__name__)
@@ -224,6 +229,65 @@ class ProductRepository:
 
     async def add(self, session: AsyncSession, product: Product) -> None:
         session.add(product)
+
+    async def delete_blocking_dependants(
+        self, session: AsyncSession, tenant_key: str, product_id: str
+    ) -> dict[str, int]:
+        project_ids = (
+            select(Project.id)
+            .where(and_(Project.product_id == product_id, Project.tenant_key == tenant_key))
+            .scalar_subquery()
+        )
+        job_ids = (
+            select(AgentJob.job_id)
+            .where(and_(AgentJob.project_id.in_(project_ids), AgentJob.tenant_key == tenant_key))
+            .scalar_subquery()
+        )
+
+        counts: dict[str, int] = {}
+        for label, stmt in (
+            (
+                "user_approvals",
+                sql_delete(UserApproval).where(
+                    and_(UserApproval.project_id.in_(project_ids), UserApproval.tenant_key == tenant_key)
+                ),
+            ),
+            (
+                "agent_executions",
+                sql_delete(AgentExecution).where(
+                    and_(AgentExecution.job_id.in_(job_ids), AgentExecution.tenant_key == tenant_key)
+                ),
+            ),
+            (
+                "agent_jobs",
+                sql_delete(AgentJob).where(
+                    and_(AgentJob.project_id.in_(project_ids), AgentJob.tenant_key == tenant_key)
+                ),
+            ),
+            (
+                "configurations",
+                sql_delete(Configuration).where(
+                    and_(Configuration.project_id.in_(project_ids), Configuration.tenant_key == tenant_key)
+                ),
+            ),
+            (
+                "messages",
+                sql_delete(Message).where(and_(Message.project_id.in_(project_ids), Message.tenant_key == tenant_key)),
+            ),
+            (
+                "tasks",
+                sql_delete(Task).where(
+                    and_(
+                        or_(Task.project_id.in_(project_ids), Task.converted_to_project_id.in_(project_ids)),
+                        Task.tenant_key == tenant_key,
+                    )
+                ),
+            ),
+        ):
+            result = await session.execute(stmt)
+            counts[label] = result.rowcount or 0
+
+        return counts
 
     async def delete_hard(self, session: AsyncSession, product: Product) -> None:
         await session.delete(product)

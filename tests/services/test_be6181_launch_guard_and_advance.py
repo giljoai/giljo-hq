@@ -160,7 +160,7 @@ async def test_launch_advances_chain_member_forward(db_session: AsyncSession) ->
     assert run["project_statuses"][p0] == "completed"
 
 
-async def test_launch_advance_blocked_without_prior_closeout(db_session: AsyncSession) -> None:
+async def test_launch_refused_without_prior_closeout(db_session: AsyncSession) -> None:
     tenant = TenantManager.generate_tenant_key()
     p0 = await _seed_project(db_session, tenant, staging_status="staging_complete")
     p1 = await _seed_project(db_session, tenant, staging_status="staging_complete")
@@ -172,12 +172,14 @@ async def test_launch_advance_blocked_without_prior_closeout(db_session: AsyncSe
     )
 
     svc = _staging_svc(db_session)
-    await svc.launch_implementation(project_id=p1, tenant_key=tenant)
+    with pytest.raises(ImplementationNotReadyError) as exc_info:
+        await svc.launch_implementation(project_id=p1, tenant_key=tenant)
+    assert exc_info.value.reason == "chain_predecessor_open"
+    assert exc_info.value.context["predecessor_project_id"] == p0
 
     run_svc = SequenceRunService(db_manager=None, tenant_manager=TenantManager(), session=db_session)
     run = await run_svc.get(run_id=run_id, tenant_key=tenant)
     assert run["current_index"] == 0
-    assert run["project_statuses"][p1] == "planning"
 
 
 async def test_launch_advance_is_forward_only(db_session: AsyncSession) -> None:

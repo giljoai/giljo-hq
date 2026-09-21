@@ -8,5 +8,6 @@ export const promptsApi = {
   termination: (projectId) => apiClient.get(`/api/v1/prompts/termination/${projectId}`),
   chainStaging: (runId) => apiClient.get(`/api/v1/prompts/chain-staging/${runId}`),
   chainImplementation: (runId) => apiClient.get(`/api/v1/prompts/chain-implementation/${runId}`),
+  chainMember: (projectId) => apiClient.get(`/api/v1/prompts/chain-member/${projectId}`),
   buildMasterPrompt: (body) => apiClient.post('/api/v1/prompts/master', body),
 }

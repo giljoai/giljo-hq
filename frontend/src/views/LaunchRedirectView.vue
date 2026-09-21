@@ -4,7 +4,7 @@
   </div>
 
   <div
-    v-else-if="!activeProject"
+    v-else-if="!redirectTarget"
     class="d-flex flex-column justify-center align-center"
     style="height: 100vh"
   >
@@ -19,35 +19,58 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useProjectStore } from '@/stores/projects'
+import { useProductStore } from '@/stores/products'
+import { useSequenceRunStore } from '@/stores/sequenceRunStore'
+import { resolveJobsNavPath, jobsNavPathToLocation } from '@/utils/jobsNavTarget'
 
 const router = useRouter()
 const loading = ref(true)
 const projectStore = useProjectStore()
+const productStore = useProductStore()
+const sequenceRunStore = useSequenceRunStore()
+
+const scopedFetchSettled = ref(false)
 
 const activeProjects = computed(() => projectStore.activeProjectsMeta)
 const activeProject = computed(() => activeProjects.value[0] ?? null)
+const activeRun = computed(() => sequenceRunStore.activeRuns[0] ?? sequenceRunStore.reviewPendingRun ?? null)
+
+const redirectTarget = computed(() =>
+  jobsNavPathToLocation(
+    resolveJobsNavPath({
+      activeProject: activeProject.value,
+      activeProjects: activeProjects.value,
+      activeRun: activeRun.value,
+    }),
+  ),
+)
 
 watch(
-  activeProjects,
-  (projects) => {
-    if (projects.length > 1) {
-      router.replace({ name: 'JobsViewport' })
-    } else if (projects.length === 1) {
-      router.replace({
-        name: 'ProjectLaunch',
-        params: { projectId: projects[0].id },
-        query: { via: 'jobs' },
-      })
-    }
+  [redirectTarget, scopedFetchSettled],
+  ([target, settled]) => {
+    if (!settled || !target) return
+    router.replace(target)
   },
   { immediate: true },
 )
 
-onMounted(async () => {
+async function loadForViewedProduct() {
   try {
-    await projectStore.fetchActiveProject()
+    await Promise.allSettled([projectStore.fetchActiveProject(), sequenceRunStore.hydrate()])
   } finally {
+    scopedFetchSettled.value = true
     loading.value = false
   }
-})
+}
+
+watch(
+  () => productStore.effectiveProductId,
+  () => {
+    scopedFetchSettled.value = false
+    loading.value = true
+    loadForViewedProduct()
+  },
+)
+
+onMounted(loadForViewedProduct)
 </script>

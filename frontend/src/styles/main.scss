@@ -522,6 +522,65 @@ body {
   min-height: 52px;
 }
 
+// ── Settings Row (name + help + right-aligned control) ─────────────────
+// FE-9616: the one row pattern the Agent behaviour dialog is built from. Global
+// rather than scoped because the five rows are rendered by three different
+// components (execution-mode default, agent timing, orchestration toggles) and
+// scoped CSS does not cross a component boundary -- the same reason .dlg-header
+// lives here.
+.setting-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 14px 0;
+  border-top: 1px solid var(--smooth-border-color, rgba(255, 255, 255, 0.10));
+
+  &:first-child {
+    border-top: 0;
+  }
+}
+
+.setting-row-text {
+  min-width: 0;
+}
+
+.setting-row-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+
+.setting-row-info {
+  color: var(--text-muted);
+  cursor: help;
+}
+
+.setting-row-help {
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  margin-top: 2px;
+}
+
+.setting-row-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.setting-row-unit {
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
 // ── Agent Badge (initials square) ──────────────────────────────────────
 // Used in agent-specific dialog headers (job, mission, details, audit)
 .agent-badge-sq {

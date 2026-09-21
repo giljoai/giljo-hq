@@ -1,41 +1,55 @@
 <template>
-  <div>
-    <div class="hitl-toggle-bar">
-      <v-switch
-        v-model="closeoutModeHitl"
-        color="primary"
-        density="compact"
-        hide-details
-        aria-label="Require user approval before project closeout"
-        data-testid="closeout-mode-toggle"
-        @update:model-value="toggleCloseoutMode"
-      />
-      <span class="hitl-toggle-label">Require approval before closeout</span>
-      <v-tooltip location="bottom" max-width="340">
-        <template #activator="{ props }">
-          <v-icon v-bind="props" size="16" class="hitl-toggle-info">mdi-information-outline</v-icon>
-        </template>
-        When enabled, the orchestrator pauses for your review before closing a project — but only if there are deferred findings to review. Clean closeouts proceed automatically.
-      </v-tooltip>
+  <div class="setting-rows">
+    <div class="setting-row">
+      <div class="setting-row-text">
+        <div class="setting-row-name">
+          Require approval before closeout
+          <v-tooltip location="bottom" max-width="340">
+            <template #activator="{ props }">
+              <v-icon v-bind="props" size="15" class="setting-row-info">mdi-information-outline</v-icon>
+            </template>
+            When enabled, the orchestrator pauses for your review before closing a project — but only if there are deferred findings to review. Clean closeouts proceed automatically.
+          </v-tooltip>
+        </div>
+        <div class="setting-row-help">A project waits for your OK before it closes.</div>
+      </div>
+      <div class="setting-row-control">
+        <v-switch
+          v-model="closeoutModeHitl"
+          color="primary"
+          density="compact"
+          hide-details
+          aria-label="Require user approval before project closeout"
+          data-testid="closeout-mode-toggle"
+          @update:model-value="toggleCloseoutMode"
+        />
+      </div>
     </div>
 
-    <div class="hitl-toggle-bar">
-      <v-switch
-        v-model="allowHeadless"
-        color="primary"
-        density="compact"
-        hide-details
-        aria-label="Allow a headless CLI agent to self-advance from staging to implementation"
-        data-testid="headless-launch-toggle"
-        @update:model-value="toggleHeadless"
-      />
-      <span class="hitl-toggle-label">Allow headless CLI self-advance (skip the Implement click)</span>
-      <v-tooltip location="bottom" max-width="360">
-        <template #activator="{ props }">
-          <v-icon v-bind="props" size="16" class="hitl-toggle-info">mdi-information-outline</v-icon>
-        </template>
-        This governs in-application, server-mediated launches only — the MCP launch_implementation tool that OAuth agent sessions use to advance a project from staging to building. On (the default) lets a trusted CLI/OAuth agent self-advance without a click. Turn it off to keep a human in the loop: the server will then refuse to authorize that launch until you press Implement yourself; only turn it off if you want every launch gated on your own click. It does not gate direct CLI interaction — an agent that reads a project and simply runs it locally never asks the server, so this toggle cannot reach it. Note: HITL guarantees the server will not authorize implementation early, but it cannot stop a non-compliant local orchestrator from inlining its own mission into an in-process subagent and working off the books (an accepted residual of local execution).
-      </v-tooltip>
+    <div class="setting-row">
+      <div class="setting-row-text">
+        <div class="setting-row-name">
+          Allow headless CLI self-advance
+          <v-tooltip location="bottom" max-width="360">
+            <template #activator="{ props }">
+              <v-icon v-bind="props" size="15" class="setting-row-info">mdi-information-outline</v-icon>
+            </template>
+            This governs in-application, server-mediated launches only — the MCP launch_implementation tool that OAuth agent sessions use to advance a project from staging to building. On (the default) lets a trusted CLI/OAuth agent self-advance without a click. Turn it off to keep a human in the loop: the server will then refuse to authorize that launch until you press Implement yourself; only turn it off if you want every launch gated on your own click. It does not gate direct CLI interaction — an agent that reads a project and simply runs it locally never asks the server, so this toggle cannot reach it. Note: HITL guarantees the server will not authorize implementation early, but it cannot stop a non-compliant local orchestrator from inlining its own mission into an in-process subagent and working off the books (an accepted residual of local execution).
+          </v-tooltip>
+        </div>
+        <div class="setting-row-help">Your coding agent may skip the Implement click.</div>
+      </div>
+      <div class="setting-row-control">
+        <v-switch
+          v-model="allowHeadless"
+          color="primary"
+          density="compact"
+          hide-details
+          aria-label="Allow a headless CLI agent to self-advance from staging to implementation"
+          data-testid="headless-launch-toggle"
+          @update:model-value="toggleHeadless"
+        />
+      </div>
     </div>
   </div>
 </template>
@@ -121,32 +135,12 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
-/* HITL closeout toggle */
-.hitl-toggle-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  /* FE-9555: 10px, not 4px. Measured in the browser: the v-switch thumb's own
-     left edge sits 6px left of the track, so at 4px the OFF-state thumb rendered
-     2px OUTSIDE this row's box and was visibly clipped, and the whole control sat
-     6px left of the Execution mode select stacked above it. 10px puts the
-     leftmost painted pixel -- the OFF thumb -- exactly on that select's left
-     edge, so the group shares one left margin and nothing overflows. */
-  padding-left: 10px;
-}
-
-.hitl-toggle-label {
-  font-size: 0.875rem;
-  color: var(--text-muted);
-}
-
-.hitl-toggle-info {
-  color: var(--text-muted);
-  cursor: help;
-}
-
-.hitl-toggle-bar :deep(.v-switch .v-selection-control) {
+/* FE-9616: the row chrome (name, help, right-aligned control) is the shared
+   .setting-row pattern in main.scss. What stays here is what CANNOT live there:
+   scoped CSS does not cross a component boundary, so these switch colours must
+   travel with the markup -- the same boundary TemplatesTable.vue documents for
+   its row toggles. */
+.setting-row :deep(.v-switch .v-selection-control) {
   min-height: auto;
 }
 

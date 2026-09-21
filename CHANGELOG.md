@@ -2,6 +2,30 @@
 
 All notable changes to this project are recorded here. This changelog follows the [Keep a Changelog](https://keepachangelog.com/) convention — entries are grouped by change type (Added / Changed / Fixed / Removed / Security). Versions follow `MAJOR.MINOR.PATCH[.HOTFIX]` and tags live on the public repository (`giljoai/giljo-hq`).
 
+## [2.4.0] — 2026-09-21
+
+### Added
+
+- You can now stop a chain of projects that is already running, without losing the work already done. A project that already finished stays finished, the one that was underway is marked terminated with its agent history kept, and the projects the chain never reached go back to inactive so you can stage them again.
+- Chains running across several terminals can nudge each other through your coding tool's own messaging when it has one. The Message Hub stays the shared channel and the record for every run.
+
+### Changed
+
+- Chained projects now start one at a time from each project's own play button, the same way a single project does. The next project's button unlocks when the previous one closes out.
+- While a chain is running, its screen shows only the Staging and Implementation views, project cards open the work dashboard, and a Stop chain button ends the run cleanly.
+- The Agents tab is the agent list again. The five account-wide behaviour settings moved into a tidy Behaviour dialog on the list's own toolbar, with a small badge showing how many you have changed from their defaults. The toolbar now stays on screen while you scroll a long list, and everything still saves the moment you change it.
+- The Products and Roadmap toolbars are lighter. Adding a product and reopening deleted ones are single icons with a small count badge, and editing the roadmap prompt before you copy it is one click in the menu beside the Create and Refresh buttons.
+- When an account's access has lapsed, connected AI tools now see a plain access message instead of a subscription prompt. The dashboard still shows the full billing status.
+
+### Fixed
+
+- Switching product tabs now updates the page you are on. The Roadmap, the Jobs page and any open project all follow the product you are viewing, instead of carrying another product's data across.
+- Projects in a chain now show a single status badge. Chain membership stays visible in the tooltip and the Linked column.
+- Connecting Giljo HQ from ChatGPT no longer fails at the consent screen.
+- A connecting app that sends an oversized sign-in security code now gets a clear error instead of the connection failing unexpectedly.
+- Staging from your coding agent now gives the agent a clear step-by-step order, asks you how you want a chain to run and how you want to start it, and shows the stop-for-approval message when staging is actually complete.
+- Deleted products are now fully cleaned up after their retention period.
+
 ## [2.3.0] — 2026-09-16
 
 ### Added

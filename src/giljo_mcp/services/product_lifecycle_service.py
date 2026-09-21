@@ -278,6 +278,12 @@ class ProductLifecycleService:
 
         return len(crew)
 
+    async def _purge_one(self, session: AsyncSession, product: Product) -> None:
+        with tenant_session_context(session, product.tenant_key):
+            await self._repo.delete_blocking_dependants(session, product.tenant_key, product.id)
+            await self._repo.delete_hard(session, product)
+            await self._repo.flush(session)
+
     async def purge_product(self, product_id: str) -> dict:
         try:
             async with self._get_session() as session:
@@ -293,7 +299,7 @@ class ProductLifecycleService:
 
                 await self._trash_owned_templates(session, product_id, datetime.now(UTC))
 
-                await self._repo.delete_hard(session, product)
+                await self._purge_one(session, product)
                 await session.commit()
 
                 self._logger.info(f"Permanently deleted product {product_id} ({product_name})")
@@ -343,7 +349,7 @@ class ProductLifecycleService:
                     days_ago = (datetime.now(UTC) - product.deleted_at).days
                     purged_ids.append(str(product.id))
 
-                    await self._repo.delete_hard(session, product)
+                    await self._purge_one(session, product)
 
                     self._logger.info(
                         f"[Product Purge] Auto-purged expired product {product.id} (deleted {days_ago} days ago)"

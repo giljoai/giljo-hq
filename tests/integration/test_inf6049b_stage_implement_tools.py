@@ -346,7 +346,9 @@ async def test_stage_project_solo_next_action_is_stop_byte_identical(
 
     assert result.is_error is False, _error_text(result)
     why = _payload(result)["next_action"]["why"]
-    assert why == _STAGING_STOP_INSTRUCTION, "solo next_action must be byte-identical to the STOP instruction"
+    assert "Implement" in why, "solo next_action must still state the human Implement gate"
+    assert "wait for the user's explicit approval" in why, "solo must still stop for the human gate"
+    assert "get_job_mission" not in why, "the chain continue wording must never reach a solo project"
 
 
 async def test_stage_project_chain_member_continues_not_stop(lifecycle_mcp_client, db_session, primary_tenant_key):
@@ -360,7 +362,7 @@ async def test_stage_project_chain_member_continues_not_stop(lifecycle_mcp_clien
     assert result.is_error is False, _error_text(result)
     payload = _payload(result)
     why = payload["next_action"]["why"]
-    assert why == _STAGING_CHAIN_CONTINUE_INSTRUCTION
+    assert _STAGING_CHAIN_CONTINUE_INSTRUCTION in why
     assert _STAGING_STOP_INSTRUCTION not in why
     assert "STOP HERE" not in why
     assert "MANUALLY press Implement" not in why
@@ -827,3 +829,71 @@ async def test_check_implementation_allowed_not_launched():
 
 async def test_check_implementation_allowed_passes_when_both_set():
     ProjectStagingService.check_implementation_allowed(_GateProject("staging_complete", datetime.now(UTC)))
+
+
+
+
+async def test_be9622_stage_project_start_is_phased_not_a_stop(lifecycle_mcp_client, db_session, primary_tenant_key):
+    new_client, _switch = lifecycle_mcp_client
+    seeded = await _seed_product_project(db_session, primary_tenant_key)
+
+    async with new_client() as session:
+        result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
+
+    assert result.is_error is False, _error_text(result)
+    next_action = _payload(result)["next_action"]
+    assert next_action["tool"] == "health_check", (
+        f"the START response must point at the first phase, not nowhere: {next_action!r}"
+    )
+    why = next_action["why"]
+    assert not why.startswith("STAGING COMPLETE"), (
+        f"the response that STARTS staging must not announce staging is complete: {why!r}"
+    )
+    for phase_marker in ("(1)", "(2)", "(3)", "(4)", "(5)"):
+        assert phase_marker in why, f"phase {phase_marker} missing from the staging phases: {why!r}"
+    assert "get_staging_instructions" in why
+    assert "complete_job" in why
+    assert "does not mean staging is complete" in why
+
+
+async def test_be9622_chain_start_defers_get_job_mission_to_the_end(
+    lifecycle_mcp_client, db_session, primary_tenant_key
+):
+    new_client, _switch = lifecycle_mcp_client
+    seeded = await _seed_product_project(db_session, primary_tenant_key)
+    await _seed_active_chain_run(db_session, primary_tenant_key, seeded["project"].id)
+
+    async with new_client() as session:
+        result = await session.call_tool("stage_project", {"project_id": seeded["project"].id, "mode": "claude"})
+
+    assert result.is_error is False, _error_text(result)
+    next_action = _payload(result)["next_action"]
+    assert next_action["tool"] == "health_check"
+    why = next_action["why"]
+    assert not why.startswith("STAGING COMPLETE"), why
+    assert "get_job_mission" in why, "the chain continue instruction must survive, at the END"
+    assert why.index("get_job_mission") > why.index("(5)"), (
+        "get_job_mission must be reached only in the final phase, not before staging starts"
+    )
+    assert "MANUALLY press Implement" not in why
+
+
+async def test_be9622_implementation_gate_refusal_carries_the_stop_text(
+    lifecycle_mcp_client, db_session, primary_tenant_key
+):
+    new_client, _switch = lifecycle_mcp_client
+    seeded = await _seed_product_project(
+        db_session, primary_tenant_key, staging_status="staging_complete", launched=False
+    )
+    await _seed_orchestrator_and_agent(db_session, primary_tenant_key, seeded["project"])
+
+    async with new_client() as session:
+        result = await session.call_tool("get_implementation_prompt", {"project_id": seeded["project"].id})
+
+    assert result.is_error is False, _error_text(result)
+    payload = _payload(result)
+    assert payload["status"] == "gate_not_passed"
+    assert payload["reason"] == "not_launched"
+    assert _STAGING_STOP_INSTRUCTION in payload["next_action"]["why"], (
+        "the gate refusal must carry the STAGING COMPLETE -- STOP HERE text verbatim"
+    )

@@ -204,6 +204,7 @@ class AuthMiddleware:
             "/.well-known/oauth-authorization-server",
             "/.well-known/oauth-protected-resource",
             "/.well-known/mcp-server-info",
+            "/.well-known/openai-apps-challenge",
             "/.well-known/openid-configuration",
             "/api/version/",
         ]

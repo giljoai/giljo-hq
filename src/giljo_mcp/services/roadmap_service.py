@@ -98,6 +98,18 @@ class RoadmapService:
         )
         return str(product.id)
 
+    async def _resolve_product_for(
+        self, tenant_key: str, product_id: str | None, *, operation: str, action: str
+    ) -> str:
+        if product_id:
+            return await self._resolve_scoped_product_id(
+                tenant_key, product_id, operation=operation, action=action, write=False
+            )
+        resolved = await self._resolve_default_product_id(tenant_key)
+        if not resolved:
+            raise ResourceNotFoundError(message="No active product set.", context={"operation": operation})
+        return resolved
+
 
     async def _get_or_create_roadmap(self, session: AsyncSession, tenant_key: str, product_id: str) -> Roadmap:
         from giljo_mcp.models.base import generate_uuid
@@ -226,6 +238,7 @@ class RoadmapService:
         *,
         updates: Any,
         tenant_key: str | None = None,
+        product_id: str | None = None,
     ) -> dict[str, Any]:
         try:
             effective_tenant_key = tenant_key or (
@@ -236,9 +249,9 @@ class RoadmapService:
 
             normalized = validate_reorder(updates)
 
-            product_id = await self._resolve_default_product_id(effective_tenant_key)
-            if not product_id:
-                raise ResourceNotFoundError(message="No active product set.", context={"operation": "reorder_roadmap"})
+            product_id = await self._resolve_product_for(
+                effective_tenant_key, product_id, operation="reorder_roadmap", action="reordered"
+            )
 
             async with self._get_session(effective_tenant_key) as session:
                 roadmap_res = await session.execute(
@@ -337,6 +350,7 @@ class RoadmapService:
         *,
         item_id: str,
         tenant_key: str | None = None,
+        product_id: str | None = None,
     ) -> dict[str, Any]:
         try:
             effective_tenant_key = tenant_key or (
@@ -347,11 +361,9 @@ class RoadmapService:
             if not item_id:
                 raise ValidationError(message="item_id is required", context={"operation": "remove_roadmap_item"})
 
-            product_id = await self._resolve_default_product_id(effective_tenant_key)
-            if not product_id:
-                raise ResourceNotFoundError(
-                    message="No active product set.", context={"operation": "remove_roadmap_item"}
-                )
+            product_id = await self._resolve_product_for(
+                effective_tenant_key, product_id, operation="remove_roadmap_item", action="removed"
+            )
 
             async with self._get_session(effective_tenant_key) as session:
                 roadmap_res = await session.execute(
@@ -413,15 +425,9 @@ class RoadmapService:
             if not effective_tenant_key:
                 raise ValidationError(message="tenant_key is required", context={"operation": "get_roadmap"})
 
-            if product_id:
-                resolved_product_id = await self._resolve_scoped_product_id(
-                    effective_tenant_key, product_id, operation="get_roadmap", action="read", write=False
-                )
-            else:
-                resolved_product_id = await self._resolve_default_product_id(effective_tenant_key)
-                if not resolved_product_id:
-                    raise ResourceNotFoundError(message="No active product set.", context={"operation": "get_roadmap"})
-            product_id = resolved_product_id
+            product_id = await self._resolve_product_for(
+                effective_tenant_key, product_id, operation="get_roadmap", action="read"
+            )
 
             if emit_agent_active:
                 await self._broadcast_agent_active(effective_tenant_key, product_id)

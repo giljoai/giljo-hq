@@ -158,6 +158,7 @@
     "ce_0101_fe9530_comm_thread_project_tags",
     "ce_0102_be9540_sequence_run_reviewed_via",
     "ce_0103_be9605b_template_model_effort",
-    "ce_0104_be9610a_product_owned_agent_copies"
+    "ce_0104_be9610a_product_owned_agent_copies",
+    "ce_0105_db9607_drop_template_export_columns"
   ]
 }

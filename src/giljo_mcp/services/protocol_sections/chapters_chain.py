@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from giljo_mcp.platform_registry import Platform, stage_mode_token
 from giljo_mcp.prompts.launch_command_synth import render_suborch_spawn_command
-from giljo_mcp.services.protocol_sections.orchestrator_body import (
-    render_capability_ladder,
-    slice_chain_mission_for_position,
+from giljo_mcp.services.protocol_sections.chain_nudge import conductor_nudge
+from giljo_mcp.services.protocol_sections.chapters_chain_suborch import (  # noqa: F401  (re-export: every caller imports it from here)
+    _build_ch_sub_orchestrator,
+    _render_ch_sub_orchestrator,
 )
+from giljo_mcp.services.protocol_sections.orchestrator_body import render_capability_ladder
 
 
 _CH_BORDER = "════════════════════════════════════════════════════════════════════════════"
@@ -239,17 +241,18 @@ NOT call launch_implementation, do NOT spawn any sub-orchestrator, do NOT drive,
 do NOT re-call get_job_mission to start driving. There is NO per-project gate, but
 there IS this ONE gate and you never cross it yourself.
 
-You are cleared to proceed ONLY when the user gives an EXPLICIT GO: in the dashboard
-they press "Implement Chain"; headless they simply tell you to go / implement this
-chain in chat. An obedient conductor stays stopped here until then — do not
-self-advance. ONLY AFTER the user's GO do you proceed: a fresh conductor session
-drives the chain (CH_CHAIN_DRIVE), spawning each project's sub-orchestrator one at a
-time (each runs free; the conductor crosses nothing).
+There are TWO valid GO doors and the choice between them is the USER'S, not yours: run it here
+(they say go in chat) or from the dashboard (they press "Implement Chain"). So ASK THE USER which
+one they want when you report the staged plan, then WAIT — do not answer it for them and do not
+self-advance. ONLY AFTER the user's GO do you proceed: a fresh conductor session drives the chain
+(CH_CHAIN_DRIVE), spawning each project's sub-orchestrator one at a time (each runs free; the
+conductor crosses nothing).
 ────────────────────────────────────────────────────────────────────────────
 """
 
 
-def _chain_drive_step_a_preset(run_id: str, preset: Platform) -> str:
+def _chain_drive_step_a_preset(run_id: str, preset: Platform, nudge: str = "") -> str:
+    nudge_note = f"\n\n{nudge}" if nudge else ""
     preferred = f"""  STEP A — CONDUCT P_i INLINE ({preset.display_label} session: no terminal to open):
 
     A1. RESOLVE + REUSE P_i's sub-orch job: read it from
@@ -265,7 +268,7 @@ def _chain_drive_step_a_preset(run_id: str, preset: Platform) -> str:
         complete_job. Only then advance.
 
     A3. COMMS — coordinate via the chain Hub thread (get_context chain -> hub_thread_id)
-        then get_thread_history / get_my_turn. Proceed to STEP B (advance on ready_to_advance)."""
+        then get_thread_history / get_my_turn. Proceed to STEP B (advance on ready_to_advance).{nudge_note}"""
     fallback = (
         "If your harness supports in-process subagents, spawn ONE subagent as P_i's\n"
         "sub-orchestrator instead of adopting the role inline — still one project at a time, and\n"
@@ -278,9 +281,10 @@ def _chain_drive_step_a_preset(run_id: str, preset: Platform) -> str:
     return render_capability_ladder(preferred, fallback, floor_user_line, preset.display_label)
 
 
-def _build_chain_drive_step_a(run_id: str, spawn_command: str, preset: Platform | None = None) -> str:
+def _build_chain_drive_step_a(run_id: str, spawn_command: str, preset: Platform | None = None, nudge: str = "") -> str:
     if preset is not None:
-        return _chain_drive_step_a_preset(run_id, preset)
+        return _chain_drive_step_a_preset(run_id, preset, nudge)
+    nudge_note = f"\n\n{nudge}\n" if nudge else ""
     return f"""  STEP A — OPEN P_i's SUB-ORCHESTRATOR IN A FRESH TERMINAL (you are the SOLE spawner):
 
     A1. get_workflow_status(project_id=<P_i>).agents[] → the job_type="orchestrator" entry is
@@ -298,7 +302,7 @@ def _build_chain_drive_step_a(run_id: str, spawn_command: str, preset: Platform 
 
     A3. Your launch returns NO result — coordinate ONLY via the Hub (get_context chain ->
         hub_thread_id) then get_thread_history / get_my_turn. The sub-orch runs the COMBINED flow
-        (CH_SUB_ORCHESTRATOR) free; you do NOT write its mission, stage it, or gate it. → STEP B.
+        (CH_SUB_ORCHESTRATOR) free; you do NOT write its mission, stage it, or gate it. → STEP B.{nudge_note}
     FAIL LOUD (no silent downgrade): if headless — no $DISPLAY and no $WAYLAND_DISPLAY (key on
     DISPLAY, NOT "is WSL", so WSLg is not blocked) — STOP and tell the user to RE-STAGE in a
     subagent mode (CH_CAPABILITY clause 4). NEVER silently downgrade."""
@@ -321,7 +325,8 @@ def _build_ch_chain_drive(
     spawn_command = (
         render_suborch_spawn_command(mode_str, run_id, detected_harness=detected_harness) if preset is None else ""
     )
-    step_a = _build_chain_drive_step_a(run_id, spawn_command, preset)
+    nudge = conductor_nudge(mode_str)
+    step_a = _build_chain_drive_step_a(run_id, spawn_command, preset, nudge.step_a)
 
     return f"""════════════════════════════════════════════════════════════════════════════
           CH_CHAIN_DRIVE: SEQUENTIAL CHAIN — IMPLEMENTATION (AUTO-CONTINUE)
@@ -330,10 +335,11 @@ def _build_ch_chain_drive(
 You are the CONDUCTOR of a {n}-project sequential chain (run_id: {run_id}).
 Execution mode: {mode_str}.  Resume from current_index: {current_index}.
 
-⚠ PROCEED ONLY AFTER THE USER'S EXPLICIT GO (dashboard "Implement Chain", or a chat "go /
-implement this chain"). Until then you are NOT cleared to drive — STOP and wait. The
-AUTO-CONTINUE below is correct ONLY once that GO is given; it never licenses you to start
-the chain yourself.
+⚠ PROCEED ONLY AFTER THE USER'S EXPLICIT GO. Both doors are valid and the choice is the
+user's: ASK THE USER whether they want to run it here (they say go) or from the dashboard
+(they press "Implement Chain"), then WAIT. Until the GO arrives you are
+not cleared to drive — STOP and wait. The AUTO-CONTINUE below is correct ONLY once that GO is given; it
+never licenses you to start the chain yourself.
 
 SCOPE IS HANDED -- this {n}-project run is your whole scope; do NOT hunt for work. Where the
 solo protocol tells you to scan for a project to continue, or a duplicate to merge, IGNORE
@@ -342,7 +348,7 @@ thread (get_context chain -> hub_thread_id), not to the user; escalate to the us
 genuine chain-level decision. When YOU post to the Hub, set from_agent to your UNIQUE label
 "Chain Conductor" -- the generic "orchestrator" name is already used by your
 sub-orchestrators, so your own posts must stay distinguishable from theirs. This chapter
-wins over any contradicting solo default.
+wins over any contradicting solo default.{nudge.sink_note}
 
 ── YOU ARE ADDRESSABLE: USER DIRECTIVE RELAY ───────────────────────────────
 You are the SINGLE steering point for run directives. The user's "Send directive to
@@ -365,8 +371,8 @@ only the CURRENTLY ACTIVE sub-orch.
 
 NO WORKER-PROTOCOL FORK: your sub-orchestrators and their workers NEVER write comm_threads and
 NEVER call set_next_actor or post_to_thread; reporting is IDENTICAL in subagent and multi_terminal
-mode (only what surfaces to the user differs, never how agents communicate).
-
+mode (only what surfaces to the user differs, never how agents communicate).{nudge.fork_note}
+{nudge.section}
 ⚠ TOOLS ONLY — NO raw HTTP. Drive the chain with MCP tools (spawn_job, get_workflow_status,
 get_thread_history, post_to_thread, set_agent_status, write_memory_entry, complete_job). Do
 NOT hand-edit the run over an HTTP client or SDK — the server advances the run for you at each
@@ -444,128 +450,5 @@ When ALL projects complete, IN ORDER:
      Caps (rejected if exceeded): summary <= 1500 chars; <= 5 key_outcomes AND <= 5
      decisions_made; each item <= 250 chars.
   3. complete_job(job_id="{job_id_str}", ...) — valid now (the FINAL project has closed out).
-────────────────────────────────────────────────────────────────────────────
-"""
-
-
-def _build_ch_sub_orchestrator(
-    *,
-    run_id: str,
-    position: int,
-    n_projects: int,
-    execution_mode: str | None,
-    chain_mission: str | None = None,
-    phase: str | None = None,
-) -> str:
-    mode = execution_mode or "multi_terminal"
-
-    if phase == "implementation":
-        staging_steps = """2.-4. STAGING -- ALREADY COMPLETE. You authored your project mission, spawned your
-   inert agent team, ended staging (complete_job), and posted a staging-complete note
-   to the Hub thread (get_context(categories=["chain"]) -> hub_thread_id finds it). Your chain-mission
-   contract slice is not re-shipped here -- fetch the full chain mission via
-   get_context(categories=["chain"]) if you need cross-project context. ESCALATION unchanged: the CONDUCTOR
-   is your escalation path, NOT the user -- post blockers to the Hub thread and POLL
-   it yourself (get_thread_history / get_my_turn) for the answer; do NOT stop to ask
-   the user directly and do NOT return to the dashboard."""
-        return _render_ch_sub_orchestrator(
-            run_id=run_id, position=position, n_projects=n_projects, mode=mode, staging_steps=staging_steps
-        )
-
-    if chain_mission is not None:
-        sliced = slice_chain_mission_for_position(chain_mission, position)
-        contract_block = (
-            "   The conductor wrote your contract into the CHAIN MISSION. YOUR project's\n"
-            "   slice (consumes / produces / must leave) is inlined below; author your\n"
-            "   project mission from it plus your own context. For cross-project awareness\n"
-            "   (the other projects' contracts) fetch the FULL chain mission via\n"
-            '   get_context(categories=["chain"]).\n\n'
-            f"   ---- YOUR CHAIN-MISSION SLICE (P_{position}, live) ----\n"
-            f"{sliced}\n"
-            "   ------------------------------"
-        )
-    else:
-        contract_block = (
-            "   The conductor wrote your contract into the CHAIN MISSION. Fetch it LIVE\n"
-            "   with get_context(categories=[\"chain\"]) -- the 'chain' category resolves\n"
-            "   YOUR active run and returns the current chain mission; lift YOUR project's\n"
-            "   slice (consumes / produces / must leave) and author your project mission\n"
-            "   from that plus your own context."
-        )
-
-    staging_steps = f"""2. READ YOUR CONTRACT -- Read the CHAIN MISSION (it carries your project's contract)
-   and your own project + product context via get_context. Then AUTHOR YOUR OWN
-   project mission with update_project_mission from that contract plus your context.
-   The conductor did NOT write your project mission; you do.
-{contract_block}
-
-3. STAGE -- Write your project mission (update_project_mission), then choose and
-   spawn your agents (spawn_job), exactly like a normal solo orchestrator staging.
-   NOTE (workers-inert): workers you spawn_job during staging are INERT until you
-   complete_job (staging-end) THEN get_job_mission; do NOT launch them before that
-   gate. A chain worker that calls get_job_mission earlier is told to RE-POLL (never
-   "click Implement in the dashboard" -- chain mode has no human gate), so it
-   auto-activates the instant you end staging. Launch your workers in the
-   IMPLEMENTATION phase (step 6), after staging-end.
-
-4. END STAGING + POST -- call complete_job (staging-end). Find the Hub thread:
-   get_context(categories=["chain"]) -> hub_thread_id; post a "staging-complete" note there so the
-   conductor and the user can follow your run. The Hub is effectively LOG-ONLY: posting
-   pushes no reply, so if you ever need a conductor decision, POLL the Hub yourself with
-   get_thread_history / get_my_turn -- do not wait for a pushed answer.
-   ESCALATION -- the CONDUCTOR is your escalation path, NOT the user. On a blocker or a
-   decision you cannot make alone, POST it to this Hub thread for the conductor; do NOT
-   stop to ask the user directly and do NOT return to the dashboard. (The conductor is
-   the escalation SINK and polls the Hub for exactly this.)"""
-    return _render_ch_sub_orchestrator(
-        run_id=run_id, position=position, n_projects=n_projects, mode=mode, staging_steps=staging_steps
-    )
-
-
-def _render_ch_sub_orchestrator(*, run_id: str, position: int, n_projects: int, mode: str, staging_steps: str) -> str:
-    return f"""════════════════════════════════════════════════════════════════════════════
-       CH_SUB_ORCHESTRATOR: COMBINED CHAIN FLOW (YOU ARE NOT THE CONDUCTOR)
-════════════════════════════════════════════════════════════════════════════
-
-1. IDENTITY -- You are the sub-orchestrator for project {position} of {n_projects}
-   in a sequential chain (run_id: {run_id}). You own ONLY this project. You run a
-   COMBINED staging+implementation flow -- there is NO separate human Implement click
-   for you. (Execution mode = {mode}, resolved at staging.)
-   SCOPE IS HANDED -- the conductor assigned you this ONE project; do NOT hunt for work.
-   Where the solo protocol below tells you to scan for a project to continue, or a
-   duplicate to merge, IGNORE it: you adopt no new project and merge none. This chapter
-   wins over any contradicting solo default.
-   TOOLSEARCH BOOTSTRAP (Claude Code): the generic orchestrator bootstrap query OMITS
-   the Hub tools you are REQUIRED to use below. ADD join_thread, post_to_thread,
-   get_thread_history (alongside list_threads) to your FIRST ToolSearch query, so you
-   load them in ONE round-trip instead of paying a second ToolSearch mid-staging.
-
-{staging_steps}
-
-5. CONTINUE TO IMPLEMENTATION (no gate, no wait) -- There is NO per-project gate and you
-   do NOT call any launch tool (you do not have one and must not). The conductor's spawn
-   already released you. After staging-end, call get_job_mission ONCE, passing the
-   protocol_etag value your boot get_job_mission returned -- on a match the server omits
-   the unchanged identity+protocol block (tens of KB smaller, so your harness cannot
-   truncate it) and you reuse your cached copy. It returns your implementation protocol
-   immediately and flips you to working. Do NOT wait for a human, do NOT return to the
-   dashboard, and do NOT sleep-poll a gate: a single get_job_mission carries you straight
-   into implementation.
-
-6. IMPLEMENT -- drive your agents to completion, exactly like solo implementation.
-
-7. CLOSE OUT + REPORT -- call complete_job(...) FIRST (this closes your orchestrator
-   execution so the closeout readiness gate passes), THEN write_project_closeout(...)
-   (commit SHA). This order matches the solo PHASE 3 closeout and the server-enforced
-   gate -- the INVERSE raises COMPLETION_BLOCKED (your execution is still open when the
-   readiness check runs) and stalls every chain advance. write_project_closeout is the
-   conductor's ADVANCE signal: when it RETURNS it has stamped the server gate
-   (ready_to_advance / project_closeout_at) -- never skip it or the chain stalls.
-   ONLY AFTER write_project_closeout RETURNS, post DONE to the Hub thread, as the LAST
-   thing you do. Do NOT announce "closed out" / "clear to advance" BEFORE that return:
-   the conductor advances on the SERVER gate, not your message, so a DONE posted while
-   the gate is still false races your own closeout and misleads a conductor that trusts
-   the Hub. The Hub post is human-facing courtesy; write_project_closeout is the real
-   signal, and the two must agree (post only once the gate is set).
 ────────────────────────────────────────────────────────────────────────────
 """

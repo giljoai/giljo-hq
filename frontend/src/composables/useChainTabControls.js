@@ -3,16 +3,23 @@ import { useSequenceRunStore } from '@/stores/sequenceRunStore'
 import { useChainLifecycle } from '@/composables/useChainLifecycle'
 import { useChainImplementation } from '@/composables/useChainImplementation'
 import { useToast } from '@/composables/useToast'
+import { buildChainScreenControls } from '@/components/projects/chainScreenVisibility.js'
 
 export function useChainTabControls({ chainCtx, projectId, router, route, activeTab, onUserNav = () => {} }) {
   const sequenceRunStore = useSequenceRunStore()
   const { stageChain, unstageChain } = useChainLifecycle()
-  const { copyImplPrompt } = useChainImplementation()
+  const { launchChainHead } = useChainImplementation()
   const { showToast } = useToast()
 
   const chainStaging = ref(false)
   const showChainReview = ref(false)
   const chainReviewTab = ref(null)
+  const chainStopping = ref(false)
+  const showChainStopConfirm = ref(false)
+
+  const chainScreenControls = computed(() =>
+    buildChainScreenControls(chainCtx.value, sequenceRunStore.isRunning(chainCtx.value?.runId)),
+  )
 
   const chainStageText = computed(() => (chainCtx.value?.locked ? 'Unstage Chain' : 'Stage Chain'))
   const chainStageDisabled = computed(
@@ -67,8 +74,18 @@ export function useChainTabControls({ chainCtx, projectId, router, route, active
     const run = chainCtx.value.run
     const headPid =
       run?.resolved_order?.[0] || run?.project_ids?.[0] || chainCtx.value.tabs?.[0]?.projectId || null
-    const ok = await copyImplPrompt(chainCtx.value.runId, headPid)
-    if (ok && activeTab) {
+    const ok = await launchChainHead(headPid)
+    if (!ok) return
+
+    if (headPid && headPid !== projectId.value) {
+      router.push({
+        name: 'ProjectLaunch',
+        params: { projectId: headPid },
+        query: { ...route.query, via: 'jobs' },
+      })
+    }
+
+    if (activeTab) {
       activeTab.value = 'jobs'
       if (route.query.via !== 'jobs') {
         router.replace({ query: { ...route.query, via: 'jobs' } })
@@ -79,7 +96,34 @@ export function useChainTabControls({ chainCtx, projectId, router, route, active
   function handleTabSelect(pid) {
     if (!pid || pid === projectId.value) return
     onUserNav()
-    router.push({ name: 'ProjectLaunch', params: { projectId: pid }, query: { ...route.query } })
+    const query = { ...route.query }
+    if (sequenceRunStore.isRunning(chainCtx.value?.runId)) query.tab = 'jobs'
+    router.push({ name: 'ProjectLaunch', params: { projectId: pid }, query })
+  }
+
+  function openChainStopConfirm() {
+    showChainStopConfirm.value = true
+  }
+
+  function cancelChainStop() {
+    showChainStopConfirm.value = false
+  }
+
+  async function handleChainStop() {
+    const runId = chainCtx.value?.runId
+    if (!runId || chainStopping.value) return
+    chainStopping.value = true
+    try {
+      await sequenceRunStore.stopChain(runId)
+      showChainStopConfirm.value = false
+      showToast({ message: 'Chain stopped.', type: 'success' })
+      router.push({ name: 'Projects' })
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.message || 'Could not stop the chain.'
+      showToast({ message: msg, type: 'error', timeout: 5000 })
+    } finally {
+      chainStopping.value = false
+    }
   }
 
   function handleTabReview(tab) {
@@ -119,7 +163,10 @@ export function useChainTabControls({ chainCtx, projectId, router, route, active
   }
 
   return {
+    chainScreenControls,
     chainStaging,
+    chainStopping,
+    showChainStopConfirm,
     showChainReview,
     chainReviewTab,
     chainStageText,
@@ -130,6 +177,9 @@ export function useChainTabControls({ chainCtx, projectId, router, route, active
     patchRunMode,
     handleChainStage,
     handleChainImplement,
+    openChainStopConfirm,
+    cancelChainStop,
+    handleChainStop,
     handleTabSelect,
     handleTabReview,
     handleChainReviewComplete,

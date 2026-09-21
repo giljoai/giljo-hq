@@ -48,13 +48,35 @@ def test_read_scoped_but_mutating_override_set_membership_is_locked():
     assert frozenset({"get_thread_history"}) == _READ_SCOPED_BUT_MUTATING
 
 
-def test_mutating_tools_carry_an_explicit_destructive_hint():
-    missing = sorted(
-        t.name
-        for t in _live_tools()
-        if TOOL_SCOPES[t.name] != SCOPE_READ and (t.annotations is None or t.annotations.destructive_hint is None)
+def test_every_tool_carries_an_explicit_destructive_hint():
+    missing = sorted(t.name for t in _live_tools() if t.annotations is None or t.annotations.destructive_hint is None)
+    assert not missing, f"tools with no explicit destructiveHint: {missing}"
+
+
+EXPECTED_DESTRUCTIVE_TOOLS = frozenset(
+    {
+        "complete_job",
+        "finalize_job",
+        "get_staging_instructions",
+        "launch_implementation",
+        "report_progress",
+        "save_roadmap",
+        "stage_project",
+        "unlink_projects",
+        "update_project",
+        "update_task",
+        "write_project_closeout",
+    }
+)
+
+
+def test_destructive_tool_set_is_exactly():
+    live = frozenset(
+        t.name for t in _live_tools() if t.annotations is not None and t.annotations.destructive_hint is True
     )
-    assert not missing, f"mutating tools with no explicit destructiveHint: {missing}"
+    assert live == EXPECTED_DESTRUCTIVE_TOOLS, (
+        f"missing: {sorted(EXPECTED_DESTRUCTIVE_TOOLS - live)}; unexpected: {sorted(live - EXPECTED_DESTRUCTIVE_TOOLS)}"
+    )
 
 
 def test_every_tool_declares_open_world_false():
@@ -70,7 +92,7 @@ def test_tool_hints_helper_derives_read_only_from_tool_scopes():
 
     read_hints = _tool_hints(read_name)
     assert read_hints.read_only_hint is True
-    assert read_hints.destructive_hint is None
+    assert read_hints.destructive_hint is False
     assert read_hints.open_world_hint is False
 
     write_hints = _tool_hints(write_name, destructive=True)
